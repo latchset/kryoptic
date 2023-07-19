@@ -1,6 +1,36 @@
 // Copyright 2023 Simo Sorce
 // See License file for terms
 
+#[derive(Debug)]
+pub struct Pkcs11Callbacks;
+
+impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
+    fn int_macro(&self, name: &str, _: i64) -> Option<bindgen::callbacks::IntKind> {
+        if name == "CK_TRUE" || name == "CK_FALSE" {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "CK_BBOOL",
+                is_signed: false,
+            })
+        } else if name.starts_with("CRYPTOKI_VERSION") {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "CK_BYTE",
+                is_signed: false,
+            })
+        } else if name.starts_with("CK") {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "CK_ULONG",
+                is_signed: false,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn include_file(&self, filename: &str) {
+        println!("cargo:rerun-if-changed={filename}");
+    }
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=pkcs11.h");
 
@@ -8,7 +38,7 @@ fn main() {
         .header("pkcs11.h")
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
         .expect("Unable to generate bindings");
 
