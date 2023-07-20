@@ -4,6 +4,17 @@ mod interface {
     #![allow(non_snake_case)]
     #![allow(dead_code)]
     include!("pkcs11_bindings.rs");
+
+    // types that need different mutability than bindgen provides
+    pub type CK_FUNCTION_LIST_PTR = *const CK_FUNCTION_LIST;
+    pub type CK_FUNCTION_LIST_3_0_PTR = *const CK_FUNCTION_LIST_3_0;
+    #[repr(C)]
+    #[derive(Debug, Copy, Clone)]
+    pub struct CK_INTERFACE {
+        pub pInterfaceName: *const CK_CHAR,
+        pub pFunctionList: *const ::std::os::raw::c_void,
+        pub flags: CK_FLAGS,
+    }
 }
 
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
@@ -485,7 +496,7 @@ extern "C" fn fn_wait_for_slot_event(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-pub static mut FNLIST_240: interface::CK_FUNCTION_LIST = interface::CK_FUNCTION_LIST {
+pub static FNLIST_240: interface::CK_FUNCTION_LIST = interface::CK_FUNCTION_LIST {
     version: interface::CK_VERSION {
         major: 2,
         minor: 40},
@@ -561,7 +572,9 @@ pub static mut FNLIST_240: interface::CK_FUNCTION_LIST = interface::CK_FUNCTION_
 
 #[no_mangle]
 pub extern "C" fn C_GetFunctionList(fnlist: interface::CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
-    unsafe { *fnlist = &mut FNLIST_240 };
+    unsafe {
+        *fnlist = &FNLIST_240;
+    };
     CKR_OK
 }
 
@@ -747,7 +760,7 @@ extern "C" fn fn_message_verify_final(_session: interface::CK_SESSION_HANDLE) ->
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-pub static mut FNLIST_300: interface::CK_FUNCTION_LIST_3_0 = interface::CK_FUNCTION_LIST_3_0 {
+pub static FNLIST_300: interface::CK_FUNCTION_LIST_3_0 = interface::CK_FUNCTION_LIST_3_0 {
     version: interface::CK_VERSION {
         major: 3,
         minor: 0},
@@ -845,22 +858,95 @@ pub static mut FNLIST_300: interface::CK_FUNCTION_LIST_3_0 = interface::CK_FUNCT
     C_MessageVerifyFinal: Some(fn_message_verify_final),
 };
 
+static INTERFACE_NAME_STD: &str = "PKCS 11";
+static INTERFACE_NAME_STD_NUL: &str = "PKCS 11\0";
+
+static mut INTERFACE_240: interface::CK_INTERFACE = interface::CK_INTERFACE {
+    pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
+    pFunctionList: &FNLIST_240 as *const _ as *const ::std::os::raw::c_void,
+    flags: 0,
+};
+
+static mut INTERFACE_300: interface::CK_INTERFACE = interface::CK_INTERFACE {
+    pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
+    pFunctionList: &FNLIST_300 as *const _ as *const ::std::os::raw::c_void,
+    flags: 0,
+};
+
 #[no_mangle]
 pub extern "C" fn C_GetInterfaceList(
-        _interfaces_list: interface::CK_INTERFACE_PTR,
-        _pul_count: interface::CK_ULONG_PTR,
+        interfaces_list: interface::CK_INTERFACE_PTR,
+        count: interface::CK_ULONG_PTR,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if count.is_null() {
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+    if interfaces_list.is_null() {
+        unsafe {
+            *count = 2;
+        }
+        return CKR_OK;
+    }
+    unsafe {
+        let num: interface::CK_ULONG = *count;
+        if num < 2 {
+            return interface::CKR_BUFFER_TOO_SMALL;
+        }
+    }
+    unsafe {
+        core::ptr::write(interfaces_list.offset(0) as *mut _, INTERFACE_300);
+        core::ptr::write(interfaces_list.offset(1) as *mut _, INTERFACE_240);
+        *count = 2;
+    }
+    CKR_OK
 }
 
 #[no_mangle]
 pub extern "C" fn C_GetInterface(
-        _interface_name: interface::CK_UTF8CHAR_PTR,
-        _version: interface::CK_VERSION_PTR,
-        _interface: interface::CK_INTERFACE_PTR_PTR,
-        _flags: interface::CK_FLAGS,
+        interface_name: interface::CK_UTF8CHAR_PTR,
+        version: interface::CK_VERSION_PTR,
+        interface: interface::CK_INTERFACE_PTR_PTR,
+        flags: interface::CK_FLAGS,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+
+    // default to 3.0
+    let mut ver: interface::CK_VERSION = interface::CK_VERSION {
+        major: 3,
+        minor: 0
+    };
+
+    if interface.is_null() {
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+    if !interface_name.is_null() {
+        let name: &str = unsafe { std::ffi::CStr::from_ptr(interface_name as *const i8).to_str().unwrap() };
+        if name != INTERFACE_NAME_STD {
+            return interface::CKR_ARGUMENTS_BAD;
+        }
+    }
+    if !version.is_null() {
+        unsafe {
+            ver.major = (*version).major;
+            ver.minor = (*version).minor;
+        }
+    }
+    if flags != 0 {
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+
+    if ver.major == 3 && ver.minor == 0 {
+        unsafe{
+            *interface = &mut INTERFACE_300 as *mut _ as *mut interface::CK_INTERFACE;
+        }
+    } else if ver.major == 2 && ver.minor == 40 {
+        unsafe{
+            *interface = &mut INTERFACE_240 as *mut _ as *mut interface::CK_INTERFACE;
+        }
+    } else {
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+
+    CKR_OK
 }
 
 #[cfg(test)]

@@ -38,6 +38,9 @@ fn main() {
         .header("pkcs11.h")
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
+        .blocklist_type("CK_FUNCTION_LIST_PTR")
+        .blocklist_type("CK_FUNCTION_LIST_3_0_PTR")
+        .blocklist_type("CK_INTERFACE")
         .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
         .expect("Unable to generate bindings");
