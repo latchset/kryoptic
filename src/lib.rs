@@ -22,6 +22,8 @@ mod interface {
 
 mod slot;
 mod token;
+mod object;
+mod session;
 
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
 
