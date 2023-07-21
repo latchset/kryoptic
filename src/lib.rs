@@ -25,9 +25,6 @@ extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
 extern "C" fn fn_finalize(_reserved: interface::CK_VOID_PTR) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
-extern "C" fn fn_get_info(_info: interface::CK_INFO_PTR) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
 extern "C" fn fn_get_slot_list(
         _token_present: interface::CK_BBOOL,
         _slot_list: interface::CK_SLOT_ID_PTR,
@@ -569,6 +566,26 @@ pub static FNLIST_240: interface::CK_FUNCTION_LIST = interface::CK_FUNCTION_LIST
     C_CancelFunction: Some(fn_cancel_function),
     C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
 };
+
+static IMPLEMENTED_VERSION: interface::CK_VERSION = interface::CK_VERSION { major: 3, minor: 0 };
+static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
+static LIBRARY_DESCRIPTION: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic PKCS11 Module          ";
+static LIBRARY_VERSION: interface::CK_VERSION = interface::CK_VERSION { major: 0, minor: 0 };
+
+static MODULE_INFO: interface::CK_INFO = interface::CK_INFO {
+    cryptokiVersion: IMPLEMENTED_VERSION,
+    manufacturerID: MANUFACTURER_ID,
+    flags: 0,
+    libraryDescription: LIBRARY_DESCRIPTION,
+    libraryVersion: LIBRARY_VERSION,
+};
+
+extern "C" fn fn_get_info(info: interface::CK_INFO_PTR) -> CK_RV {
+    unsafe {
+        *info = MODULE_INFO;
+    }
+    CKR_OK
+}
 
 #[no_mangle]
 pub extern "C" fn C_GetFunctionList(fnlist: interface::CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
