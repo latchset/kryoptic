@@ -1,5 +1,5 @@
 // Copyright 2023 Simo Sorce
-// See License file for terms
+// See LICENSE.txt file for terms
 
 #[derive(Debug)]
 pub struct Pkcs11Callbacks;

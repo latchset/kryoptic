@@ -1,3 +1,6 @@
+// Copyright 2023 Simo Sorce
+// See LICENSE.txt file for terms
+
 mod interface {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
@@ -17,25 +20,15 @@ mod interface {
     }
 }
 
+mod slot;
+mod token;
+
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
 
 extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
     CKR_OK
 }
 extern "C" fn fn_finalize(_reserved: interface::CK_VOID_PTR) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
-extern "C" fn fn_get_slot_list(
-        _token_present: interface::CK_BBOOL,
-        _slot_list: interface::CK_SLOT_ID_PTR,
-        _pul_count: interface::CK_ULONG_PTR,
-    ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
-extern "C" fn fn_get_slot_info(_slot_id: interface::CK_SLOT_ID, _info: interface::CK_SLOT_INFO_PTR) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
-extern "C" fn fn_get_token_info(_slot_id: interface::CK_SLOT_ID, _info: interface::CK_TOKEN_INFO_PTR) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_get_mechanism_list(
@@ -566,6 +559,67 @@ pub static FNLIST_240: interface::CK_FUNCTION_LIST = interface::CK_FUNCTION_LIST
     C_CancelFunction: Some(fn_cancel_function),
     C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
 };
+
+extern "C" fn fn_get_slot_list(
+        _token_present: interface::CK_BBOOL,
+        slot_list: interface::CK_SLOT_ID_PTR,
+        count: interface::CK_ULONG_PTR,
+    ) -> CK_RV {
+    if count.is_null() {
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+    // Mock up list for now
+    let slotids: &[interface::CK_SLOT_ID] = &[0];
+
+    if slot_list.is_null() {
+        unsafe {
+            *count = slotids.len() as u64;
+        }
+        return CKR_OK;
+    }
+    unsafe {
+        let num: interface::CK_ULONG = *count;
+        if num < slotids.len() as u64 {
+            return interface::CKR_BUFFER_TOO_SMALL;
+        }
+    }
+    for item in slotids.iter().enumerate() {
+        let (idx, slotid): (usize, &interface::CK_SLOT_ID) = item;
+        unsafe {
+            core::ptr::write(slot_list.offset(idx as isize), *slotid);
+        }
+    }
+    unsafe {
+        *count = slotids.len() as u64;
+    }
+    CKR_OK
+}
+
+extern "C" fn fn_get_slot_info(slot_id: interface::CK_SLOT_ID, info: interface::CK_SLOT_INFO_PTR) -> CK_RV {
+    if slot_id != 0 {
+        return interface::CKR_SLOT_ID_INVALID;
+    }
+    // Mock up a slot
+    let slot = slot::Slot::new();
+    let slotinfo = slot.get_slot_info();
+    unsafe {
+        core::ptr::write(info.offset(0) as *mut _, slotinfo);
+    }
+    CKR_OK
+}
+
+extern "C" fn fn_get_token_info(slot_id: interface::CK_SLOT_ID, info: interface::CK_TOKEN_INFO_PTR) -> CK_RV {
+    if slot_id != 0 {
+        return interface::CKR_SLOT_ID_INVALID;
+    }
+    // Mock up a slot
+    let slot = slot::Slot::new();
+    let tokinfo = slot.get_token_info();
+    unsafe {
+        core::ptr::write(info.offset(0) as *mut _, tokinfo);
+    }
+    CKR_OK
+}
 
 static IMPLEMENTED_VERSION: interface::CK_VERSION = interface::CK_VERSION { major: 3, minor: 0 };
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
