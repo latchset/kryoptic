@@ -7,6 +7,8 @@ use super::interface;
 use super::token::Token;
 use super::session::Session;
 
+use interface::CK_RV;
+
 static SLOT_DESCRIPTION: [interface::CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
 
@@ -17,8 +19,12 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new() -> Slot {
-        Slot {
+    pub fn new(filename: &str) -> Result<Slot, CK_RV> {
+        let token = match Token::load(filename) {
+            Ok(t) => t,
+            Err(e) => return Err(e),
+        };
+        Ok(Slot {
             slot_info: interface::CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
                 manufacturerID: MANUFACTURER_ID,
@@ -32,8 +38,8 @@ impl Slot {
                     minor: 0,
                 },
             },
-            token: RwLock::new(Token::new()),
-        }
+            token: RwLock::new(token),
+        })
     }
 
     pub fn get_token_info(&self) -> interface:: CK_TOKEN_INFO {

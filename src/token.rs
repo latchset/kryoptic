@@ -2,6 +2,10 @@
 // See LICENSE.txt file for terms
 
 use std::vec::Vec;
+use std::collections::HashMap;
+
+use serde::{Serialize, Deserialize};
+use serde_json;
 
 use super::interface;
 use super::session;
@@ -13,21 +17,25 @@ static TOKEN_MODEL: [interface::CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
 use interface::{CK_RV, CKR_OK};
-use object::Object;
+use object::KeyObject;
 use session::Session;
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Token {
-    token_info: interface::CK_TOKEN_INFO,
-    token_objects: Vec<Box<dyn Object>>,
+    #[serde(skip_serializing, skip_deserializing)]
+    info: interface::CK_TOKEN_INFO,
+    objects: Vec<Box<KeyObject>>,
+    #[serde(skip_serializing, skip_deserializing)]
     next_handle: interface::CK_SESSION_HANDLE,
-    token_sessions: Vec<Session>,
+    #[serde(skip_serializing, skip_deserializing)]
+    sessions: Vec<Session>,
 }
 
 impl Token {
-    pub fn new() -> Token {
-        Token {
-            token_info: interface::CK_TOKEN_INFO {
+    pub fn load(filename: &str) -> Result<Token, CK_RV> {
+
+        let mut t = Token {
+            info: interface::CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
                 manufacturerID: MANUFACTURER_ID,
                 model: TOKEN_MODEL,
@@ -53,10 +61,26 @@ impl Token {
                 },
                 utcTime: *b"0000000000000000",
             },
-            token_objects: Vec::new(),
+            objects: Vec::new(),
             next_handle: 1,
-            token_sessions: Vec::new(),
+            sessions: Vec::new(),
+        };
+
+        let file = match std::fs::File::open(filename) {
+            Ok(f) => f,
+            Err(e) => {
+                println!("Failed to open {filename}: {e:?}");
+                return Err(interface::CKR_GENERAL_ERROR);
+            }
+        };
+        match serde_json::from_reader::<std::fs::File, Token>(file) {
+            Ok(j) => t.objects = j.objects,
+            Err(e) => {
+                println!("{e:?}");
+                return Err(interface::CKR_GENERAL_ERROR);
+            }
         }
+        Ok(t)
     }
 
     fn token_flags() -> interface::CK_FLAGS {
@@ -64,8 +88,46 @@ impl Token {
         interface::CKF_RNG | interface::CKF_LOGIN_REQUIRED | interface::CKF_TOKEN_INITIALIZED
     }
 
+    pub fn test_token() -> Token {
+        let mut t = Token {
+            info: interface::CK_TOKEN_INFO {
+                label: TOKEN_LABEL,
+                manufacturerID: MANUFACTURER_ID,
+                model: TOKEN_MODEL,
+                serialNumber: TOKEN_SERIAL,
+                flags: Token::token_flags(),
+                ulMaxSessionCount: interface::CK_EFFECTIVELY_INFINITE,
+                ulSessionCount: 0,
+                ulMaxRwSessionCount: interface::CK_EFFECTIVELY_INFINITE,
+                ulRwSessionCount: 0,
+                ulMaxPinLen: interface::CK_EFFECTIVELY_INFINITE,
+                ulMinPinLen: interface::CK_EFFECTIVELY_INFINITE,
+                ulTotalPublicMemory: 0,
+                ulFreePublicMemory: 0,
+                ulTotalPrivateMemory: 0,
+                ulFreePrivateMemory: 0,
+                hardwareVersion: interface::CK_VERSION {
+                    major: 0,
+                    minor: 0,
+                },
+                firmwareVersion: interface::CK_VERSION {
+                    major: 0,
+                    minor: 0,
+                },
+                utcTime: *b"0000000000000000",
+            },
+            objects: Vec::new(),
+            next_handle: 1,
+            sessions: Vec::new(),
+        };
+
+        t.objects.push(Box::new(KeyObject::test_object()));
+
+        t
+    }
+
     pub fn get_token_info(&self) -> &interface:: CK_TOKEN_INFO {
-        &self.token_info
+        &self.info
     }
 
     pub fn get_new_session(&mut self, flags: interface::CK_FLAGS) -> (Option<Session>, CK_RV) {
@@ -75,8 +137,8 @@ impl Token {
         if res != CKR_OK {
             return (None, res)
         }
-        self.token_sessions.push(s.unwrap());
+        self.sessions.push(s.unwrap());
 
-        (Some(*self.token_sessions.last().unwrap()), CKR_OK)
+        (Some(*self.sessions.last().unwrap()), CKR_OK)
     }
 }

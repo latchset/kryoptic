@@ -1,6 +1,10 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::sync::RwLock;
+use std::ffi::{CStr, CString};
+use serde_json;
+
 mod interface {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
@@ -27,7 +31,26 @@ mod session;
 
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
 
+struct State {
+    slots: Vec<slot::Slot>,
+}
+
+static STATE: RwLock<State> = RwLock::new(State {
+    slots: Vec::new(),
+});
+
 extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
+    if _init_args.is_null() {
+        println!("_init_args is null");
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+    let filename = unsafe {CStr::from_ptr(_init_args as *const _)}.to_string_lossy();
+    let mut wstate = STATE.write().unwrap();
+    let slot = match slot::Slot::new(&filename) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    wstate.slots.push(slot);
     CKR_OK
 }
 extern "C" fn fn_finalize(_reserved: interface::CK_VOID_PTR) -> CK_RV {
@@ -601,8 +624,8 @@ extern "C" fn fn_get_slot_info(slot_id: interface::CK_SLOT_ID, info: interface::
     if slot_id != 0 {
         return interface::CKR_SLOT_ID_INVALID;
     }
-    // Mock up a slot
-    let slot = slot::Slot::new();
+    let rstate = STATE.read().unwrap();
+    let slot = &rstate.slots[0];
     let slotinfo = slot.get_slot_info();
     unsafe {
         core::ptr::write(info.offset(0) as *mut _, slotinfo);
@@ -614,8 +637,8 @@ extern "C" fn fn_get_token_info(slot_id: interface::CK_SLOT_ID, info: interface:
     if slot_id != 0 {
         return interface::CKR_SLOT_ID_INVALID;
     }
-    // Mock up a slot
-    let slot = slot::Slot::new();
+    let rstate = STATE.read().unwrap();
+    let slot = &rstate.slots[0];
     let tokinfo = slot.get_token_info();
     unsafe {
         core::ptr::write(info.offset(0) as *mut _, tokinfo);
@@ -1027,8 +1050,35 @@ mod tests {
     use super::*;
     #[test]
     fn it_works() {
-        let list :nterface::CK_FUNCTION_LIST_PTR_PTR = std::ptr::null_mut();
-        let result = C_GetFunctionList(list);
+
+        let mut test_token = token::Token::test_token();
+        let j = match serde_json::to_string(&test_token) {
+            Ok(j) => {
+                println!("JSON: {j}");
+                j
+            },
+            Err(e) => {
+                println!("Error in json serialize: {e}");
+                return;
+            }
+        };
+        let file = std::fs::File::create("test.json").unwrap();
+        serde_json::to_writer(file, &test_token).unwrap();
+
+        let mut plist :interface::CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
+        let pplist = &mut plist;
+        let result = C_GetFunctionList(&mut *pplist);
         assert_eq!(result, 0);
+        unsafe {
+            let list :interface::CK_FUNCTION_LIST = *plist;
+            match list.C_Initialize{
+                Some(value) => {
+                    let mut filename = CString::new("test.json");
+                    let ret = value(filename.unwrap().into_raw() as *mut std::ffi::c_void);
+                    assert_eq!(ret, CKR_OK)
+                }
+                None => todo!()
+            }
+        }
     }
 }

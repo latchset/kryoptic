@@ -10,7 +10,7 @@ pub struct Session {
     handle: interface::CK_SESSION_HANDLE,
 
     flags: interface::CK_FLAGS,
-    application: interface::CK_VOID_PTR,
+    //application: interface::CK_VOID_PTR,
     //notify: interface::CK_NOTIFY,
 
     state: interface::CK_STATE,
@@ -30,7 +30,7 @@ impl Session {
         let mut s = Session {
             handle: handle,
             flags: flags,
-            application: std::ptr::null_mut(),
+            //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
             state: interface::CKS_RO_PUBLIC_SESSION,
             device_error: 0
