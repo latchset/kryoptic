@@ -1063,7 +1063,7 @@ mod tests {
             }
         };
         let file = std::fs::File::create("test.json").unwrap();
-        serde_json::to_writer(file, &test_token).unwrap();
+        serde_json::to_writer_pretty(file, &test_token).unwrap();
 
         let mut plist :interface::CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
         let pplist = &mut plist;

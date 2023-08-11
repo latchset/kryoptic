@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use std::vec::Vec;
-use std::collections::HashMap;
 
 use serde::{Serialize, Deserialize};
 use serde_json;

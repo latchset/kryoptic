@@ -13,5 +13,6 @@ crate-type = ["cdylib"]
 bindgen = "0.66.1"
 
 [dependencies]
+data-encoding = "2.4.0"
 serde = { version = "1.0.180", features = ["derive"] }
 serde_json = "1.0.104"
