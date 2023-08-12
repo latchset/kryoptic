@@ -43,6 +43,11 @@ impl Slot {
         })
     }
 
+    pub fn token_save(&self, filename: &str) -> KResult<()> {
+        let token = self.token.read().unwrap();
+        token.save(filename)
+    }
+
     pub fn get_token_info(&self) -> interface:: CK_TOKEN_INFO {
         let tok = self.token.read().unwrap();
         *tok.get_token_info()

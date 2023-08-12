@@ -33,10 +33,12 @@ use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
 use error::KError;
 
 struct State {
+    filename: String,
     slots: Vec<slot::Slot>,
 }
 
 static STATE: RwLock<State> = RwLock::new(State {
+    filename: String::new(),
     slots: Vec::new(),
 });
 
@@ -45,9 +47,12 @@ extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
         println!("_init_args is null");
         return interface::CKR_ARGUMENTS_BAD;
     }
-    let filename = unsafe {CStr::from_ptr(_init_args as *const _)}.to_string_lossy();
-    let mut wstate = STATE.write().unwrap();
-    let slot = match slot::Slot::new(&filename) {
+    let mut wstate = match STATE.write() {
+        Ok(s) => s,
+        Err(e) => return interface::CKR_GENERAL_ERROR,
+    };
+    wstate.filename = unsafe {CStr::from_ptr(_init_args as *const _)}.to_string_lossy().to_string();
+    let slot = match slot::Slot::new(&wstate.filename) {
         Ok(s) => s,
         Err(e) => match e {
             KError::RvError(e) => return e.rv,
@@ -58,7 +63,17 @@ extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
     CKR_OK
 }
 extern "C" fn fn_finalize(_reserved: interface::CK_VOID_PTR) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = match STATE.read() {
+        Ok(s) => s,
+        Err(e) => return interface::CKR_GENERAL_ERROR,
+    };
+    match rstate.slots[0].token_save(&rstate.filename) {
+        Ok(_) => CKR_OK,
+        Err(e) => match e {
+            KError::RvError(e) => return e.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        }
+    }
 }
 extern "C" fn fn_get_mechanism_list(
         _slot_id: interface::CK_SLOT_ID,
@@ -1054,7 +1069,7 @@ mod tests {
     use std::ffi::CString;
     use super::*;
     #[test]
-    fn it_works() {
+    fn a_test_token() {
 
         let test_token = serde_json::json!({
             "objects": [{
@@ -1091,5 +1106,13 @@ mod tests {
                 None => todo!()
             }
         }
+    }
+
+    fn b_test_init_fini() {
+        let filename = CString::new("test.json");
+        let mut ret = fn_initialize(filename.unwrap().into_raw() as *mut std::ffi::c_void);
+        assert_eq!(ret, CKR_OK);
+        ret = fn_finalize(std::ptr::null_mut());
+        assert_eq!(ret, CKR_OK);
     }
 }

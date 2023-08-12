@@ -70,18 +70,31 @@ impl Token {
         let file = match std::fs::File::open(filename) {
             Ok(f) => f,
             Err(e) => {
-                println!("Failed to open {filename}: {e:?}");
                 return Err(KError::FileError(e));
             }
         };
         match serde_json::from_reader::<std::fs::File, Token>(file) {
             Ok(j) => t.objects = j.objects,
             Err(e) => {
-                println!("{e:?}");
                 return Err(KError::JsonError(e));
             }
         }
         Ok(t)
+    }
+
+    pub fn save(&self, filename: &str) -> KResult<()> {
+        let j = match serde_json::to_string(&self) {
+            Ok(j) => {
+                j
+            },
+            Err(e) => {
+                return Err(KError::JsonError(e));
+            }
+        };
+        match std::fs::write(filename, j) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(KError::FileError(e)),
+        }
     }
 
     fn token_flags() -> interface::CK_FLAGS {
