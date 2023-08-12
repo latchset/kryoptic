@@ -5,7 +5,8 @@ use core::fmt::Debug;
 use data_encoding::BASE64;
 
 use super::interface;
-use interface::CK_RV;
+use super::error;
+use error::{KResult, KError, CkRvError, AttributeNotFound};
 
 use serde::{Serialize, Deserialize};
 use serde_json::{Map, Value, Number};
@@ -31,7 +32,7 @@ macro_rules! object_constructor {
 
 impl Debug for dyn Object {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "Something!")
+        write!(f, "FIXME!")
     }
 }
 
@@ -39,38 +40,48 @@ impl Debug for dyn Object {
 
 macro_rules! bool_attribute {
     ($name:expr; from $map:expr; def $def:expr) => {
-        match $map.get($name) {
-            Some(Value::Bool(b)) => *b,
-            _ => $def
+        match $map.get(&$name) {
+            Some(Value::Bool(b)) => Ok(*b),
+            None => Ok($def),
+            _ => Err(KError::RvError(CkRvError{ rv: interface::CKR_ATTRIBUTE_TYPE_INVALID }))
         }
-    }
+    };
+    ($name:expr; from $map:expr) => {
+        match $map.get(&$name) {
+            Some(Value::Bool(b)) => Ok(*b),
+            None => Err(KError::NotFound(AttributeNotFound{ s: $name})),
+            _ => Err(KError::RvError(CkRvError{ rv: interface::CKR_ATTRIBUTE_TYPE_INVALID }))
+        }
+    };
 }
 
 macro_rules! str_attribute {
     ($name:expr; from $map:expr) => {
-        match $map.get($name) {
-            Some(Value::String(s)) => Some(s.clone()),
-            _ => None
+        match $map.get(&$name) {
+            Some(Value::String(s)) => Ok(s.clone()),
+            None => Err(KError::NotFound(AttributeNotFound{ s: $name})),
+            _ => Err(KError::RvError(CkRvError{ rv: interface::CKR_ATTRIBUTE_TYPE_INVALID }))
         }
     }
 }
 
 macro_rules! bytes_attribute {
     ($name:expr; from $map:expr) => {
-        match $map.get($name) {
+        match $map.get(&$name) {
             Some(Value::String(s)) => {
                 let len = match BASE64.decode_len(s.len()) {
                     Ok(l) => l,
-                    Err(_e) => return None,
+                    Err(_e) => return Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
                 };
                 let mut output = vec![0; len];
                 let _ = match BASE64.decode_mut(s.as_bytes(), &mut output) {
                     Ok(l) => l,
-                    Err(_e) => return None,
+                    Err(_e) => return Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
                 };
-                Some(output)
+                Ok(output)
             },
-            _ => None
+            None => Err(KError::NotFound(AttributeNotFound{ s: $name})),
+            _ => Err(KError::RvError(CkRvError{ rv: interface::CKR_ATTRIBUTE_TYPE_INVALID }))
         }
     }
 }
@@ -80,7 +91,7 @@ macro_rules! ulong_set_attribute {
         {
             let old = match $map.insert($name, Value::Number(Number::from($value))) {
                 Some(o) => o,
-                _ => return Err(interface::CKR_GENERAL_ERROR),
+                None => Value::Null
             };
             Ok(old)
         }
@@ -92,7 +103,7 @@ macro_rules! string_set_attribute {
         {
             let old = match $map.insert($name, Value::String($value)) {
                 Some(o) => o,
-                _ => return Err(interface::CKR_GENERAL_ERROR),
+                None => Value::Null
             };
             Ok(old)
         }
@@ -104,7 +115,7 @@ macro_rules! bool_set_attribute {
         {
             let old = match $map.insert($name, Value::Bool($value)) {
                 Some(o) => o,
-                _ => return Err(interface::CKR_GENERAL_ERROR),
+                None => Value::Null
             };
             Ok(old)
         }
@@ -117,7 +128,7 @@ macro_rules! bytes_set_attribute {
             let sval = BASE64.encode($value.as_ref());
             let old = match $map.insert($name, Value::String(sval)) {
                 Some(o) => o,
-                _ => return Err(interface::CKR_GENERAL_ERROR),
+                None => Value::Null
             };
             Ok(old)
         }
@@ -133,39 +144,45 @@ macro_rules! with {
 }
 
 pub trait Storage {
-    fn is_token(&self) -> bool {
-        false
+    fn is_token(&self) -> KResult<bool> {
+        Ok(false)
     }
-    fn is_private(&self) -> bool;
-    fn is_modifiable(&self) -> bool {
-        true
+    fn is_private(&self) -> KResult<bool>;
+    fn is_modifiable(&self) -> KResult<bool> {
+        Ok(true)
     }
-    fn is_copyable(&self) -> bool {
-        true
+    fn is_copyable(&self) -> KResult<bool> {
+        Ok(true)
     }
-    fn is_destroyable(&self) -> bool {
-        true
+    fn is_destroyable(&self) -> KResult<bool> {
+        Ok(true)
     }
-    fn get_label(&self) -> Option<String> {
-        None
+    fn get_label(&self) -> KResult<String> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
-    fn get_unique_id(&self) -> Option<String> {
-        None
+    fn get_unique_id(&self) -> KResult<String> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
-    fn get_attr_as_bytes(&self, s: String) -> Option<Vec<u8>> {
-        None
+    fn get_attr_as_string(&self, _s: String) -> KResult<String> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
-    fn set_attr_from_ulong(&mut self, s: String, u: interface::CK_ULONG) -> Result<Value, CK_RV> {
-        Err(interface::CKR_GENERAL_ERROR)
+    fn get_attr_as_bool(&self, _s: String) -> KResult<bool> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
-    fn set_attr_from_string(&mut self, s: String, v: String) -> Result<Value, CK_RV> {
-        Err(interface::CKR_GENERAL_ERROR)
+    fn get_attr_as_bytes(&self, _s: String) -> KResult<Vec<u8>> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
-    fn set_attr_from_bool(&mut self, s: String, b: bool) -> Result<Value, CK_RV> {
-        Err(interface::CKR_GENERAL_ERROR)
+    fn set_attr_from_ulong(&mut self, _s: String, _u: interface::CK_ULONG) -> KResult<Value> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
-    fn set_attr_from_bytes(&mut self, s: String, u: Vec<u8>) -> Result<Value, CK_RV> {
-        Err(interface::CKR_GENERAL_ERROR)
+    fn set_attr_from_string(&mut self, _s: String, _v: String) -> KResult<Value> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
+    }
+    fn set_attr_from_bool(&mut self, _s: String, _b: bool) -> KResult<Value> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
+    }
+    fn set_attr_from_bytes(&mut self, _s: String, _u: Vec<u8>) -> KResult<Value> {
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR }))
     }
 }
 
@@ -178,37 +195,43 @@ pub struct KeyObject {
 }
 
 impl Storage for KeyObject {
-    fn is_token(&self) -> bool {
-        bool_attribute!("CKA_TOKEN"; from self.attributes; def false)
+    fn is_token(&self) -> KResult<bool> {
+        bool_attribute!(with!("CKA_TOKEN"); from self.attributes; def false)
     }
-    fn is_private(&self) -> bool {
-        bool_attribute!("CKA_PRIVATE"; from self.attributes; def true)
+    fn is_private(&self) -> KResult<bool> {
+        bool_attribute!(with!("CKA_PRIVATE"); from self.attributes; def true)
     }
-    fn is_modifiable(&self) -> bool {
-        bool_attribute!("CKA_MODIFIABLE"; from self.attributes; def true)
+    fn is_modifiable(&self) -> KResult<bool> {
+        bool_attribute!(with!("CKA_MODIFIABLE"); from self.attributes; def true)
     }
-    fn is_destroyable(&self) -> bool {
-        bool_attribute!("CKA_DESTROYABLE"; from self.attributes; def false)
+    fn is_destroyable(&self) -> KResult<bool> {
+        bool_attribute!(with!("CKA_DESTROYABLE"); from self.attributes; def false)
     }
-    fn get_label(&self) -> Option<String> {
-        str_attribute!("CKA_LABEL"; from self.attributes)
+    fn get_label(&self) -> KResult<String> {
+        str_attribute!(with!("CKA_LABEL"); from self.attributes)
     }
-    fn get_unique_id(&self) -> Option<String> {
-        str_attribute!("CKA_ID"; from self.attributes)
+    fn get_unique_id(&self) ->  KResult<String>{
+        str_attribute!(with!("CKA_ID"); from self.attributes)
     }
-    fn get_attr_as_bytes(&self, s: String) -> Option<Vec<u8>> {
-        bytes_attribute!(&s; from self.attributes)
+    fn get_attr_as_string(&self, s:String) -> KResult<String> {
+        str_attribute!(s; from self.attributes)
     }
-    fn set_attr_from_ulong(&mut self, s: String, u: interface::CK_ULONG) -> Result<Value, CK_RV> {
+    fn get_attr_as_bool(&self, s:String) -> KResult<bool> {
+        bool_attribute!(s; from self.attributes)
+    }
+    fn get_attr_as_bytes(&self, s: String) -> KResult<Vec<u8>> {
+        bytes_attribute!(s; from self.attributes)
+    }
+    fn set_attr_from_ulong(&mut self, s: String, u: interface::CK_ULONG) -> KResult<Value> {
         ulong_set_attribute!(s; u; into self.attributes)
     }
-    fn set_attr_from_string(&mut self, s: String, v: String) -> Result<Value, CK_RV> {
+    fn set_attr_from_string(&mut self, s: String, v: String) -> KResult<Value> {
         string_set_attribute!(s; v; into self.attributes)
     }
-    fn set_attr_from_bool(&mut self, s: String, b: bool) -> Result<Value, CK_RV> {
+    fn set_attr_from_bool(&mut self, s: String, b: bool) -> KResult<Value> {
         bool_set_attribute!(s; b; into self.attributes)
     }
-    fn set_attr_from_bytes(&mut self, s: String, u: Vec<u8>) -> Result<Value, CK_RV> {
+    fn set_attr_from_bytes(&mut self, s: String, u: Vec<u8>) -> KResult<Value> {
         bytes_set_attribute!(s; u; into self.attributes)
     }
 }
@@ -224,7 +247,7 @@ impl KeyObject {
         }
     }
 
-    pub fn test_object() -> KeyObject {
+    pub fn test_object() -> KResult<KeyObject> {
         let mut o = KeyObject {
             handle: 1234,
             class: interface::CKO_PUBLIC_KEY,
@@ -232,15 +255,15 @@ impl KeyObject {
             attributes: Map::new(),
         };
 
-        o.set_attr_from_bool("CKA_TOKEN".to_string(), true);
-        o.set_attr_from_bool(with!("CKA_PRIVATE"), false);
-        o.set_attr_from_bool(with!("CKA_MODIFIABLE"), false);
-        o.set_attr_from_bool(with!("CKA_DESTROYABLE"), false);
-        o.set_attr_from_string(with!("CKA_LABEL"), with!("Test RSA Key"));
-        o.set_attr_from_bytes(with!("CKA_ID"), b"\x01".to_vec());
-        o.set_attr_from_bytes(with!("CKA_MODULUS"), b"\x01\x02\x03\x04\x05\x06\x07\x08".to_vec());
-        o.set_attr_from_bytes(with!("CKA_PUBLIC_EXPONENT"), b"\x01\x00\x01".to_vec());
+        o.set_attr_from_bool("CKA_TOKEN".to_string(), true)?;
+        o.set_attr_from_bool(with!("CKA_PRIVATE"), false)?;
+        o.set_attr_from_bool(with!("CKA_MODIFIABLE"), false)?;
+        o.set_attr_from_bool(with!("CKA_DESTROYABLE"), false)?;
+        o.set_attr_from_string(with!("CKA_LABEL"), with!("Test RSA Key"))?;
+        o.set_attr_from_bytes(with!("CKA_ID"), b"\x01".to_vec())?;
+        o.set_attr_from_bytes(with!("CKA_MODULUS"), b"\x01\x02\x03\x04\x05\x06\x07\x08".to_vec())?;
+        o.set_attr_from_bytes(with!("CKA_PUBLIC_EXPONENT"), b"\x01\x00\x01".to_vec())?;
 
-        o
+        Ok(o)
     }
 }

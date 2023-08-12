@@ -2,8 +2,7 @@
 // See LICENSE.txt file for terms
 
 use std::sync::RwLock;
-use std::ffi::{CStr, CString};
-use serde_json;
+use std::ffi::CStr;
 
 mod interface {
     #![allow(non_upper_case_globals)]
@@ -24,12 +23,14 @@ mod interface {
     }
 }
 
+mod error;
 mod slot;
 mod token;
 mod object;
 mod session;
 
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
+use error::KError;
 
 struct State {
     slots: Vec<slot::Slot>,
@@ -48,7 +49,10 @@ extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
     let mut wstate = STATE.write().unwrap();
     let slot = match slot::Slot::new(&filename) {
         Ok(s) => s,
-        Err(e) => return e,
+        Err(e) => match e {
+            KError::RvError(e) => return e.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        }
     };
     wstate.slots.push(slot);
     CKR_OK
@@ -1047,11 +1051,12 @@ pub extern "C" fn C_GetInterface(
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
     use super::*;
     #[test]
     fn it_works() {
 
-        let mut test_token = token::Token::test_token();
+        let mut test_token = token::Token::test_token().unwrap();
         let j = match serde_json::to_string(&test_token) {
             Ok(j) => {
                 println!("JSON: {j}");

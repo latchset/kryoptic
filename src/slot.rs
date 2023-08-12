@@ -3,11 +3,12 @@
 
 use std::sync::{RwLock};
 
+use super::error;
 use super::interface;
 use super::token::Token;
 use super::session::Session;
 
-use interface::CK_RV;
+use error::KResult;
 
 static SLOT_DESCRIPTION: [interface::CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
@@ -19,7 +20,7 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new(filename: &str) -> Result<Slot, CK_RV> {
+    pub fn new(filename: &str) -> KResult<Slot> {
         let token = match Token::load(filename) {
             Ok(t) => t,
             Err(e) => return Err(e),

@@ -9,6 +9,7 @@ use serde_json;
 use super::interface;
 use super::session;
 use super::object;
+use super::error;
 
 static TOKEN_LABEL: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
@@ -18,6 +19,7 @@ static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 use interface::{CK_RV, CKR_OK};
 use object::KeyObject;
 use session::Session;
+use error::{KResult, KError};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Token {
@@ -31,7 +33,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn load(filename: &str) -> Result<Token, CK_RV> {
+    pub fn load(filename: &str) -> KResult<Token> {
 
         let mut t = Token {
             info: interface::CK_TOKEN_INFO {
@@ -69,14 +71,14 @@ impl Token {
             Ok(f) => f,
             Err(e) => {
                 println!("Failed to open {filename}: {e:?}");
-                return Err(interface::CKR_GENERAL_ERROR);
+                return Err(KError::FileError(e));
             }
         };
         match serde_json::from_reader::<std::fs::File, Token>(file) {
             Ok(j) => t.objects = j.objects,
             Err(e) => {
                 println!("{e:?}");
-                return Err(interface::CKR_GENERAL_ERROR);
+                return Err(KError::JsonError(e));
             }
         }
         Ok(t)
@@ -87,7 +89,7 @@ impl Token {
         interface::CKF_RNG | interface::CKF_LOGIN_REQUIRED | interface::CKF_TOKEN_INITIALIZED
     }
 
-    pub fn test_token() -> Token {
+    pub fn test_token() -> KResult<Token> {
         let mut t = Token {
             info: interface::CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
@@ -120,9 +122,9 @@ impl Token {
             sessions: Vec::new(),
         };
 
-        t.objects.push(Box::new(KeyObject::test_object()));
+        t.objects.push(Box::new(KeyObject::test_object()?));
 
-        t
+        Ok(t)
     }
 
     pub fn get_token_info(&self) -> &interface:: CK_TOKEN_INFO {
