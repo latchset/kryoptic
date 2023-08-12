@@ -246,24 +246,4 @@ impl KeyObject {
             attributes: Map::new(),
         }
     }
-
-    pub fn test_object() -> KResult<KeyObject> {
-        let mut o = KeyObject {
-            handle: 1234,
-            class: interface::CKO_PUBLIC_KEY,
-            key_type: interface::CKK_RSA,
-            attributes: Map::new(),
-        };
-
-        o.set_attr_from_bool("CKA_TOKEN".to_string(), true)?;
-        o.set_attr_from_bool(with!("CKA_PRIVATE"), false)?;
-        o.set_attr_from_bool(with!("CKA_MODIFIABLE"), false)?;
-        o.set_attr_from_bool(with!("CKA_DESTROYABLE"), false)?;
-        o.set_attr_from_string(with!("CKA_LABEL"), with!("Test RSA Key"))?;
-        o.set_attr_from_bytes(with!("CKA_ID"), b"\x01".to_vec())?;
-        o.set_attr_from_bytes(with!("CKA_MODULUS"), b"\x01\x02\x03\x04\x05\x06\x07\x08".to_vec())?;
-        o.set_attr_from_bytes(with!("CKA_PUBLIC_EXPONENT"), b"\x01\x00\x01".to_vec())?;
-
-        Ok(o)
-    }
 }

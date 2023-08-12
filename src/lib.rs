@@ -1056,17 +1056,23 @@ mod tests {
     #[test]
     fn it_works() {
 
-        let mut test_token = token::Token::test_token().unwrap();
-        let j = match serde_json::to_string(&test_token) {
-            Ok(j) => {
-                println!("JSON: {j}");
-                j
-            },
-            Err(e) => {
-                println!("Error in json serialize: {e}");
-                return;
-            }
-        };
+        let test_token = serde_json::json!({
+            "objects": [{
+                "handle": 4030201,
+                "class": 2,
+                "key_type": 0,
+                "attributes": {
+                    "CKA_DESTROYABLE": false,
+                    "CKA_ID": "AQ==",
+                    "CKA_LABEL": "Test RSA Key",
+                    "CKA_MODIFIABLE": false,
+                    "CKA_MODULUS": "AQIDBAUGBwg=",
+                    "CKA_PRIVATE": false,
+                    "CKA_PUBLIC_EXPONENT": "AQAB",
+                    "CKA_TOKEN": true
+                }
+            }]
+        });
         let file = std::fs::File::create("test.json").unwrap();
         serde_json::to_writer_pretty(file, &test_token).unwrap();
 
@@ -1078,7 +1084,7 @@ mod tests {
             let list :interface::CK_FUNCTION_LIST = *plist;
             match list.C_Initialize{
                 Some(value) => {
-                    let mut filename = CString::new("test.json");
+                    let filename = CString::new("test.json");
                     let ret = value(filename.unwrap().into_raw() as *mut std::ffi::c_void);
                     assert_eq!(ret, CKR_OK)
                 }

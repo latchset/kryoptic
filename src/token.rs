@@ -89,44 +89,6 @@ impl Token {
         interface::CKF_RNG | interface::CKF_LOGIN_REQUIRED | interface::CKF_TOKEN_INITIALIZED
     }
 
-    pub fn test_token() -> KResult<Token> {
-        let mut t = Token {
-            info: interface::CK_TOKEN_INFO {
-                label: TOKEN_LABEL,
-                manufacturerID: MANUFACTURER_ID,
-                model: TOKEN_MODEL,
-                serialNumber: TOKEN_SERIAL,
-                flags: Token::token_flags(),
-                ulMaxSessionCount: interface::CK_EFFECTIVELY_INFINITE,
-                ulSessionCount: 0,
-                ulMaxRwSessionCount: interface::CK_EFFECTIVELY_INFINITE,
-                ulRwSessionCount: 0,
-                ulMaxPinLen: interface::CK_EFFECTIVELY_INFINITE,
-                ulMinPinLen: interface::CK_EFFECTIVELY_INFINITE,
-                ulTotalPublicMemory: 0,
-                ulFreePublicMemory: 0,
-                ulTotalPrivateMemory: 0,
-                ulFreePrivateMemory: 0,
-                hardwareVersion: interface::CK_VERSION {
-                    major: 0,
-                    minor: 0,
-                },
-                firmwareVersion: interface::CK_VERSION {
-                    major: 0,
-                    minor: 0,
-                },
-                utcTime: *b"0000000000000000",
-            },
-            objects: Vec::new(),
-            next_handle: 1,
-            sessions: Vec::new(),
-        };
-
-        t.objects.push(Box::new(KeyObject::test_object()?));
-
-        Ok(t)
-    }
-
     pub fn get_token_info(&self) -> &interface:: CK_TOKEN_INFO {
         &self.info
     }
