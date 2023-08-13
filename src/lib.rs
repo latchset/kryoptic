@@ -30,16 +30,62 @@ mod object;
 mod session;
 
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
-use error::KError;
+use session::Session;
+use error::{KResult, KError};
 
 struct State {
     filename: String,
     slots: Vec<slot::Slot>,
+    sessions: Vec<Session>,
+    next_handle: interface::CK_SESSION_HANDLE,
+}
+
+impl State {
+    fn new_session(&mut self, flags: interface::CK_FLAGS) -> KResult<&Session> {
+        let handle = self.next_handle;
+        self.next_handle += 1;
+        let session = match Session::new(handle, flags) {
+            Ok(s) => s,
+            Err(e) => return Err(e),
+        };
+        self.sessions.push(session);
+
+        Ok(self.sessions.last().unwrap())
+    }
+
+    fn get_session(&self, handle: interface::CK_SESSION_HANDLE) -> KResult<&Session> {
+        if handle >= self.next_handle {
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_HANDLE_INVALID}))
+        }
+        let iter = self.sessions.iter();
+        for s in iter {
+            let h = s.get_handle();
+            if h == handle {
+                return Ok(s);
+            }
+        }
+        Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_CLOSED}))
+    }
+
+    fn get_session_mut(&mut self, handle: interface::CK_SESSION_HANDLE) -> KResult<&mut Session> {
+        if handle >= self.next_handle {
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_HANDLE_INVALID}))
+        }
+        for s in self.sessions.iter_mut() {
+            let h = s.get_handle();
+            if h == handle {
+                return Ok(s);
+            }
+        }
+        Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_CLOSED}))
+    }
 }
 
 static STATE: RwLock<State> = RwLock::new(State {
     filename: String::new(),
     slots: Vec::new(),
+    sessions: Vec::new(),
+    next_handle: 1,
 });
 
 extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
@@ -134,13 +180,27 @@ extern "C" fn fn_set_pin(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_open_session(
-        _slot_id: interface::CK_SLOT_ID,
-        _flags: interface::CK_FLAGS,
+        slot_id: interface::CK_SLOT_ID,
+        flags: interface::CK_FLAGS,
         _application: interface::CK_VOID_PTR,
         _notify: interface::CK_NOTIFY,
-        _ph_session: interface::CK_SESSION_HANDLE_PTR,
+        ph_session: interface::CK_SESSION_HANDLE_PTR,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if slot_id != 0 {
+        return interface::CKR_SLOT_ID_INVALID;
+    }
+    let mut wstate = STATE.write().unwrap();
+    let session = match wstate.new_session(flags) {
+        Ok(s) => s,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    unsafe {
+        core::ptr::write(ph_session as *mut _, session.get_handle());
+    }
+    CKR_OK
 }
 extern "C" fn fn_close_session(_session: interface::CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
@@ -1108,7 +1168,7 @@ mod tests {
     fn a_test_token() {
 
         let test_token = serde_json::json!({
-            "objects": [{
+            "key_objects": [{
                 "handle": 4030201,
                 "class": 2,
                 "key_type": 0,

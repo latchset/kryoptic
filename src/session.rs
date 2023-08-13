@@ -1,11 +1,14 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::vec::Vec;
+
 use super::interface;
+use super::error;
 
-use interface::{CK_RV, CKR_OK};
+use error::{KResult, KError};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Session {
     handle: interface::CK_SESSION_HANDLE,
 
@@ -15,16 +18,17 @@ pub struct Session {
 
     state: interface::CK_STATE,
     device_error: interface::CK_ULONG,
+    object_handles: Vec<interface::CK_OBJECT_HANDLE>,
 }
 
 impl Session {
     pub fn new(handle: interface::CK_SESSION_HANDLE,
-               flags: interface::CK_FLAGS) -> (Option<Session>, CK_RV) {
+               flags: interface::CK_FLAGS) -> KResult<Session> {
         if handle == interface::CK_INVALID_HANDLE {
-            return (None, interface::CKR_GENERAL_ERROR);
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_GENERAL_ERROR}));
         }
         if flags & interface::CKF_SERIAL_SESSION != interface::CKF_SERIAL_SESSION {
-            return (None, interface::CKR_ARGUMENTS_BAD);
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_ARGUMENTS_BAD}));
         }
 
         let mut s = Session {
@@ -33,7 +37,8 @@ impl Session {
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
             state: interface::CKS_RO_PUBLIC_SESSION,
-            device_error: 0
+            device_error: 0,
+            object_handles: Vec::new(),
         };
 
         // FIXME check Login status
@@ -45,6 +50,10 @@ impl Session {
             }
         }
 
-        (Some(s), CKR_OK)
+        Ok(s)
+    }
+
+    pub fn get_handle(&self) -> interface::CK_SESSION_HANDLE {
+        self.handle
     }
 }

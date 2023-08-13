@@ -7,7 +7,6 @@ use serde::{Serialize, Deserialize};
 use serde_json;
 
 use super::interface;
-use super::session;
 use super::object;
 use super::error;
 
@@ -16,20 +15,14 @@ static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic         
 static TOKEN_MODEL: [interface::CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
-use interface::{CK_RV, CKR_OK};
 use object::KeyObject;
-use session::Session;
 use error::{KResult, KError};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Token {
     #[serde(skip_serializing, skip_deserializing)]
     info: interface::CK_TOKEN_INFO,
-    objects: Vec<Box<KeyObject>>,
-    #[serde(skip_serializing, skip_deserializing)]
-    next_handle: interface::CK_SESSION_HANDLE,
-    #[serde(skip_serializing, skip_deserializing)]
-    sessions: Vec<Session>,
+    key_objects: Vec<Box<KeyObject>>,
 }
 
 impl Token {
@@ -62,9 +55,7 @@ impl Token {
                 },
                 utcTime: *b"0000000000000000",
             },
-            objects: Vec::new(),
-            next_handle: 1,
-            sessions: Vec::new(),
+            key_objects: Vec::new(),
         };
 
         let file = match std::fs::File::open(filename) {
@@ -74,7 +65,7 @@ impl Token {
             }
         };
         match serde_json::from_reader::<std::fs::File, Token>(file) {
-            Ok(j) => t.objects = j.objects,
+            Ok(j) => t.key_objects = j.key_objects,
             Err(e) => {
                 return Err(KError::JsonError(e));
             }
@@ -104,17 +95,5 @@ impl Token {
 
     pub fn get_token_info(&self) -> &interface:: CK_TOKEN_INFO {
         &self.info
-    }
-
-    pub fn get_new_session(&mut self, flags: interface::CK_FLAGS) -> (Option<Session>, CK_RV) {
-        let handle = self.next_handle;
-        self.next_handle += 1;
-        let (s, res) = Session::new(handle, flags);
-        if res != CKR_OK {
-            return (None, res)
-        }
-        self.sessions.push(s.unwrap());
-
-        (Some(*self.sessions.last().unwrap()), CKR_OK)
     }
 }

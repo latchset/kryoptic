@@ -6,7 +6,6 @@ use std::sync::{RwLock};
 use super::error;
 use super::interface;
 use super::token::Token;
-use super::session::Session;
 
 use error::KResult;
 
@@ -55,10 +54,5 @@ impl Slot {
 
     pub fn get_slot_info(&self) -> &interface:: CK_SLOT_INFO {
         &self.slot_info
-    }
-
-    pub fn open_session(&mut self, flags: interface::CK_FLAGS) -> (Option<Session>, interface::CK_RV) {
-        let mut tok = self.token.write().unwrap();
-        tok.get_new_session(flags)
     }
 }
