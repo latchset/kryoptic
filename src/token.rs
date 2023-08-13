@@ -10,12 +10,14 @@ use super::interface;
 use super::object;
 use super::error;
 
+use interface::{CK_RV, CKR_OK};
+
 static TOKEN_LABEL: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
 static TOKEN_MODEL: [interface::CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
-use object::KeyObject;
+use object::{ Object, Storage, KeyObject };
 use error::{KResult, KError};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -23,6 +25,8 @@ pub struct Token {
     #[serde(skip_serializing, skip_deserializing)]
     info: interface::CK_TOKEN_INFO,
     key_objects: Vec<Box<KeyObject>>,
+    #[serde(skip_serializing, skip_deserializing)]
+    login: bool,
 }
 
 impl Token {
@@ -56,6 +60,7 @@ impl Token {
                 utcTime: *b"0000000000000000",
             },
             key_objects: Vec::new(),
+            login: false,
         };
 
         let file = match std::fs::File::open(filename) {
@@ -96,4 +101,27 @@ impl Token {
     pub fn get_token_info(&self) -> &interface:: CK_TOKEN_INFO {
         &self.info
     }
+
+    pub fn search_keys(&self, template: &[interface::CK_ATTRIBUTE], handles: &mut std::vec::Vec<interface::CK_OBJECT_HANDLE>) -> CK_RV {
+        for o in self.key_objects.iter() {
+            if self.login == false {
+                match o.is_private() {
+                    Ok(p) => {
+                        if p == true {
+                            continue;
+                        }
+                    },
+                    Err(e) => match e {
+                        KError::RvError(x) => return x.rv,
+                        _ => return interface::CKR_GENERAL_ERROR,
+                    },
+                }
+            }
+            if o.match_template(template) {
+                handles.push(o.get_handle());
+            }
+        }
+        CKR_OK
+    }
+
 }

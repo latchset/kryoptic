@@ -56,4 +56,20 @@ impl Session {
     pub fn get_handle(&self) -> interface::CK_SESSION_HANDLE {
         self.handle
     }
+
+    pub fn reset_object_handles(&mut self) {
+        self.object_handles.clear();
+    }
+
+    pub fn append_object_handles(&mut self, handles: &mut Vec<interface::CK_OBJECT_HANDLE>) {
+        self.object_handles.append(handles);
+    }
+
+    pub fn get_object_handles(&mut self, max: usize) -> KResult<Vec<interface::CK_OBJECT_HANDLE>> {
+        let mut amount = max;
+        if self.object_handles.len() < amount {
+            amount = self.object_handles.len();
+        }
+        Ok(self.object_handles.drain(0..amount).collect())
+    }
 }

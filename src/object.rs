@@ -74,11 +74,10 @@ macro_rules! bytes_attribute {
                     Err(_e) => return Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
                 };
                 let mut output = vec![0; len];
-                let _ = match BASE64.decode_mut(s.as_bytes(), &mut output) {
-                    Ok(l) => l,
-                    Err(_e) => return Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
-                };
-                Ok(output)
+                match BASE64.decode_mut(s.as_bytes(), &mut output) {
+                    Ok(_) => Ok(output),
+                    Err(_e) => Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
+                }
             },
             None => Err(KError::NotFound(AttributeNotFound{ s: $name})),
             _ => Err(KError::RvError(CkRvError{ rv: interface::CKR_ATTRIBUTE_TYPE_INVALID }))
@@ -245,5 +244,173 @@ impl KeyObject {
             key_type: interface::CKK_RSA,
             attributes: Map::new(),
         }
+    }
+
+    pub fn match_template(&self, template: &[interface::CK_ATTRIBUTE]) -> bool {
+        for attr in template.iter() {
+            /* special attrs we store as native elements */
+            match attr.type_ {
+                interface::CKA_CLASS => match attr.to_ulong() {
+                    Ok(aval) => {
+                        if self.class == aval {
+                            continue;
+                        } else {
+                            return false;
+                        }
+                    }
+                    Err(_) => return false,
+                },
+                interface::CKA_KEY_TYPE => match attr.to_ulong() {
+                    Ok(aval) => {
+                        if self.key_type == aval {
+                            continue;
+                        } else {
+                            return false;
+                        }
+                    }
+                    Err(_) => return false,
+                },
+                _ => (),
+            }
+            /* all others */
+            let elem = attrmap_element(attr.type_ as usize);
+            match self.attributes.get(&elem.name.to_string()) {
+                Some(Value::Bool(ebool)) => {
+                    if elem.type_ != AttrType::BoolType {
+                        return false;
+                    }
+                    match attr.to_bool() {
+                        Ok(abool) => {
+                            if *ebool != abool {
+                                return false;
+                            }
+                        },
+                        Err(_) => return false,
+                    }
+                },
+                Some(Value::Number(eval)) => {
+                    if elem.type_ != AttrType::NumType {
+                        return false;
+                    }
+                    match attr.to_ulong() {
+                        Ok(aval) => {
+                            if eval.as_u64() != Some(aval as u64) {
+                                return false;
+                            }
+                        },
+                        Err(_) => return false,
+                    }
+                },
+                Some(Value::String(estr)) => {
+                    if elem.type_ == AttrType::BytesType {
+                        let len = match BASE64.decode_len(estr.len()) {
+                            Ok(l) => l,
+                            Err(_) => return false,
+                        };
+                        let mut ebuf = vec![0; len];
+                        match BASE64.decode_mut(estr.as_bytes(), &mut ebuf) {
+                            Ok(_) => (),
+                            Err(_) => return false,
+                        };
+                        let abuf = attr.to_buf().unwrap();
+                        if abuf != ebuf {
+                            return false;
+                        }
+                    } else if elem.type_ == AttrType::StringType {
+                        match attr.to_string() {
+                            Ok(astr) => {
+                                if *estr != astr {
+                                    return false;
+                                }
+                            },
+                            Err(_) => return false,
+                        }
+                    }
+                    return false;
+                },
+                _ => return false,
+            }
+        }
+        true
+    }
+}
+
+use interface::{CK_ATTRIBUTE, CK_ULONG, CK_BBOOL};
+impl CK_ATTRIBUTE {
+    pub fn to_ulong(self) -> KResult<CK_ULONG> {
+        if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_ATTRIBUTE_VALUE_INVALID}));
+        }
+        let val: &[CK_ULONG] = unsafe {
+            std::slice::from_raw_parts(self.pValue as *const _, 1)
+        };
+        Ok(val[0])
+    }
+    pub fn to_bool(self) -> KResult<bool> {
+        if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_ATTRIBUTE_VALUE_INVALID}));
+        }
+        let val: &[CK_BBOOL] = unsafe {
+            std::slice::from_raw_parts(self.pValue as *const _, 1)
+        };
+        if val[0] == 0 {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
+    }
+    pub fn to_string(self) ->KResult<String> {
+        let buf: &[u8] = unsafe {
+            std::slice::from_raw_parts(self.pValue as *const _, self.ulValueLen as usize)
+        };
+        let utf8str = match std::str::from_utf8(buf) {
+            Ok(s) => s,
+            Err(_) => return Err(KError::RvError(error::CkRvError{rv: interface::CKR_ATTRIBUTE_VALUE_INVALID})),
+        };
+        Ok(utf8str.to_string())
+    }
+    pub fn to_buf(self) ->KResult<Vec<u8>> {
+        let buf: &[u8] = unsafe {
+            std::slice::from_raw_parts(self.pValue as *const _, self.ulValueLen as usize)
+        };
+        Ok(buf.to_vec())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AttrType {
+    BoolType,
+    NumType,
+    StringType,
+    BytesType,
+}
+
+#[derive(Debug)]
+struct Attrmap<'a> {
+    name: &'a str,
+    type_: AttrType,
+}
+#[derive(Debug)]
+struct Attrelem {
+    name: String,
+    type_: AttrType,
+}
+
+static ATTRMAP: [Attrmap; 3] = [
+    Attrmap { name: "CKA_CLASS", type_: AttrType::NumType },
+    Attrmap { name: "CKA_TOKEN", type_: AttrType::BoolType },
+    Attrmap { name: "CKA_PRIVATE", type_: AttrType::BoolType },
+];
+
+fn attrmap_element(id: usize) -> Attrelem {
+    if id < ATTRMAP.len() {
+        return Attrelem {
+            name: ATTRMAP[id].name.to_string(),
+            type_: ATTRMAP[id].type_,
+        };
+    }
+    Attrelem {
+        name: id.to_string(),
+        type_: AttrType::BytesType,
     }
 }

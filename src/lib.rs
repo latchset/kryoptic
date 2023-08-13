@@ -288,22 +288,126 @@ extern "C" fn fn_set_attribute_value(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_find_objects_init(
-        _session: interface::CK_SESSION_HANDLE,
-        _template: interface::CK_ATTRIBUTE_PTR,
-        _count: interface::CK_ULONG,
+        handle: interface::CK_SESSION_HANDLE,
+        template: interface::CK_ATTRIBUTE_PTR,
+        count: interface::CK_ULONG,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let mut wstate = STATE.write().unwrap();
+    /* check that session is ok */
+    match wstate.get_session(handle) {
+        Ok(_) => (),
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    let slot = &wstate.slots[0];
+
+    let tmpl: &[interface::CK_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts(template, count as usize)
+    };
+
+    /* find if specific object class is requested */
+    let mut class = interface::CK_UNAVAILABLE_INFORMATION;
+    let mut idx = 0;
+    while idx < tmpl.len() {
+        if tmpl[idx].type_ == interface::CKA_CLASS {
+            class = match tmpl[idx].to_ulong() {
+                Ok(v) => v,
+                Err(e) => match e {
+                    KError::RvError(r) => return r.rv,
+                    _ => return interface::CKR_GENERAL_ERROR,
+                },
+            };
+            break;
+        }
+        idx += 1;
+    }
+
+    let mut handles = Vec::<interface::CK_OBJECT_HANDLE>::new();
+    let res = match class {
+        interface::CKO_DATA => { CKR_OK },
+        interface::CKO_CERTIFICATE => { CKR_OK },
+        interface::CKO_PUBLIC_KEY => {
+            slot.search_keys(tmpl, &mut handles)
+        },
+        interface::CKO_PRIVATE_KEY => {
+            slot.search_keys(tmpl, &mut handles)
+        },
+        interface::CKO_SECRET_KEY => { CKR_OK },
+        interface::CKO_HW_FEATURE => { CKR_OK },
+        interface::CKO_DOMAIN_PARAMETERS => { CKR_OK },
+        interface::CKO_MECHANISM => { CKR_OK },
+        interface::CKO_OTP_KEY => { CKR_OK },
+        interface::CKO_PROFILE => { CKR_OK },
+        _ => {
+            slot.search_keys(tmpl, &mut handles)
+        },
+    };
+    if res == CKR_OK {
+        let session = match wstate.get_session_mut(handle) {
+            Ok(s) => s,
+            Err(e) => match e {
+                KError::RvError(r) => return r.rv,
+                _ => return interface::CKR_GENERAL_ERROR,
+            },
+        };
+        session.reset_object_handles();
+        session.append_object_handles(&mut handles);
+    }
+    res
 }
+
 extern "C" fn fn_find_objects(
-        _session: interface::CK_SESSION_HANDLE,
-        _ph_object: interface::CK_OBJECT_HANDLE_PTR,
-        _max_object_count: interface::CK_ULONG,
-        _pul_object_count: interface::CK_ULONG_PTR,
+        handle: interface::CK_SESSION_HANDLE,
+        ph_object: interface::CK_OBJECT_HANDLE_PTR,
+        max_object_count: interface::CK_ULONG,
+        pul_object_count: interface::CK_ULONG_PTR,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if ph_object.is_null() {
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+    let mut wstate = STATE.write().unwrap();
+    let session = match wstate.get_session_mut(handle) {
+        Ok(s) => s,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    let handles = match session.get_object_handles(max_object_count as usize) {
+        Ok(h) => h,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    let hlen = handles.len();
+    if hlen > 0 {
+        let mut idx = 0;
+        while idx < hlen {
+            unsafe {
+                core::ptr::write(ph_object.offset(idx as isize), handles[idx]);
+            }
+            idx += 1;
+        }
+    }
+    unsafe {
+        core::ptr::write(pul_object_count.offset(0), hlen as interface::CK_ULONG);
+    }
+    CKR_OK
 }
-extern "C" fn fn_find_objects_final(_session: interface::CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+extern "C" fn fn_find_objects_final(handle: interface::CK_SESSION_HANDLE) -> CK_RV {
+    let mut wstate = STATE.write().unwrap();
+    let session = match wstate.get_session_mut(handle) {
+        Ok(s) => s,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    session.reset_object_handles();
+    CKR_OK
 }
 extern "C" fn fn_encrypt_init(
         _session: interface::CK_SESSION_HANDLE,
