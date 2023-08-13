@@ -667,7 +667,7 @@ extern "C" fn fn_get_slot_info(slot_id: interface::CK_SLOT_ID, info: interface::
     let slot = &rstate.slots[0];
     let slotinfo = slot.get_slot_info();
     unsafe {
-        core::ptr::write(info.offset(0) as *mut _, slotinfo);
+        core::ptr::write(info as *mut _, *slotinfo);
     }
     CKR_OK
 }
@@ -680,7 +680,7 @@ extern "C" fn fn_get_token_info(slot_id: interface::CK_SLOT_ID, info: interface:
     let slot = &rstate.slots[0];
     let tokinfo = slot.get_token_info();
     unsafe {
-        core::ptr::write(info.offset(0) as *mut _, tokinfo);
+        core::ptr::write(info as *mut _, tokinfo);
     }
     CKR_OK
 }
