@@ -41,10 +41,10 @@ struct State {
 }
 
 impl State {
-    fn new_session(&mut self, flags: interface::CK_FLAGS) -> KResult<&Session> {
+    fn new_session(&mut self, slotid: interface::CK_SLOT_ID, flags: interface::CK_FLAGS) -> KResult<&Session> {
         let handle = self.next_handle;
         self.next_handle += 1;
-        let session = match Session::new(handle, flags) {
+        let session = match Session::new(slotid, handle, flags) {
             Ok(s) => s,
             Err(e) => return Err(e),
         };
@@ -78,6 +78,25 @@ impl State {
             }
         }
         Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_CLOSED}))
+    }
+
+    fn drop_session(&mut self, handle: interface::CK_SESSION_HANDLE) -> KResult<()> {
+        if handle >= self.next_handle {
+            return Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_HANDLE_INVALID}))
+        }
+        let mut idx = 0;
+        while idx < self.sessions.len() {
+            if handle == self.sessions[idx].get_handle() {
+                self.sessions.swap_remove(idx);
+                return Ok(());
+            }
+            idx += 1;
+        }
+        Err(KError::RvError(error::CkRvError{rv: interface::CKR_SESSION_CLOSED}))
+    }
+
+    fn drop_all_sessions(&mut self) {
+        self.sessions.clear();
     }
 }
 
@@ -190,7 +209,7 @@ extern "C" fn fn_open_session(
         return interface::CKR_SLOT_ID_INVALID;
     }
     let mut wstate = STATE.write().unwrap();
-    let session = match wstate.new_session(flags) {
+    let session = match wstate.new_session(slot_id, flags) {
         Ok(s) => s,
         Err(e) => match e {
             KError::RvError(r) => return r.rv,
@@ -202,17 +221,37 @@ extern "C" fn fn_open_session(
     }
     CKR_OK
 }
-extern "C" fn fn_close_session(_session: interface::CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+extern "C" fn fn_close_session(handle: interface::CK_SESSION_HANDLE) -> CK_RV {
+    let mut wstate = STATE.write().unwrap();
+    match wstate.drop_session(handle) {
+        Ok(_) => CKR_OK,
+        Err(e) => match e {
+            KError::RvError(r) => r.rv,
+            _ => interface::CKR_GENERAL_ERROR,
+        },
+    }
 }
 extern "C" fn fn_close_all_sessions(_slot_id: interface::CK_SLOT_ID) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let mut wstate = STATE.write().unwrap();
+    wstate.drop_all_sessions();
+    CKR_OK
 }
 extern "C" fn fn_get_session_info(
-        _session: interface::CK_SESSION_HANDLE,
-        _info: interface::CK_SESSION_INFO_PTR,
+        handle: interface::CK_SESSION_HANDLE,
+        info: interface::CK_SESSION_INFO_PTR,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = STATE.read().unwrap();
+    let session = match rstate.get_session(handle) {
+        Ok(s) => s,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    unsafe {
+        core::ptr::write(info as *mut _, session.get_session_info());
+    }
+    CKR_OK
 }
 extern "C" fn fn_get_operation_state(
         _session: interface::CK_SESSION_HANDLE,

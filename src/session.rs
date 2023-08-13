@@ -10,19 +10,18 @@ use error::{KResult, KError};
 
 #[derive(Debug, Clone)]
 pub struct Session {
-    handle: interface::CK_SESSION_HANDLE,
+    info: interface::CK_SESSION_INFO,
 
-    flags: interface::CK_FLAGS,
     //application: interface::CK_VOID_PTR,
     //notify: interface::CK_NOTIFY,
 
-    state: interface::CK_STATE,
-    device_error: interface::CK_ULONG,
+    handle: interface::CK_SESSION_HANDLE,
     object_handles: Vec<interface::CK_OBJECT_HANDLE>,
 }
 
 impl Session {
-    pub fn new(handle: interface::CK_SESSION_HANDLE,
+    pub fn new(slotid: interface::CK_SLOT_ID,
+               handle: interface::CK_SESSION_HANDLE,
                flags: interface::CK_FLAGS) -> KResult<Session> {
         if handle == interface::CK_INVALID_HANDLE {
             return Err(KError::RvError(error::CkRvError{rv: interface::CKR_GENERAL_ERROR}));
@@ -32,21 +31,24 @@ impl Session {
         }
 
         let mut s = Session {
-            handle: handle,
-            flags: flags,
+            info: interface::CK_SESSION_INFO {
+                slotID: slotid,
+                state: interface::CKS_RO_PUBLIC_SESSION,
+                flags: flags,
+                ulDeviceError: 0,
+            },
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
-            state: interface::CKS_RO_PUBLIC_SESSION,
-            device_error: 0,
+            handle: handle,
             object_handles: Vec::new(),
         };
 
         // FIXME check Login status
         if flags & interface::CKF_RW_SESSION == interface::CKF_RW_SESSION {
-            if s.state == interface::CKS_RO_PUBLIC_SESSION {
-                s.state = interface::CKS_RW_PUBLIC_SESSION;
-            } else if s.state == interface::CKS_RO_USER_FUNCTIONS {
-                s.state = interface::CKS_RW_USER_FUNCTIONS;
+            if s.info.state == interface::CKS_RO_PUBLIC_SESSION {
+                s.info.state = interface::CKS_RW_PUBLIC_SESSION;
+            } else if s.info.state == interface::CKS_RO_USER_FUNCTIONS {
+                s.info.state = interface::CKS_RW_USER_FUNCTIONS;
             }
         }
 
@@ -71,5 +73,9 @@ impl Session {
             amount = self.object_handles.len();
         }
         Ok(self.object_handles.drain(0..amount).collect())
+    }
+
+    pub fn get_session_info(&self) -> &interface::CK_SESSION_INFO {
+        &self.info
     }
 }
