@@ -47,16 +47,33 @@ extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
         println!("_init_args is null");
         return interface::CKR_ARGUMENTS_BAD;
     }
+    let args = _init_args as *const interface::CK_C_INITIALIZE_ARGS;
+
     let mut wstate = match STATE.write() {
         Ok(s) => s,
-        Err(e) => return interface::CKR_GENERAL_ERROR,
+        Err(e) => {
+            println!("Can't get state lock {}", e);
+            return interface::CKR_GENERAL_ERROR;
+        },
     };
-    wstate.filename = unsafe {CStr::from_ptr(_init_args as *const _)}.to_string_lossy().to_string();
+    if unsafe {(*args).pReserved.is_null()} {
+        println!("reserved arg is null");
+        return interface::CKR_ARGUMENTS_BAD;
+    }
+    let filename = match unsafe {CStr::from_ptr((*args).pReserved as *const _)}.to_str() {
+        Ok(f) => f,
+        Err(_e) => return interface::CKR_ARGUMENTS_BAD,
+    };
+    println!("{}", filename.to_string());
+    wstate.filename = filename.to_string();
     let slot = match slot::Slot::new(&wstate.filename) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(e) => return e.rv,
-            _ => return interface::CKR_GENERAL_ERROR,
+        Err(e) => {
+            println!("{}", e);
+            match e {
+                KError::RvError(e) => return e.rv,
+                _ => return interface::CKR_GENERAL_ERROR,
+            }
         }
     };
     wstate.slots.push(slot);
@@ -65,13 +82,16 @@ extern "C" fn fn_initialize(_init_args: interface::CK_VOID_PTR) -> CK_RV {
 extern "C" fn fn_finalize(_reserved: interface::CK_VOID_PTR) -> CK_RV {
     let rstate = match STATE.read() {
         Ok(s) => s,
-        Err(e) => return interface::CKR_GENERAL_ERROR,
+        Err(_e) => return interface::CKR_GENERAL_ERROR,
     };
     match rstate.slots[0].token_save(&rstate.filename) {
         Ok(_) => CKR_OK,
-        Err(e) => match e {
-            KError::RvError(e) => return e.rv,
-            _ => return interface::CKR_GENERAL_ERROR,
+        Err(e) => {
+            println!("{}", e);
+            match e {
+                KError::RvError(e) => return e.rv,
+                _ => return interface::CKR_GENERAL_ERROR,
+            }
         }
     }
 }
@@ -1064,6 +1084,22 @@ pub extern "C" fn C_GetInterface(
     CKR_OK
 }
 
+unsafe extern "C" fn dummy_create_mutex(_mutex: *mut *mut std::ffi::c_void) -> CK_RV {
+    interface::CKR_GENERAL_ERROR
+}
+
+unsafe extern "C" fn dummy_destroy_mutex(_mutex: *mut std::ffi::c_void) -> CK_RV {
+    interface::CKR_GENERAL_ERROR
+}
+
+unsafe extern "C" fn dummy_lock_mutex(_mutex: *mut std::ffi::c_void) -> CK_RV {
+    interface::CKR_GENERAL_ERROR
+}
+
+unsafe extern "C" fn dummy_unlock_mutex(_mutex: *mut std::ffi::c_void) -> CK_RV {
+    interface::CKR_GENERAL_ERROR
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::CString;
@@ -1100,7 +1136,16 @@ mod tests {
             match list.C_Initialize{
                 Some(value) => {
                     let filename = CString::new("test.json");
-                    let ret = value(filename.unwrap().into_raw() as *mut std::ffi::c_void);
+                    let mut args = interface::CK_C_INITIALIZE_ARGS {
+                        CreateMutex: Some(dummy_create_mutex),
+                        DestroyMutex: Some(dummy_destroy_mutex),
+                        LockMutex: Some(dummy_lock_mutex),
+                        UnlockMutex: Some(dummy_unlock_mutex),
+                        flags: 0,
+                        pReserved: filename.unwrap().into_raw() as *mut std::ffi::c_void,
+                    };
+                    let mut args_ptr = &mut args as *mut interface::CK_C_INITIALIZE_ARGS;
+                    let ret = value(args_ptr as *mut std::ffi::c_void);
                     assert_eq!(ret, CKR_OK)
                 }
                 None => todo!()
@@ -1110,7 +1155,16 @@ mod tests {
 
     fn b_test_init_fini() {
         let filename = CString::new("test.json");
-        let mut ret = fn_initialize(filename.unwrap().into_raw() as *mut std::ffi::c_void);
+        let mut args = interface::CK_C_INITIALIZE_ARGS {
+            CreateMutex: Some(dummy_create_mutex),
+            DestroyMutex: Some(dummy_destroy_mutex),
+            LockMutex: Some(dummy_lock_mutex),
+            UnlockMutex: Some(dummy_unlock_mutex),
+            flags: 0,
+            pReserved: filename.unwrap().into_raw() as *mut std::ffi::c_void,
+        };
+        let mut args_ptr = &mut args as *mut interface::CK_C_INITIALIZE_ARGS;
+        let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
         assert_eq!(ret, CKR_OK);
         ret = fn_finalize(std::ptr::null_mut());
         assert_eq!(ret, CKR_OK);
