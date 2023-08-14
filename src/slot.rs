@@ -8,7 +8,6 @@ use super::interface;
 use super::token::Token;
 
 use error::KResult;
-use interface::CK_RV;
 
 static SLOT_DESCRIPTION: [interface::CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
@@ -57,8 +56,8 @@ impl Slot {
         &self.slot_info
     }
 
-    pub fn search_keys(&self, template: &[interface::CK_ATTRIBUTE], handles: &mut std::vec::Vec<interface::CK_OBJECT_HANDLE>) -> CK_RV {
+    pub fn search(&self, template: &[interface::CK_ATTRIBUTE]) -> KResult<std::vec::Vec<interface::CK_OBJECT_HANDLE>> {
         let token = self.token.read().unwrap();
-        token.search_keys(template, handles)
+        token.search(template)
     }
 }

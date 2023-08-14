@@ -28,6 +28,7 @@ mod slot;
 mod token;
 mod object;
 mod session;
+mod attribute;
 
 use interface::{CK_RV, CKR_OK, CKR_FUNCTION_NOT_SUPPORTED};
 use session::Session;
@@ -346,55 +347,23 @@ extern "C" fn fn_find_objects_init(
         std::slice::from_raw_parts(template, count as usize)
     };
 
-    /* find if specific object class is requested */
-    let mut class = interface::CK_UNAVAILABLE_INFORMATION;
-    let mut idx = 0;
-    while idx < tmpl.len() {
-        if tmpl[idx].type_ == interface::CKA_CLASS {
-            class = match tmpl[idx].to_ulong() {
-                Ok(v) => v,
-                Err(e) => match e {
-                    KError::RvError(r) => return r.rv,
-                    _ => return interface::CKR_GENERAL_ERROR,
-                },
-            };
-            break;
-        }
-        idx += 1;
-    }
-
-    let mut handles = Vec::<interface::CK_OBJECT_HANDLE>::new();
-    let res = match class {
-        interface::CKO_DATA => { CKR_OK },
-        interface::CKO_CERTIFICATE => { CKR_OK },
-        interface::CKO_PUBLIC_KEY => {
-            slot.search_keys(tmpl, &mut handles)
-        },
-        interface::CKO_PRIVATE_KEY => {
-            slot.search_keys(tmpl, &mut handles)
-        },
-        interface::CKO_SECRET_KEY => { CKR_OK },
-        interface::CKO_HW_FEATURE => { CKR_OK },
-        interface::CKO_DOMAIN_PARAMETERS => { CKR_OK },
-        interface::CKO_MECHANISM => { CKR_OK },
-        interface::CKO_OTP_KEY => { CKR_OK },
-        interface::CKO_PROFILE => { CKR_OK },
-        _ => {
-            slot.search_keys(tmpl, &mut handles)
+    let mut handles = match slot.search(tmpl) {
+        Ok(h) => h,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
         },
     };
-    if res == CKR_OK {
-        let session = match wstate.get_session_mut(handle) {
-            Ok(s) => s,
-            Err(e) => match e {
-                KError::RvError(r) => return r.rv,
-                _ => return interface::CKR_GENERAL_ERROR,
-            },
-        };
-        session.reset_object_handles();
-        session.append_object_handles(&mut handles);
-    }
-    res
+    let session = match wstate.get_session_mut(handle) {
+        Ok(s) => s,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    session.reset_object_handles();
+    session.append_object_handles(&mut handles);
+    CKR_OK
 }
 
 extern "C" fn fn_find_objects(
@@ -1311,11 +1280,11 @@ mod tests {
     fn a_test_token() {
 
         let test_token = serde_json::json!({
-            "key_objects": [{
+            "objects": [{
                 "handle": 4030201,
-                "class": 2,
-                "key_type": 0,
                 "attributes": {
+                    "CKA_CLASS": 2,
+                    "CKA_KEY_TYPE": 0,
                     "CKA_DESTROYABLE": false,
                     "CKA_ID": "AQ==",
                     "CKA_LABEL": "Test RSA Key",

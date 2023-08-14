@@ -10,22 +10,18 @@ use super::interface;
 use super::object;
 use super::error;
 
-use interface::{CK_RV, CKR_OK};
-
 static TOKEN_LABEL: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
 static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
 static TOKEN_MODEL: [interface::CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
-use object::{ Object, Storage, KeyObject };
+use object::{Object, JsonObject};
 use error::{KResult, KError};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Token {
-    #[serde(skip_serializing, skip_deserializing)]
     info: interface::CK_TOKEN_INFO,
-    key_objects: Vec<Box<KeyObject>>,
-    #[serde(skip_serializing, skip_deserializing)]
+    objects: Vec<Object>,
     login: bool,
 }
 
@@ -59,7 +55,7 @@ impl Token {
                 },
                 utcTime: *b"0000000000000000",
             },
-            key_objects: Vec::new(),
+            objects: Vec::new(),
             login: false,
         };
 
@@ -69,17 +65,18 @@ impl Token {
                 return Err(KError::FileError(e));
             }
         };
-        match serde_json::from_reader::<std::fs::File, Token>(file) {
-            Ok(j) => t.key_objects = j.key_objects,
-            Err(e) => {
-                return Err(KError::JsonError(e));
-            }
+        match serde_json::from_reader::<std::fs::File, JsonToken>(file) {
+            Ok(j) => t.objects = object::json_to_objects(&j.objects),
+            Err(e) => return Err(KError::JsonError(e)),
         }
         Ok(t)
     }
 
     pub fn save(&self, filename: &str) -> KResult<()> {
-        let j = match serde_json::to_string(&self) {
+        let token = JsonToken {
+            objects: object::objects_to_json(&self.objects)
+        };
+        let j = match serde_json::to_string(&token) {
             Ok(j) => {
                 j
             },
@@ -102,8 +99,9 @@ impl Token {
         &self.info
     }
 
-    pub fn search_keys(&self, template: &[interface::CK_ATTRIBUTE], handles: &mut std::vec::Vec<interface::CK_OBJECT_HANDLE>) -> CK_RV {
-        for o in self.key_objects.iter() {
+    pub fn search(&self, template: &[interface::CK_ATTRIBUTE]) -> KResult<std::vec::Vec<interface::CK_OBJECT_HANDLE>> {
+        let mut handles = Vec::<interface::CK_OBJECT_HANDLE>::new();
+        for o in self.objects.iter() {
             if self.login == false {
                 match o.is_private() {
                     Ok(p) => {
@@ -111,17 +109,18 @@ impl Token {
                             continue;
                         }
                     },
-                    Err(e) => match e {
-                        KError::RvError(x) => return x.rv,
-                        _ => return interface::CKR_GENERAL_ERROR,
-                    },
+                    Err(e) => return Err(e),
                 }
             }
             if o.match_template(template) {
                 handles.push(o.get_handle());
             }
         }
-        CKR_OK
+        Ok(handles)
     }
+}
 
+#[derive(Debug, Serialize, Deserialize)]
+struct JsonToken {
+    objects: Vec<JsonObject>,
 }
