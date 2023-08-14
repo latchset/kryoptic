@@ -312,12 +312,33 @@ extern "C" fn fn_get_object_size(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_get_attribute_value(
-        _session: interface::CK_SESSION_HANDLE,
-        _object: interface::CK_OBJECT_HANDLE,
-        _template: interface::CK_ATTRIBUTE_PTR,
-        _count: interface::CK_ULONG,
+        s_handle: interface::CK_SESSION_HANDLE,
+        o_handle: interface::CK_OBJECT_HANDLE,
+        template: interface::CK_ATTRIBUTE_PTR,
+        count: interface::CK_ULONG,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = STATE.read().unwrap();
+    let session = match rstate.get_session(s_handle) {
+        Ok(s) => s,
+        Err(e) => match e {
+            KError::RvError(r) => return r.rv,
+            _ => return interface::CKR_GENERAL_ERROR,
+        },
+    };
+    let info = session.get_session_info();
+    let slot = &rstate.slots[info.slotID as usize];
+
+    let mut tmpl: &mut [interface::CK_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts_mut(template, count as usize)
+    };
+
+    match slot.get_object_attrs(o_handle, &mut tmpl) {
+        Ok(_) => CKR_OK,
+        Err(e) => match e {
+            KError::RvError(r) => r.rv,
+            _ => interface::CKR_GENERAL_ERROR,
+        },
+    }
 }
 extern "C" fn fn_set_attribute_value(
         _session: interface::CK_SESSION_HANDLE,

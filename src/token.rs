@@ -16,12 +16,12 @@ static TOKEN_MODEL: [interface::CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
 use object::{Object, JsonObject};
-use error::{KResult, KError};
+use error::{KResult, KError, CkRvError};
 
 #[derive(Debug, Clone)]
 pub struct Token {
     info: interface::CK_TOKEN_INFO,
-    objects: Vec<Object>,
+    objects: Vec<Object>, /* FIXME: convert to hashMap ? */
     login: bool,
 }
 
@@ -117,6 +117,18 @@ impl Token {
             }
         }
         Ok(handles)
+    }
+
+    pub fn get_object_attrs(&self, handle: interface::CK_OBJECT_HANDLE, template: &mut [interface::CK_ATTRIBUTE]) -> KResult<()> {
+        for o in self.objects.iter() {
+            if !self.login && o.is_private()? {
+                continue;
+            }
+            if o.get_handle() == handle {
+                return o.fill_template(template)
+            }
+        }
+        Err(KError::RvError(CkRvError{ rv: interface::CKR_OBJECT_HANDLE_INVALID}))
     }
 }
 

@@ -60,4 +60,9 @@ impl Slot {
         let token = self.token.read().unwrap();
         token.search(template)
     }
+
+    pub fn get_object_attrs(&self, handle: interface::CK_OBJECT_HANDLE, template: &mut [interface::CK_ATTRIBUTE]) -> KResult<()> {
+        let token = self.token.read().unwrap();
+        token.get_object_attrs(handle, template)
+    }
 }
