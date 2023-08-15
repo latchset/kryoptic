@@ -3,9 +3,12 @@
 
 use std::ffi::CString;
 use super::*;
-#[test]
-fn a_test_token() {
 
+struct TestData<'a> {
+    filename: Option<&'a str>
+}
+
+fn test_setup(filename: &str) {
     let test_token = serde_json::json!({
         "objects": [{
             "handle": 4030201,
@@ -23,8 +26,29 @@ fn a_test_token() {
             }
         }]
     });
-    let file = std::fs::File::create("test.json").unwrap();
+    let file = std::fs::File::create(filename).unwrap();
     serde_json::to_writer_pretty(file, &test_token).unwrap();
+}
+
+fn test_cleanup(filename: &str) {
+    std::fs::remove_file(filename).unwrap_or(());
+}
+
+impl Drop for TestData<'_> {
+    fn drop(&mut self) {
+        if let Some(f) = self.filename {
+            test_cleanup(f);
+        }
+    }
+}
+
+#[test]
+fn test_token() {
+
+    let testdata = TestData {
+        filename: Some("test_token.json"),
+    };
+    test_setup(testdata.filename.unwrap());
 
     let mut plist :CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -34,7 +58,7 @@ fn a_test_token() {
         let list :CK_FUNCTION_LIST = *plist;
         match list.C_Initialize{
             Some(value) => {
-                let filename = CString::new("test.json");
+                let filename = CString::new(testdata.filename.unwrap());
                 let mut args = CK_C_INITIALIZE_ARGS {
                     CreateMutex: Some(dummy_create_mutex),
                     DestroyMutex: Some(dummy_destroy_mutex),
@@ -52,8 +76,14 @@ fn a_test_token() {
     }
 }
 
-fn b_test_init_fini() {
-    let filename = CString::new("test.json");
+#[test]
+fn test_init_fini() {
+    let testdata = TestData {
+        filename: Some("test_init_fini.json"),
+    };
+    test_setup(testdata.filename.unwrap());
+
+    let filename = CString::new(testdata.filename.unwrap());
     let mut args = CK_C_INITIALIZE_ARGS {
         CreateMutex: Some(dummy_create_mutex),
         DestroyMutex: Some(dummy_destroy_mutex),
