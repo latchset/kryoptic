@@ -12,7 +12,8 @@ use super::error;
 
 use interface::*;
 use object::{Object, JsonObject};
-use error::{KResult, KError, CkRvError};
+use error::{KResult, KError};
+use super::err_rv;
 
 static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
@@ -129,7 +130,7 @@ impl Token {
                 return o.fill_template(template)
             }
         }
-        Err(KError::RvError(CkRvError{ rv: CKR_OBJECT_HANDLE_INVALID}))
+        err_rv!(CKR_OBJECT_HANDLE_INVALID)
     }
 }
 

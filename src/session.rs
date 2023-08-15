@@ -8,6 +8,7 @@ use super::error;
 
 use interface::*;
 use error::{KResult, KError};
+use super::err_rv;
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -25,10 +26,10 @@ impl Session {
                handle: CK_SESSION_HANDLE,
                flags: CK_FLAGS) -> KResult<Session> {
         if handle == CK_INVALID_HANDLE {
-            return Err(KError::RvError(error::CkRvError{rv: CKR_GENERAL_ERROR}));
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         if flags & interface::CKF_SERIAL_SESSION != CKF_SERIAL_SESSION {
-            return Err(KError::RvError(error::CkRvError{rv: CKR_ARGUMENTS_BAD}));
+            return err_rv!(CKR_ARGUMENTS_BAD);
         }
 
         let mut s = Session {

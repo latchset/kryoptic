@@ -56,7 +56,7 @@ impl State {
 
     fn get_session(&self, handle: CK_SESSION_HANDLE) -> KResult<&Session> {
         if handle >= self.next_handle {
-            return Err(KError::RvError(error::CkRvError{rv: CKR_SESSION_HANDLE_INVALID}))
+            return err_rv!(CKR_SESSION_HANDLE_INVALID)
         }
         let iter = self.sessions.iter();
         for s in iter {
@@ -65,12 +65,12 @@ impl State {
                 return Ok(s);
             }
         }
-        Err(KError::RvError(error::CkRvError{rv: CKR_SESSION_CLOSED}))
+        err_rv!(CKR_SESSION_CLOSED)
     }
 
     fn get_session_mut(&mut self, handle: CK_SESSION_HANDLE) -> KResult<&mut Session> {
         if handle >= self.next_handle {
-            return Err(KError::RvError(error::CkRvError{rv: CKR_SESSION_HANDLE_INVALID}))
+            return err_rv!(CKR_SESSION_HANDLE_INVALID)
         }
         for s in self.sessions.iter_mut() {
             let h = s.get_handle();
@@ -78,12 +78,12 @@ impl State {
                 return Ok(s);
             }
         }
-        Err(KError::RvError(error::CkRvError{rv: CKR_SESSION_CLOSED}))
+        err_rv!(CKR_SESSION_CLOSED)
     }
 
     fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
         if handle >= self.next_handle {
-            return Err(KError::RvError(error::CkRvError{rv: CKR_SESSION_HANDLE_INVALID}))
+            return err_rv!(CKR_SESSION_HANDLE_INVALID)
         }
         let mut idx = 0;
         while idx < self.sessions.len() {
@@ -93,7 +93,7 @@ impl State {
             }
             idx += 1;
         }
-        Err(KError::RvError(error::CkRvError{rv: CKR_SESSION_CLOSED}))
+        err_rv!(CKR_SESSION_CLOSED)
     }
 
     fn drop_all_sessions(&mut self) {

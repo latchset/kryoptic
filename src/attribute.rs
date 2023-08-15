@@ -8,7 +8,8 @@ use super::interface;
 use super::error;
 
 use interface::*;
-use error::{KResult, KError, CkRvError, AttributeNotFound};
+use error::{KResult, KError};
+use super::{err_rv, err_not_found};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttrType {
@@ -198,7 +199,7 @@ impl Attribute {
 
     pub fn to_bool(&self) -> KResult<bool> {
         if self.value.len() != 1 {
-            return Err(KError::RvError(CkRvError{ rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         if self.value[0] == 0 {
             return Ok(false);
@@ -214,7 +215,7 @@ impl Attribute {
 
     pub fn to_ulong(&self) -> KResult<u64> {
         if self.value.len() != 8 {
-            return Err(KError::RvError(CkRvError{ rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         Ok(u64::from_ne_bytes(self.value.as_slice().try_into().unwrap()))
     }
@@ -229,7 +230,7 @@ impl Attribute {
     pub fn to_string(&self) -> KResult<String> {
         match std::str::from_utf8(&self.value) {
             Ok(s) => Ok(s.to_string()),
-            Err(_) => Err(KError::RvError(CkRvError{ rv: CKR_ATTRIBUTE_VALUE_INVALID})),
+            Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
 
@@ -250,7 +251,7 @@ impl Attribute {
 
     pub fn to_date(&self) -> KResult<String> {
         if self.value.len() != 8 {
-            return Err(KError::RvError(CkRvError{ rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         let chars: [char; 10] = [
             char::from(self.value[0]),
@@ -304,10 +305,10 @@ pub fn from_type_bool(t: CK_ULONG, b: bool) -> KResult<Attribute> {
             if a.atype == AttrType::BoolType {
                 return Ok(from_bool(t, b));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: t.to_string() }))
+    err_not_found!(t.to_string())
 }
 
 pub fn from_string_bool(s: String, b: bool) -> KResult<Attribute> {
@@ -316,10 +317,10 @@ pub fn from_string_bool(s: String, b: bool) -> KResult<Attribute> {
             if a.atype == AttrType::BoolType {
                 return Ok(from_bool(a.id, b));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: s }))
+    err_not_found!(s)
 }
 
 fn from_ulong(t: CK_ULONG, u: CK_ULONG) -> Attribute {
@@ -336,10 +337,10 @@ pub fn from_type_ulong(t: CK_ULONG, u: CK_ULONG) -> KResult<Attribute> {
             if a.atype == AttrType::NumType {
                 return Ok(from_ulong(t, u));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: t.to_string() }))
+    err_not_found!(t.to_string())
 }
 
 pub fn from_string_ulong(s: String, u: CK_ULONG) -> KResult<Attribute> {
@@ -348,10 +349,10 @@ pub fn from_string_ulong(s: String, u: CK_ULONG) -> KResult<Attribute> {
             if a.atype == AttrType::NumType {
                 return Ok(from_ulong(a.id, u));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: s }))
+    err_not_found!(s)
 }
 
 fn from_string(t: CK_ULONG, s: String) -> Attribute {
@@ -368,10 +369,10 @@ pub fn from_type_string(t: CK_ULONG, s: String) -> KResult<Attribute> {
             if a.atype == AttrType::StringType {
                 return Ok(from_string(t, s));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: t.to_string() }))
+    err_not_found!(t.to_string())
 }
 
 pub fn from_string_string(s: String, v: String) -> KResult<Attribute> {
@@ -380,10 +381,10 @@ pub fn from_string_string(s: String, v: String) -> KResult<Attribute> {
             if a.atype == AttrType::StringType {
                 return Ok(from_string(a.id, v));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: s }))
+    err_not_found!(s)
 }
 
 fn from_bytes(t: CK_ULONG, v: Vec<u8>) -> Attribute {
@@ -400,10 +401,10 @@ pub fn from_type_bytes(t: CK_ULONG, v: Vec<u8>) -> KResult<Attribute> {
             if a.atype == AttrType::BytesType {
                 return Ok(from_bytes(t, v));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: t.to_string() }))
+    err_not_found!(t.to_string())
 }
 
 pub fn from_string_bytes(s: String, v: Vec<u8>) -> KResult<Attribute> {
@@ -412,10 +413,10 @@ pub fn from_string_bytes(s: String, v: Vec<u8>) -> KResult<Attribute> {
             if a.atype == AttrType::BytesType {
                 return Ok(from_bytes(a.id, v));
             }
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
     }
-    Err(KError::NotFound(AttributeNotFound{ s: s }))
+    err_not_found!(s)
 }
 
 pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
@@ -426,20 +427,20 @@ pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
                 AttrType::BoolType => {
                     match v.as_bool() {
                         Some(b) => return Ok(from_bool(a.id, b)),
-                        None => return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID})),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     }
                 },
                 AttrType::NumType => {
                     match v.as_u64() {
                         Some(n) => return Ok(from_ulong(a.id, n as CK_ULONG)),
-                        None => return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID})),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     }
 
                 },
                 AttrType::StringType => {
                     match v.as_str() {
                         Some(s) => return Ok(from_string(a.id, s.to_string())),
-                        None => return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID})),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     }
                 },
                 AttrType::BytesType => {
@@ -447,15 +448,15 @@ pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
                         Some(s) => {
                             let len = match BASE64.decode_len(s.len()) {
                                 Ok(l) => l,
-                                Err(_) => return Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
+                                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
                             };
                             let mut v = vec![0; len];
                             match BASE64.decode_mut(s.as_bytes(), &mut v) {
                                 Ok(_) => return Ok(from_bytes(a.id, v)),
-                                Err(_) => return Err(KError::RvError(CkRvError{ rv: interface::CKR_GENERAL_ERROR })),
+                                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
                             }
                         },
-                        None => return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID})),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     }
                 },
                 AttrType::DateType => (),
@@ -463,14 +464,14 @@ pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
             }
         }
     }
-    Err(KError::NotFound(AttributeNotFound{s: s}))
+    err_not_found!(s)
 }
 
 
 impl CK_ATTRIBUTE {
     pub fn to_ulong(self) -> KResult<CK_ULONG> {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         let val: &[CK_ULONG] = unsafe {
             std::slice::from_raw_parts(self.pValue as *const _, 1)
@@ -479,7 +480,7 @@ impl CK_ATTRIBUTE {
     }
     pub fn to_bool(self) -> KResult<bool> {
         if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
-            return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID}));
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         let val: &[CK_BBOOL] = unsafe {
             std::slice::from_raw_parts(self.pValue as *const _, 1)
@@ -496,7 +497,7 @@ impl CK_ATTRIBUTE {
         };
         let utf8str = match std::str::from_utf8(buf) {
             Ok(s) => s,
-            Err(_) => return Err(KError::RvError(CkRvError{rv: CKR_ATTRIBUTE_VALUE_INVALID})),
+            Err(_) => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         };
         Ok(utf8str.to_string())
     }

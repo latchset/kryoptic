@@ -56,3 +56,17 @@ impl fmt::Display for KError {
         }
     }
 }
+
+#[macro_export]
+macro_rules! err_rv {
+    ($ck_err:expr) => {
+        Err(KError::RvError(error::CkRvError{rv: $ck_err}))
+    }
+}
+
+#[macro_export]
+macro_rules! err_not_found {
+    ($err_str:expr) => {
+        Err(KError::NotFound(error::AttributeNotFound{s: $err_str}))
+    }
+}
