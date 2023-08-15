@@ -67,7 +67,7 @@ static SENSITIVE: [(CK_ULONG, &[CK_ULONG]); 8] = [
 
 #[derive(Debug, Clone)]
 pub struct Object {
-    handle: interface::CK_OBJECT_HANDLE,
+    handle: CK_OBJECT_HANDLE,
     attributes: Vec<Attribute>
 }
 
@@ -79,21 +79,21 @@ impl Object {
         }
     }
 
-    pub fn get_handle(&self) -> interface::CK_OBJECT_HANDLE {
+    pub fn get_handle(&self) -> CK_OBJECT_HANDLE {
         self.handle
     }
 
     pub fn is_token(&self) -> KResult<bool> {
-        bool_attribute!(interface::CKA_TOKEN; from &self.attributes; def false)
+        bool_attribute!(CKA_TOKEN; from &self.attributes; def false)
     }
     pub fn is_private(&self) -> KResult<bool> {
-        bool_attribute!(interface::CKA_PRIVATE; from &self.attributes; def true)
+        bool_attribute!(CKA_PRIVATE; from &self.attributes; def true)
     }
     pub fn is_modifiable(&self) -> KResult<bool> {
-        bool_attribute!(interface::CKA_MODIFIABLE; from &self.attributes; def true)
+        bool_attribute!(CKA_MODIFIABLE; from &self.attributes; def true)
     }
     pub fn is_destroyable(&self) -> KResult<bool> {
-        bool_attribute!(interface::CKA_DESTROYABLE; from &self.attributes; def false)
+        bool_attribute!(CKA_DESTROYABLE; from &self.attributes; def false)
     }
     fn set_attr(&mut self, a: Attribute) -> KResult<()> {
         let mut idx = self.attributes.len();
@@ -139,7 +139,7 @@ impl Object {
         self.set_attr(a)
     }
 
-    pub fn match_template(&self, template: &[interface::CK_ATTRIBUTE]) -> bool {
+    pub fn match_template(&self, template: &[CK_ATTRIBUTE]) -> bool {
         for ck_attr in template.iter() {
             let mut found = false;
             for attr in &self.attributes {
@@ -231,7 +231,7 @@ impl Object {
                     let val = attr.get_value();
                     if (elem.ulValueLen as usize) < val.len() {
                         elem.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = interface::CKR_BUFFER_TOO_SMALL;
+                        rv = CKR_BUFFER_TOO_SMALL;
                         break;
                     }
                     unsafe {
@@ -255,7 +255,7 @@ impl Object {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonObject {
-    handle: interface::CK_OBJECT_HANDLE,
+    handle: CK_OBJECT_HANDLE,
     attributes: Map<String, Value>
 }
 

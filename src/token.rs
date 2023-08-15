@@ -10,17 +10,18 @@ use super::interface;
 use super::object;
 use super::error;
 
-static TOKEN_LABEL: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
-static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
-static TOKEN_MODEL: [interface::CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
-static TOKEN_SERIAL: [interface::CK_UTF8CHAR; 16usize] = *b"0000000000000000";
-
+use interface::*;
 use object::{Object, JsonObject};
 use error::{KResult, KError, CkRvError};
 
+static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
+static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
+static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
+static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
+
 #[derive(Debug, Clone)]
 pub struct Token {
-    info: interface::CK_TOKEN_INFO,
+    info: CK_TOKEN_INFO,
     objects: Vec<Object>, /* FIXME: convert to hashMap ? */
     login: bool,
 }
@@ -29,27 +30,27 @@ impl Token {
     pub fn load(filename: &str) -> KResult<Token> {
 
         let mut t = Token {
-            info: interface::CK_TOKEN_INFO {
+            info: CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
                 manufacturerID: MANUFACTURER_ID,
                 model: TOKEN_MODEL,
                 serialNumber: TOKEN_SERIAL,
                 flags: Token::token_flags(),
-                ulMaxSessionCount: interface::CK_EFFECTIVELY_INFINITE,
+                ulMaxSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulSessionCount: 0,
-                ulMaxRwSessionCount: interface::CK_EFFECTIVELY_INFINITE,
+                ulMaxRwSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulRwSessionCount: 0,
-                ulMaxPinLen: interface::CK_EFFECTIVELY_INFINITE,
-                ulMinPinLen: interface::CK_EFFECTIVELY_INFINITE,
+                ulMaxPinLen: CK_EFFECTIVELY_INFINITE,
+                ulMinPinLen: CK_EFFECTIVELY_INFINITE,
                 ulTotalPublicMemory: 0,
                 ulFreePublicMemory: 0,
                 ulTotalPrivateMemory: 0,
                 ulFreePrivateMemory: 0,
-                hardwareVersion: interface::CK_VERSION {
+                hardwareVersion: CK_VERSION {
                     major: 0,
                     minor: 0,
                 },
-                firmwareVersion: interface::CK_VERSION {
+                firmwareVersion: CK_VERSION {
                     major: 0,
                     minor: 0,
                 },
@@ -90,17 +91,17 @@ impl Token {
         }
     }
 
-    fn token_flags() -> interface::CK_FLAGS {
+    fn token_flags() -> CK_FLAGS {
         // FIXME: most of these flags need to be set dynamically
-        interface::CKF_RNG | interface::CKF_LOGIN_REQUIRED | interface::CKF_TOKEN_INITIALIZED
+        CKF_RNG | CKF_LOGIN_REQUIRED | CKF_TOKEN_INITIALIZED
     }
 
-    pub fn get_token_info(&self) -> &interface:: CK_TOKEN_INFO {
+    pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
         &self.info
     }
 
-    pub fn search(&self, template: &[interface::CK_ATTRIBUTE]) -> KResult<std::vec::Vec<interface::CK_OBJECT_HANDLE>> {
-        let mut handles = Vec::<interface::CK_OBJECT_HANDLE>::new();
+    pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+        let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         for o in self.objects.iter() {
             if self.login == false {
                 match o.is_private() {
@@ -119,7 +120,7 @@ impl Token {
         Ok(handles)
     }
 
-    pub fn get_object_attrs(&self, handle: interface::CK_OBJECT_HANDLE, template: &mut [interface::CK_ATTRIBUTE]) -> KResult<()> {
+    pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
         for o in self.objects.iter() {
             if !self.login && o.is_private()? {
                 continue;
@@ -128,7 +129,7 @@ impl Token {
                 return o.fill_template(template)
             }
         }
-        Err(KError::RvError(CkRvError{ rv: interface::CKR_OBJECT_HANDLE_INVALID}))
+        Err(KError::RvError(CkRvError{ rv: CKR_OBJECT_HANDLE_INVALID}))
     }
 }
 

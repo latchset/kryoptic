@@ -8,13 +8,14 @@ use super::interface;
 use super::token::Token;
 
 use error::KResult;
+use interface::*;
 
-static SLOT_DESCRIPTION: [interface::CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
-static MANUFACTURER_ID: [interface::CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
+static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
+static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
 
 #[derive(Debug)]
 pub struct Slot {
-    slot_info: interface::CK_SLOT_INFO,
+    slot_info: CK_SLOT_INFO,
     token: RwLock<Token>,
 }
 
@@ -25,15 +26,15 @@ impl Slot {
             Err(e) => return Err(e),
         };
         Ok(Slot {
-            slot_info: interface::CK_SLOT_INFO {
+            slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
                 manufacturerID: MANUFACTURER_ID,
-                flags: interface::CKF_TOKEN_PRESENT,
-                hardwareVersion: interface::CK_VERSION {
+                flags: CKF_TOKEN_PRESENT,
+                hardwareVersion: CK_VERSION {
                     major: 0,
                     minor: 0,
                 },
-                firmwareVersion: interface::CK_VERSION {
+                firmwareVersion: CK_VERSION {
                     major: 0,
                     minor: 0,
                 },
@@ -47,21 +48,21 @@ impl Slot {
         token.save(filename)
     }
 
-    pub fn get_token_info(&self) -> interface:: CK_TOKEN_INFO {
+    pub fn get_token_info(&self) -> CK_TOKEN_INFO {
         let tok = self.token.read().unwrap();
         *tok.get_token_info()
     }
 
-    pub fn get_slot_info(&self) -> &interface:: CK_SLOT_INFO {
+    pub fn get_slot_info(&self) -> &CK_SLOT_INFO {
         &self.slot_info
     }
 
-    pub fn search(&self, template: &[interface::CK_ATTRIBUTE]) -> KResult<std::vec::Vec<interface::CK_OBJECT_HANDLE>> {
+    pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<std::vec::Vec<CK_OBJECT_HANDLE>> {
         let token = self.token.read().unwrap();
         token.search(template)
     }
 
-    pub fn get_object_attrs(&self, handle: interface::CK_OBJECT_HANDLE, template: &mut [interface::CK_ATTRIBUTE]) -> KResult<()> {
+    pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
         let token = self.token.read().unwrap();
         token.get_object_attrs(handle, template)
     }
