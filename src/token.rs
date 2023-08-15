@@ -79,12 +79,8 @@ impl Token {
             objects: object::objects_to_json(&self.objects)
         };
         let j = match serde_json::to_string(&token) {
-            Ok(j) => {
-                j
-            },
-            Err(e) => {
-                return Err(KError::JsonError(e));
-            }
+            Ok(j) => j,
+            Err(e) => return Err(KError::JsonError(e)),
         };
         match std::fs::write(filename, j) {
             Ok(_) => Ok(()),
@@ -104,15 +100,8 @@ impl Token {
     pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         for o in self.objects.iter() {
-            if self.login == false {
-                match o.is_private() {
-                    Ok(p) => {
-                        if p == true {
-                            continue;
-                        }
-                    },
-                    Err(e) => return Err(e),
-                }
+            if !self.login && o.is_private()? {
+                continue;
             }
             if o.match_template(template) {
                 handles.push(o.get_handle());
@@ -123,10 +112,10 @@ impl Token {
 
     pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
         for o in self.objects.iter() {
-            if !self.login && o.is_private()? {
-                continue;
-            }
             if o.get_handle() == handle {
+                if !self.login && o.is_private()? {
+                    break;
+                }
                 return o.fill_template(template)
             }
         }

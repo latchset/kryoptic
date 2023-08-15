@@ -111,31 +111,19 @@ impl Object {
         Ok(())
     }
     pub fn set_attr_from_ulong(&mut self, s: String, u: CK_ULONG) -> KResult<()> {
-        let a = match attribute::from_string_ulong(s, u) {
-            Ok(a) => a,
-            Err(e) => return Err(e),
-        };
+        let a = attribute::from_string_ulong(s, u)?;
         self.set_attr(a)
     }
     pub fn set_attr_from_string(&mut self, s: String, v: String) -> KResult<()> {
-        let a = match attribute::from_string_string(s, v) {
-            Ok(a) => a,
-            Err(e) => return Err(e),
-        };
+        let a = attribute::from_string_string(s, v)?;
         self.set_attr(a)
     }
     pub fn set_attr_from_bool(&mut self, s: String, b: bool) -> KResult<()> {
-        let a = match attribute::from_string_bool(s, b) {
-            Ok(a) => a,
-            Err(e) => return Err(e),
-        };
+        let a = attribute::from_string_bool(s, b)?;
         self.set_attr(a)
     }
     pub fn set_attr_from_bytes(&mut self, s: String, v: Vec<u8>) -> KResult<()> {
-        let a = match attribute::from_string_bytes(s, v) {
-            Ok(a) => a,
-            Err(e) => return Err(e),
-        };
+        let a = attribute::from_string_bytes(s, v)?;
         self.set_attr(a)
     }
 
@@ -284,11 +272,9 @@ pub fn json_to_objects(jobjs: &Vec<JsonObject>) -> Vec<Object> {
             attributes: Vec::new(),
         };
         for jk in jo.attributes.keys() {
-            let a = match attribute::from_value(jk.clone(), jo.attributes.get(jk).unwrap()) {
-                Ok(a) => a,
-                Err(_) => continue,
-            };
-            o.attributes.push(a);
+            if let Ok(a) = attribute::from_value(jk.clone(), jo.attributes.get(jk).unwrap()) {
+                o.attributes.push(a);
+            }
         }
         objs.push(o);
     }

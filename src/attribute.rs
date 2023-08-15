@@ -495,11 +495,10 @@ impl CK_ATTRIBUTE {
         let buf: &[u8] = unsafe {
             std::slice::from_raw_parts(self.pValue as *const _, self.ulValueLen as usize)
         };
-        let utf8str = match std::str::from_utf8(buf) {
-            Ok(s) => s,
-            Err(_) => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-        };
-        Ok(utf8str.to_string())
+        match std::str::from_utf8(buf) {
+            Ok(s) => Ok(s.to_string()),
+            Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        }
     }
     pub fn to_buf(self) ->KResult<Vec<u8>> {
         let buf: &[u8] = unsafe {
@@ -508,4 +507,3 @@ impl CK_ATTRIBUTE {
         Ok(buf.to_vec())
     }
 }
-

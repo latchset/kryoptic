@@ -21,10 +21,7 @@ pub struct Slot {
 
 impl Slot {
     pub fn new(filename: &str) -> KResult<Slot> {
-        let token = match Token::load(filename) {
-            Ok(t) => t,
-            Err(e) => return Err(e),
-        };
+        let token = Token::load(filename)?;
         Ok(Slot {
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,

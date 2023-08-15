@@ -34,6 +34,15 @@ use interface::*;
 use session::Session;
 use error::{KResult, KError};
 
+macro_rules! err_to_rv {
+    ($err:expr) => {
+        match $err {
+            KError::RvError(e) => e.rv,
+            _ => CKR_GENERAL_ERROR,
+        }
+    }
+}
+
 struct State {
     filename: String,
     slots: Vec<slot::Slot>,
@@ -45,10 +54,7 @@ impl State {
     fn new_session(&mut self, slotid: CK_SLOT_ID, flags: CK_FLAGS) -> KResult<&Session> {
         let handle = self.next_handle;
         self.next_handle += 1;
-        let session = match Session::new(slotid, handle, flags) {
-            Ok(s) => s,
-            Err(e) => return Err(e),
-        };
+        let session = Session::new(slotid, handle, flags)?;
         self.sessions.push(session);
 
         Ok(self.sessions.last().unwrap())
@@ -134,13 +140,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     wstate.filename = filename.to_string();
     let slot = match slot::Slot::new(&wstate.filename) {
         Ok(s) => s,
-        Err(e) => {
-            println!("{}", e);
-            match e {
-                KError::RvError(e) => return e.rv,
-                _ => return CKR_GENERAL_ERROR,
-            }
-        }
+        Err(e) => return err_to_rv!(e),
     };
     wstate.slots.push(slot);
     CKR_OK
@@ -152,13 +152,7 @@ extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     };
     match rstate.slots[0].token_save(&rstate.filename) {
         Ok(_) => CKR_OK,
-        Err(e) => {
-            println!("{}", e);
-            match e {
-                KError::RvError(e) => return e.rv,
-                _ => return CKR_GENERAL_ERROR,
-            }
-        }
+        Err(e) => return err_to_rv!(e),
     }
 }
 extern "C" fn fn_get_mechanism_list(
@@ -212,10 +206,7 @@ extern "C" fn fn_open_session(
     let mut wstate = STATE.write().unwrap();
     let session = match wstate.new_session(slot_id, flags) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     unsafe {
         core::ptr::write(ph_session as *mut _, session.get_handle());
@@ -226,10 +217,7 @@ extern "C" fn fn_close_session(handle: CK_SESSION_HANDLE) -> CK_RV {
     let mut wstate = STATE.write().unwrap();
     match wstate.drop_session(handle) {
         Ok(_) => CKR_OK,
-        Err(e) => match e {
-            KError::RvError(r) => r.rv,
-            _ => CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     }
 }
 extern "C" fn fn_close_all_sessions(_slot_id: CK_SLOT_ID) -> CK_RV {
@@ -244,10 +232,7 @@ extern "C" fn fn_get_session_info(
     let rstate = STATE.read().unwrap();
     let session = match rstate.get_session(handle) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     unsafe {
         core::ptr::write(info as *mut _, session.get_session_info());
@@ -320,10 +305,7 @@ extern "C" fn fn_get_attribute_value(
     let rstate = STATE.read().unwrap();
     let session = match rstate.get_session(s_handle) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     let info = session.get_session_info();
     let slot = &rstate.slots[info.slotID as usize];
@@ -336,10 +318,7 @@ extern "C" fn fn_get_attribute_value(
 
     match token.get_object_attrs(o_handle, &mut tmpl) {
         Ok(_) => CKR_OK,
-        Err(e) => match e {
-            KError::RvError(r) => r.rv,
-            _ => CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     }
 }
 extern "C" fn fn_set_attribute_value(
@@ -359,10 +338,7 @@ extern "C" fn fn_find_objects_init(
     /* check that session is ok */
     match wstate.get_session(handle) {
         Ok(_) => (),
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     let slot = &wstate.slots[0];
     let token = slot.get_token();
@@ -373,18 +349,12 @@ extern "C" fn fn_find_objects_init(
 
     let mut handles = match token.search(tmpl) {
         Ok(h) => h,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     drop(token);
     let session = match wstate.get_session_mut(handle) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     session.reset_object_handles();
     session.append_object_handles(&mut handles);
@@ -403,17 +373,11 @@ extern "C" fn fn_find_objects(
     let mut wstate = STATE.write().unwrap();
     let session = match wstate.get_session_mut(handle) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     let handles = match session.get_object_handles(max_object_count as usize) {
         Ok(h) => h,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     let hlen = handles.len();
     if hlen > 0 {
@@ -434,10 +398,7 @@ extern "C" fn fn_find_objects_final(handle: CK_SESSION_HANDLE) -> CK_RV {
     let mut wstate = STATE.write().unwrap();
     let session = match wstate.get_session_mut(handle) {
         Ok(s) => s,
-        Err(e) => match e {
-            KError::RvError(r) => return r.rv,
-            _ => return CKR_GENERAL_ERROR,
-        },
+        Err(e) => return err_to_rv!(e),
     };
     session.reset_object_handles();
     CKR_OK
