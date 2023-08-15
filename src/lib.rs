@@ -1,7 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::RwLock;
+use std::sync::{RwLock,RwLockReadGuard};
 use std::ffi::CStr;
 
 mod interface {
@@ -32,6 +32,7 @@ mod attribute;
 
 use interface::*;
 use session::Session;
+use token::Token;
 use error::{KResult, KError};
 
 macro_rules! err_to_rv {
@@ -104,6 +105,17 @@ impl State {
 
     fn drop_all_sessions(&mut self) {
         self.sessions.clear();
+    }
+
+    fn get_token_from_session_handle(&self, handle: CK_SESSION_HANDLE) -> KResult<RwLockReadGuard<'_, Token>> {
+        let session = self.get_session(handle)?;
+        let info = session.get_session_info();
+        let idx = info.slotID as usize;
+        if idx >= self.slots.len() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let slot = &self.slots[idx];
+        slot.get_token()
     }
 }
 
@@ -303,19 +315,13 @@ extern "C" fn fn_get_attribute_value(
         count: CK_ULONG,
     ) -> CK_RV {
     let rstate = STATE.read().unwrap();
-    let session = match rstate.get_session(s_handle) {
-        Ok(s) => s,
+    let token = match rstate.get_token_from_session_handle(s_handle) {
+        Ok(t) => t,
         Err(e) => return err_to_rv!(e),
     };
-    let info = session.get_session_info();
-    let slot = &rstate.slots[info.slotID as usize];
-
     let mut tmpl: &mut [CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts_mut(template, count as usize)
     };
-
-    let token = slot.get_token();
-
     match token.get_object_attrs(o_handle, &mut tmpl) {
         Ok(_) => CKR_OK,
         Err(e) => return err_to_rv!(e),
@@ -335,23 +341,20 @@ extern "C" fn fn_find_objects_init(
         count: CK_ULONG,
     ) -> CK_RV {
     let mut wstate = STATE.write().unwrap();
-    /* check that session is ok */
-    match wstate.get_session(handle) {
-        Ok(_) => (),
+    let token = match wstate.get_token_from_session_handle(handle) {
+        Ok(t) => t,
         Err(e) => return err_to_rv!(e),
     };
-    let slot = &wstate.slots[0];
-    let token = slot.get_token();
 
     let tmpl: &[CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts(template, count as usize)
     };
-
     let mut handles = match token.search(tmpl) {
         Ok(h) => h,
         Err(e) => return err_to_rv!(e),
     };
     drop(token);
+
     let session = match wstate.get_session_mut(handle) {
         Ok(s) => s,
         Err(e) => return err_to_rv!(e),
@@ -688,11 +691,23 @@ extern "C" fn fn_seed_random(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_generate_random(
-        _session: CK_SESSION_HANDLE,
-        _random_data: CK_BYTE_PTR,
-        _random_len: CK_ULONG,
+        handle: CK_SESSION_HANDLE,
+        random_data: CK_BYTE_PTR,
+        random_len: CK_ULONG,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+
+    let rstate = STATE.read().unwrap();
+    let token = match rstate.get_token_from_session_handle(handle) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    let mut data: &mut [u8] = unsafe {
+        std::slice::from_raw_parts_mut(random_data, random_len as usize)
+    };
+    match token.generate_random(data) {
+        Ok(_) => CKR_OK,
+        Err(e) => return err_to_rv!(e),
+    }
 }
 extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
@@ -1240,22 +1255,6 @@ pub extern "C" fn C_GetInterface(
     }
 
     CKR_OK
-}
-
-unsafe extern "C" fn dummy_create_mutex(_mutex: *mut *mut std::ffi::c_void) -> CK_RV {
-    CKR_GENERAL_ERROR
-}
-
-unsafe extern "C" fn dummy_destroy_mutex(_mutex: *mut std::ffi::c_void) -> CK_RV {
-    CKR_GENERAL_ERROR
-}
-
-unsafe extern "C" fn dummy_lock_mutex(_mutex: *mut std::ffi::c_void) -> CK_RV {
-    CKR_GENERAL_ERROR
-}
-
-unsafe extern "C" fn dummy_unlock_mutex(_mutex: *mut std::ffi::c_void) -> CK_RV {
-    CKR_GENERAL_ERROR
 }
 
 #[cfg(test)]

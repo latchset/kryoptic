@@ -30,6 +30,18 @@ fn test_setup(filename: &str) {
     serde_json::to_writer_pretty(file, &test_token).unwrap();
 }
 
+fn test_init_args(filename: &str) -> CK_C_INITIALIZE_ARGS {
+    CK_C_INITIALIZE_ARGS {
+        CreateMutex: None,
+        DestroyMutex: None,
+        LockMutex: None,
+        UnlockMutex: None,
+        flags: 0,
+        pReserved: CString::new(filename).unwrap().into_raw() as *mut std::ffi::c_void,
+    }
+}
+
+
 fn test_cleanup(filename: &str) {
     std::fs::remove_file(filename).unwrap_or(());
 }
@@ -58,15 +70,7 @@ fn test_token() {
         let list :CK_FUNCTION_LIST = *plist;
         match list.C_Initialize{
             Some(value) => {
-                let filename = CString::new(testdata.filename.unwrap());
-                let mut args = CK_C_INITIALIZE_ARGS {
-                    CreateMutex: Some(dummy_create_mutex),
-                    DestroyMutex: Some(dummy_destroy_mutex),
-                    LockMutex: Some(dummy_lock_mutex),
-                    UnlockMutex: Some(dummy_unlock_mutex),
-                    flags: 0,
-                    pReserved: filename.unwrap().into_raw() as *mut std::ffi::c_void,
-                };
+                let mut args = test_init_args(testdata.filename.unwrap());
                 let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -83,15 +87,7 @@ fn test_init_fini() {
     };
     test_setup(testdata.filename.unwrap());
 
-    let filename = CString::new(testdata.filename.unwrap());
-    let mut args = CK_C_INITIALIZE_ARGS {
-        CreateMutex: Some(dummy_create_mutex),
-        DestroyMutex: Some(dummy_destroy_mutex),
-        LockMutex: Some(dummy_lock_mutex),
-        UnlockMutex: Some(dummy_unlock_mutex),
-        flags: 0,
-        pReserved: filename.unwrap().into_raw() as *mut std::ffi::c_void,
-    };
+    let mut args = test_init_args(testdata.filename.unwrap());
     let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -99,3 +95,26 @@ fn test_init_fini() {
     assert_eq!(ret, CKR_OK);
 }
 
+#[test]
+fn test_random() {
+    let testdata = TestData {
+        filename: Some("test_random.json"),
+    };
+    test_setup(testdata.filename.unwrap());
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
+    assert_eq!(ret, CKR_OK);
+    let mut data: &[u8] = &mut [0, 0, 0, 0];
+    ret = fn_generate_random(handle, data.as_ptr() as *mut u8, data.len() as CK_ULONG);
+    assert_eq!(ret, CKR_OK);
+    assert_ne!(data, &[0, 0, 0, 0]);
+    ret = fn_close_session(handle);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}

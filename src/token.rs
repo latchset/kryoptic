@@ -15,6 +15,8 @@ use object::{Object, JsonObject};
 use error::{KResult, KError};
 use super::err_rv;
 
+use getrandom;
+
 static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
 static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
@@ -120,6 +122,17 @@ impl Token {
             }
         }
         err_rv!(CKR_OBJECT_HANDLE_INVALID)
+    }
+
+    pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
+        /* NOTE: this is just a placeholder to get somethjing going */
+        if buffer.len() > 256 {
+            return err_rv!(CKR_ARGUMENTS_BAD);
+        }
+        if getrandom::getrandom(buffer).is_err() {
+            return err_rv!(CKR_GENERAL_ERROR)
+        }
+        Ok(())
     }
 }
 

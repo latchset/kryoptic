@@ -7,8 +7,9 @@ use super::error;
 use super::interface;
 use super::token::Token;
 
-use error::KResult;
 use interface::*;
+use error::{KResult, KError};
+use super::err_rv;
 
 static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
@@ -54,7 +55,10 @@ impl Slot {
         &self.slot_info
     }
 
-    pub fn get_token(&self) -> RwLockReadGuard<'_, Token> {
-        self.token.read().unwrap()
+    pub fn get_token(&self) -> KResult<RwLockReadGuard<'_, Token>> {
+        match self.token.read() {
+            Ok(token) => Ok(token),
+            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+        }
     }
 }
