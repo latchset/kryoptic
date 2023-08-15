@@ -256,7 +256,7 @@ pub fn objects_to_json(objs: &Vec<Object>) -> Vec<JsonObject> {
             attributes: Map::new()
         };
         for a in &o.attributes {
-            jo.attributes.insert(a.name(), a.value());
+            jo.attributes.insert(a.name(), a.json_value());
         }
         jobjs.push(jo);
     }

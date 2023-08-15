@@ -107,15 +107,19 @@ impl State {
         self.sessions.clear();
     }
 
-    fn get_token_from_session_handle(&self, handle: CK_SESSION_HANDLE) -> KResult<RwLockReadGuard<'_, Token>> {
-        let session = self.get_session(handle)?;
-        let info = session.get_session_info();
-        let idx = info.slotID as usize;
+    fn get_token_from_slot(&self, slotid: CK_SLOT_ID) -> KResult<RwLockReadGuard<'_, Token>> {
+        let idx = slotid as usize;
         if idx >= self.slots.len() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return err_rv!(CKR_SLOT_ID_INVALID);
         }
         let slot = &self.slots[idx];
         slot.get_token()
+    }
+
+    fn get_token_from_session_handle(&self, handle: CK_SESSION_HANDLE) -> KResult<RwLockReadGuard<'_, Token>> {
+        let session = self.get_session(handle)?;
+        let info = session.get_session_info();
+        self.get_token_from_slot(info.slotID)
     }
 }
 
@@ -148,7 +152,6 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         Ok(f) => f,
         Err(_e) => return CKR_ARGUMENTS_BAD,
     };
-    println!("{}", filename.to_string());
     wstate.filename = filename.to_string();
     let slot = match slot::Slot::new(&wstate.filename) {
         Ok(s) => s,
@@ -162,10 +165,21 @@ extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
         Ok(s) => s,
         Err(_e) => return CKR_GENERAL_ERROR,
     };
-    match rstate.slots[0].token_save(&rstate.filename) {
-        Ok(_) => CKR_OK,
-        Err(e) => return err_to_rv!(e),
+    let mut ret = CKR_OK;
+    for slot in &rstate.slots {
+        let token = match slot.get_token() {
+            Ok(t) => t,
+            Err(e) => {
+                ret = err_to_rv!(e);
+                continue;
+            }
+        };
+        ret = match token.save(&rstate.filename) {
+            Ok(_) => CKR_OK,
+            Err(e) => err_to_rv!(e),
+        };
     }
+    ret
 }
 extern "C" fn fn_get_mechanism_list(
         _slot_id: CK_SLOT_ID,
@@ -701,7 +715,7 @@ extern "C" fn fn_generate_random(
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
     };
-    let mut data: &mut [u8] = unsafe {
+    let data: &mut [u8] = unsafe {
         std::slice::from_raw_parts_mut(random_data, random_len as usize)
     };
     match token.generate_random(data) {

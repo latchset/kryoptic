@@ -27,6 +27,7 @@ pub struct Token {
     info: CK_TOKEN_INFO,
     objects: Vec<Object>, /* FIXME: convert to hashMap ? */
     login: bool,
+    dirty: bool,
 }
 
 impl Token {
@@ -61,6 +62,7 @@ impl Token {
             },
             objects: Vec::new(),
             login: false,
+            dirty: false,
         };
 
         let file = match std::fs::File::open(filename) {
@@ -77,10 +79,13 @@ impl Token {
     }
 
     pub fn save(&self, filename: &str) -> KResult<()> {
+        if !self.dirty {
+            return Ok(())
+        }
         let token = JsonToken {
             objects: object::objects_to_json(&self.objects)
         };
-        let j = match serde_json::to_string(&token) {
+        let j = match serde_json::to_string_pretty(&token) {
             Ok(j) => j,
             Err(e) => return Err(KError::JsonError(e)),
         };

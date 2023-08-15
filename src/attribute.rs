@@ -275,7 +275,7 @@ impl Attribute {
         }
     }
 
-    pub fn value(&self) -> serde_json::Value {
+    pub fn json_value(&self) -> serde_json::Value {
         match self.attrtype {
             AttrType::BoolType => self.to_bool_value(),
             AttrType::NumType => self.to_ulong_value(),
@@ -358,7 +358,7 @@ pub fn from_string_ulong(s: String, u: CK_ULONG) -> KResult<Attribute> {
 fn from_string(t: CK_ULONG, s: String) -> Attribute {
     Attribute {
         ck_type: t,
-        attrtype: AttrType::NumType,
+        attrtype: AttrType::StringType,
         value: Vec::from(s.as_bytes()),
     }
 }
@@ -390,7 +390,7 @@ pub fn from_string_string(s: String, v: String) -> KResult<Attribute> {
 fn from_bytes(t: CK_ULONG, v: Vec<u8>) -> Attribute {
     Attribute {
         ck_type: t,
-        attrtype: AttrType::NumType,
+        attrtype: AttrType::BytesType,
         value: v,
     }
 }
