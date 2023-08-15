@@ -24,6 +24,21 @@ fn test_setup(filename: &str) {
                 "CKA_PUBLIC_EXPONENT": "AQAB",
                 "CKA_TOKEN": true
             }
+        }, {
+            "handle": 4030202,
+            "attributes": {
+                "CKA_CLASS": 2,
+                "CKA_KEY_TYPE": 0,
+                "CKA_DESTROYABLE": false,
+                "CKA_ID": "AQ==",
+                "CKA_LABEL": "Test RSA Key",
+                "CKA_MODIFIABLE": false,
+                "CKA_MODULUS": "AQIDBAUGBwg=",
+                "CKA_PRIVATE": true,
+                "CKA_PUBLIC_EXPONENT": "AQAB",
+                "CKA_PRIVATE_EXPONENT": "AQAD",
+                "CKA_TOKEN": true
+            }
         }]
     });
     let file = std::fs::File::create(filename).unwrap();
@@ -113,6 +128,71 @@ fn test_random() {
     ret = fn_generate_random(handle, data.as_ptr() as *mut u8, data.len() as CK_ULONG);
     assert_eq!(ret, CKR_OK);
     assert_ne!(data, &[0, 0, 0, 0]);
+    ret = fn_close_session(handle);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+fn test_get_attr() {
+    let testdata = TestData {
+        filename: Some("test_get_attr.json"),
+    };
+    test_setup(testdata.filename.unwrap());
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut template = CK_ATTRIBUTE {
+        type_: CKA_LABEL,
+        pValue: std::ptr::null_mut(),
+        ulValueLen: 0,
+    };
+
+    /* public key data */
+    let mut o_handle: CK_ULONG = 4030201;
+
+    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    assert_eq!(ret, CKR_OK);
+    assert_ne!(template.ulValueLen, 0);
+
+    let data: &mut [u8] = &mut [0; 128];
+    template.pValue = data.as_ptr() as *mut std::ffi::c_void;
+    template.ulValueLen = 128;
+
+    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    assert_eq!(ret, CKR_OK);
+    let size = template.ulValueLen as usize;
+    let value = std::str::from_utf8(&data[0..size]).unwrap();
+    assert_eq!(value, "Test RSA Key");
+
+    template.ulValueLen = 1;
+    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+
+    /* private key data */
+
+    o_handle = 4030202;
+    template.type_ = CKA_PRIVATE_EXPONENT;
+    template.ulValueLen = 128;
+    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    assert_eq!(ret, CKR_OBJECT_HANDLE_INVALID);
+    /* TODO: once login is implemented we should get:
+    assert_eq!(ret, CKR_INFORMATION_SENSITIVE);
+
+    template.type_ = CKA_PUBLIC_EXPONENT;
+    template.ulValueLen = 128;
+    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(template.ulValueLen, 3);
+    */
+
     ret = fn_close_session(handle);
     assert_eq!(ret, CKR_OK);
     ret = fn_finalize(std::ptr::null_mut());
