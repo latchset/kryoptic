@@ -1,7 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::{RwLock};
+use std::sync::{RwLock,RwLockReadGuard};
 
 use super::error;
 use super::interface;
@@ -57,13 +57,7 @@ impl Slot {
         &self.slot_info
     }
 
-    pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<std::vec::Vec<CK_OBJECT_HANDLE>> {
-        let token = self.token.read().unwrap();
-        token.search(template)
-    }
-
-    pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
-        let token = self.token.read().unwrap();
-        token.get_object_attrs(handle, template)
+    pub fn get_token(&self) -> RwLockReadGuard<'_, Token> {
+        self.token.read().unwrap()
     }
 }

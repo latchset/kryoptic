@@ -332,7 +332,9 @@ extern "C" fn fn_get_attribute_value(
         std::slice::from_raw_parts_mut(template, count as usize)
     };
 
-    match slot.get_object_attrs(o_handle, &mut tmpl) {
+    let token = slot.get_token();
+
+    match token.get_object_attrs(o_handle, &mut tmpl) {
         Ok(_) => CKR_OK,
         Err(e) => match e {
             KError::RvError(r) => r.rv,
@@ -363,18 +365,20 @@ extern "C" fn fn_find_objects_init(
         },
     };
     let slot = &wstate.slots[0];
+    let token = slot.get_token();
 
     let tmpl: &[CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts(template, count as usize)
     };
 
-    let mut handles = match slot.search(tmpl) {
+    let mut handles = match token.search(tmpl) {
         Ok(h) => h,
         Err(e) => match e {
             KError::RvError(r) => return r.rv,
             _ => return CKR_GENERAL_ERROR,
         },
     };
+    drop(token);
     let session = match wstate.get_session_mut(handle) {
         Ok(s) => s,
         Err(e) => match e {
