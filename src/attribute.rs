@@ -28,135 +28,141 @@ struct Attrmap<'a> {
     atype: AttrType,
 }
 
+macro_rules! attrmap_element {
+    ($id:expr; as $attrtype:ident) => {
+        Attrmap { id: $id, name: stringify!($id), atype: AttrType::$attrtype }
+    }
+}
+
 static ATTRMAP: [Attrmap<'_>; 126] = [
-    Attrmap { id: 0, name: "CKA_CLASS", atype: AttrType::NumType  },
-    Attrmap { id: 1, name: "CKA_TOKEN", atype: AttrType::BoolType  },
-    Attrmap { id: 2, name: "CKA_PRIVATE", atype: AttrType::BoolType  },
-    Attrmap { id: 3, name: "CKA_LABEL", atype: AttrType::StringType  },
-    Attrmap { id: 4, name: "CKA_UNIQUE_ID", atype: AttrType::StringType  },
-    Attrmap { id: 16, name: "CKA_APPLICATION", atype: AttrType::StringType  },
-    Attrmap { id: 17, name: "CKA_VALUE", atype: AttrType::BytesType  },
-    Attrmap { id: 18, name: "CKA_OBJECT_ID", atype: AttrType::BytesType  },
-    Attrmap { id: 128, name: "CKA_CERTIFICATE_TYPE", atype: AttrType::NumType  },
-    Attrmap { id: 129, name: "CKA_ISSUER", atype: AttrType::BytesType  },
-    Attrmap { id: 130, name: "CKA_SERIAL_NUMBER", atype: AttrType::BytesType  },
-    Attrmap { id: 131, name: "CKA_AC_ISSUER", atype: AttrType::BytesType  },
-    Attrmap { id: 132, name: "CKA_OWNER", atype: AttrType::BytesType  },
-    Attrmap { id: 133, name: "CKA_ATTR_TYPES", atype: AttrType::BytesType  },
-    Attrmap { id: 134, name: "CKA_TRUSTED", atype: AttrType::BoolType  },
-    Attrmap { id: 135, name: "CKA_CERTIFICATE_CATEGORY", atype: AttrType::NumType  },
-    Attrmap { id: 136, name: "CKA_JAVA_MIDP_SECURITY_DOMAIN", atype: AttrType::NumType  },
-    Attrmap { id: 137, name: "CKA_URL", atype: AttrType::StringType  },
-    Attrmap { id: 138, name: "CKA_HASH_OF_SUBJECT_PUBLIC_KEY", atype: AttrType::BytesType  },
-    Attrmap { id: 139, name: "CKA_HASH_OF_ISSUER_PUBLIC_KEY", atype: AttrType::BytesType  },
-    Attrmap { id: 140, name: "CKA_NAME_HASH_ALGORITHM", atype: AttrType::NumType  },
-    Attrmap { id: 144, name: "CKA_CHECK_VALUE", atype: AttrType::BytesType  },
-    Attrmap { id: 256, name: "CKA_KEY_TYPE", atype: AttrType::NumType  },
-    Attrmap { id: 257, name: "CKA_SUBJECT", atype: AttrType::BytesType  },
-    Attrmap { id: 258, name: "CKA_ID", atype: AttrType::BytesType  },
-    Attrmap { id: 259, name: "CKA_SENSITIVE", atype: AttrType::BoolType  },
-    Attrmap { id: 260, name: "CKA_ENCRYPT", atype: AttrType::BoolType  },
-    Attrmap { id: 261, name: "CKA_DECRYPT", atype: AttrType::BoolType  },
-    Attrmap { id: 262, name: "CKA_WRAP", atype: AttrType::BoolType  },
-    Attrmap { id: 263, name: "CKA_UNWRAP", atype: AttrType::BoolType  },
-    Attrmap { id: 264, name: "CKA_SIGN", atype: AttrType::BoolType  },
-    Attrmap { id: 265, name: "CKA_SIGN_RECOVER", atype: AttrType::BoolType  },
-    Attrmap { id: 266, name: "CKA_VERIFY", atype: AttrType::BoolType  },
-    Attrmap { id: 267, name: "CKA_VERIFY_RECOVER", atype: AttrType::BoolType  },
-    Attrmap { id: 268, name: "CKA_DERIVE", atype: AttrType::BoolType  },
-    Attrmap { id: 272, name: "CKA_START_DATE", atype: AttrType::DateType  },
-    Attrmap { id: 273, name: "CKA_END_DATE", atype: AttrType::DateType  },
-    Attrmap { id: 288, name: "CKA_MODULUS", atype: AttrType::BytesType  },
-    Attrmap { id: 289, name: "CKA_MODULUS_BITS", atype: AttrType::NumType  },
-    Attrmap { id: 290, name: "CKA_PUBLIC_EXPONENT", atype: AttrType::BytesType  },
-    Attrmap { id: 291, name: "CKA_PRIVATE_EXPONENT", atype: AttrType::BytesType  },
-    Attrmap { id: 292, name: "CKA_PRIME_1", atype: AttrType::BytesType  },
-    Attrmap { id: 293, name: "CKA_PRIME_2", atype: AttrType::BytesType  },
-    Attrmap { id: 294, name: "CKA_EXPONENT_1", atype: AttrType::BytesType  },
-    Attrmap { id: 295, name: "CKA_EXPONENT_2", atype: AttrType::BytesType  },
-    Attrmap { id: 296, name: "CKA_COEFFICIENT", atype: AttrType::BytesType  },
-    Attrmap { id: 297, name: "CKA_PUBLIC_KEY_INFO", atype: AttrType::BytesType  },
-    Attrmap { id: 304, name: "CKA_PRIME", atype: AttrType::BytesType  },
-    Attrmap { id: 305, name: "CKA_SUBPRIME", atype: AttrType::BytesType  },
-    Attrmap { id: 306, name: "CKA_BASE", atype: AttrType::BytesType  },
-    Attrmap { id: 307, name: "CKA_PRIME_BITS", atype: AttrType::BytesType  },
-    Attrmap { id: 308, name: "CKA_SUBPRIME_BITS", atype: AttrType::NumType  },
-    /*Attrmap { id: , name: "CKA_SUB_PRIME_BITS", atype: AttrType::NumType  },*/
-    Attrmap { id: 352, name: "CKA_VALUE_BITS", atype: AttrType::NumType  },
-    Attrmap { id: 353, name: "CKA_VALUE_LEN", atype: AttrType::NumType  },
-    Attrmap { id: 354, name: "CKA_EXTRACTABLE", atype: AttrType::BoolType  },
-    Attrmap { id: 355, name: "CKA_LOCAL", atype: AttrType::BoolType  },
-    Attrmap { id: 356, name: "CKA_NEVER_EXTRACTABLE", atype: AttrType::BoolType  },
-    Attrmap { id: 357, name: "CKA_ALWAYS_SENSITIVE", atype: AttrType::BoolType  },
-    Attrmap { id: 358, name: "CKA_KEY_GEN_MECHANISM", atype: AttrType::NumType  },
-    Attrmap { id: 368, name: "CKA_MODIFIABLE", atype: AttrType::BoolType  },
-    Attrmap { id: 369, name: "CKA_COPYABLE", atype: AttrType::BoolType  },
-    Attrmap { id: 370, name: "CKA_DESTROYABLE", atype: AttrType::BoolType  },
-    /*Attrmap { id: , name: "CKA_ECDSA_PARAMS", atype: AttrType::BytesType  },*/
-    Attrmap { id: 384, name: "CKA_EC_PARAMS", atype: AttrType::BytesType  },
-    Attrmap { id: 385, name: "CKA_EC_POINT", atype: AttrType::BytesType  },
-    Attrmap { id: 512, name: "CKA_SECONDARY_AUTH", atype: AttrType::NumType  },
-    Attrmap { id: 513, name: "CKA_AUTH_PIN_FLAGS", atype: AttrType::NumType  },
-    Attrmap { id: 514, name: "CKA_ALWAYS_AUTHENTICATE", atype: AttrType::BoolType  },
-    Attrmap { id: 528, name: "CKA_WRAP_WITH_TRUSTED", atype: AttrType::BoolType  },
-    Attrmap { id: 1073742353, name: "CKA_WRAP_TEMPLATE", atype: AttrType::BytesType  },
-    Attrmap { id: 1073742354, name: "CKA_UNWRAP_TEMPLATE", atype: AttrType::BytesType  },
-    Attrmap { id: 1073742355, name: "CKA_DERIVE_TEMPLATE", atype: AttrType::BytesType  },
-    Attrmap { id: 544, name: "CKA_OTP_FORMAT", atype: AttrType::NumType  },
-    Attrmap { id: 545, name: "CKA_OTP_LENGTH", atype: AttrType::NumType  },
-    Attrmap { id: 546, name: "CKA_OTP_TIME_INTERVAL", atype: AttrType::NumType  },
-    Attrmap { id: 547, name: "CKA_OTP_USER_FRIENDLY_MODE", atype: AttrType::BoolType  },
-    Attrmap { id: 548, name: "CKA_OTP_CHALLENGE_REQUIREMENT", atype: AttrType::NumType  },
-    Attrmap { id: 549, name: "CKA_OTP_TIME_REQUIREMENT", atype: AttrType::NumType  },
-    Attrmap { id: 550, name: "CKA_OTP_COUNTER_REQUIREMENT", atype: AttrType::NumType  },
-    Attrmap { id: 551, name: "CKA_OTP_PIN_REQUIREMENT", atype: AttrType::NumType  },
-    Attrmap { id: 558, name: "CKA_OTP_COUNTER", atype: AttrType::BytesType  },
-    Attrmap { id: 559, name: "CKA_OTP_TIME", atype: AttrType::StringType  },
-    Attrmap { id: 554, name: "CKA_OTP_USER_IDENTIFIER", atype: AttrType::StringType  },
-    Attrmap { id: 555, name: "CKA_OTP_SERVICE_IDENTIFIER", atype: AttrType::StringType  },
-    Attrmap { id: 556, name: "CKA_OTP_SERVICE_LOGO", atype: AttrType::BytesType  },
-    Attrmap { id: 557, name: "CKA_OTP_SERVICE_LOGO_TYPE", atype: AttrType::StringType  },
-    Attrmap { id: 592, name: "CKA_GOSTR3410_PARAMS", atype: AttrType::BytesType  },
-    Attrmap { id: 593, name: "CKA_GOSTR3411_PARAMS", atype: AttrType::BytesType  },
-    Attrmap { id: 594, name: "CKA_GOST28147_PARAMS", atype: AttrType::BytesType  },
-    Attrmap { id: 768, name: "CKA_HW_FEATURE_TYPE", atype: AttrType::NumType  },
-    Attrmap { id: 769, name: "CKA_RESET_ON_INIT", atype: AttrType::BoolType  },
-    Attrmap { id: 770, name: "CKA_HAS_RESET", atype: AttrType::BoolType  },
-    Attrmap { id: 1024, name: "CKA_PIXEL_X", atype: AttrType::NumType  },
-    Attrmap { id: 1025, name: "CKA_PIXEL_Y", atype: AttrType::NumType  },
-    Attrmap { id: 1026, name: "CKA_RESOLUTION", atype: AttrType::NumType  },
-    Attrmap { id: 1027, name: "CKA_CHAR_ROWS", atype: AttrType::NumType  },
-    Attrmap { id: 1028, name: "CKA_CHAR_COLUMNS", atype: AttrType::NumType  },
-    Attrmap { id: 1029, name: "CKA_COLOR", atype: AttrType::BoolType  },
-    Attrmap { id: 1030, name: "CKA_BITS_PER_PIXEL", atype: AttrType::NumType  },
-    Attrmap { id: 1152, name: "CKA_CHAR_SETS", atype: AttrType::StringType  },
-    Attrmap { id: 1153, name: "CKA_ENCODING_METHODS", atype: AttrType::StringType  },
-    Attrmap { id: 1154, name: "CKA_MIME_TYPES", atype: AttrType::StringType  },
-    Attrmap { id: 1280, name: "CKA_MECHANISM_TYPE", atype: AttrType::NumType  },
-    Attrmap { id: 1281, name: "CKA_REQUIRED_CMS_ATTRIBUTES", atype: AttrType::BytesType  },
-    Attrmap { id: 1282, name: "CKA_DEFAULT_CMS_ATTRIBUTES", atype: AttrType::BytesType  },
-    Attrmap { id: 1283, name: "CKA_SUPPORTED_CMS_ATTRIBUTES", atype: AttrType::BytesType  },
-    Attrmap { id: 1073743360, name: "CKA_ALLOWED_MECHANISMS", atype: AttrType::BytesType  },
-    Attrmap { id: 1537, name: "CKA_PROFILE_ID", atype: AttrType::NumType  },
-    Attrmap { id: 1538, name: "CKA_X2RATCHET_BAG", atype: AttrType::BytesType  },
-    Attrmap { id: 1539, name: "CKA_X2RATCHET_BAGSIZE", atype: AttrType::NumType  },
-    Attrmap { id: 1540, name: "CKA_X2RATCHET_BOBS1STMSG", atype: AttrType::BoolType  },
-    Attrmap { id: 1541, name: "CKA_X2RATCHET_CKR", atype: AttrType::BytesType  },
-    Attrmap { id: 1542, name: "CKA_X2RATCHET_CKS", atype: AttrType::BytesType  },
-    Attrmap { id: 1543, name: "CKA_X2RATCHET_DHP", atype: AttrType::BytesType  },
-    Attrmap { id: 1544, name: "CKA_X2RATCHET_DHR", atype: AttrType::BytesType  },
-    Attrmap { id: 1545, name: "CKA_X2RATCHET_DHS", atype: AttrType::BytesType  },
-    Attrmap { id: 1546, name: "CKA_X2RATCHET_HKR", atype: AttrType::BytesType  },
-    Attrmap { id: 1547, name: "CKA_X2RATCHET_HKS", atype: AttrType::BytesType  },
-    Attrmap { id: 1548, name: "CKA_X2RATCHET_ISALICE", atype: AttrType::BoolType  },
-    Attrmap { id: 1549, name: "CKA_X2RATCHET_NHKR", atype: AttrType::BytesType  },
-    Attrmap { id: 1550, name: "CKA_X2RATCHET_NHKS", atype: AttrType::BytesType  },
-    Attrmap { id: 1551, name: "CKA_X2RATCHET_NR", atype: AttrType::NumType  },
-    Attrmap { id: 1552, name: "CKA_X2RATCHET_NS", atype: AttrType::NumType  },
-    Attrmap { id: 1553, name: "CKA_X2RATCHET_PNS", atype: AttrType::NumType  },
-    Attrmap { id: 1554, name: "CKA_X2RATCHET_RK", atype: AttrType::BytesType  },
-    Attrmap { id: 2147483648, name: "CKA_VENDOR_DEFINED", atype: AttrType::DenyType  },
-    Attrmap { id: KRYATTR_MAX_LOGIN_ATTEMPTS, name: "KRYATTR_MAX_LOGIN_ATTEMPTS", atype: AttrType::NumType },
+    attrmap_element!(CKA_CLASS; as NumType),
+    attrmap_element!(CKA_TOKEN; as BoolType),
+    attrmap_element!(CKA_PRIVATE; as BoolType),
+    attrmap_element!(CKA_LABEL; as StringType),
+    attrmap_element!(CKA_UNIQUE_ID; as StringType),
+    attrmap_element!(CKA_APPLICATION; as StringType),
+    attrmap_element!(CKA_VALUE; as BytesType),
+    attrmap_element!(CKA_OBJECT_ID; as BytesType),
+    attrmap_element!(CKA_CERTIFICATE_TYPE; as NumType),
+    attrmap_element!(CKA_ISSUER; as BytesType),
+    attrmap_element!(CKA_SERIAL_NUMBER; as BytesType),
+    attrmap_element!(CKA_AC_ISSUER; as BytesType),
+    attrmap_element!(CKA_OWNER; as BytesType),
+    attrmap_element!(CKA_ATTR_TYPES; as BytesType),
+    attrmap_element!(CKA_TRUSTED; as BoolType),
+    attrmap_element!(CKA_CERTIFICATE_CATEGORY; as NumType),
+    attrmap_element!(CKA_JAVA_MIDP_SECURITY_DOMAIN; as NumType),
+    attrmap_element!(CKA_URL; as StringType),
+    attrmap_element!(CKA_HASH_OF_SUBJECT_PUBLIC_KEY; as BytesType),
+    attrmap_element!(CKA_HASH_OF_ISSUER_PUBLIC_KEY; as BytesType),
+    attrmap_element!(CKA_NAME_HASH_ALGORITHM; as NumType),
+    attrmap_element!(CKA_CHECK_VALUE; as BytesType),
+    attrmap_element!(CKA_KEY_TYPE; as NumType),
+    attrmap_element!(CKA_SUBJECT; as BytesType),
+    attrmap_element!(CKA_ID; as BytesType),
+    attrmap_element!(CKA_SENSITIVE; as BoolType),
+    attrmap_element!(CKA_ENCRYPT; as BoolType),
+    attrmap_element!(CKA_DECRYPT; as BoolType),
+    attrmap_element!(CKA_WRAP; as BoolType),
+    attrmap_element!(CKA_UNWRAP; as BoolType),
+    attrmap_element!(CKA_SIGN; as BoolType),
+    attrmap_element!(CKA_SIGN_RECOVER; as BoolType),
+    attrmap_element!(CKA_VERIFY; as BoolType),
+    attrmap_element!(CKA_VERIFY_RECOVER; as BoolType),
+    attrmap_element!(CKA_DERIVE; as BoolType),
+    attrmap_element!(CKA_START_DATE; as DateType),
+    attrmap_element!(CKA_END_DATE; as DateType),
+    attrmap_element!(CKA_MODULUS; as BytesType),
+    attrmap_element!(CKA_MODULUS_BITS; as NumType),
+    attrmap_element!(CKA_PUBLIC_EXPONENT; as BytesType),
+    attrmap_element!(CKA_PRIVATE_EXPONENT; as BytesType),
+    attrmap_element!(CKA_PRIME_1; as BytesType),
+    attrmap_element!(CKA_PRIME_2; as BytesType),
+    attrmap_element!(CKA_EXPONENT_1; as BytesType),
+    attrmap_element!(CKA_EXPONENT_2; as BytesType),
+    attrmap_element!(CKA_COEFFICIENT; as BytesType),
+    attrmap_element!(CKA_PUBLIC_KEY_INFO; as BytesType),
+    attrmap_element!(CKA_PRIME; as BytesType),
+    attrmap_element!(CKA_SUBPRIME; as BytesType),
+    attrmap_element!(CKA_BASE; as BytesType),
+    attrmap_element!(CKA_PRIME_BITS; as BytesType),
+    attrmap_element!(CKA_SUBPRIME_BITS; as NumType),
+    /*attrmap_element!(CKA_SUB_PRIME_BITS; as NumType),*/
+    attrmap_element!(CKA_VALUE_BITS; as NumType),
+    attrmap_element!(CKA_VALUE_LEN; as NumType),
+    attrmap_element!(CKA_EXTRACTABLE; as BoolType),
+    attrmap_element!(CKA_LOCAL; as BoolType),
+    attrmap_element!(CKA_NEVER_EXTRACTABLE; as BoolType),
+    attrmap_element!(CKA_ALWAYS_SENSITIVE; as BoolType),
+    attrmap_element!(CKA_KEY_GEN_MECHANISM; as NumType),
+    attrmap_element!(CKA_MODIFIABLE; as BoolType),
+    attrmap_element!(CKA_COPYABLE; as BoolType),
+    attrmap_element!(CKA_DESTROYABLE; as BoolType),
+    /*attrmap_element!(CKA_ECDSA_PARAMS; as BytesType),*/
+    attrmap_element!(CKA_EC_PARAMS; as BytesType),
+    attrmap_element!(CKA_EC_POINT; as BytesType),
+    attrmap_element!(CKA_SECONDARY_AUTH; as NumType),
+    attrmap_element!(CKA_AUTH_PIN_FLAGS; as NumType),
+    attrmap_element!(CKA_ALWAYS_AUTHENTICATE; as BoolType),
+    attrmap_element!(CKA_WRAP_WITH_TRUSTED; as BoolType),
+    attrmap_element!(CKA_WRAP_TEMPLATE; as BytesType),
+    attrmap_element!(CKA_UNWRAP_TEMPLATE; as BytesType),
+    attrmap_element!(CKA_DERIVE_TEMPLATE; as BytesType),
+    attrmap_element!(CKA_OTP_FORMAT; as NumType),
+    attrmap_element!(CKA_OTP_LENGTH; as NumType),
+    attrmap_element!(CKA_OTP_TIME_INTERVAL; as NumType),
+    attrmap_element!(CKA_OTP_USER_FRIENDLY_MODE; as BoolType),
+    attrmap_element!(CKA_OTP_CHALLENGE_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_TIME_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_COUNTER_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_PIN_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_COUNTER; as BytesType),
+    attrmap_element!(CKA_OTP_TIME; as StringType),
+    attrmap_element!(CKA_OTP_USER_IDENTIFIER; as StringType),
+    attrmap_element!(CKA_OTP_SERVICE_IDENTIFIER; as StringType),
+    attrmap_element!(CKA_OTP_SERVICE_LOGO; as BytesType),
+    attrmap_element!(CKA_OTP_SERVICE_LOGO_TYPE; as StringType),
+    attrmap_element!(CKA_GOSTR3410_PARAMS; as BytesType),
+    attrmap_element!(CKA_GOSTR3411_PARAMS; as BytesType),
+    attrmap_element!(CKA_GOST28147_PARAMS; as BytesType),
+    attrmap_element!(CKA_HW_FEATURE_TYPE; as NumType),
+    attrmap_element!(CKA_RESET_ON_INIT; as BoolType),
+    attrmap_element!(CKA_HAS_RESET; as BoolType),
+    attrmap_element!(CKA_PIXEL_X; as NumType),
+    attrmap_element!(CKA_PIXEL_Y; as NumType),
+    attrmap_element!(CKA_RESOLUTION; as NumType),
+    attrmap_element!(CKA_CHAR_ROWS; as NumType),
+    attrmap_element!(CKA_CHAR_COLUMNS; as NumType),
+    attrmap_element!(CKA_COLOR; as BoolType),
+    attrmap_element!(CKA_BITS_PER_PIXEL; as NumType),
+    attrmap_element!(CKA_CHAR_SETS; as StringType),
+    attrmap_element!(CKA_ENCODING_METHODS; as StringType),
+    attrmap_element!(CKA_MIME_TYPES; as StringType),
+    attrmap_element!(CKA_MECHANISM_TYPE; as NumType),
+    attrmap_element!(CKA_REQUIRED_CMS_ATTRIBUTES; as BytesType),
+    attrmap_element!(CKA_DEFAULT_CMS_ATTRIBUTES; as BytesType),
+    attrmap_element!(CKA_SUPPORTED_CMS_ATTRIBUTES; as BytesType),
+    attrmap_element!(CKA_ALLOWED_MECHANISMS; as BytesType),
+    attrmap_element!(CKA_PROFILE_ID; as NumType),
+    attrmap_element!(CKA_X2RATCHET_BAG; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_BAGSIZE; as NumType),
+    attrmap_element!(CKA_X2RATCHET_BOBS1STMSG; as BoolType),
+    attrmap_element!(CKA_X2RATCHET_CKR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_CKS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_DHP; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_DHR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_DHS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_HKR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_HKS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_ISALICE; as BoolType),
+    attrmap_element!(CKA_X2RATCHET_NHKR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_NHKS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_NR; as NumType),
+    attrmap_element!(CKA_X2RATCHET_NS; as NumType),
+    attrmap_element!(CKA_X2RATCHET_PNS; as NumType),
+    attrmap_element!(CKA_X2RATCHET_RK; as BytesType),
+    attrmap_element!(CKA_VENDOR_DEFINED; as DenyType),
+    attrmap_element!(KRYATTR_MAX_LOGIN_ATTEMPTS; as NumType),
 ];
 
 #[derive(Debug, Clone)]
@@ -242,6 +248,10 @@ impl Attribute {
         }
     }
 
+    pub fn to_bytes(&self) -> KResult<&Vec<u8>> {
+        Ok(&self.value)
+    }
+
     pub fn to_b64_string(&self) -> KResult<String> {
         Ok(BASE64.encode(&self.value))
     }
@@ -288,137 +298,61 @@ impl Attribute {
     }
 }
 
-fn from_bool(t: CK_ULONG, b: bool) -> Attribute {
-    let mut a = Attribute {
-        ck_type: t,
-        attrtype: AttrType::BoolType,
-        value: vec![0],
-    };
-    if b {
-        a.value[0] = 1;
-    }
-    a
-}
-
-pub fn from_type_bool(t: CK_ULONG, b: bool) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.id == t {
-            if a.atype == AttrType::BoolType {
-                return Ok(from_bool(t, b));
+macro_rules! conversion_from_type {
+    (make $fn1:ident; $fn2:ident; $fn3:ident; from $rtype:ty; as $atype:ident; via $conv:ident) => {
+        fn $fn1(t: CK_ULONG, val: $rtype) -> Attribute {
+            Attribute {
+                ck_type: t,
+                attrtype: AttrType::$atype,
+                value: $conv(val),
             }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+
+        pub fn $fn2(t: CK_ULONG, val: $rtype) -> KResult<Attribute> {
+            for a in &ATTRMAP {
+                if a.id == t {
+                    if a.atype == AttrType::$atype {
+                        return Ok($fn1(t, val));
+                    }
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+            err_not_found!(t.to_string())
+        }
+
+        pub fn $fn3(s: String, val: $rtype) -> KResult<Attribute> {
+            for a in &ATTRMAP {
+                if a.name == &s {
+                    if a.atype == AttrType::$atype {
+                        return Ok($fn1(a.id, val));
+                    }
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+            err_not_found!(s)
         }
     }
-    err_not_found!(t.to_string())
 }
 
-pub fn from_string_bool(s: String, b: bool) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.name == &s {
-            if a.atype == AttrType::BoolType {
-                return Ok(from_bool(a.id, b));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(s)
+fn bool_to_vec(val: bool) -> Vec<u8> {
+    Vec::from(if val { &[1 as u8][..] } else { &[0 as u8][..] })
 }
+conversion_from_type!{make from_bool; from_type_bool; from_string_bool; from bool; as BoolType; via bool_to_vec}
 
-fn from_ulong(t: CK_ULONG, u: CK_ULONG) -> Attribute {
-    Attribute {
-        ck_type: t,
-        attrtype: AttrType::NumType,
-        value: Vec::from((u as u64).to_ne_bytes()),
-    }
+fn ulong_to_vec(val: CK_ULONG) -> Vec<u8> {
+    Vec::from((val as u64).to_ne_bytes())
 }
+conversion_from_type!{make from_ulong; from_type_ulong; from_string_ulong; from CK_ULONG; as NumType; via ulong_to_vec}
 
-pub fn from_type_ulong(t: CK_ULONG, u: CK_ULONG) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.id == t {
-            if a.atype == AttrType::NumType {
-                return Ok(from_ulong(t, u));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(t.to_string())
+fn string_to_vec(val: String) -> Vec<u8> {
+    Vec::from(val.as_bytes())
 }
+conversion_from_type!{make from_string; from_type_string; from_string_string; from String; as StringType; via string_to_vec}
 
-pub fn from_string_ulong(s: String, u: CK_ULONG) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.name == &s {
-            if a.atype == AttrType::NumType {
-                return Ok(from_ulong(a.id, u));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(s)
+fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
+    val
 }
-
-fn from_string(t: CK_ULONG, s: String) -> Attribute {
-    Attribute {
-        ck_type: t,
-        attrtype: AttrType::StringType,
-        value: Vec::from(s.as_bytes()),
-    }
-}
-
-pub fn from_type_string(t: CK_ULONG, s: String) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.id == t {
-            if a.atype == AttrType::StringType {
-                return Ok(from_string(t, s));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(t.to_string())
-}
-
-pub fn from_string_string(s: String, v: String) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.name == &s {
-            if a.atype == AttrType::StringType {
-                return Ok(from_string(a.id, v));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(s)
-}
-
-fn from_bytes(t: CK_ULONG, v: Vec<u8>) -> Attribute {
-    Attribute {
-        ck_type: t,
-        attrtype: AttrType::BytesType,
-        value: v,
-    }
-}
-
-pub fn from_type_bytes(t: CK_ULONG, v: Vec<u8>) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.id == t {
-            if a.atype == AttrType::BytesType {
-                return Ok(from_bytes(t, v));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(t.to_string())
-}
-
-pub fn from_string_bytes(s: String, v: Vec<u8>) -> KResult<Attribute> {
-    for a in &ATTRMAP {
-        if a.name == &s {
-            if a.atype == AttrType::BytesType {
-                return Ok(from_bytes(a.id, v));
-            }
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-    }
-    err_not_found!(s)
-}
+conversion_from_type!{make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
 
 pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
     /* skips invalid types */

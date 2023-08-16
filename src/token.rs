@@ -196,7 +196,7 @@ impl Token {
     pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         for o in self.objects.iter() {
-            if !self.login.logged_in && o.is_private()? {
+            if !self.login.logged_in && o.is_private() {
                 continue;
             }
             if o.match_template(template) {
@@ -209,7 +209,7 @@ impl Token {
     pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
         for o in self.objects.iter() {
             if o.get_handle() == handle {
-                if !self.login.logged_in && o.is_private()? {
+                if !self.login.logged_in && o.is_private() {
                     break;
                 }
                 return o.fill_template(template)

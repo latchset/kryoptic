@@ -12,18 +12,31 @@ use super::{err_rv, err_not_found};
 use serde::{Serialize, Deserialize};
 use serde_json::{Map, Value};
 
-macro_rules! bool_attribute {
-    ($name:expr; from $map:expr; def $def:expr) => {
-        {
-            for a in $map {
-                if a.get_type() == $name {
-                    match a.to_bool() {
-                        Ok(b) => return Ok(b),
-                        Err(_) => (),
-                    }
+macro_rules! create_bool_checker {
+    (make $name:ident; from $id:expr; def $def:expr) => {
+        pub fn $name(&self) -> bool {
+            for a in &self.attributes {
+                if a.get_type() == $id {
+                    return a.to_bool().unwrap_or($def);
                 }
             }
-            Ok($def)
+            $def
+        }
+    }
+}
+
+macro_rules! attr_as_type {
+    (make $name:ident; with $r:ty; $atype:ident; via $conv:ident) => {
+        pub fn $name(&self, t: CK_ULONG) -> KResult<$r> {
+            for attr in &self.attributes {
+                if attr.get_type() == t {
+                    if attr.get_attrtype() != AttrType::$atype {
+                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                    }
+                    return attr.$conv()
+                }
+            }
+            err_not_found!(t.to_string())
         }
     }
 }
@@ -84,18 +97,13 @@ impl Object {
         self.handle
     }
 
-    pub fn is_token(&self) -> KResult<bool> {
-        bool_attribute!(CKA_TOKEN; from &self.attributes; def false)
-    }
-    pub fn is_private(&self) -> KResult<bool> {
-        bool_attribute!(CKA_PRIVATE; from &self.attributes; def true)
-    }
-    pub fn is_modifiable(&self) -> KResult<bool> {
-        bool_attribute!(CKA_MODIFIABLE; from &self.attributes; def true)
-    }
-    pub fn is_destroyable(&self) -> KResult<bool> {
-        bool_attribute!(CKA_DESTROYABLE; from &self.attributes; def false)
-    }
+    create_bool_checker!{make is_token; from CKA_TOKEN; def false}
+    create_bool_checker!{make is_private; from CKA_PRIVATE; def true}
+    create_bool_checker!{make is_sensitive; from CKA_SENSITIVE; def true}
+    create_bool_checker!{make is_modifiable; from CKA_MODIFIABLE; def true}
+    create_bool_checker!{make is_destroyable; from CKA_DESTROYABLE; def false}
+    create_bool_checker!{make is_extractable; from CKA_EXTRACTABLE; def false}
+
     fn set_attr(&mut self, a: Attribute) -> KResult<()> {
         let mut idx = self.attributes.len();
         for (i, elem) in self.attributes.iter().enumerate() {
@@ -111,66 +119,11 @@ impl Object {
         }
         Ok(())
     }
-    pub fn get_attr_as_bool(&self, t: CK_ULONG) -> KResult<bool> {
-        for attr in &self.attributes {
-            if attr.get_type() == t {
-                if attr.get_attrtype() != AttrType::BoolType {
-                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
-                }
-                return attr.to_bool()
-            }
-        }
-        err_not_found!(t.to_string())
-    }
-    pub fn get_attr_as_ulong(&self, t: CK_ULONG) -> KResult<CK_ULONG> {
-        for attr in &self.attributes {
-            if attr.get_type() == t {
-                if attr.get_attrtype() != AttrType::NumType {
-                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
-                }
-                return attr.to_ulong()
-            }
-        }
-        err_not_found!(t.to_string())
-    }
-    pub fn get_attr_as_string(&self, t: CK_ULONG) -> KResult<String> {
-        for attr in &self.attributes {
-            if attr.get_type() == t {
-                if attr.get_attrtype() != AttrType::StringType {
-                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
-                }
-                return attr.to_string()
-            }
-        }
-        err_not_found!(t.to_string())
-    }
-    pub fn get_attr_as_bytes(&self, t: CK_ULONG) -> KResult<&Vec<u8>> {
-        for attr in &self.attributes {
-            if attr.get_type() == t {
-                if attr.get_attrtype() != AttrType::BytesType {
-                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
-                }
-                return Ok(attr.get_value())
-            }
-        }
-        err_not_found!(t.to_string())
-    }
-    pub fn set_attr_from_ulong(&mut self, s: String, u: CK_ULONG) -> KResult<()> {
-        let a = attribute::from_string_ulong(s, u)?;
-        self.set_attr(a)
-    }
-    pub fn set_attr_from_string(&mut self, s: String, v: String) -> KResult<()> {
-        let a = attribute::from_string_string(s, v)?;
-        self.set_attr(a)
-    }
-    pub fn set_attr_from_bool(&mut self, s: String, b: bool) -> KResult<()> {
-        let a = attribute::from_string_bool(s, b)?;
-        self.set_attr(a)
-    }
-    pub fn set_attr_from_bytes(&mut self, s: String, v: Vec<u8>) -> KResult<()> {
-        let a = attribute::from_string_bytes(s, v)?;
-        self.set_attr(a)
-    }
+
+    attr_as_type!{make get_attr_as_bool; with bool; BoolType; via to_bool}
+    attr_as_type!{make get_attr_as_ulong; with CK_ULONG; NumType; via to_ulong}
+    attr_as_type!{make get_attr_as_string; with String; StringType; via to_string}
+    attr_as_type!{make get_attr_as_bytes; with &Vec<u8>; BytesType; via to_bytes}
 
     pub fn match_template(&self, template: &[CK_ATTRIBUTE]) -> bool {
         for ck_attr in template.iter() {
@@ -220,18 +173,11 @@ impl Object {
         if !sense.contains(&id) {
             return false;
         }
-        for attr in &self.attributes {
-            if attr.get_type() == CKA_SENSITIVE {
-                if attr.to_bool().unwrap_or(false) {
-                    return true;
-                }
-                continue;
-            }
-            if attr.get_type() == CKA_EXTRACTABLE {
-                if !attr.to_bool().unwrap_or(true) {
-                    return true;
-                }
-            }
+        if self.is_sensitive() {
+            return true;
+        }
+        if !self.is_extractable() {
+            return true;
         }
         false
     }
