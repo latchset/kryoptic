@@ -28,7 +28,7 @@ struct Attrmap<'a> {
     atype: AttrType,
 }
 
-static ATTRMAP: [Attrmap<'_>; 125] = [
+static ATTRMAP: [Attrmap<'_>; 126] = [
     Attrmap { id: 0, name: "CKA_CLASS", atype: AttrType::NumType  },
     Attrmap { id: 1, name: "CKA_TOKEN", atype: AttrType::BoolType  },
     Attrmap { id: 2, name: "CKA_PRIVATE", atype: AttrType::BoolType  },
@@ -156,6 +156,7 @@ static ATTRMAP: [Attrmap<'_>; 125] = [
     Attrmap { id: 1553, name: "CKA_X2RATCHET_PNS", atype: AttrType::NumType  },
     Attrmap { id: 1554, name: "CKA_X2RATCHET_RK", atype: AttrType::BytesType  },
     Attrmap { id: 2147483648, name: "CKA_VENDOR_DEFINED", atype: AttrType::DenyType  },
+    Attrmap { id: KRYATTR_MAX_LOGIN_ATTEMPTS, name: "KRYATTR_MAX_LOGIN_ATTEMPTS", atype: AttrType::NumType },
 ];
 
 #[derive(Debug, Clone)]
@@ -213,16 +214,16 @@ impl Attribute {
         }
     }
 
-    pub fn to_ulong(&self) -> KResult<u64> {
+    pub fn to_ulong(&self) -> KResult<CK_ULONG> {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        Ok(u64::from_ne_bytes(self.value.as_slice().try_into().unwrap()))
+        Ok(u64::from_ne_bytes(self.value.as_slice().try_into().unwrap()) as CK_ULONG)
     }
 
     fn to_ulong_value(&self) -> Value {
         match self.to_ulong() {
-            Ok(l) => Value::Number(Number::from(l)),
+            Ok(l) => Value::Number(Number::from(l as u64)),
             Err(_) => Value::Null,
         }
     }
@@ -452,7 +453,7 @@ pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
                             };
                             let mut v = vec![0; len];
                             match BASE64.decode_mut(s.as_bytes(), &mut v) {
-                                Ok(_) => return Ok(from_bytes(a.id, v)),
+                                Ok(l) => return Ok(from_bytes(a.id, v[0..l].to_vec())),
                                 Err(_) => return err_rv!(CKR_GENERAL_ERROR),
                             }
                         },

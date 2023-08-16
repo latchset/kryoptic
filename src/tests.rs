@@ -11,8 +11,18 @@ struct TestData<'a> {
 fn test_setup(filename: &str) {
     let test_token = serde_json::json!({
         "objects": [{
+            "handle": 1,
+            "attributes": {
+                "CKA_UNIQUE_ID": "1",
+                "CKA_CLASS": 4,
+                "CKA_KEY_TYPE": 16,
+                "CKA_LABEL": "User PIN",
+                "CKA_VALUE": "MTIzNDU2Nzg=",
+            }
+        }, {
             "handle": 4030201,
             "attributes": {
+                "CKA_UNIQUE_ID": "2",
                 "CKA_CLASS": 2,
                 "CKA_KEY_TYPE": 0,
                 "CKA_DESTROYABLE": false,
@@ -27,7 +37,8 @@ fn test_setup(filename: &str) {
         }, {
             "handle": 4030202,
             "attributes": {
-                "CKA_CLASS": 2,
+                "CKA_UNIQUE_ID": "3",
+                "CKA_CLASS": 3,
                 "CKA_KEY_TYPE": 0,
                 "CKA_DESTROYABLE": false,
                 "CKA_ID": "AQ==",
@@ -35,6 +46,8 @@ fn test_setup(filename: &str) {
                 "CKA_MODIFIABLE": false,
                 "CKA_MODULUS": "AQIDBAUGBwg=",
                 "CKA_PRIVATE": true,
+                "CKA_SENSITIVE": true,
+                "CKA_EXTRACTABLE": false,
                 "CKA_PUBLIC_EXPONENT": "AQAB",
                 "CKA_PRIVATE_EXPONENT": "AQAD",
                 "CKA_TOKEN": true
@@ -183,15 +196,20 @@ fn test_get_attr() {
     template.ulValueLen = 128;
     ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
     assert_eq!(ret, CKR_OBJECT_HANDLE_INVALID);
-    /* TODO: once login is implemented we should get:
-    assert_eq!(ret, CKR_INFORMATION_SENSITIVE);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(handle, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    assert_eq!(ret, CKR_ATTRIBUTE_SENSITIVE);
 
     template.type_ = CKA_PUBLIC_EXPONENT;
     template.ulValueLen = 128;
     ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
     assert_eq!(ret, CKR_OK);
     assert_eq!(template.ulValueLen, 3);
-    */
 
     ret = fn_close_session(handle);
     assert_eq!(ret, CKR_OK);

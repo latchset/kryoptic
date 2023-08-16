@@ -1,7 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::{RwLock,RwLockReadGuard};
+use std::sync::{RwLock,RwLockReadGuard, RwLockWriteGuard};
 
 use super::error;
 use super::interface;
@@ -52,6 +52,13 @@ impl Slot {
 
     pub fn get_token(&self) -> KResult<RwLockReadGuard<'_, Token>> {
         match self.token.read() {
+            Ok(token) => Ok(token),
+            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+
+    pub fn get_token_mut(&self) -> KResult<RwLockWriteGuard<'_, Token>> {
+        match self.token.write() {
             Ok(token) => Ok(token),
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
         }

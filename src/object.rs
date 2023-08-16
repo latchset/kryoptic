@@ -5,8 +5,9 @@ use super::interface;
 use super::attribute;
 use super::error;
 use interface::*;
-use attribute::Attribute;
-use error::{KResult, KError, CkRvError};
+use attribute::{Attribute, AttrType};
+use error::{KResult, KError};
+use super::{err_rv, err_not_found};
 
 use serde::{Serialize, Deserialize};
 use serde_json::{Map, Value};
@@ -110,6 +111,50 @@ impl Object {
         }
         Ok(())
     }
+    pub fn get_attr_as_bool(&self, t: CK_ULONG) -> KResult<bool> {
+        for attr in &self.attributes {
+            if attr.get_type() == t {
+                if attr.get_attrtype() != AttrType::BoolType {
+                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                }
+                return attr.to_bool()
+            }
+        }
+        err_not_found!(t.to_string())
+    }
+    pub fn get_attr_as_ulong(&self, t: CK_ULONG) -> KResult<CK_ULONG> {
+        for attr in &self.attributes {
+            if attr.get_type() == t {
+                if attr.get_attrtype() != AttrType::NumType {
+                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                }
+                return attr.to_ulong()
+            }
+        }
+        err_not_found!(t.to_string())
+    }
+    pub fn get_attr_as_string(&self, t: CK_ULONG) -> KResult<String> {
+        for attr in &self.attributes {
+            if attr.get_type() == t {
+                if attr.get_attrtype() != AttrType::StringType {
+                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                }
+                return attr.to_string()
+            }
+        }
+        err_not_found!(t.to_string())
+    }
+    pub fn get_attr_as_bytes(&self, t: CK_ULONG) -> KResult<&Vec<u8>> {
+        for attr in &self.attributes {
+            if attr.get_type() == t {
+                if attr.get_attrtype() != AttrType::BytesType {
+                    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                }
+                return Ok(attr.get_value())
+            }
+        }
+        err_not_found!(t.to_string())
+    }
     pub fn set_attr_from_ulong(&mut self, s: String, u: CK_ULONG) -> KResult<()> {
         let a = attribute::from_string_ulong(s, u)?;
         self.set_attr(a)
@@ -148,17 +193,15 @@ impl Object {
         let mut key_type: CK_ULONG = CK_UNAVAILABLE_INFORMATION;
         for attr in &self.attributes {
             if attr.get_type() == CKA_CLASS {
-                class = attr.to_ulong().ok()?;
+                class = attr.to_ulong().unwrap_or(CK_UNAVAILABLE_INFORMATION);
                 continue;
             }
             if attr.get_type() == CKA_KEY_TYPE {
-                key_type = attr.to_ulong().ok()?;
+                key_type = attr.to_ulong().unwrap_or(CK_UNAVAILABLE_INFORMATION);
             }
         }
-        if class == CKO_PRIVATE_KEY {
-            if key_type != CK_UNAVAILABLE_INFORMATION {
-                return Some(key_type);
-            }
+        if class == CKO_PRIVATE_KEY || class == CKO_SECRET_KEY {
+            return Some(key_type);
         }
         None
     }
@@ -174,27 +217,23 @@ impl Object {
     }
 
     fn is_sensitive_attr(&self, id: CK_ULONG, sense: &[CK_ULONG]) -> bool {
-        let mut sensitive = false;
         if !sense.contains(&id) {
             return false;
         }
         for attr in &self.attributes {
             if attr.get_type() == CKA_SENSITIVE {
                 if attr.to_bool().unwrap_or(false) {
-                    sensitive = true;
-                } else {
-                    return false;
+                    return true;
                 }
                 continue;
             }
             if attr.get_type() == CKA_EXTRACTABLE {
                 if !attr.to_bool().unwrap_or(true) {
-                    sensitive = true;
+                    return true;
                 }
-                continue;
             }
         }
-        sensitive
+        false
     }
 
     pub fn fill_template(&self, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
@@ -237,7 +276,7 @@ impl Object {
         if rv == CKR_OK {
             return Ok(());
         }
-        Err(KError::RvError(CkRvError{rv: rv}))
+        err_rv!(rv)
     }
 }
 

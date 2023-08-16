@@ -1,7 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::{RwLock,RwLockReadGuard};
+use std::sync::{RwLock,RwLockReadGuard, RwLockWriteGuard};
 use std::ffi::CStr;
 
 mod interface {
@@ -21,6 +21,9 @@ mod interface {
         pub pFunctionList: *const ::std::os::raw::c_void,
         pub flags: CK_FLAGS,
     }
+
+    pub const KRYATTR_OFFSET: CK_ULONG = 485259;
+    pub const KRYATTR_MAX_LOGIN_ATTEMPTS: CK_ULONG = CKA_VENDOR_DEFINED + KRYATTR_OFFSET + 1;
 }
 
 mod error;
@@ -116,10 +119,25 @@ impl State {
         slot.get_token()
     }
 
+    fn get_token_from_slot_mut(&self, slotid: CK_SLOT_ID) -> KResult<RwLockWriteGuard<'_, Token>> {
+        let idx = slotid as usize;
+        if idx >= self.slots.len() {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
+        let slot = &self.slots[idx];
+        slot.get_token_mut()
+    }
+
     fn get_token_from_session_handle(&self, handle: CK_SESSION_HANDLE) -> KResult<RwLockReadGuard<'_, Token>> {
         let session = self.get_session(handle)?;
         let info = session.get_session_info();
         self.get_token_from_slot(info.slotID)
+    }
+
+    fn get_token_from_session_handle_mut(&self, handle: CK_SESSION_HANDLE) -> KResult<RwLockWriteGuard<'_, Token>> {
+        let session = self.get_session(handle)?;
+        let info = session.get_session_info();
+        self.get_token_from_slot_mut(info.slotID)
     }
 }
 
@@ -282,12 +300,21 @@ extern "C" fn fn_set_operation_state(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_login(
-        _session: CK_SESSION_HANDLE,
-        _user_type: CK_USER_TYPE,
-        _pin: CK_UTF8CHAR_PTR,
-        _pin_len: CK_ULONG,
+        handle: CK_SESSION_HANDLE,
+        user_type: CK_USER_TYPE,
+        pin: CK_UTF8CHAR_PTR,
+        pin_len: CK_ULONG,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let wstate = STATE.write().unwrap();
+    let mut token = match wstate.get_token_from_session_handle_mut(handle) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    let vpin: Vec<u8> = unsafe {
+        std::slice::from_raw_parts(pin, pin_len as usize).to_vec()
+    };
+
+    token.login(user_type, &vpin)
 }
 extern "C" fn fn_logout(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED

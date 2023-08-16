@@ -23,11 +23,19 @@ static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
 #[derive(Debug, Clone)]
+struct LoginData {
+    user_pin: Option<Vec<u8>>,
+    max_attempts: CK_ULONG,
+    attempts: CK_ULONG,
+    logged_in: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct Token {
     info: CK_TOKEN_INFO,
     objects: Vec<Object>, /* FIXME: convert to hashMap ? */
-    login: bool,
     dirty: bool,
+    login: LoginData,
 }
 
 impl Token {
@@ -61,7 +69,12 @@ impl Token {
                 utcTime: *b"0000000000000000",
             },
             objects: Vec::new(),
-            login: false,
+            login: LoginData {
+                user_pin: None,
+                max_attempts: 0,
+                attempts: 0,
+                logged_in: false,
+            },
             dirty: false,
         };
 
@@ -76,6 +89,82 @@ impl Token {
             Err(e) => return Err(KError::JsonError(e)),
         }
         Ok(t)
+    }
+
+    fn get_object_by_handle(&self, h: CK_ULONG) -> KResult<&Object> {
+        for o in self.objects.iter() {
+            if o.get_handle() == h {
+                return Ok(o);
+            }
+        }
+        err_rv!(CKR_USER_PIN_NOT_INITIALIZED)
+    }
+
+
+    fn get_login_data(&mut self) -> KResult<()> {
+        let obj = self.get_object_by_handle(1)?;
+        if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        if obj.get_attr_as_string(CKA_LABEL)? != "User PIN" {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let value = obj.get_attr_as_bytes(CKA_VALUE)?;
+        let max = match obj.get_attr_as_ulong(KRYATTR_MAX_LOGIN_ATTEMPTS) {
+            Ok(n) => n,
+            Err(_) => 10,
+        };
+
+        self.login.user_pin = Some(value.clone());
+        self.login.max_attempts = max;
+        Ok(())
+    }
+
+    pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
+        match user_type {
+            CKU_SO => {
+                /* not supported yet */
+                return CKR_OPERATION_NOT_INITIALIZED;
+            },
+            CKU_USER => {
+                if self.login.user_pin.is_none() {
+                    match self.get_login_data() {
+                        Ok(_) => (),
+                        Err(_) => return CKR_USER_PIN_NOT_INITIALIZED,
+                    }
+                }
+
+                if self.login.attempts >= self.login.max_attempts {
+                    return CKR_PIN_LOCKED
+                }
+                if self.login.logged_in {
+                    return CKR_USER_ALREADY_LOGGED_IN
+                }
+                match &self.login.user_pin {
+                    Some(p) => {
+                        if p == pin {
+                            self.login.logged_in = true;
+                            self.login.attempts = 0;
+                            return CKR_OK;
+                        }
+                        println!("Cmp fail");
+                        self.login.attempts += 1;
+                        return CKR_PIN_INCORRECT;
+                    },
+                    None => {
+                        return CKR_USER_PIN_NOT_INITIALIZED
+                    }
+                }
+            },
+            CKU_CONTEXT_SPECIFIC => {
+                /* not supported yet */
+                return CKR_OPERATION_NOT_INITIALIZED;
+            },
+            _ => return CKR_USER_TYPE_INVALID,
+        }
     }
 
     pub fn save(&self, filename: &str) -> KResult<()> {
@@ -107,7 +196,7 @@ impl Token {
     pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         for o in self.objects.iter() {
-            if !self.login && o.is_private()? {
+            if !self.login.logged_in && o.is_private()? {
                 continue;
             }
             if o.match_template(template) {
@@ -120,7 +209,7 @@ impl Token {
     pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
         for o in self.objects.iter() {
             if o.get_handle() == handle {
-                if !self.login && o.is_private()? {
+                if !self.login.logged_in && o.is_private()? {
                     break;
                 }
                 return o.fill_template(template)
