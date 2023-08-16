@@ -110,6 +110,19 @@ impl State {
         self.sessions.clear();
     }
 
+    fn all_sessions_set_user_functions(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+        if handle >= self.next_handle {
+            return err_rv!(CKR_SESSION_HANDLE_INVALID)
+        }
+        let slotid = self.get_session(handle)?.get_session_info().slotID;
+        for s in self.sessions.iter_mut() {
+            if s.get_session_info().slotID == slotid {
+                s.set_user_functions();
+            }
+        }
+        Ok(())
+    }
+
     fn get_token_from_slot(&self, slotid: CK_SLOT_ID) -> KResult<RwLockReadGuard<'_, Token>> {
         let idx = slotid as usize;
         if idx >= self.slots.len() {
@@ -305,7 +318,7 @@ extern "C" fn fn_login(
         pin: CK_UTF8CHAR_PTR,
         pin_len: CK_ULONG,
     ) -> CK_RV {
-    let wstate = STATE.write().unwrap();
+    let mut wstate = STATE.write().unwrap();
     let mut token = match wstate.get_token_from_session_handle_mut(handle) {
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
@@ -314,7 +327,19 @@ extern "C" fn fn_login(
         std::slice::from_raw_parts(pin, pin_len as usize).to_vec()
     };
 
-    token.login(user_type, &vpin)
+    let ret = token.login(user_type, &vpin);
+    if ret != CKR_OK {
+        return ret;
+    }
+    drop(token);
+
+    /* must mark all sessions on same token as logged in */
+    match wstate.all_sessions_set_user_functions(handle) {
+        Ok(id) => id,
+        Err(e) => return err_to_rv!(e),
+    };
+
+    CKR_OK
 }
 extern "C" fn fn_logout(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED

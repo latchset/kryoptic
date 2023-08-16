@@ -80,4 +80,12 @@ impl Session {
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
         &self.info
     }
+
+    pub fn set_user_functions(&mut self) {
+        match self.info.state {
+            CKS_RO_PUBLIC_SESSION => self.info.state = CKS_RO_USER_FUNCTIONS,
+            CKS_RW_PUBLIC_SESSION => self.info.state = CKS_RW_USER_FUNCTIONS,
+            _ => (),
+        };
+    }
 }
