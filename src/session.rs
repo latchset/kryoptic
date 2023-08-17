@@ -28,7 +28,7 @@ impl Session {
         if handle == CK_INVALID_HANDLE {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        if flags & interface::CKF_SERIAL_SESSION != CKF_SERIAL_SESSION {
+        if flags & CKF_SERIAL_SESSION != CKF_SERIAL_SESSION {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
 
@@ -81,11 +81,18 @@ impl Session {
         &self.info
     }
 
-    pub fn set_user_functions(&mut self) {
-        match self.info.state {
-            CKS_RO_PUBLIC_SESSION => self.info.state = CKS_RO_USER_FUNCTIONS,
-            CKS_RW_PUBLIC_SESSION => self.info.state = CKS_RW_USER_FUNCTIONS,
-            _ => (),
+    pub fn set_user_functions(&mut self, on: bool) {
+        match on {
+            true => match self.info.state {
+                CKS_RO_PUBLIC_SESSION => self.info.state = CKS_RO_USER_FUNCTIONS,
+                CKS_RW_PUBLIC_SESSION => self.info.state = CKS_RW_USER_FUNCTIONS,
+                _ => (),
+            },
+            false => match self.info.state {
+                CKS_RO_USER_FUNCTIONS => self.info.state = CKS_RO_PUBLIC_SESSION,
+                CKS_RW_USER_FUNCTIONS => self.info.state = CKS_RW_PUBLIC_SESSION,
+                _ => (),
+            }
         };
     }
 }

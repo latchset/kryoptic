@@ -167,6 +167,14 @@ impl Token {
         }
     }
 
+    pub fn logout(&mut self) -> CK_RV {
+        if !self.login.logged_in {
+            return CKR_USER_NOT_LOGGED_IN;
+        }
+        self.login.logged_in = false;
+        CKR_OK
+    }
+
     pub fn save(&self, filename: &str) -> KResult<()> {
         if !self.dirty {
             return Ok(())

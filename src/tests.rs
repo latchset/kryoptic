@@ -148,6 +148,77 @@ fn test_random() {
 }
 
 #[test]
+fn test_login() {
+    let testdata = TestData {
+        filename: Some("test_login.json"),
+    };
+    test_setup(testdata.filename.unwrap());
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut info = CK_SESSION_INFO {
+        slotID: CK_UNAVAILABLE_INFORMATION,
+        state: CK_UNAVAILABLE_INFORMATION,
+        flags: 0,
+        ulDeviceError: 0,
+    };
+    ret = fn_get_session_info(handle, &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.state, CKS_RO_PUBLIC_SESSION);
+
+    let mut handle2: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(0, CKF_SERIAL_SESSION|CKF_RW_SESSION, std::ptr::null_mut(), None, &mut handle2);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_get_session_info(handle2, &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.state, CKS_RW_PUBLIC_SESSION);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(handle, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_get_session_info(handle, &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.state, CKS_RO_USER_FUNCTIONS);
+
+    ret = fn_get_session_info(handle2, &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.state, CKS_RW_USER_FUNCTIONS);
+
+    ret = fn_login(handle, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    assert_eq!(ret, CKR_USER_ALREADY_LOGGED_IN);
+
+    ret = fn_logout(handle2);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_get_session_info(handle, &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.state, CKS_RO_PUBLIC_SESSION);
+
+    ret = fn_get_session_info(handle2, &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.state, CKS_RW_PUBLIC_SESSION);
+
+    ret = fn_logout(handle);
+    assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+
+    ret = fn_close_session(handle);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(handle2);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}
+
+#[test]
 fn test_get_attr() {
     let testdata = TestData {
         filename: Some("test_get_attr.json"),
@@ -211,6 +282,8 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(template.ulValueLen, 3);
 
+    ret = fn_logout(handle);
+    assert_eq!(ret, CKR_OK);
     ret = fn_close_session(handle);
     assert_eq!(ret, CKR_OK);
     ret = fn_finalize(std::ptr::null_mut());

@@ -110,14 +110,14 @@ impl State {
         self.sessions.clear();
     }
 
-    fn all_sessions_set_user_functions(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+    fn all_sessions_set_user_functions(&mut self, handle: CK_SESSION_HANDLE, on: bool) -> KResult<()> {
         if handle >= self.next_handle {
             return err_rv!(CKR_SESSION_HANDLE_INVALID)
         }
         let slotid = self.get_session(handle)?.get_session_info().slotID;
         for s in self.sessions.iter_mut() {
             if s.get_session_info().slotID == slotid {
-                s.set_user_functions();
+                s.set_user_functions(on);
             }
         }
         Ok(())
@@ -334,15 +334,33 @@ extern "C" fn fn_login(
     drop(token);
 
     /* must mark all sessions on same token as logged in */
-    match wstate.all_sessions_set_user_functions(handle) {
+    match wstate.all_sessions_set_user_functions(handle, true) {
         Ok(id) => id,
         Err(e) => return err_to_rv!(e),
     };
 
     CKR_OK
 }
-extern "C" fn fn_logout(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+extern "C" fn fn_logout(handle: CK_SESSION_HANDLE) -> CK_RV {
+    let mut wstate = STATE.write().unwrap();
+    let mut token = match wstate.get_token_from_session_handle_mut(handle) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+
+    let ret = token.logout();
+    if ret != CKR_OK {
+        return ret;
+    }
+    drop(token);
+
+    /* must mark all sessions on same token as logged in */
+    match wstate.all_sessions_set_user_functions(handle, false) {
+        Ok(id) => id,
+        Err(e) => return err_to_rv!(e),
+    };
+
+    CKR_OK
 }
 extern "C" fn fn_create_object(
         _session: CK_SESSION_HANDLE,
