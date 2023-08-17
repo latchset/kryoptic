@@ -292,7 +292,7 @@ extern "C" fn fn_get_session_info(
         Err(e) => return err_to_rv!(e),
     };
     unsafe {
-        core::ptr::write(info as *mut _, session.get_session_info());
+        core::ptr::write(info as *mut _, *session.get_session_info());
     }
     CKR_OK
 }
