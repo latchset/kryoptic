@@ -1,6 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::collections::HashMap;
 use std::vec::Vec;
 
 use serde::{Serialize, Deserialize};
@@ -13,7 +14,7 @@ use super::error;
 use interface::*;
 use object::{Object, JsonObject};
 use error::{KResult, KError};
-use super::err_rv;
+use super::{err_rv, err_not_found};
 
 use getrandom;
 
@@ -33,7 +34,7 @@ struct LoginData {
 #[derive(Debug, Clone)]
 pub struct Token {
     info: CK_TOKEN_INFO,
-    objects: Vec<Object>, /* FIXME: convert to hashMap ? */
+    objects: HashMap<CK_ULONG, Object>,
     dirty: bool,
     login: LoginData,
 }
@@ -68,7 +69,7 @@ impl Token {
                 },
                 utcTime: *b"0000000000000000",
             },
-            objects: Vec::new(),
+            objects: HashMap::new(),
             login: LoginData {
                 user_pin: None,
                 max_attempts: 0,
@@ -92,17 +93,17 @@ impl Token {
     }
 
     fn get_object_by_handle(&self, h: CK_ULONG) -> KResult<&Object> {
-        for o in self.objects.iter() {
-            if o.get_handle() == h {
-                return Ok(o);
-            }
+        match self.objects.get(&h) {
+            Some(o) => Ok(o),
+            None => err_not_found!{h.to_string()}
         }
-        err_rv!(CKR_USER_PIN_NOT_INITIALIZED)
     }
 
-
     fn get_login_data(&mut self) -> KResult<()> {
-        let obj = self.get_object_by_handle(1)?;
+        let obj = match self.get_object_by_handle(1) {
+            Ok(o) => o,
+            Err(_) => return err_rv!(CKR_USER_PIN_NOT_INITIALIZED),
+        };
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -203,27 +204,26 @@ impl Token {
 
     pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
-        for o in self.objects.iter() {
+        for (h, o) in self.objects.iter() {
             if !self.login.logged_in && o.is_private() {
                 continue;
             }
             if o.match_template(template) {
-                handles.push(o.get_handle());
+                handles.push(*h);
             }
         }
         Ok(handles)
     }
 
     pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
-        for o in self.objects.iter() {
-            if o.get_handle() == handle {
-                if !self.login.logged_in && o.is_private() {
-                    break;
-                }
-                return o.fill_template(template)
-            }
+        let obj = match self.objects.get(&handle) {
+            Some(o) => o,
+            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID)
+        };
+        if !self.login.logged_in && obj.is_private() {
+            return err_rv!(CKR_OBJECT_HANDLE_INVALID)
         }
-        err_rv!(CKR_OBJECT_HANDLE_INVALID)
+        return obj.fill_template(template)
     }
 
     pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {

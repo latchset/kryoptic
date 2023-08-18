@@ -1,6 +1,8 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::collections::HashMap;
+
 use super::interface;
 use super::attribute;
 use super::error;
@@ -232,12 +234,12 @@ pub struct JsonObject {
     attributes: Map<String, Value>
 }
 
-pub fn objects_to_json(objs: &Vec<Object>) -> Vec<JsonObject> {
+pub fn objects_to_json(objs: &HashMap<CK_ULONG, Object>) -> Vec<JsonObject> {
     let mut jobjs = Vec::new();
 
-    for o in objs {
+    for (h, o) in objs {
         let mut jo = JsonObject {
-            handle: o.handle,
+            handle: *h,
             attributes: Map::new()
         };
         for a in &o.attributes {
@@ -248,8 +250,8 @@ pub fn objects_to_json(objs: &Vec<Object>) -> Vec<JsonObject> {
     jobjs
 }
 
-pub fn json_to_objects(jobjs: &Vec<JsonObject>) -> Vec<Object> {
-    let mut objs = Vec::new();
+pub fn json_to_objects(jobjs: &Vec<JsonObject>) -> HashMap<CK_ULONG, Object> {
+    let mut objs = HashMap::new();
 
     for jo in jobjs {
         let mut o = Object {
@@ -261,7 +263,7 @@ pub fn json_to_objects(jobjs: &Vec<JsonObject>) -> Vec<Object> {
                 o.attributes.push(a);
             }
         }
-        objs.push(o);
+        objs.insert(o.handle, o);
     }
     objs
 }
