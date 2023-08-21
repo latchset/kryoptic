@@ -12,13 +12,14 @@ use super::err_rv;
 
 #[derive(Debug, Clone)]
 pub struct Session {
-    info: CK_SESSION_INFO,
+    handle: CK_SESSION_HANDLE,
 
+    info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
 
-    handle: CK_SESSION_HANDLE,
-    object_handles: Vec<CK_OBJECT_HANDLE>,
+    session_handles: Vec<CK_OBJECT_HANDLE>,
+    search_handles: Vec<CK_OBJECT_HANDLE>,
 }
 
 impl Session {
@@ -33,6 +34,7 @@ impl Session {
         }
 
         let mut s = Session {
+            handle: handle,
             info: CK_SESSION_INFO {
                 slotID: slotid,
                 state: CKS_RO_PUBLIC_SESSION,
@@ -41,8 +43,8 @@ impl Session {
             },
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
-            handle: handle,
-            object_handles: Vec::new(),
+            session_handles: Vec::<CK_OBJECT_HANDLE>::new(),
+            search_handles: Vec::<CK_OBJECT_HANDLE>::new(),
         };
 
         // FIXME check Login status
@@ -61,20 +63,24 @@ impl Session {
         self.handle
     }
 
-    pub fn reset_object_handles(&mut self) {
-        self.object_handles.clear();
+    pub fn add_handle(&mut self, handle: CK_OBJECT_HANDLE) {
+        self.session_handles.push(handle);
     }
 
-    pub fn append_object_handles(&mut self, handles: &mut Vec<CK_OBJECT_HANDLE>) {
-        self.object_handles.append(handles);
+    pub fn reset_search_handles(&mut self) {
+        self.search_handles.clear();
     }
 
-    pub fn get_object_handles(&mut self, max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
-        let mut amount = max;
-        if self.object_handles.len() < amount {
-            amount = self.object_handles.len();
+    pub fn add_search_handle(&mut self, handle: CK_OBJECT_HANDLE) {
+        self.search_handles.push(handle);
+    }
+
+    pub fn get_search_handles(&mut self, max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+        let mut amount = self.search_handles.len();
+        if max < amount {
+            amount = max;
         }
-        Ok(self.object_handles.drain(0..amount).collect())
+        Ok(self.search_handles.drain(0..amount).collect())
     }
 
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
@@ -94,5 +100,13 @@ impl Session {
                 _ => (),
             }
         };
+    }
+
+    pub fn is_writable(&self) -> bool {
+        match self.info.state {
+            CKS_RW_PUBLIC_SESSION => true,
+            CKS_RW_USER_FUNCTIONS => true,
+            _ => false,
+        }
     }
 }

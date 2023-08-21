@@ -1,8 +1,6 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::collections::HashMap;
-
 use super::interface;
 use super::attribute;
 use super::error;
@@ -11,8 +9,7 @@ use attribute::{Attribute, AttrType};
 use error::{KResult, KError};
 use super::{err_rv, err_not_found};
 
-use serde::{Serialize, Deserialize};
-use serde_json::{Map, Value};
+use uuid::Uuid;
 
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
@@ -88,9 +85,9 @@ pub struct Object {
 }
 
 impl Object {
-    pub fn new() -> Object {
+    pub fn new(handle: CK_ULONG) -> Object {
         Object {
-            handle: 0,
+            handle: handle,
             attributes: Vec::new(),
         }
     }
@@ -106,7 +103,7 @@ impl Object {
     create_bool_checker!{make is_destroyable; from CKA_DESTROYABLE; def false}
     create_bool_checker!{make is_extractable; from CKA_EXTRACTABLE; def false}
 
-    fn set_attr(&mut self, a: Attribute) -> KResult<()> {
+    pub fn set_attr(&mut self, a: Attribute) -> KResult<()> {
         let mut idx = self.attributes.len();
         for (i, elem) in self.attributes.iter().enumerate() {
             if a.get_type() == elem.get_type() {
@@ -120,6 +117,10 @@ impl Object {
             self.attributes.push(a);
         }
         Ok(())
+    }
+
+    pub fn get_attributes(&self) -> &Vec<Attribute> {
+        return &self.attributes
     }
 
     attr_as_type!{make get_attr_as_bool; with bool; BoolType; via to_bool}
@@ -228,42 +229,133 @@ impl Object {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JsonObject {
-    handle: CK_OBJECT_HANDLE,
-    attributes: Map<String, Value>
+#[derive(Debug, Clone, Copy)]
+struct ObjectAttr {
+    id: CK_ULONG,
+    required: bool,
+    present: bool,
+    default: bool, /* only for bool values */
+    default_value: bool,
 }
 
-pub fn objects_to_json(objs: &HashMap<CK_ULONG, Object>) -> Vec<JsonObject> {
-    let mut jobjs = Vec::new();
-
-    for (h, o) in objs {
-        let mut jo = JsonObject {
-            handle: *h,
-            attributes: Map::new()
-        };
-        for a in &o.attributes {
-            jo.attributes.insert(a.name(), a.json_value());
-        }
-        jobjs.push(jo);
+macro_rules! req_element {
+    ($id:expr) => {
+        ObjectAttr { id: $id, required: true, present: false, default: false, default_value: false }
+    };
+    ($id:expr; def $def:expr) => {
+        ObjectAttr { id: $id, required: true, present: false, default: true, default_value: $def }
     }
-    jobjs
+}
+macro_rules! opt_element {
+    ($id:expr) => {
+        ObjectAttr { id: $id, required: false, present: false, default: false, default_value: false }
+    };
+    ($id:expr; def $def:expr) => {
+        ObjectAttr { id: $id, required: false, present: false, default: true, default_value: $def }
+    }
 }
 
-pub fn json_to_objects(jobjs: &Vec<JsonObject>) -> HashMap<CK_ULONG, Object> {
-    let mut objs = HashMap::new();
-
-    for jo in jobjs {
-        let mut o = Object {
-            handle: jo.handle,
-            attributes: Vec::new(),
-        };
-        for jk in jo.attributes.keys() {
-            if let Ok(a) = attribute::from_value(jk.clone(), jo.attributes.get(jk).unwrap()) {
-                o.attributes.push(a);
+fn basic_object_attrs_checks(obj: &mut Object, cattrs: &mut Vec::<ObjectAttr>) -> CK_RV {
+    for attr in &obj.attributes {
+        let typ = attr.get_type();
+        let mut valid = false;
+        for elem in cattrs.iter_mut() {
+            if typ == elem.id {
+                if elem.present {
+                    /* duplicate */
+                    return CKR_TEMPLATE_INCONSISTENT;
+                }
+                valid = true;
+                elem.present = true;
+                break;
             }
         }
-        objs.insert(o.handle, o);
+        if !valid {
+            return CKR_ATTRIBUTE_VALUE_INVALID;
+        }
     }
-    objs
+
+    for elem in cattrs.iter_mut() {
+        if !elem.present && elem.default {
+            obj.attributes.push(
+                attribute::from_bool(elem.id, elem.default_value)
+            );
+            elem.present = true;
+        }
+        if elem.required && !elem.present {
+            return CKR_TEMPLATE_INCOMPLETE;
+        }
+    }
+
+    CKR_OK
+}
+
+static COMMON_OBJ_ATTRS: [ObjectAttr; 1] = [
+    req_element!(CKA_CLASS)
+];
+
+static COMMON_STORAGE_ATTRS: [ObjectAttr; 7] = [
+    opt_element!(CKA_TOKEN; def false),
+    opt_element!(CKA_PRIVATE; def false),
+    opt_element!(CKA_MODIFIABLE; def true),
+    opt_element!(CKA_LABEL),
+    opt_element!(CKA_COPYABLE; def true),
+    opt_element!(CKA_DESTROYABLE; def true),
+    req_element!(CKA_UNIQUE_ID),
+];
+
+static DATA_OBJECT_ATTRS: [ObjectAttr; 3] = [
+    req_element!(CKA_APPLICATION),
+    opt_element!(CKA_OBJECT_ID),
+    req_element!(CKA_VALUE)
+];
+
+fn create_data_object(mut obj: Object) -> KResult<Object> {
+    let mut cattrs = Vec::<ObjectAttr>::with_capacity(
+            COMMON_OBJ_ATTRS.len() +
+            COMMON_STORAGE_ATTRS.len() +
+            DATA_OBJECT_ATTRS.len()
+        );
+    cattrs.extend(COMMON_OBJ_ATTRS);
+    cattrs.extend(COMMON_STORAGE_ATTRS);
+    cattrs.extend(DATA_OBJECT_ATTRS);
+
+    let ret = basic_object_attrs_checks(&mut obj, &mut cattrs);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    Ok(obj)
+}
+
+pub fn create(handle: CK_ULONG, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    let mut obj = Object {
+        handle: handle,
+        attributes: Vec::new(),
+    };
+
+    let uuid = Uuid::new_v4().to_string();
+    obj.attributes.push(attribute::from_string(CKA_UNIQUE_ID, uuid));
+
+    for ck_attr in template.iter() {
+        obj.attributes.push(ck_attr.to_attribute()?);
+    }
+
+    let class = match obj.get_attr_as_ulong(CKA_CLASS) {
+        Ok(c) => c,
+        Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+    };
+    match class {
+        CKO_DATA => create_data_object(obj),
+        CKO_CERTIFICATE => err_rv!(CKR_FUNCTION_FAILED),
+        CKO_PUBLIC_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_PRIVATE_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_SECRET_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_HW_FEATURE => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_DOMAIN_PARAMETERS => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_MECHANISM => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_OTP_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_PROFILE => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        CKO_VENDOR_DEFINED => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+    }
 }

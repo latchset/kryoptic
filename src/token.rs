@@ -8,11 +8,14 @@ use serde::{Serialize, Deserialize};
 use serde_json;
 
 use super::interface;
+use super::attribute;
+use super::session;
 use super::object;
 use super::error;
 
 use interface::*;
-use object::{Object, JsonObject};
+use session::Session;
+use object::Object;
 use error::{KResult, KError};
 use super::{err_rv, err_not_found};
 
@@ -22,6 +25,16 @@ static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
 static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JsonToken {
+    objects: Vec<JsonObject>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct JsonObject {
+    attributes: serde_json::Map<String, serde_json::Value>
+}
 
 #[derive(Debug, Clone)]
 struct LoginData {
@@ -34,9 +47,11 @@ struct LoginData {
 #[derive(Debug, Clone)]
 pub struct Token {
     info: CK_TOKEN_INFO,
-    objects: HashMap<CK_ULONG, Object>,
+    objects: HashMap<String, Object>,
     dirty: bool,
     login: LoginData,
+    handles: HashMap<CK_OBJECT_HANDLE, String>,
+    next_handle: CK_OBJECT_HANDLE,
 }
 
 impl Token {
@@ -77,6 +92,8 @@ impl Token {
                 logged_in: false,
             },
             dirty: false,
+            handles: HashMap::new(),
+            next_handle: 1,
         };
 
         let file = match std::fs::File::open(filename) {
@@ -86,23 +103,84 @@ impl Token {
             }
         };
         match serde_json::from_reader::<std::fs::File, JsonToken>(file) {
-            Ok(j) => t.objects = object::json_to_objects(&j.objects),
+            Ok(j) => t.json_to_objects(&j.objects)?,
             Err(e) => return Err(KError::JsonError(e)),
         }
         Ok(t)
     }
 
-    fn get_object_by_handle(&self, h: CK_ULONG) -> KResult<&Object> {
-        match self.objects.get(&h) {
-            Some(o) => Ok(o),
-            None => err_not_found!{h.to_string()}
+    fn next_object_handle(&mut self) -> CK_SESSION_HANDLE {
+        /* if we ever implement reloading from file,
+         * we'll want to pass the CKA_UNIQUE_ID object to this call and look
+         * in the handles cache to see if a handle has already been assigned
+         * to this object before */
+        let handle = self.next_handle;
+        self.next_handle += 1;
+        handle
+    }
+
+    fn objects_to_json(&self) -> Vec<JsonObject> {
+        let mut jobjs = Vec::new();
+
+        for (_h, o) in &self.objects {
+            match o.get_attr_as_bool(CKA_TOKEN) {
+                Ok(t) => if !t {
+                    continue;
+                },
+                Err(_) => continue,
+            }
+            let mut jo = JsonObject {
+                attributes: serde_json::Map::new()
+            };
+            for a in o.get_attributes() {
+                jo.attributes.insert(a.name(), a.json_value());
+            }
+            jobjs.push(jo);
         }
+        jobjs
+    }
+
+    fn json_to_objects(&mut self, jobjs: &Vec<JsonObject>) -> KResult<()> {
+        for jo in jobjs {
+            let mut obj = Object::new(self.next_object_handle());
+            let mut uid: String = String::new();
+            for (key, val) in &jo.attributes {
+                let attr = attribute::from_value(key.clone(), &val)?;
+                obj.set_attr(attr)?;
+                if key == "CKA_UNIQUE_ID" {
+                    uid = match val.as_str() {
+                        Some(s) => s.to_string(),
+                        None => return err_rv!(CKR_DEVICE_ERROR),
+                    }
+                }
+            }
+            if uid.len() == 0 {
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+            self.handles.insert(obj.get_handle(), uid.clone());
+            self.objects.insert(uid, obj);
+        }
+        Ok(())
+    }
+
+    pub fn get_object_by_handle(&self, handle: CK_OBJECT_HANDLE, checks: bool) -> KResult<&Object> {
+        let obj = match self.handles.get(&handle) {
+            Some(s) => match self.objects.get(s) {
+                Some(o) => o,
+                None => return err_not_found!{s.clone()},
+            },
+            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        };
+        if checks && !self.login.logged_in && obj.is_private() {
+            return err_rv!(CKR_OBJECT_HANDLE_INVALID)
+        }
+        Ok(obj)
     }
 
     fn get_login_data(&mut self) -> KResult<()> {
-        let obj = match self.get_object_by_handle(1) {
-            Ok(o) => o,
-            Err(_) => return err_rv!(CKR_USER_PIN_NOT_INITIALIZED),
+        let obj = match self.objects.get(&"1".to_string()) {
+            Some(o) => o,
+            None => return err_rv!(CKR_USER_PIN_NOT_INITIALIZED),
         };
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_GENERAL_ERROR);
@@ -151,7 +229,6 @@ impl Token {
                             self.login.attempts = 0;
                             return CKR_OK;
                         }
-                        println!("Cmp fail");
                         self.login.attempts += 1;
                         return CKR_PIN_INCORRECT;
                     },
@@ -181,7 +258,7 @@ impl Token {
             return Ok(())
         }
         let token = JsonToken {
-            objects: object::objects_to_json(&self.objects)
+            objects: self.objects_to_json(),
         };
         let j = match serde_json::to_string_pretty(&token) {
             Ok(j) => j,
@@ -193,6 +270,31 @@ impl Token {
         }
     }
 
+    pub fn create_object(&mut self, session: &mut Session, template: &[CK_ATTRIBUTE]) -> KResult<CK_OBJECT_HANDLE> {
+
+        if !self.login.logged_in {
+            return err_rv!(CKR_USER_NOT_LOGGED_IN);
+        }
+
+        let obj = object::create(self.next_object_handle(), template)?;
+        let handle = obj.get_handle();
+        match obj.get_attr_as_bool(CKA_TOKEN) {
+            Ok(t) => if t {
+                if !session.is_writable() {
+                    return err_rv!(CKR_SESSION_READ_ONLY);
+                }
+                self.dirty = true;
+            } else {
+                session.add_handle(handle);
+            },
+            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+        self.handles.insert(handle, uid.clone());
+        self.objects.insert(uid.clone(), obj);
+        Ok(handle)
+    }
+
     fn token_flags() -> CK_FLAGS {
         // FIXME: most of these flags need to be set dynamically
         CKF_RNG | CKF_LOGIN_REQUIRED | CKF_TOKEN_INITIALIZED
@@ -202,28 +304,26 @@ impl Token {
         &self.info
     }
 
-    pub fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<CK_OBJECT_HANDLE>> {
-        let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
-        for (h, o) in self.objects.iter() {
+    pub fn search(&self, session: &mut Session, template: &[CK_ATTRIBUTE]) -> KResult<()> {
+        session.reset_search_handles();
+
+        for (_, o) in &self.objects {
             if !self.login.logged_in && o.is_private() {
                 continue;
             }
+
             if o.match_template(template) {
-                handles.push(*h);
+                session.add_search_handle(o.get_handle());
             }
         }
-        Ok(handles)
+        Ok(())
     }
 
     pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
-        let obj = match self.objects.get(&handle) {
-            Some(o) => o,
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID)
-        };
-        if !self.login.logged_in && obj.is_private() {
-            return err_rv!(CKR_OBJECT_HANDLE_INVALID)
+        match self.get_object_by_handle(handle, true) {
+            Ok(o) => o.fill_template(template),
+            Err(e) => return Err(e),
         }
-        return obj.fill_template(template)
     }
 
     pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
@@ -236,9 +336,4 @@ impl Token {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonToken {
-    objects: Vec<JsonObject>,
 }

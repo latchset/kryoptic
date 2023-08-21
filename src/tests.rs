@@ -11,7 +11,6 @@ struct TestData<'a> {
 fn test_setup(filename: &str) {
     let test_token = serde_json::json!({
         "objects": [{
-            "handle": 1,
             "attributes": {
                 "CKA_UNIQUE_ID": "1",
                 "CKA_CLASS": 4,
@@ -20,7 +19,6 @@ fn test_setup(filename: &str) {
                 "CKA_VALUE": "MTIzNDU2Nzg=",
             }
         }, {
-            "handle": 4030201,
             "attributes": {
                 "CKA_UNIQUE_ID": "2",
                 "CKA_CLASS": 2,
@@ -35,7 +33,6 @@ fn test_setup(filename: &str) {
                 "CKA_TOKEN": true
             }
         }, {
-            "handle": 4030202,
             "attributes": {
                 "CKA_UNIQUE_ID": "3",
                 "CKA_CLASS": 3,
@@ -229,62 +226,166 @@ fn test_get_attr() {
     let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
-    let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut session);
     assert_eq!(ret, CKR_OK);
 
-    let mut template = CK_ATTRIBUTE {
+    let mut template = Vec::<CK_ATTRIBUTE>::new();
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+
+    /* public key data */
+    template.push(CK_ATTRIBUTE {
+        type_: CKA_UNIQUE_ID,
+        pValue: CString::new("2").unwrap().into_raw() as *mut std::ffi::c_void,
+        ulValueLen: 1,
+    });
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    template.clear();
+    template.push(CK_ATTRIBUTE {
         type_: CKA_LABEL,
         pValue: std::ptr::null_mut(),
         ulValueLen: 0,
-    };
+    });
 
-    /* public key data */
-    let mut o_handle: CK_ULONG = 4030201;
-
-    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
-    assert_ne!(template.ulValueLen, 0);
+    assert_ne!(template[0].ulValueLen, 0);
 
     let data: &mut [u8] = &mut [0; 128];
-    template.pValue = data.as_ptr() as *mut std::ffi::c_void;
-    template.ulValueLen = 128;
+    template[0].pValue = data.as_ptr() as *mut std::ffi::c_void;
+    template[0].ulValueLen = 128;
 
-    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
-    let size = template.ulValueLen as usize;
+    let size = template[0].ulValueLen as usize;
     let value = std::str::from_utf8(&data[0..size]).unwrap();
     assert_eq!(value, "Test RSA Key");
 
-    template.ulValueLen = 1;
-    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    template[0].ulValueLen = 1;
+    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
 
     /* private key data */
-
-    o_handle = 4030202;
-    template.type_ = CKA_PRIVATE_EXPONENT;
-    template.ulValueLen = 128;
-    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
-    assert_eq!(ret, CKR_OBJECT_HANDLE_INVALID);
+    template.clear();
+    handle = CK_INVALID_HANDLE;
+    template.push(CK_ATTRIBUTE {
+        type_: CKA_UNIQUE_ID,
+        pValue: CString::new("3").unwrap().into_raw() as *mut std::ffi::c_void,
+        ulValueLen: 1,
+    });
+    /* first try should not find it */
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 0);
+    assert_eq!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
 
     /* login */
     let pin = "12345678";
-    ret = fn_login(handle, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    ret = fn_login(session, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    /* after login should find it */
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    template.clear();
+    template.push(CK_ATTRIBUTE {
+        type_: CKA_PRIVATE_EXPONENT,
+        pValue: (&mut [0; 128]).as_ptr() as *mut std::ffi::c_void,
+        ulValueLen: 128,
+    });
+
+    /* should fail for sensitive attributes */
+    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_ATTRIBUTE_SENSITIVE);
 
-    template.type_ = CKA_PUBLIC_EXPONENT;
-    template.ulValueLen = 128;
-    ret = fn_get_attribute_value(handle, o_handle, &mut template, 1);
+    /* and succeed for public ones */
+    template[0].type_ = CKA_PUBLIC_EXPONENT;
+    template[0].ulValueLen = 128;
+    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
-    assert_eq!(template.ulValueLen, 3);
+    assert_eq!(template[0].ulValueLen, 3);
 
-    ret = fn_logout(handle);
+    ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(handle);
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+fn test_create_objects() {
+    let testdata = TestData {
+        filename: Some("test_create_objects.json"),
+    };
+    test_setup(testdata.filename.unwrap());
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut session);
+    assert_eq!(ret, CKR_OK);
+
+    let mut class = CKO_DATA;
+    let mut application = "test";
+    let mut data = "payload";
+    let mut template = vec![
+        CK_ATTRIBUTE {
+            type_: CKA_CLASS,
+            pValue: &mut class as *mut _ as *mut std::ffi::c_void,
+            ulValueLen: 8
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_APPLICATION,
+            pValue: CString::new(application).unwrap().into_raw() as *mut std::ffi::c_void,
+            ulValueLen: application.len() as CK_ULONG,
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_VALUE,
+            pValue: CString::new(data).unwrap().into_raw() as *mut std::ffi::c_void,
+            ulValueLen: data.len() as CK_ULONG,
+        },
+    ];
+
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    ret = fn_create_object(session, template.as_mut_ptr(), 3, &mut handle);
+    assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(session, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_create_object(session, template.as_mut_ptr(), 3, &mut handle);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_finalize(std::ptr::null_mut());
     assert_eq!(ret, CKR_OK);

@@ -300,7 +300,7 @@ impl Attribute {
 
 macro_rules! conversion_from_type {
     (make $fn1:ident; $fn2:ident; $fn3:ident; from $rtype:ty; as $atype:ident; via $conv:ident) => {
-        fn $fn1(t: CK_ULONG, val: $rtype) -> Attribute {
+        pub fn $fn1(t: CK_ULONG, val: $rtype) -> Attribute {
             Attribute {
                 ck_type: t,
                 attrtype: AttrType::$atype,
@@ -440,5 +440,23 @@ impl CK_ATTRIBUTE {
             std::slice::from_raw_parts(self.pValue as *const _, self.ulValueLen as usize)
         };
         Ok(buf.to_vec())
+    }
+
+    pub fn to_attribute(self) -> KResult<Attribute> {
+        let mut atype = AttrType::DenyType;
+        for amap in &ATTRMAP {
+            if amap.id == self.type_ {
+                atype = amap.atype;
+                break;
+            }
+        }
+        match atype {
+            AttrType::BoolType => Ok(from_bool(self.type_, self.to_bool()?)),
+            AttrType::NumType => Ok(from_ulong(self.type_, self.to_ulong()?)),
+            AttrType::StringType => Ok(from_string(self.type_, self.to_string()?)),
+            AttrType::BytesType => Ok(from_bytes(self.type_, self.to_buf()?)),
+            AttrType::DateType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+            AttrType::DenyType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+        }
     }
 }
