@@ -383,7 +383,27 @@ fn test_create_objects() {
     ret = fn_create_object(session, template.as_mut_ptr(), 3, &mut handle);
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_logout(session);
+    let mut intoken: CK_BBOOL = 1;
+    template.push(CK_ATTRIBUTE {
+        type_: CKA_TOKEN,
+        pValue: &mut intoken as *mut _ as *mut std::ffi::c_void,
+        ulValueLen: 1
+    });
+
+    ret = fn_create_object(session, template.as_mut_ptr(), 4, &mut handle);
+    assert_eq!(ret, CKR_SESSION_READ_ONLY);
+
+    let login_session = session;
+
+    ret = fn_open_session(0, CKF_SERIAL_SESSION|CKF_RW_SESSION, std::ptr::null_mut(), None, &mut session);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_create_object(session, template.as_mut_ptr(), 4, &mut handle);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_logout(login_session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(login_session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
