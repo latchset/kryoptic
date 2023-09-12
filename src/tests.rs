@@ -12,6 +12,14 @@ fn test_setup(filename: &str) {
     let test_token = serde_json::json!({
         "objects": [{
             "attributes": {
+                "CKA_UNIQUE_ID": "0",
+                "CKA_CLASS": 4,
+                "CKA_KEY_TYPE": 16,
+                "CKA_LABEL": "SO PIN",
+                "CKA_VALUE": "MTIzNDU2Nzg=",
+            }
+        }, {
+            "attributes": {
                 "CKA_UNIQUE_ID": "1",
                 "CKA_CLASS": 4,
                 "CKA_KEY_TYPE": 16,
@@ -407,6 +415,44 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+fn test_init_token() {
+    let testdata = TestData {
+        filename: Some("test_init_token.json"),
+    };
+    /* skip setup, we are creating an unitiliaized token */
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+
+    /* init once */
+    let pin_value = "SO Pin Value";
+    ret = fn_init_token(0,
+        CString::new(pin_value).unwrap().into_raw() as *mut u8,
+        pin_value.len() as CK_ULONG, std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+
+    /* verify wrong SO PIN fails */
+    let bad_value = "SO Bad Value";
+    ret = fn_init_token(0,
+        CString::new(bad_value).unwrap().into_raw() as *mut u8,
+        pin_value.len() as CK_ULONG, std::ptr::null_mut());
+    assert_eq!(ret, CKR_PIN_INCORRECT);
+
+    /* re-init */
+    let pin_value = "SO Pin Value";
+    ret = fn_init_token(0,
+        CString::new(pin_value).unwrap().into_raw() as *mut u8,
+        pin_value.len() as CK_ULONG, std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+
     ret = fn_finalize(std::ptr::null_mut());
     assert_eq!(ret, CKR_OK);
 }

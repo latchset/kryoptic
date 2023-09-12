@@ -21,7 +21,7 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new(filename: &str) -> KResult<Slot> {
+    pub fn new(filename: String) -> KResult<Slot> {
         let token = Token::load(filename)?;
         Ok(Slot {
             slot_info: CK_SLOT_INFO {
@@ -52,15 +52,38 @@ impl Slot {
 
     pub fn get_token(&self) -> KResult<RwLockReadGuard<'_, Token>> {
         match self.token.read() {
-            Ok(token) => Ok(token),
+            Ok(token) => {
+                if token.is_initialized() {
+                    Ok(token)
+                } else {
+                    /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
+                     * available error, we should rreturn that instead */
+                    err_rv!(KRYERR_TOKEN_NOT_INITIALIZED)
+                }
+            },
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
         }
     }
 
     pub fn get_token_mut(&self) -> KResult<RwLockWriteGuard<'_, Token>> {
         match self.token.write() {
-            Ok(token) => Ok(token),
+            Ok(token) => {
+                if token.is_initialized() {
+                    Ok(token)
+                } else {
+                    /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
+                     * available error, we should rreturn that instead */
+                    err_rv!(KRYERR_TOKEN_NOT_INITIALIZED)
+                }
+            },
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+
+    pub fn init_token(&self, pin: &Vec<u8>, label: &Vec<u8>) -> CK_RV {
+        match self.token.write() {
+            Ok(mut token) => token.initialize(pin, label),
+            Err(_) => CKR_GENERAL_ERROR,
         }
     }
 }

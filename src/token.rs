@@ -38,24 +38,52 @@ struct JsonObject {
 
 #[derive(Debug, Clone)]
 struct LoginData {
-    user_pin: Option<Vec<u8>>,
+    pin: Option<Vec<u8>>,
     max_attempts: CK_ULONG,
     attempts: CK_ULONG,
     logged_in: bool,
 }
 
+impl LoginData {
+    fn check_pin(&mut self, pin: &Vec<u8>) -> CK_RV {
+        if self.attempts >= self.max_attempts {
+            return CKR_PIN_LOCKED
+        }
+        if self.logged_in {
+            return CKR_USER_ALREADY_LOGGED_IN
+        }
+        match &self.pin {
+            Some(p) => {
+                if p == pin {
+                    self.logged_in = true;
+                    self.attempts = 0;
+                    CKR_OK
+                } else {
+                    self.attempts += 1;
+                    CKR_PIN_INCORRECT
+                }
+            },
+            None => {
+                CKR_USER_PIN_NOT_INITIALIZED
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Token {
     info: CK_TOKEN_INFO,
+    filename: String,
     objects: HashMap<String, Object>,
     dirty: bool,
-    login: LoginData,
+    so_login: LoginData,
+    user_login: LoginData,
     handles: HashMap<CK_OBJECT_HANDLE, String>,
     next_handle: CK_OBJECT_HANDLE,
 }
 
 impl Token {
-    pub fn load(filename: &str) -> KResult<Token> {
+    pub fn load(filename: String) -> KResult<Token> {
 
         let mut t = Token {
             info: CK_TOKEN_INFO {
@@ -63,7 +91,7 @@ impl Token {
                 manufacturerID: MANUFACTURER_ID,
                 model: TOKEN_MODEL,
                 serialNumber: TOKEN_SERIAL,
-                flags: Token::token_flags(),
+                flags: CKF_RNG | CKF_LOGIN_REQUIRED,
                 ulMaxSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulSessionCount: 0,
                 ulMaxRwSessionCount: CK_EFFECTIVELY_INFINITE,
@@ -84,9 +112,16 @@ impl Token {
                 },
                 utcTime: *b"0000000000000000",
             },
+            filename: filename,
             objects: HashMap::new(),
-            login: LoginData {
-                user_pin: None,
+            so_login: LoginData {
+                pin: None,
+                max_attempts: 0,
+                attempts: 0,
+                logged_in: false,
+            },
+            user_login: LoginData {
+                pin: None,
                 max_attempts: 0,
                 attempts: 0,
                 logged_in: false,
@@ -96,17 +131,77 @@ impl Token {
             next_handle: 1,
         };
 
-        let file = match std::fs::File::open(filename) {
-            Ok(f) => f,
-            Err(e) => {
-                return Err(KError::FileError(e));
+        match std::fs::File::open(&t.filename) {
+            Ok(f) => match serde_json::from_reader::<std::fs::File, JsonToken>(f) {
+                Ok(j) => t.json_to_objects(&j.objects)?,
+                Err(e) => return Err(KError::JsonError(e)),
+            },
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => return Ok(t),
+                _ => return Err(KError::FileError(e)),
             }
         };
-        match serde_json::from_reader::<std::fs::File, JsonToken>(file) {
-            Ok(j) => t.json_to_objects(&j.objects)?,
-            Err(e) => return Err(KError::JsonError(e)),
-        }
+        t.info.flags |= CKF_TOKEN_INITIALIZED;
         Ok(t)
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.info.flags & CKF_TOKEN_INITIALIZED == CKF_TOKEN_INITIALIZED
+    }
+
+    pub fn initialize(&mut self, pin: &Vec<u8>, _label: &Vec<u8>) -> CK_RV {
+        if self.is_initialized() {
+            let ret = self.login(CKU_SO, pin);
+            if ret != CKR_OK {
+                return ret;
+            }
+        } else {
+            self.so_login.pin = Some(pin.clone());
+            self.so_login.max_attempts = 10;
+            self.so_login.attempts = 0;
+        }
+        self.so_login.logged_in = false;
+
+        self.objects = HashMap::new();
+        self.handles = HashMap::new();
+        self.next_handle = 1;
+        self.dirty = true;
+
+        let jtok: JsonToken = match serde_json::from_str("
+            {
+                \"objects\": [{
+                    \"attributes\":{
+                        \"CKA_UNIQUE_ID\": \"0\",
+                        \"CKA_CLASS\": 4,
+                        \"CKA_KEY_TYPE\": 16,
+                        \"CKA_LABEL\": \"SO PIN\"
+                    }
+                }]
+            }") {
+            Ok(t) => t,
+            Err(_) => return CKR_GENERAL_ERROR,
+        };
+        if self.json_to_objects(&jtok.objects).is_err() {
+            return CKR_GENERAL_ERROR
+        }
+
+        /* add pin to so_object */
+        let mut obj = match self.objects.get_mut(&"0".to_string()) {
+            Some(mut o) => o,
+            None => return CKR_GENERAL_ERROR,
+        };
+        match obj.set_attr(attribute::from_bytes(CKA_VALUE, pin.clone())) {
+            Ok(()) => (),
+            Err(_) => return CKR_GENERAL_ERROR,
+        }
+
+        match self.save() {
+            Ok(_) => {
+                self.info.flags |= CKF_TOKEN_INITIALIZED;
+                CKR_OK
+            },
+            Err(_) => CKR_GENERAL_ERROR,
+        }
     }
 
     fn next_object_handle(&mut self) -> CK_SESSION_HANDLE {
@@ -171,24 +266,20 @@ impl Token {
             },
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
-        if checks && !self.login.logged_in && obj.is_private() {
+        if checks && !self.user_login.logged_in && obj.is_private() {
             return err_rv!(CKR_OBJECT_HANDLE_INVALID)
         }
         Ok(obj)
     }
 
-    fn get_login_data(&mut self) -> KResult<()> {
-        let obj = match self.objects.get(&"1".to_string()) {
-            Some(o) => o,
-            None => return err_rv!(CKR_USER_PIN_NOT_INITIALIZED),
-        };
+    fn validate_pin_obj(&self, obj: &Object, label: String) -> KResult<(Vec<u8>, CK_ULONG)> {
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        if obj.get_attr_as_string(CKA_LABEL)? != "User PIN" {
+        if obj.get_attr_as_string(CKA_LABEL)? != label {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         let value = obj.get_attr_as_bytes(CKA_VALUE)?;
@@ -197,45 +288,56 @@ impl Token {
             Err(_) => 10,
         };
 
-        self.login.user_pin = Some(value.clone());
-        self.login.max_attempts = max;
+        Ok((value.clone(), max as CK_ULONG))
+    }
+
+    fn get_so_login_data(&mut self) -> KResult<()> {
+        if self.so_login.pin.is_none() {
+            let obj = match self.objects.get(&"0".to_string()) {
+                Some(o) => o,
+                None => return err_rv!(CKR_GENERAL_ERROR),
+            };
+            let (pin, max) = self.validate_pin_obj(obj, "SO PIN".to_string())?;
+            self.so_login.pin = Some(pin);
+            self.so_login.max_attempts = max;
+        }
+        Ok(())
+    }
+
+    fn get_user_login_data(&mut self) -> KResult<()> {
+        if self.user_login.pin.is_none() {
+            let obj = match self.objects.get(&"1".to_string()) {
+                Some(o) => o,
+                None => return err_rv!(CKR_USER_PIN_NOT_INITIALIZED),
+            };
+            let (pin, max) = self.validate_pin_obj(obj, "User PIN".to_string())?;
+            self.user_login.pin = Some(pin);
+            self.user_login.max_attempts = max;
+        }
         Ok(())
     }
 
     pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
         match user_type {
             CKU_SO => {
-                /* not supported yet */
-                return CKR_OPERATION_NOT_INITIALIZED;
+                match self.get_so_login_data() {
+                    Ok(_) => (),
+                    Err(e) => match e {
+                        KError::RvError(e) => return e.rv,
+                        _ => return CKR_GENERAL_ERROR,
+                    },
+                }
+                self.so_login.check_pin(pin)
             },
             CKU_USER => {
-                if self.login.user_pin.is_none() {
-                    match self.get_login_data() {
-                        Ok(_) => (),
-                        Err(_) => return CKR_USER_PIN_NOT_INITIALIZED,
-                    }
-                }
-
-                if self.login.attempts >= self.login.max_attempts {
-                    return CKR_PIN_LOCKED
-                }
-                if self.login.logged_in {
-                    return CKR_USER_ALREADY_LOGGED_IN
-                }
-                match &self.login.user_pin {
-                    Some(p) => {
-                        if p == pin {
-                            self.login.logged_in = true;
-                            self.login.attempts = 0;
-                            return CKR_OK;
-                        }
-                        self.login.attempts += 1;
-                        return CKR_PIN_INCORRECT;
+                match self.get_user_login_data() {
+                    Ok(_) => (),
+                    Err(e) => match e {
+                        KError::RvError(e) => return e.rv,
+                        _ => return CKR_GENERAL_ERROR,
                     },
-                    None => {
-                        return CKR_USER_PIN_NOT_INITIALIZED
-                    }
                 }
+                self.user_login.check_pin(pin)
             },
             CKU_CONTEXT_SPECIFIC => {
                 /* not supported yet */
@@ -246,14 +348,14 @@ impl Token {
     }
 
     pub fn logout(&mut self) -> CK_RV {
-        if !self.login.logged_in {
+        if !self.user_login.logged_in {
             return CKR_USER_NOT_LOGGED_IN;
         }
-        self.login.logged_in = false;
+        self.user_login.logged_in = false;
         CKR_OK
     }
 
-    pub fn save(&self, filename: &str) -> KResult<()> {
+    pub fn save(&self) -> KResult<()> {
         if !self.dirty {
             return Ok(())
         }
@@ -264,7 +366,7 @@ impl Token {
             Ok(j) => j,
             Err(e) => return Err(KError::JsonError(e)),
         };
-        match std::fs::write(filename, j) {
+        match std::fs::write(&self.filename, j) {
             Ok(_) => Ok(()),
             Err(e) => Err(KError::FileError(e)),
         }
@@ -272,7 +374,7 @@ impl Token {
 
     pub fn create_object(&mut self, session: &mut Session, template: &[CK_ATTRIBUTE]) -> KResult<CK_OBJECT_HANDLE> {
 
-        if !self.login.logged_in {
+        if !self.user_login.logged_in {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
@@ -295,11 +397,6 @@ impl Token {
         Ok(handle)
     }
 
-    fn token_flags() -> CK_FLAGS {
-        // FIXME: most of these flags need to be set dynamically
-        CKF_RNG | CKF_LOGIN_REQUIRED | CKF_TOKEN_INITIALIZED
-    }
-
     pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
         &self.info
     }
@@ -308,7 +405,7 @@ impl Token {
         session.reset_search_handles();
 
         for (_, o) in &self.objects {
-            if !self.login.logged_in && o.is_private() {
+            if !self.user_login.logged_in && o.is_private() {
                 continue;
             }
 
