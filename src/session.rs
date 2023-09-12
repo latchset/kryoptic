@@ -87,25 +87,76 @@ impl Session {
         &self.info
     }
 
-    pub fn set_user_functions(&mut self, on: bool) {
-        match on {
-            true => match self.info.state {
-                CKS_RO_PUBLIC_SESSION => self.info.state = CKS_RO_USER_FUNCTIONS,
-                CKS_RW_PUBLIC_SESSION => self.info.state = CKS_RW_USER_FUNCTIONS,
-                _ => (),
+    /* a user type of CK_UNAVAILABLE_INFORMATION effects a "logout" to public */
+    pub fn change_session_state(&mut self, user_type: CK_USER_TYPE) -> CK_RV {
+        match self.info.state {
+            CKS_RO_PUBLIC_SESSION => {
+                match user_type {
+                    CK_UNAVAILABLE_INFORMATION => CKR_OK,
+                    CKU_USER => {
+                        self.info.state = CKS_RO_USER_FUNCTIONS;
+                        CKR_OK
+                    },
+                    CKU_SO => CKR_OPERATION_NOT_INITIALIZED,
+                    _ => CKR_USER_TYPE_INVALID,
+                }
             },
-            false => match self.info.state {
-                CKS_RO_USER_FUNCTIONS => self.info.state = CKS_RO_PUBLIC_SESSION,
-                CKS_RW_USER_FUNCTIONS => self.info.state = CKS_RW_PUBLIC_SESSION,
-                _ => (),
-            }
-        };
+            CKS_RW_PUBLIC_SESSION => {
+                match user_type {
+                    CK_UNAVAILABLE_INFORMATION => CKR_OK,
+                    CKU_USER => {
+                        self.info.state = CKS_RW_USER_FUNCTIONS;
+                        CKR_OK
+                    },
+                    CKU_SO => {
+                        self.info.state = CKS_RW_SO_FUNCTIONS;
+                        CKR_OK
+                    },
+                    _ => CKR_USER_TYPE_INVALID,
+                }
+            },
+            CKS_RO_USER_FUNCTIONS => {
+                match user_type {
+                    CK_UNAVAILABLE_INFORMATION => {
+                        self.info.state = CKS_RO_PUBLIC_SESSION;
+                        CKR_OK
+                    },
+                    CKU_USER => CKR_OK,
+                    CKU_SO => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+                    _ => CKR_USER_TYPE_INVALID,
+                }
+            },
+            CKS_RW_USER_FUNCTIONS => {
+                match user_type {
+                    CK_UNAVAILABLE_INFORMATION => {
+                        self.info.state = CKS_RW_PUBLIC_SESSION;
+                        CKR_OK
+                    },
+                    CKU_USER => CKR_OK,
+                    CKU_SO => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+                    _ => CKR_USER_TYPE_INVALID,
+                }
+            },
+            CKS_RW_SO_FUNCTIONS => {
+                match user_type {
+                    CK_UNAVAILABLE_INFORMATION => {
+                        self.info.state = CKS_RW_PUBLIC_SESSION;
+                        CKR_OK
+                    },
+                    CKU_USER => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+                    CKU_SO => CKR_OK,
+                    _ => CKR_USER_TYPE_INVALID,
+                }
+            },
+            _ => CKR_GENERAL_ERROR,
+        }
     }
 
     pub fn is_writable(&self) -> bool {
         match self.info.state {
             CKS_RW_PUBLIC_SESSION => true,
             CKS_RW_USER_FUNCTIONS => true,
+            CKS_RW_SO_FUNCTIONS => true,
             _ => false,
         }
     }

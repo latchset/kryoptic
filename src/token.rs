@@ -49,9 +49,6 @@ impl LoginData {
         if self.attempts >= self.max_attempts {
             return CKR_PIN_LOCKED
         }
-        if self.logged_in {
-            return CKR_USER_ALREADY_LOGGED_IN
-        }
         match &self.pin {
             Some(p) => {
                 if p == pin {
@@ -67,6 +64,30 @@ impl LoginData {
                 CKR_USER_PIN_NOT_INITIALIZED
             }
         }
+    }
+
+    fn set_pin(&mut self, info: &CK_TOKEN_INFO, pin: &Vec<u8>) -> CK_RV {
+        let pin_len = pin.len() as CK_ULONG;
+        if info.ulMaxPinLen != CK_EFFECTIVELY_INFINITE {
+            if pin_len > info.ulMaxPinLen {
+                return CKR_PIN_LEN_RANGE
+            }
+        }
+        if pin_len < info.ulMinPinLen {
+            return CKR_PIN_LEN_RANGE
+        }
+        self.pin = Some(pin.clone());
+        self.max_attempts = 10;
+        self.attempts = 0;
+        CKR_OK
+    }
+
+    fn change_pin(&mut self, info: &CK_TOKEN_INFO, pin: &Vec<u8>, old: &Vec<u8>) -> CK_RV {
+        let ret = self.check_pin(old);
+        if ret != CKR_OK {
+            return ret
+        }
+        self.set_pin(info, pin)
     }
 }
 
@@ -97,7 +118,7 @@ impl Token {
                 ulMaxRwSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulRwSessionCount: 0,
                 ulMaxPinLen: CK_EFFECTIVELY_INFINITE,
-                ulMinPinLen: CK_EFFECTIVELY_INFINITE,
+                ulMinPinLen: 8,
                 ulTotalPublicMemory: 0,
                 ulFreePublicMemory: 0,
                 ulTotalPrivateMemory: 0,
@@ -149,16 +170,38 @@ impl Token {
         self.info.flags & CKF_TOKEN_INITIALIZED == CKF_TOKEN_INITIALIZED
     }
 
+    fn store_pin_object(&mut self, uid: String, label: String,
+                        pin: Vec<u8>) -> KResult<()> {
+        match self.objects.get_mut(&uid) {
+            Some(obj) => {
+                obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
+            },
+            None => {
+                let mut obj = Object::new(self.next_object_handle());
+                obj.set_attr(attribute::from_string(CKA_UNIQUE_ID,
+                                                    uid.clone()))?;
+                obj.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
+                obj.set_attr(attribute::from_ulong(CKA_CLASS,
+                                                   CKO_SECRET_KEY))?;
+                obj.set_attr(attribute::from_ulong(CKA_KEY_TYPE,
+                                                   CKK_GENERIC_SECRET))?;
+                obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
+                obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
+                self.handles.insert(obj.get_handle(), uid.clone());
+                self.objects.insert(uid, obj);
+            },
+        }
+        return Ok(())
+    }
+
     pub fn initialize(&mut self, pin: &Vec<u8>, _label: &Vec<u8>) -> CK_RV {
-        if self.is_initialized() {
-            let ret = self.login(CKU_SO, pin);
-            if ret != CKR_OK {
-                return ret;
-            }
+        let ret = if self.is_initialized() {
+            self.login(CKU_SO, pin)
         } else {
-            self.so_login.pin = Some(pin.clone());
-            self.so_login.max_attempts = 10;
-            self.so_login.attempts = 0;
+            self.so_login.set_pin(&self.info, pin)
+        };
+        if ret != CKR_OK {
+            return ret;
         }
         self.so_login.logged_in = false;
 
@@ -167,30 +210,10 @@ impl Token {
         self.next_handle = 1;
         self.dirty = true;
 
-        let jtok: JsonToken = match serde_json::from_str("
-            {
-                \"objects\": [{
-                    \"attributes\":{
-                        \"CKA_UNIQUE_ID\": \"0\",
-                        \"CKA_CLASS\": 4,
-                        \"CKA_KEY_TYPE\": 16,
-                        \"CKA_LABEL\": \"SO PIN\"
-                    }
-                }]
-            }") {
-            Ok(t) => t,
-            Err(_) => return CKR_GENERAL_ERROR,
-        };
-        if self.json_to_objects(&jtok.objects).is_err() {
-            return CKR_GENERAL_ERROR
-        }
-
         /* add pin to so_object */
-        let mut obj = match self.objects.get_mut(&"0".to_string()) {
-            Some(mut o) => o,
-            None => return CKR_GENERAL_ERROR,
-        };
-        match obj.set_attr(attribute::from_bytes(CKA_VALUE, pin.clone())) {
+        match self.store_pin_object("0".to_string(),
+                                    "SO PIN".to_string(),
+                                    pin.clone()) {
             Ok(()) => (),
             Err(_) => return CKR_GENERAL_ERROR,
         }
@@ -320,6 +343,12 @@ impl Token {
     pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
         match user_type {
             CKU_SO => {
+                if self.so_login.logged_in {
+                    return CKR_USER_ALREADY_LOGGED_IN
+                }
+                if self.user_login.logged_in {
+                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+                }
                 match self.get_so_login_data() {
                     Ok(_) => (),
                     Err(e) => match e {
@@ -330,6 +359,12 @@ impl Token {
                 self.so_login.check_pin(pin)
             },
             CKU_USER => {
+                if self.user_login.logged_in {
+                    return CKR_USER_ALREADY_LOGGED_IN
+                }
+                if self.so_login.logged_in {
+                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+                }
                 match self.get_user_login_data() {
                     Ok(_) => (),
                     Err(e) => match e {
@@ -339,20 +374,93 @@ impl Token {
                 }
                 self.user_login.check_pin(pin)
             },
-            CKU_CONTEXT_SPECIFIC => {
-                /* not supported yet */
-                return CKR_OPERATION_NOT_INITIALIZED;
-            },
             _ => return CKR_USER_TYPE_INVALID,
         }
     }
 
     pub fn logout(&mut self) -> CK_RV {
-        if !self.user_login.logged_in {
-            return CKR_USER_NOT_LOGGED_IN;
+        if self.user_login.logged_in {
+            self.user_login.logged_in = false;
+            return CKR_OK
         }
-        self.user_login.logged_in = false;
-        CKR_OK
+        if self.so_login.logged_in {
+            self.so_login.logged_in = false;
+            return CKR_OK
+        }
+        CKR_USER_NOT_LOGGED_IN
+    }
+
+    pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
+        match user_type {
+            CK_UNAVAILABLE_INFORMATION => {
+                self.so_login.logged_in || self.user_login.logged_in
+            },
+            CKU_SO => self.so_login.logged_in,
+            CKU_USER => self.user_login.logged_in,
+            _ => false,
+        }
+    }
+
+    pub fn set_pin(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>, old: Option<&Vec<u8>>) -> CK_RV {
+        let utype = match user_type {
+            CK_UNAVAILABLE_INFORMATION => {
+                if self.so_login.logged_in {
+                    CKU_SO
+                } else {
+                    CKU_USER
+                }
+            },
+            CKU_USER => CKU_USER,
+            CKU_SO => CKU_SO,
+            _ => return CKR_GENERAL_ERROR,
+        };
+
+        match utype {
+            CKU_USER => {
+                let ret = if self.so_login.logged_in {
+                    self.user_login.set_pin(&self.info, pin)
+                } else {
+                    if old.is_none() {
+                        return CKR_PIN_INCORRECT
+                    }
+                    self.user_login.change_pin(&self.info, pin, old.unwrap())
+                };
+                if ret != CKR_OK {
+                    return ret
+                }
+                /* update pin in storage */
+                match self.store_pin_object("1".to_string(),
+                                            "User PIN".to_string(),
+                                            pin.clone()) {
+                    Ok(()) => (),
+                    Err(_) => return CKR_GENERAL_ERROR,
+                }
+            },
+            CKU_SO => {
+                if old.is_none() {
+                    return CKR_PIN_INCORRECT
+                }
+                let ret = self.so_login.change_pin(&self.info, pin,
+                                                   old.unwrap());
+                if ret != CKR_OK {
+                    return ret
+                }
+                /* update pin in storage */
+                match self.store_pin_object("0".to_string(),
+                                            "SO PIN".to_string(),
+                                            pin.clone()) {
+                    Ok(()) => (),
+                    Err(_) => return CKR_GENERAL_ERROR,
+                }
+            },
+            _ => return CKR_GENERAL_ERROR,
+        }
+
+        self.dirty = true;
+        match self.save() {
+            Ok(()) => CKR_OK,
+            Err(_) => CKR_GENERAL_ERROR,
+        }
     }
 
     pub fn save(&self) -> KResult<()> {

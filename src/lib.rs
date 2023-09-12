@@ -150,25 +150,33 @@ impl SessionsState {
         self.sessions.clear();
     }
 
-    fn all_sessions_set_user_functions(&mut self, handle: CK_SESSION_HANDLE, on: bool) -> KResult<()> {
-        if handle >= self.next_handle {
-            return err_rv!(CKR_SESSION_HANDLE_INVALID)
-        }
-        let slotid = self.get_session(handle)?.get_session_info().slotID;
+    fn change_all_sessions_states(&mut self, slot_id: CK_SLOT_ID,
+                                  user_type: CK_USER_TYPE) -> KResult<()> {
         for s in self.sessions.iter_mut() {
-            if s.get_session_info().slotID == slotid {
-                s.set_user_functions(on);
+            if s.get_session_info().slotID == slot_id {
+                let ret = s.change_session_state(user_type);
+                if ret != CKR_OK {
+                    return err_rv!(ret);
+                }
             }
         }
         Ok(())
     }
 
-    fn check_slot_has_sessions(&self, slot_id: CK_SLOT_ID) -> bool {
+    fn check_slot_has_sessions(&self, slot_id: CK_SLOT_ID, ro: bool) -> bool {
         let iter = self.sessions.iter();
         for s in iter {
             let info = s.get_session_info();
             if info.slotID == slot_id {
-                return true;
+                if ro {
+                    match info.state {
+                        CKS_RO_PUBLIC_SESSION => return true,
+                        CKS_RO_USER_FUNCTIONS => return true,
+                        _ => continue,
+                    }
+                } else {
+                    return true;
+                }
             }
         }
         return false;
@@ -293,7 +301,7 @@ extern "C" fn fn_init_token(
         return CKR_SLOT_ID_INVALID;
     }
     let rsess = global_rlock!(SESSIONS);
-    if rsess.check_slot_has_sessions(slot_id) {
+    if rsess.check_slot_has_sessions(slot_id, false) {
         return CKR_SESSION_EXISTS;
     }
     let vpin: Vec<u8> = unsafe {
@@ -309,20 +317,61 @@ extern "C" fn fn_init_token(
     rslots.slots[slot_id as usize].init_token(&vpin, &vlabel)
 }
 extern "C" fn fn_init_pin(
-        _session: CK_SESSION_HANDLE,
-        _pin: CK_UTF8CHAR_PTR,
-        _pin_len: CK_ULONG,
+        s_handle: CK_SESSION_HANDLE,
+        pin: CK_UTF8CHAR_PTR,
+        pin_len: CK_ULONG,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rsess = global_rlock!(SESSIONS);
+    let session = match rsess.get_session(s_handle) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
+    let info = session.get_session_info();
+    if info.state != CKS_RW_SO_FUNCTIONS {
+        return CKR_USER_NOT_LOGGED_IN;
+    }
+
+    let wslots = global_wlock!(SLOTS);
+    let mut token = match wslots.get_token_from_slot_mut(info.slotID) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    let vpin: Vec<u8> = unsafe {
+        std::slice::from_raw_parts(pin, pin_len as usize).to_vec()
+    };
+
+    token.set_pin(CKU_USER, &vpin, None)
 }
 extern "C" fn fn_set_pin(
-        _session: CK_SESSION_HANDLE,
-        _old_pin: CK_UTF8CHAR_PTR,
-        _old_len: CK_ULONG,
-        _new_pin: CK_UTF8CHAR_PTR,
-        _new_len: CK_ULONG,
+        s_handle: CK_SESSION_HANDLE,
+        old_pin: CK_UTF8CHAR_PTR,
+        old_len: CK_ULONG,
+        new_pin: CK_UTF8CHAR_PTR,
+        new_len: CK_ULONG,
     ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rsess = global_rlock!(SESSIONS);
+    let session = match rsess.get_session(s_handle) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
+    if !session.is_writable() {
+        return CKR_SESSION_READ_ONLY;
+    }
+    let info = session.get_session_info();
+
+    let wslots = global_wlock!(SLOTS);
+    let mut token = match wslots.get_token_from_slot_mut(info.slotID) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    let vpin: Vec<u8> = unsafe {
+        std::slice::from_raw_parts(new_pin, new_len as usize).to_vec()
+    };
+    let vold: Vec<u8> = unsafe {
+        std::slice::from_raw_parts(old_pin, old_len as usize).to_vec()
+    };
+
+    token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, Some(&vold))
 }
 extern "C" fn fn_open_session(
         slot_id: CK_SLOT_ID,
@@ -331,8 +380,15 @@ extern "C" fn fn_open_session(
         _notify: CK_NOTIFY,
         ph_session: CK_SESSION_HANDLE_PTR,
     ) -> CK_RV {
-    if slot_id != 0 {
-        return CKR_SLOT_ID_INVALID;
+    let rslots = global_rlock!(SLOTS);
+    let token = match rslots.get_token_from_slot(slot_id) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    if flags & CKF_RW_SESSION == 0 {
+        if token.is_logged_in(CKU_SO) {
+            return CKR_SESSION_READ_WRITE_SO_EXISTS;
+        }
     }
     let mut wsess = global_wlock!(SESSIONS);
     let session = match wsess.new_session(slot_id, flags) {
@@ -395,8 +451,14 @@ extern "C" fn fn_login(
         Err(e) => return err_to_rv!(e),
     };
     let info = session.get_session_info();
-    let mut wslots = global_wlock!(SLOTS);
-    let mut token = match wslots.get_token_from_slot_mut(info.slotID) {
+    let slot_id = info.slotID;
+    if user_type == CKU_SO {
+        if wsess.check_slot_has_sessions(slot_id, true) {
+            return CKR_SESSION_READ_ONLY_EXISTS
+        }
+    }
+    let wslots = global_wlock!(SLOTS);
+    let mut token = match wslots.get_token_from_slot_mut(slot_id) {
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
     };
@@ -410,12 +472,16 @@ extern "C" fn fn_login(
     }
 
     /* must mark all sessions on same token as logged in */
-    match wsess.all_sessions_set_user_functions(handle, true) {
-        Ok(id) => id,
-        Err(e) => return err_to_rv!(e),
-    };
-
-    CKR_OK
+    match wsess.change_all_sessions_states(slot_id, user_type) {
+        Ok(_) => CKR_OK,
+        Err(e) => {
+            /* log all out to bring back to a consistent state */
+            token.logout();
+            let _ = wsess.change_all_sessions_states(slot_id,
+                                                     CK_UNAVAILABLE_INFORMATION);
+            return err_to_rv!(e)
+        },
+    }
 }
 extern "C" fn fn_logout(handle: CK_SESSION_HANDLE) -> CK_RV {
     let mut wsess = global_wlock!(SESSIONS);
@@ -424,8 +490,9 @@ extern "C" fn fn_logout(handle: CK_SESSION_HANDLE) -> CK_RV {
         Err(e) => return err_to_rv!(e),
     };
     let info = session.get_session_info();
-    let mut wslots = global_wlock!(SLOTS);
-    let mut token = match wslots.get_token_from_slot_mut(info.slotID) {
+    let slot_id = info.slotID;
+    let wslots = global_wlock!(SLOTS);
+    let mut token = match wslots.get_token_from_slot_mut(slot_id) {
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
     };
@@ -435,13 +502,12 @@ extern "C" fn fn_logout(handle: CK_SESSION_HANDLE) -> CK_RV {
         return ret;
     }
 
-    /* must mark all sessions on same token as logged in */
-    match wsess.all_sessions_set_user_functions(handle, false) {
-        Ok(id) => id,
+    /* must mark all sessions on same token as logged out */
+    match wsess.change_all_sessions_states(slot_id,
+                                           CK_UNAVAILABLE_INFORMATION) {
+        Ok(_) => CKR_OK,
         Err(e) => return err_to_rv!(e),
-    };
-
-    CKR_OK
+    }
 }
 extern "C" fn fn_create_object(
         handle: CK_SESSION_HANDLE,
@@ -455,7 +521,7 @@ extern "C" fn fn_create_object(
         Err(e) => return err_to_rv!(e),
     };
     let info = session.get_session_info();
-    let mut wslots = global_wlock!(SLOTS);
+    let wslots = global_wlock!(SLOTS);
     let mut token = match wslots.get_token_from_slot_mut(info.slotID) {
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
