@@ -1,18 +1,20 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::{RwLock,RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use super::error;
 use super::interface;
 use super::token::Token;
 
-use interface::*;
-use error::{KResult, KError};
 use super::err_rv;
+use error::{KError, KResult};
+use interface::*;
 
-static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] = *b"Kryoptic SLot                                                   ";
-static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
+static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] =
+    *b"Kryoptic SLot                                                   ";
+static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic                        ";
 
 #[derive(Debug)]
 pub struct Slot {
@@ -29,14 +31,8 @@ impl Slot {
                 slotDescription: SLOT_DESCRIPTION,
                 manufacturerID: MANUFACTURER_ID,
                 flags: CKF_TOKEN_PRESENT,
-                hardwareVersion: CK_VERSION {
-                    major: 0,
-                    minor: 0,
-                },
-                firmwareVersion: CK_VERSION {
-                    major: 0,
-                    minor: 0,
-                },
+                hardwareVersion: CK_VERSION { major: 0, minor: 0 },
+                firmwareVersion: CK_VERSION { major: 0, minor: 0 },
             },
             token: RwLock::new(token),
         })
@@ -61,12 +57,15 @@ impl Slot {
                      * available error, we should rreturn that instead */
                     err_rv!(KRYERR_TOKEN_NOT_INITIALIZED)
                 }
-            },
+            }
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
         }
     }
 
-    pub fn get_token_mut(&self, nochecks: bool) -> KResult<RwLockWriteGuard<'_, Token>> {
+    pub fn get_token_mut(
+        &self,
+        nochecks: bool,
+    ) -> KResult<RwLockWriteGuard<'_, Token>> {
         match self.token.write() {
             Ok(token) => {
                 if nochecks {
@@ -78,7 +77,7 @@ impl Slot {
                      * available error, we should rreturn that instead */
                     err_rv!(KRYERR_TOKEN_NOT_INITIALIZED)
                 }
-            },
+            }
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
         }
     }

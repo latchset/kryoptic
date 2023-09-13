@@ -1,13 +1,13 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::interface;
 use super::attribute;
 use super::error;
+use super::interface;
+use super::{err_not_found, err_rv};
+use attribute::{AttrType, Attribute};
+use error::{KError, KResult};
 use interface::*;
-use attribute::{Attribute, AttrType};
-use error::{KResult, KError};
-use super::{err_rv, err_not_found};
 
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ macro_rules! create_bool_checker {
             }
             $def
         }
-    }
+    };
 }
 
 macro_rules! attr_as_type {
@@ -32,12 +32,12 @@ macro_rules! attr_as_type {
                     if attr.get_attrtype() != AttrType::$atype {
                         return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
                     }
-                    return attr.$conv()
+                    return attr.$conv();
                 }
             }
             err_not_found!(t.to_string())
         }
-    }
+    };
 }
 
 static SENSITIVE_CKK_RSA: [CK_ULONG; 6] = [
@@ -49,23 +49,13 @@ static SENSITIVE_CKK_RSA: [CK_ULONG; 6] = [
     CKA_COEFFICIENT,
 ];
 
-static SENSITIVE_CKK_EC: [CK_ULONG; 1] = [
-    CKA_VALUE,
-];
+static SENSITIVE_CKK_EC: [CK_ULONG; 1] = [CKA_VALUE];
 
-static SENSITIVE_CKK_DH: [CK_ULONG; 2] = [
-    CKA_VALUE,
-    CKA_VALUE_BITS,
-];
+static SENSITIVE_CKK_DH: [CK_ULONG; 2] = [CKA_VALUE, CKA_VALUE_BITS];
 
-static SENSITIVE_CKK_DSA: [CK_ULONG; 1] = [
-    CKA_VALUE,
-];
+static SENSITIVE_CKK_DSA: [CK_ULONG; 1] = [CKA_VALUE];
 
-static SENSITIVE_CKK_GENERIC_SECRET: [CK_ULONG; 2] = [
-    CKA_VALUE,
-    CKA_VALUE_LEN,
-];
+static SENSITIVE_CKK_GENERIC_SECRET: [CK_ULONG; 2] = [CKA_VALUE, CKA_VALUE_LEN];
 
 static SENSITIVE: [(CK_ULONG, &[CK_ULONG]); 8] = [
     (CKK_RSA, &SENSITIVE_CKK_RSA),
@@ -81,7 +71,7 @@ static SENSITIVE: [(CK_ULONG, &[CK_ULONG]); 8] = [
 #[derive(Debug, Clone)]
 pub struct Object {
     handle: CK_OBJECT_HANDLE,
-    attributes: Vec<Attribute>
+    attributes: Vec<Attribute>,
 }
 
 impl Object {
@@ -96,12 +86,12 @@ impl Object {
         self.handle
     }
 
-    create_bool_checker!{make is_token; from CKA_TOKEN; def false}
-    create_bool_checker!{make is_private; from CKA_PRIVATE; def true}
-    create_bool_checker!{make is_sensitive; from CKA_SENSITIVE; def true}
-    create_bool_checker!{make is_modifiable; from CKA_MODIFIABLE; def true}
-    create_bool_checker!{make is_destroyable; from CKA_DESTROYABLE; def false}
-    create_bool_checker!{make is_extractable; from CKA_EXTRACTABLE; def false}
+    create_bool_checker! {make is_token; from CKA_TOKEN; def false}
+    create_bool_checker! {make is_private; from CKA_PRIVATE; def true}
+    create_bool_checker! {make is_sensitive; from CKA_SENSITIVE; def true}
+    create_bool_checker! {make is_modifiable; from CKA_MODIFIABLE; def true}
+    create_bool_checker! {make is_destroyable; from CKA_DESTROYABLE; def false}
+    create_bool_checker! {make is_extractable; from CKA_EXTRACTABLE; def false}
 
     pub fn set_attr(&mut self, a: Attribute) -> KResult<()> {
         let mut idx = self.attributes.len();
@@ -120,13 +110,13 @@ impl Object {
     }
 
     pub fn get_attributes(&self) -> &Vec<Attribute> {
-        return &self.attributes
+        return &self.attributes;
     }
 
-    attr_as_type!{make get_attr_as_bool; with bool; BoolType; via to_bool}
-    attr_as_type!{make get_attr_as_ulong; with CK_ULONG; NumType; via to_ulong}
-    attr_as_type!{make get_attr_as_string; with String; StringType; via to_string}
-    attr_as_type!{make get_attr_as_bytes; with &Vec<u8>; BytesType; via to_bytes}
+    attr_as_type! {make get_attr_as_bool; with bool; BoolType; via to_bool}
+    attr_as_type! {make get_attr_as_ulong; with CK_ULONG; NumType; via to_ulong}
+    attr_as_type! {make get_attr_as_string; with String; StringType; via to_string}
+    attr_as_type! {make get_attr_as_bytes; with &Vec<u8>; BytesType; via to_bytes}
 
     pub fn match_template(&self, template: &[CK_ATTRIBUTE]) -> bool {
         for ck_attr in template.iter() {
@@ -153,7 +143,8 @@ impl Object {
                 continue;
             }
             if attr.get_type() == CKA_KEY_TYPE {
-                key_type = attr.to_ulong().unwrap_or(CK_UNAVAILABLE_INFORMATION);
+                key_type =
+                    attr.to_ulong().unwrap_or(CK_UNAVAILABLE_INFORMATION);
             }
         }
         if class == CKO_PRIVATE_KEY || class == CKO_SECRET_KEY {
@@ -211,7 +202,11 @@ impl Object {
                         break;
                     }
                     unsafe {
-                        std::ptr::copy_nonoverlapping(val.as_ptr(), elem.pValue as *mut _, val.len());
+                        std::ptr::copy_nonoverlapping(
+                            val.as_ptr(),
+                            elem.pValue as *mut _,
+                            val.len(),
+                        );
                     }
                     elem.ulValueLen = val.len() as CK_ULONG;
                     break;
@@ -240,22 +235,49 @@ struct ObjectAttr {
 
 macro_rules! req_element {
     ($id:expr) => {
-        ObjectAttr { id: $id, required: true, present: false, default: false, default_value: false }
+        ObjectAttr {
+            id: $id,
+            required: true,
+            present: false,
+            default: false,
+            default_value: false,
+        }
     };
     ($id:expr; def $def:expr) => {
-        ObjectAttr { id: $id, required: true, present: false, default: true, default_value: $def }
-    }
+        ObjectAttr {
+            id: $id,
+            required: true,
+            present: false,
+            default: true,
+            default_value: $def,
+        }
+    };
 }
 macro_rules! opt_element {
     ($id:expr) => {
-        ObjectAttr { id: $id, required: false, present: false, default: false, default_value: false }
+        ObjectAttr {
+            id: $id,
+            required: false,
+            present: false,
+            default: false,
+            default_value: false,
+        }
     };
     ($id:expr; def $def:expr) => {
-        ObjectAttr { id: $id, required: false, present: false, default: true, default_value: $def }
-    }
+        ObjectAttr {
+            id: $id,
+            required: false,
+            present: false,
+            default: true,
+            default_value: $def,
+        }
+    };
 }
 
-fn basic_object_attrs_checks(obj: &mut Object, cattrs: &mut Vec::<ObjectAttr>) -> CK_RV {
+fn basic_object_attrs_checks(
+    obj: &mut Object,
+    cattrs: &mut Vec<ObjectAttr>,
+) -> CK_RV {
     for attr in &obj.attributes {
         let typ = attr.get_type();
         let mut valid = false;
@@ -277,9 +299,8 @@ fn basic_object_attrs_checks(obj: &mut Object, cattrs: &mut Vec::<ObjectAttr>) -
 
     for elem in cattrs.iter_mut() {
         if !elem.present && elem.default {
-            obj.attributes.push(
-                attribute::from_bool(elem.id, elem.default_value)
-            );
+            obj.attributes
+                .push(attribute::from_bool(elem.id, elem.default_value));
             elem.present = true;
         }
         if elem.required && !elem.present {
@@ -290,9 +311,7 @@ fn basic_object_attrs_checks(obj: &mut Object, cattrs: &mut Vec::<ObjectAttr>) -
     CKR_OK
 }
 
-static COMMON_OBJ_ATTRS: [ObjectAttr; 1] = [
-    req_element!(CKA_CLASS)
-];
+static COMMON_OBJ_ATTRS: [ObjectAttr; 1] = [req_element!(CKA_CLASS)];
 
 static COMMON_STORAGE_ATTRS: [ObjectAttr; 7] = [
     opt_element!(CKA_TOKEN; def false),
@@ -307,15 +326,15 @@ static COMMON_STORAGE_ATTRS: [ObjectAttr; 7] = [
 static DATA_OBJECT_ATTRS: [ObjectAttr; 3] = [
     req_element!(CKA_APPLICATION),
     opt_element!(CKA_OBJECT_ID),
-    req_element!(CKA_VALUE)
+    req_element!(CKA_VALUE),
 ];
 
 fn create_data_object(mut obj: Object) -> KResult<Object> {
     let mut cattrs = Vec::<ObjectAttr>::with_capacity(
-            COMMON_OBJ_ATTRS.len() +
-            COMMON_STORAGE_ATTRS.len() +
-            DATA_OBJECT_ATTRS.len()
-        );
+        COMMON_OBJ_ATTRS.len()
+            + COMMON_STORAGE_ATTRS.len()
+            + DATA_OBJECT_ATTRS.len(),
+    );
     cattrs.extend(COMMON_OBJ_ATTRS);
     cattrs.extend(COMMON_STORAGE_ATTRS);
     cattrs.extend(DATA_OBJECT_ATTRS);
@@ -334,7 +353,8 @@ pub fn create(handle: CK_ULONG, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
     };
 
     let uuid = Uuid::new_v4().to_string();
-    obj.attributes.push(attribute::from_string(CKA_UNIQUE_ID, uuid));
+    obj.attributes
+        .push(attribute::from_string(CKA_UNIQUE_ID, uuid));
 
     for ck_attr in template.iter() {
         obj.attributes.push(ck_attr.to_attribute()?);

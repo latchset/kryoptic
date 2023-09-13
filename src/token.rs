@@ -4,25 +4,27 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json;
 
-use super::interface;
 use super::attribute;
-use super::session;
-use super::object;
 use super::error;
+use super::interface;
+use super::object;
+use super::session;
 
+use super::{err_not_found, err_rv};
+use error::{KError, KResult};
 use interface::*;
-use session::Session;
 use object::Object;
-use error::{KResult, KError};
-use super::{err_rv, err_not_found};
+use session::Session;
 
 use getrandom;
 
-static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] = *b"Kryoptic FIPS Token             ";
-static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
+static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic FIPS Token             ";
+static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic                        ";
 static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
@@ -33,7 +35,7 @@ struct JsonToken {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct JsonObject {
-    attributes: serde_json::Map<String, serde_json::Value>
+    attributes: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +49,7 @@ struct LoginData {
 impl LoginData {
     fn check_pin(&mut self, pin: &Vec<u8>) -> CK_RV {
         if self.attempts >= self.max_attempts {
-            return CKR_PIN_LOCKED
+            return CKR_PIN_LOCKED;
         }
         match &self.pin {
             Some(p) => {
@@ -59,10 +61,8 @@ impl LoginData {
                     self.attempts += 1;
                     CKR_PIN_INCORRECT
                 }
-            },
-            None => {
-                CKR_USER_PIN_NOT_INITIALIZED
             }
+            None => CKR_USER_PIN_NOT_INITIALIZED,
         }
     }
 
@@ -70,11 +70,11 @@ impl LoginData {
         let pin_len = pin.len() as CK_ULONG;
         if info.ulMaxPinLen != CK_EFFECTIVELY_INFINITE {
             if pin_len > info.ulMaxPinLen {
-                return CKR_PIN_LEN_RANGE
+                return CKR_PIN_LEN_RANGE;
             }
         }
         if pin_len < info.ulMinPinLen {
-            return CKR_PIN_LEN_RANGE
+            return CKR_PIN_LEN_RANGE;
         }
         self.pin = Some(pin.clone());
         self.max_attempts = 10;
@@ -82,10 +82,15 @@ impl LoginData {
         CKR_OK
     }
 
-    fn change_pin(&mut self, info: &CK_TOKEN_INFO, pin: &Vec<u8>, old: &Vec<u8>) -> CK_RV {
+    fn change_pin(
+        &mut self,
+        info: &CK_TOKEN_INFO,
+        pin: &Vec<u8>,
+        old: &Vec<u8>,
+    ) -> CK_RV {
         let ret = self.check_pin(old);
         if ret != CKR_OK {
-            return ret
+            return ret;
         }
         self.set_pin(info, pin)
     }
@@ -124,14 +129,8 @@ impl Token {
                 ulFreePublicMemory: CK_EFFECTIVELY_INFINITE,
                 ulTotalPrivateMemory: 0,
                 ulFreePrivateMemory: CK_EFFECTIVELY_INFINITE,
-                hardwareVersion: CK_VERSION {
-                    major: 0,
-                    minor: 0,
-                },
-                firmwareVersion: CK_VERSION {
-                    major: 0,
-                    minor: 0,
-                },
+                hardwareVersion: CK_VERSION { major: 0, minor: 0 },
+                firmwareVersion: CK_VERSION { major: 0, minor: 0 },
                 utcTime: *b"0000000000000000",
             },
             slot_id: slot_id,
@@ -161,14 +160,16 @@ impl Token {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         match std::fs::File::open(&self.filename) {
-            Ok(f) => match serde_json::from_reader::<std::fs::File, JsonToken>(f) {
-                Ok(j) => self.json_to_objects(&j.objects)?,
-                Err(e) => return Err(KError::JsonError(e)),
-            },
+            Ok(f) => {
+                match serde_json::from_reader::<std::fs::File, JsonToken>(f) {
+                    Ok(j) => self.json_to_objects(&j.objects)?,
+                    Err(e) => return Err(KError::JsonError(e)),
+                }
+            }
             Err(e) => match e.kind() {
                 std::io::ErrorKind::NotFound => return Ok(()),
                 _ => return Err(KError::FileError(e)),
-            }
+            },
         };
         self.info.flags |= CKF_TOKEN_INITIALIZED;
         Ok(())
@@ -178,28 +179,35 @@ impl Token {
         self.info.flags & CKF_TOKEN_INITIALIZED == CKF_TOKEN_INITIALIZED
     }
 
-    fn store_pin_object(&mut self, uid: String, label: String,
-                        pin: Vec<u8>) -> KResult<()> {
+    fn store_pin_object(
+        &mut self,
+        uid: String,
+        label: String,
+        pin: Vec<u8>,
+    ) -> KResult<()> {
         match self.objects.get_mut(&uid) {
             Some(obj) => {
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
-            },
+            }
             None => {
                 let mut obj = Object::new(self.next_object_handle());
-                obj.set_attr(attribute::from_string(CKA_UNIQUE_ID,
-                                                    uid.clone()))?;
+                obj.set_attr(attribute::from_string(
+                    CKA_UNIQUE_ID,
+                    uid.clone(),
+                ))?;
                 obj.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
-                obj.set_attr(attribute::from_ulong(CKA_CLASS,
-                                                   CKO_SECRET_KEY))?;
-                obj.set_attr(attribute::from_ulong(CKA_KEY_TYPE,
-                                                   CKK_GENERIC_SECRET))?;
+                obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
+                obj.set_attr(attribute::from_ulong(
+                    CKA_KEY_TYPE,
+                    CKK_GENERIC_SECRET,
+                ))?;
                 obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
                 self.handles.insert(obj.get_handle(), uid.clone());
                 self.objects.insert(uid, obj);
-            },
+            }
         }
-        return Ok(())
+        return Ok(());
     }
 
     pub fn initialize(&mut self, pin: &Vec<u8>, _label: &Vec<u8>) -> CK_RV {
@@ -219,9 +227,11 @@ impl Token {
         self.dirty = true;
 
         /* add pin to so_object */
-        match self.store_pin_object("0".to_string(),
-                                    "SO PIN".to_string(),
-                                    pin.clone()) {
+        match self.store_pin_object(
+            "0".to_string(),
+            "SO PIN".to_string(),
+            pin.clone(),
+        ) {
             Ok(()) => (),
             Err(_) => return CKR_GENERAL_ERROR,
         }
@@ -230,7 +240,7 @@ impl Token {
             Ok(_) => {
                 self.info.flags |= CKF_TOKEN_INITIALIZED;
                 CKR_OK
-            },
+            }
             Err(_) => CKR_GENERAL_ERROR,
         }
     }
@@ -250,13 +260,15 @@ impl Token {
 
         for (_h, o) in &self.objects {
             match o.get_attr_as_bool(CKA_TOKEN) {
-                Ok(t) => if !t {
-                    continue;
-                },
+                Ok(t) => {
+                    if !t {
+                        continue;
+                    }
+                }
                 Err(_) => continue,
             }
             let mut jo = JsonObject {
-                attributes: serde_json::Map::new()
+                attributes: serde_json::Map::new(),
             };
             for a in o.get_attributes() {
                 jo.attributes.insert(a.name(), a.json_value());
@@ -289,21 +301,29 @@ impl Token {
         Ok(())
     }
 
-    pub fn get_object_by_handle(&self, handle: CK_OBJECT_HANDLE, checks: bool) -> KResult<&Object> {
+    pub fn get_object_by_handle(
+        &self,
+        handle: CK_OBJECT_HANDLE,
+        checks: bool,
+    ) -> KResult<&Object> {
         let obj = match self.handles.get(&handle) {
             Some(s) => match self.objects.get(s) {
                 Some(o) => o,
-                None => return err_not_found!{s.clone()},
+                None => return err_not_found! {s.clone()},
             },
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
         if checks && !self.user_login.logged_in && obj.is_private() {
-            return err_rv!(CKR_OBJECT_HANDLE_INVALID)
+            return err_rv!(CKR_OBJECT_HANDLE_INVALID);
         }
         Ok(obj)
     }
 
-    fn validate_pin_obj(&self, obj: &Object, label: String) -> KResult<(Vec<u8>, CK_ULONG)> {
+    fn validate_pin_obj(
+        &self,
+        obj: &Object,
+        label: String,
+    ) -> KResult<(Vec<u8>, CK_ULONG)> {
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -328,7 +348,8 @@ impl Token {
                 Some(o) => o,
                 None => return err_rv!(CKR_GENERAL_ERROR),
             };
-            let (pin, max) = self.validate_pin_obj(obj, "SO PIN".to_string())?;
+            let (pin, max) =
+                self.validate_pin_obj(obj, "SO PIN".to_string())?;
             self.so_login.pin = Some(pin);
             self.so_login.max_attempts = max;
         }
@@ -341,7 +362,8 @@ impl Token {
                 Some(o) => o,
                 None => return err_rv!(CKR_USER_PIN_NOT_INITIALIZED),
             };
-            let (pin, max) = self.validate_pin_obj(obj, "User PIN".to_string())?;
+            let (pin, max) =
+                self.validate_pin_obj(obj, "User PIN".to_string())?;
             self.user_login.pin = Some(pin);
             self.user_login.max_attempts = max;
         }
@@ -352,7 +374,7 @@ impl Token {
         let mut ret = match user_type {
             CKU_SO => {
                 if self.so_login.logged_in {
-                    return CKR_USER_ALREADY_LOGGED_IN
+                    return CKR_USER_ALREADY_LOGGED_IN;
                 }
                 if self.user_login.logged_in {
                     return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
@@ -365,10 +387,10 @@ impl Token {
                     },
                 }
                 self.so_login.check_pin(pin)
-            },
+            }
             CKU_USER => {
                 if self.user_login.logged_in {
-                    return CKR_USER_ALREADY_LOGGED_IN
+                    return CKR_USER_ALREADY_LOGGED_IN;
                 }
                 if self.so_login.logged_in {
                     return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
@@ -381,7 +403,7 @@ impl Token {
                     },
                 }
                 self.user_login.check_pin(pin)
-            },
+            }
             _ => return CKR_USER_TYPE_INVALID,
         };
         if ret != CKR_OK {
@@ -430,14 +452,19 @@ impl Token {
         match user_type {
             CK_UNAVAILABLE_INFORMATION => {
                 self.so_login.logged_in || self.user_login.logged_in
-            },
+            }
             CKU_SO => self.so_login.logged_in,
             CKU_USER => self.user_login.logged_in,
             _ => false,
         }
     }
 
-    pub fn set_pin(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>, old: Option<&Vec<u8>>) -> CK_RV {
+    pub fn set_pin(
+        &mut self,
+        user_type: CK_USER_TYPE,
+        pin: &Vec<u8>,
+        old: Option<&Vec<u8>>,
+    ) -> CK_RV {
         let utype = match user_type {
             CK_UNAVAILABLE_INFORMATION => {
                 if self.so_login.logged_in {
@@ -445,7 +472,7 @@ impl Token {
                 } else {
                     CKU_USER
                 }
-            },
+            }
             CKU_USER => CKU_USER,
             CKU_SO => CKU_SO,
             _ => return CKR_GENERAL_ERROR,
@@ -457,38 +484,42 @@ impl Token {
                     self.user_login.set_pin(&self.info, pin)
                 } else {
                     if old.is_none() {
-                        return CKR_PIN_INCORRECT
+                        return CKR_PIN_INCORRECT;
                     }
                     self.user_login.change_pin(&self.info, pin, old.unwrap())
                 };
                 if ret != CKR_OK {
-                    return ret
+                    return ret;
                 }
                 /* update pin in storage */
-                match self.store_pin_object("1".to_string(),
-                                            "User PIN".to_string(),
-                                            pin.clone()) {
+                match self.store_pin_object(
+                    "1".to_string(),
+                    "User PIN".to_string(),
+                    pin.clone(),
+                ) {
                     Ok(()) => (),
                     Err(_) => return CKR_GENERAL_ERROR,
                 }
-            },
+            }
             CKU_SO => {
                 if old.is_none() {
-                    return CKR_PIN_INCORRECT
+                    return CKR_PIN_INCORRECT;
                 }
-                let ret = self.so_login.change_pin(&self.info, pin,
-                                                   old.unwrap());
+                let ret =
+                    self.so_login.change_pin(&self.info, pin, old.unwrap());
                 if ret != CKR_OK {
-                    return ret
+                    return ret;
                 }
                 /* update pin in storage */
-                match self.store_pin_object("0".to_string(),
-                                            "SO PIN".to_string(),
-                                            pin.clone()) {
+                match self.store_pin_object(
+                    "0".to_string(),
+                    "SO PIN".to_string(),
+                    pin.clone(),
+                ) {
                     Ok(()) => (),
                     Err(_) => return CKR_GENERAL_ERROR,
                 }
-            },
+            }
             _ => return CKR_GENERAL_ERROR,
         }
 
@@ -501,7 +532,7 @@ impl Token {
 
     pub fn save(&self) -> KResult<()> {
         if !self.dirty {
-            return Ok(())
+            return Ok(());
         }
         let token = JsonToken {
             objects: self.objects_to_json(),
@@ -516,7 +547,11 @@ impl Token {
         }
     }
 
-    pub fn create_object(&mut self, s_handle: CK_SESSION_HANDLE, template: &[CK_ATTRIBUTE]) -> KResult<CK_OBJECT_HANDLE> {
+    pub fn create_object(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<CK_OBJECT_HANDLE> {
         /* check that session is valid */
         let _ = self.get_session(s_handle)?;
 
@@ -527,16 +562,18 @@ impl Token {
         let handle = self.next_object_handle();
         let obj = object::create(handle, template)?;
         match obj.get_attr_as_bool(CKA_TOKEN) {
-            Ok(t) => if t {
-                let session = self.get_session(s_handle)?;
-                if !session.is_writable() {
-                    return err_rv!(CKR_SESSION_READ_ONLY);
+            Ok(t) => {
+                if t {
+                    let session = self.get_session(s_handle)?;
+                    if !session.is_writable() {
+                        return err_rv!(CKR_SESSION_READ_ONLY);
+                    }
+                    self.dirty = true;
+                } else {
+                    let session = self.get_session_mut(s_handle)?;
+                    session.add_handle(handle);
                 }
-                self.dirty = true;
-            } else {
-                let session = self.get_session_mut(s_handle)?;
-                session.add_handle(handle);
-            },
+            }
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         }
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
@@ -549,7 +586,11 @@ impl Token {
         &self.info
     }
 
-    pub fn search(&mut self, handle: CK_SESSION_HANDLE, template: &[CK_ATTRIBUTE]) -> KResult<()> {
+    pub fn search(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<()> {
         /* check that session is valid */
         let _ = self.get_session(handle)?;
 
@@ -569,7 +610,11 @@ impl Token {
         Ok(())
     }
 
-    pub fn get_object_attrs(&self, handle: CK_OBJECT_HANDLE, template: &mut [CK_ATTRIBUTE]) -> KResult<()> {
+    pub fn get_object_attrs(
+        &self,
+        handle: CK_OBJECT_HANDLE,
+        template: &mut [CK_ATTRIBUTE],
+    ) -> KResult<()> {
         match self.get_object_by_handle(handle, true) {
             Ok(o) => o.fill_template(template),
             Err(e) => return Err(e),
@@ -582,12 +627,16 @@ impl Token {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
         if getrandom::getrandom(buffer).is_err() {
-            return err_rv!(CKR_GENERAL_ERROR)
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         Ok(())
     }
 
-    pub fn new_session(&mut self, handle: CK_SESSION_HANDLE, flags: CK_FLAGS) -> KResult<&Session> {
+    pub fn new_session(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        flags: CK_FLAGS,
+    ) -> KResult<&Session> {
         let session = Session::new(self.slot_id, handle, flags)?;
         self.sessions.push(session);
 
@@ -598,13 +647,16 @@ impl Token {
         for s in self.sessions.iter() {
             let h = s.get_handle();
             if h == handle {
-                return Ok(s)
+                return Ok(s);
             }
         }
         err_rv!(CKR_SESSION_HANDLE_INVALID)
     }
 
-    pub fn get_session_mut(&mut self, handle: CK_SESSION_HANDLE) -> KResult<&mut Session> {
+    pub fn get_session_mut(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+    ) -> KResult<&mut Session> {
         for s in self.sessions.iter_mut() {
             let h = s.get_handle();
             if h == handle {

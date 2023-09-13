@@ -5,7 +5,11 @@
 pub struct Pkcs11Callbacks;
 
 impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
-    fn int_macro(&self, name: &str, _: i64) -> Option<bindgen::callbacks::IntKind> {
+    fn int_macro(
+        &self,
+        name: &str,
+        _: i64,
+    ) -> Option<bindgen::callbacks::IntKind> {
         if name == "CK_TRUE" || name == "CK_FALSE" {
             Some(bindgen::callbacks::IntKind::Custom {
                 name: "CK_BBOOL",
@@ -49,4 +53,3 @@ fn main() {
         .write_to_file("src/pkcs11_bindings.rs")
         .expect("Couldn't write bindings!");
 }
-

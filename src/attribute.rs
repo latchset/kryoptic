@@ -1,15 +1,15 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use serde_json::{Value, Number};
 use data_encoding::BASE64;
+use serde_json::{Number, Value};
 
-use super::interface;
 use super::error;
+use super::interface;
 
+use super::{err_not_found, err_rv};
+use error::{KError, KResult};
 use interface::*;
-use error::{KResult, KError};
-use super::{err_rv, err_not_found};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttrType {
@@ -30,8 +30,12 @@ struct Attrmap<'a> {
 
 macro_rules! attrmap_element {
     ($id:expr; as $attrtype:ident) => {
-        Attrmap { id: $id, name: stringify!($id), atype: AttrType::$attrtype }
-    }
+        Attrmap {
+            id: $id,
+            name: stringify!($id),
+            atype: AttrType::$attrtype,
+        }
+    };
 }
 
 static ATTRMAP: [Attrmap<'_>; 126] = [
@@ -169,7 +173,7 @@ static ATTRMAP: [Attrmap<'_>; 126] = [
 pub struct Attribute {
     ck_type: CK_ULONG,
     attrtype: AttrType,
-    value: Vec<u8>
+    value: Vec<u8>,
 }
 
 impl Attribute {
@@ -191,7 +195,7 @@ impl Attribute {
         }
         match attr.to_buf() {
             Ok(buf) => buf == self.value,
-            Err(_) => false
+            Err(_) => false,
         }
     }
 
@@ -201,7 +205,7 @@ impl Attribute {
                 return a.name.to_string();
             }
         }
-        return self.ck_type.to_string()
+        return self.ck_type.to_string();
     }
 
     pub fn to_bool(&self) -> KResult<bool> {
@@ -224,7 +228,10 @@ impl Attribute {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        Ok(u64::from_ne_bytes(self.value.as_slice().try_into().unwrap()) as CK_ULONG)
+        Ok(
+            u64::from_ne_bytes(self.value.as_slice().try_into().unwrap())
+                as CK_ULONG,
+        )
     }
 
     fn to_ulong_value(&self) -> Value {
@@ -244,7 +251,7 @@ impl Attribute {
     fn to_string_value(&self) -> Value {
         match self.to_string() {
             Ok(s) => Value::String(s),
-            Err(_) => self.to_b64_string_value()
+            Err(_) => self.to_b64_string_value(),
         }
     }
 
@@ -331,68 +338,61 @@ macro_rules! conversion_from_type {
             }
             err_not_found!(s)
         }
-    }
+    };
 }
 
 fn bool_to_vec(val: bool) -> Vec<u8> {
     Vec::from(if val { &[1 as u8][..] } else { &[0 as u8][..] })
 }
-conversion_from_type!{make from_bool; from_type_bool; from_string_bool; from bool; as BoolType; via bool_to_vec}
+conversion_from_type! {make from_bool; from_type_bool; from_string_bool; from bool; as BoolType; via bool_to_vec}
 
 fn ulong_to_vec(val: CK_ULONG) -> Vec<u8> {
     Vec::from((val as u64).to_ne_bytes())
 }
-conversion_from_type!{make from_ulong; from_type_ulong; from_string_ulong; from CK_ULONG; as NumType; via ulong_to_vec}
+conversion_from_type! {make from_ulong; from_type_ulong; from_string_ulong; from CK_ULONG; as NumType; via ulong_to_vec}
 
 fn string_to_vec(val: String) -> Vec<u8> {
     Vec::from(val.as_bytes())
 }
-conversion_from_type!{make from_string; from_type_string; from_string_string; from String; as StringType; via string_to_vec}
+conversion_from_type! {make from_string; from_type_string; from_string_string; from String; as StringType; via string_to_vec}
 
 fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
     val
 }
-conversion_from_type!{make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
+conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
 
 pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
     /* skips invalid types */
     for a in &ATTRMAP {
         if a.name == &s {
             match a.atype {
-                AttrType::BoolType => {
-                    match v.as_bool() {
-                        Some(b) => return Ok(from_bool(a.id, b)),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    }
+                AttrType::BoolType => match v.as_bool() {
+                    Some(b) => return Ok(from_bool(a.id, b)),
+                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 },
-                AttrType::NumType => {
-                    match v.as_u64() {
-                        Some(n) => return Ok(from_ulong(a.id, n as CK_ULONG)),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    }
-
+                AttrType::NumType => match v.as_u64() {
+                    Some(n) => return Ok(from_ulong(a.id, n as CK_ULONG)),
+                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 },
-                AttrType::StringType => {
-                    match v.as_str() {
-                        Some(s) => return Ok(from_string(a.id, s.to_string())),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    }
+                AttrType::StringType => match v.as_str() {
+                    Some(s) => return Ok(from_string(a.id, s.to_string())),
+                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 },
-                AttrType::BytesType => {
-                    match v.as_str() {
-                        Some(s) => {
-                            let len = match BASE64.decode_len(s.len()) {
-                                Ok(l) => l,
-                                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-                            };
-                            let mut v = vec![0; len];
-                            match BASE64.decode_mut(s.as_bytes(), &mut v) {
-                                Ok(l) => return Ok(from_bytes(a.id, v[0..l].to_vec())),
-                                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                AttrType::BytesType => match v.as_str() {
+                    Some(s) => {
+                        let len = match BASE64.decode_len(s.len()) {
+                            Ok(l) => l,
+                            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                        };
+                        let mut v = vec![0; len];
+                        match BASE64.decode_mut(s.as_bytes(), &mut v) {
+                            Ok(l) => {
+                                return Ok(from_bytes(a.id, v[0..l].to_vec()))
                             }
-                        },
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                        }
                     }
+                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 },
                 AttrType::DateType => (),
                 AttrType::DenyType => (),
@@ -402,42 +402,45 @@ pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
     err_not_found!(s)
 }
 
-
 impl CK_ATTRIBUTE {
     pub fn to_ulong(self) -> KResult<CK_ULONG> {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        let val: &[CK_ULONG] = unsafe {
-            std::slice::from_raw_parts(self.pValue as *const _, 1)
-        };
+        let val: &[CK_ULONG] =
+            unsafe { std::slice::from_raw_parts(self.pValue as *const _, 1) };
         Ok(val[0])
     }
     pub fn to_bool(self) -> KResult<bool> {
         if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        let val: &[CK_BBOOL] = unsafe {
-            std::slice::from_raw_parts(self.pValue as *const _, 1)
-        };
+        let val: &[CK_BBOOL] =
+            unsafe { std::slice::from_raw_parts(self.pValue as *const _, 1) };
         if val[0] == 0 {
             Ok(false)
         } else {
             Ok(true)
         }
     }
-    pub fn to_string(self) ->KResult<String> {
+    pub fn to_string(self) -> KResult<String> {
         let buf: &[u8] = unsafe {
-            std::slice::from_raw_parts(self.pValue as *const _, self.ulValueLen as usize)
+            std::slice::from_raw_parts(
+                self.pValue as *const _,
+                self.ulValueLen as usize,
+            )
         };
         match std::str::from_utf8(buf) {
             Ok(s) => Ok(s.to_string()),
             Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
-    pub fn to_buf(self) ->KResult<Vec<u8>> {
+    pub fn to_buf(self) -> KResult<Vec<u8>> {
         let buf: &[u8] = unsafe {
-            std::slice::from_raw_parts(self.pValue as *const _, self.ulValueLen as usize)
+            std::slice::from_raw_parts(
+                self.pValue as *const _,
+                self.ulValueLen as usize,
+            )
         };
         Ok(buf.to_vec())
     }
@@ -453,7 +456,9 @@ impl CK_ATTRIBUTE {
         match atype {
             AttrType::BoolType => Ok(from_bool(self.type_, self.to_bool()?)),
             AttrType::NumType => Ok(from_ulong(self.type_, self.to_ulong()?)),
-            AttrType::StringType => Ok(from_string(self.type_, self.to_string()?)),
+            AttrType::StringType => {
+                Ok(from_string(self.type_, self.to_string()?))
+            }
             AttrType::BytesType => Ok(from_bytes(self.type_, self.to_buf()?)),
             AttrType::DateType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
             AttrType::DenyType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),

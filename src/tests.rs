@@ -1,11 +1,11 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::ffi::CString;
 use super::*;
+use std::ffi::CString;
 
 struct TestData<'a> {
-    filename: Option<&'a str>
+    filename: Option<&'a str>,
 }
 
 fn test_setup(filename: &str) {
@@ -70,10 +70,10 @@ fn test_init_args(filename: &str) -> CK_C_INITIALIZE_ARGS {
         LockMutex: None,
         UnlockMutex: None,
         flags: 0,
-        pReserved: CString::new(filename).unwrap().into_raw() as *mut std::ffi::c_void,
+        pReserved: CString::new(filename).unwrap().into_raw()
+            as *mut std::ffi::c_void,
     }
 }
-
 
 fn test_cleanup(filename: &str) {
     std::fs::remove_file(filename).unwrap_or(());
@@ -89,26 +89,25 @@ impl Drop for TestData<'_> {
 
 #[test]
 fn test_token() {
-
     let testdata = TestData {
         filename: Some("test_token.json"),
     };
     test_setup(testdata.filename.unwrap());
 
-    let mut plist :CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
+    let mut plist: CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
     let pplist = &mut plist;
     let result = C_GetFunctionList(&mut *pplist);
     assert_eq!(result, 0);
     unsafe {
-        let list :CK_FUNCTION_LIST = *plist;
-        match list.C_Initialize{
+        let list: CK_FUNCTION_LIST = *plist;
+        match list.C_Initialize {
             Some(value) => {
                 let mut args = test_init_args(testdata.filename.unwrap());
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
             }
-            None => todo!()
+            None => todo!(),
         }
     }
 }
@@ -140,10 +139,20 @@ fn test_random() {
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut handle,
+    );
     assert_eq!(ret, CKR_OK);
     let data: &[u8] = &mut [0, 0, 0, 0];
-    ret = fn_generate_random(handle, data.as_ptr() as *mut u8, data.len() as CK_ULONG);
+    ret = fn_generate_random(
+        handle,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
     assert_ne!(data, &[0, 0, 0, 0]);
     ret = fn_close_session(handle);
@@ -165,7 +174,13 @@ fn test_login() {
     assert_eq!(ret, CKR_OK);
 
     let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut handle,
+    );
     assert_eq!(ret, CKR_OK);
 
     let mut info = CK_SESSION_INFO {
@@ -179,7 +194,13 @@ fn test_login() {
     assert_eq!(info.state, CKS_RO_PUBLIC_SESSION);
 
     let mut handle2: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(0, CKF_SERIAL_SESSION|CKF_RW_SESSION, std::ptr::null_mut(), None, &mut handle2);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut handle2,
+    );
     assert_eq!(ret, CKR_OK);
     ret = fn_get_session_info(handle2, &mut info);
     assert_eq!(ret, CKR_OK);
@@ -187,7 +208,12 @@ fn test_login() {
 
     /* login */
     let pin = "12345678";
-    ret = fn_login(handle, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    ret = fn_login(
+        handle,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_get_session_info(handle, &mut info);
@@ -198,7 +224,12 @@ fn test_login() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RW_USER_FUNCTIONS);
 
-    ret = fn_login(handle, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    ret = fn_login(
+        handle,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_USER_ALREADY_LOGGED_IN);
 
     ret = fn_logout(handle2);
@@ -235,7 +266,13 @@ fn test_get_attr() {
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut session);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
     assert_eq!(ret, CKR_OK);
 
     let mut template = Vec::<CK_ATTRIBUTE>::new();
@@ -303,7 +340,12 @@ fn test_get_attr() {
 
     /* login */
     let pin = "12345678";
-    ret = fn_login(session, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* after login should find it */
@@ -355,7 +397,13 @@ fn test_create_objects() {
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut session);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
     assert_eq!(ret, CKR_OK);
 
     let mut class = CKO_DATA;
@@ -365,16 +413,18 @@ fn test_create_objects() {
         CK_ATTRIBUTE {
             type_: CKA_CLASS,
             pValue: &mut class as *mut _ as *mut std::ffi::c_void,
-            ulValueLen: 8
+            ulValueLen: 8,
         },
         CK_ATTRIBUTE {
             type_: CKA_APPLICATION,
-            pValue: CString::new(application).unwrap().into_raw() as *mut std::ffi::c_void,
+            pValue: CString::new(application).unwrap().into_raw()
+                as *mut std::ffi::c_void,
             ulValueLen: application.len() as CK_ULONG,
         },
         CK_ATTRIBUTE {
             type_: CKA_VALUE,
-            pValue: CString::new(data).unwrap().into_raw() as *mut std::ffi::c_void,
+            pValue: CString::new(data).unwrap().into_raw()
+                as *mut std::ffi::c_void,
             ulValueLen: data.len() as CK_ULONG,
         },
     ];
@@ -385,7 +435,12 @@ fn test_create_objects() {
 
     /* login */
     let pin = "12345678";
-    ret = fn_login(session, CKU_USER, pin.as_ptr() as *mut _, pin.len() as CK_ULONG);
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_create_object(session, template.as_mut_ptr(), 3, &mut handle);
@@ -395,7 +450,7 @@ fn test_create_objects() {
     template.push(CK_ATTRIBUTE {
         type_: CKA_TOKEN,
         pValue: &mut intoken as *mut _ as *mut std::ffi::c_void,
-        ulValueLen: 1
+        ulValueLen: 1,
     });
 
     ret = fn_create_object(session, template.as_mut_ptr(), 4, &mut handle);
@@ -403,7 +458,13 @@ fn test_create_objects() {
 
     let login_session = session;
 
-    ret = fn_open_session(0, CKF_SERIAL_SESSION|CKF_RW_SESSION, std::ptr::null_mut(), None, &mut session);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_create_object(session, template.as_mut_ptr(), 4, &mut handle);
@@ -435,113 +496,165 @@ fn test_init_token() {
 
     /* init once */
     let pin_value = "SO Pin Value";
-    ret = fn_init_token(0,
+    ret = fn_init_token(
+        0,
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG, std::ptr::null_mut());
+        pin_value.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
     assert_eq!(ret, CKR_OK);
 
     /* verify wrong SO PIN fails */
     let bad_value = "SO Bad Value";
-    ret = fn_init_token(0,
+    ret = fn_init_token(
+        0,
         CString::new(bad_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG, std::ptr::null_mut());
+        pin_value.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
     assert_eq!(ret, CKR_PIN_INCORRECT);
 
     /* re-init */
     let pin_value = "SO Pin Value";
-    ret = fn_init_token(0,
+    ret = fn_init_token(
+        0,
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG, std::ptr::null_mut());
+        pin_value.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
     assert_eq!(ret, CKR_OK);
 
     /* login as so */
-    ret = fn_open_session(0, CKF_SERIAL_SESSION|CKF_RW_SESSION, std::ptr::null_mut(), None, &mut session);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
     assert_eq!(ret, CKR_OK);
-    ret = fn_login(session, CKU_SO,
+    ret = fn_login(
+        session,
+        CKU_SO,
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG);
+        pin_value.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* change so pin */
     let new_pin = "New SO Pin Value";
-    ret = fn_set_pin(session,
+    ret = fn_set_pin(
+        session,
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         CString::new(new_pin).unwrap().into_raw() as *mut u8,
-        new_pin.len() as CK_ULONG);
+        new_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* try to open ro_session and fail */
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut ro_session);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut ro_session,
+    );
     assert_eq!(ret, CKR_SESSION_READ_WRITE_SO_EXISTS);
 
     /* logout and retry */
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut ro_session);
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut ro_session,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* try to change pin and fail with ro_session */
-    ret = fn_set_pin(ro_session,
+    ret = fn_set_pin(
+        ro_session,
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         CString::new(new_pin).unwrap().into_raw() as *mut u8,
-        new_pin.len() as CK_ULONG);
+        new_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
     /* try to login again and fail because of ro_session exists */
-    ret = fn_login(session, CKU_SO,
+    ret = fn_login(
+        session,
+        CKU_SO,
         CString::new(new_pin).unwrap().into_raw() as *mut u8,
-        new_pin.len() as CK_ULONG);
+        new_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_SESSION_READ_ONLY_EXISTS);
 
     /* try again after closing ro_session */
     ret = fn_close_session(ro_session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_login(session, CKU_SO,
+    ret = fn_login(
+        session,
+        CKU_SO,
         CString::new(new_pin).unwrap().into_raw() as *mut u8,
-        new_pin.len() as CK_ULONG);
+        new_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* set user pin */
     let user_pin = "User PIN Value";
-    ret = fn_init_pin(session,
+    ret = fn_init_pin(
+        session,
         CString::new(user_pin).unwrap().into_raw() as *mut u8,
-        user_pin.len() as CK_ULONG);
+        user_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* try to log in as user and fail because SO active */
-    ret = fn_login(session, CKU_USER,
+    ret = fn_login(
+        session,
+        CKU_USER,
         CString::new(user_pin).unwrap().into_raw() as *mut u8,
-        user_pin.len() as CK_ULONG);
+        user_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_USER_ANOTHER_ALREADY_LOGGED_IN);
 
     /* retry user login after logout */
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_login(session, CKU_USER,
+    ret = fn_login(
+        session,
+        CKU_USER,
         CString::new(user_pin).unwrap().into_raw() as *mut u8,
-        user_pin.len() as CK_ULONG);
+        user_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     /* change user pin as user */
     let new_user_pin = "New User PIN Value";
-    ret = fn_set_pin(session,
+    ret = fn_set_pin(
+        session,
         CString::new(user_pin).unwrap().into_raw() as *mut u8,
         user_pin.len() as CK_ULONG,
         CString::new(new_user_pin).unwrap().into_raw() as *mut u8,
-        new_user_pin.len() as CK_ULONG);
+        new_user_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
 
     /* change back user pin after logout */
-    ret = fn_set_pin(session,
+    ret = fn_set_pin(
+        session,
         CString::new(new_user_pin).unwrap().into_raw() as *mut u8,
         new_user_pin.len() as CK_ULONG,
         CString::new(user_pin).unwrap().into_raw() as *mut u8,
-        user_pin.len() as CK_ULONG);
+        user_pin.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_logout(session);

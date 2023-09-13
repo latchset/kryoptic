@@ -3,12 +3,12 @@
 
 use std::vec::Vec;
 
-use super::interface;
 use super::error;
+use super::interface;
 
-use interface::*;
-use error::{KResult, KError};
 use super::err_rv;
+use error::{KError, KResult};
+use interface::*;
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -17,15 +17,16 @@ pub struct Session {
     info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
-
     session_handles: Vec<CK_OBJECT_HANDLE>,
     search_handles: Vec<CK_OBJECT_HANDLE>,
 }
 
 impl Session {
-    pub fn new(slotid: CK_SLOT_ID,
-               handle: CK_SESSION_HANDLE,
-               flags: CK_FLAGS) -> KResult<Session> {
+    pub fn new(
+        slotid: CK_SLOT_ID,
+        handle: CK_SESSION_HANDLE,
+        flags: CK_FLAGS,
+    ) -> KResult<Session> {
         if handle == CK_INVALID_HANDLE {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -75,7 +76,10 @@ impl Session {
         self.search_handles = handles;
     }
 
-    pub fn get_search_handles(&mut self, max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+    pub fn get_search_handles(
+        &mut self,
+        max: usize,
+    ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut amount = self.search_handles.len();
         if max < amount {
             amount = max;
@@ -90,63 +94,53 @@ impl Session {
     /* a user type of CK_UNAVAILABLE_INFORMATION effects a "logout" to public */
     pub fn change_session_state(&mut self, user_type: CK_USER_TYPE) -> CK_RV {
         match self.info.state {
-            CKS_RO_PUBLIC_SESSION => {
-                match user_type {
-                    CK_UNAVAILABLE_INFORMATION => CKR_OK,
-                    CKU_USER => {
-                        self.info.state = CKS_RO_USER_FUNCTIONS;
-                        CKR_OK
-                    },
-                    CKU_SO => CKR_OPERATION_NOT_INITIALIZED,
-                    _ => CKR_USER_TYPE_INVALID,
+            CKS_RO_PUBLIC_SESSION => match user_type {
+                CK_UNAVAILABLE_INFORMATION => CKR_OK,
+                CKU_USER => {
+                    self.info.state = CKS_RO_USER_FUNCTIONS;
+                    CKR_OK
                 }
+                CKU_SO => CKR_OPERATION_NOT_INITIALIZED,
+                _ => CKR_USER_TYPE_INVALID,
             },
-            CKS_RW_PUBLIC_SESSION => {
-                match user_type {
-                    CK_UNAVAILABLE_INFORMATION => CKR_OK,
-                    CKU_USER => {
-                        self.info.state = CKS_RW_USER_FUNCTIONS;
-                        CKR_OK
-                    },
-                    CKU_SO => {
-                        self.info.state = CKS_RW_SO_FUNCTIONS;
-                        CKR_OK
-                    },
-                    _ => CKR_USER_TYPE_INVALID,
+            CKS_RW_PUBLIC_SESSION => match user_type {
+                CK_UNAVAILABLE_INFORMATION => CKR_OK,
+                CKU_USER => {
+                    self.info.state = CKS_RW_USER_FUNCTIONS;
+                    CKR_OK
                 }
+                CKU_SO => {
+                    self.info.state = CKS_RW_SO_FUNCTIONS;
+                    CKR_OK
+                }
+                _ => CKR_USER_TYPE_INVALID,
             },
-            CKS_RO_USER_FUNCTIONS => {
-                match user_type {
-                    CK_UNAVAILABLE_INFORMATION => {
-                        self.info.state = CKS_RO_PUBLIC_SESSION;
-                        CKR_OK
-                    },
-                    CKU_USER => CKR_OK,
-                    CKU_SO => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
-                    _ => CKR_USER_TYPE_INVALID,
+            CKS_RO_USER_FUNCTIONS => match user_type {
+                CK_UNAVAILABLE_INFORMATION => {
+                    self.info.state = CKS_RO_PUBLIC_SESSION;
+                    CKR_OK
                 }
+                CKU_USER => CKR_OK,
+                CKU_SO => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+                _ => CKR_USER_TYPE_INVALID,
             },
-            CKS_RW_USER_FUNCTIONS => {
-                match user_type {
-                    CK_UNAVAILABLE_INFORMATION => {
-                        self.info.state = CKS_RW_PUBLIC_SESSION;
-                        CKR_OK
-                    },
-                    CKU_USER => CKR_OK,
-                    CKU_SO => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
-                    _ => CKR_USER_TYPE_INVALID,
+            CKS_RW_USER_FUNCTIONS => match user_type {
+                CK_UNAVAILABLE_INFORMATION => {
+                    self.info.state = CKS_RW_PUBLIC_SESSION;
+                    CKR_OK
                 }
+                CKU_USER => CKR_OK,
+                CKU_SO => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+                _ => CKR_USER_TYPE_INVALID,
             },
-            CKS_RW_SO_FUNCTIONS => {
-                match user_type {
-                    CK_UNAVAILABLE_INFORMATION => {
-                        self.info.state = CKS_RW_PUBLIC_SESSION;
-                        CKR_OK
-                    },
-                    CKU_USER => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
-                    CKU_SO => CKR_OK,
-                    _ => CKR_USER_TYPE_INVALID,
+            CKS_RW_SO_FUNCTIONS => match user_type {
+                CK_UNAVAILABLE_INFORMATION => {
+                    self.info.state = CKS_RW_PUBLIC_SESSION;
+                    CKR_OK
                 }
+                CKU_USER => CKR_USER_ANOTHER_ALREADY_LOGGED_IN,
+                CKU_SO => CKR_OK,
+                _ => CKR_USER_TYPE_INVALID,
             },
             _ => CKR_GENERAL_ERROR,
         }

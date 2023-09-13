@@ -2,8 +2,8 @@
 // See LICENSE.txt file for terms
 
 use std::collections::HashMap;
-use std::sync::{RwLock,RwLockReadGuard, RwLockWriteGuard};
 use std::ffi::CStr;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 mod interface {
     #![allow(non_upper_case_globals)]
@@ -24,22 +24,24 @@ mod interface {
     }
 
     pub const KRYATTR_OFFSET: CK_ULONG = 485259;
-    pub const KRYATTR_MAX_LOGIN_ATTEMPTS: CK_ULONG = CKA_VENDOR_DEFINED + KRYATTR_OFFSET + 1;
+    pub const KRYATTR_MAX_LOGIN_ATTEMPTS: CK_ULONG =
+        CKA_VENDOR_DEFINED + KRYATTR_OFFSET + 1;
 
     pub const KRYERR_OFFSET: CK_ULONG = 485259;
-    pub const KRYERR_TOKEN_NOT_INITIALIZED: CK_ULONG = CKR_VENDOR_DEFINED + KRYERR_OFFSET + 1;
+    pub const KRYERR_TOKEN_NOT_INITIALIZED: CK_ULONG =
+        CKR_VENDOR_DEFINED + KRYERR_OFFSET + 1;
 }
 
+mod attribute;
 mod error;
-mod slot;
-mod token;
 mod object;
 mod session;
-mod attribute;
+mod slot;
+mod token;
 
+use error::{KError, KResult};
 use interface::*;
 use token::Token;
-use error::{KResult, KError};
 
 macro_rules! err_to_rv {
     ($err:expr) => {
@@ -47,7 +49,7 @@ macro_rules! err_to_rv {
             KError::RvError(e) => e.rv,
             _ => CKR_GENERAL_ERROR,
         }
-    }
+    };
 }
 
 macro_rules! ret_to_rv {
@@ -56,7 +58,7 @@ macro_rules! ret_to_rv {
             Ok(()) => CKR_OK,
             Err(e) => err_to_rv!(e),
         }
-    }
+    };
 }
 
 struct SlotsState {
@@ -78,20 +80,20 @@ impl SlotsState {
 
     fn get_slot(&self, slotid: CK_SLOT_ID) -> KResult<&slot::Slot> {
         match self.slots {
-            Some (ref s) => {
+            Some(ref s) => {
                 let idx = slotid as usize;
                 if idx >= s.len() {
                     return err_rv!(CKR_SLOT_ID_INVALID);
                 }
                 Ok(&s[idx])
-            },
+            }
             None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
         }
     }
 
     fn get_slots(&self) -> KResult<&Vec<slot::Slot>> {
         match self.slots {
-            Some (ref s) => Ok(s),
+            Some(ref s) => Ok(s),
             None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
         }
     }
@@ -103,24 +105,33 @@ impl SlotsState {
         }
     }
 
-    fn get_token_from_slot(&self, slotid: CK_SLOT_ID) -> KResult<RwLockReadGuard<'_, Token>> {
+    fn get_token_from_slot(
+        &self,
+        slotid: CK_SLOT_ID,
+    ) -> KResult<RwLockReadGuard<'_, Token>> {
         let slot = self.get_slot(slotid)?;
         slot.get_token()
     }
 
-    fn get_token_from_slot_mut(&self, slotid: CK_SLOT_ID) -> KResult<RwLockWriteGuard<'_, Token>> {
+    fn get_token_from_slot_mut(
+        &self,
+        slotid: CK_SLOT_ID,
+    ) -> KResult<RwLockWriteGuard<'_, Token>> {
         let slot = self.get_slot(slotid)?;
         slot.get_token_mut(false)
     }
 
-    fn get_token_from_slot_mut_nochecks(&self, slotid: CK_SLOT_ID) -> KResult<RwLockWriteGuard<'_, Token>> {
+    fn get_token_from_slot_mut_nochecks(
+        &self,
+        slotid: CK_SLOT_ID,
+    ) -> KResult<RwLockWriteGuard<'_, Token>> {
         let slot = self.get_slot(slotid)?;
         slot.get_token_mut(true)
     }
 
     fn add_slot(&mut self, slot: slot::Slot) -> KResult<()> {
         match self.slots {
-            Some (ref mut s) => Ok(s.push(slot)),
+            Some(ref mut s) => Ok(s.push(slot)),
             None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
         }
     }
@@ -145,7 +156,10 @@ impl SessionsState {
         self.sessions.is_none() == false
     }
 
-    fn get_session_slot(&self, handle: CK_SESSION_HANDLE) -> KResult<CK_SLOT_ID> {
+    fn get_session_slot(
+        &self,
+        handle: CK_SESSION_HANDLE,
+    ) -> KResult<CK_SLOT_ID> {
         match self.sessions {
             Some(ref s) => match s.get(&handle) {
                 Some(s) => Ok(*s),
@@ -161,8 +175,8 @@ impl SessionsState {
                 let handle = self.next_handle;
                 self.next_handle += 1;
                 s.insert(handle, slot_id);
-                return handle
-            },
+                return handle;
+            }
             None => return CK_UNAVAILABLE_INFORMATION,
         }
     }
@@ -171,7 +185,7 @@ impl SessionsState {
         match self.sessions {
             Some(ref mut s) => {
                 s.remove(&handle);
-            },
+            }
             None => (),
         }
     }
@@ -180,15 +194,13 @@ impl SessionsState {
         match self.sessions {
             Some(ref mut s) => {
                 s.retain(|_key, val| *val != slot_id);
-            },
+            }
             None => (),
         }
     }
 }
 
-static SLOTS: RwLock<SlotsState> = RwLock::new(SlotsState {
-    slots: None,
-});
+static SLOTS: RwLock<SlotsState> = RwLock::new(SlotsState { slots: None });
 
 static SESSIONS: RwLock<SessionsState> = RwLock::new(SessionsState {
     sessions: None,
@@ -203,65 +215,57 @@ macro_rules! global_rlock {
                     return CKR_CRYPTOKI_NOT_INITIALIZED;
                 }
                 r
-            },
+            }
             Err(_) => return CKR_GENERAL_ERROR,
         }
-    }
+    };
 }
 
 macro_rules! global_wlock {
-    ($GLOBAL:expr) => {
-        {
-            match $GLOBAL.write() {
-                Ok(w) => {
-                    if (!w.is_initialized()) {
-                        return CKR_CRYPTOKI_NOT_INITIALIZED;
-                    }
-                    w
-                },
-                Err(_) => return CKR_GENERAL_ERROR,
+    ($GLOBAL:expr) => {{
+        match $GLOBAL.write() {
+            Ok(w) => {
+                if (!w.is_initialized()) {
+                    return CKR_CRYPTOKI_NOT_INITIALIZED;
+                }
+                w
             }
+            Err(_) => return CKR_GENERAL_ERROR,
         }
-    };
-    (noinitcheck $GLOBAL:expr) => {
-        {
-            match $GLOBAL.write() {
-                Ok(w) => w,
-                Err(_) => return CKR_GENERAL_ERROR,
-            }
+    }};
+    (noinitcheck $GLOBAL:expr) => {{
+        match $GLOBAL.write() {
+            Ok(w) => w,
+            Err(_) => return CKR_GENERAL_ERROR,
         }
-    }
+    }};
 }
 
 macro_rules! token_from_session_handle {
-    ($RSLOTS:expr, $HANDLE:expr) => {
-        {
-            let rsess = global_rlock!(SESSIONS);
-            let slot_id = match rsess.get_session_slot($HANDLE) {
-                Ok(s) => s,
-                Err(e) => return err_to_rv!(e),
-            };
-            let token = match $RSLOTS.get_token_from_slot(slot_id) {
-                Ok(t) => t,
-                Err(e) => return err_to_rv!(e),
-            };
-            token
-        }
-    };
-    ($WSLOTS:expr, $HANDLE:expr, as_mut) => {
-        {
-            let rsess = global_rlock!(SESSIONS);
-            let slot_id = match rsess.get_session_slot($HANDLE) {
-                Ok(s) => s,
-                Err(e) => return err_to_rv!(e),
-            };
-            let token = match $WSLOTS.get_token_from_slot_mut(slot_id) {
-                Ok(t) => t,
-                Err(e) => return err_to_rv!(e),
-            };
-            token
-        }
-    };
+    ($RSLOTS:expr, $HANDLE:expr) => {{
+        let rsess = global_rlock!(SESSIONS);
+        let slot_id = match rsess.get_session_slot($HANDLE) {
+            Ok(s) => s,
+            Err(e) => return err_to_rv!(e),
+        };
+        let token = match $RSLOTS.get_token_from_slot(slot_id) {
+            Ok(t) => t,
+            Err(e) => return err_to_rv!(e),
+        };
+        token
+    }};
+    ($WSLOTS:expr, $HANDLE:expr, as_mut) => {{
+        let rsess = global_rlock!(SESSIONS);
+        let slot_id = match rsess.get_session_slot($HANDLE) {
+            Ok(s) => s,
+            Err(e) => return err_to_rv!(e),
+        };
+        let token = match $WSLOTS.get_token_from_slot_mut(slot_id) {
+            Ok(t) => t,
+            Err(e) => return err_to_rv!(e),
+        };
+        token
+    }};
 }
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
@@ -270,13 +274,15 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     }
     let args = _init_args as *const CK_C_INITIALIZE_ARGS;
 
-    if unsafe {(*args).pReserved.is_null()} {
+    if unsafe { (*args).pReserved.is_null() } {
         return CKR_ARGUMENTS_BAD;
     }
-    let filename = match unsafe {CStr::from_ptr((*args).pReserved as *const _)}.to_str() {
-        Ok(f) => f,
-        Err(_e) => return CKR_ARGUMENTS_BAD,
-    };
+    let filename =
+        match unsafe { CStr::from_ptr((*args).pReserved as *const _) }.to_str()
+        {
+            Ok(f) => f,
+            Err(_e) => return CKR_ARGUMENTS_BAD,
+        };
 
     let mut wsess = global_wlock!(noinitcheck SESSIONS);
     wsess.initialize();
@@ -321,25 +327,25 @@ extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     ret
 }
 extern "C" fn fn_get_mechanism_list(
-        _slot_id: CK_SLOT_ID,
-        _mechanism_list: CK_MECHANISM_TYPE_PTR,
-        _pul_count: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _slot_id: CK_SLOT_ID,
+    _mechanism_list: CK_MECHANISM_TYPE_PTR,
+    _pul_count: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_get_mechanism_info(
-        _slot_id: CK_SLOT_ID,
-        _type_: CK_MECHANISM_TYPE,
-        _info: CK_MECHANISM_INFO_PTR,
-    ) -> CK_RV {
+    _slot_id: CK_SLOT_ID,
+    _type_: CK_MECHANISM_TYPE,
+    _info: CK_MECHANISM_INFO_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_init_token(
-        slot_id: CK_SLOT_ID,
-        pin: CK_UTF8CHAR_PTR,
-        pin_len: CK_ULONG,
-        label: CK_UTF8CHAR_PTR,
-    ) -> CK_RV {
+    slot_id: CK_SLOT_ID,
+    pin: CK_UTF8CHAR_PTR,
+    pin_len: CK_ULONG,
+    label: CK_UTF8CHAR_PTR,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut token = match rslots.get_token_from_slot_mut_nochecks(slot_id) {
         Ok(t) => t,
@@ -348,9 +354,8 @@ extern "C" fn fn_init_token(
     if token.has_sessions() {
         return CKR_SESSION_EXISTS;
     }
-    let vpin: Vec<u8> = unsafe {
-        std::slice::from_raw_parts(pin, pin_len as usize).to_vec()
-    };
+    let vpin: Vec<u8> =
+        unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
     let vlabel: Vec<u8> = unsafe {
         if label.is_null() {
             vec![0x20 as u8; 32]
@@ -361,29 +366,28 @@ extern "C" fn fn_init_token(
     token.initialize(&vpin, &vlabel)
 }
 extern "C" fn fn_init_pin(
-        s_handle: CK_SESSION_HANDLE,
-        pin: CK_UTF8CHAR_PTR,
-        pin_len: CK_ULONG,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    pin: CK_UTF8CHAR_PTR,
+    pin_len: CK_ULONG,
+) -> CK_RV {
     let wslots = global_wlock!(SLOTS);
     let mut token = token_from_session_handle!(wslots, s_handle, as_mut);
     if !token.is_logged_in(CKU_SO) {
         return CKR_USER_NOT_LOGGED_IN;
     }
 
-    let vpin: Vec<u8> = unsafe {
-        std::slice::from_raw_parts(pin, pin_len as usize).to_vec()
-    };
+    let vpin: Vec<u8> =
+        unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
 
     token.set_pin(CKU_USER, &vpin, None)
 }
 extern "C" fn fn_set_pin(
-        s_handle: CK_SESSION_HANDLE,
-        old_pin: CK_UTF8CHAR_PTR,
-        old_len: CK_ULONG,
-        new_pin: CK_UTF8CHAR_PTR,
-        new_len: CK_ULONG,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    old_pin: CK_UTF8CHAR_PTR,
+    old_len: CK_ULONG,
+    new_pin: CK_UTF8CHAR_PTR,
+    new_len: CK_ULONG,
+) -> CK_RV {
     let wslots = global_wlock!(SLOTS);
     let mut token = token_from_session_handle!(wslots, s_handle, as_mut);
     let session = match token.get_session(s_handle) {
@@ -391,7 +395,7 @@ extern "C" fn fn_set_pin(
         Err(e) => return err_to_rv!(e),
     };
     if !session.is_writable() {
-        return CKR_SESSION_READ_ONLY
+        return CKR_SESSION_READ_ONLY;
     }
     let vpin: Vec<u8> = unsafe {
         std::slice::from_raw_parts(new_pin, new_len as usize).to_vec()
@@ -403,12 +407,12 @@ extern "C" fn fn_set_pin(
     token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, Some(&vold))
 }
 extern "C" fn fn_open_session(
-        slot_id: CK_SLOT_ID,
-        flags: CK_FLAGS,
-        _application: CK_VOID_PTR,
-        _notify: CK_NOTIFY,
-        ph_session: CK_SESSION_HANDLE_PTR,
-    ) -> CK_RV {
+    slot_id: CK_SLOT_ID,
+    flags: CK_FLAGS,
+    _application: CK_VOID_PTR,
+    _notify: CK_NOTIFY,
+    ph_session: CK_SESSION_HANDLE_PTR,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut token = match rslots.get_token_from_slot_mut(slot_id) {
         Ok(t) => t,
@@ -425,8 +429,8 @@ extern "C" fn fn_open_session(
         Ok(s) => s,
         Err(e) => {
             wsess.clear_session_slot(handle);
-            return err_to_rv!(e)
-        },
+            return err_to_rv!(e);
+        }
     };
     unsafe {
         core::ptr::write(ph_session as *mut _, session.get_handle());
@@ -456,9 +460,9 @@ extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
     CKR_OK
 }
 extern "C" fn fn_get_session_info(
-        s_handle: CK_SESSION_HANDLE,
-        info: CK_SESSION_INFO_PTR,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    info: CK_SESSION_INFO_PTR,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let token = token_from_session_handle!(rslots, s_handle);
     let session = match token.get_session(s_handle) {
@@ -471,37 +475,36 @@ extern "C" fn fn_get_session_info(
     CKR_OK
 }
 extern "C" fn fn_get_operation_state(
-        _session: CK_SESSION_HANDLE,
-        _operation_state: CK_BYTE_PTR,
-        _pul_operation_state_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _operation_state: CK_BYTE_PTR,
+    _pul_operation_state_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_set_operation_state(
-        _session: CK_SESSION_HANDLE,
-        _operation_state: CK_BYTE_PTR,
-        _operation_state_len: CK_ULONG,
-        _encryption_key: CK_OBJECT_HANDLE,
-        _authentication_key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _operation_state: CK_BYTE_PTR,
+    _operation_state_len: CK_ULONG,
+    _encryption_key: CK_OBJECT_HANDLE,
+    _authentication_key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_login(
-        s_handle: CK_SESSION_HANDLE,
-        user_type: CK_USER_TYPE,
-        pin: CK_UTF8CHAR_PTR,
-        pin_len: CK_ULONG,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    user_type: CK_USER_TYPE,
+    pin: CK_UTF8CHAR_PTR,
+    pin_len: CK_ULONG,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
     if user_type == CKU_SO {
         if token.has_ro_sessions() {
-            return CKR_SESSION_READ_ONLY_EXISTS
+            return CKR_SESSION_READ_ONLY_EXISTS;
         }
     }
-    let vpin: Vec<u8> = unsafe {
-        std::slice::from_raw_parts(pin, pin_len as usize).to_vec()
-    };
+    let vpin: Vec<u8> =
+        unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
 
     token.login(user_type, &vpin)
 }
@@ -511,17 +514,16 @@ extern "C" fn fn_logout(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     token.logout()
 }
 extern "C" fn fn_create_object(
-        s_handle: CK_SESSION_HANDLE,
-        template: CK_ATTRIBUTE_PTR,
-        count: CK_ULONG,
-        object_handle: CK_OBJECT_HANDLE_PTR,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    template: CK_ATTRIBUTE_PTR,
+    count: CK_ULONG,
+    object_handle: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
 
-    let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts_mut(template, count as usize)
-    };
+    let tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
 
     let oh = match token.create_object(s_handle, tmpl) {
         Ok(h) => h,
@@ -535,67 +537,65 @@ extern "C" fn fn_create_object(
     CKR_OK
 }
 extern "C" fn fn_copy_object(
-        _session: CK_SESSION_HANDLE,
-        _object: CK_OBJECT_HANDLE,
-        _template: CK_ATTRIBUTE_PTR,
-        _count: CK_ULONG,
-        _ph_new_object: CK_OBJECT_HANDLE_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _object: CK_OBJECT_HANDLE,
+    _template: CK_ATTRIBUTE_PTR,
+    _count: CK_ULONG,
+    _ph_new_object: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_destroy_object(
-        _session: CK_SESSION_HANDLE,
-        _object: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _object: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_get_object_size(
-        _session: CK_SESSION_HANDLE,
-        _object: CK_OBJECT_HANDLE,
-        _pul_size: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _object: CK_OBJECT_HANDLE,
+    _pul_size: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_get_attribute_value(
-        s_handle: CK_SESSION_HANDLE,
-        o_handle: CK_OBJECT_HANDLE,
-        template: CK_ATTRIBUTE_PTR,
-        count: CK_ULONG,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    o_handle: CK_OBJECT_HANDLE,
+    template: CK_ATTRIBUTE_PTR,
+    count: CK_ULONG,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let token = token_from_session_handle!(rslots, s_handle);
-    let mut tmpl: &mut [CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts_mut(template, count as usize)
-    };
+    let mut tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
     ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl))
 }
 extern "C" fn fn_set_attribute_value(
-        _session: CK_SESSION_HANDLE,
-        _object: CK_OBJECT_HANDLE,
-        _template: CK_ATTRIBUTE_PTR,
-        _count: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _object: CK_OBJECT_HANDLE,
+    _template: CK_ATTRIBUTE_PTR,
+    _count: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_find_objects_init(
-        s_handle: CK_SESSION_HANDLE,
-        template: CK_ATTRIBUTE_PTR,
-        count: CK_ULONG,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    template: CK_ATTRIBUTE_PTR,
+    count: CK_ULONG,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let tmpl: &[CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts(template, count as usize)
-    };
+    let tmpl: &[CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts(template, count as usize) };
     ret_to_rv!(token.search(s_handle, tmpl))
 }
 
 extern "C" fn fn_find_objects(
-        s_handle: CK_SESSION_HANDLE,
-        ph_object: CK_OBJECT_HANDLE_PTR,
-        max_object_count: CK_ULONG,
-        pul_object_count: CK_ULONG_PTR,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    ph_object: CK_OBJECT_HANDLE_PTR,
+    max_object_count: CK_ULONG,
+    pul_object_count: CK_ULONG_PTR,
+) -> CK_RV {
     if ph_object.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
@@ -635,294 +635,297 @@ extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     CKR_OK
 }
 extern "C" fn fn_encrypt_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_encrypt(
-        _session: CK_SESSION_HANDLE,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _encrypted_data: CK_BYTE_PTR,
-        _pul_encrypted_data_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _encrypted_data: CK_BYTE_PTR,
+    _pul_encrypted_data_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_encrypt_update(
-        _session: CK_SESSION_HANDLE,
-        _part: CK_BYTE_PTR,
-        _part_len: CK_ULONG,
-        _encrypted_part: CK_BYTE_PTR,
-        _pul_encrypted_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _part: CK_BYTE_PTR,
+    _part_len: CK_ULONG,
+    _encrypted_part: CK_BYTE_PTR,
+    _pul_encrypted_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_encrypt_final(
-        _session: CK_SESSION_HANDLE,
-        _last_encrypted_part: CK_BYTE_PTR,
-        _pul_last_encrypted_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _last_encrypted_part: CK_BYTE_PTR,
+    _pul_last_encrypted_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt(
-        _session: CK_SESSION_HANDLE,
-        _encrypted_data: CK_BYTE_PTR,
-        _encrypted_data_len: CK_ULONG,
-        _data: CK_BYTE_PTR,
-        _pul_data_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _encrypted_data: CK_BYTE_PTR,
+    _encrypted_data_len: CK_ULONG,
+    _data: CK_BYTE_PTR,
+    _pul_data_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_update(
-        _session: CK_SESSION_HANDLE,
-        _encrypted_part: CK_BYTE_PTR,
-        _encrypted_part_len: CK_ULONG,
-        _part: CK_BYTE_PTR,
-        _pul_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _encrypted_part: CK_BYTE_PTR,
+    _encrypted_part_len: CK_ULONG,
+    _part: CK_BYTE_PTR,
+    _pul_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_final(
-        _session: CK_SESSION_HANDLE,
-        _last_part: CK_BYTE_PTR,
-        _pul_last_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _last_part: CK_BYTE_PTR,
+    _pul_last_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_digest_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_digest(
-        _session: CK_SESSION_HANDLE,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _digest: CK_BYTE_PTR,
-        _pul_digest_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _digest: CK_BYTE_PTR,
+    _pul_digest_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_digest_update(
-        _session: CK_SESSION_HANDLE,
-        _part: CK_BYTE_PTR,
-        _part_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _part: CK_BYTE_PTR,
+    _part_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
-extern "C" fn fn_digest_key(_session: CK_SESSION_HANDLE, _key: CK_OBJECT_HANDLE) -> CK_RV {
+extern "C" fn fn_digest_key(
+    _session: CK_SESSION_HANDLE,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_digest_final(
-        _session: CK_SESSION_HANDLE,
-        _digest: CK_BYTE_PTR,
-        _pul_digest_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _digest: CK_BYTE_PTR,
+    _pul_digest_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign(
-        _session: CK_SESSION_HANDLE,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _pul_signature_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _pul_signature_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_update(
-        _session: CK_SESSION_HANDLE,
-        _part: CK_BYTE_PTR,
-        _part_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _part: CK_BYTE_PTR,
+    _part_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_final(
-        _session: CK_SESSION_HANDLE,
-        _signature: CK_BYTE_PTR,
-        _pul_signature_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _signature: CK_BYTE_PTR,
+    _pul_signature_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_recover_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_recover(
-        _session: CK_SESSION_HANDLE,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _pul_signature_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _pul_signature_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify(
-        _session: CK_SESSION_HANDLE,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _signature_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _signature_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_update(
-        _session: CK_SESSION_HANDLE,
-        _part: CK_BYTE_PTR,
-        _part_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _part: CK_BYTE_PTR,
+    _part_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_final(
-        _session: CK_SESSION_HANDLE,
-        _signature: CK_BYTE_PTR,
-        _signature_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _signature: CK_BYTE_PTR,
+    _signature_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_recover_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_recover(
-        _session: CK_SESSION_HANDLE,
-        _signature: CK_BYTE_PTR,
-        _signature_len: CK_ULONG,
-        _data: CK_BYTE_PTR,
-        _pul_data_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _signature: CK_BYTE_PTR,
+    _signature_len: CK_ULONG,
+    _data: CK_BYTE_PTR,
+    _pul_data_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_digest_encrypt_update(
-        _session: CK_SESSION_HANDLE,
-        _part: CK_BYTE_PTR,
-        _part_len: CK_ULONG,
-        _encrypted_part: CK_BYTE_PTR,
-        _pul_encrypted_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _part: CK_BYTE_PTR,
+    _part_len: CK_ULONG,
+    _encrypted_part: CK_BYTE_PTR,
+    _pul_encrypted_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_digest_update(
-        _session: CK_SESSION_HANDLE,
-        _encrypted_part: CK_BYTE_PTR,
-        _encrypted_part_len: CK_ULONG,
-        _part: CK_BYTE_PTR,
-        _pul_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _encrypted_part: CK_BYTE_PTR,
+    _encrypted_part_len: CK_ULONG,
+    _part: CK_BYTE_PTR,
+    _pul_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_encrypt_update(
-        _session: CK_SESSION_HANDLE,
-        _part: CK_BYTE_PTR,
-        _part_len: CK_ULONG,
-        _encrypted_part: CK_BYTE_PTR,
-        _pul_encrypted_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _part: CK_BYTE_PTR,
+    _part_len: CK_ULONG,
+    _encrypted_part: CK_BYTE_PTR,
+    _pul_encrypted_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_verify_update(
-        _session: CK_SESSION_HANDLE,
-        _encrypted_part: CK_BYTE_PTR,
-        _encrypted_part_len: CK_ULONG,
-        _part: CK_BYTE_PTR,
-        _pul_part_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _encrypted_part: CK_BYTE_PTR,
+    _encrypted_part_len: CK_ULONG,
+    _part: CK_BYTE_PTR,
+    _pul_part_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_generate_key(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _template: CK_ATTRIBUTE_PTR,
-        _count: CK_ULONG,
-        _ph_key: CK_OBJECT_HANDLE_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _template: CK_ATTRIBUTE_PTR,
+    _count: CK_ULONG,
+    _ph_key: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_generate_key_pair(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _public_key_template: CK_ATTRIBUTE_PTR,
-        _public_key_attribute_count: CK_ULONG,
-        _private_key_template: CK_ATTRIBUTE_PTR,
-        _private_key_attribute_count: CK_ULONG,
-        _ph_public_key: CK_OBJECT_HANDLE_PTR,
-        _ph_private_key: CK_OBJECT_HANDLE_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _public_key_template: CK_ATTRIBUTE_PTR,
+    _public_key_attribute_count: CK_ULONG,
+    _private_key_template: CK_ATTRIBUTE_PTR,
+    _private_key_attribute_count: CK_ULONG,
+    _ph_public_key: CK_OBJECT_HANDLE_PTR,
+    _ph_private_key: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_wrap_key(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _wrapping_key: CK_OBJECT_HANDLE,
-        _key: CK_OBJECT_HANDLE,
-        _wrapped_key: CK_BYTE_PTR,
-        _pul_wrapped_key_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _wrapping_key: CK_OBJECT_HANDLE,
+    _key: CK_OBJECT_HANDLE,
+    _wrapped_key: CK_BYTE_PTR,
+    _pul_wrapped_key_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_unwrap_key(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _unwrapping_key: CK_OBJECT_HANDLE,
-        _wrapped_key: CK_BYTE_PTR,
-        _wrapped_key_len: CK_ULONG,
-        _template: CK_ATTRIBUTE_PTR,
-        _attribute_count: CK_ULONG,
-        _ph_key: CK_OBJECT_HANDLE_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _unwrapping_key: CK_OBJECT_HANDLE,
+    _wrapped_key: CK_BYTE_PTR,
+    _wrapped_key_len: CK_ULONG,
+    _template: CK_ATTRIBUTE_PTR,
+    _attribute_count: CK_ULONG,
+    _ph_key: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_derive_key(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _base_key: CK_OBJECT_HANDLE,
-        _template: CK_ATTRIBUTE_PTR,
-        _attribute_count: CK_ULONG,
-        _ph_key: CK_OBJECT_HANDLE_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _base_key: CK_OBJECT_HANDLE,
+    _template: CK_ATTRIBUTE_PTR,
+    _attribute_count: CK_ULONG,
+    _ph_key: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_seed_random(
-        _session: CK_SESSION_HANDLE,
-        _seed: CK_BYTE_PTR,
-        _seed_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _seed: CK_BYTE_PTR,
+    _seed_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_generate_random(
-        s_handle: CK_SESSION_HANDLE,
-        random_data: CK_BYTE_PTR,
-        random_len: CK_ULONG,
-    ) -> CK_RV {
+    s_handle: CK_SESSION_HANDLE,
+    random_data: CK_BYTE_PTR,
+    random_len: CK_ULONG,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let token = token_from_session_handle!(rslots, s_handle);
     let data: &mut [u8] = unsafe {
@@ -937,17 +940,18 @@ extern "C" fn fn_cancel_function(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_wait_for_slot_event(
-        _flags: CK_FLAGS,
-        _slot: CK_SLOT_ID_PTR,
-        _rserved: CK_VOID_PTR,
-    ) -> CK_RV {
+    _flags: CK_FLAGS,
+    _slot: CK_SLOT_ID_PTR,
+    _rserved: CK_VOID_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
 pub static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     version: CK_VERSION {
         major: 2,
-        minor: 40},
+        minor: 40,
+    },
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
     C_GetInfo: Some(fn_get_info),
@@ -1019,19 +1023,19 @@ pub static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
 };
 
 extern "C" fn fn_get_slot_list(
-        _token_present: CK_BBOOL,
-        slot_list: CK_SLOT_ID_PTR,
-        count: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _token_present: CK_BBOOL,
+    slot_list: CK_SLOT_ID_PTR,
+    count: CK_ULONG_PTR,
+) -> CK_RV {
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
     let rslots_len = global_rlock!(SLOTS).get_slots_num();
 
-    let mut slotids: Vec::<CK_ULONG> = vec!(0; rslots_len);
+    let mut slotids: Vec<CK_ULONG> = vec![0; rslots_len];
     for i in 0..rslots_len {
         slotids[i] = i as CK_ULONG;
-    };
+    }
 
     if slot_list.is_null() {
         unsafe {
@@ -1057,7 +1061,10 @@ extern "C" fn fn_get_slot_list(
     CKR_OK
 }
 
-extern "C" fn fn_get_slot_info(slot_id: CK_SLOT_ID, info: CK_SLOT_INFO_PTR) -> CK_RV {
+extern "C" fn fn_get_slot_info(
+    slot_id: CK_SLOT_ID,
+    info: CK_SLOT_INFO_PTR,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let slot = match rslots.get_slot(slot_id) {
         Ok(s) => s,
@@ -1070,7 +1077,10 @@ extern "C" fn fn_get_slot_info(slot_id: CK_SLOT_ID, info: CK_SLOT_INFO_PTR) -> C
     CKR_OK
 }
 
-extern "C" fn fn_get_token_info(slot_id: CK_SLOT_ID, info: CK_TOKEN_INFO_PTR) -> CK_RV {
+extern "C" fn fn_get_token_info(
+    slot_id: CK_SLOT_ID,
+    info: CK_TOKEN_INFO_PTR,
+) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let slot = match rslots.get_slot(slot_id) {
         Ok(s) => s,
@@ -1084,8 +1094,10 @@ extern "C" fn fn_get_token_info(slot_id: CK_SLOT_ID, info: CK_TOKEN_INFO_PTR) ->
 }
 
 static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 0 };
-static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                        ";
-static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] = *b"Kryoptic PKCS11 Module          ";
+static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic                        ";
+static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic PKCS11 Module          ";
 static LIBRARY_VERSION: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
 
 static MODULE_INFO: CK_INFO = CK_INFO {
@@ -1114,179 +1126,182 @@ pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
 // Additional 3.0 functions
 
 extern "C" fn fn_login_user(
-        _session: CK_SESSION_HANDLE,
-        _user_type: CK_USER_TYPE,
-        _pin: CK_UTF8CHAR_PTR,
-        _pin_len: CK_ULONG,
-        _username: CK_UTF8CHAR_PTR,
-        _username_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _user_type: CK_USER_TYPE,
+    _pin: CK_UTF8CHAR_PTR,
+    _pin_len: CK_ULONG,
+    _username: CK_UTF8CHAR_PTR,
+    _username_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
-extern "C" fn fn_session_cancel(_session: CK_SESSION_HANDLE, _flags: CK_FLAGS) -> CK_RV {
+extern "C" fn fn_session_cancel(
+    _session: CK_SESSION_HANDLE,
+    _flags: CK_FLAGS,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_encrypt_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_encrypt_message(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _associated_data: CK_BYTE_PTR,
-        _associated_data_len: CK_ULONG,
-        _plaintext: CK_BYTE_PTR,
-        _plaintext_len: CK_ULONG,
-        _ciphertext: CK_BYTE_PTR,
-        _pul_ciphertext_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _associated_data: CK_BYTE_PTR,
+    _associated_data_len: CK_ULONG,
+    _plaintext: CK_BYTE_PTR,
+    _plaintext_len: CK_ULONG,
+    _ciphertext: CK_BYTE_PTR,
+    _pul_ciphertext_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_encrypt_message_begin(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _associated_data: CK_BYTE_PTR,
-        _associated_data_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _associated_data: CK_BYTE_PTR,
+    _associated_data_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_encrypt_message_next(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _plaintext_part: CK_BYTE_PTR,
-        _plaintext_part_len: CK_ULONG,
-        _ciphertext_part: CK_BYTE_PTR,
-        _pul_ciphertext_part_len: CK_ULONG_PTR,
-        _flags: CK_FLAGS,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _plaintext_part: CK_BYTE_PTR,
+    _plaintext_part_len: CK_ULONG,
+    _ciphertext_part: CK_BYTE_PTR,
+    _pul_ciphertext_part_len: CK_ULONG_PTR,
+    _flags: CK_FLAGS,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_encrypt_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_decrypt_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_message(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _associated_data: CK_BYTE_PTR,
-        _associated_data_len: CK_ULONG,
-        _ciphertext: CK_BYTE_PTR,
-        _ciphertext_len: CK_ULONG,
-        _plaintext: CK_BYTE_PTR,
-        _pul_plaintext_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _associated_data: CK_BYTE_PTR,
+    _associated_data_len: CK_ULONG,
+    _ciphertext: CK_BYTE_PTR,
+    _ciphertext_len: CK_ULONG,
+    _plaintext: CK_BYTE_PTR,
+    _pul_plaintext_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_message_begin(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _associated_data: CK_BYTE_PTR,
-        _associated_data_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _associated_data: CK_BYTE_PTR,
+    _associated_data_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_decrypt_message_next(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _ciphertext_part: CK_BYTE_PTR,
-        _ciphertext_part_len: CK_ULONG,
-        _plaintext_part: CK_BYTE_PTR,
-        _pul_plaintext_part_len: CK_ULONG_PTR,
-        _flags: CK_FLAGS,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _ciphertext_part: CK_BYTE_PTR,
+    _ciphertext_part_len: CK_ULONG,
+    _plaintext_part: CK_BYTE_PTR,
+    _pul_plaintext_part_len: CK_ULONG_PTR,
+    _flags: CK_FLAGS,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_decrypt_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_sign_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_message(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _pul_signature_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _pul_signature_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_message_begin(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_sign_message_next(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _pul_signature_len: CK_ULONG_PTR,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _pul_signature_len: CK_ULONG_PTR,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_sign_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_verify_init(
-        _session: CK_SESSION_HANDLE,
-        _mechanism: CK_MECHANISM_PTR,
-        _key: CK_OBJECT_HANDLE,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _mechanism: CK_MECHANISM_PTR,
+    _key: CK_OBJECT_HANDLE,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_message(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _signature_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _signature_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_message_begin(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_verify_message_next(
-        _session: CK_SESSION_HANDLE,
-        _parameter: CK_VOID_PTR,
-        _parameter_len: CK_ULONG,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG,
-        _signature: CK_BYTE_PTR,
-        _signature_len: CK_ULONG,
-    ) -> CK_RV {
+    _session: CK_SESSION_HANDLE,
+    _parameter: CK_VOID_PTR,
+    _parameter_len: CK_ULONG,
+    _data: CK_BYTE_PTR,
+    _data_len: CK_ULONG,
+    _signature: CK_BYTE_PTR,
+    _signature_len: CK_ULONG,
+) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
@@ -1294,9 +1309,7 @@ extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
 }
 
 pub static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
-    version: CK_VERSION {
-        major: 3,
-        minor: 0},
+    version: CK_VERSION { major: 3, minor: 0 },
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
     C_GetInfo: Some(fn_get_info),
@@ -1408,9 +1421,9 @@ static mut INTERFACE_300: CK_INTERFACE = CK_INTERFACE {
 
 #[no_mangle]
 pub extern "C" fn C_GetInterfaceList(
-        interfaces_list: CK_INTERFACE_PTR,
-        count: CK_ULONG_PTR,
-    ) -> CK_RV {
+    interfaces_list: CK_INTERFACE_PTR,
+    count: CK_ULONG_PTR,
+) -> CK_RV {
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
@@ -1436,23 +1449,23 @@ pub extern "C" fn C_GetInterfaceList(
 
 #[no_mangle]
 pub extern "C" fn C_GetInterface(
-        interface_name: CK_UTF8CHAR_PTR,
-        version: CK_VERSION_PTR,
-        interface: CK_INTERFACE_PTR_PTR,
-        flags: CK_FLAGS,
-    ) -> CK_RV {
-
+    interface_name: CK_UTF8CHAR_PTR,
+    version: CK_VERSION_PTR,
+    interface: CK_INTERFACE_PTR_PTR,
+    flags: CK_FLAGS,
+) -> CK_RV {
     // default to 3.0
-    let mut ver: CK_VERSION = CK_VERSION {
-        major: 3,
-        minor: 0
-    };
+    let mut ver: CK_VERSION = CK_VERSION { major: 3, minor: 0 };
 
     if interface.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
     if !interface_name.is_null() {
-        let name: &str = unsafe { std::ffi::CStr::from_ptr(interface_name as *const i8).to_str().unwrap() };
+        let name: &str = unsafe {
+            std::ffi::CStr::from_ptr(interface_name as *const i8)
+                .to_str()
+                .unwrap()
+        };
         if name != INTERFACE_NAME_STD {
             return CKR_ARGUMENTS_BAD;
         }
@@ -1468,11 +1481,11 @@ pub extern "C" fn C_GetInterface(
     }
 
     if ver.major == 3 && ver.minor == 0 {
-        unsafe{
+        unsafe {
             *interface = &mut INTERFACE_300 as *mut _ as *mut CK_INTERFACE;
         }
     } else if ver.major == 2 && ver.minor == 40 {
-        unsafe{
+        unsafe {
             *interface = &mut INTERFACE_240 as *mut _ as *mut CK_INTERFACE;
         }
     } else {
@@ -1484,4 +1497,3 @@ pub extern "C" fn C_GetInterface(
 
 #[cfg(test)]
 mod tests;
-

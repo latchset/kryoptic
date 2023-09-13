@@ -1,8 +1,8 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::{error::Error, fmt};
 use serde_json;
+use std::{error::Error, fmt};
 
 use super::interface;
 
@@ -19,7 +19,9 @@ impl fmt::Display for CkRvError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.rv {
             interface::CKR_GENERAL_ERROR => write!(f, "CKR_GENERAL_ERROR"),
-            interface::CKR_ATTRIBUTE_TYPE_INVALID => write!(f, "CKR_ATTRIBUTE_TYPE_INVALID"),
+            interface::CKR_ATTRIBUTE_TYPE_INVALID => {
+                write!(f, "CKR_ATTRIBUTE_TYPE_INVALID")
+            }
             _ => write!(f, "unknown error"),
         }
     }
@@ -60,13 +62,13 @@ impl fmt::Display for KError {
 #[macro_export]
 macro_rules! err_rv {
     ($ck_err:expr) => {
-        Err(KError::RvError(error::CkRvError{rv: $ck_err}))
-    }
+        Err(KError::RvError(error::CkRvError { rv: $ck_err }))
+    };
 }
 
 #[macro_export]
 macro_rules! err_not_found {
     ($err_str:expr) => {
-        Err(KError::NotFound(error::AttributeNotFound{s: $err_str}))
-    }
+        Err(KError::NotFound(error::AttributeNotFound { s: $err_str }))
+    };
 }
