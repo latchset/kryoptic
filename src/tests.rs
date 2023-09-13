@@ -104,7 +104,7 @@ fn test_token() {
         match list.C_Initialize{
             Some(value) => {
                 let mut args = test_init_args(testdata.filename.unwrap());
-                let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+                let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
             }
@@ -121,7 +121,7 @@ fn test_init_fini() {
     test_setup(testdata.filename.unwrap());
 
     let mut args = test_init_args(testdata.filename.unwrap());
-    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     ret = fn_finalize(std::ptr::null_mut());
@@ -136,13 +136,13 @@ fn test_random() {
     test_setup(testdata.filename.unwrap());
 
     let mut args = test_init_args(testdata.filename.unwrap());
-    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(0, CKF_SERIAL_SESSION, std::ptr::null_mut(), None, &mut handle);
     assert_eq!(ret, CKR_OK);
-    let mut data: &[u8] = &mut [0, 0, 0, 0];
+    let data: &[u8] = &mut [0, 0, 0, 0];
     ret = fn_generate_random(handle, data.as_ptr() as *mut u8, data.len() as CK_ULONG);
     assert_eq!(ret, CKR_OK);
     assert_ne!(data, &[0, 0, 0, 0]);
@@ -160,7 +160,7 @@ fn test_login() {
     test_setup(testdata.filename.unwrap());
 
     let mut args = test_init_args(testdata.filename.unwrap());
-    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
 
@@ -231,7 +231,7 @@ fn test_get_attr() {
     test_setup(testdata.filename.unwrap());
 
     let mut args = test_init_args(testdata.filename.unwrap());
-    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
@@ -351,7 +351,7 @@ fn test_create_objects() {
     test_setup(testdata.filename.unwrap());
 
     let mut args = test_init_args(testdata.filename.unwrap());
-    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
@@ -359,8 +359,8 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_OK);
 
     let mut class = CKO_DATA;
-    let mut application = "test";
-    let mut data = "payload";
+    let application = "test";
+    let data = "payload";
     let mut template = vec![
         CK_ATTRIBUTE {
             type_: CKA_CLASS,
@@ -427,7 +427,7 @@ fn test_init_token() {
     /* skip setup, we are creating an unitiliaized token */
 
     let mut args = test_init_args(testdata.filename.unwrap());
-    let mut args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
