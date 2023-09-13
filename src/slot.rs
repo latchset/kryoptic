@@ -16,14 +16,17 @@ static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                    
 
 #[derive(Debug)]
 pub struct Slot {
+    slot_id: CK_SLOT_ID,
     slot_info: CK_SLOT_INFO,
     token: RwLock<Token>,
 }
 
 impl Slot {
-    pub fn new(filename: String) -> KResult<Slot> {
-        let token = Token::load(filename)?;
+    pub fn new(slot_id: CK_SLOT_ID, filename: String) -> KResult<Slot> {
+        let mut token = Token::new(slot_id, filename);
+        token.load()?;
         Ok(Slot {
+            slot_id: slot_id,
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
                 manufacturerID: MANUFACTURER_ID,
@@ -65,10 +68,12 @@ impl Slot {
         }
     }
 
-    pub fn get_token_mut(&self) -> KResult<RwLockWriteGuard<'_, Token>> {
+    pub fn get_token_mut(&self, nochecks: bool) -> KResult<RwLockWriteGuard<'_, Token>> {
         match self.token.write() {
             Ok(token) => {
-                if token.is_initialized() {
+                if nochecks {
+                    Ok(token)
+                } else if token.is_initialized() {
                     Ok(token)
                 } else {
                     /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
@@ -77,13 +82,6 @@ impl Slot {
                 }
             },
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
-        }
-    }
-
-    pub fn init_token(&self, pin: &Vec<u8>, label: &Vec<u8>) -> CK_RV {
-        match self.token.write() {
-            Ok(mut token) => token.initialize(pin, label),
-            Err(_) => CKR_GENERAL_ERROR,
         }
     }
 }

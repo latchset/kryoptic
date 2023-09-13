@@ -71,8 +71,8 @@ impl Session {
         self.search_handles.clear();
     }
 
-    pub fn add_search_handle(&mut self, handle: CK_OBJECT_HANDLE) {
-        self.search_handles.push(handle);
+    pub fn set_search_handles(&mut self, handles: Vec<CK_OBJECT_HANDLE>) {
+        self.search_handles = handles;
     }
 
     pub fn get_search_handles(&mut self, max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {

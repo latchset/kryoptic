@@ -94,7 +94,9 @@ impl LoginData {
 #[derive(Debug, Clone)]
 pub struct Token {
     info: CK_TOKEN_INFO,
+    slot_id: CK_SLOT_ID,
     filename: String,
+    sessions: Vec<Session>,
     objects: HashMap<String, Object>,
     dirty: bool,
     so_login: LoginData,
@@ -104,9 +106,8 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn load(filename: String) -> KResult<Token> {
-
-        let mut t = Token {
+    pub fn new(slot_id: CK_SLOT_ID, filename: String) -> Token {
+        Token {
             info: CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
                 manufacturerID: MANUFACTURER_ID,
@@ -120,9 +121,9 @@ impl Token {
                 ulMaxPinLen: CK_EFFECTIVELY_INFINITE,
                 ulMinPinLen: 8,
                 ulTotalPublicMemory: 0,
-                ulFreePublicMemory: 0,
+                ulFreePublicMemory: CK_EFFECTIVELY_INFINITE,
                 ulTotalPrivateMemory: 0,
-                ulFreePrivateMemory: 0,
+                ulFreePrivateMemory: CK_EFFECTIVELY_INFINITE,
                 hardwareVersion: CK_VERSION {
                     major: 0,
                     minor: 0,
@@ -133,7 +134,9 @@ impl Token {
                 },
                 utcTime: *b"0000000000000000",
             },
+            slot_id: slot_id,
             filename: filename,
+            sessions: Vec::new(),
             objects: HashMap::new(),
             so_login: LoginData {
                 pin: None,
@@ -150,20 +153,25 @@ impl Token {
             dirty: false,
             handles: HashMap::new(),
             next_handle: 1,
-        };
+        }
+    }
 
-        match std::fs::File::open(&t.filename) {
+    pub fn load(&mut self) -> KResult<()> {
+        if self.is_initialized() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        match std::fs::File::open(&self.filename) {
             Ok(f) => match serde_json::from_reader::<std::fs::File, JsonToken>(f) {
-                Ok(j) => t.json_to_objects(&j.objects)?,
+                Ok(j) => self.json_to_objects(&j.objects)?,
                 Err(e) => return Err(KError::JsonError(e)),
             },
             Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => return Ok(t),
+                std::io::ErrorKind::NotFound => return Ok(()),
                 _ => return Err(KError::FileError(e)),
             }
         };
-        t.info.flags |= CKF_TOKEN_INITIALIZED;
-        Ok(t)
+        self.info.flags |= CKF_TOKEN_INITIALIZED;
+        Ok(())
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -341,7 +349,7 @@ impl Token {
     }
 
     pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
-        match user_type {
+        let mut ret = match user_type {
             CKU_SO => {
                 if self.so_login.logged_in {
                     return CKR_USER_ALREADY_LOGGED_IN
@@ -375,19 +383,47 @@ impl Token {
                 self.user_login.check_pin(pin)
             },
             _ => return CKR_USER_TYPE_INVALID,
+        };
+        if ret != CKR_OK {
+            return ret;
         }
+
+        /* change session states to logged in values */
+        for s in self.sessions.iter_mut() {
+            ret = s.change_session_state(user_type);
+            if ret != CKR_OK {
+                break;
+            }
+        }
+        if ret != CKR_OK {
+            match user_type {
+                CKU_SO => self.so_login.logged_in = false,
+                CKU_USER => self.user_login.logged_in = false,
+                _ => return CKR_GENERAL_ERROR,
+            }
+            for s in self.sessions.iter_mut() {
+                let _ = s.change_session_state(CK_UNAVAILABLE_INFORMATION);
+            }
+        }
+        ret
     }
 
     pub fn logout(&mut self) -> CK_RV {
+        let mut ret = CKR_USER_NOT_LOGGED_IN;
         if self.user_login.logged_in {
             self.user_login.logged_in = false;
-            return CKR_OK
+            ret = CKR_OK;
         }
         if self.so_login.logged_in {
             self.so_login.logged_in = false;
-            return CKR_OK
+            ret = CKR_OK;
         }
-        CKR_USER_NOT_LOGGED_IN
+        if ret == CKR_OK {
+            for s in self.sessions.iter_mut() {
+                let _ = s.change_session_state(CK_UNAVAILABLE_INFORMATION);
+            }
+        }
+        ret
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
@@ -480,21 +516,25 @@ impl Token {
         }
     }
 
-    pub fn create_object(&mut self, session: &mut Session, template: &[CK_ATTRIBUTE]) -> KResult<CK_OBJECT_HANDLE> {
+    pub fn create_object(&mut self, s_handle: CK_SESSION_HANDLE, template: &[CK_ATTRIBUTE]) -> KResult<CK_OBJECT_HANDLE> {
+        /* check that session is valid */
+        let _ = self.get_session(s_handle)?;
 
         if !self.user_login.logged_in {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
-        let obj = object::create(self.next_object_handle(), template)?;
-        let handle = obj.get_handle();
+        let handle = self.next_object_handle();
+        let obj = object::create(handle, template)?;
         match obj.get_attr_as_bool(CKA_TOKEN) {
             Ok(t) => if t {
+                let session = self.get_session(s_handle)?;
                 if !session.is_writable() {
                     return err_rv!(CKR_SESSION_READ_ONLY);
                 }
                 self.dirty = true;
             } else {
+                let session = self.get_session_mut(s_handle)?;
                 session.add_handle(handle);
             },
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -509,18 +549,23 @@ impl Token {
         &self.info
     }
 
-    pub fn search(&self, session: &mut Session, template: &[CK_ATTRIBUTE]) -> KResult<()> {
-        session.reset_search_handles();
+    pub fn search(&mut self, handle: CK_SESSION_HANDLE, template: &[CK_ATTRIBUTE]) -> KResult<()> {
+        /* check that session is valid */
+        let _ = self.get_session(handle)?;
 
+        let mut search_handles: Vec<CK_OBJECT_HANDLE> = Vec::new();
         for (_, o) in &self.objects {
             if !self.user_login.logged_in && o.is_private() {
                 continue;
             }
 
             if o.match_template(template) {
-                session.add_search_handle(o.get_handle());
+                search_handles.push(o.get_handle());
             }
         }
+
+        let session = self.get_session_mut(handle)?;
+        session.set_search_handles(search_handles);
         Ok(())
     }
 
@@ -540,5 +585,63 @@ impl Token {
             return err_rv!(CKR_GENERAL_ERROR)
         }
         Ok(())
+    }
+
+    pub fn new_session(&mut self, handle: CK_SESSION_HANDLE, flags: CK_FLAGS) -> KResult<&Session> {
+        let session = Session::new(self.slot_id, handle, flags)?;
+        self.sessions.push(session);
+
+        Ok(self.sessions.last().unwrap())
+    }
+
+    pub fn get_session(&self, handle: CK_SESSION_HANDLE) -> KResult<&Session> {
+        for s in self.sessions.iter() {
+            let h = s.get_handle();
+            if h == handle {
+                return Ok(s)
+            }
+        }
+        err_rv!(CKR_SESSION_HANDLE_INVALID)
+    }
+
+    pub fn get_session_mut(&mut self, handle: CK_SESSION_HANDLE) -> KResult<&mut Session> {
+        for s in self.sessions.iter_mut() {
+            let h = s.get_handle();
+            if h == handle {
+                return Ok(s);
+            }
+        }
+        err_rv!(CKR_SESSION_HANDLE_INVALID)
+    }
+
+    pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+        let mut idx = 0;
+        while idx < self.sessions.len() {
+            if handle == self.sessions[idx].get_handle() {
+                self.sessions.swap_remove(idx);
+                return Ok(());
+            }
+            idx += 1;
+        }
+        err_rv!(CKR_SESSION_HANDLE_INVALID)
+    }
+
+    pub fn drop_all_sessions(&mut self) {
+        self.sessions.clear();
+    }
+
+    pub fn has_sessions(&self) -> bool {
+        self.sessions.len() != 0
+    }
+
+    pub fn has_ro_sessions(&self) -> bool {
+        for s in self.sessions.iter() {
+            match s.get_session_info().state {
+                CKS_RO_PUBLIC_SESSION => return true,
+                CKS_RO_USER_FUNCTIONS => return true,
+                _ => continue,
+            }
+        }
+        false
     }
 }
