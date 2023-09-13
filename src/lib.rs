@@ -60,45 +60,91 @@ macro_rules! ret_to_rv {
 }
 
 struct SlotsState {
-    init: bool,
-    slots: Vec<slot::Slot>,
+    slots: Option<Vec<slot::Slot>>,
 }
 
 impl SlotsState {
-    fn get_token_from_slot(&self, slotid: CK_SLOT_ID) -> KResult<RwLockReadGuard<'_, Token>> {
-        let idx = slotid as usize;
-        if idx >= self.slots.len() {
-            return err_rv!(CKR_SLOT_ID_INVALID);
+    fn initialize(&mut self) {
+        self.slots = Some(Vec::new());
+    }
+
+    fn finalize(&mut self) {
+        self.slots = None;
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.slots.is_none() == false
+    }
+
+    fn get_slot(&self, slotid: CK_SLOT_ID) -> KResult<&slot::Slot> {
+        match self.slots {
+            Some (ref s) => {
+                let idx = slotid as usize;
+                if idx >= s.len() {
+                    return err_rv!(CKR_SLOT_ID_INVALID);
+                }
+                Ok(&s[idx])
+            },
+            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
         }
-        let slot = &self.slots[idx];
+    }
+
+    fn get_slots(&self) -> KResult<&Vec<slot::Slot>> {
+        match self.slots {
+            Some (ref s) => Ok(s),
+            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+        }
+    }
+
+    fn get_slots_num(&self) -> usize {
+        match self.get_slots() {
+            Ok(slots) => slots.len(),
+            Err(_) => 0,
+        }
+    }
+
+    fn get_token_from_slot(&self, slotid: CK_SLOT_ID) -> KResult<RwLockReadGuard<'_, Token>> {
+        let slot = self.get_slot(slotid)?;
         slot.get_token()
     }
 
     fn get_token_from_slot_mut(&self, slotid: CK_SLOT_ID) -> KResult<RwLockWriteGuard<'_, Token>> {
-        let idx = slotid as usize;
-        if idx >= self.slots.len() {
-            return err_rv!(CKR_SLOT_ID_INVALID);
-        }
-        let slot = &self.slots[idx];
+        let slot = self.get_slot(slotid)?;
         slot.get_token_mut(false)
     }
+
     fn get_token_from_slot_mut_nochecks(&self, slotid: CK_SLOT_ID) -> KResult<RwLockWriteGuard<'_, Token>> {
-        let idx = slotid as usize;
-        if idx >= self.slots.len() {
-            return err_rv!(CKR_SLOT_ID_INVALID);
-        }
-        let slot = &self.slots[idx];
+        let slot = self.get_slot(slotid)?;
         slot.get_token_mut(true)
+    }
+
+    fn add_slot(&mut self, slot: slot::Slot) -> KResult<()> {
+        match self.slots {
+            Some (ref mut s) => Ok(s.push(slot)),
+            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+        }
     }
 }
 
 struct SessionsState {
-    init: bool,
     sessions: Option<HashMap<CK_SESSION_HANDLE, CK_SLOT_ID>>,
     next_handle: CK_ULONG,
 }
 
 impl SessionsState {
+    fn initialize(&mut self) {
+        self.sessions = Some(HashMap::new());
+        self.next_handle = 1;
+    }
+
+    fn finalize(&mut self) {
+        self.sessions = None;
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.sessions.is_none() == false
+    }
+
     fn get_session_slot(&self, handle: CK_SESSION_HANDLE) -> KResult<CK_SLOT_ID> {
         match self.sessions {
             Some(ref s) => match s.get(&handle) {
@@ -141,12 +187,10 @@ impl SessionsState {
 }
 
 static SLOTS: RwLock<SlotsState> = RwLock::new(SlotsState {
-    init: false,
-    slots: Vec::new(),
+    slots: None,
 });
 
 static SESSIONS: RwLock<SessionsState> = RwLock::new(SessionsState {
-    init: false,
     sessions: None,
     next_handle: 1,
 });
@@ -155,7 +199,7 @@ macro_rules! global_rlock {
     ($GLOBAL:expr) => {
         match $GLOBAL.read() {
             Ok(r) => {
-                if (!r.init) {
+                if (!r.is_initialized()) {
                     return CKR_CRYPTOKI_NOT_INITIALIZED;
                 }
                 r
@@ -170,7 +214,7 @@ macro_rules! global_wlock {
         {
             match $GLOBAL.write() {
                 Ok(w) => {
-                    if (!w.init) {
+                    if (!w.is_initialized()) {
                         return CKR_CRYPTOKI_NOT_INITIALIZED;
                     }
                     w
@@ -235,27 +279,28 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     };
 
     let mut wsess = global_wlock!(noinitcheck SESSIONS);
-    wsess.init = true;
-    wsess.sessions = Some(HashMap::new());
-    wsess.next_handle = 1;
+    wsess.initialize();
 
     let mut wslots = global_wlock!(noinitcheck SLOTS);
-    wslots.init = true;
-    wslots.slots.clear();
+    wslots.initialize();
 
-    let slot_id = wslots.slots.len() as CK_ULONG;
-    let slot = match slot::Slot::new(slot_id, filename.to_string()) {
+    let slot = match slot::Slot::new(0, filename.to_string()) {
         Ok(s) => s,
         Err(e) => return err_to_rv!(e),
     };
-    wslots.slots.push(slot);
-
-    CKR_OK
+    match wslots.add_slot(slot) {
+        Ok(_) => CKR_OK,
+        Err(e) => err_to_rv!(e),
+    }
 }
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
-    let rslots = global_rlock!(SLOTS);
+    let mut wslots = global_wlock!(SLOTS);
     let mut ret = CKR_OK;
-    for slot in &rslots.slots {
+    let slots = match wslots.get_slots() {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
+    for slot in slots {
         let token = match slot.get_token() {
             Ok(t) => t,
             Err(e) => {
@@ -263,8 +308,16 @@ extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
                 continue;
             }
         };
-        ret = ret_to_rv!(token.save());
+        let r = ret_to_rv!(token.save());
+        /* do not overwrite previos errors */
+        if ret == CKR_OK {
+            ret = r
+        }
     }
+    wslots.finalize();
+    let mut wsess = global_wlock!(noinitcheck SESSIONS);
+    wsess.finalize();
+
     ret
 }
 extern "C" fn fn_get_mechanism_list(
@@ -288,9 +341,6 @@ extern "C" fn fn_init_token(
         label: CK_UTF8CHAR_PTR,
     ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    if slot_id > rslots.slots.len() as CK_ULONG {
-        return CKR_SLOT_ID_INVALID;
-    }
     let mut token = match rslots.get_token_from_slot_mut_nochecks(slot_id) {
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
@@ -976,7 +1026,7 @@ extern "C" fn fn_get_slot_list(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots_len = global_rlock!(SLOTS).slots.len();
+    let rslots_len = global_rlock!(SLOTS).get_slots_num();
 
     let mut slotids: Vec::<CK_ULONG> = vec!(0; rslots_len);
     for i in 0..rslots_len {
@@ -1009,10 +1059,10 @@ extern "C" fn fn_get_slot_list(
 
 extern "C" fn fn_get_slot_info(slot_id: CK_SLOT_ID, info: CK_SLOT_INFO_PTR) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    if slot_id > rslots.slots.len() as CK_ULONG {
-        return CKR_SLOT_ID_INVALID;
-    }
-    let slot = &rslots.slots[slot_id as usize];
+    let slot = match rslots.get_slot(slot_id) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
     let slotinfo = slot.get_slot_info();
     unsafe {
         core::ptr::write(info as *mut _, *slotinfo);
@@ -1022,10 +1072,10 @@ extern "C" fn fn_get_slot_info(slot_id: CK_SLOT_ID, info: CK_SLOT_INFO_PTR) -> C
 
 extern "C" fn fn_get_token_info(slot_id: CK_SLOT_ID, info: CK_TOKEN_INFO_PTR) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    if slot_id > rslots.slots.len() as CK_ULONG {
-        return CKR_SLOT_ID_INVALID;
-    }
-    let slot = &rslots.slots[slot_id as usize];
+    let slot = match rslots.get_slot(slot_id) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
     let tokinfo = slot.get_token_info();
     unsafe {
         core::ptr::write(info as *mut _, tokinfo);

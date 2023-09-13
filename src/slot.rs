@@ -16,7 +16,6 @@ static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] = *b"Kryoptic                    
 
 #[derive(Debug)]
 pub struct Slot {
-    slot_id: CK_SLOT_ID,
     slot_info: CK_SLOT_INFO,
     token: RwLock<Token>,
 }
@@ -26,7 +25,6 @@ impl Slot {
         let mut token = Token::new(slot_id, filename);
         token.load()?;
         Ok(Slot {
-            slot_id: slot_id,
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
                 manufacturerID: MANUFACTURER_ID,
