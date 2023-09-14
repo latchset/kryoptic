@@ -5,9 +5,12 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::{err_not_found, err_rv};
-use attribute::{AttrType, Attribute};
+use attribute::{
+    from_bool, from_bytes, from_string, from_ulong, AttrType, Attribute,
+};
 use error::{KError, KResult};
 use interface::*;
+use std::sync::Once;
 
 use uuid::Uuid;
 
@@ -224,52 +227,21 @@ impl Object {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ObjectAttr {
-    id: CK_ULONG,
+    attribute: Attribute,
     required: bool,
     present: bool,
-    default: bool, /* only for bool values */
-    default_value: bool,
+    default: bool,
 }
 
-macro_rules! req_element {
-    ($id:expr) => {
+macro_rules! attr_element {
+    ($id:expr; req $required:expr; def $default:expr; $from_type:expr; val $defval:expr) => {
         ObjectAttr {
-            id: $id,
-            required: true,
+            attribute: $from_type($id, $defval),
+            required: $required,
             present: false,
-            default: false,
-            default_value: false,
-        }
-    };
-    ($id:expr; def $def:expr) => {
-        ObjectAttr {
-            id: $id,
-            required: true,
-            present: false,
-            default: true,
-            default_value: $def,
-        }
-    };
-}
-macro_rules! opt_element {
-    ($id:expr) => {
-        ObjectAttr {
-            id: $id,
-            required: false,
-            present: false,
-            default: false,
-            default_value: false,
-        }
-    };
-    ($id:expr; def $def:expr) => {
-        ObjectAttr {
-            id: $id,
-            required: false,
-            present: false,
-            default: true,
-            default_value: $def,
+            default: $default,
         }
     };
 }
@@ -282,7 +254,7 @@ fn basic_object_attrs_checks(
         let typ = attr.get_type();
         let mut valid = false;
         for elem in cattrs.iter_mut() {
-            if typ == elem.id {
+            if typ == elem.attribute.get_type() {
                 if elem.present {
                     /* duplicate */
                     return CKR_TEMPLATE_INCONSISTENT;
@@ -299,8 +271,7 @@ fn basic_object_attrs_checks(
 
     for elem in cattrs.iter_mut() {
         if !elem.present && elem.default {
-            obj.attributes
-                .push(attribute::from_bool(elem.id, elem.default_value));
+            obj.attributes.push(elem.attribute.clone());
             elem.present = true;
         }
         if elem.required && !elem.present {
@@ -311,33 +282,68 @@ fn basic_object_attrs_checks(
     CKR_OK
 }
 
-static COMMON_OBJ_ATTRS: [ObjectAttr; 1] = [req_element!(CKA_CLASS)];
+struct ObjectTemplates {
+    data_object_template: Option<Vec<ObjectAttr>>,
+}
+fn lazy_init_common_object_attrs(attrs: &mut Vec<ObjectAttr>) {
+    attrs
+        .push(attr_element!(CKA_CLASS; req true; def false; from_ulong; val 0));
+}
+fn lazy_init_common_storage_attrs(attrs: &mut Vec<ObjectAttr>) {
+    attrs.push(
+        attr_element!(CKA_TOKEN; req false; def true; from_bool; val false),
+    );
+    attrs.push(
+        attr_element!(CKA_PRIVATE; req false; def true; from_bool; val false),
+    );
+    attrs.push(
+        attr_element!(CKA_MODIFIABLE; req false; def true; from_bool; val true),
+    );
+    attrs.push(attr_element!(CKA_LABEL; req false; def false; from_string; val String::new()));
+    attrs.push(
+        attr_element!(CKA_COPYABLE; req false; def true; from_bool; val true),
+    );
+    attrs.push(attr_element!(CKA_DESTROYABLE; req false; def true; from_bool; val true));
+    attrs.push(attr_element!(CKA_UNIQUE_ID; req true; def false; from_string; val String::new()));
+}
+fn lazy_init_data_object_attrs(attrs: &mut Vec<ObjectAttr>) {
+    attrs.push(attr_element!(CKA_APPLICATION; req true; def false; from_string; val String::new()));
+    attrs.push(attr_element!(CKA_OBJECT_ID; req false; def false; from_bytes; val Vec::new()));
+    attrs.push(attr_element!(CKA_VALUE; req true; def false; from_bytes; val Vec::new()));
+}
+fn lazy_init_data_object_template() -> Vec<ObjectAttr> {
+    let mut new_template = Vec::<ObjectAttr>::with_capacity(11);
+    lazy_init_common_object_attrs(&mut new_template);
+    lazy_init_common_storage_attrs(&mut new_template);
+    lazy_init_data_object_attrs(&mut new_template);
+    new_template
+}
 
-static COMMON_STORAGE_ATTRS: [ObjectAttr; 7] = [
-    opt_element!(CKA_TOKEN; def false),
-    opt_element!(CKA_PRIVATE; def false),
-    opt_element!(CKA_MODIFIABLE; def true),
-    opt_element!(CKA_LABEL),
-    opt_element!(CKA_COPYABLE; def true),
-    opt_element!(CKA_DESTROYABLE; def true),
-    req_element!(CKA_UNIQUE_ID),
-];
+static mut ATTR_DEFAULTS: ObjectTemplates = ObjectTemplates {
+    data_object_template: None,
+};
+static INIT: Once = Once::new();
 
-static DATA_OBJECT_ATTRS: [ObjectAttr; 3] = [
-    req_element!(CKA_APPLICATION),
-    opt_element!(CKA_OBJECT_ID),
-    req_element!(CKA_VALUE),
-];
+fn get_object_templates() -> &'static ObjectTemplates {
+    unsafe {
+        INIT.call_once(|| {
+            ATTR_DEFAULTS.data_object_template =
+                Some(lazy_init_data_object_template());
+        });
+        &ATTR_DEFAULTS
+    }
+}
+
+fn get_data_object_template() -> Vec<ObjectAttr> {
+    get_object_templates()
+        .data_object_template
+        .as_ref()
+        .map(|d| d.clone())
+        .unwrap()
+}
 
 fn create_data_object(mut obj: Object) -> KResult<Object> {
-    let mut cattrs = Vec::<ObjectAttr>::with_capacity(
-        COMMON_OBJ_ATTRS.len()
-            + COMMON_STORAGE_ATTRS.len()
-            + DATA_OBJECT_ATTRS.len(),
-    );
-    cattrs.extend(COMMON_OBJ_ATTRS);
-    cattrs.extend(COMMON_STORAGE_ATTRS);
-    cattrs.extend(DATA_OBJECT_ATTRS);
+    let mut cattrs = get_data_object_template();
 
     let ret = basic_object_attrs_checks(&mut obj, &mut cattrs);
     if ret != CKR_OK {
@@ -366,7 +372,7 @@ pub fn create(handle: CK_ULONG, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
     };
     match class {
         CKO_DATA => create_data_object(obj),
-        CKO_CERTIFICATE => err_rv!(CKR_FUNCTION_FAILED),
+        CKO_CERTIFICATE => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         CKO_PUBLIC_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         CKO_PRIVATE_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         CKO_SECRET_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
