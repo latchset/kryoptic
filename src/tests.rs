@@ -4,6 +4,18 @@
 use super::*;
 use std::ffi::CString;
 
+const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
+const CK_BBOOL_SIZE: usize = std::mem::size_of::<CK_BBOOL>();
+macro_rules! make_attribute {
+    ($type:expr, $value:expr, $length:expr) => {
+        CK_ATTRIBUTE {
+            type_: $type,
+            pValue: $value as CK_VOID_PTR,
+            ulValueLen: $length as CK_ULONG,
+        }
+    };
+}
+
 struct TestData<'a> {
     filename: Option<&'a str>,
 }
@@ -279,11 +291,11 @@ fn test_get_attr() {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
     /* public key data */
-    template.push(CK_ATTRIBUTE {
-        type_: CKA_UNIQUE_ID,
-        pValue: CString::new("2").unwrap().into_raw() as *mut std::ffi::c_void,
-        ulValueLen: 1,
-    });
+    template.push(make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("2").unwrap().into_raw(),
+        1
+    ));
     ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -295,11 +307,7 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
 
     template.clear();
-    template.push(CK_ATTRIBUTE {
-        type_: CKA_LABEL,
-        pValue: std::ptr::null_mut(),
-        ulValueLen: 0,
-    });
+    template.push(make_attribute!(CKA_LABEL, std::ptr::null_mut(), 0));
 
     ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
@@ -322,11 +330,11 @@ fn test_get_attr() {
     /* private key data */
     template.clear();
     handle = CK_INVALID_HANDLE;
-    template.push(CK_ATTRIBUTE {
-        type_: CKA_UNIQUE_ID,
-        pValue: CString::new("3").unwrap().into_raw() as *mut std::ffi::c_void,
-        ulValueLen: 1,
-    });
+    template.push(make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("3").unwrap().into_raw(),
+        1
+    ));
     /* first try should not find it */
     ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
@@ -360,11 +368,11 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
 
     template.clear();
-    template.push(CK_ATTRIBUTE {
-        type_: CKA_PRIVATE_EXPONENT,
-        pValue: (&mut [0; 128]).as_ptr() as *mut std::ffi::c_void,
-        ulValueLen: 128,
-    });
+    template.push(make_attribute!(
+        CKA_PRIVATE_EXPONENT,
+        (&mut [0; 128]).as_ptr(),
+        128
+    ));
 
     /* should fail for sensitive attributes */
     ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
@@ -410,27 +418,26 @@ fn test_create_objects() {
     let application = "test";
     let data = "payload";
     let mut template = vec![
-        CK_ATTRIBUTE {
-            type_: CKA_CLASS,
-            pValue: &mut class as *mut _ as *mut std::ffi::c_void,
-            ulValueLen: 8,
-        },
-        CK_ATTRIBUTE {
-            type_: CKA_APPLICATION,
-            pValue: CString::new(application).unwrap().into_raw()
-                as *mut std::ffi::c_void,
-            ulValueLen: application.len() as CK_ULONG,
-        },
-        CK_ATTRIBUTE {
-            type_: CKA_VALUE,
-            pValue: CString::new(data).unwrap().into_raw()
-                as *mut std::ffi::c_void,
-            ulValueLen: data.len() as CK_ULONG,
-        },
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(
+            CKA_APPLICATION,
+            CString::new(application).unwrap().into_raw(),
+            application.len()
+        ),
+        make_attribute!(
+            CKA_VALUE,
+            CString::new(data).unwrap().into_raw(),
+            data.len()
+        ),
     ];
 
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    ret = fn_create_object(session, template.as_mut_ptr(), 3, &mut handle);
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
     /* login */
@@ -443,17 +450,27 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_create_object(session, template.as_mut_ptr(), 3, &mut handle);
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
     assert_eq!(ret, CKR_OK);
 
-    let mut intoken: CK_BBOOL = 1;
-    template.push(CK_ATTRIBUTE {
-        type_: CKA_TOKEN,
-        pValue: &mut intoken as *mut _ as *mut std::ffi::c_void,
-        ulValueLen: 1,
-    });
+    let mut intoken: CK_BBOOL = CK_TRUE;
+    template.push(make_attribute!(
+        CKA_TOKEN,
+        &mut intoken as *mut _,
+        CK_BBOOL_SIZE
+    ));
 
-    ret = fn_create_object(session, template.as_mut_ptr(), 4, &mut handle);
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
     let login_session = session;
@@ -467,7 +484,39 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_create_object(session, template.as_mut_ptr(), 4, &mut handle);
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    class = CKO_CERTIFICATE;
+    let mut ctype = CKC_X_509;
+    let mut trusted: CK_BBOOL = CK_FALSE;
+    let ignored = "ignored";
+    let bogus = "bogus";
+    template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_TOKEN, &mut intoken as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_CERTIFICATE_TYPE,
+            &mut ctype as *mut _,
+            CK_ULONG_SIZE
+        ),
+        make_attribute!(CKA_TRUSTED, &mut trusted as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_CHECK_VALUE, ignored.as_ptr(), 42),
+        make_attribute!(CKA_SUBJECT, bogus.as_ptr(), bogus.len()),
+        make_attribute!(CKA_VALUE, bogus.as_ptr(), bogus.len()),
+    ];
+
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_logout(login_session);

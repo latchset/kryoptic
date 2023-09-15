@@ -19,6 +19,7 @@ pub enum AttrType {
     BytesType,
     DateType,
     DenyType,
+    IgnoreType,
 }
 
 #[derive(Debug)]
@@ -60,7 +61,7 @@ static ATTRMAP: [Attrmap<'_>; 126] = [
     attrmap_element!(CKA_HASH_OF_SUBJECT_PUBLIC_KEY; as BytesType),
     attrmap_element!(CKA_HASH_OF_ISSUER_PUBLIC_KEY; as BytesType),
     attrmap_element!(CKA_NAME_HASH_ALGORITHM; as NumType),
-    attrmap_element!(CKA_CHECK_VALUE; as BytesType),
+    attrmap_element!(CKA_CHECK_VALUE; as IgnoreType),
     attrmap_element!(CKA_KEY_TYPE; as NumType),
     attrmap_element!(CKA_SUBJECT; as BytesType),
     attrmap_element!(CKA_ID; as BytesType),
@@ -267,7 +268,7 @@ impl Attribute {
         Value::String(BASE64.encode(&self.value))
     }
 
-    pub fn to_date(&self) -> KResult<String> {
+    pub fn to_date_string(&self) -> KResult<String> {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
@@ -287,7 +288,7 @@ impl Attribute {
     }
 
     fn to_date_value(&self) -> Value {
-        match self.to_date() {
+        match self.to_date_string() {
             Ok(d) => Value::String(d),
             Err(_) => Value::String(String::new()),
         }
@@ -300,6 +301,7 @@ impl Attribute {
             AttrType::StringType => self.to_string_value(),
             AttrType::BytesType => self.to_b64_string_value(),
             AttrType::DateType => self.to_date_value(),
+            AttrType::IgnoreType => Value::Null,
             AttrType::DenyType => Value::Null,
         }
     }
@@ -361,6 +363,81 @@ fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
 }
 conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
 
+fn date_to_vec(val: CK_DATE) -> Vec<u8> {
+    let mut v = Vec::with_capacity(8);
+    v[0] = val.year[0];
+    v[1] = val.year[1];
+    v[2] = val.year[2];
+    v[3] = val.year[3];
+    v[4] = val.month[0];
+    v[5] = val.month[1];
+    v[6] = val.day[0];
+    v[7] = val.day[1];
+    v
+}
+
+conversion_from_type! {make from_date; from_type_date; from_string_date; from CK_DATE; as DateType; via date_to_vec}
+
+fn vec_to_date(val: Vec<u8>) -> CK_DATE {
+    CK_DATE {
+        year: [val[0], val[1], val[2], val[3]],
+        month: [val[5], val[6]],
+        day: [val[8], val[9]],
+    }
+}
+
+const ASCII_DASH: u8 = 0x2D;
+const MIN_ASCII_DIGIT: u8 = 0x30;
+const MAX_ASCII_DIGIT: u8 = 0x39;
+
+fn vec_to_date_validate(val: Vec<u8>) -> KResult<CK_DATE> {
+    if val.len() != 8 {
+        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+    }
+    for n in val.iter() {
+        if *n < MIN_ASCII_DIGIT || *n > MAX_ASCII_DIGIT {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+    }
+    Ok(vec_to_date(val))
+}
+
+fn string_to_ck_date(date: &str) -> KResult<CK_DATE> {
+    let s = date.as_bytes().to_vec();
+    if s.len() != 10 {
+        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+    }
+    if s[4] != ASCII_DASH || s[7] != ASCII_DASH {
+        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+    }
+    let mut buf = Vec::with_capacity(8);
+    buf[0] = s[0];
+    buf[1] = s[1];
+    buf[2] = s[2];
+    buf[3] = s[3];
+    buf[4] = s[5];
+    buf[5] = s[6];
+    buf[6] = s[8];
+    buf[7] = s[9];
+    vec_to_date_validate(buf)
+}
+
+pub fn from_date_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
+    Attribute {
+        ck_type: t,
+        attrtype: AttrType::DateType,
+        value: val,
+    }
+}
+
+pub fn from_ignore(t: CK_ULONG) -> Attribute {
+    Attribute {
+        ck_type: t,
+        attrtype: AttrType::IgnoreType,
+        value: Vec::new(),
+    }
+}
+
 pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
     /* skips invalid types */
     for a in &ATTRMAP {
@@ -394,8 +471,19 @@ pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
                     }
                     None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 },
-                AttrType::DateType => (),
+                AttrType::DateType => match v.as_str() {
+                    Some(s) => {
+                        if s.len() == 0 {
+                            /* special case for default empty value */
+                            return Ok(from_date_bytes(a.id, Vec::new()));
+                        } else {
+                            return Ok(from_date(a.id, string_to_ck_date(&s)?));
+                        }
+                    }
+                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                },
                 AttrType::DenyType => (),
+                AttrType::IgnoreType => (),
             }
         }
     }
@@ -444,6 +532,18 @@ impl CK_ATTRIBUTE {
         };
         Ok(buf.to_vec())
     }
+    pub fn to_date(self) -> KResult<CK_DATE> {
+        if self.ulValueLen != 8 {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+        let buf: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self.pValue as *const _,
+                self.ulValueLen as usize,
+            )
+        };
+        vec_to_date_validate(buf.to_vec())
+    }
 
     pub fn to_attribute(self) -> KResult<Attribute> {
         let mut atype = AttrType::DenyType;
@@ -460,8 +560,9 @@ impl CK_ATTRIBUTE {
                 Ok(from_string(self.type_, self.to_string()?))
             }
             AttrType::BytesType => Ok(from_bytes(self.type_, self.to_buf()?)),
-            AttrType::DateType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+            AttrType::DateType => Ok(from_date(self.type_, self.to_date()?)),
             AttrType::DenyType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+            AttrType::IgnoreType => Ok(from_ignore(self.type_)),
         }
     }
 }
