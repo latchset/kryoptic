@@ -29,6 +29,7 @@ fn test_setup(filename: &str) {
                 "CKA_KEY_TYPE": 16,
                 "CKA_LABEL": "SO PIN",
                 "CKA_VALUE": "MTIzNDU2Nzg=",
+                "CKA_TOKEN": true
             }
         }, {
             "attributes": {
@@ -37,6 +38,7 @@ fn test_setup(filename: &str) {
                 "CKA_KEY_TYPE": 16,
                 "CKA_LABEL": "User PIN",
                 "CKA_VALUE": "MTIzNDU2Nzg=",
+                "CKA_TOKEN": true
             }
         }, {
             "attributes": {
