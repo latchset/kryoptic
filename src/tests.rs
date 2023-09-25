@@ -879,6 +879,18 @@ fn test_rsa_operations() {
     ret = fn_encrypt_init(session, &mut mechanism, handle);
     assert_eq!(ret, CKR_OK);
 
+    let data = "plaintext";
+    let mut enc: [u8; 2048] = [0; 2048];
+    let mut enc_len: CK_ULONG = 2048;
+    ret = fn_encrypt(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_ptr() as *mut _,
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);

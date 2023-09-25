@@ -34,6 +34,7 @@ mod interface {
 }
 
 mod attribute;
+mod cryptography;
 mod error;
 mod mechanism;
 mod object;
@@ -723,14 +724,36 @@ extern "C" fn fn_encrypt_init(
     }
     ret_to_rv!(token.encrypt_init(s_handle, data, key))
 }
+
+static NULL_BUF: [u8; 0] = [0; 0];
+
 extern "C" fn fn_encrypt(
-    _session: CK_SESSION_HANDLE,
-    _data: CK_BYTE_PTR,
-    _data_len: CK_ULONG,
-    _encrypted_data: CK_BYTE_PTR,
-    _pul_encrypted_data_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    data: CK_BYTE_PTR,
+    data_len: CK_ULONG,
+    encrypted_data: CK_BYTE_PTR,
+    pul_encrypted_data_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if data.is_null()
+        || encrypted_data.is_null()
+        || pul_encrypted_data_len.is_null()
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let mut inplace = false;
+    let mut plain: &[u8] = &NULL_BUF;
+    let cipher: &mut [u8] = unsafe {
+        let len = *pul_encrypted_data_len;
+        std::slice::from_raw_parts_mut(encrypted_data, len as usize)
+    };
+    if data == encrypted_data {
+        inplace = true;
+    } else {
+        plain = unsafe { std::slice::from_raw_parts(data, data_len as usize) };
+    }
+    ret_to_rv!(token.encrypt(s_handle, plain, cipher, inplace))
 }
 extern "C" fn fn_encrypt_update(
     _session: CK_SESSION_HANDLE,

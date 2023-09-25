@@ -7,8 +7,10 @@ use super::err_rv;
 use super::error;
 use super::interface;
 use super::object;
+use super::token;
 use error::{KError, KResult};
 use interface::*;
+use token::RNG;
 
 use std::fmt::Debug;
 
@@ -17,14 +19,14 @@ pub trait Mechanism: Debug + Send + Sync {
     fn encryption_new(
         &self,
         _: &CK_MECHANISM,
-        _: object::Object,
+        _: &object::Object,
     ) -> KResult<Box<dyn Operation>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
     fn decryption_new(
         &self,
         _: &CK_MECHANISM,
-        _: object::Object,
+        _: &object::Object,
     ) -> KResult<Box<dyn Operation>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
@@ -73,18 +75,65 @@ impl Mechanisms {
     }
 }
 
-pub trait Operation: Debug + Send + Sync {
+pub trait BaseOperation: Debug + Send + Sync {
     fn mechanism(&self) -> CK_MECHANISM_TYPE;
+    fn used(&self) -> bool;
 }
 
 pub trait Encryption: Debug + Send + Sync {
-    fn encrypt(data: Vec<u8>) -> KResult<Vec<u8>>;
-    fn encrypt_update(data: Vec<u8>) -> KResult<Vec<u8>>;
-    fn encrypt_final() -> KResult<Vec<u8>>;
+    fn encrypt(
+        &mut self,
+        _rng: &mut RNG,
+        _plain: &[u8],
+        _cipher: &mut [u8],
+        _inplace: bool,
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn encrypt_update(
+        &mut self,
+        _rng: &mut RNG,
+        _plain: &[u8],
+        _cipher: &mut [u8],
+        _inplace: bool,
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn encrypt_final(
+        &mut self,
+        _rng: &mut RNG,
+        _cipher: &mut [u8],
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
 }
 
 pub trait Decryption: Debug + Send + Sync {
-    fn decrypt(data: Vec<u8>) -> KResult<Vec<u8>>;
-    fn decrypt_update(data: Vec<u8>) -> KResult<Vec<u8>>;
-    fn decrypt_final() -> KResult<Vec<u8>>;
+    fn decrypt(
+        &mut self,
+        _rng: &mut RNG,
+        _cipher: &[u8],
+        _plain: &mut [u8],
+        _inplace: bool,
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn decrypt_update(
+        &mut self,
+        _rng: &mut RNG,
+        _cipher: &[u8],
+        _plain: &mut [u8],
+        _inplace: bool,
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn decrypt_final(
+        &mut self,
+        _rng: &mut RNG,
+        _cipher: &mut [u8],
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
 }
+
+pub trait Operation: BaseOperation + Encryption + Decryption {}

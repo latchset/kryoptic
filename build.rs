@@ -52,4 +52,48 @@ fn main() {
     bindings
         .write_to_file("src/pkcs11_bindings.rs")
         .expect("Couldn't write bindings!");
+
+    println!("cargo:rerun-if-changed=nettle.h");
+    println!("cargo:rustc-link-lib=nettle");
+    println!("cargo:rustc-link-lib=hogweed");
+    println!("cargo:rustc-link-lib=gmp");
+    let nettle_bindings = bindgen::Builder::default()
+        .header("nettle.h")
+        .derive_default(true)
+        .formatter(bindgen::Formatter::Prettyplease)
+        .blocklist_type("_.*_t")
+        .blocklist_type("__u_.*")
+        .blocklist_type(".*int_.*_t")
+        .blocklist_type(".*intmax_t")
+        .blocklist_type("gmp_.*")
+        .blocklist_item(".*_MIN")
+        .blocklist_item(".*_MAX")
+        .blocklist_item("NR_OPEN")
+        .blocklist_item("MAX_.*")
+        .blocklist_item("PIPE_BUF")
+        .blocklist_item("PTHREAD_.*")
+        .blocklist_item("_.*_H")
+        .blocklist_item("_.*_T")
+        .blocklist_item("__GNU_.*")
+        .blocklist_item("__HAVE_.*")
+        .blocklist_item("__USE_.*")
+        .blocklist_item("_POSIX_.*")
+        .blocklist_item("_.*LIBC_.*")
+        .blocklist_item(".*GMP_.*")
+        .blocklist_item("__STDC_.*")
+        .blocklist_item("__.*TIME.*")
+        .blocklist_item("_.*SOURCE.*")
+        .blocklist_item("_.*WORDSIZE.*")
+        .blocklist_item("__glibc.*")
+        .blocklist_item("__LDOUBLE.*")
+        .blocklist_item("__STATFS.*")
+        .blocklist_item("__FD.*")
+        .blocklist_item("max_align_t")
+        .blocklist_item("__gmp.*rand.*")
+        .generate()
+        .expect("Unable to generate nettle bindings");
+
+    nettle_bindings
+        .write_to_file("src/nettle_bindings.rs")
+        .expect("Couldn't write bindings!");
 }

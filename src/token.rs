@@ -20,7 +20,7 @@ use error::{KError, KResult};
 use interface::*;
 use mechanism::Mechanisms;
 use object::{Object, ObjectTemplates};
-use session::Session;
+use session::{Session, Sessions};
 
 use getrandom;
 
@@ -100,19 +100,42 @@ impl LoginData {
 }
 
 #[derive(Debug)]
+pub struct RNG {
+    initialized: bool,
+}
+
+impl RNG {
+    pub fn new() -> RNG {
+        RNG { initialized: true }
+    }
+
+    pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
+        /* NOTE: this is just a placeholder to get somethjing going */
+        if buffer.len() > 256 {
+            return err_rv!(CKR_ARGUMENTS_BAD);
+        }
+        if getrandom::getrandom(buffer).is_err() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
     slot_id: CK_SLOT_ID,
     filename: String,
     object_templates: ObjectTemplates,
     mechanisms: Mechanisms,
-    sessions: Vec<Session>,
+    sessions: Sessions,
     objects: HashMap<String, Object>,
     dirty: bool,
     so_login: LoginData,
     user_login: LoginData,
     handles: HashMap<CK_OBJECT_HANDLE, String>,
     next_handle: CK_OBJECT_HANDLE,
+    rng: RNG,
 }
 
 impl Token {
@@ -142,7 +165,7 @@ impl Token {
             filename: filename,
             object_templates: ObjectTemplates::new(),
             mechanisms: Mechanisms::new(),
-            sessions: Vec::new(),
+            sessions: Sessions::new(),
             objects: HashMap::new(),
             so_login: LoginData {
                 pin: None,
@@ -159,6 +182,7 @@ impl Token {
             dirty: false,
             handles: HashMap::new(),
             next_handle: 1,
+            rng: RNG::new(),
         };
 
         /* register mechanisms and templates */
@@ -427,21 +451,14 @@ impl Token {
         }
 
         /* change session states to logged in values */
-        for s in self.sessions.iter_mut() {
-            ret = s.change_session_state(user_type);
-            if ret != CKR_OK {
-                break;
-            }
-        }
+        ret = self.sessions.change_session_states(user_type);
         if ret != CKR_OK {
             match user_type {
                 CKU_SO => self.so_login.logged_in = false,
                 CKU_USER => self.user_login.logged_in = false,
                 _ => return CKR_GENERAL_ERROR,
             }
-            for s in self.sessions.iter_mut() {
-                let _ = s.change_session_state(CK_UNAVAILABLE_INFORMATION);
-            }
+            self.sessions.invalidate_session_states();
         }
         ret
     }
@@ -457,9 +474,7 @@ impl Token {
             ret = CKR_OK;
         }
         if ret == CKR_OK {
-            for s in self.sessions.iter_mut() {
-                let _ = s.change_session_state(CK_UNAVAILABLE_INFORMATION);
-            }
+            self.sessions.invalidate_session_states();
         }
         ret
     }
@@ -638,14 +653,7 @@ impl Token {
     }
 
     pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
-        /* NOTE: this is just a placeholder to get somethjing going */
-        if buffer.len() > 256 {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        }
-        if getrandom::getrandom(buffer).is_err() {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        Ok(())
+        self.rng.generate_random(buffer)
     }
 
     pub fn new_session(
@@ -653,64 +661,34 @@ impl Token {
         handle: CK_SESSION_HANDLE,
         flags: CK_FLAGS,
     ) -> KResult<&Session> {
-        let session = Session::new(self.slot_id, handle, flags)?;
-        self.sessions.push(session);
-
-        Ok(self.sessions.last().unwrap())
+        self.sessions.new_session(self.slot_id, handle, flags)
     }
 
     pub fn get_session(&self, handle: CK_SESSION_HANDLE) -> KResult<&Session> {
-        for s in self.sessions.iter() {
-            let h = s.get_handle();
-            if h == handle {
-                return Ok(s);
-            }
-        }
-        err_rv!(CKR_SESSION_HANDLE_INVALID)
+        self.sessions.get_session(handle)
     }
 
     pub fn get_session_mut(
         &mut self,
         handle: CK_SESSION_HANDLE,
     ) -> KResult<&mut Session> {
-        for s in self.sessions.iter_mut() {
-            let h = s.get_handle();
-            if h == handle {
-                return Ok(s);
-            }
-        }
-        err_rv!(CKR_SESSION_HANDLE_INVALID)
+        self.sessions.get_session_mut(handle)
     }
 
     pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
-        let mut idx = 0;
-        while idx < self.sessions.len() {
-            if handle == self.sessions[idx].get_handle() {
-                self.sessions.swap_remove(idx);
-                return Ok(());
-            }
-            idx += 1;
-        }
-        err_rv!(CKR_SESSION_HANDLE_INVALID)
+        self.sessions.drop_session(handle)
     }
 
     pub fn drop_all_sessions(&mut self) {
-        self.sessions.clear();
+        self.sessions.drop_all_sessions();
     }
 
     pub fn has_sessions(&self) -> bool {
-        self.sessions.len() != 0
+        self.sessions.has_sessions()
     }
 
     pub fn has_ro_sessions(&self) -> bool {
-        for s in self.sessions.iter() {
-            match s.get_session_info().state {
-                CKS_RO_PUBLIC_SESSION => return true,
-                CKS_RO_USER_FUNCTIONS => return true,
-                _ => continue,
-            }
-        }
-        false
+        self.sessions.has_ro_sessions()
     }
 
     pub fn get_mechs_num(&self) -> usize {
@@ -754,12 +732,27 @@ impl Token {
         let mech = self.mechanisms.get(data.mechanism)?;
         let obj = self.get_object_by_handle(key, true)?;
         if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
-            let operation = Some(mech.encryption_new(data, obj.clone())?);
+            let operation = Some(mech.encryption_new(data, obj)?);
             let session = self.get_session_mut(handle)?;
             session.set_operation(operation);
             Ok(())
         } else {
             err_rv!(CKR_MECHANISM_INVALID)
         }
+    }
+
+    pub fn encrypt(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        plain: &[u8],
+        cipher: &mut [u8],
+        inplace: bool,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            None => return err_rv!(CKR_OPERATION_ACTIVE),
+            Some(op) => op,
+        };
+        operation.encrypt(&mut self.rng, plain, cipher, inplace)
     }
 }

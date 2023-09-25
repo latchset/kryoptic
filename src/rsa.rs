@@ -2,12 +2,15 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
+use super::cryptography;
 use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::token;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 use attribute::{from_bytes, from_ulong};
+use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
@@ -16,6 +19,7 @@ use object::{
     ObjectType, PrivKeyTemplate, PubKeyTemplate,
 };
 use std::fmt::Debug;
+use token::RNG;
 
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
@@ -192,6 +196,58 @@ fn check_key_object(key: &Object, public: bool, op: CK_ULONG) -> KResult<()> {
     Ok(())
 }
 
+macro_rules! import_mpz {
+    ($obj:expr; $id:expr; $mpz:expr) => {{
+        let x = match $obj.get_attr_as_bytes($id) {
+            Ok(b) => b,
+            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+        };
+        unsafe {
+            __gmpz_import(
+                &mut $mpz,
+                x.len(),
+                1,
+                1,
+                0,
+                0,
+                x.as_ptr() as *const ::std::os::raw::c_void,
+            );
+        }
+    }};
+}
+
+fn object_to_rsa_public_key(key: &Object) -> KResult<rsa_public_key> {
+    let mut k: rsa_public_key = rsa_public_key::default();
+    unsafe {
+        nettle_rsa_public_key_init(&mut k);
+    }
+    import_mpz!(key; CKA_PUBLIC_EXPONENT; k.e[0]);
+    import_mpz!(key; CKA_MODULUS; k.n[0]);
+    if unsafe { nettle_rsa_public_key_prepare(&mut k) } == 0 {
+        err_rv!(CKR_GENERAL_ERROR)
+    } else {
+        Ok(k)
+    }
+}
+
+fn object_to_rsa_private_key(key: &Object) -> KResult<rsa_private_key> {
+    let mut k: rsa_private_key = rsa_private_key::default();
+    unsafe {
+        nettle_rsa_private_key_init(&mut k);
+    }
+    import_mpz!(key; CKA_PRIVATE_EXPONENT; k.d[0]);
+    import_mpz!(key; CKA_PRIME_1; k.p[0]);
+    import_mpz!(key; CKA_PRIME_2; k.q[0]);
+    import_mpz!(key; CKA_EXPONENT_1; k.a[0]);
+    import_mpz!(key; CKA_EXPONENT_2; k.b[0]);
+    import_mpz!(key; CKA_COEFFICIENT; k.c[0]);
+    if unsafe { nettle_rsa_private_key_prepare(&mut k) } == 0 {
+        err_rv!(CKR_GENERAL_ERROR)
+    } else {
+        Ok(k)
+    }
+}
+
 #[derive(Debug)]
 struct RsaPKCSMechanism {
     info: CK_MECHANISM_INFO,
@@ -205,7 +261,7 @@ impl Mechanism for RsaPKCSMechanism {
     fn encryption_new(
         &self,
         mech: &CK_MECHANISM,
-        key: Object,
+        key: &Object,
     ) -> KResult<Box<dyn Operation>> {
         if mech.mechanism != CKM_RSA_PKCS {
             return err_rv!(CKR_MECHANISM_INVALID);
@@ -213,13 +269,16 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(&key, true, CKA_ENCRYPT) {
+        match check_key_object(key, true, CKA_ENCRYPT) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        let op = RsaPKCSEncrypt {
+        let op = RsaPKCSOperation {
             mech: mech.mechanism,
-            key: key,
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: None,
+            used: false,
+            finalized: false,
         };
         Ok(Box::new(op))
     }
@@ -227,7 +286,7 @@ impl Mechanism for RsaPKCSMechanism {
     fn decryption_new(
         &self,
         mech: &CK_MECHANISM,
-        key: Object,
+        key: &Object,
     ) -> KResult<Box<dyn Operation>> {
         if mech.mechanism != CKM_RSA_PKCS {
             return err_rv!(CKR_MECHANISM_INVALID);
@@ -235,13 +294,16 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(&key, false, CKA_DECRYPT) {
+        match check_key_object(key, false, CKA_DECRYPT) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        let op = RsaPKCSDecrypt {
+        let op = RsaPKCSOperation {
             mech: mech.mechanism,
-            key: key,
+            public_key: None,
+            private_key: Some(object_to_rsa_private_key(key)?),
+            used: false,
+            finalized: false,
         };
         Ok(Box::new(op))
     }
@@ -264,39 +326,114 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
 }
 
 #[derive(Debug)]
-struct RsaPKCSEncrypt {
+struct RsaPKCSOperation {
     mech: CK_MECHANISM_TYPE,
-    key: Object,
-    /* TODO: whatever state is needed by crypto library */
+    public_key: Option<rsa_public_key>,
+    private_key: Option<rsa_private_key>,
+    used: bool,
+    finalized: bool,
 }
 
-impl Operation for RsaPKCSEncrypt {
+impl BaseOperation for RsaPKCSOperation {
     fn mechanism(&self) -> CK_MECHANISM_TYPE {
         self.mech
     }
-}
-
-impl Encryption for RsaPKCSEncrypt {
-    fn encrypt(_data: Vec<u8>) -> KResult<Vec<u8>> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn encrypt_update(_data: Vec<u8>) -> KResult<Vec<u8>> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn encrypt_final() -> KResult<Vec<u8>> {
-        err_rv!(CKR_GENERAL_ERROR)
+    fn used(&self) -> bool {
+        self.used
     }
 }
 
-#[derive(Debug)]
-struct RsaPKCSDecrypt {
-    mech: CK_MECHANISM_TYPE,
-    key: Object,
-    /* TODO: whatever state is needed by crypto library */
+impl Encryption for RsaPKCSOperation {
+    fn encrypt(
+        &mut self,
+        rng: &mut RNG,
+        plain: &[u8],
+        cipher: &mut [u8],
+        inplace: bool,
+    ) -> KResult<()> {
+        self.used = true;
+
+        let mut x: __mpz_struct = __mpz_struct::default();
+        let key: *const rsa_public_key = match self.public_key {
+            None => return err_rv!(CKR_GENERAL_ERROR),
+            Some(ref k) => k,
+        };
+
+        if unsafe {
+            __gmpz_init(&mut x);
+            if inplace {
+                nettle_rsa_encrypt(
+                    key,
+                    rng as *mut _ as *mut ::std::os::raw::c_void,
+                    Some(get_random),
+                    cipher.len(),
+                    cipher.as_ptr(),
+                    &mut x,
+                )
+            } else {
+                nettle_rsa_encrypt(
+                    key,
+                    rng as *mut _ as *mut ::std::os::raw::c_void,
+                    Some(get_random),
+                    plain.len(),
+                    plain.as_ptr(),
+                    &mut x,
+                )
+            }
+        } == 0
+        {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        cipher.fill(0);
+        unsafe {
+            let len = nettle_mpz_sizeinbase_256_u(&mut x);
+            if len > cipher.len() {
+                return err_rv!(CKR_BUFFER_TOO_SMALL);
+            }
+            let mut count: usize = 0;
+            __gmpz_export(
+                cipher.as_ptr() as *mut ::std::os::raw::c_void,
+                &mut count,
+                -1,
+                1,
+                0,
+                0,
+                &mut x,
+            );
+        }
+        Ok(())
+    }
+    fn encrypt_update(
+        &mut self,
+        _rng: &mut RNG,
+        plain: &[u8],
+        cipher: &mut [u8],
+        inplace: bool,
+    ) -> KResult<()> {
+        self.used = true;
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn encrypt_final(
+        &mut self,
+        _rng: &mut RNG,
+        cipher: &mut [u8],
+    ) -> KResult<()> {
+        self.finalized = true;
+        Ok(())
+    }
 }
 
-impl Operation for RsaPKCSDecrypt {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
+impl Decryption for RsaPKCSOperation {}
+
+impl Operation for RsaPKCSOperation {}
+
+unsafe extern "C" fn get_random(
+    ctx: *mut ::std::os::raw::c_void,
+    length: usize,
+    dst: *mut u8,
+) {
+    let rng = unsafe { &mut *(ctx as *mut RNG) };
+    let buf = unsafe { std::slice::from_raw_parts_mut(dst, length) };
+    rng.generate_random(buf).unwrap();
 }
