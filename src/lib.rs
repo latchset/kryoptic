@@ -43,6 +43,9 @@ use error::{KError, KResult};
 use interface::*;
 use token::Token;
 
+/* algorithms and ciphers */
+mod rsa;
+
 macro_rules! err_to_rv {
     ($err:expr) => {
         match $err {

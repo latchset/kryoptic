@@ -18,6 +18,9 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
+use super::rsa;
+use rsa::{RSAPrivTemplate, RSAPubTemplate};
+
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
         pub fn $name(&self) -> bool {
@@ -240,15 +243,28 @@ pub struct ObjectAttr {
     ignore: bool,
 }
 
+impl ObjectAttr {
+    pub fn new(a: Attribute, r: bool, p: bool, d: bool, i: bool) -> ObjectAttr {
+        ObjectAttr {
+            attribute: a,
+            required: r,
+            present: p,
+            default: d,
+            ignore: i,
+        }
+    }
+}
+
+#[macro_export]
 macro_rules! attr_element {
     ($id:expr; req $required:expr; def $default:expr; $from_type:expr; val $defval:expr) => {
-        ObjectAttr {
-            attribute: $from_type($id, $defval),
-            required: $required,
-            present: false,
-            default: $default,
-            ignore: false,
-        }
+        ObjectAttr::new(
+            $from_type($id, $defval),
+            $required,
+            false,
+            $default,
+            false,
+        )
     };
 }
 
@@ -260,6 +276,35 @@ macro_rules! attr_ignore {
             present: false,
             default: false,
             ignore: true,
+        }
+    };
+}
+
+macro_rules! bool_attr_never_set {
+    ($obj:expr; $id:expr) => {
+        match $obj.get_attr_as_bool($id) {
+            Ok(_) => return CKR_ATTRIBUTE_READ_ONLY,
+            Err(e) => match e {
+                KError::NotFound(_) => (),
+                _ => return CKR_GENERAL_ERROR,
+            },
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! bytes_attr_not_empty {
+    ($obj:expr; $id:expr) => {
+        match $obj.get_attr_as_bytes($id) {
+            Ok(e) => {
+                if e.len() == 0 {
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+            Err(e) => match e {
+                KError::NotFound(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                _ => return Err(e),
+            },
         }
     };
 }
@@ -523,10 +568,114 @@ impl ObjectTemplate for X509Template {
     }
 }
 
+/* pkcs11-spec-v3.1 4.7 Key objects */
+pub trait CommonKeyTemplate {
+    fn init_common_key_attrs(&mut self) {
+        self.get_template().push(attr_element!(CKA_KEY_TYPE; req true; def false; from_ulong; val CK_UNAVAILABLE_INFORMATION));
+        self.get_template().push(attr_element!(CKA_ID; req false; def false; from_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_START_DATE; req false; def true; from_date_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_END_DATE; req false; def true; from_date_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_DERIVE; req false; def true; from_bool; val false));
+        self.get_template().push(
+            attr_element!(CKA_LOCAL; req false; def true; from_bool; val false),
+        );
+        self.get_template().push(attr_element!(CKA_KEY_GEN_MECHANISM; req false; def true; from_ulong; val CK_UNAVAILABLE_INFORMATION));
+        self.get_template().push(attr_element!(CKA_ALLOWED_MECHANISMS; req false; def false; from_bytes; val Vec::new()));
+    }
+
+    fn key_create_attrs_checks(
+        &self,
+        obj: &mut Object,
+        cattrs: &mut Vec<ObjectAttr>,
+    ) -> CK_RV {
+        bool_attr_never_set!(obj; CKA_LOCAL);
+        bool_attr_never_set!(obj; CKA_KEY_GEN_MECHANISM);
+
+        CKR_OK
+    }
+
+    fn get_template(&mut self) -> &mut Vec<ObjectAttr>;
+}
+
+/* pkcs11-spec-v3.1 4.8 Public key objects */
+pub trait PubKeyTemplate {
+    fn init_common_public_key_attrs(&mut self) {
+        self.get_template().push(attr_element!(CKA_SUBJECT; req false; def true; from_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_ENCRYPT; req false; def false; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_VERIFY; req false; def false; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_VERIFY_RECOVER; req false; def false; from_bool; val false));
+        self.get_template().push(
+            attr_element!(CKA_WRAP; req false; def false; from_bool; val false),
+        );
+        self.get_template().push(attr_element!(CKA_TRUSTED; req false; def false; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_WRAP_TEMPLATE; req false; def false; from_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_PUBLIC_KEY_INFO; req false; def false; from_bytes; val Vec::new()));
+    }
+
+    fn pubkey_create_attrs_checks(
+        &self,
+        obj: &mut Object,
+        cattrs: &mut Vec<ObjectAttr>,
+    ) -> CK_RV {
+        match obj.get_attr_as_bool(CKA_TRUSTED) {
+            Ok(t) => {
+                if t == true {
+                    /* until we implement checking for SO auth */
+                    return CKR_ATTRIBUTE_READ_ONLY;
+                }
+            }
+            Err(_) => (),
+        }
+
+        CKR_OK
+    }
+
+    fn get_template(&mut self) -> &mut Vec<ObjectAttr>;
+}
+
+/* pkcs11-spec-v3.1 4.9 Private key objects */
+pub trait PrivKeyTemplate {
+    fn init_common_private_key_attrs(&mut self) {
+        self.get_template().push(attr_element!(CKA_SUBJECT; req false; def true; from_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_SENSITIVE; req false; def true; from_bool; val true));
+        self.get_template().push(attr_element!(CKA_DECRYPT; req false; def false; from_bool; val false));
+        self.get_template().push(
+            attr_element!(CKA_SIGN; req false; def false; from_bool; val false),
+        );
+        self.get_template().push(attr_element!(CKA_SIGN_RECOVER; req false; def false; from_bool; val false));
+        self.get_template().push(
+            attr_element!(CKA_UNWRAP; req false; def false; from_bool; val false),
+        );
+        self.get_template().push(attr_element!(CKA_EXTRACTABLE; req false; def false; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_ALWAYS_SENSITIVE; req false; def false; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_NEVER_EXTRACTABLE; req false; def false; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_WRAP_WITH_TRUSTED; req false; def true; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_UNWRAP_TEMPLATE; req false; def false; from_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_ALWAYS_AUTHENTICATE; req false; def true; from_bool; val false));
+        self.get_template().push(attr_element!(CKA_PUBLIC_KEY_INFO; req false; def false; from_bytes; val Vec::new()));
+        self.get_template().push(attr_element!(CKA_DERIVE_TEMPLATE; req false; def false; from_bytes; val Vec::new()));
+    }
+
+    fn privkey_create_attrs_checks(
+        &self,
+        obj: &mut Object,
+        cattrs: &mut Vec<ObjectAttr>,
+    ) -> CK_RV {
+        bool_attr_never_set!(obj; CKA_ALWAYS_SENSITIVE);
+        bool_attr_never_set!(obj; CKA_NEVER_EXTRACTABLE);
+
+        CKR_OK
+    }
+
+    fn get_template(&mut self) -> &mut Vec<ObjectAttr>;
+}
+
 #[derive(Debug, Eq, Hash, PartialEq)]
 enum ObjectType {
     DataObj,
     X509CertObj,
+    RSAPubKey,
+    RSAPrivKey,
 }
 
 #[derive(Debug)]
@@ -542,6 +691,10 @@ static OBJECT_TEMPLATES: Lazy<ObjectTemplates> = Lazy::new(|| {
         .insert(ObjectType::DataObj, Box::new(DataTemplate::new()));
     ot.templates
         .insert(ObjectType::X509CertObj, Box::new(X509Template::new()));
+    ot.templates
+        .insert(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
+    ot.templates
+        .insert(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
     ot
 });
 
@@ -579,7 +732,18 @@ impl ObjectTemplates {
                     _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 }
             }
-            CKO_PUBLIC_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+            CKO_PUBLIC_KEY => {
+                let ktype = match obj.get_attr_as_ulong(CKA_KEY_TYPE) {
+                    Ok(k) => k,
+                    Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                };
+                match ktype {
+                    CKK_RSA => {
+                        self.get_template(ObjectType::RSAPubKey)?.create(obj)
+                    }
+                    _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                }
+            }
             CKO_PRIVATE_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
             CKO_SECRET_KEY => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
             CKO_HW_FEATURE => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),

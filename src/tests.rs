@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use super::*;
+use hex;
 use std::ffi::CString;
 
 const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
@@ -511,6 +512,44 @@ fn test_create_objects() {
         make_attribute!(CKA_CHECK_VALUE, ignored.as_ptr(), 42),
         make_attribute!(CKA_SUBJECT, bogus.as_ptr(), bogus.len()),
         make_attribute!(CKA_VALUE, bogus.as_ptr(), bogus.len()),
+    ];
+
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    class = CKO_PUBLIC_KEY;
+    let mut ktype = CKK_RSA;
+    let mut encrypt: CK_BBOOL = CK_TRUE;
+    let label = "RSA Public Encryption Key";
+    let modulus_hex = "9D2E7820CE719B9194CDFE0FD751214193C4E9BE9BFA24D0E91B0FC3541C85885CB3CA95F8FDA4E129558EE41F653481E66A04ECB75808D57BD76ED9069767A2AFC9C3188F2BD42F045D0575765ADE27AD033B338DD5C2C1AAA899B89201A34BBB6ED9CCD0511325ADCF1C69718BD27196447D567F17E35A5865A3BC1FB35B3A605C25294D2A02E5F53D170C57814D8246F50CAE32321D8A5C44508238AC50519BD12221C740620198B762C2D1670A4B94655C783EAAD0E9A1244F8AE86D3B4A3DF26AC532B6A4EAA4FB4A35DF5C3A1B755DC5C17E451643D2DB722113C1E3E2CA59CFA592C80FB9B2D7056E19F5C84198371465CE7DFBA7390C3CE19D878121";
+    let mut modulus =
+        hex::decode(modulus_hex).expect("Failed to decode hex modulus");
+    let mut exponent =
+        hex::decode("010001").expect("Failed to decode exponent");
+    template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_ENCRYPT, &mut encrypt as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_LABEL,
+            label.as_ptr() as *mut std::ffi::c_void,
+            label.len()
+        ),
+        make_attribute!(
+            CKA_MODULUS,
+            modulus.as_ptr() as *mut std::ffi::c_void,
+            modulus.len()
+        ),
+        make_attribute!(
+            CKA_PUBLIC_EXPONENT,
+            exponent.as_ptr() as *mut std::ffi::c_void,
+            exponent.len()
+        ),
     ];
 
     ret = fn_create_object(
