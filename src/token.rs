@@ -16,7 +16,7 @@ use super::session;
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
-use object::Object;
+use object::{Object, ObjectTemplates};
 use session::Session;
 
 use getrandom;
@@ -96,11 +96,12 @@ impl LoginData {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
     slot_id: CK_SLOT_ID,
     filename: String,
+    object_templates: ObjectTemplates,
     sessions: Vec<Session>,
     objects: HashMap<String, Object>,
     dirty: bool,
@@ -135,6 +136,7 @@ impl Token {
             },
             slot_id: slot_id,
             filename: filename,
+            object_templates: ObjectTemplates::new(),
             sessions: Vec::new(),
             objects: HashMap::new(),
             so_login: LoginData {
@@ -560,7 +562,7 @@ impl Token {
         }
 
         let handle = self.next_object_handle();
-        let obj = object::create(handle, template)?;
+        let obj = self.object_templates.create(handle, template)?;
         match obj.get_attr_as_bool(CKA_TOKEN) {
             Ok(t) => {
                 if t {

@@ -13,7 +13,6 @@ use attribute::{
 };
 use error::{KError, KResult};
 use interface::*;
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
 use uuid::Uuid;
@@ -679,26 +678,26 @@ enum ObjectType {
 }
 
 #[derive(Debug)]
-struct ObjectTemplates {
+pub struct ObjectTemplates {
     templates: HashMap<ObjectType, Box<dyn ObjectTemplate>>,
 }
 
-static OBJECT_TEMPLATES: Lazy<ObjectTemplates> = Lazy::new(|| {
-    let mut ot: ObjectTemplates = ObjectTemplates {
-        templates: HashMap::new(),
-    };
-    ot.templates
-        .insert(ObjectType::DataObj, Box::new(DataTemplate::new()));
-    ot.templates
-        .insert(ObjectType::X509CertObj, Box::new(X509Template::new()));
-    ot.templates
-        .insert(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
-    ot.templates
-        .insert(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
-    ot
-});
-
 impl ObjectTemplates {
+    pub fn new() -> ObjectTemplates {
+        let mut ot: ObjectTemplates = ObjectTemplates {
+            templates: HashMap::new(),
+        };
+        ot.templates
+            .insert(ObjectType::DataObj, Box::new(DataTemplate::new()));
+        ot.templates
+            .insert(ObjectType::X509CertObj, Box::new(X509Template::new()));
+        ot.templates
+            .insert(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
+        ot.templates
+            .insert(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
+        ot
+    }
+
     fn get_template(
         &self,
         otype: ObjectType,
@@ -709,7 +708,24 @@ impl ObjectTemplates {
         }
     }
 
-    fn create(&self, obj: Object) -> KResult<Object> {
+    pub fn create(
+        &self,
+        handle: CK_ULONG,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let mut obj = Object {
+            handle: handle,
+            attributes: Vec::new(),
+        };
+
+        let uuid = Uuid::new_v4().to_string();
+        obj.attributes
+            .push(attribute::from_string(CKA_UNIQUE_ID, uuid));
+
+        for ck_attr in template.iter() {
+            obj.attributes.push(ck_attr.to_attribute()?);
+        }
+
         let class = match obj.get_attr_as_ulong(CKA_CLASS) {
             Ok(c) => c,
             Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
@@ -755,21 +771,4 @@ impl ObjectTemplates {
             _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
-}
-
-pub fn create(handle: CK_ULONG, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-    let mut obj = Object {
-        handle: handle,
-        attributes: Vec::new(),
-    };
-
-    let uuid = Uuid::new_v4().to_string();
-    obj.attributes
-        .push(attribute::from_string(CKA_UNIQUE_ID, uuid));
-
-    for ck_attr in template.iter() {
-        obj.attributes.push(ck_attr.to_attribute()?);
-    }
-
-    OBJECT_TEMPLATES.create(obj)
 }
