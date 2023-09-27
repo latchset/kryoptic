@@ -754,3 +754,34 @@ fn test_init_token() {
     ret = fn_finalize(std::ptr::null_mut());
     assert_eq!(ret, CKR_OK);
 }
+
+#[test]
+fn test_get_mechs() {
+    let testdata = TestData {
+        filename: Some("test_get_mechs.json"),
+    };
+    test_setup(testdata.filename.unwrap());
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_get_mechanism_list(0, std::ptr::null_mut(), &mut count);
+    assert_eq!(ret, CKR_OK);
+    let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
+    ret = fn_get_mechanism_list(
+        0,
+        mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_eq!(mechs[0], 1);
+    let mut info: CK_MECHANISM_INFO = Default::default();
+    ret = fn_get_mechanism_info(0, mechs[0], &mut info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.ulMinKeySize, 1024);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}

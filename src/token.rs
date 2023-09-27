@@ -1,6 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -11,6 +12,7 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::object;
+use super::rsa;
 use super::session;
 
 use super::{err_not_found, err_rv};
@@ -97,11 +99,45 @@ impl LoginData {
 }
 
 #[derive(Debug)]
+pub struct Mechanisms {
+    tree: BTreeMap<CK_MECHANISM_TYPE, CK_MECHANISM_INFO>,
+}
+
+impl Mechanisms {
+    fn new() -> Mechanisms {
+        Mechanisms {
+            tree: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_mechanism(
+        &mut self,
+        typ: CK_MECHANISM_TYPE,
+        info: CK_MECHANISM_INFO,
+    ) {
+        self.tree.insert(typ, info);
+    }
+
+    pub fn len(&self) -> usize {
+        self.tree.len()
+    }
+
+    pub fn list(&self) -> Vec<CK_MECHANISM_TYPE> {
+        self.tree.keys().cloned().collect()
+    }
+
+    pub fn info(&self, typ: CK_MECHANISM_TYPE) -> Option<&CK_MECHANISM_INFO> {
+        self.tree.get(&typ)
+    }
+}
+
+#[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
     slot_id: CK_SLOT_ID,
     filename: String,
     object_templates: ObjectTemplates,
+    mechanisms: Mechanisms,
     sessions: Vec<Session>,
     objects: HashMap<String, Object>,
     dirty: bool,
@@ -113,7 +149,7 @@ pub struct Token {
 
 impl Token {
     pub fn new(slot_id: CK_SLOT_ID, filename: String) -> Token {
-        Token {
+        let mut token: Token = Token {
             info: CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
                 manufacturerID: MANUFACTURER_ID,
@@ -137,6 +173,7 @@ impl Token {
             slot_id: slot_id,
             filename: filename,
             object_templates: ObjectTemplates::new(),
+            mechanisms: Mechanisms::new(),
             sessions: Vec::new(),
             objects: HashMap::new(),
             so_login: LoginData {
@@ -154,7 +191,12 @@ impl Token {
             dirty: false,
             handles: HashMap::new(),
             next_handle: 1,
-        }
+        };
+
+        /* register mechanisms and templates */
+        rsa::register(&mut token.mechanisms, &mut token.object_templates);
+
+        token
     }
 
     pub fn load(&mut self) -> KResult<()> {
@@ -697,5 +739,23 @@ impl Token {
             }
         }
         false
+    }
+
+    pub fn get_mechs_num(&self) -> usize {
+        self.mechanisms.len()
+    }
+
+    pub fn get_mechs_list(&self) -> Vec<CK_MECHANISM_TYPE> {
+        self.mechanisms.list()
+    }
+
+    pub fn get_mech_info(
+        &self,
+        typ: CK_MECHANISM_TYPE,
+    ) -> KResult<&CK_MECHANISM_INFO> {
+        match self.mechanisms.info(typ) {
+            Some(m) => Ok(m),
+            None => err_rv!(CKR_MECHANISM_INVALID),
+        }
     }
 }

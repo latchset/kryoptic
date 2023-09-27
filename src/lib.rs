@@ -330,18 +330,60 @@ extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     ret
 }
 extern "C" fn fn_get_mechanism_list(
-    _slot_id: CK_SLOT_ID,
-    _mechanism_list: CK_MECHANISM_TYPE_PTR,
-    _pul_count: CK_ULONG_PTR,
+    slot_id: CK_SLOT_ID,
+    mechanism_list: CK_MECHANISM_TYPE_PTR,
+    count: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if count.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let token = match rslots.get_token_from_slot(slot_id) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    if mechanism_list.is_null() {
+        unsafe {
+            *count = token.get_mechs_num() as CK_ULONG;
+        }
+        return CKR_OK;
+    }
+    let mechs = token.get_mechs_list();
+    unsafe {
+        let num: CK_ULONG = *count;
+        if num < mechs.len() as CK_ULONG {
+            return CKR_BUFFER_TOO_SMALL;
+        }
+    }
+    for item in mechs.iter().enumerate() {
+        let (idx, mech): (usize, &CK_MECHANISM_TYPE) = item;
+        unsafe {
+            core::ptr::write(mechanism_list.offset(idx as isize), *mech);
+        }
+    }
+    unsafe {
+        *count = mechs.len() as CK_ULONG;
+    }
+    CKR_OK
 }
 extern "C" fn fn_get_mechanism_info(
-    _slot_id: CK_SLOT_ID,
-    _type_: CK_MECHANISM_TYPE,
-    _info: CK_MECHANISM_INFO_PTR,
+    slot_id: CK_SLOT_ID,
+    typ: CK_MECHANISM_TYPE,
+    info: CK_MECHANISM_INFO_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let token = match rslots.get_token_from_slot(slot_id) {
+        Ok(t) => t,
+        Err(e) => return err_to_rv!(e),
+    };
+    let mech = match token.get_mech_info(typ) {
+        Ok(i) => i,
+        Err(e) => return err_to_rv!(e),
+    };
+    unsafe {
+        core::ptr::write(info as *mut _, *mech);
+    }
+    CKR_OK
 }
 extern "C" fn fn_init_token(
     slot_id: CK_SLOT_ID,

@@ -17,9 +17,6 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
-use super::rsa;
-use rsa::{RSAPrivTemplate, RSAPubTemplate};
-
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
         pub fn $name(&self) -> bool {
@@ -670,7 +667,7 @@ pub trait PrivKeyTemplate {
 }
 
 #[derive(Debug, Eq, Hash, PartialEq)]
-enum ObjectType {
+pub enum ObjectType {
     DataObj,
     X509CertObj,
     RSAPubKey,
@@ -691,11 +688,15 @@ impl ObjectTemplates {
             .insert(ObjectType::DataObj, Box::new(DataTemplate::new()));
         ot.templates
             .insert(ObjectType::X509CertObj, Box::new(X509Template::new()));
-        ot.templates
-            .insert(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
-        ot.templates
-            .insert(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
         ot
+    }
+
+    pub fn add_template(
+        &mut self,
+        typ: ObjectType,
+        templ: Box<dyn ObjectTemplate>,
+    ) {
+        self.templates.insert(typ, templ);
     }
 
     fn get_template(
