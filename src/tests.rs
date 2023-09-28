@@ -19,6 +19,7 @@ macro_rules! make_attribute {
 
 struct TestData<'a> {
     filename: Option<&'a str>,
+    create: bool,
 }
 
 fn test_setup(filename: &str) {
@@ -96,8 +97,10 @@ fn test_cleanup(filename: &str) {
 
 impl Drop for TestData<'_> {
     fn drop(&mut self) {
-        if let Some(f) = self.filename {
-            test_cleanup(f);
+        if self.create {
+            if let Some(f) = self.filename {
+                test_cleanup(f);
+            }
         }
     }
 }
@@ -105,7 +108,8 @@ impl Drop for TestData<'_> {
 #[test]
 fn test_token() {
     let testdata = TestData {
-        filename: Some("test_token.json"),
+        filename: Some("testdata/test_token.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -130,7 +134,8 @@ fn test_token() {
 #[test]
 fn test_init_fini() {
     let testdata = TestData {
-        filename: Some("test_init_fini.json"),
+        filename: Some("testdata/test_init_fini.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -145,7 +150,8 @@ fn test_init_fini() {
 #[test]
 fn test_random() {
     let testdata = TestData {
-        filename: Some("test_random.json"),
+        filename: Some("testdata/test_random.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -179,7 +185,8 @@ fn test_random() {
 #[test]
 fn test_login() {
     let testdata = TestData {
-        filename: Some("test_login.json"),
+        filename: Some("testdata/test_login.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -272,7 +279,8 @@ fn test_login() {
 #[test]
 fn test_get_attr() {
     let testdata = TestData {
-        filename: Some("test_get_attr.json"),
+        filename: Some("testdata/test_get_attr.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -399,7 +407,8 @@ fn test_get_attr() {
 #[test]
 fn test_create_objects() {
     let testdata = TestData {
-        filename: Some("test_create_objects.json"),
+        filename: Some("testdata/test_create_objects.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -573,7 +582,8 @@ fn test_create_objects() {
 #[test]
 fn test_init_token() {
     let testdata = TestData {
-        filename: Some("test_init_token.json"),
+        filename: Some("testdata/test_init_token.json"),
+        create: true,
     };
     /* skip setup, we are creating an unitiliaized token */
 
@@ -758,7 +768,8 @@ fn test_init_token() {
 #[test]
 fn test_get_mechs() {
     let testdata = TestData {
-        filename: Some("test_get_mechs.json"),
+        filename: Some("testdata/test_get_mechs.json"),
+        create: true,
     };
     test_setup(testdata.filename.unwrap());
 
@@ -782,6 +793,73 @@ fn test_get_mechs() {
     ret = fn_get_mechanism_info(0, mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.ulMinKeySize, 1024);
+    ret = fn_finalize(std::ptr::null_mut());
+    assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+fn test_rsa_operations() {
+    let testdata = TestData {
+        filename: Some("testdata/test_rsa_operations.json"),
+        create: false,
+    };
+
+    let mut args = test_init_args(testdata.filename.unwrap());
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* open session */
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        0,
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* public key data */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("2").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* encrypt init */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
     ret = fn_finalize(std::ptr::null_mut());
     assert_eq!(ret, CKR_OK);
 }

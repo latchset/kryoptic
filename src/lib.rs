@@ -34,6 +34,7 @@ mod interface {
 
 mod attribute;
 mod error;
+mod mechanism;
 mod object;
 mod session;
 mod slot;
@@ -680,11 +681,17 @@ extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     CKR_OK
 }
 extern "C" fn fn_encrypt_init(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _key: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    if mechanism.is_null() {
+        ret_to_rv!(token.encrypt_terminate(s_handle));
+    }
+    ret_to_rv!(token.encrypt_init(s_handle, data, key))
 }
 extern "C" fn fn_encrypt(
     _session: CK_SESSION_HANDLE,

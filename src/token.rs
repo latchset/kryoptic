@@ -1,7 +1,6 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -11,6 +10,7 @@ use serde_json;
 use super::attribute;
 use super::error;
 use super::interface;
+use super::mechanism;
 use super::object;
 use super::rsa;
 use super::session;
@@ -18,6 +18,7 @@ use super::session;
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
+use mechanism::Mechanisms;
 use object::{Object, ObjectTemplates};
 use session::Session;
 
@@ -95,39 +96,6 @@ impl LoginData {
             return ret;
         }
         self.set_pin(info, pin)
-    }
-}
-
-#[derive(Debug)]
-pub struct Mechanisms {
-    tree: BTreeMap<CK_MECHANISM_TYPE, CK_MECHANISM_INFO>,
-}
-
-impl Mechanisms {
-    fn new() -> Mechanisms {
-        Mechanisms {
-            tree: BTreeMap::new(),
-        }
-    }
-
-    pub fn add_mechanism(
-        &mut self,
-        typ: CK_MECHANISM_TYPE,
-        info: CK_MECHANISM_INFO,
-    ) {
-        self.tree.insert(typ, info);
-    }
-
-    pub fn len(&self) -> usize {
-        self.tree.len()
-    }
-
-    pub fn list(&self) -> Vec<CK_MECHANISM_TYPE> {
-        self.tree.keys().cloned().collect()
-    }
-
-    pub fn info(&self, typ: CK_MECHANISM_TYPE) -> Option<&CK_MECHANISM_INFO> {
-        self.tree.get(&typ)
     }
 }
 
@@ -756,6 +724,38 @@ impl Token {
         match self.mechanisms.info(typ) {
             Some(m) => Ok(m),
             None => err_rv!(CKR_MECHANISM_INVALID),
+        }
+    }
+
+    pub fn encrypt_terminate(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+    ) -> KResult<()> {
+        let session = self.get_session_mut(handle)?;
+        session.set_operation(None);
+        Ok(())
+    }
+
+    pub fn encrypt_init(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &CK_MECHANISM,
+        key: CK_OBJECT_HANDLE,
+    ) -> KResult<()> {
+        let session = self.get_session(handle)?;
+        match session.get_operation() {
+            Some(_) => return err_rv!(CKR_OPERATION_ACTIVE),
+            None => (),
+        }
+        let mech = self.mechanisms.get(data.mechanism)?;
+        let obj = self.get_object_by_handle(key, true)?;
+        if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
+            let operation = Some(mech.encryption_new(data, obj.clone())?);
+            let session = self.get_session_mut(handle)?;
+            session.set_operation(operation);
+            Ok(())
+        } else {
+            err_rv!(CKR_MECHANISM_INVALID)
         }
     }
 }

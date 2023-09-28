@@ -4,12 +4,13 @@
 use super::attribute;
 use super::error;
 use super::interface;
+use super::mechanism;
 use super::object;
-use super::token;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 use attribute::{from_bytes, from_ulong};
 use error::{KError, KResult};
 use interface::*;
+use mechanism::*;
 use object::{
     CommonKeyTemplate, Object, ObjectAttr, ObjectTemplate, ObjectTemplates,
     ObjectType, PrivKeyTemplate, PubKeyTemplate,
@@ -162,16 +163,140 @@ impl PrivKeyTemplate for RSAPrivTemplate {
     }
 }
 
-pub fn register(mechs: &mut token::Mechanisms, ot: &mut ObjectTemplates) {
+fn check_key_object(key: &Object, public: bool, op: CK_ULONG) -> KResult<()> {
+    match key.get_attr_as_ulong(CKA_CLASS)? {
+        CKO_PUBLIC_KEY => {
+            if !public {
+                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            }
+        }
+        CKO_PRIVATE_KEY => {
+            if public {
+                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            }
+        }
+        _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
+    }
+    match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
+        CKK_RSA => (),
+        _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
+    }
+    match key.get_attr_as_bool(op) {
+        Ok(avail) => {
+            if !avail {
+                return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
+            }
+        }
+        Err(_) => return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED),
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RsaPKCSMechanism {
+    info: CK_MECHANISM_INFO,
+}
+
+impl Mechanism for RsaPKCSMechanism {
+    fn info(&self) -> &CK_MECHANISM_INFO {
+        &self.info
+    }
+
+    fn encryption_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: Object,
+    ) -> KResult<Box<dyn Operation>> {
+        if mech.mechanism != CKM_RSA_PKCS {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match check_key_object(&key, true, CKA_ENCRYPT) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        let op = RsaPKCSEncrypt {
+            mech: mech.mechanism,
+            key: key,
+        };
+        Ok(Box::new(op))
+    }
+
+    fn decryption_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: Object,
+    ) -> KResult<Box<dyn Operation>> {
+        if mech.mechanism != CKM_RSA_PKCS {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match check_key_object(&key, false, CKA_DECRYPT) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        let op = RsaPKCSDecrypt {
+            mech: mech.mechanism,
+            key: key,
+        };
+        Ok(Box::new(op))
+    }
+}
+
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
     mechs.add_mechanism(
         CKM_RSA_PKCS,
-        CK_MECHANISM_INFO {
-            ulMinKeySize: 1024,
-            ulMaxKeySize: 4096,
-            flags: CKF_ENCRYPT | CKF_DECRYPT,
-        },
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 1024,
+                ulMaxKeySize: 4096,
+                flags: CKF_ENCRYPT | CKF_DECRYPT,
+            },
+        }),
     );
 
     ot.add_template(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
     ot.add_template(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
+}
+
+#[derive(Debug)]
+struct RsaPKCSEncrypt {
+    mech: CK_MECHANISM_TYPE,
+    key: Object,
+    /* TODO: whatever state is needed by crypto library */
+}
+
+impl Operation for RsaPKCSEncrypt {
+    fn mechanism(&self) -> CK_MECHANISM_TYPE {
+        self.mech
+    }
+}
+
+impl Encryption for RsaPKCSEncrypt {
+    fn encrypt(_data: Vec<u8>) -> KResult<Vec<u8>> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn encrypt_update(_data: Vec<u8>) -> KResult<Vec<u8>> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn encrypt_final() -> KResult<Vec<u8>> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
+#[derive(Debug)]
+struct RsaPKCSDecrypt {
+    mech: CK_MECHANISM_TYPE,
+    key: Object,
+    /* TODO: whatever state is needed by crypto library */
+}
+
+impl Operation for RsaPKCSDecrypt {
+    fn mechanism(&self) -> CK_MECHANISM_TYPE {
+        self.mech
+    }
 }

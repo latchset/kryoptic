@@ -5,12 +5,14 @@ use std::vec::Vec;
 
 use super::error;
 use super::interface;
+use super::mechanism;
 
 use super::err_rv;
 use error::{KError, KResult};
 use interface::*;
+use mechanism::Operation;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Session {
     handle: CK_SESSION_HANDLE,
 
@@ -19,6 +21,8 @@ pub struct Session {
     //notify: CK_NOTIFY,
     session_handles: Vec<CK_OBJECT_HANDLE>,
     search_handles: Vec<CK_OBJECT_HANDLE>,
+
+    operation: Option<Box<dyn Operation>>,
 }
 
 impl Session {
@@ -46,6 +50,7 @@ impl Session {
             //notify: unsafe { std::ptr::null_mut() },
             session_handles: Vec::<CK_OBJECT_HANDLE>::new(),
             search_handles: Vec::<CK_OBJECT_HANDLE>::new(),
+            operation: None,
         };
 
         // FIXME check Login status
@@ -153,5 +158,13 @@ impl Session {
             CKS_RW_SO_FUNCTIONS => true,
             _ => false,
         }
+    }
+
+    pub fn get_operation(&self) -> &Option<Box<dyn Operation>> {
+        &self.operation
+    }
+
+    pub fn set_operation(&mut self, op: Option<Box<dyn Operation>>) {
+        self.operation = op;
     }
 }
