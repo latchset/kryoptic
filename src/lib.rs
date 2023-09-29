@@ -525,9 +525,9 @@ extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     ret
 }
 extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
+    let rslots = global_rlock!(SLOTS);
     let mut wsess = global_wlock!(SESSIONS);
     wsess.clear_all_sessions_slot(slot_id);
-    let rslots = global_rlock!(SLOTS);
     let mut token = match rslots.get_token_from_slot_mut(slot_id) {
         Ok(t) => t,
         Err(e) => return err_to_rv!(e),
