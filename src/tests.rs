@@ -17,101 +17,118 @@ macro_rules! make_attribute {
     };
 }
 
+struct Slots {
+    id: usize,
+}
+
+static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
+
 struct TestData<'a> {
-    filename: Option<&'a str>,
-    create: bool,
+    slot: usize,
+    filename: &'a str,
+    created: bool,
 }
 
-fn test_setup(filename: &str) {
-    let test_token = serde_json::json!({
-        "objects": [{
-            "attributes": {
-                "CKA_UNIQUE_ID": "0",
-                "CKA_CLASS": 4,
-                "CKA_KEY_TYPE": 16,
-                "CKA_LABEL": "SO PIN",
-                "CKA_VALUE": "MTIzNDU2Nzg=",
-                "CKA_TOKEN": true
-            }
-        }, {
-            "attributes": {
-                "CKA_UNIQUE_ID": "1",
-                "CKA_CLASS": 4,
-                "CKA_KEY_TYPE": 16,
-                "CKA_LABEL": "User PIN",
-                "CKA_VALUE": "MTIzNDU2Nzg=",
-                "CKA_TOKEN": true
-            }
-        }, {
-            "attributes": {
-                "CKA_UNIQUE_ID": "2",
-                "CKA_CLASS": 2,
-                "CKA_KEY_TYPE": 0,
-                "CKA_DESTROYABLE": false,
-                "CKA_ID": "AQ==",
-                "CKA_LABEL": "Test RSA Key",
-                "CKA_MODIFIABLE": false,
-                "CKA_MODULUS": "AQIDBAUGBwg=",
-                "CKA_PRIVATE": false,
-                "CKA_PUBLIC_EXPONENT": "AQAB",
-                "CKA_TOKEN": true
-            }
-        }, {
-            "attributes": {
-                "CKA_UNIQUE_ID": "3",
-                "CKA_CLASS": 3,
-                "CKA_KEY_TYPE": 0,
-                "CKA_DESTROYABLE": false,
-                "CKA_ID": "AQ==",
-                "CKA_LABEL": "Test RSA Key",
-                "CKA_MODIFIABLE": false,
-                "CKA_MODULUS": "AQIDBAUGBwg=",
-                "CKA_PRIVATE": true,
-                "CKA_SENSITIVE": true,
-                "CKA_EXTRACTABLE": false,
-                "CKA_PUBLIC_EXPONENT": "AQAB",
-                "CKA_PRIVATE_EXPONENT": "AQAD",
-                "CKA_TOKEN": true
-            }
-        }]
-    });
-    let file = std::fs::File::create(filename).unwrap();
-    serde_json::to_writer_pretty(file, &test_token).unwrap();
-}
-
-fn test_init_args(filename: &str) -> CK_C_INITIALIZE_ARGS {
-    CK_C_INITIALIZE_ARGS {
-        CreateMutex: None,
-        DestroyMutex: None,
-        LockMutex: None,
-        UnlockMutex: None,
-        flags: 0,
-        pReserved: CString::new(filename).unwrap().into_raw()
-            as *mut std::ffi::c_void,
+impl TestData<'_> {
+    fn new<'a>(filename: &'a str) -> TestData {
+        let mut slots = SLOTS.write().unwrap();
+        slots.id += 1;
+        TestData {
+            slot: slots.id,
+            filename: filename,
+            created: false,
+        }
     }
-}
 
-fn test_cleanup(filename: &str) {
-    std::fs::remove_file(filename).unwrap_or(());
+    fn setup_db(&mut self) {
+        let test_token = serde_json::json!({
+            "objects": [{
+                "attributes": {
+                    "CKA_UNIQUE_ID": "0",
+                    "CKA_CLASS": 4,
+                    "CKA_KEY_TYPE": 16,
+                    "CKA_LABEL": "SO PIN",
+                    "CKA_VALUE": "MTIzNDU2Nzg=",
+                    "CKA_TOKEN": true
+                }
+            }, {
+                "attributes": {
+                    "CKA_UNIQUE_ID": "1",
+                    "CKA_CLASS": 4,
+                    "CKA_KEY_TYPE": 16,
+                    "CKA_LABEL": "User PIN",
+                    "CKA_VALUE": "MTIzNDU2Nzg=",
+                    "CKA_TOKEN": true
+                }
+            }, {
+                "attributes": {
+                    "CKA_UNIQUE_ID": "2",
+                    "CKA_CLASS": 2,
+                    "CKA_KEY_TYPE": 0,
+                    "CKA_DESTROYABLE": false,
+                    "CKA_ID": "AQ==",
+                    "CKA_LABEL": "Test RSA Key",
+                    "CKA_MODIFIABLE": false,
+                    "CKA_MODULUS": "AQIDBAUGBwg=",
+                    "CKA_PRIVATE": false,
+                    "CKA_PUBLIC_EXPONENT": "AQAB",
+                    "CKA_TOKEN": true
+                }
+            }, {
+                "attributes": {
+                    "CKA_UNIQUE_ID": "3",
+                    "CKA_CLASS": 3,
+                    "CKA_KEY_TYPE": 0,
+                    "CKA_DESTROYABLE": false,
+                    "CKA_ID": "AQ==",
+                    "CKA_LABEL": "Test RSA Key",
+                    "CKA_MODIFIABLE": false,
+                    "CKA_MODULUS": "AQIDBAUGBwg=",
+                    "CKA_PRIVATE": true,
+                    "CKA_SENSITIVE": true,
+                    "CKA_EXTRACTABLE": false,
+                    "CKA_PUBLIC_EXPONENT": "AQAB",
+                    "CKA_PRIVATE_EXPONENT": "AQAD",
+                    "CKA_TOKEN": true
+                }
+            }]
+        });
+        let file = std::fs::File::create(self.filename).unwrap();
+        serde_json::to_writer_pretty(file, &test_token).unwrap();
+        self.created = true;
+    }
+
+    fn mark_file_created(&mut self) {
+        self.created = true;
+    }
+
+    fn make_init_args(&self) -> CK_C_INITIALIZE_ARGS {
+        let reserved: String = format!("{}:{}", self.filename, self.slot);
+
+        CK_C_INITIALIZE_ARGS {
+            CreateMutex: None,
+            DestroyMutex: None,
+            LockMutex: None,
+            UnlockMutex: None,
+            flags: 0,
+            pReserved: CString::new(reserved).unwrap().into_raw()
+                as *mut std::ffi::c_void,
+        }
+    }
 }
 
 impl Drop for TestData<'_> {
     fn drop(&mut self) {
-        if self.create {
-            if let Some(f) = self.filename {
-                test_cleanup(f);
-            }
+        if self.created {
+            std::fs::remove_file(self.filename).unwrap_or(());
         }
     }
 }
 
 #[test]
 fn test_token() {
-    let testdata = TestData {
-        filename: Some("testdata/test_token.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_token.json");
+    testdata.setup_db();
 
     let mut plist: CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -121,7 +138,7 @@ fn test_token() {
         let list: CK_FUNCTION_LIST = *plist;
         match list.C_Initialize {
             Some(value) => {
-                let mut args = test_init_args(testdata.filename.unwrap());
+                let mut args = testdata.make_init_args();
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -133,13 +150,10 @@ fn test_token() {
 
 #[test]
 fn test_init_fini() {
-    let testdata = TestData {
-        filename: Some("testdata/test_init_fini.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_init_fini.json");
+    testdata.setup_db();
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -149,13 +163,10 @@ fn test_init_fini() {
 
 #[test]
 fn test_random() {
-    let testdata = TestData {
-        filename: Some("testdata/test_random.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_random.json");
+    testdata.setup_db();
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -184,13 +195,10 @@ fn test_random() {
 
 #[test]
 fn test_login() {
-    let testdata = TestData {
-        filename: Some("testdata/test_login.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_login.json");
+    testdata.setup_db();
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -278,13 +286,10 @@ fn test_login() {
 
 #[test]
 fn test_get_attr() {
-    let testdata = TestData {
-        filename: Some("testdata/test_get_attr.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_get_attr.json");
+    testdata.setup_db();
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -406,13 +411,10 @@ fn test_get_attr() {
 
 #[test]
 fn test_create_objects() {
-    let testdata = TestData {
-        filename: Some("testdata/test_create_objects.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_create_objects.json");
+    testdata.setup_db();
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -536,10 +538,9 @@ fn test_create_objects() {
     let mut encrypt: CK_BBOOL = CK_TRUE;
     let label = "RSA Public Encryption Key";
     let modulus_hex = "9D2E7820CE719B9194CDFE0FD751214193C4E9BE9BFA24D0E91B0FC3541C85885CB3CA95F8FDA4E129558EE41F653481E66A04ECB75808D57BD76ED9069767A2AFC9C3188F2BD42F045D0575765ADE27AD033B338DD5C2C1AAA899B89201A34BBB6ED9CCD0511325ADCF1C69718BD27196447D567F17E35A5865A3BC1FB35B3A605C25294D2A02E5F53D170C57814D8246F50CAE32321D8A5C44508238AC50519BD12221C740620198B762C2D1670A4B94655C783EAAD0E9A1244F8AE86D3B4A3DF26AC532B6A4EAA4FB4A35DF5C3A1B755DC5C17E451643D2DB722113C1E3E2CA59CFA592C80FB9B2D7056E19F5C84198371465CE7DFBA7390C3CE19D878121";
-    let mut modulus =
+    let modulus =
         hex::decode(modulus_hex).expect("Failed to decode hex modulus");
-    let mut exponent =
-        hex::decode("010001").expect("Failed to decode exponent");
+    let exponent = hex::decode("010001").expect("Failed to decode exponent");
     template = vec![
         make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
         make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
@@ -581,13 +582,14 @@ fn test_create_objects() {
 
 #[test]
 fn test_init_token() {
-    let testdata = TestData {
-        filename: Some("testdata/test_init_token.json"),
-        create: true,
-    };
+    let mut testdata = TestData::new("testdata/test_init_token.json");
     /* skip setup, we are creating an unitiliaized token */
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    /* but mark the file as created,
+     * so it will be cleaned up when the test is complete */
+    testdata.mark_file_created();
+
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -767,13 +769,10 @@ fn test_init_token() {
 
 #[test]
 fn test_get_mechs() {
-    let testdata = TestData {
-        filename: Some("testdata/test_get_mechs.json"),
-        create: true,
-    };
-    test_setup(testdata.filename.unwrap());
+    let mut testdata = TestData::new("testdata/test_get_mechs.json");
+    testdata.setup_db();
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -799,12 +798,9 @@ fn test_get_mechs() {
 
 #[test]
 fn test_rsa_operations() {
-    let testdata = TestData {
-        filename: Some("testdata/test_rsa_operations.json"),
-        create: false,
-    };
+    let testdata = TestData::new("testdata/test_rsa_operations.json");
 
-    let mut args = test_init_args(testdata.filename.unwrap());
+    let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
