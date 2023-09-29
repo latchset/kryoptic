@@ -167,6 +167,10 @@ impl Token {
         token
     }
 
+    pub fn get_filename(&self) -> &String {
+        &self.filename
+    }
+
     pub fn load(&mut self) -> KResult<()> {
         if self.is_initialized() {
             return err_rv!(CKR_GENERAL_ERROR);

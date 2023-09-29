@@ -17,16 +17,19 @@ macro_rules! make_attribute {
     };
 }
 
+static FINI: RwLock<u64> = RwLock::new(0);
+
 struct Slots {
-    id: usize,
+    id: u64,
 }
 
 static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
 
 struct TestData<'a> {
-    slot: usize,
+    slot: CK_SLOT_ID,
     filename: &'a str,
     created: bool,
+    fini_lock: RwLockReadGuard<'a, u64>,
 }
 
 impl TestData<'_> {
@@ -37,6 +40,7 @@ impl TestData<'_> {
             slot: slots.id,
             filename: filename,
             created: false,
+            fini_lock: FINI.read().unwrap(),
         }
     }
 
@@ -98,6 +102,10 @@ impl TestData<'_> {
         self.created = true;
     }
 
+    fn get_slot(&self) -> CK_SLOT_ID {
+        self.slot
+    }
+
     fn mark_file_created(&mut self) {
         self.created = true;
     }
@@ -157,8 +165,13 @@ fn test_init_fini() {
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
+
+    /* this test only will wait untill all other complete and then test fn_finialize */
+    drop(testdata);
+    let wlock = FINI.write();
     ret = fn_finalize(std::ptr::null_mut());
     assert_eq!(ret, CKR_OK);
+    drop(wlock);
 }
 
 #[test]
@@ -172,7 +185,7 @@ fn test_random() {
     assert_eq!(ret, CKR_OK);
     let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -189,8 +202,6 @@ fn test_random() {
     assert_ne!(data, &[0, 0, 0, 0]);
     ret = fn_close_session(handle);
     assert_eq!(ret, CKR_OK);
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
 }
 
 #[test]
@@ -205,7 +216,7 @@ fn test_login() {
 
     let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -225,7 +236,7 @@ fn test_login() {
 
     let mut handle2: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -280,8 +291,6 @@ fn test_login() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(handle2);
     assert_eq!(ret, CKR_OK);
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
 }
 
 #[test]
@@ -295,7 +304,7 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -405,8 +414,6 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
 }
 
 #[test]
@@ -420,7 +427,7 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -490,7 +497,7 @@ fn test_create_objects() {
     let login_session = session;
 
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -576,8 +583,6 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
 }
 
 #[test]
@@ -599,7 +604,7 @@ fn test_init_token() {
     /* init once */
     let pin_value = "SO Pin Value";
     ret = fn_init_token(
-        0,
+        testdata.get_slot(),
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         std::ptr::null_mut(),
@@ -609,7 +614,7 @@ fn test_init_token() {
     /* verify wrong SO PIN fails */
     let bad_value = "SO Bad Value";
     ret = fn_init_token(
-        0,
+        testdata.get_slot(),
         CString::new(bad_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         std::ptr::null_mut(),
@@ -619,7 +624,7 @@ fn test_init_token() {
     /* re-init */
     let pin_value = "SO Pin Value";
     ret = fn_init_token(
-        0,
+        testdata.get_slot(),
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         std::ptr::null_mut(),
@@ -628,7 +633,7 @@ fn test_init_token() {
 
     /* login as so */
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -656,7 +661,7 @@ fn test_init_token() {
 
     /* try to open ro_session and fail */
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -668,7 +673,7 @@ fn test_init_token() {
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -763,8 +768,6 @@ fn test_init_token() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
 }
 
 #[test]
@@ -777,11 +780,15 @@ fn test_get_mechs() {
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_get_mechanism_list(0, std::ptr::null_mut(), &mut count);
+    ret = fn_get_mechanism_list(
+        testdata.get_slot(),
+        std::ptr::null_mut(),
+        &mut count,
+    );
     assert_eq!(ret, CKR_OK);
     let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
     ret = fn_get_mechanism_list(
-        0,
+        testdata.get_slot(),
         mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
         &mut count,
     );
@@ -789,11 +796,9 @@ fn test_get_mechs() {
     assert_eq!(count, 1);
     assert_eq!(mechs[0], 1);
     let mut info: CK_MECHANISM_INFO = Default::default();
-    ret = fn_get_mechanism_info(0, mechs[0], &mut info);
+    ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.ulMinKeySize, 1024);
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
 }
 
 #[test]
@@ -808,7 +813,7 @@ fn test_rsa_operations() {
     /* open session */
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        0,
+        testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -855,7 +860,5 @@ fn test_rsa_operations() {
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_finalize(std::ptr::null_mut());
     assert_eq!(ret, CKR_OK);
 }

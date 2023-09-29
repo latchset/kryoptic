@@ -18,6 +18,7 @@ static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
 
 #[derive(Debug)]
 pub struct Slot {
+    slot_id: CK_SLOT_ID,
     slot_info: CK_SLOT_INFO,
     token: RwLock<Token>,
 }
@@ -27,6 +28,7 @@ impl Slot {
         let mut token = Token::new(slot_id, filename);
         token.load()?;
         Ok(Slot {
+            slot_id: slot_id,
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
                 manufacturerID: MANUFACTURER_ID,
@@ -38,13 +40,17 @@ impl Slot {
         })
     }
 
-    pub fn get_token_info(&self) -> CK_TOKEN_INFO {
-        let tok = self.token.read().unwrap();
-        *tok.get_token_info()
+    pub fn get_slot_id(&self) -> CK_SLOT_ID {
+        self.slot_id
     }
 
     pub fn get_slot_info(&self) -> &CK_SLOT_INFO {
         &self.slot_info
+    }
+
+    pub fn get_token_info(&self) -> CK_TOKEN_INFO {
+        let tok = self.token.read().unwrap();
+        *tok.get_token_info()
     }
 
     pub fn get_token(&self) -> KResult<RwLockReadGuard<'_, Token>> {

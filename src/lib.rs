@@ -67,47 +67,43 @@ macro_rules! ret_to_rv {
 }
 
 struct SlotsState {
-    slots: Option<Vec<slot::Slot>>,
+    slots: Vec<slot::Slot>,
 }
 
 impl SlotsState {
     fn initialize(&mut self) {
-        self.slots = Some(Vec::new());
+        self.slots.clear();
     }
 
     fn finalize(&mut self) {
-        self.slots = None;
+        self.slots.clear();
     }
 
     fn is_initialized(&self) -> bool {
-        self.slots.is_none() == false
+        self.slots.len() != 0
     }
 
     fn get_slot(&self, slotid: CK_SLOT_ID) -> KResult<&slot::Slot> {
-        match self.slots {
-            Some(ref s) => {
-                let idx = slotid as usize;
-                if idx >= s.len() {
-                    return err_rv!(CKR_SLOT_ID_INVALID);
-                }
-                Ok(&s[idx])
-            }
-            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+        if !self.is_initialized() {
+            return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED);
         }
+        for slot in &self.slots {
+            if slot.get_slot_id() == slotid {
+                return Ok(&slot);
+            }
+        }
+        return err_rv!(CKR_SLOT_ID_INVALID);
     }
 
     fn get_slots(&self) -> KResult<&Vec<slot::Slot>> {
-        match self.slots {
-            Some(ref s) => Ok(s),
-            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+        if !self.is_initialized() {
+            return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED);
         }
+        Ok(&self.slots)
     }
 
     fn get_slots_num(&self) -> usize {
-        match self.get_slots() {
-            Ok(slots) => slots.len(),
-            Err(_) => 0,
-        }
+        self.slots.len()
     }
 
     fn get_token_from_slot(
@@ -135,10 +131,8 @@ impl SlotsState {
     }
 
     fn add_slot(&mut self, slot: slot::Slot) -> KResult<()> {
-        match self.slots {
-            Some(ref mut s) => Ok(s.push(slot)),
-            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
-        }
+        self.slots.push(slot);
+        Ok(())
     }
 }
 
@@ -205,7 +199,8 @@ impl SessionsState {
     }
 }
 
-static SLOTS: RwLock<SlotsState> = RwLock::new(SlotsState { slots: None });
+static SLOTS: RwLock<SlotsState> =
+    RwLock::new(SlotsState { slots: Vec::new() });
 
 static SESSIONS: RwLock<SessionsState> = RwLock::new(SessionsState {
     sessions: None,
@@ -289,11 +284,10 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
             Err(_e) => return CKR_ARGUMENTS_BAD,
         };
 
-    let mut wsess = global_wlock!(noinitcheck SESSIONS);
-    wsess.initialize();
-
     let mut wslots = global_wlock!(noinitcheck SLOTS);
-    wslots.initialize();
+    if !wslots.is_initialized() {
+        wslots.initialize();
+    }
 
     let mut slotnum: u64 = 0;
     let v: Vec<&str> = reserved.split(':').collect();
@@ -303,15 +297,41 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
             Err(_) => return CKR_ARGUMENTS_BAD,
         };
     }
+    let filename = v[0].to_string();
+    /* check that this slot was not already initialized with a different db */
+    match wslots.get_token_from_slot(slotnum) {
+        Ok(token) => {
+            if filename.eq(token.get_filename()) {
+                return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+            } else {
+                return CKR_ARGUMENTS_BAD;
+            }
+        }
+        Err(e) => match e {
+            KError::RvError(cke) => match cke.rv {
+                CKR_SLOT_ID_INVALID => (),
+                CKR_CRYPTOKI_NOT_INITIALIZED => (),
+                _ => return cke.rv,
+            },
+            _ => return CKR_GENERAL_ERROR,
+        },
+    }
 
-    let slot = match slot::Slot::new(slotnum, v[0].to_string()) {
+    let slot = match slot::Slot::new(slotnum, filename) {
         Ok(s) => s,
         Err(e) => return err_to_rv!(e),
     };
     match wslots.add_slot(slot) {
-        Ok(_) => CKR_OK,
-        Err(e) => err_to_rv!(e),
+        Ok(()) => (),
+        Err(e) => return err_to_rv!(e),
     }
+
+    let mut wsess = global_wlock!(noinitcheck SESSIONS);
+    if !wsess.is_initialized() {
+        wsess.initialize();
+    }
+
+    CKR_OK
 }
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     let mut wslots = global_wlock!(SLOTS);
