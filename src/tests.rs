@@ -4,6 +4,7 @@
 use super::*;
 use hex;
 use std::ffi::CString;
+use std::sync::Once;
 
 const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 const CK_BBOOL_SIZE: usize = std::mem::size_of::<CK_BBOOL>();
@@ -17,7 +18,19 @@ macro_rules! make_attribute {
     };
 }
 
+/* note that the following concoction to sync threads is not entirely race free
+ * as it assumes all tests initialize before all of the others complete. */
 static FINI: RwLock<u64> = RwLock::new(0);
+static SYNC: RwLock<u64> = RwLock::new(0);
+
+static INIT: Once = Once::new();
+fn test_finalizer() -> Option<RwLockWriteGuard<'static, u64>> {
+    let mut winner: Option<RwLockWriteGuard<u64>> = None;
+    INIT.call_once(|| {
+        winner = Some(FINI.write().unwrap());
+    });
+    winner
+}
 
 struct Slots {
     id: u64,
@@ -29,7 +42,8 @@ struct TestData<'a> {
     slot: CK_SLOT_ID,
     filename: &'a str,
     created: bool,
-    fini_lock: RwLockReadGuard<'a, u64>,
+    finalize: Option<RwLockWriteGuard<'a, u64>>,
+    sync: Option<RwLockReadGuard<'a, u64>>,
 }
 
 impl TestData<'_> {
@@ -40,7 +54,8 @@ impl TestData<'_> {
             slot: slots.id,
             filename: filename,
             created: false,
-            fini_lock: FINI.read().unwrap(),
+            finalize: test_finalizer(),
+            sync: Some(SYNC.read().unwrap()),
         }
     }
 
@@ -123,10 +138,21 @@ impl TestData<'_> {
                 as *mut std::ffi::c_void,
         }
     }
-}
 
-impl Drop for TestData<'_> {
-    fn drop(&mut self) {
+    fn finalize(&mut self) {
+        if self.finalize.is_none() {
+            self.sync = None;
+            /* wait until we can read, which means the winner finalized the module */
+            let read_lock = FINI.read().unwrap();
+        } else {
+            self.sync = None;
+            /* wait for all others to complete */
+            let sync_lock = SYNC.write().unwrap();
+            let ret = fn_finalize(std::ptr::null_mut());
+            assert_eq!(ret, CKR_OK);
+            /* winner finalized and completed the tests */
+            self.finalize = None;
+        }
         if self.created {
             std::fs::remove_file(self.filename).unwrap_or(());
         }
@@ -154,24 +180,8 @@ fn test_token() {
             None => todo!(),
         }
     }
-}
 
-#[test]
-fn test_init_fini() {
-    let mut testdata = TestData::new("testdata/test_init_fini.json");
-    testdata.setup_db();
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    /* this test only will wait untill all other complete and then test fn_finialize */
-    drop(testdata);
-    let wlock = FINI.write();
-    ret = fn_finalize(std::ptr::null_mut());
-    assert_eq!(ret, CKR_OK);
-    drop(wlock);
+    testdata.finalize();
 }
 
 #[test]
@@ -202,6 +212,8 @@ fn test_random() {
     assert_ne!(data, &[0, 0, 0, 0]);
     ret = fn_close_session(handle);
     assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
 }
 
 #[test]
@@ -291,6 +303,8 @@ fn test_login() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(handle2);
     assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
 }
 
 #[test]
@@ -414,6 +428,8 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
 }
 
 #[test]
@@ -583,6 +599,8 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
 }
 
 #[test]
@@ -768,6 +786,8 @@ fn test_init_token() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
 }
 
 #[test]
@@ -799,11 +819,13 @@ fn test_get_mechs() {
     ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.ulMinKeySize, 1024);
+
+    testdata.finalize();
 }
 
 #[test]
 fn test_rsa_operations() {
-    let testdata = TestData::new("testdata/test_rsa_operations.json");
+    let mut testdata = TestData::new("testdata/test_rsa_operations.json");
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -861,4 +883,6 @@ fn test_rsa_operations() {
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
 }
