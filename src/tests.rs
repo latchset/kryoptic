@@ -879,6 +879,10 @@ fn test_rsa_operations() {
     ret = fn_encrypt_init(session, &mut mechanism, handle);
     assert_eq!(ret, CKR_OK);
 
+    /* a second invocation should return an error */
+    ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OPERATION_ACTIVE);
+
     let data = "plaintext";
     let mut enc: [u8; 2048] = [0; 2048];
     let mut enc_len: CK_ULONG = 2048;
@@ -889,6 +893,60 @@ fn test_rsa_operations() {
         enc.as_ptr() as *mut _,
         &mut enc_len,
     );
+    assert_eq!(ret, CKR_OK);
+
+    /* a second invocation should return an error */
+    ret = fn_encrypt(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_ptr() as *mut _,
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    /* calling final should also return error */
+    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut enc_len);
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    /* reinit and check via parts interface */
+    ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_encrypt_update(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_ptr() as *mut _,
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* a second time should still be fine */
+    ret = fn_encrypt_update(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_ptr() as *mut _,
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* but fn_encrypt should return an error */
+    ret = fn_encrypt(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_ptr() as *mut _,
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    /* and an init should also return an error */
+    ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OPERATION_ACTIVE);
+
+    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut enc_len);
     assert_eq!(ret, CKR_OK);
 
     ret = fn_logout(session);

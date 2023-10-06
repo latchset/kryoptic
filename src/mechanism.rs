@@ -77,32 +77,36 @@ impl Mechanisms {
 
 pub trait BaseOperation: Debug + Send + Sync {
     fn mechanism(&self) -> CK_MECHANISM_TYPE;
-    fn used(&self) -> bool;
+    fn in_use(&self) -> bool;
+    fn finalized(&self) -> bool;
 }
 
 pub trait Encryption: Debug + Send + Sync {
     fn encrypt(
         &mut self,
         _rng: &mut RNG,
-        _plain: &[u8],
-        _cipher: &mut [u8],
-        _inplace: bool,
+        _plain: CK_BYTE_PTR,
+        _plain_len: CK_ULONG,
+        _cipher: CK_BYTE_PTR,
+        _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn encrypt_update(
         &mut self,
         _rng: &mut RNG,
-        _plain: &[u8],
-        _cipher: &mut [u8],
-        _inplace: bool,
+        _plain: CK_BYTE_PTR,
+        _plain_len: CK_ULONG,
+        _cipher: CK_BYTE_PTR,
+        _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn encrypt_final(
         &mut self,
         _rng: &mut RNG,
-        _cipher: &mut [u8],
+        _cipher: CK_BYTE_PTR,
+        _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
@@ -112,25 +116,28 @@ pub trait Decryption: Debug + Send + Sync {
     fn decrypt(
         &mut self,
         _rng: &mut RNG,
-        _cipher: &[u8],
-        _plain: &mut [u8],
-        _inplace: bool,
+        _cipher: CK_BYTE_PTR,
+        _cipher_len: CK_ULONG,
+        _plain: CK_BYTE_PTR,
+        _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn decrypt_update(
         &mut self,
         _rng: &mut RNG,
-        _cipher: &[u8],
-        _plain: &mut [u8],
-        _inplace: bool,
+        _cipher: CK_BYTE_PTR,
+        _cipher_len: CK_ULONG,
+        _plain: CK_BYTE_PTR,
+        _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn decrypt_final(
         &mut self,
         _rng: &mut RNG,
-        _cipher: &mut [u8],
+        _plain: CK_BYTE_PTR,
+        _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }

@@ -744,15 +744,85 @@ impl Token {
     pub fn encrypt(
         &mut self,
         handle: CK_SESSION_HANDLE,
-        plain: &[u8],
-        cipher: &mut [u8],
-        inplace: bool,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
         let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
-            None => return err_rv!(CKR_OPERATION_ACTIVE),
+            None => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
             Some(op) => op,
         };
-        operation.encrypt(&mut self.rng, plain, cipher, inplace)
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.encrypt(
+            &mut self.rng,
+            plain,
+            plain_len,
+            cipher,
+            cipher_len,
+        );
+
+        if operation.finalized() {
+            session.set_operation(None);
+        }
+
+        result
+    }
+
+    pub fn encrypt_update(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            None => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            Some(op) => op,
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.encrypt_update(
+            &mut self.rng,
+            plain,
+            plain_len,
+            cipher,
+            cipher_len,
+        );
+
+        if operation.finalized() {
+            session.set_operation(None);
+        }
+
+        result
+    }
+
+    pub fn encrypt_final(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            None => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            Some(op) => op,
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.encrypt_final(&mut self.rng, cipher, cipher_len);
+
+        if operation.finalized() {
+            session.set_operation(None);
+        }
+
+        result
     }
 }
