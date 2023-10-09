@@ -109,8 +109,11 @@ impl RNG {
         RNG { initialized: true }
     }
 
+    /* NOTE: this is just a placeholder to get somethjing going */
     pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
-        /* NOTE: this is just a placeholder to get somethjing going */
+        if !self.initialized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
         if buffer.len() > 256 {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
@@ -119,6 +122,14 @@ impl RNG {
         }
         Ok(())
     }
+}
+
+macro_rules! generic_next_handle {
+    (from $handle:expr) => {{
+        let current = $handle;
+        $handle += 1;
+        current
+    }};
 }
 
 #[derive(Debug)]
@@ -230,7 +241,7 @@ impl Token {
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
             }
             None => {
-                let mut obj = Object::new(self.next_object_handle());
+                let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
                 obj.set_attr(attribute::from_string(
                     CKA_UNIQUE_ID,
                     uid.clone(),
@@ -243,7 +254,6 @@ impl Token {
                 ))?;
                 obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
-                self.handles.insert(obj.get_handle(), uid.clone());
                 self.objects.insert(uid, obj);
             }
         }
@@ -285,16 +295,6 @@ impl Token {
         }
     }
 
-    fn next_object_handle(&mut self) -> CK_SESSION_HANDLE {
-        /* if we ever implement reloading from file,
-         * we'll want to pass the CKA_UNIQUE_ID object to this call and look
-         * in the handles cache to see if a handle has already been assigned
-         * to this object before */
-        let handle = self.next_handle;
-        self.next_handle += 1;
-        handle
-    }
-
     fn objects_to_json(&self) -> Vec<JsonObject> {
         let mut jobjs = Vec::new();
 
@@ -320,7 +320,7 @@ impl Token {
 
     fn json_to_objects(&mut self, jobjs: &Vec<JsonObject>) -> KResult<()> {
         for jo in jobjs {
-            let mut obj = Object::new(self.next_object_handle());
+            let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
             let mut uid: String = String::new();
             for (key, val) in &jo.attributes {
                 let attr = attribute::from_value(key.clone(), &val)?;
@@ -335,7 +335,6 @@ impl Token {
             if uid.len() == 0 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
-            self.handles.insert(obj.get_handle(), uid.clone());
             self.objects.insert(uid, obj);
         }
         Ok(())
@@ -473,10 +472,52 @@ impl Token {
             self.so_login.logged_in = false;
             ret = CKR_OK;
         }
-        if ret == CKR_OK {
-            self.sessions.invalidate_session_states();
+        if ret != CKR_OK {
+            return ret;
         }
-        ret
+
+        let mut priv_handles = Vec::<CK_OBJECT_HANDLE>::new();
+        let mut priv_uids = Vec::<String>::new();
+        for (_, obj) in &self.objects {
+            if obj.is_private() {
+                let oh = obj.get_handle();
+                if oh != CK_UNAVAILABLE_INFORMATION {
+                    priv_handles.push(oh);
+                    let _ = self.handles.remove(&oh);
+                }
+                if !obj.is_token() {
+                    /* not a token object, therefore we need to destroy it */
+                    let uid = match obj.get_attr_as_string(CKA_UNIQUE_ID) {
+                        Ok(u) => u,
+                        Err(_) => continue,
+                    };
+                    priv_uids.push(uid.clone());
+                }
+            }
+        }
+
+        /* remove all refrences to private non-token objects */
+        priv_handles.sort_unstable();
+        for s in self.sessions.get_sessions_iter_mut() {
+            let mut pub_handles = Vec::<CK_OBJECT_HANDLE>::new();
+            for oh in s.get_object_handles() {
+                match priv_handles.binary_search(oh) {
+                    Ok(_) => continue,
+                    Err(_) => pub_handles.push(*oh),
+                }
+            }
+            /* replace handles list with the remaining public object handles only */
+            s.set_object_handles(pub_handles);
+        }
+
+        /* remove all private non-token objects */
+        for uid in priv_uids {
+            self.objects.remove(&uid);
+        }
+
+        /* reset all session states */
+        self.sessions.invalidate_session_states();
+        CKR_OK
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
@@ -590,7 +631,7 @@ impl Token {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
-        let handle = self.next_object_handle();
+        let handle = generic_next_handle!(from self.next_handle);
         let obj = self.object_templates.create(handle, template)?;
         match obj.get_attr_as_bool(CKA_TOKEN) {
             Ok(t) => {
@@ -626,13 +667,23 @@ impl Token {
         let _ = self.get_session(handle)?;
 
         let mut search_handles: Vec<CK_OBJECT_HANDLE> = Vec::new();
-        for (_, o) in &self.objects {
+        for (_, o) in &mut self.objects {
             if !self.user_login.logged_in && o.is_private() {
                 continue;
             }
 
             if o.match_template(template) {
-                search_handles.push(o.get_handle());
+                let mut oh = o.get_handle();
+                if oh == CK_UNAVAILABLE_INFORMATION {
+                    let uid = match o.get_attr_as_string(CKA_UNIQUE_ID) {
+                        Ok(s) => s,
+                        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                    };
+                    oh = generic_next_handle!(from self.next_handle);
+                    o.set_handle(oh);
+                    self.handles.insert(oh, uid.clone());
+                }
+                search_handles.push(oh);
             }
         }
 

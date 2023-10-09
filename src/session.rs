@@ -12,6 +12,8 @@ use error::{KError, KResult};
 use interface::*;
 use mechanism::Operation;
 
+use std::slice::IterMut;
+
 #[derive(Debug)]
 pub struct Session {
     handle: CK_SESSION_HANDLE,
@@ -19,7 +21,7 @@ pub struct Session {
     info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
-    session_handles: Vec<CK_OBJECT_HANDLE>,
+    object_handles: Vec<CK_OBJECT_HANDLE>,
     search_handles: Vec<CK_OBJECT_HANDLE>,
 
     operation: Option<Box<dyn Operation>>,
@@ -48,7 +50,7 @@ impl Session {
             },
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
-            session_handles: Vec::<CK_OBJECT_HANDLE>::new(),
+            object_handles: Vec::<CK_OBJECT_HANDLE>::new(),
             search_handles: Vec::<CK_OBJECT_HANDLE>::new(),
             operation: None,
         };
@@ -70,7 +72,15 @@ impl Session {
     }
 
     pub fn add_handle(&mut self, handle: CK_OBJECT_HANDLE) {
-        self.session_handles.push(handle);
+        self.object_handles.push(handle);
+    }
+
+    pub fn set_object_handles(&mut self, handles: Vec<CK_OBJECT_HANDLE>) {
+        self.object_handles = handles;
+    }
+
+    pub fn get_object_handles(&self) -> &Vec<CK_OBJECT_HANDLE> {
+        &self.object_handles
     }
 
     pub fn reset_search_handles(&mut self) {
@@ -219,6 +229,10 @@ impl Sessions {
             }
         }
         err_rv!(CKR_SESSION_HANDLE_INVALID)
+    }
+
+    pub fn get_sessions_iter_mut(&mut self) -> IterMut<'_, Session> {
+        self.store.iter_mut()
     }
 
     pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {

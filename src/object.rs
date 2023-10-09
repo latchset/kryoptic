@@ -88,6 +88,10 @@ impl Object {
         }
     }
 
+    pub fn set_handle(&mut self, h: CK_OBJECT_HANDLE) {
+        self.handle = h
+    }
+
     pub fn get_handle(&self) -> CK_OBJECT_HANDLE {
         self.handle
     }
