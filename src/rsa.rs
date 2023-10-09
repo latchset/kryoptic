@@ -262,7 +262,7 @@ impl Mechanism for RsaPKCSMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Operation>> {
+    ) -> KResult<Box<dyn Encryption>> {
         if mech.mechanism != CKM_RSA_PKCS {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -287,7 +287,7 @@ impl Mechanism for RsaPKCSMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Operation>> {
+    ) -> KResult<Box<dyn Decryption>> {
         if mech.mechanism != CKM_RSA_PKCS {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -334,7 +334,7 @@ struct RsaPKCSOperation {
     in_use: bool,
 }
 
-impl BaseOperation for RsaPKCSOperation {
+impl MechOperation for RsaPKCSOperation {
     fn mechanism(&self) -> CK_MECHANISM_TYPE {
         self.mech
     }
@@ -404,8 +404,6 @@ impl Encryption for RsaPKCSOperation {
 }
 
 impl Decryption for RsaPKCSOperation {}
-
-impl Operation for RsaPKCSOperation {}
 
 unsafe extern "C" fn get_random(
     ctx: *mut ::std::os::raw::c_void,

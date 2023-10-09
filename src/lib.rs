@@ -664,7 +664,7 @@ extern "C" fn fn_find_objects_init(
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
     let tmpl: &[CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts(template, count as usize) };
-    ret_to_rv!(token.search(s_handle, tmpl))
+    ret_to_rv!(token.search_objects(s_handle, tmpl))
 }
 
 extern "C" fn fn_find_objects(
@@ -678,14 +678,11 @@ extern "C" fn fn_find_objects(
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let session = match token.get_session_mut(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
-    let handles = match session.get_search_handles(max_object_count as usize) {
-        Ok(h) => h,
-        Err(e) => return err_to_rv!(e),
-    };
+    let handles =
+        match token.search_results(s_handle, max_object_count as usize) {
+            Ok(h) => h,
+            Err(e) => return err_to_rv!(e),
+        };
     let hlen = handles.len();
     if hlen > 0 {
         let mut idx = 0;
@@ -704,12 +701,7 @@ extern "C" fn fn_find_objects(
 extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let session = match token.get_session_mut(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
-    session.reset_search_handles();
-    CKR_OK
+    ret_to_rv!(token.search_final(s_handle))
 }
 extern "C" fn fn_encrypt_init(
     s_handle: CK_SESSION_HANDLE,

@@ -18,9 +18,11 @@ use super::session;
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
-use mechanism::Mechanisms;
+use mechanism::{Mechanisms, Operation};
 use object::{Object, ObjectTemplates};
 use session::{Session, Sessions};
+
+use std::collections::hash_map::Iter;
 
 use getrandom;
 
@@ -124,12 +126,136 @@ impl RNG {
     }
 }
 
-macro_rules! generic_next_handle {
-    (from $handle:expr) => {{
-        let current = $handle;
-        $handle += 1;
-        current
-    }};
+#[derive(Debug)]
+pub struct TokenObjects {
+    objects: HashMap<String, Object>,
+    handles: HashMap<CK_OBJECT_HANDLE, String>,
+    next_handle: CK_OBJECT_HANDLE,
+}
+
+impl TokenObjects {
+    fn new() -> TokenObjects {
+        TokenObjects {
+            objects: HashMap::new(),
+            handles: HashMap::new(),
+            next_handle: 1,
+        }
+    }
+
+    fn initialize(&mut self) {
+        self.objects = HashMap::new();
+        self.handles = HashMap::new();
+        self.next_handle = 1;
+    }
+
+    fn get(&self, uid: &String) -> Option<&Object> {
+        self.objects.get(uid)
+    }
+
+    pub fn get_mut(&mut self, uid: &String) -> Option<&mut Object> {
+        self.objects.get_mut(uid)
+    }
+
+    fn insert(&mut self, uid: String, obj: Object) {
+        self.objects.insert(uid, obj);
+    }
+
+    pub fn iter(&self) -> Iter<'_, String, Object> {
+        self.objects.iter()
+    }
+
+    pub fn next_handle(&mut self) -> CK_OBJECT_HANDLE {
+        let next = self.next_handle;
+        self.next_handle += 1;
+        next
+    }
+
+    fn get_by_handle(&self, handle: CK_OBJECT_HANDLE) -> KResult<&Object> {
+        match self.handles.get(&handle) {
+            Some(s) => match self.objects.get(s) {
+                Some(o) => Ok(o),
+                None => err_not_found! {s.clone()},
+            },
+            None => err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        }
+    }
+
+    pub fn insert_handle(&mut self, oh: CK_OBJECT_HANDLE, uid: String) {
+        self.handles.insert(oh, uid);
+    }
+
+    fn to_json(&self) -> Vec<JsonObject> {
+        let mut jobjs = Vec::new();
+
+        for (_h, o) in &self.objects {
+            match o.get_attr_as_bool(CKA_TOKEN) {
+                Ok(t) => {
+                    if !t {
+                        continue;
+                    }
+                }
+                Err(_) => continue,
+            }
+            let mut jo = JsonObject {
+                attributes: serde_json::Map::new(),
+            };
+            for a in o.get_attributes() {
+                jo.attributes.insert(a.name(), a.json_value());
+            }
+            jobjs.push(jo);
+        }
+        jobjs
+    }
+
+    fn from_json(&mut self, jobjs: &Vec<JsonObject>) -> KResult<()> {
+        for jo in jobjs {
+            let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
+            let mut uid: String = String::new();
+            for (key, val) in &jo.attributes {
+                let attr = attribute::from_value(key.clone(), &val)?;
+                obj.set_attr(attr)?;
+                if key == "CKA_UNIQUE_ID" {
+                    uid = match val.as_str() {
+                        Some(s) => s.to_string(),
+                        None => return err_rv!(CKR_DEVICE_ERROR),
+                    }
+                }
+            }
+            if uid.len() == 0 {
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+            self.objects.insert(uid, obj);
+        }
+        Ok(())
+    }
+
+    fn clear_private_session_objects(&mut self) -> Vec<CK_OBJECT_HANDLE> {
+        let mut priv_handles = Vec::<CK_OBJECT_HANDLE>::new();
+        let mut priv_uids = Vec::<String>::new();
+        for (_, obj) in &self.objects {
+            if obj.is_private() {
+                let oh = obj.get_handle();
+                if oh != CK_UNAVAILABLE_INFORMATION {
+                    priv_handles.push(oh);
+                    let _ = self.handles.remove(&oh);
+                }
+                if !obj.is_token() {
+                    /* not a token object, therefore we need to destroy it */
+                    let uid = match obj.get_attr_as_string(CKA_UNIQUE_ID) {
+                        Ok(u) => u,
+                        Err(_) => continue,
+                    };
+                    priv_uids.push(uid.clone());
+                }
+            }
+        }
+
+        /* remove all private session objects */
+        for uid in priv_uids {
+            self.objects.remove(&uid);
+        }
+        priv_handles
+    }
 }
 
 #[derive(Debug)]
@@ -140,12 +266,10 @@ pub struct Token {
     object_templates: ObjectTemplates,
     mechanisms: Mechanisms,
     sessions: Sessions,
-    objects: HashMap<String, Object>,
+    objects: TokenObjects,
     dirty: bool,
     so_login: LoginData,
     user_login: LoginData,
-    handles: HashMap<CK_OBJECT_HANDLE, String>,
-    next_handle: CK_OBJECT_HANDLE,
     rng: RNG,
 }
 
@@ -177,7 +301,7 @@ impl Token {
             object_templates: ObjectTemplates::new(),
             mechanisms: Mechanisms::new(),
             sessions: Sessions::new(),
-            objects: HashMap::new(),
+            objects: TokenObjects::new(),
             so_login: LoginData {
                 pin: None,
                 max_attempts: 0,
@@ -191,8 +315,6 @@ impl Token {
                 logged_in: false,
             },
             dirty: false,
-            handles: HashMap::new(),
-            next_handle: 1,
             rng: RNG::new(),
         };
 
@@ -213,7 +335,7 @@ impl Token {
         match std::fs::File::open(&self.filename) {
             Ok(f) => {
                 match serde_json::from_reader::<std::fs::File, JsonToken>(f) {
-                    Ok(j) => self.json_to_objects(&j.objects)?,
+                    Ok(j) => self.objects.from_json(&j.objects)?,
                     Err(e) => return Err(KError::JsonError(e)),
                 }
             }
@@ -270,10 +392,7 @@ impl Token {
             return ret;
         }
         self.so_login.logged_in = false;
-
-        self.objects = HashMap::new();
-        self.handles = HashMap::new();
-        self.next_handle = 1;
+        self.objects.initialize();
         self.dirty = true;
 
         /* add pin to so_object */
@@ -295,62 +414,14 @@ impl Token {
         }
     }
 
-    fn objects_to_json(&self) -> Vec<JsonObject> {
-        let mut jobjs = Vec::new();
-
-        for (_h, o) in &self.objects {
-            match o.get_attr_as_bool(CKA_TOKEN) {
-                Ok(t) => {
-                    if !t {
-                        continue;
-                    }
-                }
-                Err(_) => continue,
-            }
-            let mut jo = JsonObject {
-                attributes: serde_json::Map::new(),
-            };
-            for a in o.get_attributes() {
-                jo.attributes.insert(a.name(), a.json_value());
-            }
-            jobjs.push(jo);
-        }
-        jobjs
-    }
-
-    fn json_to_objects(&mut self, jobjs: &Vec<JsonObject>) -> KResult<()> {
-        for jo in jobjs {
-            let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
-            let mut uid: String = String::new();
-            for (key, val) in &jo.attributes {
-                let attr = attribute::from_value(key.clone(), &val)?;
-                obj.set_attr(attr)?;
-                if key == "CKA_UNIQUE_ID" {
-                    uid = match val.as_str() {
-                        Some(s) => s.to_string(),
-                        None => return err_rv!(CKR_DEVICE_ERROR),
-                    }
-                }
-            }
-            if uid.len() == 0 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            self.objects.insert(uid, obj);
-        }
-        Ok(())
-    }
-
     pub fn get_object_by_handle(
         &self,
         handle: CK_OBJECT_HANDLE,
         checks: bool,
     ) -> KResult<&Object> {
-        let obj = match self.handles.get(&handle) {
-            Some(s) => match self.objects.get(s) {
-                Some(o) => o,
-                None => return err_not_found! {s.clone()},
-            },
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        let obj = match self.objects.get_by_handle(handle) {
+            Ok(o) => o,
+            Err(e) => return Err(e),
         };
         if checks && !self.user_login.logged_in && obj.is_private() {
             return err_rv!(CKR_OBJECT_HANDLE_INVALID);
@@ -476,27 +547,10 @@ impl Token {
             return ret;
         }
 
-        let mut priv_handles = Vec::<CK_OBJECT_HANDLE>::new();
-        let mut priv_uids = Vec::<String>::new();
-        for (_, obj) in &self.objects {
-            if obj.is_private() {
-                let oh = obj.get_handle();
-                if oh != CK_UNAVAILABLE_INFORMATION {
-                    priv_handles.push(oh);
-                    let _ = self.handles.remove(&oh);
-                }
-                if !obj.is_token() {
-                    /* not a token object, therefore we need to destroy it */
-                    let uid = match obj.get_attr_as_string(CKA_UNIQUE_ID) {
-                        Ok(u) => u,
-                        Err(_) => continue,
-                    };
-                    priv_uids.push(uid.clone());
-                }
-            }
-        }
+        /* remove private session objects and return all the removed handles */
+        let mut priv_handles = self.objects.clear_private_session_objects();
 
-        /* remove all refrences to private non-token objects */
+        /* remove all refrences to private session handles for removed objects */
         priv_handles.sort_unstable();
         for s in self.sessions.get_sessions_iter_mut() {
             let mut pub_handles = Vec::<CK_OBJECT_HANDLE>::new();
@@ -508,11 +562,6 @@ impl Token {
             }
             /* replace handles list with the remaining public object handles only */
             s.set_object_handles(pub_handles);
-        }
-
-        /* remove all private non-token objects */
-        for uid in priv_uids {
-            self.objects.remove(&uid);
         }
 
         /* reset all session states */
@@ -607,7 +656,7 @@ impl Token {
             return Ok(());
         }
         let token = JsonToken {
-            objects: self.objects_to_json(),
+            objects: self.objects.to_json(),
         };
         let j = match serde_json::to_string_pretty(&token) {
             Ok(j) => j,
@@ -631,7 +680,7 @@ impl Token {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
-        let handle = generic_next_handle!(from self.next_handle);
+        let handle = self.objects.next_handle();
         let obj = self.object_templates.create(handle, template)?;
         match obj.get_attr_as_bool(CKA_TOKEN) {
             Ok(t) => {
@@ -649,47 +698,13 @@ impl Token {
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         }
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
-        self.handles.insert(handle, uid.clone());
+        self.objects.insert_handle(handle, uid.clone());
         self.objects.insert(uid.clone(), obj);
         Ok(handle)
     }
 
     pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
         &self.info
-    }
-
-    pub fn search(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        template: &[CK_ATTRIBUTE],
-    ) -> KResult<()> {
-        /* check that session is valid */
-        let _ = self.get_session(handle)?;
-
-        let mut search_handles: Vec<CK_OBJECT_HANDLE> = Vec::new();
-        for (_, o) in &mut self.objects {
-            if !self.user_login.logged_in && o.is_private() {
-                continue;
-            }
-
-            if o.match_template(template) {
-                let mut oh = o.get_handle();
-                if oh == CK_UNAVAILABLE_INFORMATION {
-                    let uid = match o.get_attr_as_string(CKA_UNIQUE_ID) {
-                        Ok(s) => s,
-                        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-                    };
-                    oh = generic_next_handle!(from self.next_handle);
-                    o.set_handle(oh);
-                    self.handles.insert(oh, uid.clone());
-                }
-                search_handles.push(oh);
-            }
-        }
-
-        let session = self.get_session_mut(handle)?;
-        session.set_search_handles(search_handles);
-        Ok(())
     }
 
     pub fn get_object_attrs(
@@ -760,12 +775,53 @@ impl Token {
         }
     }
 
+    pub fn search_objects(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<()> {
+        let logged_in = self.user_login.logged_in;
+        let session = self.sessions.get_session_mut(handle)?;
+        session.new_search_operation(logged_in)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Search(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        operation.search(&mut self.objects, template)
+    }
+
+    pub fn search_results(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        max: usize,
+    ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+        let session = self.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Search(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        operation.results(max)
+    }
+
+    pub fn search_final(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+        let session = self.get_session_mut(handle)?;
+        match session.get_operation() {
+            Operation::Search(_) => (),
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        session.set_operation(Operation::Empty);
+        Ok(())
+    }
+
     pub fn encrypt_terminate(
         &mut self,
         handle: CK_SESSION_HANDLE,
     ) -> KResult<()> {
         let session = self.get_session_mut(handle)?;
-        session.set_operation(None);
+        session.set_operation(Operation::Empty);
         Ok(())
     }
 
@@ -777,15 +833,15 @@ impl Token {
     ) -> KResult<()> {
         let session = self.get_session(handle)?;
         match session.get_operation() {
-            Some(_) => return err_rv!(CKR_OPERATION_ACTIVE),
-            None => (),
+            Operation::Empty => (),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
         }
         let mech = self.mechanisms.get(data.mechanism)?;
         let obj = self.get_object_by_handle(key, true)?;
         if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
-            let operation = Some(mech.encryption_new(data, obj)?);
+            let operation = mech.encryption_new(data, obj)?;
             let session = self.get_session_mut(handle)?;
-            session.set_operation(operation);
+            session.set_operation(Operation::Encryption(operation));
             Ok(())
         } else {
             err_rv!(CKR_MECHANISM_INVALID)
@@ -802,8 +858,9 @@ impl Token {
     ) -> KResult<()> {
         let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
-            None => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            Some(op) => op,
+            Operation::Encryption(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
         };
         if operation.finalized() {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
@@ -817,7 +874,7 @@ impl Token {
         );
 
         if operation.finalized() {
-            session.set_operation(None);
+            session.set_operation(Operation::Empty);
         }
 
         result
@@ -833,8 +890,9 @@ impl Token {
     ) -> KResult<()> {
         let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
-            None => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            Some(op) => op,
+            Operation::Encryption(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
         };
         if operation.finalized() {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
@@ -848,7 +906,7 @@ impl Token {
         );
 
         if operation.finalized() {
-            session.set_operation(None);
+            session.set_operation(Operation::Empty);
         }
 
         result
@@ -862,8 +920,9 @@ impl Token {
     ) -> KResult<()> {
         let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
-            None => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            Some(op) => op,
+            Operation::Encryption(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
         };
         if operation.finalized() {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
@@ -871,7 +930,7 @@ impl Token {
         let result = operation.encrypt_final(&mut self.rng, cipher, cipher_len);
 
         if operation.finalized() {
-            session.set_operation(None);
+            session.set_operation(Operation::Empty);
         }
 
         result

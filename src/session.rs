@@ -6,13 +6,76 @@ use std::vec::Vec;
 use super::error;
 use super::interface;
 use super::mechanism;
+use super::token;
 
 use super::err_rv;
 use error::{KError, KResult};
 use interface::*;
-use mechanism::Operation;
+use mechanism::{Operation, SearchOperation};
+use token::TokenObjects;
 
 use std::slice::IterMut;
+
+#[derive(Debug)]
+pub struct SessionSearch {
+    handles: Vec<CK_OBJECT_HANDLE>,
+    in_use: bool,
+    logged_in: bool,
+}
+
+impl SearchOperation for SessionSearch {
+    fn search(
+        &mut self,
+        objects: &mut TokenObjects,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<()> {
+        if self.in_use {
+            return err_rv!(CKR_OPERATION_ACTIVE);
+        }
+        self.in_use = true;
+        let mut needs_handle = Vec::<String>::new();
+        for (_, o) in objects.iter() {
+            if !self.logged_in && o.is_private() {
+                continue;
+            }
+
+            if o.match_template(template) {
+                let oh = o.get_handle();
+                if oh == CK_UNAVAILABLE_INFORMATION {
+                    let uid = match o.get_attr_as_string(CKA_UNIQUE_ID) {
+                        Ok(s) => s,
+                        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                    };
+                    needs_handle.push(uid.clone());
+                } else {
+                    self.handles.push(oh);
+                }
+            }
+        }
+        while let Some(uid) = needs_handle.pop() {
+            let oh = objects.next_handle();
+            let obj = match objects.get_mut(&uid) {
+                Some(o) => o,
+                None => continue,
+            };
+            obj.set_handle(oh);
+            objects.insert_handle(oh, uid);
+            self.handles.push(oh);
+        }
+        Ok(())
+    }
+
+    fn results(&mut self, max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+        if !self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let mut amount = self.handles.len();
+        if max < amount {
+            amount = max;
+        }
+        Ok(self.handles.drain(0..amount).collect())
+    }
+}
 
 #[derive(Debug)]
 pub struct Session {
@@ -22,9 +85,8 @@ pub struct Session {
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
     object_handles: Vec<CK_OBJECT_HANDLE>,
-    search_handles: Vec<CK_OBJECT_HANDLE>,
 
-    operation: Option<Box<dyn Operation>>,
+    operation: Operation,
 }
 
 impl Session {
@@ -51,8 +113,7 @@ impl Session {
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
             object_handles: Vec::<CK_OBJECT_HANDLE>::new(),
-            search_handles: Vec::<CK_OBJECT_HANDLE>::new(),
-            operation: None,
+            operation: Operation::Empty,
         };
 
         // FIXME check Login status
@@ -81,25 +142,6 @@ impl Session {
 
     pub fn get_object_handles(&self) -> &Vec<CK_OBJECT_HANDLE> {
         &self.object_handles
-    }
-
-    pub fn reset_search_handles(&mut self) {
-        self.search_handles.clear();
-    }
-
-    pub fn set_search_handles(&mut self, handles: Vec<CK_OBJECT_HANDLE>) {
-        self.search_handles = handles;
-    }
-
-    pub fn get_search_handles(
-        &mut self,
-        max: usize,
-    ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
-        let mut amount = self.search_handles.len();
-        if max < amount {
-            amount = max;
-        }
-        Ok(self.search_handles.drain(0..amount).collect())
     }
 
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
@@ -170,18 +212,29 @@ impl Session {
         }
     }
 
-    pub fn get_operation(&self) -> &Option<Box<dyn Operation>> {
-        &self.operation
-    }
-
-    pub fn get_operation_mut(&mut self) -> Option<&mut Box<dyn Operation>> {
+    pub fn new_search_operation(&mut self, logged_in: bool) -> KResult<()> {
         match self.operation {
-            None => None,
-            Some(ref mut op) => Some(op),
+            Operation::Empty => {
+                self.operation = Operation::Search(Box::new(SessionSearch {
+                    handles: Vec::new(),
+                    in_use: false,
+                    logged_in: logged_in,
+                }));
+                Ok(())
+            }
+            _ => err_rv!(CKR_OPERATION_ACTIVE),
         }
     }
 
-    pub fn set_operation(&mut self, op: Option<Box<dyn Operation>>) {
+    pub fn get_operation(&self) -> &Operation {
+        &self.operation
+    }
+
+    pub fn get_operation_mut(&mut self) -> &mut Operation {
+        &mut self.operation
+    }
+
+    pub fn set_operation(&mut self, op: Operation) {
         self.operation = op;
     }
 }

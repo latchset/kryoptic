@@ -10,7 +10,7 @@ use super::object;
 use super::token;
 use error::{KError, KResult};
 use interface::*;
-use token::RNG;
+use token::{TokenObjects, RNG};
 
 use std::fmt::Debug;
 
@@ -20,14 +20,14 @@ pub trait Mechanism: Debug + Send + Sync {
         &self,
         _: &CK_MECHANISM,
         _: &object::Object,
-    ) -> KResult<Box<dyn Operation>> {
+    ) -> KResult<Box<dyn Encryption>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
     fn decryption_new(
         &self,
         _: &CK_MECHANISM,
         _: &object::Object,
-    ) -> KResult<Box<dyn Operation>> {
+    ) -> KResult<Box<dyn Decryption>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 }
@@ -75,13 +75,13 @@ impl Mechanisms {
     }
 }
 
-pub trait BaseOperation: Debug + Send + Sync {
+pub trait MechOperation: Debug + Send + Sync {
     fn mechanism(&self) -> CK_MECHANISM_TYPE;
     fn in_use(&self) -> bool;
     fn finalized(&self) -> bool;
 }
 
-pub trait Encryption: Debug + Send + Sync {
+pub trait Encryption: MechOperation {
     fn encrypt(
         &mut self,
         _rng: &mut RNG,
@@ -112,7 +112,7 @@ pub trait Encryption: Debug + Send + Sync {
     }
 }
 
-pub trait Decryption: Debug + Send + Sync {
+pub trait Decryption: MechOperation {
     fn decrypt(
         &mut self,
         _rng: &mut RNG,
@@ -143,4 +143,23 @@ pub trait Decryption: Debug + Send + Sync {
     }
 }
 
-pub trait Operation: BaseOperation + Encryption + Decryption {}
+pub trait SearchOperation: Debug + Send + Sync {
+    fn search(
+        &mut self,
+        _objects: &mut TokenObjects,
+        _template: &[CK_ATTRIBUTE],
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn results(&mut self, _max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
+#[derive(Debug)]
+pub enum Operation {
+    Empty,
+    Search(Box<dyn SearchOperation>),
+    Encryption(Box<dyn Encryption>),
+    Decryption(Box<dyn Decryption>),
+}
