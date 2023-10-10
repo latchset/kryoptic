@@ -884,8 +884,8 @@ fn test_rsa_operations() {
     assert_eq!(ret, CKR_OPERATION_ACTIVE);
 
     let data = "plaintext";
-    let mut enc: [u8; 2048] = [0; 2048];
-    let mut enc_len: CK_ULONG = 2048;
+    let mut enc: [u8; 512] = [0; 512];
+    let mut enc_len: CK_ULONG = 512;
     ret = fn_encrypt(
         session,
         CString::new(data).unwrap().into_raw() as *mut u8,
@@ -894,6 +894,7 @@ fn test_rsa_operations() {
         &mut enc_len,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(enc_len, 256);
 
     /* a second invocation should return an error */
     ret = fn_encrypt(
@@ -906,7 +907,8 @@ fn test_rsa_operations() {
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* calling final should also return error */
-    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut enc_len);
+    let mut fin_len: CK_ULONG = 256;
+    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut fin_len);
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* reinit and check via parts interface */
@@ -946,7 +948,38 @@ fn test_rsa_operations() {
     ret = fn_encrypt_init(session, &mut mechanism, handle);
     assert_eq!(ret, CKR_OPERATION_ACTIVE);
 
-    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut enc_len);
+    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut fin_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(fin_len, 0);
+
+    /* test that decryption returns the same data back */
+    template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("3").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut dec: [u8; 512] = [0; 512];
+    let mut dec_len: CK_ULONG = 512;
+    ret = fn_decrypt(
+        session,
+        enc.as_ptr() as *mut u8,
+        enc_len,
+        dec.as_ptr() as *mut u8,
+        &mut dec_len,
+    );
     assert_eq!(ret, CKR_OK);
 
     ret = fn_logout(session);

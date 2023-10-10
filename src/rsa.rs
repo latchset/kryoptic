@@ -203,15 +203,7 @@ macro_rules! import_mpz {
             Err(_) => return err_rv!(CKR_DEVICE_ERROR),
         };
         unsafe {
-            __gmpz_import(
-                &mut $mpz,
-                x.len(),
-                1,
-                1,
-                0,
-                0,
-                x.as_ptr() as *const ::std::os::raw::c_void,
-            );
+            nettle_mpz_set_str_256_u(&mut $mpz, x.len(), x.as_ptr());
         }
     }};
 }
@@ -300,7 +292,7 @@ impl Mechanism for RsaPKCSMechanism {
         }
         let op = RsaPKCSOperation {
             mech: mech.mechanism,
-            public_key: None,
+            public_key: Some(object_to_rsa_public_key(key)?),
             private_key: Some(object_to_rsa_private_key(key)?),
             finalized: false,
             in_use: false,
@@ -395,15 +387,73 @@ impl Encryption for RsaPKCSOperation {
     fn encrypt_final(
         &mut self,
         _rng: &mut RNG,
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG_PTR,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        self.finalized = true;
+        unsafe { *cipher_len = 0 };
+        if !cipher.is_null() {
+            self.finalized = true;
+        }
         Ok(())
     }
 }
 
-impl Decryption for RsaPKCSOperation {}
+impl Decryption for RsaPKCSOperation {
+    fn decrypt(
+        &mut self,
+        rng: &mut RNG,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        if self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.finalized = true;
+        self.decrypt_update(rng, cipher, cipher_len, plain, plain_len)
+    }
+    fn decrypt_update(
+        &mut self,
+        rng: &mut RNG,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        self.in_use = true;
+
+        let pubkey: &rsa_public_key = match self.public_key {
+            None => return err_rv!(CKR_GENERAL_ERROR),
+            Some(ref k) => k,
+        };
+        let prikey: &rsa_private_key = match self.private_key {
+            None => return err_rv!(CKR_GENERAL_ERROR),
+            Some(ref k) => k,
+        };
+
+        let key_size = (pubkey.size - 1) as CK_ULONG;
+
+        if plain.is_null() {
+            unsafe { *plain_len = key_size };
+            return Ok(());
+        }
+
+        decrypt(pubkey, prikey, rng, cipher, cipher_len, plain, plain_len)
+    }
+    fn decrypt_final(
+        &mut self,
+        _rng: &mut RNG,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        unsafe { *plain_len = 0 };
+        if !plain.is_null() {
+            self.finalized = true;
+        }
+        Ok(())
+    }
+}
 
 unsafe extern "C" fn get_random(
     ctx: *mut ::std::os::raw::c_void,
@@ -426,7 +476,7 @@ fn encrypt(
     let mut x: __mpz_struct = __mpz_struct::default();
     unsafe { __gmpz_init(&mut x) };
 
-    if unsafe {
+    let res = unsafe {
         nettle_rsa_encrypt(
             key,
             rng as *mut _ as *mut ::std::os::raw::c_void,
@@ -435,8 +485,8 @@ fn encrypt(
             plain,
             &mut x,
         )
-    } == 0
-    {
+    };
+    if res == 0 {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 
@@ -445,17 +495,44 @@ fn encrypt(
         if len as CK_ULONG > *cipher_len {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        let mut count: usize = 0;
-        __gmpz_export(
-            cipher as *mut ::std::os::raw::c_void,
-            &mut count,
-            -1,
-            1,
-            0,
-            0,
+        nettle_mpz_get_str_256(len, cipher, &mut x);
+        *cipher_len = len as CK_ULONG;
+    }
+    Ok(())
+}
+
+fn decrypt(
+    pubkey: &rsa_public_key,
+    prikey: &rsa_private_key,
+    rng: &mut RNG,
+    cipher: CK_BYTE_PTR,
+    cipher_len: CK_ULONG,
+    plain: CK_BYTE_PTR,
+    plain_len: CK_ULONG_PTR,
+) -> KResult<()> {
+    let mut x: __mpz_struct = __mpz_struct::default();
+    unsafe {
+        nettle_mpz_init_set_str_256_s(&mut x, cipher_len as usize, cipher);
+    }
+
+    let mut plen: usize = unsafe { *plain_len } as usize;
+    if plen < (pubkey.size - 1) {
+        return err_rv!(CKR_BUFFER_TOO_SMALL);
+    }
+
+    let res = unsafe {
+        nettle_rsa_decrypt_tr(
+            pubkey,
+            prikey,
+            rng as *mut _ as *mut ::std::os::raw::c_void,
+            Some(get_random),
+            &mut plen,
+            plain as *mut _ as *mut u8,
             &mut x,
-        );
-        *cipher_len = count as CK_ULONG;
+        )
+    };
+    if res == 0 {
+        return err_rv!(CKR_GENERAL_ERROR);
     }
     Ok(())
 }

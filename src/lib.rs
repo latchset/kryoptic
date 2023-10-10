@@ -712,7 +712,11 @@ extern "C" fn fn_encrypt_init(
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
     if mechanism.is_null() {
-        ret_to_rv!(token.encrypt_terminate(s_handle));
+        ret_to_rv!(token.encrypt_final(
+            s_handle,
+            std::ptr::null_mut(),
+            std::ptr::null_mut()
+        ));
     }
     ret_to_rv!(token.encrypt_init(s_handle, data, key))
 }
@@ -762,7 +766,7 @@ extern "C" fn fn_encrypt_final(
     last_encrypted_part: CK_BYTE_PTR,
     pul_last_encrypted_part_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    if last_encrypted_part.is_null() || pul_last_encrypted_part_len.is_null() {
+    if last_encrypted_part.is_null() && pul_last_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
@@ -775,36 +779,73 @@ extern "C" fn fn_encrypt_final(
 }
 
 extern "C" fn fn_decrypt_init(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _key: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    if mechanism.is_null() {
+        ret_to_rv!(token.decrypt_final(
+            s_handle,
+            std::ptr::null_mut(),
+            std::ptr::null_mut()
+        ));
+    }
+    ret_to_rv!(token.decrypt_init(s_handle, data, key))
 }
 extern "C" fn fn_decrypt(
-    _session: CK_SESSION_HANDLE,
-    _encrypted_data: CK_BYTE_PTR,
-    _encrypted_data_len: CK_ULONG,
-    _data: CK_BYTE_PTR,
-    _pul_data_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    encrypted_data: CK_BYTE_PTR,
+    encrypted_data_len: CK_ULONG,
+    data: CK_BYTE_PTR,
+    pul_data_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if encrypted_data.is_null() || pul_data_len.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    ret_to_rv!(token.decrypt(
+        s_handle,
+        encrypted_data,
+        encrypted_data_len,
+        data,
+        pul_data_len,
+    ))
 }
 extern "C" fn fn_decrypt_update(
-    _session: CK_SESSION_HANDLE,
-    _encrypted_part: CK_BYTE_PTR,
-    _encrypted_part_len: CK_ULONG,
-    _part: CK_BYTE_PTR,
-    _pul_part_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    encrypted_part: CK_BYTE_PTR,
+    encrypted_part_len: CK_ULONG,
+    part: CK_BYTE_PTR,
+    pul_part_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if encrypted_part.is_null() || pul_part_len.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    ret_to_rv!(token.decrypt_update(
+        s_handle,
+        encrypted_part,
+        encrypted_part_len,
+        part,
+        pul_part_len,
+    ))
 }
 extern "C" fn fn_decrypt_final(
-    _session: CK_SESSION_HANDLE,
-    _last_part: CK_BYTE_PTR,
-    _pul_last_part_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    last_part: CK_BYTE_PTR,
+    pul_last_part_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if last_part.is_null() && pul_last_part_len.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    ret_to_rv!(token.decrypt_final(s_handle, last_part, pul_last_part_len))
 }
 extern "C" fn fn_digest_init(
     _session: CK_SESSION_HANDLE,

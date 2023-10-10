@@ -816,15 +816,6 @@ impl Token {
         Ok(())
     }
 
-    pub fn encrypt_terminate(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-    ) -> KResult<()> {
-        let session = self.get_session_mut(handle)?;
-        session.set_operation(Operation::Empty);
-        Ok(())
-    }
-
     pub fn encrypt_init(
         &mut self,
         handle: CK_SESSION_HANDLE,
@@ -927,7 +918,129 @@ impl Token {
         if operation.finalized() {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        if cipher.is_null() && cipher_len.is_null() {
+            /* internal convention to ask to terminate the operation */
+            session.set_operation(Operation::Empty);
+            return Ok(());
+        }
+
         let result = operation.encrypt_final(&mut self.rng, cipher, cipher_len);
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn decrypt_init(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &CK_MECHANISM,
+        key: CK_OBJECT_HANDLE,
+    ) -> KResult<()> {
+        let session = self.get_session(handle)?;
+        match session.get_operation() {
+            Operation::Empty => (),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        }
+        let mech = self.mechanisms.get(data.mechanism)?;
+        let obj = self.get_object_by_handle(key, true)?;
+        if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
+            let operation = mech.decryption_new(data, obj)?;
+            let session = self.get_session_mut(handle)?;
+            session.set_operation(Operation::Decryption(operation));
+            Ok(())
+        } else {
+            err_rv!(CKR_MECHANISM_INVALID)
+        }
+    }
+
+    pub fn decrypt(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Decryption(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.decrypt(
+            &mut self.rng,
+            cipher,
+            cipher_len,
+            plain,
+            plain_len,
+        );
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn decrypt_update(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        cipher: CK_BYTE_PTR,
+        cipher_len: CK_ULONG,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Decryption(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.decrypt_update(
+            &mut self.rng,
+            cipher,
+            cipher_len,
+            plain,
+            plain_len,
+        );
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn decrypt_final(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        plain: CK_BYTE_PTR,
+        plain_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Decryption(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if plain.is_null() && plain_len.is_null() {
+            /* internal convention to ask to terminate the operation */
+            session.set_operation(Operation::Empty);
+            return Ok(());
+        }
+
+        let result = operation.decrypt_final(&mut self.rng, plain, plain_len);
 
         if operation.finalized() {
             session.set_operation(Operation::Empty);
