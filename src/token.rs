@@ -256,6 +256,26 @@ impl TokenObjects {
         }
         priv_handles
     }
+
+    pub fn clear_session_objects(&mut self, handles: &Vec<CK_OBJECT_HANDLE>) {
+        for oh in handles {
+            let uid = match self.handles.get(&oh) {
+                Some(u) => u,
+                None => continue,
+            };
+            let obj = match self.objects.get(uid) {
+                Some(o) => o,
+                None => {
+                    self.handles.remove(&oh);
+                    continue;
+                }
+            };
+            if !obj.is_token() {
+                self.objects.remove(uid);
+                self.handles.remove(&oh);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -742,10 +762,17 @@ impl Token {
     }
 
     pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+        let session = self.sessions.get_session(handle)?;
+        let handles = session.get_object_handles();
+        self.objects.clear_session_objects(handles);
         self.sessions.drop_session(handle)
     }
 
     pub fn drop_all_sessions(&mut self) {
+        for s in self.sessions.get_sessions() {
+            let handles = s.get_object_handles();
+            self.objects.clear_session_objects(handles);
+        }
         self.sessions.drop_all_sessions();
     }
 

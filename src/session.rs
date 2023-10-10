@@ -14,7 +14,7 @@ use interface::*;
 use mechanism::{Operation, SearchOperation};
 use token::TokenObjects;
 
-use std::slice::IterMut;
+use std::slice::{Iter, IterMut};
 
 #[derive(Debug)]
 pub struct SessionSearch {
@@ -269,6 +269,10 @@ impl Sessions {
             }
         }
         err_rv!(CKR_SESSION_HANDLE_INVALID)
+    }
+
+    pub fn get_sessions(&self) -> Iter<'_, Session> {
+        self.store.iter()
     }
 
     pub fn get_session_mut(
