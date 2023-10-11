@@ -632,12 +632,22 @@ extern "C" fn fn_destroy_object(
 }
 
 extern "C" fn fn_get_object_size(
-    _session: CK_SESSION_HANDLE,
-    _object: CK_OBJECT_HANDLE,
-    _pul_size: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    object: CK_OBJECT_HANDLE,
+    size: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let token = token_from_session_handle!(rslots, s_handle);
+    let len = match token.get_object_size(s_handle, object) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
+    unsafe {
+        *size = len as CK_ULONG;
+    }
+    CKR_OK
 }
+
 extern "C" fn fn_get_attribute_value(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,

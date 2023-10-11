@@ -593,6 +593,11 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
+    let mut size: CK_ULONG = 0;
+    ret = fn_get_object_size(session, handle, &mut size);
+    assert_eq!(ret, CKR_OK);
+    assert_ne!(size, 0);
+
     ret = fn_destroy_object(session, handle);
     assert_eq!(ret, CKR_OK);
 

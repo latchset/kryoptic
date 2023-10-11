@@ -209,25 +209,24 @@ impl TokenObjects {
         self.handles.insert(oh, uid);
     }
 
+    fn object_to_json(&self, o: &Object) -> JsonObject {
+        let mut jo = JsonObject {
+            attributes: serde_json::Map::new(),
+        };
+        for a in o.get_attributes() {
+            jo.attributes.insert(a.name(), a.json_value());
+        }
+        jo
+    }
+
     fn to_json(&self) -> Vec<JsonObject> {
         let mut jobjs = Vec::new();
 
         for (_h, o) in &self.objects {
-            match o.get_attr_as_bool(CKA_TOKEN) {
-                Ok(t) => {
-                    if !t {
-                        continue;
-                    }
-                }
-                Err(_) => continue,
+            if !o.is_token() {
+                continue;
             }
-            let mut jo = JsonObject {
-                attributes: serde_json::Map::new(),
-            };
-            for a in o.get_attributes() {
-                jo.attributes.insert(a.name(), a.json_value());
-            }
-            jobjs.push(jo);
+            jobjs.push(self.object_to_json(o));
         }
         jobjs
     }
@@ -285,6 +284,18 @@ impl TokenObjects {
     pub fn clear_session_objects(&mut self, handles: &Vec<CK_OBJECT_HANDLE>) {
         for oh in handles {
             let _ = self.remove(*oh, true);
+        }
+    }
+
+    pub fn object_rough_size(
+        &self,
+        handle: CK_OBJECT_HANDLE,
+    ) -> KResult<usize> {
+        let obj = self.get_by_handle(handle)?;
+        let jo = self.object_to_json(obj);
+        match serde_json::to_string(&jo) {
+            Ok(js) => Ok(js.len()),
+            Err(_) => err_rv!(CKR_GENERAL_ERROR),
         }
     }
 }
@@ -823,6 +834,15 @@ impl Token {
             Some(m) => Ok(m),
             None => err_rv!(CKR_MECHANISM_INVALID),
         }
+    }
+
+    pub fn get_object_size(
+        &self,
+        s_handle: CK_SESSION_HANDLE,
+        o_handle: CK_OBJECT_HANDLE,
+    ) -> KResult<usize> {
+        let _ = self.sessions.get_session(s_handle)?;
+        self.objects.object_rough_size(o_handle)
     }
 
     pub fn search_objects(
