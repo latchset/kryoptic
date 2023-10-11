@@ -593,6 +593,9 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
+    ret = fn_destroy_object(session, handle);
+    assert_eq!(ret, CKR_OK);
+
     ret = fn_logout(login_session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(login_session);

@@ -164,6 +164,31 @@ impl TokenObjects {
         self.objects.iter()
     }
 
+    pub fn remove(
+        &mut self,
+        handle: CK_OBJECT_HANDLE,
+        session_only: bool,
+    ) -> KResult<()> {
+        let uid = match self.handles.get(&handle) {
+            Some(u) => u,
+            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        };
+        let obj = match self.objects.get(uid) {
+            Some(o) => o,
+            None => {
+                self.handles.remove(&handle);
+                return err_rv!(CKR_OBJECT_HANDLE_INVALID);
+            }
+        };
+        if session_only && obj.is_token() {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+
+        self.objects.remove(uid);
+        self.handles.remove(&handle);
+        Ok(())
+    }
+
     pub fn next_handle(&mut self) -> CK_OBJECT_HANDLE {
         let next = self.next_handle;
         self.next_handle += 1;
@@ -259,21 +284,7 @@ impl TokenObjects {
 
     pub fn clear_session_objects(&mut self, handles: &Vec<CK_OBJECT_HANDLE>) {
         for oh in handles {
-            let uid = match self.handles.get(&oh) {
-                Some(u) => u,
-                None => continue,
-            };
-            let obj = match self.objects.get(uid) {
-                Some(o) => o,
-                None => {
-                    self.handles.remove(&oh);
-                    continue;
-                }
-            };
-            if !obj.is_token() {
-                self.objects.remove(uid);
-                self.handles.remove(&oh);
-            }
+            let _ = self.remove(*oh, true);
         }
     }
 }
@@ -694,7 +705,7 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
         /* check that session is valid */
-        let _ = self.get_session(s_handle)?;
+        let _ = self.sessions.get_session(s_handle)?;
 
         if !self.user_login.logged_in {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
@@ -705,13 +716,13 @@ impl Token {
         match obj.get_attr_as_bool(CKA_TOKEN) {
             Ok(t) => {
                 if t {
-                    let session = self.get_session(s_handle)?;
+                    let session = self.sessions.get_session(s_handle)?;
                     if !session.is_writable() {
                         return err_rv!(CKR_SESSION_READ_ONLY);
                     }
                     self.dirty = true;
                 } else {
-                    let session = self.get_session_mut(s_handle)?;
+                    let session = self.sessions.get_session_mut(s_handle)?;
                     session.add_handle(handle);
                 }
             }
@@ -721,6 +732,25 @@ impl Token {
         self.objects.insert_handle(handle, uid.clone());
         self.objects.insert(uid.clone(), obj);
         Ok(handle)
+    }
+
+    pub fn destroy_object(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        o_handle: CK_OBJECT_HANDLE,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(s_handle)?;
+        let obj = self.objects.get_by_handle(o_handle)?;
+        if obj.is_private() && !self.user_login.logged_in {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+        if obj.is_token() && !session.is_writable() {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+        if !obj.is_destroyable() {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+        self.objects.remove(o_handle, false)
     }
 
     pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
@@ -752,13 +782,6 @@ impl Token {
 
     pub fn get_session(&self, handle: CK_SESSION_HANDLE) -> KResult<&Session> {
         self.sessions.get_session(handle)
-    }
-
-    pub fn get_session_mut(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-    ) -> KResult<&mut Session> {
-        self.sessions.get_session_mut(handle)
     }
 
     pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
@@ -823,7 +846,7 @@ impl Token {
         handle: CK_SESSION_HANDLE,
         max: usize,
     ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
-        let session = self.get_session_mut(handle)?;
+        let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
             Operation::Search(op) => op,
             Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
@@ -833,7 +856,7 @@ impl Token {
     }
 
     pub fn search_final(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
-        let session = self.get_session_mut(handle)?;
+        let session = self.sessions.get_session_mut(handle)?;
         match session.get_operation() {
             Operation::Search(_) => (),
             Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
@@ -849,7 +872,7 @@ impl Token {
         data: &CK_MECHANISM,
         key: CK_OBJECT_HANDLE,
     ) -> KResult<()> {
-        let session = self.get_session(handle)?;
+        let session = self.sessions.get_session(handle)?;
         match session.get_operation() {
             Operation::Empty => (),
             _ => return err_rv!(CKR_OPERATION_ACTIVE),
@@ -858,7 +881,7 @@ impl Token {
         let obj = self.get_object_by_handle(key, true)?;
         if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
             let operation = mech.encryption_new(data, obj)?;
-            let session = self.get_session_mut(handle)?;
+            let session = self.sessions.get_session_mut(handle)?;
             session.set_operation(Operation::Encryption(operation));
             Ok(())
         } else {
@@ -965,7 +988,7 @@ impl Token {
         data: &CK_MECHANISM,
         key: CK_OBJECT_HANDLE,
     ) -> KResult<()> {
-        let session = self.get_session(handle)?;
+        let session = self.sessions.get_session(handle)?;
         match session.get_operation() {
             Operation::Empty => (),
             _ => return err_rv!(CKR_OPERATION_ACTIVE),
@@ -974,7 +997,7 @@ impl Token {
         let obj = self.get_object_by_handle(key, true)?;
         if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
             let operation = mech.decryption_new(data, obj)?;
-            let session = self.get_session_mut(handle)?;
+            let session = self.sessions.get_session_mut(handle)?;
             session.set_operation(Operation::Decryption(operation));
             Ok(())
         } else {

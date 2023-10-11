@@ -465,8 +465,8 @@ extern "C" fn fn_set_pin(
     new_pin: CK_UTF8CHAR_PTR,
     new_len: CK_ULONG,
 ) -> CK_RV {
-    let wslots = global_wlock!(SLOTS);
-    let mut token = token_from_session_handle!(wslots, s_handle, as_mut);
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
     let session = match token.get_session(s_handle) {
         Ok(s) => s,
         Err(e) => return err_to_rv!(e),
@@ -623,11 +623,14 @@ extern "C" fn fn_copy_object(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 extern "C" fn fn_destroy_object(
-    _session: CK_SESSION_HANDLE,
-    _object: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    object: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    ret_to_rv!(token.destroy_object(s_handle, object))
 }
+
 extern "C" fn fn_get_object_size(
     _session: CK_SESSION_HANDLE,
     _object: CK_OBJECT_HANDLE,
