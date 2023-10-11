@@ -309,6 +309,7 @@ impl Attribute {
 
 macro_rules! conversion_from_type {
     (make $fn1:ident; $fn2:ident; $fn3:ident; from $rtype:ty; as $atype:ident; via $conv:ident) => {
+        #[allow(dead_code)]
         pub fn $fn1(t: CK_ULONG, val: $rtype) -> Attribute {
             Attribute {
                 ck_type: t,
@@ -317,6 +318,7 @@ macro_rules! conversion_from_type {
             }
         }
 
+        #[allow(dead_code)]
         pub fn $fn2(t: CK_ULONG, val: $rtype) -> KResult<Attribute> {
             for a in &ATTRMAP {
                 if a.id == t {
@@ -329,6 +331,7 @@ macro_rules! conversion_from_type {
             err_not_found!(t.to_string())
         }
 
+        #[allow(dead_code)]
         pub fn $fn3(s: String, val: $rtype) -> KResult<Attribute> {
             for a in &ATTRMAP {
                 if a.name == &s {

@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
+        #[allow(dead_code)]
         pub fn $name(&self) -> bool {
             for a in &self.attributes {
                 if a.get_type() == $id {
@@ -437,11 +438,7 @@ pub trait CertTemplate {
         self.get_template().push(attr_element!(CKA_PUBLIC_KEY_INFO; req false; def true; from_bytes; val Vec::new()));
     }
 
-    fn basic_cert_object_attrs_checks(
-        &self,
-        obj: &mut Object,
-        cattrs: &mut Vec<ObjectAttr>,
-    ) -> CK_RV {
+    fn basic_cert_object_attrs_checks(&self, obj: &mut Object) -> CK_RV {
         match obj.get_attr_as_bool(CKA_TRUSTED) {
             Ok(t) => {
                 if t == true {
@@ -513,8 +510,7 @@ impl ObjectTemplate for X509Template {
             return err_rv!(ret);
         }
 
-        let ret =
-            self.basic_cert_object_attrs_checks(&mut obj, &mut attr_checker);
+        let ret = self.basic_cert_object_attrs_checks(&mut obj);
         if ret != CKR_OK {
             return err_rv!(ret);
         }
@@ -583,11 +579,7 @@ pub trait CommonKeyTemplate {
         self.get_template().push(attr_element!(CKA_ALLOWED_MECHANISMS; req false; def false; from_bytes; val Vec::new()));
     }
 
-    fn key_create_attrs_checks(
-        &self,
-        obj: &mut Object,
-        cattrs: &mut Vec<ObjectAttr>,
-    ) -> CK_RV {
+    fn key_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
         bool_attr_never_set!(obj; CKA_LOCAL);
         bool_attr_never_set!(obj; CKA_KEY_GEN_MECHANISM);
 
@@ -612,11 +604,7 @@ pub trait PubKeyTemplate {
         self.get_template().push(attr_element!(CKA_PUBLIC_KEY_INFO; req false; def false; from_bytes; val Vec::new()));
     }
 
-    fn pubkey_create_attrs_checks(
-        &self,
-        obj: &mut Object,
-        cattrs: &mut Vec<ObjectAttr>,
-    ) -> CK_RV {
+    fn pubkey_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
         match obj.get_attr_as_bool(CKA_TRUSTED) {
             Ok(t) => {
                 if t == true {
@@ -656,11 +644,7 @@ pub trait PrivKeyTemplate {
         self.get_template().push(attr_element!(CKA_DERIVE_TEMPLATE; req false; def false; from_bytes; val Vec::new()));
     }
 
-    fn privkey_create_attrs_checks(
-        &self,
-        obj: &mut Object,
-        cattrs: &mut Vec<ObjectAttr>,
-    ) -> CK_RV {
+    fn privkey_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
         bool_attr_never_set!(obj; CKA_ALWAYS_SENSITIVE);
         bool_attr_never_set!(obj; CKA_NEVER_EXTRACTABLE);
 

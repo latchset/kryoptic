@@ -143,11 +143,11 @@ impl TestData<'_> {
         if self.finalize.is_none() {
             self.sync = None;
             /* wait until we can read, which means the winner finalized the module */
-            let read_lock = FINI.read().unwrap();
+            drop(FINI.read().unwrap());
         } else {
             self.sync = None;
             /* wait for all others to complete */
-            let sync_lock = SYNC.write().unwrap();
+            drop(SYNC.write().unwrap());
             let ret = fn_finalize(std::ptr::null_mut());
             assert_eq!(ret, CKR_OK);
             /* winner finalized and completed the tests */
@@ -887,7 +887,7 @@ fn test_rsa_operations() {
     assert_eq!(ret, CKR_OPERATION_ACTIVE);
 
     let data = "plaintext";
-    let mut enc: [u8; 512] = [0; 512];
+    let enc: [u8; 512] = [0; 512];
     let mut enc_len: CK_ULONG = 512;
     ret = fn_encrypt(
         session,
@@ -974,7 +974,7 @@ fn test_rsa_operations() {
     ret = fn_decrypt_init(session, &mut mechanism, handle);
     assert_eq!(ret, CKR_OK);
 
-    let mut dec: [u8; 512] = [0; 512];
+    let dec: [u8; 512] = [0; 512];
     let mut dec_len: CK_ULONG = 512;
     ret = fn_decrypt(
         session,

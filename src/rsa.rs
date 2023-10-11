@@ -55,7 +55,7 @@ impl ObjectTemplate for RSAPubTemplate {
             return err_rv!(ret);
         }
 
-        ret = self.pubkey_create_attrs_checks(&mut obj, &mut attr_checker);
+        ret = self.pubkey_create_attrs_checks(&mut obj);
         if ret != CKR_OK {
             return err_rv!(ret);
         }
@@ -132,7 +132,7 @@ impl ObjectTemplate for RSAPrivTemplate {
             return err_rv!(ret);
         }
 
-        ret = self.privkey_create_attrs_checks(&mut obj, &mut attr_checker);
+        ret = self.privkey_create_attrs_checks(&mut obj);
         if ret != CKR_OK {
             return err_rv!(ret);
         }
