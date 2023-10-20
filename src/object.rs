@@ -74,6 +74,18 @@ impl Object {
         }
     }
 
+    pub fn blind_copy(&self) -> KResult<Object> {
+        let mut obj = Object::new();
+        obj.generate_unique();
+        for attr in &self.attributes {
+            if attr.get_type() == CKA_UNIQUE_ID {
+                continue;
+            }
+            obj.attributes.push(attr.clone())
+        }
+        Ok(obj)
+    }
+
     pub fn set_handle(&mut self, h: CK_OBJECT_HANDLE) {
         self.handle = h
     }
@@ -85,6 +97,7 @@ impl Object {
     create_bool_checker! {make is_token; from CKA_TOKEN; def false}
     create_bool_checker! {make is_private; from CKA_PRIVATE; def true}
     create_bool_checker! {make is_sensitive; from CKA_SENSITIVE; def true}
+    create_bool_checker! {make is_copyable; from CKA_COPYABLE; def true}
     create_bool_checker! {make is_modifiable; from CKA_MODIFIABLE; def true}
     create_bool_checker! {make is_destroyable; from CKA_DESTROYABLE; def false}
     create_bool_checker! {make is_extractable; from CKA_EXTRACTABLE; def false}
@@ -211,6 +224,10 @@ pub trait ObjectTemplate: Debug + Send + Sync {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 
+    fn copy(&self, obj: &Object, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+        self.default_copy(obj, template)
+    }
+
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
     fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr>;
 
@@ -278,6 +295,78 @@ pub trait ObjectTemplate: Debug + Send + Sync {
         obj.generate_unique();
         Ok(obj)
     }
+
+    fn default_copy(
+        &self,
+        origin: &Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let attributes = self.get_attributes();
+        for ck_attr in template {
+            match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(attr) => {
+                    if attr.is(OAFlags::Unchangeable) {
+                        if attr
+                            .is(OAFlags::ChangeToFalse | OAFlags::ChangeToTrue)
+                        {
+                            let val =
+                                match origin.get_attr_as_bool(ck_attr.type_) {
+                                    Ok(a) => a,
+                                    Err(_) => false,
+                                };
+                            if val && !attr.is(OAFlags::ChangeToFalse) {
+                                return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                            }
+                            if !val && !attr.is(OAFlags::ChangeToTrue) {
+                                return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                            }
+                        }
+                        if !attr.is(OAFlags::ChangeOnCopy) {
+                            return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                        }
+                    }
+                }
+                None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+            }
+        }
+
+        let mut obj = origin.blind_copy()?;
+        for ck_attr in template {
+            let _ = obj.set_attr(ck_attr.to_attribute()?);
+        }
+
+        /* special attrs handling */
+        match obj.get_attr_as_bool(CKA_EXTRACTABLE) {
+            Ok(e) => {
+                let mut val = !e;
+                match obj.get_attr_as_bool(CKA_NEVER_EXTRACTABLE) {
+                    Ok(ne) => val &= ne,
+                    Err(_) => match origin.get_attr_as_bool(CKA_EXTRACTABLE) {
+                        Ok(oe) => val &= !oe,
+                        Err(_) => val = false,
+                    },
+                }
+                let _ = obj.set_attr(from_bool(CKA_NEVER_EXTRACTABLE, val))?;
+            }
+            Err(_) => (),
+        }
+        match obj.get_attr_as_bool(CKA_SENSITIVE) {
+            Ok(b) => {
+                let mut val = b;
+                match origin.get_attr_as_bool(CKA_ALWAYS_SENSITIVE) {
+                    Ok(ob) => val &= ob,
+                    Err(_) => match origin.get_attr_as_bool(CKA_SENSITIVE) {
+                        Ok(os) => val &= os,
+                        Err(_) => val = false,
+                    },
+                }
+                let _ = obj.set_attr(from_bool(CKA_ALWAYS_SENSITIVE, val))?;
+            }
+            Err(_) => (),
+        }
+
+        Ok(obj)
+    }
 }
 
 /* pkcs11-spec-v3.1 4.5 Data Objects */
@@ -303,6 +392,14 @@ impl DataTemplate {
 impl ObjectTemplate for DataTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         self.default_object_create(template)
+    }
+
+    fn copy(
+        &self,
+        origin: &Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        self.default_copy(origin, template)
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
@@ -791,5 +888,16 @@ impl ObjectTemplates {
         } else {
             err_rv!(result)
         }
+    }
+
+    pub fn copy(
+        &self,
+        obj: &Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        if !obj.is_copyable() {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+        self.get_object_template(obj)?.copy(obj, template)
     }
 }

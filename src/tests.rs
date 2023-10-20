@@ -433,6 +433,122 @@ fn test_get_attr() {
 }
 
 #[test]
+fn test_copy_objects() {
+    let mut testdata = TestData::new("testdata/test_copy_objects.json");
+    testdata.setup_db();
+
+    let mut args = testdata.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* public key data */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("2").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* copy token object to session object */
+    let mut intoken: CK_BBOOL = CK_FALSE;
+    let mut private: CK_BBOOL = CK_TRUE;
+    let mut template = vec![
+        make_attribute!(CKA_TOKEN, &mut intoken as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_PRIVATE, &mut private as *mut _, CK_BBOOL_SIZE),
+    ];
+    let mut handle2: CK_ULONG = CK_INVALID_HANDLE;
+    ret = fn_copy_object(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle2,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* make not copyable object */
+    let mut class = CKO_DATA;
+    let mut copyable: CK_BBOOL = CK_FALSE;
+    let application = "nocopy";
+    let data = "data";
+    let mut template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_COPYABLE, &mut copyable as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_APPLICATION,
+            CString::new(application).unwrap().into_raw(),
+            application.len()
+        ),
+        make_attribute!(
+            CKA_VALUE,
+            CString::new(data).unwrap().into_raw(),
+            data.len()
+        ),
+    ];
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* copy token object to session object */
+    let mut intoken: CK_BBOOL = CK_FALSE;
+    let mut template = vec![make_attribute!(
+        CKA_TOKEN,
+        &mut intoken as *mut _,
+        CK_BBOOL_SIZE
+    )];
+    let mut handle2: CK_ULONG = CK_INVALID_HANDLE;
+    ret = fn_copy_object(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle2,
+    );
+    assert_eq!(ret, CKR_ACTION_PROHIBITED);
+
+    ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
+}
+
+#[test]
 fn test_create_objects() {
     let mut testdata = TestData::new("testdata/test_create_objects.json");
     testdata.setup_db();

@@ -614,13 +614,28 @@ extern "C" fn fn_create_object(
     CKR_OK
 }
 extern "C" fn fn_copy_object(
-    _session: CK_SESSION_HANDLE,
-    _object: CK_OBJECT_HANDLE,
-    _template: CK_ATTRIBUTE_PTR,
-    _count: CK_ULONG,
-    _ph_new_object: CK_OBJECT_HANDLE_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    o_handle: CK_OBJECT_HANDLE,
+    template: CK_ATTRIBUTE_PTR,
+    count: CK_ULONG,
+    ph_new_object: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+
+    let tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+
+    let oh = match token.copy_object(s_handle, o_handle, tmpl) {
+        Ok(h) => h,
+        Err(e) => return err_to_rv!(e),
+    };
+
+    unsafe {
+        core::ptr::write(ph_new_object as *mut _, oh);
+    }
+
+    CKR_OK
 }
 extern "C" fn fn_destroy_object(
     s_handle: CK_SESSION_HANDLE,

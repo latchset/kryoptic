@@ -852,6 +852,23 @@ impl Token {
         self.objects.object_rough_size(o_handle)
     }
 
+    pub fn copy_object(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        o_handle: CK_OBJECT_HANDLE,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<CK_OBJECT_HANDLE> {
+        /* check that session is valid */
+        let _ = self.sessions.get_session(s_handle)?;
+
+        let obj = self.objects.get_by_handle(o_handle)?;
+        if obj.is_private() && !self.user_login.logged_in {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+        let newobj = self.object_templates.copy(obj, template)?;
+        self.insert_object(s_handle, newobj)
+    }
+
     pub fn search_objects(
         &mut self,
         handle: CK_SESSION_HANDLE,
