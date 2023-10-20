@@ -9,14 +9,14 @@ use super::mechanism;
 use super::object;
 use super::token;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
-use attribute::{from_bytes, from_ulong};
+use attribute::{from_bool, from_bytes, from_ulong};
 use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
 use object::{
-    CommonKeyTemplate, Object, ObjectAttr, ObjectTemplate, ObjectTemplates,
-    ObjectType, PrivKeyTemplate, PubKeyTemplate,
+    CommonKeyTemplate, OAFlags, Object, ObjectAttr, ObjectTemplate,
+    ObjectTemplates, ObjectType, PrivKeyTemplate, PubKeyTemplate,
 };
 use std::fmt::Debug;
 use token::RNG;
@@ -26,36 +26,30 @@ pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
 #[derive(Debug)]
 pub struct RSAPubTemplate {
-    template: Vec<ObjectAttr>,
+    attributes: Vec<ObjectAttr>,
 }
 
 impl RSAPubTemplate {
     pub fn new() -> RSAPubTemplate {
         let mut data: RSAPubTemplate = RSAPubTemplate {
-            template: Vec::new(),
+            attributes: Vec::new(),
         };
         data.init_common_object_attrs();
         data.init_common_storage_attrs();
         data.init_common_key_attrs();
         data.init_common_public_key_attrs();
-        data.template.push(attr_element!(CKA_MODULUS; req true; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_MODULUS_BITS; req false; def false; from_ulong; val 0));
-        data.template.push(attr_element!(CKA_PUBLIC_EXPONENT; req true; def false; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_MODULUS_BITS;  OAFlags::Unchangeable; from_ulong; val 0));
+        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data
     }
 }
 
 impl ObjectTemplate for RSAPubTemplate {
-    fn create(&self, mut obj: Object) -> KResult<Object> {
-        let mut attr_checker = self.template.clone();
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+        let mut obj = self.default_object_create(template)?;
 
-        let mut ret =
-            self.basic_object_attrs_checks(&mut obj, &mut attr_checker);
-        if ret != CKR_OK {
-            return err_rv!(ret);
-        }
-
-        ret = self.pubkey_create_attrs_checks(&mut obj);
+        let ret = self.pubkey_create_attrs_checks(&mut obj);
         if ret != CKR_OK {
             return err_rv!(ret);
         }
@@ -79,60 +73,77 @@ impl ObjectTemplate for RSAPubTemplate {
         Ok(obj)
     }
 
-    fn get_template(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.template
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
     }
 }
 
 impl CommonKeyTemplate for RSAPubTemplate {
-    fn get_template(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.template
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
     }
 }
 
 impl PubKeyTemplate for RSAPubTemplate {
-    fn get_template(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.template
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
     }
 }
 
 #[derive(Debug)]
 pub struct RSAPrivTemplate {
-    template: Vec<ObjectAttr>,
+    attributes: Vec<ObjectAttr>,
 }
 
 impl RSAPrivTemplate {
     pub fn new() -> RSAPrivTemplate {
         let mut data: RSAPrivTemplate = RSAPrivTemplate {
-            template: Vec::new(),
+            attributes: Vec::new(),
         };
         data.init_common_object_attrs();
         data.init_common_storage_attrs();
         data.init_common_key_attrs();
         data.init_common_private_key_attrs();
-        data.template.push(attr_element!(CKA_MODULUS; req true; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_PUBLIC_EXPONENT; req true; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_PRIVATE_EXPONENT; req true; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_PRIME_1; req false; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_PRIME_2; req false; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_EXPONENT_1; req false; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_EXPONENT_2; req false; def false; from_bytes; val Vec::new()));
-        data.template.push(attr_element!(CKA_COEFFICIENT; req false; def false; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PRIVATE_EXPONENT; OAFlags::Sensitive | OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PRIME_1; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PRIME_2; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_EXPONENT_1; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_EXPONENT_2; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_COEFFICIENT; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+
+        /* default to private */
+        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
+        match data
+            .attributes
+            .iter()
+            .position(|x| x.get_type() == CKA_PRIVATE)
+        {
+            Some(idx) => data.attributes[idx] = private,
+            None => data.attributes.push(private),
+        }
+
         data
     }
 }
 
 impl ObjectTemplate for RSAPrivTemplate {
-    fn create(&self, mut obj: Object) -> KResult<Object> {
-        let mut attr_checker = self.template.clone();
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+        let mut obj = self.default_object_create(template)?;
 
-        let mut ret =
-            self.basic_object_attrs_checks(&mut obj, &mut attr_checker);
-        if ret != CKR_OK {
-            return err_rv!(ret);
-        }
-
-        ret = self.privkey_create_attrs_checks(&mut obj);
+        let ret = self.privkey_create_attrs_checks(&mut obj);
         if ret != CKR_OK {
             return err_rv!(ret);
         }
@@ -150,20 +161,32 @@ impl ObjectTemplate for RSAPrivTemplate {
         Ok(obj)
     }
 
-    fn get_template(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.template
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
     }
 }
 
 impl CommonKeyTemplate for RSAPrivTemplate {
-    fn get_template(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.template
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
     }
 }
 
 impl PrivKeyTemplate for RSAPrivTemplate {
-    fn get_template(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.template
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
     }
 }
 

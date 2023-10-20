@@ -433,7 +433,7 @@ pub fn from_date_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
     }
 }
 
-pub fn from_ignore(t: CK_ULONG) -> Attribute {
+pub fn from_ignore(t: CK_ULONG, _val: Option<()>) -> Attribute {
     Attribute {
         ck_type: t,
         attrtype: AttrType::IgnoreType,
@@ -565,7 +565,7 @@ impl CK_ATTRIBUTE {
             AttrType::BytesType => Ok(from_bytes(self.type_, self.to_buf()?)),
             AttrType::DateType => Ok(from_date(self.type_, self.to_date()?)),
             AttrType::DenyType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
-            AttrType::IgnoreType => Ok(from_ignore(self.type_)),
+            AttrType::IgnoreType => Ok(from_ignore(self.type_, None)),
         }
     }
 }

@@ -10,6 +10,7 @@ use super::object;
 use super::token;
 use error::{KError, KResult};
 use interface::*;
+use object::ObjectTemplates;
 use token::{TokenObjects, RNG};
 
 use std::fmt::Debug;
@@ -146,6 +147,7 @@ pub trait Decryption: MechOperation {
 pub trait SearchOperation: Debug + Send + Sync {
     fn search(
         &mut self,
+        _object_templates: &ObjectTemplates,
         _objects: &mut TokenObjects,
         _template: &[CK_ATTRIBUTE],
     ) -> KResult<()> {

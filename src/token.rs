@@ -233,7 +233,7 @@ impl TokenObjects {
 
     fn from_json(&mut self, jobjs: &Vec<JsonObject>) -> KResult<()> {
         for jo in jobjs {
-            let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
+            let mut obj = Object::new();
             let mut uid: String = String::new();
             for (key, val) in &jo.attributes {
                 let attr = attribute::from_value(key.clone(), &val)?;
@@ -405,7 +405,7 @@ impl Token {
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
             }
             None => {
-                let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
+                let mut obj = Object::new();
                 obj.set_attr(attribute::from_string(
                     CKA_UNIQUE_ID,
                     uid.clone(),
@@ -710,6 +710,32 @@ impl Token {
         }
     }
 
+    fn insert_object(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        mut obj: Object,
+    ) -> KResult<CK_OBJECT_HANDLE> {
+        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+        let is_token = match obj.get_attr_as_bool(CKA_TOKEN) {
+            Ok(t) => t,
+            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        if is_token {
+            if !self.sessions.get_session(s_handle)?.is_writable() {
+                return err_rv!(CKR_SESSION_READ_ONLY);
+            }
+            self.dirty = true;
+        }
+        let handle = self.objects.next_handle();
+        obj.set_handle(handle);
+        self.objects.insert_handle(handle, uid.clone());
+        self.objects.insert(uid.clone(), obj);
+        if !is_token {
+            self.sessions.get_session_mut(s_handle)?.add_handle(handle);
+        }
+        Ok(handle)
+    }
+
     pub fn create_object(
         &mut self,
         s_handle: CK_SESSION_HANDLE,
@@ -722,27 +748,8 @@ impl Token {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
-        let handle = self.objects.next_handle();
-        let obj = self.object_templates.create(handle, template)?;
-        match obj.get_attr_as_bool(CKA_TOKEN) {
-            Ok(t) => {
-                if t {
-                    let session = self.sessions.get_session(s_handle)?;
-                    if !session.is_writable() {
-                        return err_rv!(CKR_SESSION_READ_ONLY);
-                    }
-                    self.dirty = true;
-                } else {
-                    let session = self.sessions.get_session_mut(s_handle)?;
-                    session.add_handle(handle);
-                }
-            }
-            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-        }
-        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
-        self.objects.insert_handle(handle, uid.clone());
-        self.objects.insert(uid.clone(), obj);
-        Ok(handle)
+        let object = self.object_templates.create(template)?;
+        self.insert_object(s_handle, object)
     }
 
     pub fn destroy_object(
@@ -774,7 +781,7 @@ impl Token {
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
         match self.get_object_by_handle(handle, true) {
-            Ok(o) => o.fill_template(template),
+            Ok(o) => self.object_templates.get_object_attributes(o, template),
             Err(e) => return Err(e),
         }
     }
@@ -858,7 +865,7 @@ impl Token {
             Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
             _ => return err_rv!(CKR_OPERATION_ACTIVE),
         };
-        operation.search(&mut self.objects, template)
+        operation.search(&self.object_templates, &mut self.objects, template)
     }
 
     pub fn search_results(

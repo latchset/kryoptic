@@ -6,12 +6,14 @@ use std::vec::Vec;
 use super::error;
 use super::interface;
 use super::mechanism;
+use super::object;
 use super::token;
 
 use super::err_rv;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::{Operation, SearchOperation};
+use object::ObjectTemplates;
 use token::TokenObjects;
 
 use std::slice::{Iter, IterMut};
@@ -26,6 +28,7 @@ pub struct SessionSearch {
 impl SearchOperation for SessionSearch {
     fn search(
         &mut self,
+        object_templates: &ObjectTemplates,
         objects: &mut TokenObjects,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<()> {
@@ -37,6 +40,13 @@ impl SearchOperation for SessionSearch {
         for (_, o) in objects.iter() {
             if !self.logged_in && o.is_private() {
                 continue;
+            }
+
+            if o.is_sensitive() {
+                match object_templates.check_sensitive(o, template) {
+                    Err(_) => continue,
+                    Ok(()) => (),
+                }
             }
 
             if o.match_template(template) {
