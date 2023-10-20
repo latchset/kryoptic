@@ -676,12 +676,16 @@ extern "C" fn fn_get_attribute_value(
     ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl))
 }
 extern "C" fn fn_set_attribute_value(
-    _session: CK_SESSION_HANDLE,
-    _object: CK_OBJECT_HANDLE,
-    _template: CK_ATTRIBUTE_PTR,
-    _count: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    o_handle: CK_OBJECT_HANDLE,
+    template: CK_ATTRIBUTE_PTR,
+    count: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let mut tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+    ret_to_rv!(token.set_object_attrs(s_handle, o_handle, &mut tmpl))
 }
 extern "C" fn fn_find_objects_init(
     s_handle: CK_SESSION_HANDLE,

@@ -205,6 +205,19 @@ impl TokenObjects {
         }
     }
 
+    fn get_by_handle_mut(
+        &mut self,
+        handle: CK_OBJECT_HANDLE,
+    ) -> KResult<&mut Object> {
+        match self.handles.get(&handle) {
+            Some(s) => match self.objects.get_mut(s) {
+                Some(o) => Ok(o),
+                None => err_not_found! {s.clone()},
+            },
+            None => err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        }
+    }
+
     pub fn insert_handle(&mut self, oh: CK_OBJECT_HANDLE, uid: String) {
         self.handles.insert(oh, uid);
     }
@@ -782,8 +795,36 @@ impl Token {
     ) -> KResult<()> {
         match self.get_object_by_handle(handle, true) {
             Ok(o) => self.object_templates.get_object_attributes(o, template),
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
         }
+    }
+
+    pub fn set_object_attrs(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        handle: CK_OBJECT_HANDLE,
+        template: &mut [CK_ATTRIBUTE],
+    ) -> KResult<()> {
+        let obj = match self.objects.get_by_handle_mut(handle) {
+            Ok(o) => o,
+            Err(e) => return Err(e),
+        };
+        if !self.user_login.logged_in {
+            if obj.is_private() {
+                return err_rv!(CKR_OBJECT_HANDLE_INVALID);
+            }
+        }
+        if obj.is_token() {
+            if !self.user_login.logged_in {
+                return err_rv!(CKR_USER_NOT_LOGGED_IN);
+            }
+            if !self.sessions.get_session(s_handle)?.is_writable() {
+                return err_rv!(CKR_SESSION_READ_ONLY);
+            }
+        }
+        self.object_templates.set_object_attributes(obj, template)?;
+        self.dirty = true;
+        Ok(())
     }
 
     pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {

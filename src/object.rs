@@ -890,6 +890,60 @@ impl ObjectTemplates {
         }
     }
 
+    pub fn set_object_attributes(
+        &self,
+        obj: &mut Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<()> {
+        if !obj.is_modifiable() {
+            return err_rv!(CKR_ACTION_PROHIBITED);
+        }
+
+        /* first check that all attributes can be changed */
+        let objtype_attrs = self.get_object_template(obj)?.get_attributes();
+        for ck_attr in template {
+            match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
+                None => return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+                Some(attr) => {
+                    if attr.is(OAFlags::Unchangeable) {
+                        if attr.attribute.get_attrtype() == AttrType::BoolType {
+                            let val = match obj.get_attr(ck_attr.type_) {
+                                Some(a) => a.to_bool()?,
+                                None => {
+                                    if attr.has_default() {
+                                        attr.attribute.to_bool()?
+                                    } else {
+                                        return err_rv!(
+                                            CKR_ATTRIBUTE_READ_ONLY
+                                        );
+                                    }
+                                }
+                            };
+                            if val {
+                                if !attr.is(OAFlags::ChangeToFalse) {
+                                    return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                                }
+                            } else {
+                                if !attr.is(OAFlags::ChangeToTrue) {
+                                    return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                                }
+                            }
+                        } else {
+                            return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                        }
+                    }
+                }
+            }
+        }
+
+        /* if checks clear out, apply changes */
+        for ck_attr in template {
+            obj.set_attr(ck_attr.to_attribute()?)?;
+        }
+
+        Ok(())
+    }
+
     pub fn copy(
         &self,
         obj: &Object,

@@ -87,7 +87,7 @@ impl TestData<'_> {
                     "CKA_DESTROYABLE": false,
                     "CKA_ID": "AQ==",
                     "CKA_LABEL": "Test RSA Key",
-                    "CKA_MODIFIABLE": false,
+                    "CKA_MODIFIABLE": true,
                     "CKA_MODULUS": "AQIDBAUGBwg=",
                     "CKA_PRIVATE": false,
                     "CKA_PUBLIC_EXPONENT": "AQAB",
@@ -423,6 +423,94 @@ fn test_get_attr() {
     ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     assert_eq!(template[0].ulValueLen, 3);
+
+    ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
+}
+
+#[test]
+fn test_set_attr() {
+    let mut testdata = TestData::new("testdata/test_set_attr.json");
+    testdata.setup_db();
+
+    let mut args = testdata.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut template = Vec::<CK_ATTRIBUTE>::new();
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+
+    /* public key data */
+    template.push(make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("2").unwrap().into_raw(),
+        1
+    ));
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    let label = "new label";
+    template.clear();
+    template.push(make_attribute!(CKA_LABEL, label.as_ptr(), label.len()));
+    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_SESSION_READ_ONLY);
+
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+
+    let unique = "unsettable";
+    template.clear();
+    template.push(make_attribute!(
+        CKA_UNIQUE_ID,
+        unique.as_ptr(),
+        unique.len()
+    ));
+
+    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_ATTRIBUTE_READ_ONLY);
 
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
