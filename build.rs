@@ -35,10 +35,36 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     }
 }
 
+#[derive(Debug)]
+pub struct HaclCallbacks;
+
+impl bindgen::callbacks::ParseCallbacks for HaclCallbacks {
+    fn int_macro(
+        &self,
+        name: &str,
+        _: i64,
+    ) -> Option<bindgen::callbacks::IntKind> {
+        if name.starts_with("Spec_") {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "u8",
+                is_signed: false,
+            })
+        } else if name.starts_with("Hacl_Streaming_Types_") {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "u8",
+                is_signed: false,
+            })
+        } else {
+            None
+        }
+    }
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=pkcs11.h");
 
-    let bindings = bindgen::Builder::default()
+    /* PKCS11 Headers */
+    bindgen::Builder::default()
         .header("pkcs11.h")
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
@@ -47,17 +73,70 @@ fn main() {
         .blocklist_type("CK_INTERFACE")
         .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
-        .expect("Unable to generate bindings");
-
-    bindings
+        .expect("Unable to generate bindings")
         .write_to_file("src/pkcs11_bindings.rs")
         .expect("Couldn't write bindings!");
 
+    /* HACL Code */
+    let hacl_path = std::path::PathBuf::from("hacl/gcc-compatible")
+        .canonicalize()
+        .expect("cannot canonicalize path");
+
+    let hacl_conf = hacl_path.join("config.h");
+    let hacl_krml_include = hacl_path
+        .join("../karamel/include")
+        .canonicalize()
+        .expect("cannot canonicalize path");
+    let hacl_krml_dist = hacl_path
+        .join("../karamel/krmllib/dist/minimal")
+        .canonicalize()
+        .expect("cannot canonicalize path");
+    let hacl_h = hacl_path.join("hacl.h");
+
+    println!("cargo:rustc-link-search={}", hacl_path.to_str().unwrap());
+    println!("cargo:rustc-link-lib=evercrypt");
+    println!("cargo:rerun-if-changed={}", hacl_conf.to_str().unwrap());
+    if !std::process::Command::new("./configure")
+        .current_dir(&hacl_path)
+        .output()
+        .expect("could not run hacl `configure`")
+        .status
+        .success()
+    {
+        // Panic if the command was not successful.
+        panic!("could not configure HACL");
+    }
+
+    if !std::process::Command::new("make")
+        .current_dir(&hacl_path)
+        .output()
+        .expect("could not run hacl `make`")
+        .status
+        .success()
+    {
+        // Panic if the command was not successful.
+        panic!("could not build HACL library");
+    }
+    bindgen::Builder::default()
+        .header(hacl_h.to_str().unwrap())
+        .clang_arg(format!("-I{}", hacl_krml_include.display()))
+        .clang_arg(format!("-I{}", hacl_krml_dist.display()))
+        .derive_default(true)
+        .formatter(bindgen::Formatter::Prettyplease)
+        .allowlist_item("Hacl_.*")
+        .allowlist_item("Spec_.*")
+        .parse_callbacks(Box::new(HaclCallbacks))
+        .generate()
+        .expect("Unable to generate bindings")
+        .write_to_file("src/hacl_bindings.rs")
+        .expect("Couldn't write bindings!");
+
+    /* Nettle for RSA */
     println!("cargo:rerun-if-changed=nettle.h");
     println!("cargo:rustc-link-lib=nettle");
     println!("cargo:rustc-link-lib=hogweed");
     println!("cargo:rustc-link-lib=gmp");
-    let nettle_bindings = bindgen::Builder::default()
+    bindgen::Builder::default()
         .header("nettle.h")
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
@@ -91,9 +170,7 @@ fn main() {
         .blocklist_item("max_align_t")
         .blocklist_item("__gmp.*rand.*")
         .generate()
-        .expect("Unable to generate nettle bindings");
-
-    nettle_bindings
+        .expect("Unable to generate nettle bindings")
         .write_to_file("src/nettle_bindings.rs")
         .expect("Couldn't write bindings!");
 }

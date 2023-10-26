@@ -2,4 +2,10 @@
 /Cargo.lock
 /src/pkcs11_bindings.rs
 /src/nettle_bindings.rs
+/src/hacl_bindings.rs
 /test.json
+*.o
+*.a
+*.d
+*.config
+/hacl/gcc-compatible/config.h
