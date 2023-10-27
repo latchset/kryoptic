@@ -31,6 +31,9 @@ pub trait Mechanism: Debug + Send + Sync {
     ) -> KResult<Box<dyn Decryption>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
+    fn digest_new(&self, _: &CK_MECHANISM) -> KResult<Box<dyn Digest>> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
 }
 
 #[derive(Debug)]
@@ -158,10 +161,32 @@ pub trait SearchOperation: Debug + Send + Sync {
     }
 }
 
+pub trait Digest: MechOperation {
+    fn digest(
+        &mut self,
+        _data: &[u8],
+        _digest: CK_BYTE_PTR,
+        _digest_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn digest_update(&mut self, _data: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn digest_final(
+        &mut self,
+        _digest: CK_BYTE_PTR,
+        _digest_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
 #[derive(Debug)]
 pub enum Operation {
     Empty,
     Search(Box<dyn SearchOperation>),
     Encryption(Box<dyn Encryption>),
     Decryption(Box<dyn Decryption>),
+    Digest(Box<dyn Digest>),
 }

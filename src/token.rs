@@ -14,6 +14,7 @@ use super::mechanism;
 use super::object;
 use super::rsa;
 use super::session;
+use super::sha2;
 
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
@@ -375,6 +376,7 @@ impl Token {
 
         /* register mechanisms and templates */
         rsa::register(&mut token.mechanisms, &mut token.object_templates);
+        sha2::register(&mut token.mechanisms, &mut token.object_templates);
 
         token
     }
@@ -1176,6 +1178,142 @@ impl Token {
         }
 
         let result = operation.decrypt_final(&mut self.rng, plain, plain_len);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn digest_init(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &CK_MECHANISM,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session(handle)?;
+        match session.get_operation() {
+            Operation::Empty => (),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        }
+        let mech = self.mechanisms.get(data.mechanism)?;
+        if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
+            let operation = mech.digest_new(data)?;
+            let session = self.sessions.get_session_mut(handle)?;
+            session.set_operation(Operation::Digest(operation));
+            Ok(())
+        } else {
+            err_rv!(CKR_MECHANISM_INVALID)
+        }
+    }
+
+    pub fn digest(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &[u8],
+        digest: CK_BYTE_PTR,
+        digest_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Digest(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.digest(data, digest, digest_len);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn digest_update(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &[u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Digest(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.digest_update(data);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn digest_key(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        key: CK_OBJECT_HANDLE,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Digest(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let obj = match self.objects.get_by_handle(key) {
+            Ok(o) => o,
+            Err(e) => return Err(e),
+        };
+        if !self.user_login.logged_in && obj.is_private() {
+            return err_rv!(CKR_KEY_HANDLE_INVALID);
+        }
+        if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
+            return err_rv!(CKR_KEY_HANDLE_INVALID);
+        }
+        if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+        let data = obj.get_attr_as_bytes(CKA_VALUE)?;
+        let result = operation.digest_update(data);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn digest_final(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        digest: CK_BYTE_PTR,
+        digest_len: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Digest(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if digest.is_null() && digest_len.is_null() {
+            /* internal convention to ask to terminate the operation */
+            session.set_operation(Operation::Empty);
+            return Ok(());
+        }
+
+        let result = operation.digest_final(digest, digest_len);
 
         if operation.finalized() {
             session.set_operation(Operation::Empty);

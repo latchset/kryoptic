@@ -48,6 +48,7 @@ use token::Token;
 
 /* algorithms and ciphers */
 mod rsa;
+mod sha2;
 
 macro_rules! err_to_rv {
     ($err:expr) => {
@@ -879,41 +880,75 @@ extern "C" fn fn_decrypt_final(
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
     ret_to_rv!(token.decrypt_final(s_handle, last_part, pul_last_part_len))
 }
+
 extern "C" fn fn_digest_init(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    if mechanism.is_null() {
+        ret_to_rv!(token.digest_final(
+            s_handle,
+            std::ptr::null_mut(),
+            std::ptr::null_mut()
+        ));
+    }
+    ret_to_rv!(token.digest_init(s_handle, data))
 }
+
 extern "C" fn fn_digest(
-    _session: CK_SESSION_HANDLE,
-    _data: CK_BYTE_PTR,
-    _data_len: CK_ULONG,
-    _digest: CK_BYTE_PTR,
-    _pul_digest_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    pdata: CK_BYTE_PTR,
+    pdata_len: CK_ULONG,
+    digest: CK_BYTE_PTR,
+    pul_digest_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if pdata.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let data: &[u8] =
+        unsafe { std::slice::from_raw_parts(pdata, pdata_len as usize) };
+    ret_to_rv!(token.digest(s_handle, data, digest, pul_digest_len))
 }
 extern "C" fn fn_digest_update(
-    _session: CK_SESSION_HANDLE,
-    _part: CK_BYTE_PTR,
-    _part_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    part: CK_BYTE_PTR,
+    part_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if part.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let data: &[u8] =
+        unsafe { std::slice::from_raw_parts(part, part_len as usize) };
+    ret_to_rv!(token.digest_update(s_handle, data))
 }
 extern "C" fn fn_digest_key(
-    _session: CK_SESSION_HANDLE,
-    _key: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    ret_to_rv!(token.digest_key(s_handle, key))
 }
 extern "C" fn fn_digest_final(
-    _session: CK_SESSION_HANDLE,
-    _digest: CK_BYTE_PTR,
-    _pul_digest_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    digest: CK_BYTE_PTR,
+    pul_digest_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if pul_digest_len.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    ret_to_rv!(token.digest_final(s_handle, digest, pul_digest_len))
 }
+
 extern "C" fn fn_sign_init(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
