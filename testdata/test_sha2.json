@@ -1,0 +1,32 @@
+{"objects": [{
+    "attributes": {
+        "CKA_UNIQUE_ID": "0",
+        "CKA_CLASS": 4,
+        "CKA_KEY_TYPE": 16,
+        "CKA_LABEL": "SO PIN",
+        "CKA_VALUE": "MTIzNDU2Nzg=",
+        "CKA_TOKEN": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "1",
+        "CKA_CLASS": 4,
+        "CKA_KEY_TYPE": 16,
+        "CKA_LABEL": "User PIN",
+        "CKA_VALUE": "MTIzNDU2Nzg=",
+        "CKA_TOKEN": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "2",
+        "CKA_APPLICATION": "CKM_SHA256",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "Sha2-256 Test Data (Checksum in CKA_ID, Data in CKA_VALUE)",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "4yvQP0b1HUpckDQp/qHDEDLY16ponHZBQbfOvXT04UA=",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "SGVsbG8gU0hBMjU2Cg=="
+    }
+}]}
