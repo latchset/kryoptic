@@ -81,3 +81,83 @@ impl Drop for SHA256state {
 
 unsafe impl Send for SHA256state {}
 unsafe impl Sync for SHA256state {}
+
+#[derive(Debug)]
+pub struct SHA384state {
+    s: *mut Hacl_Streaming_SHA2_state_sha2_384,
+}
+
+impl SHA384state {
+    pub fn new() -> SHA384state {
+        SHA384state {
+            s: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn init(&mut self) {
+        unsafe {
+            self.s = Hacl_Streaming_SHA2_create_in_384();
+        }
+    }
+
+    pub fn get_state(&mut self) -> *mut Hacl_Streaming_SHA2_state_sha2_384 {
+        if self.s.is_null() {
+            self.init();
+        }
+        self.s
+    }
+}
+
+impl Drop for SHA384state {
+    fn drop(&mut self) {
+        if !self.s.is_null() {
+            unsafe {
+                Hacl_Streaming_SHA2_free_384(self.s);
+            }
+            self.s = std::ptr::null_mut();
+        }
+    }
+}
+
+unsafe impl Send for SHA384state {}
+unsafe impl Sync for SHA384state {}
+
+#[derive(Debug)]
+pub struct SHA512state {
+    s: *mut Hacl_Streaming_SHA2_state_sha2_512,
+}
+
+impl SHA512state {
+    pub fn new() -> SHA512state {
+        SHA512state {
+            s: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn init(&mut self) {
+        unsafe {
+            self.s = Hacl_Streaming_SHA2_create_in_512();
+        }
+    }
+
+    pub fn get_state(&mut self) -> *mut Hacl_Streaming_SHA2_state_sha2_512 {
+        if self.s.is_null() {
+            self.init();
+        }
+        self.s
+    }
+}
+
+impl Drop for SHA512state {
+    fn drop(&mut self) {
+        if !self.s.is_null() {
+            unsafe {
+                Hacl_Streaming_SHA2_free_512(self.s);
+            }
+            self.s = std::ptr::null_mut();
+        }
+    }
+}
+
+unsafe impl Send for SHA512state {}
+unsafe impl Sync for SHA512state {}

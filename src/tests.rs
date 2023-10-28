@@ -1025,7 +1025,7 @@ fn test_get_mechs() {
         &mut count,
     );
     assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 2);
+    assert_eq!(count, 4);
     assert_eq!(mechs[0], 1);
     let mut info: CK_MECHANISM_INFO = Default::default();
     ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
@@ -1450,6 +1450,122 @@ fn test_sha2_digest() {
 
     let mut digest2: [u8; 32] = [0; 32];
     ret = fn_digest_final(session, digest2.as_mut_ptr(), &mut digest2_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(hash, digest);
+
+    /* ==== SHA 384 ==== */
+
+    /* get test data */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("3").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* get values */
+    let mut hash: [u8; 48] = [0; 48];
+    let mut value: [u8; 48] = [0; 48];
+    template.clear();
+    template.push(make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len()));
+    template.push(make_attribute!(
+        CKA_OBJECT_ID,
+        hash.as_mut_ptr(),
+        hash.len()
+    ));
+    ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as u64,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let value_len = template[0].ulValueLen;
+
+    /* one shot digest */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA384,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_digest_init(session, &mut mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    let mut digest: [u8; 48] = [0; 48];
+    let mut digest_len: CK_ULONG = digest.len() as CK_ULONG;
+    ret = fn_digest(
+        session,
+        value.as_mut_ptr(),
+        value_len,
+        digest.as_mut_ptr(),
+        &mut digest_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(hash, digest);
+
+    /* ==== SHA 512 ==== */
+
+    /* get test data */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("4").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* get values */
+    let mut hash: [u8; 64] = [0; 64];
+    let mut value: [u8; 64] = [0; 64];
+    template.clear();
+    template.push(make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len()));
+    template.push(make_attribute!(
+        CKA_OBJECT_ID,
+        hash.as_mut_ptr(),
+        hash.len()
+    ));
+    ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as u64,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let value_len = template[0].ulValueLen;
+
+    /* one shot digest */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA512,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_digest_init(session, &mut mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    let mut digest: [u8; 64] = [0; 64];
+    let mut digest_len: CK_ULONG = digest.len() as CK_ULONG;
+    ret = fn_digest(
+        session,
+        value.as_mut_ptr(),
+        value_len,
+        digest.as_mut_ptr(),
+        &mut digest_len,
+    );
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
 
