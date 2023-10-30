@@ -43,6 +43,46 @@ impl Debug for rsa_private_key {
 include!("hacl_bindings.rs");
 
 #[derive(Debug)]
+pub struct SHA1state {
+    s: *mut Hacl_Streaming_SHA1_state,
+}
+
+impl SHA1state {
+    pub fn new() -> SHA1state {
+        SHA1state {
+            s: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn init(&mut self) {
+        unsafe {
+            self.s = Hacl_Streaming_SHA1_legacy_create_in();
+        }
+    }
+
+    pub fn get_state(&mut self) -> *mut Hacl_Streaming_SHA1_state {
+        if self.s.is_null() {
+            self.init();
+        }
+        self.s
+    }
+}
+
+impl Drop for SHA1state {
+    fn drop(&mut self) {
+        if !self.s.is_null() {
+            unsafe {
+                Hacl_Streaming_SHA1_legacy_free(self.s);
+            }
+            self.s = std::ptr::null_mut();
+        }
+    }
+}
+
+unsafe impl Send for SHA1state {}
+unsafe impl Sync for SHA1state {}
+
+#[derive(Debug)]
 pub struct SHA256state {
     s: *mut Hacl_Streaming_SHA2_state_sha2_256,
 }

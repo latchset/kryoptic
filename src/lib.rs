@@ -48,6 +48,7 @@ use token::Token;
 
 /* algorithms and ciphers */
 mod rsa;
+mod sha1;
 mod sha2;
 
 macro_rules! err_to_rv {

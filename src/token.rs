@@ -14,6 +14,7 @@ use super::mechanism;
 use super::object;
 use super::rsa;
 use super::session;
+use super::sha1;
 use super::sha2;
 
 use super::{err_not_found, err_rv};
@@ -377,6 +378,7 @@ impl Token {
         /* register mechanisms and templates */
         rsa::register(&mut token.mechanisms, &mut token.object_templates);
         sha2::register(&mut token.mechanisms, &mut token.object_templates);
+        sha1::register(&mut token.mechanisms, &mut token.object_templates);
 
         token
     }
