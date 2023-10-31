@@ -31,20 +31,25 @@ impl Mechanism for SHA256Mechanism {
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        let op = SHA256Operation {
-            state: SHA256state::new(),
-            finalized: false,
-            in_use: false,
-        };
-        Ok(Box::new(op))
+        Ok(Box::new(SHA256Operation::new()))
     }
 }
 
 #[derive(Debug)]
-struct SHA256Operation {
+pub struct SHA256Operation {
     state: SHA256state,
     finalized: bool,
     in_use: bool,
+}
+
+impl SHA256Operation {
+    pub fn new() -> SHA256Operation {
+        SHA256Operation {
+            state: SHA256state::new(),
+            finalized: false,
+            in_use: false,
+        }
+    }
 }
 
 impl MechOperation for SHA256Operation {
@@ -60,31 +65,12 @@ impl MechOperation for SHA256Operation {
 }
 
 impl Digest for SHA256Operation {
-    fn digest(
-        &mut self,
-        data: &[u8],
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> KResult<()> {
         if self.in_use || self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest_len.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        } else {
-            unsafe {
-                let len = Hacl_Hash_Definitions_hash_len(
-                    Spec_Hash_Definitions_SHA2_256,
-                ) as u64;
-                if digest.is_null() {
-                    *digest_len = len;
-                    return Ok(());
-                } else {
-                    if *digest_len < len {
-                        return err_rv!(CKR_BUFFER_TOO_SMALL);
-                    }
-                }
-            }
+        if digest.len() != self.digest_len()? {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
         /* NOTE: It is ok if data and digest point to the same buffer*/
@@ -92,7 +78,7 @@ impl Digest for SHA256Operation {
             Hacl_Streaming_SHA2_hash_256(
                 data.as_ptr() as *mut u8,
                 data.len() as u32,
-                digest,
+                digest.as_mut_ptr(),
             )
         }
         Ok(())
@@ -128,39 +114,31 @@ impl Digest for SHA256Operation {
         }
     }
 
-    fn digest_final(
-        &mut self,
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest_final(&mut self, digest: &mut [u8]) -> KResult<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest_len.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        } else {
-            unsafe {
-                let len = Hacl_Hash_Definitions_hash_len(
-                    Spec_Hash_Definitions_SHA2_256,
-                ) as u64;
-                if digest.is_null() {
-                    *digest_len = len;
-                    return Ok(());
-                } else {
-                    if *digest_len < len {
-                        return err_rv!(CKR_BUFFER_TOO_SMALL);
-                    }
-                }
-            }
+        if digest.len() != self.digest_len()? {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
         unsafe {
-            Hacl_Streaming_SHA2_finish_256(self.state.get_state(), digest);
+            Hacl_Streaming_SHA2_finish_256(
+                self.state.get_state(),
+                digest.as_mut_ptr(),
+            );
         }
         Ok(())
+    }
+
+    fn digest_len(&self) -> KResult<usize> {
+        Ok(unsafe {
+            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA2_256)
+                as usize
+        })
     }
 }
 
@@ -181,20 +159,25 @@ impl Mechanism for SHA384Mechanism {
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        let op = SHA384Operation {
-            state: SHA384state::new(),
-            finalized: false,
-            in_use: false,
-        };
-        Ok(Box::new(op))
+        Ok(Box::new(SHA384Operation::new()))
     }
 }
 
 #[derive(Debug)]
-struct SHA384Operation {
+pub struct SHA384Operation {
     state: SHA384state,
     finalized: bool,
     in_use: bool,
+}
+
+impl SHA384Operation {
+    pub fn new() -> SHA384Operation {
+        SHA384Operation {
+            state: SHA384state::new(),
+            finalized: false,
+            in_use: false,
+        }
+    }
 }
 
 impl MechOperation for SHA384Operation {
@@ -210,31 +193,12 @@ impl MechOperation for SHA384Operation {
 }
 
 impl Digest for SHA384Operation {
-    fn digest(
-        &mut self,
-        data: &[u8],
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> KResult<()> {
         if self.in_use || self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest_len.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        } else {
-            unsafe {
-                let len = Hacl_Hash_Definitions_hash_len(
-                    Spec_Hash_Definitions_SHA2_384,
-                ) as u64;
-                if digest.is_null() {
-                    *digest_len = len;
-                    return Ok(());
-                } else {
-                    if *digest_len < len {
-                        return err_rv!(CKR_BUFFER_TOO_SMALL);
-                    }
-                }
-            }
+        if digest.len() != self.digest_len()? {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
         /* NOTE: It is ok if data and digest point to the same buffer*/
@@ -242,7 +206,7 @@ impl Digest for SHA384Operation {
             Hacl_Streaming_SHA2_hash_384(
                 data.as_ptr() as *mut u8,
                 data.len() as u32,
-                digest,
+                digest.as_mut_ptr(),
             )
         }
         Ok(())
@@ -278,39 +242,31 @@ impl Digest for SHA384Operation {
         }
     }
 
-    fn digest_final(
-        &mut self,
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest_final(&mut self, digest: &mut [u8]) -> KResult<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest_len.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        } else {
-            unsafe {
-                let len = Hacl_Hash_Definitions_hash_len(
-                    Spec_Hash_Definitions_SHA2_384,
-                ) as u64;
-                if digest.is_null() {
-                    *digest_len = len;
-                    return Ok(());
-                } else {
-                    if *digest_len < len {
-                        return err_rv!(CKR_BUFFER_TOO_SMALL);
-                    }
-                }
-            }
+        if digest.len() != self.digest_len()? {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
         unsafe {
-            Hacl_Streaming_SHA2_finish_384(self.state.get_state(), digest);
+            Hacl_Streaming_SHA2_finish_384(
+                self.state.get_state(),
+                digest.as_mut_ptr(),
+            );
         }
         Ok(())
+    }
+
+    fn digest_len(&self) -> KResult<usize> {
+        Ok(unsafe {
+            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA2_384)
+                as usize
+        })
     }
 }
 
@@ -331,20 +287,25 @@ impl Mechanism for SHA512Mechanism {
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        let op = SHA512Operation {
-            state: SHA512state::new(),
-            finalized: false,
-            in_use: false,
-        };
-        Ok(Box::new(op))
+        Ok(Box::new(SHA512Operation::new()))
     }
 }
 
 #[derive(Debug)]
-struct SHA512Operation {
+pub struct SHA512Operation {
     state: SHA512state,
     finalized: bool,
     in_use: bool,
+}
+
+impl SHA512Operation {
+    pub fn new() -> SHA512Operation {
+        SHA512Operation {
+            state: SHA512state::new(),
+            finalized: false,
+            in_use: false,
+        }
+    }
 }
 
 impl MechOperation for SHA512Operation {
@@ -360,31 +321,12 @@ impl MechOperation for SHA512Operation {
 }
 
 impl Digest for SHA512Operation {
-    fn digest(
-        &mut self,
-        data: &[u8],
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> KResult<()> {
         if self.in_use || self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest_len.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        } else {
-            unsafe {
-                let len = Hacl_Hash_Definitions_hash_len(
-                    Spec_Hash_Definitions_SHA2_512,
-                ) as u64;
-                if digest.is_null() {
-                    *digest_len = len;
-                    return Ok(());
-                } else {
-                    if *digest_len < len {
-                        return err_rv!(CKR_BUFFER_TOO_SMALL);
-                    }
-                }
-            }
+        if digest.len() != self.digest_len()? {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
         /* NOTE: It is ok if data and digest point to the same buffer*/
@@ -392,8 +334,8 @@ impl Digest for SHA512Operation {
             Hacl_Streaming_SHA2_hash_512(
                 data.as_ptr() as *mut u8,
                 data.len() as u32,
-                digest,
-            )
+                digest.as_mut_ptr(),
+            );
         }
         Ok(())
     }
@@ -428,39 +370,31 @@ impl Digest for SHA512Operation {
         }
     }
 
-    fn digest_final(
-        &mut self,
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest_final(&mut self, digest: &mut [u8]) -> KResult<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest_len.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        } else {
-            unsafe {
-                let len = Hacl_Hash_Definitions_hash_len(
-                    Spec_Hash_Definitions_SHA2_512,
-                ) as u64;
-                if digest.is_null() {
-                    *digest_len = len;
-                    return Ok(());
-                } else {
-                    if *digest_len < len {
-                        return err_rv!(CKR_BUFFER_TOO_SMALL);
-                    }
-                }
-            }
+        if digest.len() != self.digest_len()? {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
         unsafe {
-            Hacl_Streaming_SHA2_finish_512(self.state.get_state(), digest);
+            Hacl_Streaming_SHA2_finish_512(
+                self.state.get_state(),
+                digest.as_mut_ptr(),
+            );
         }
         Ok(())
+    }
+
+    fn digest_len(&self) -> KResult<usize> {
+        Ok(unsafe {
+            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA2_512)
+                as usize
+        })
     }
 }
 

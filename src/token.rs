@@ -1213,8 +1213,7 @@ impl Token {
         &mut self,
         handle: CK_SESSION_HANDLE,
         data: &[u8],
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
+        digest: &mut [u8],
     ) -> KResult<()> {
         let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
@@ -1225,7 +1224,7 @@ impl Token {
         if operation.finalized() {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        let result = operation.digest(data, digest, digest_len);
+        let result = operation.digest(data, digest);
 
         if operation.finalized() {
             session.set_operation(Operation::Empty);
@@ -1297,8 +1296,7 @@ impl Token {
     pub fn digest_final(
         &mut self,
         handle: CK_SESSION_HANDLE,
-        digest: CK_BYTE_PTR,
-        digest_len: CK_ULONG_PTR,
+        digest: &mut [u8],
     ) -> KResult<()> {
         let session = self.sessions.get_session_mut(handle)?;
         let operation = match session.get_operation_mut() {
@@ -1309,18 +1307,275 @@ impl Token {
         if operation.finalized() {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if digest.is_null() && digest_len.is_null() {
-            /* internal convention to ask to terminate the operation */
-            session.set_operation(Operation::Empty);
-            return Ok(());
-        }
 
-        let result = operation.digest_final(digest, digest_len);
+        let result = operation.digest_final(digest);
 
         if operation.finalized() {
             session.set_operation(Operation::Empty);
         }
 
         result
+    }
+
+    pub fn digest_terminate(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Digest(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        session.set_operation(Operation::Empty);
+        Ok(())
+    }
+
+    pub fn digest_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
+        let session = self.sessions.get_session(handle)?;
+        let operation = match session.get_operation() {
+            Operation::Digest(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        operation.digest_len()
+    }
+
+    pub fn sign_init(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &CK_MECHANISM,
+        key: CK_OBJECT_HANDLE,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session(handle)?;
+        match session.get_operation() {
+            Operation::Empty => (),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        }
+        let mech = self.mechanisms.get(data.mechanism)?;
+        let obj = self.get_object_by_handle(key, true)?;
+        if mech.info().flags & CKF_SIGN == CKF_SIGN {
+            let operation = mech.sign_new(data, obj)?;
+            let session = self.sessions.get_session_mut(handle)?;
+            session.set_operation(Operation::Sign(operation));
+            Ok(())
+        } else {
+            err_rv!(CKR_MECHANISM_INVALID)
+        }
+    }
+
+    pub fn sign(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &[u8],
+        signature: &mut [u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Sign(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.sign(&mut self.rng, data, signature);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn sign_update(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &[u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Sign(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.sign_update(data);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn sign_final(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        signature: &mut [u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Sign(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+
+        let result = operation.sign_final(&mut self.rng, signature);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn sign_terminate(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Sign(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        session.set_operation(Operation::Empty);
+        Ok(())
+    }
+
+    pub fn signature_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
+        let session = self.sessions.get_session(handle)?;
+        let operation = match session.get_operation() {
+            Operation::Sign(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        operation.signature_len()
+    }
+
+    pub fn verify_init(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &CK_MECHANISM,
+        key: CK_OBJECT_HANDLE,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session(handle)?;
+        match session.get_operation() {
+            Operation::Empty => (),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        }
+        let mech = self.mechanisms.get(data.mechanism)?;
+        let obj = self.get_object_by_handle(key, true)?;
+        if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
+            let operation = mech.verify_new(data, obj)?;
+            let session = self.sessions.get_session_mut(handle)?;
+            session.set_operation(Operation::Verify(operation));
+            Ok(())
+        } else {
+            err_rv!(CKR_MECHANISM_INVALID)
+        }
+    }
+
+    pub fn verify(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &[u8],
+        signature: &[u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Verify(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.verify(data, signature);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn verify_update(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        data: &[u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Verify(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        let result = operation.verify_update(data);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn verify_final(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+        signature: &[u8],
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Verify(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+
+        let result = operation.verify_final(signature);
+
+        if operation.finalized() {
+            session.set_operation(Operation::Empty);
+        }
+
+        result
+    }
+
+    pub fn verify_terminate(
+        &mut self,
+        handle: CK_SESSION_HANDLE,
+    ) -> KResult<()> {
+        let session = self.sessions.get_session_mut(handle)?;
+        let operation = match session.get_operation_mut() {
+            Operation::Verify(op) => op,
+            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
+            _ => return err_rv!(CKR_OPERATION_ACTIVE),
+        };
+        if operation.finalized() {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        session.set_operation(Operation::Empty);
+        Ok(())
     }
 }

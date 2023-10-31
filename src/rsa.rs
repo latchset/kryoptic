@@ -7,6 +7,8 @@ use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::sha1;
+use super::sha2;
 use super::token;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 use attribute::{from_bool, from_bytes, from_ulong};
@@ -278,9 +280,6 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> KResult<Box<dyn Encryption>> {
-        if mech.mechanism != CKM_RSA_PKCS {
-            return err_rv!(CKR_MECHANISM_INVALID);
-        }
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -288,14 +287,9 @@ impl Mechanism for RsaPKCSMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        let op = RsaPKCSOperation {
-            mech: mech.mechanism,
-            public_key: Some(object_to_rsa_public_key(key)?),
-            private_key: None,
-            finalized: false,
-            in_use: false,
-        };
-        Ok(Box::new(op))
+        Ok(Box::new(RsaPKCSOperation::encrypt_new(
+            mech, key, &self.info,
+        )?))
     }
 
     fn decryption_new(
@@ -303,9 +297,6 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> KResult<Box<dyn Decryption>> {
-        if mech.mechanism != CKM_RSA_PKCS {
-            return err_rv!(CKR_MECHANISM_INVALID);
-        }
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -313,14 +304,39 @@ impl Mechanism for RsaPKCSMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        let op = RsaPKCSOperation {
-            mech: mech.mechanism,
-            public_key: Some(object_to_rsa_public_key(key)?),
-            private_key: Some(object_to_rsa_private_key(key)?),
-            finalized: false,
-            in_use: false,
-        };
-        Ok(Box::new(op))
+        Ok(Box::new(RsaPKCSOperation::decrypt_new(
+            mech, key, &self.info,
+        )?))
+    }
+    fn sign_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> KResult<Box<dyn Sign>> {
+        if self.info.flags & CKF_SIGN != CKF_SIGN {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match check_key_object(key, false, CKA_SIGN) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(RsaPKCSOperation::sign_new(mech, key, &self.info)?))
+    }
+    fn verify_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> KResult<Box<dyn Verify>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match check_key_object(key, true, CKA_VERIFY) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(RsaPKCSOperation::verify_new(
+            mech, key, &self.info,
+        )?))
     }
 }
 
@@ -330,8 +346,51 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: 1024,
-                ulMaxKeySize: 4096,
-                flags: CKF_ENCRYPT | CKF_DECRYPT,
+                ulMaxKeySize: 16536,
+                flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA1_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 1024,
+                ulMaxKeySize: 16536,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
+        CKM_SHA256_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 1024,
+                ulMaxKeySize: 16536,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
+        CKM_SHA384_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 1024,
+                ulMaxKeySize: 16536,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
+        CKM_SHA512_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 1024,
+                ulMaxKeySize: 16536,
+                flags: CKF_SIGN | CKF_VERIFY,
             },
         }),
     );
@@ -343,10 +402,260 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
 #[derive(Debug)]
 struct RsaPKCSOperation {
     mech: CK_MECHANISM_TYPE,
+    inner: Operation,
+    max_input: usize,
+    output_len: usize,
     public_key: Option<rsa_public_key>,
     private_key: Option<rsa_private_key>,
     finalized: bool,
     in_use: bool,
+}
+
+impl RsaPKCSOperation {
+    fn encrypt_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+    ) -> KResult<RsaPKCSOperation> {
+        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
+        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        if modulus_bits < info.ulMinKeySize
+            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
+        {
+            return err_rv!(CKR_KEY_SIZE_RANGE);
+        }
+        if mech.mechanism != CKM_RSA_PKCS {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        Ok(RsaPKCSOperation {
+            mech: mech.mechanism,
+            inner: Operation::Empty,
+            max_input: modulus.len() - 11,
+            output_len: modulus.len(),
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: None,
+            finalized: false,
+            in_use: false,
+        })
+    }
+
+    fn decrypt_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+    ) -> KResult<RsaPKCSOperation> {
+        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
+        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        if modulus_bits < info.ulMinKeySize
+            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
+        {
+            return err_rv!(CKR_KEY_SIZE_RANGE);
+        }
+        if mech.mechanism != CKM_RSA_PKCS {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        Ok(RsaPKCSOperation {
+            mech: mech.mechanism,
+            inner: Operation::Empty,
+            max_input: modulus.len(),
+            output_len: modulus.len() - 11,
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: Some(object_to_rsa_private_key(key)?),
+            finalized: false,
+            in_use: false,
+        })
+    }
+
+    fn sign_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+    ) -> KResult<RsaPKCSOperation> {
+        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
+        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        if modulus_bits < info.ulMinKeySize
+            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
+        {
+            return err_rv!(CKR_KEY_SIZE_RANGE);
+        }
+
+        Ok(RsaPKCSOperation {
+            mech: mech.mechanism,
+            max_input: match mech.mechanism {
+                CKM_RSA_PKCS => modulus.len() - 11,
+                CKM_SHA1_RSA_PKCS => 0,
+                CKM_SHA256_RSA_PKCS => 0,
+                CKM_SHA384_RSA_PKCS => 0,
+                CKM_SHA512_RSA_PKCS => 0,
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
+            output_len: modulus.len(),
+            inner: match mech.mechanism {
+                CKM_RSA_PKCS => Operation::Empty,
+                CKM_SHA1_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha1::SHA1Operation::new()))
+                }
+                CKM_SHA256_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha2::SHA256Operation::new()))
+                }
+                CKM_SHA384_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha2::SHA384Operation::new()))
+                }
+                CKM_SHA512_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha2::SHA512Operation::new()))
+                }
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: Some(object_to_rsa_private_key(key)?),
+            finalized: false,
+            in_use: false,
+        })
+    }
+
+    fn verify_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+    ) -> KResult<RsaPKCSOperation> {
+        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
+        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        if modulus_bits < info.ulMinKeySize
+            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
+        {
+            return err_rv!(CKR_KEY_SIZE_RANGE);
+        }
+
+        Ok(RsaPKCSOperation {
+            mech: mech.mechanism,
+            max_input: match mech.mechanism {
+                CKM_RSA_PKCS => modulus.len() - 11,
+                CKM_SHA1_RSA_PKCS => 0,
+                CKM_SHA256_RSA_PKCS => 0,
+                CKM_SHA384_RSA_PKCS => 0,
+                CKM_SHA512_RSA_PKCS => 0,
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
+            output_len: modulus.len(),
+            inner: match mech.mechanism {
+                CKM_RSA_PKCS => Operation::Empty,
+                CKM_SHA1_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha1::SHA1Operation::new()))
+                }
+                CKM_SHA256_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha2::SHA256Operation::new()))
+                }
+                CKM_SHA384_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha2::SHA384Operation::new()))
+                }
+                CKM_SHA512_RSA_PKCS => {
+                    Operation::Digest(Box::new(sha2::SHA512Operation::new()))
+                }
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: None,
+            finalized: false,
+            in_use: false,
+        })
+    }
+
+    fn emsa_prefix(&self, digest_idx: &mut usize) -> KResult<Vec<u8>> {
+        /* EMSA prefixes are an ASN.1 structure containing a hash identifier
+         * in OID form, and the actual hash in an octect string. Here we
+         * hard code the DER strcutures as they do not change based on the
+         * content of the hash which can be trated as a buffer at a fixed index.
+         * The general form is defined in RFC8017 Appendix A.2.4:
+         *   DigestInfo ::= SEQUENCE {
+         *     digestAlgorithm DigestAlgorithm,
+         *     digest OCTET STRING
+         *   }
+         *
+         *   DigestAlgorithm ::= AlgorithmIdentifier {
+         *     {PKCS1-v1-5DigestAlgorithms}
+         *   }
+         *
+         *   AlgorithmIdentifier { ALGORITHM-IDENTIFIER:InfoObjectSet } ::=
+         *     SEQUENCE {
+         *       algorithm ALGORITHM-IDENTIFIER.&id({InfoObjectSet}),
+         *       parameters ALGORITHM-IDENTIFIER.&Type({InfoObjectSet}{@.algorithm}) OPTIONAL
+         *     }
+         *
+         *    ALGORITHM-IDENTIFIER ::= CLASS {
+         *      &id    OBJECT IDENTIFIER  UNIQUE,
+         *      &Type  OPTIONAL
+         *    }
+         *
+         *  Although this looks complicated parameter/type is nevr used so the structure bils down
+         *  to:
+         *    SEQUENCE {                // [0x30, length]
+         *      SEQUENCE {              // [0x30, length]
+         *        OID { value }         // [OID] (0x06, lenght, ...)
+         *        NULL                  // [0x05, 0]
+         *      }
+         *      OCTET-STRING (hash)     // [0x04, length, hash]
+         *    }
+         */
+        match self.mech {
+            CKM_SHA1_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 33,
+                      0x30, 9,
+                        0x06, 0x05,
+                          0x2b, 0x0e, 0x03, 0x02, 0x1a,
+                        0x05, 0,
+                      0x04, 20,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 20]);
+                Ok(emsa)
+            }
+            CKM_SHA256_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 49,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+                        0x05, 0,
+                      0x04, 32,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 32]);
+                Ok(emsa)
+            }
+            CKM_SHA384_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 65,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02,
+                        0x05, 0,
+                      0x04, 48,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 48]);
+                Ok(emsa)
+            }
+            CKM_SHA512_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 81,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
+                        0x05, 0,
+                      0x04, 64,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 64]);
+                Ok(emsa)
+            }
+            _ => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
 }
 
 impl MechOperation for RsaPKCSOperation {
@@ -535,7 +844,7 @@ fn decrypt(
 ) -> KResult<()> {
     let mut x: __mpz_struct = __mpz_struct::default();
     unsafe {
-        nettle_mpz_init_set_str_256_s(&mut x, cipher_len as usize, cipher);
+        nettle_mpz_init_set_str_256_u(&mut x, cipher_len as usize, cipher);
     }
 
     let mut plen: usize = unsafe { *plain_len } as usize;
@@ -553,6 +862,238 @@ fn decrypt(
             plain as *mut _ as *mut u8,
             &mut x,
         )
+    };
+    if res == 0 {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
+    Ok(())
+}
+
+impl Sign for RsaPKCSOperation {
+    fn sign(
+        &mut self,
+        rng: &mut RNG,
+        data: &[u8],
+        signature: &mut [u8],
+    ) -> KResult<()> {
+        if self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        match self.mech {
+            CKM_RSA_PKCS => {
+                self.finalized = true;
+                if data.len() > self.max_input {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                if signature.len() != self.output_len {
+                    return err_rv!(CKR_GENERAL_ERROR);
+                }
+                let pubkey: &rsa_public_key = match self.public_key {
+                    None => return err_rv!(CKR_GENERAL_ERROR),
+                    Some(ref k) => k,
+                };
+                let prikey: &rsa_private_key = match self.private_key {
+                    None => return err_rv!(CKR_GENERAL_ERROR),
+                    Some(ref k) => k,
+                };
+                return pkcs1_sign(pubkey, prikey, rng, data, signature);
+            }
+            CKM_SHA1_RSA_PKCS => (),
+            CKM_SHA256_RSA_PKCS => (),
+            CKM_SHA384_RSA_PKCS => (),
+            CKM_SHA512_RSA_PKCS => (),
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        self.sign_update(data)?;
+        self.sign_final(rng, signature)
+    }
+
+    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if !self.in_use {
+            if self.mech == CKM_RSA_PKCS {
+                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            }
+            self.in_use = true;
+        }
+        match &mut self.inner {
+            Operation::Digest(op) => op.digest_update(data),
+            _ => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+
+    fn sign_final(
+        &mut self,
+        rng: &mut RNG,
+        signature: &mut [u8],
+    ) -> KResult<()> {
+        if !self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.finalized = true;
+        if signature.len() != self.output_len {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let pubkey: &rsa_public_key = match self.public_key {
+            None => return err_rv!(CKR_GENERAL_ERROR),
+            Some(ref k) => k,
+        };
+        let prikey: &rsa_private_key = match self.private_key {
+            None => return err_rv!(CKR_GENERAL_ERROR),
+            Some(ref k) => k,
+        };
+        let mut digest_idx = 0;
+        let mut digest = self.emsa_prefix(&mut digest_idx)?;
+        match &mut self.inner {
+            Operation::Digest(op) => {
+                op.digest_final(&mut digest[digest_idx..])?
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        pkcs1_sign(pubkey, prikey, rng, digest.as_slice(), signature)
+    }
+
+    fn signature_len(&self) -> KResult<usize> {
+        Ok(self.output_len)
+    }
+}
+
+fn pkcs1_sign(
+    pubkey: &rsa_public_key,
+    prikey: &rsa_private_key,
+    rng: &mut RNG,
+    digest: &[u8],
+    signature: &mut [u8],
+) -> KResult<()> {
+    let mut s: __mpz_struct = __mpz_struct::default();
+    unsafe { __gmpz_init(&mut s) };
+
+    let res = unsafe {
+        nettle_rsa_pkcs1_sign_tr(
+            pubkey,
+            prikey,
+            rng as *mut _ as *mut ::std::os::raw::c_void,
+            Some(get_random),
+            digest.len(),
+            digest.as_ptr(),
+            &mut s,
+        )
+    };
+    if res == 0 {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
+
+    unsafe {
+        let len = nettle_mpz_sizeinbase_256_u(&mut s);
+        if len != signature.len() {
+            return err_rv!(CKR_BUFFER_TOO_SMALL);
+        }
+        nettle_mpz_get_str_256(len, signature.as_mut_ptr(), &mut s);
+    }
+    Ok(())
+}
+
+impl Verify for RsaPKCSOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+        if self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        match self.mech {
+            CKM_RSA_PKCS => {
+                self.finalized = true;
+                if data.len() > self.max_input {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                if signature.len() < self.output_len {
+                    return err_rv!(CKR_BUFFER_TOO_SMALL);
+                }
+                let pubkey: &rsa_public_key = match self.public_key {
+                    None => return err_rv!(CKR_GENERAL_ERROR),
+                    Some(ref k) => k,
+                };
+                return pkcs1_verify(pubkey, data, signature);
+            }
+            CKM_SHA1_RSA_PKCS => (),
+            CKM_SHA256_RSA_PKCS => (),
+            CKM_SHA384_RSA_PKCS => (),
+            CKM_SHA512_RSA_PKCS => (),
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        self.verify_update(data)?;
+        self.verify_final(signature)
+    }
+    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if !self.in_use {
+            if self.mech == CKM_RSA_PKCS {
+                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            }
+            self.in_use = true;
+        }
+        match &mut self.inner {
+            Operation::Digest(op) => op.digest_update(data),
+            _ => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+        if !self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.finalized = true;
+        if signature.len() != self.output_len {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let pubkey: &rsa_public_key = match self.public_key {
+            None => return err_rv!(CKR_GENERAL_ERROR),
+            Some(ref k) => k,
+        };
+        let mut digest_idx = 0;
+        let mut digest = self.emsa_prefix(&mut digest_idx)?;
+        match &mut self.inner {
+            Operation::Digest(op) => {
+                op.digest_final(&mut digest[digest_idx..])?
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        pkcs1_verify(pubkey, digest.as_slice(), signature)
+    }
+
+    fn signature_len(&self) -> KResult<usize> {
+        Ok(self.output_len)
+    }
+}
+
+fn pkcs1_verify(
+    pubkey: &rsa_public_key,
+    digest: &[u8],
+    signature: &[u8],
+) -> KResult<()> {
+    let mut s: __mpz_struct = __mpz_struct::default();
+    unsafe {
+        nettle_mpz_init_set_str_256_u(
+            &mut s,
+            signature.len(),
+            signature.as_ptr(),
+        );
+    }
+    let res = unsafe {
+        nettle_rsa_pkcs1_verify(pubkey, digest.len(), digest.as_ptr(), &mut s)
     };
     if res == 0 {
         return err_rv!(CKR_GENERAL_ERROR);

@@ -34,6 +34,20 @@ pub trait Mechanism: Debug + Send + Sync {
     fn digest_new(&self, _: &CK_MECHANISM) -> KResult<Box<dyn Digest>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
+    fn sign_new(
+        &self,
+        _: &CK_MECHANISM,
+        _: &object::Object,
+    ) -> KResult<Box<dyn Sign>> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
+    fn verify_new(
+        &self,
+        _: &CK_MECHANISM,
+        _: &object::Object,
+    ) -> KResult<Box<dyn Verify>> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
 }
 
 #[derive(Debug)]
@@ -162,22 +176,64 @@ pub trait SearchOperation: Debug + Send + Sync {
 }
 
 pub trait Digest: MechOperation {
-    fn digest(
-        &mut self,
-        _data: &[u8],
-        _digest: CK_BYTE_PTR,
-        _digest_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    fn digest(&mut self, _data: &[u8], _digest: &mut [u8]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn digest_update(&mut self, _data: &[u8]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn digest_final(
+    fn digest_final(&mut self, _digest: &mut [u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn digest_len(&self) -> KResult<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
+pub trait Sign: MechOperation {
+    fn sign(
         &mut self,
-        _digest: CK_BYTE_PTR,
-        _digest_len: CK_ULONG_PTR,
+        _rng: &mut RNG,
+        _data: &[u8],
+        _signature: &mut [u8],
     ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn sign_final(
+        &mut self,
+        _rng: &mut RNG,
+        _signature: &mut [u8],
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn signature_len(&self) -> KResult<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
+pub trait Verify: MechOperation {
+    fn verify(&mut self, _data: &[u8], _signature: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn verify_update(&mut self, _data: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn signature_len(&self) -> KResult<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
+pub trait Accumulator: MechOperation {
+    fn push(&mut self, _data: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn peek(&mut self) -> KResult<&[u8]> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
@@ -189,4 +245,6 @@ pub enum Operation {
     Encryption(Box<dyn Encryption>),
     Decryption(Box<dyn Decryption>),
     Digest(Box<dyn Digest>),
+    Sign(Box<dyn Sign>),
+    Verify(Box<dyn Verify>),
 }
