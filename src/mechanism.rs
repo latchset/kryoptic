@@ -103,8 +103,7 @@ pub trait Encryption: MechOperation {
     fn encrypt(
         &mut self,
         _rng: &mut RNG,
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG,
+        _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -113,8 +112,7 @@ pub trait Encryption: MechOperation {
     fn encrypt_update(
         &mut self,
         _rng: &mut RNG,
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG,
+        _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -128,14 +126,16 @@ pub trait Encryption: MechOperation {
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
+    fn encryption_len(&self) -> KResult<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
 }
 
 pub trait Decryption: MechOperation {
     fn decrypt(
         &mut self,
         _rng: &mut RNG,
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG,
+        _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -144,8 +144,7 @@ pub trait Decryption: MechOperation {
     fn decrypt_update(
         &mut self,
         _rng: &mut RNG,
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG,
+        _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -157,6 +156,9 @@ pub trait Decryption: MechOperation {
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn decryption_len(&self) -> KResult<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
@@ -222,9 +224,6 @@ pub trait Verify: MechOperation {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn signature_len(&self) -> KResult<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }

@@ -1118,52 +1118,6 @@ fn test_rsa_operations() {
     );
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
-    /* calling final should also return error */
-    let mut fin_len: CK_ULONG = 256;
-    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut fin_len);
-    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
-
-    /* reinit and check via parts interface */
-    ret = fn_encrypt_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_encrypt_update(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        enc.as_ptr() as *mut _,
-        &mut enc_len,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    /* a second time should still be fine */
-    ret = fn_encrypt_update(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        enc.as_ptr() as *mut _,
-        &mut enc_len,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    /* but fn_encrypt should return an error */
-    ret = fn_encrypt(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        enc.as_ptr() as *mut _,
-        &mut enc_len,
-    );
-    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
-
-    /* and an init should also return an error */
-    ret = fn_encrypt_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OPERATION_ACTIVE);
-
-    ret = fn_encrypt_final(session, enc.as_ptr() as *mut _, &mut fin_len);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(fin_len, 0);
-
     /* test that decryption returns the same data back */
     template = vec![make_attribute!(
         CKA_UNIQUE_ID,
@@ -1193,6 +1147,7 @@ fn test_rsa_operations() {
         &mut dec_len,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
 
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);

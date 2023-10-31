@@ -757,20 +757,31 @@ extern "C" fn fn_encrypt_init(
 
 extern "C" fn fn_encrypt(
     s_handle: CK_SESSION_HANDLE,
-    data: CK_BYTE_PTR,
+    pdata: CK_BYTE_PTR,
     data_len: CK_ULONG,
     encrypted_data: CK_BYTE_PTR,
     pul_encrypted_data_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    if data.is_null() || pul_encrypted_data_len.is_null() {
+    if pdata.is_null() || pul_encrypted_data_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    if encrypted_data.is_null() {
+        let encryption_len = match token.encryption_len(s_handle) {
+            Ok(l) => l,
+            Err(e) => return err_to_rv!(e),
+        };
+        unsafe {
+            *pul_encrypted_data_len = encryption_len as CK_ULONG;
+        }
+        return CKR_OK;
+    }
+    let data: &[u8] =
+        unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
     ret_to_rv!(token.encrypt(
         s_handle,
         data,
-        data_len,
         encrypted_data,
         pul_encrypted_data_len
     ))
@@ -787,10 +798,11 @@ extern "C" fn fn_encrypt_update(
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let data: &[u8] =
+        unsafe { std::slice::from_raw_parts(part, part_len as usize) };
     ret_to_rv!(token.encrypt_update(
         s_handle,
-        part,
-        part_len,
+        data,
         encrypted_part,
         pul_encrypted_part_len
     ))
@@ -805,6 +817,16 @@ extern "C" fn fn_encrypt_final(
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    if last_encrypted_part.is_null() {
+        let encryption_len = match token.encryption_len(s_handle) {
+            Ok(l) => l,
+            Err(e) => return err_to_rv!(e),
+        };
+        unsafe {
+            *pul_last_encrypted_part_len = encryption_len as CK_ULONG;
+        }
+        return CKR_OK;
+    }
     ret_to_rv!(token.encrypt_final(
         s_handle,
         last_encrypted_part,
@@ -841,13 +863,20 @@ extern "C" fn fn_decrypt(
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    ret_to_rv!(token.decrypt(
-        s_handle,
-        encrypted_data,
-        encrypted_data_len,
-        data,
-        pul_data_len,
-    ))
+    if data.is_null() {
+        let decryption_len = match token.decryption_len(s_handle) {
+            Ok(l) => l,
+            Err(e) => return err_to_rv!(e),
+        };
+        unsafe {
+            *pul_data_len = decryption_len as CK_ULONG;
+        }
+        return CKR_OK;
+    }
+    let enc: &[u8] = unsafe {
+        std::slice::from_raw_parts(encrypted_data, encrypted_data_len as usize)
+    };
+    ret_to_rv!(token.decrypt(s_handle, enc, data, pul_data_len,))
 }
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -861,13 +890,10 @@ extern "C" fn fn_decrypt_update(
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    ret_to_rv!(token.decrypt_update(
-        s_handle,
-        encrypted_part,
-        encrypted_part_len,
-        part,
-        pul_part_len,
-    ))
+    let enc: &[u8] = unsafe {
+        std::slice::from_raw_parts(encrypted_part, encrypted_part_len as usize)
+    };
+    ret_to_rv!(token.decrypt_update(s_handle, enc, part, pul_part_len,))
 }
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -879,6 +905,16 @@ extern "C" fn fn_decrypt_final(
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    if last_part.is_null() {
+        let decryption_len = match token.decryption_len(s_handle) {
+            Ok(l) => l,
+            Err(e) => return err_to_rv!(e),
+        };
+        unsafe {
+            *pul_last_part_len = decryption_len as CK_ULONG;
+        }
+        return CKR_OK;
+    }
     ret_to_rv!(token.decrypt_final(s_handle, last_part, pul_last_part_len))
 }
 
