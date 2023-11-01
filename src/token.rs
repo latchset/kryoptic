@@ -9,6 +9,7 @@ use serde_json;
 
 use super::attribute;
 use super::error;
+use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
@@ -379,6 +380,7 @@ impl Token {
         rsa::register(&mut token.mechanisms, &mut token.object_templates);
         sha2::register(&mut token.mechanisms, &mut token.object_templates);
         sha1::register(&mut token.mechanisms, &mut token.object_templates);
+        hmac::register(&mut token.mechanisms, &mut token.object_templates);
 
         token
     }
@@ -1458,15 +1460,23 @@ impl Token {
 
     pub fn signature_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
         let session = self.sessions.get_session(handle)?;
-        let operation = match session.get_operation() {
-            Operation::Sign(op) => op,
+        let len = match session.get_operation() {
+            Operation::Sign(operation) => {
+                if operation.finalized() {
+                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                }
+                operation.signature_len()?
+            }
+            Operation::Verify(operation) => {
+                if operation.finalized() {
+                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                }
+                operation.signature_len()?
+            }
             Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
             _ => return err_rv!(CKR_OPERATION_ACTIVE),
         };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        operation.signature_len()
+        Ok(len)
     }
 
     pub fn verify_init(

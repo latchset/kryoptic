@@ -226,6 +226,10 @@ pub trait Verify: MechOperation {
     fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
+
+    fn signature_len(&self) -> KResult<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
 }
 
 pub trait Accumulator: MechOperation {

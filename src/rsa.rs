@@ -797,7 +797,7 @@ impl RsaPKCSOperation {
             )
         };
         if res == 0 {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return err_rv!(CKR_SIGNATURE_INVALID);
         }
         Ok(())
     }
@@ -1075,5 +1075,9 @@ impl Verify for RsaPKCSOperation {
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         self.pkcs1_verify(digest.as_slice(), signature)
+    }
+
+    fn signature_len(&self) -> KResult<usize> {
+        Ok(self.output_len)
     }
 }

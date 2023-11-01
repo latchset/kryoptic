@@ -47,6 +47,7 @@ use interface::*;
 use token::Token;
 
 /* algorithms and ciphers */
+mod hmac;
 mod rsa;
 mod sha1;
 mod sha2;
@@ -1166,18 +1167,24 @@ extern "C" fn fn_verify(
     pdata: CK_BYTE_PTR,
     data_len: CK_ULONG,
     psignature: CK_BYTE_PTR,
-    signature_len: CK_ULONG,
+    psignature_len: CK_ULONG,
 ) -> CK_RV {
     if pdata.is_null() || psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let signature_len = match token.signature_len(s_handle) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
+    };
+    if psignature_len != signature_len as CK_ULONG {
+        return CKR_SIGNATURE_LEN_RANGE;
+    }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
-    let signature: &[u8] = unsafe {
-        std::slice::from_raw_parts(psignature, signature_len as usize)
-    };
+    let signature: &[u8] =
+        unsafe { std::slice::from_raw_parts(psignature, signature_len) };
     ret_to_rv!(token.verify(s_handle, data, signature))
 }
 extern "C" fn fn_verify_update(
@@ -1197,16 +1204,22 @@ extern "C" fn fn_verify_update(
 extern "C" fn fn_verify_final(
     s_handle: CK_SESSION_HANDLE,
     psignature: CK_BYTE_PTR,
-    signature_len: CK_ULONG,
+    psignature_len: CK_ULONG,
 ) -> CK_RV {
     if psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
     let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let signature: &mut [u8] = unsafe {
-        std::slice::from_raw_parts_mut(psignature, signature_len as usize)
+    let signature_len = match token.signature_len(s_handle) {
+        Ok(s) => s,
+        Err(e) => return err_to_rv!(e),
     };
+    if psignature_len != signature_len as CK_ULONG {
+        return CKR_SIGNATURE_LEN_RANGE;
+    }
+    let signature: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
     ret_to_rv!(token.verify_final(s_handle, signature))
 }
 extern "C" fn fn_verify_recover_init(
