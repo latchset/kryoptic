@@ -678,8 +678,7 @@ impl RsaPKCSOperation {
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        let mut x: __mpz_struct = __mpz_struct::default();
-        unsafe { __gmpz_init(&mut x) };
+        let mut c: mpz_struct_wrapper = mpz_struct_wrapper::new();
 
         let res = unsafe {
             nettle_rsa_encrypt(
@@ -688,7 +687,7 @@ impl RsaPKCSOperation {
                 Some(get_random),
                 plain.len(),
                 plain.as_ptr(),
-                &mut x,
+                c.as_mut_ptr(),
             )
         };
         if res == 0 {
@@ -696,11 +695,11 @@ impl RsaPKCSOperation {
         }
 
         unsafe {
-            let len = nettle_mpz_sizeinbase_256_u(&mut x);
+            let len = nettle_mpz_sizeinbase_256_u(c.as_mut_ptr());
             if len as CK_ULONG > *cipher_len {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
-            nettle_mpz_get_str_256(len, cipher, &mut x);
+            nettle_mpz_get_str_256(len, cipher, c.as_mut_ptr());
             *cipher_len = len as CK_ULONG;
         }
         Ok(())
@@ -713,10 +712,10 @@ impl RsaPKCSOperation {
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        let mut x: __mpz_struct = __mpz_struct::default();
+        let mut c: mpz_struct_wrapper = mpz_struct_wrapper::new();
         unsafe {
             nettle_mpz_init_set_str_256_u(
-                &mut x,
+                c.as_mut_ptr(),
                 cipher.len(),
                 cipher.as_ptr(),
             );
@@ -735,7 +734,7 @@ impl RsaPKCSOperation {
                 Some(get_random),
                 &mut plen,
                 plain as *mut _ as *mut u8,
-                &mut x,
+                c.as_mut_ptr(),
             )
         };
         if res == 0 {
@@ -753,8 +752,7 @@ impl RsaPKCSOperation {
         digest: &[u8],
         signature: &mut [u8],
     ) -> KResult<()> {
-        let mut s: __mpz_struct = __mpz_struct::default();
-        unsafe { __gmpz_init(&mut s) };
+        let mut s: mpz_struct_wrapper = mpz_struct_wrapper::new();
 
         let res = unsafe {
             nettle_rsa_pkcs1_sign_tr(
@@ -764,7 +762,7 @@ impl RsaPKCSOperation {
                 Some(get_random),
                 digest.len(),
                 digest.as_ptr(),
-                &mut s,
+                s.as_mut_ptr(),
             )
         };
         if res == 0 {
@@ -772,20 +770,20 @@ impl RsaPKCSOperation {
         }
 
         unsafe {
-            let len = nettle_mpz_sizeinbase_256_u(&mut s);
+            let len = nettle_mpz_sizeinbase_256_u(s.as_mut_ptr());
             if len != signature.len() {
                 return err_rv!(CKR_BUFFER_TOO_SMALL);
             }
-            nettle_mpz_get_str_256(len, signature.as_mut_ptr(), &mut s);
+            nettle_mpz_get_str_256(len, signature.as_mut_ptr(), s.as_mut_ptr());
         }
         Ok(())
     }
 
     fn pkcs1_verify(&self, digest: &[u8], signature: &[u8]) -> KResult<()> {
-        let mut s: __mpz_struct = __mpz_struct::default();
+        let mut s: mpz_struct_wrapper = mpz_struct_wrapper::new();
         unsafe {
             nettle_mpz_init_set_str_256_u(
-                &mut s,
+                s.as_mut_ptr(),
                 signature.len(),
                 signature.as_ptr(),
             );
@@ -795,7 +793,7 @@ impl RsaPKCSOperation {
                 &self.public_key,
                 digest.len(),
                 digest.as_ptr(),
-                &mut s,
+                s.as_mut_ptr(),
             )
         };
         if res == 0 {

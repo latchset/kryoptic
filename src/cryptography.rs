@@ -10,6 +10,7 @@ include!("nettle_bindings.rs");
 use core::fmt::Error;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use zeroize::Zeroize;
 
 unsafe impl Send for rsa_public_key {}
 unsafe impl Sync for rsa_public_key {}
@@ -37,6 +38,60 @@ impl Debug for rsa_private_key {
             .field("b", &"b")
             .field("c", &"c")
             .finish()
+    }
+}
+
+macro_rules! zero_mpz_struct {
+    ($field:expr) => {
+        let z: &mut [::std::os::raw::c_ulong] = unsafe {
+            std::slice::from_raw_parts_mut(
+                $field._mp_d,
+                $field._mp_alloc as usize,
+            )
+        };
+        z.zeroize();
+    };
+}
+
+impl Drop for rsa_public_key {
+    fn drop(&mut self) {
+        unsafe { nettle_rsa_public_key_clear(self) };
+    }
+}
+
+impl Drop for rsa_private_key {
+    fn drop(&mut self) {
+        zero_mpz_struct!(self.d[0]);
+        zero_mpz_struct!(self.p[0]);
+        zero_mpz_struct!(self.q[0]);
+        zero_mpz_struct!(self.a[0]);
+        zero_mpz_struct!(self.b[0]);
+        zero_mpz_struct!(self.c[0]);
+        unsafe { nettle_rsa_private_key_clear(self) };
+    }
+}
+
+pub struct mpz_struct_wrapper {
+    mpz: __mpz_struct,
+}
+
+impl mpz_struct_wrapper {
+    pub fn new() -> mpz_struct_wrapper {
+        let mut x = mpz_struct_wrapper {
+            mpz: __mpz_struct::default(),
+        };
+        unsafe { __gmpz_init(&mut x.mpz) };
+        x
+    }
+    pub fn as_mut_ptr(&mut self) -> &mut __mpz_struct {
+        &mut self.mpz
+    }
+}
+
+impl Drop for mpz_struct_wrapper {
+    fn drop(&mut self) {
+        zero_mpz_struct!(self.mpz);
+        unsafe { __gmpz_clear(&mut self.mpz) };
     }
 }
 
