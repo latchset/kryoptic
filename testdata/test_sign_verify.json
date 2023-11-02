@@ -67,4 +67,70 @@
         "CKA_TOKEN": true,
         "CKA_VALUE": "9F1V81VR6XXWqNx+qfSIWTlAzHVpSiePJ+V4oWPYObNAQIQYCM+cWMm4cov1+c6O6BHqkXFPR7q5LQ9tWib8/ups2TuRDAoslj5k6xgj8QJ1PUHwM1kQrTqXcQTxqvbDdCcWqXVdEbju1pBHf0RcXScgiy4oQzD6PTAUI/p/LQhuCtC4krnbVE5FbT8Nq4XZU8EtNAqoc+2nJ8imSdt/pjdA4l6a8VM7MH5hMpmTEQ6VGU4Dk5nDgk0kxR8ismveECTNOVlYot/rSBam6K3ttQsfa1bQswYP8PHEyw0OAB3VnXO+Eg=="
     }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "5",
+        "CKA_CLASS": 4,
+        "CKA_KEY_TYPE": 16,
+        "CKA_ID": "SE1BQyBUZXN0IEtleQ==",
+        "CKA_LABEL": "HMAC Test Key",
+        "CKA_EXTRACTABLE": false,
+        "CKA_DESTROYABLE": false,
+        "CKA_PRIVATE": true,
+        "CKA_SENSITIVE": true,
+        "CKA_VALUE": "VEVTVEtFWQ==",
+        "CKA_TOKEN": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "6",
+        "CKA_APPLICATION": "CKM_SHA_1_HMAC",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "SHA 1 HMAC",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "96xfUohUO9m5LHPJ3OHdHtVldh0=",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "SGVsbG8gU0hBLTEgSE1BQw=="
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "7",
+        "CKA_APPLICATION": "CKM_SHA256_HMAC",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "SHA 256 HMAC",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "Iu/AVKn/Qwq3g3oGthAnoLc2tipcH/5LdhVSCFPJ7+s=",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "SGVsbG8gU0hBMjU2IEhNQUM="
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "8",
+        "CKA_APPLICATION": "CKM_SHA384_HMAC",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "SHA384 HMAC",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "RYsJJAWvGaOjj1/ZITlWo4Ak20Xx0Usxc0m26AtN5yp8vHmgqvPSwNwj4l80S2g8",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "SGVsbG8gU0hBMzg0IEhNQUM="
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "9",
+        "CKA_APPLICATION": "CKM_SHA512_HMAC",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "SHA 512 HMAC",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "YFlWSCGB1smR5lw/ULgqAHxyQpKwwKSmqm/gYFyz5lg2dgmYSHjQ0cWwet0TlComLfOAom5X+Iv/A3Avdp9thg==",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "SGVsbG8gU0hBNTEyIEhNQUM="
+    }
 }]}

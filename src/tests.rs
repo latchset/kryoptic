@@ -1588,6 +1588,140 @@ fn test_hashes_digest() {
     testdata.finalize();
 }
 
+struct TestCase {
+    value: Vec<u8>,
+    result: Vec<u8>,
+}
+
+/* name in CKA_APPLICATION, value in CKA_VALUE, result in CKA_OBJECT_ID */
+fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_APPLICATION,
+        CString::new(name).unwrap().into_raw(),
+        name.len()
+    )];
+    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* get values */
+    template.clear();
+    template.push(make_attribute!(CKA_VALUE, std::ptr::null_mut(), 0));
+    template.push(make_attribute!(CKA_OBJECT_ID, std::ptr::null_mut(), 0));
+    ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut tc = TestCase {
+        value: vec![0; template[0].ulValueLen as usize],
+        result: vec![0; template[1].ulValueLen as usize],
+    };
+    template[0].pValue = tc.value.as_mut_ptr() as CK_VOID_PTR;
+    template[1].pValue = tc.result.as_mut_ptr() as CK_VOID_PTR;
+    ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    tc
+}
+
+/* name in CKA_ID */
+fn get_test_key_handle(
+    session: CK_SESSION_HANDLE,
+    name: &str,
+    class: CK_ULONG,
+) -> CK_OBJECT_HANDLE {
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut classbuf = class;
+    let mut template = vec![
+        make_attribute!(
+            CKA_ID,
+            CString::new(name).unwrap().into_raw(),
+            name.len()
+        ),
+        make_attribute!(CKA_CLASS, &mut classbuf as *mut _, CK_ULONG_SIZE),
+    ];
+    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 2);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    handle
+}
+
+fn sig_verify(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    data: &mut Vec<u8>,
+    signature: &mut Vec<u8>,
+    mechanism: &mut CK_MECHANISM,
+) {
+    let mut ret = fn_verify_init(session, mechanism, key);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        signature.as_mut_ptr(),
+        signature.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+}
+
+fn sig_and_check(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    data: &mut Vec<u8>,
+    signature: &mut Vec<u8>,
+    mechanism: &mut CK_MECHANISM,
+) -> Vec<u8> {
+    let mut ret = fn_sign_init(session, mechanism, key);
+    assert_eq!(ret, CKR_OK);
+
+    /* get signature lenght */
+    let mut csiglen: CK_ULONG = 0;
+    ret = fn_sign(
+        session,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut csiglen,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(csiglen, signature.len() as CK_ULONG);
+
+    let mut computed_signature: Vec<u8> = vec![0; csiglen as usize];
+    ret = fn_sign(
+        session,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        computed_signature.as_mut_ptr(),
+        &mut csiglen,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(csiglen, signature.len() as CK_ULONG);
+    assert_eq!(signature, &mut computed_signature);
+
+    computed_signature
+}
+
 #[test]
 fn test_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
@@ -1619,61 +1753,14 @@ fn test_signatures() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* ### CKM_RSA_PKCS ### */
+
     /* get test data */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("4").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
-
-    /* get values */
-    template.clear();
-    template.push(make_attribute!(CKA_OBJECT_ID, std::ptr::null_mut(), 0));
-    template.push(make_attribute!(CKA_VALUE, std::ptr::null_mut(), 0));
-    ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    let mut signature: Vec<u8> = vec![0; template[0].ulValueLen as usize];
-    let mut value: Vec<u8> = vec![0; template[1].ulValueLen as usize];
-    template[0].pValue = signature.as_mut_ptr() as CK_VOID_PTR;
-    template[1].pValue = value.as_mut_ptr() as CK_VOID_PTR;
-    ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    /* get test keys */
-    let mut key_handles: [CK_OBJECT_HANDLE; 2] = [CK_INVALID_HANDLE; 2];
-    let idval = "Example 15";
-    template.clear();
-    template.push(make_attribute!(
-        CKA_ID,
-        CString::new(idval).unwrap().into_raw(),
-        idval.len()
-    ));
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, key_handles.as_mut_ptr(), 2, &mut count);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 2);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
+    let mut testcase = get_test_case_data(session, "CKM_RSA_PKCS");
+    let pri_key_handle =
+        get_test_key_handle(session, "Example 15", CKO_PRIVATE_KEY);
+    let pub_key_handle =
+        get_test_key_handle(session, "Example 15", CKO_PUBLIC_KEY);
 
     /* verify test vector */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -1681,65 +1768,131 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-
-    ret = fn_verify_init(session, &mut mechanism, key_handles[0]);
-    if ret == CKR_KEY_TYPE_INCONSISTENT {
-        let tmp = key_handles[0];
-        key_handles[0] = key_handles[1];
-        key_handles[1] = tmp;
-        ret = fn_verify_init(session, &mut mechanism, key_handles[0]);
-    }
-    assert_eq!(ret, CKR_OK);
-
-    /* a second invocation should return an error */
-    ret = fn_verify_init(session, &mut mechanism, key_handles[0]);
-    assert_eq!(ret, CKR_OPERATION_ACTIVE);
-
-    ret = fn_verify(
+    sig_verify(
         session,
-        value.as_mut_ptr(),
-        value.len() as CK_ULONG,
-        signature.as_mut_ptr(),
-        signature.len() as CK_ULONG,
+        pub_key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
     );
-    assert_eq!(ret, CKR_OK);
 
-    /* sign cycle */
-    ret = fn_sign_init(session, &mut mechanism, key_handles[1]);
-    assert_eq!(ret, CKR_OK);
-
-    /* get signature lenght */
-    let mut csiglen: CK_ULONG = 0;
-    ret = fn_sign(
+    let _ = sig_and_check(
         session,
-        value.as_mut_ptr(),
-        value.len() as CK_ULONG,
-        std::ptr::null_mut(),
-        &mut csiglen,
+        pri_key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
     );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(csiglen, signature.len() as CK_ULONG);
 
-    let mut computed_signature: Vec<u8> = vec![0; csiglen as usize];
-    ret = fn_sign(
-        session,
-        value.as_mut_ptr(),
-        value.len() as CK_ULONG,
-        computed_signature.as_mut_ptr(),
-        &mut csiglen,
-    );
-    assert_eq!(ret, CKR_OK);
+    /* ### HMACs ### */
 
-    ret = fn_verify_init(session, &mut mechanism, key_handles[0]);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_verify(
+    /* get test keys */
+    let key_handle =
+        get_test_key_handle(session, "HMAC Test Key", CKO_SECRET_KEY);
+
+    /* ### SHA-1 HMAC */
+
+    /* get test data */
+    let mut testcase = get_test_case_data(session, "CKM_SHA_1_HMAC");
+
+    /* verify test vector */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA_1_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    sig_verify(
         session,
-        value.as_mut_ptr(),
-        value.len() as CK_ULONG,
-        computed_signature.as_mut_ptr(),
-        computed_signature.len() as CK_ULONG,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
     );
-    assert_eq!(ret, CKR_OK);
+    let _ = sig_and_check(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+
+    /* ### SHA256 HMAC */
+
+    /* get test data */
+    let mut testcase = get_test_case_data(session, "CKM_SHA256_HMAC");
+
+    /* verify test vector */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    sig_verify(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+    let _ = sig_and_check(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+
+    /* ### SHA384 HMAC */
+
+    /* get test data */
+    let mut testcase = get_test_case_data(session, "CKM_SHA384_HMAC");
+
+    /* verify test vector */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA384_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    sig_verify(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+    let _ = sig_and_check(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+
+    /* ### SHA512 HMAC */
+
+    /* get test data */
+    let mut testcase = get_test_case_data(session, "CKM_SHA512_HMAC");
+
+    /* verify test vector */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA512_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    sig_verify(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+    let _ = sig_and_check(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
 
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
