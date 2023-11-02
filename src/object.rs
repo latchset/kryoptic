@@ -658,12 +658,94 @@ pub trait PrivKeyTemplate {
     fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr>;
 }
 
+/* pkcs11-spec-v3.1 6.8 Generic secret key */
+#[derive(Debug)]
+struct GenericSecretKeyTemplate {
+    attributes: Vec<ObjectAttr>,
+}
+
+impl GenericSecretKeyTemplate {
+    fn new() -> GenericSecretKeyTemplate {
+        let mut data: GenericSecretKeyTemplate = GenericSecretKeyTemplate {
+            attributes: Vec::new(),
+        };
+        data.init_common_object_attrs();
+        data.init_common_storage_attrs();
+        data.init_common_key_attrs();
+        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; from_bytes; val Vec::new()));
+
+        /* default to private */
+        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
+        match data
+            .attributes
+            .iter()
+            .position(|x| x.get_type() == CKA_PRIVATE)
+        {
+            Some(idx) => data.attributes[idx] = private,
+            None => data.attributes.push(private),
+        }
+
+        data
+    }
+
+    fn gen_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
+        bool_attr_never_set!(obj; CKA_VALUE_LEN);
+
+        CKR_OK
+    }
+}
+
+impl ObjectTemplate for GenericSecretKeyTemplate {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+        let mut obj = self.default_object_create(template)?;
+
+        let mut ret = self.key_create_attrs_checks(&mut obj);
+        if ret != CKR_OK {
+            return err_rv!(ret);
+        }
+        ret = self.gen_create_attrs_checks(&mut obj);
+        if ret != CKR_OK {
+            return err_rv!(ret);
+        }
+        bytes_attr_not_empty!(obj; CKA_VALUE);
+
+        Ok(obj)
+    }
+
+    fn copy(
+        &self,
+        origin: &Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        self.default_copy(origin, template)
+    }
+
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
+    }
+}
+
+impl CommonKeyTemplate for GenericSecretKeyTemplate {
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
+    }
+}
+
 #[derive(Debug, Eq, Hash, PartialEq)]
 pub enum ObjectType {
     DataObj,
     X509CertObj,
     RSAPubKey,
     RSAPrivKey,
+    GenericSecretKey,
 }
 
 #[derive(Debug)]
@@ -680,6 +762,10 @@ impl ObjectTemplates {
             .insert(ObjectType::DataObj, Box::new(DataTemplate::new()));
         ot.templates
             .insert(ObjectType::X509CertObj, Box::new(X509Template::new()));
+        ot.templates.insert(
+            ObjectType::GenericSecretKey,
+            Box::new(GenericSecretKeyTemplate::new()),
+        );
         ot
     }
 
@@ -796,8 +882,19 @@ impl ObjectTemplates {
                         _ => err_rv!(CKR_DEVICE_ERROR),
                     },
                 },
+                CKO_SECRET_KEY => match obj.get_attr_as_ulong(CKA_KEY_TYPE) {
+                    Err(_) => err_rv!(CKR_DEVICE_ERROR),
+                    Ok(ktype) => match ktype {
+                        CKK_GENERIC_SECRET | CKK_SHA_1_HMAC
+                        | CKK_SHA256_HMAC | CKK_SHA384_HMAC
+                        | CKK_SHA512_HMAC => {
+                            self.get_template(ObjectType::GenericSecretKey)
+                        }
+                        _ => err_rv!(CKR_DEVICE_ERROR),
+                    },
+                },
                 /* TODO:
-                 *  CKO_SECRET_KEY, CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
+                 *  CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
                  *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
                  *  CKO_VENDOR_DEFINED
                  */
