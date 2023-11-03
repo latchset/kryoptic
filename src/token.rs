@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use super::attribute;
+use super::drbg;
 use super::error;
 use super::hmac;
 use super::interface;
@@ -26,8 +27,6 @@ use object::{Object, ObjectTemplates};
 use session::{Session, Sessions};
 
 use std::collections::hash_map::Iter;
-
-use getrandom;
 
 static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic FIPS Token             ";
@@ -106,26 +105,25 @@ impl LoginData {
 
 #[derive(Debug)]
 pub struct RNG {
-    initialized: bool,
+    drbg: Box<dyn mechanism::DRBG>,
 }
 
 impl RNG {
-    pub fn new() -> RNG {
-        RNG { initialized: true }
+    pub fn new(alg: &str) -> KResult<RNG> {
+        match alg {
+            "HMAC DRBG SHA256" => Ok(RNG {
+                drbg: Box::new(drbg::HmacSha256Drbg::new()?),
+            }),
+            "HMAC DRBG SHA512" => Ok(RNG {
+                drbg: Box::new(drbg::HmacSha512Drbg::new()?),
+            }),
+            _ => err_rv!(CKR_RANDOM_NO_RNG),
+        }
     }
 
-    /* NOTE: this is just a placeholder to get somethjing going */
-    pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
-        if !self.initialized {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        if buffer.len() > 256 {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        }
-        if getrandom::getrandom(buffer).is_err() {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        Ok(())
+    pub fn generate_random(&mut self, buffer: &mut [u8]) -> KResult<()> {
+        let noaddtl: [u8; 0] = [];
+        self.drbg.generate(&noaddtl, buffer)
     }
 }
 
@@ -373,7 +371,7 @@ impl Token {
                 logged_in: false,
             },
             dirty: false,
-            rng: RNG::new(),
+            rng: RNG::new("HMAC DRBG SHA256").unwrap(),
         };
 
         /* register mechanisms and templates */
@@ -833,7 +831,7 @@ impl Token {
         Ok(())
     }
 
-    pub fn generate_random(&self, buffer: &mut [u8]) -> KResult<()> {
+    pub fn generate_random(&mut self, buffer: &mut [u8]) -> KResult<()> {
         self.rng.generate_random(buffer)
     }
 

@@ -7,6 +7,7 @@ ALL_C_FILES=\
 	Hacl_Hash_SHA1.c \
 	Hacl_Hash_SHA2.c \
 	Hacl_HMAC.c \
+	Hacl_HMAC_DRBG.c \
 	$(NULL)
 ALL_H_FILES=\
 	Hacl_IntTypes_Intrinsics.h Hacl_IntTypes_Intrinsics_128.h \
@@ -15,4 +16,5 @@ ALL_H_FILES=\
 	Hacl_Hash_SHA1.h internal/Hacl_Hash_SHA1.h \
 	Hacl_Hash_SHA2.h internal/Hacl_Hash_SHA2.h internal/Hacl_SHA2_Types.h \
 	Hacl_HMAC.h \
+	Hacl_HMAC_DRBG.h \
 	$(NULL)

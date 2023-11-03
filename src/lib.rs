@@ -47,6 +47,7 @@ use interface::*;
 use token::Token;
 
 /* algorithms and ciphers */
+mod drbg;
 mod hmac;
 mod rsa;
 mod sha1;
@@ -1340,7 +1341,7 @@ extern "C" fn fn_generate_random(
     random_len: CK_ULONG,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let token = token_from_session_handle!(rslots, s_handle);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
     let data: &mut [u8] = unsafe {
         std::slice::from_raw_parts_mut(random_data, random_len as usize)
     };

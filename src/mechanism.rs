@@ -232,15 +232,6 @@ pub trait Verify: MechOperation {
     }
 }
 
-pub trait Accumulator: MechOperation {
-    fn push(&mut self, _data: &[u8]) -> KResult<()> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn peek(&mut self) -> KResult<&[u8]> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-}
-
 #[derive(Debug)]
 pub enum Operation {
     Empty,
@@ -250,4 +241,21 @@ pub enum Operation {
     Digest(Box<dyn Digest>),
     Sign(Box<dyn Sign>),
     Verify(Box<dyn Verify>),
+}
+
+pub trait DRBG: Debug + Send + Sync {
+    fn init(
+        &mut self,
+        _entropy: &[u8],
+        _nonce: &[u8],
+        _pers: &[u8],
+    ) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn reseed(&mut self, _entropy: &[u8], _addtl: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn generate(&mut self, _addtl: &[u8], _output: &mut [u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
 }
