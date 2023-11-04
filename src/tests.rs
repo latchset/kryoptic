@@ -164,7 +164,7 @@ fn test_token() {
     let mut testdata = TestData::new("testdata/test_token.json");
     testdata.setup_db();
 
-    let mut plist: CK_FUNCTION_LIST_PTR = std::ptr::null_mut();
+    let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
     let result = C_GetFunctionList(&mut *pplist);
     assert_eq!(result, 0);

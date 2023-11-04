@@ -61,11 +61,11 @@ impl bindgen::callbacks::ParseCallbacks for HaclCallbacks {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=pkcs11.h");
+    println!("cargo:rerun-if-changed=pkcs11_headers/3.1/pkcs11.h");
 
     /* PKCS11 Headers */
     bindgen::Builder::default()
-        .header("pkcs11.h")
+        .header("pkcs11_headers/3.1/pkcs11.h")
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
         .blocklist_type("CK_FUNCTION_LIST_PTR")

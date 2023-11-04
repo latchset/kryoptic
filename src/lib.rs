@@ -1532,7 +1532,7 @@ extern "C" fn fn_get_info(info: CK_INFO_PTR) -> CK_RV {
 #[no_mangle]
 pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
     unsafe {
-        *fnlist = &FNLIST_240;
+        *fnlist = &FNLIST_240 as *const _ as *mut _;
     };
     CKR_OK
 }

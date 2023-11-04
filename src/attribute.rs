@@ -39,7 +39,7 @@ macro_rules! attrmap_element {
     };
 }
 
-static ATTRMAP: [Attrmap<'_>; 126] = [
+static ATTRMAP: [Attrmap<'_>; 130] = [
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -92,7 +92,6 @@ static ATTRMAP: [Attrmap<'_>; 126] = [
     attrmap_element!(CKA_BASE; as BytesType),
     attrmap_element!(CKA_PRIME_BITS; as BytesType),
     attrmap_element!(CKA_SUBPRIME_BITS; as NumType),
-    /*attrmap_element!(CKA_SUB_PRIME_BITS; as NumType),*/
     attrmap_element!(CKA_VALUE_BITS; as NumType),
     attrmap_element!(CKA_VALUE_LEN; as NumType),
     attrmap_element!(CKA_EXTRACTABLE; as BoolType),
@@ -103,11 +102,8 @@ static ATTRMAP: [Attrmap<'_>; 126] = [
     attrmap_element!(CKA_MODIFIABLE; as BoolType),
     attrmap_element!(CKA_COPYABLE; as BoolType),
     attrmap_element!(CKA_DESTROYABLE; as BoolType),
-    /*attrmap_element!(CKA_ECDSA_PARAMS; as BytesType),*/
     attrmap_element!(CKA_EC_PARAMS; as BytesType),
     attrmap_element!(CKA_EC_POINT; as BytesType),
-    attrmap_element!(CKA_SECONDARY_AUTH; as NumType),
-    attrmap_element!(CKA_AUTH_PIN_FLAGS; as NumType),
     attrmap_element!(CKA_ALWAYS_AUTHENTICATE; as BoolType),
     attrmap_element!(CKA_WRAP_WITH_TRUSTED; as BoolType),
     attrmap_element!(CKA_WRAP_TEMPLATE; as BytesType),
@@ -167,6 +163,12 @@ static ATTRMAP: [Attrmap<'_>; 126] = [
     attrmap_element!(CKA_X2RATCHET_PNS; as NumType),
     attrmap_element!(CKA_X2RATCHET_RK; as BytesType),
     attrmap_element!(CKA_VENDOR_DEFINED; as DenyType),
+    attrmap_element!(CKA_HSS_LEVELS; as NumType),
+    attrmap_element!(CKA_HSS_LMS_TYPE; as NumType),
+    attrmap_element!(CKA_HSS_LMOTS_TYPE; as NumType),
+    attrmap_element!(CKA_HSS_LMS_TYPES; as BytesType),
+    attrmap_element!(CKA_HSS_LMOTS_TYPES; as BytesType),
+    attrmap_element!(CKA_HSS_KEYS_REMAINING; as NumType),
     attrmap_element!(KRYATTR_MAX_LOGIN_ATTEMPTS; as NumType),
 ];
 
