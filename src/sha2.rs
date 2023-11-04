@@ -50,6 +50,19 @@ impl SHA256Operation {
             in_use: false,
         }
     }
+    pub fn hashlen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
+        }
+    }
+    pub fn blocklen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
+        }
+    }
+    pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
+        Spec_Hash_Definitions_SHA2_256
+    }
 }
 
 impl MechOperation for SHA256Operation {
@@ -61,6 +74,11 @@ impl MechOperation for SHA256Operation {
     }
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn reset(&mut self) -> KResult<()> {
+        self.finalized = false;
+        self.in_use = false;
+        Ok(())
     }
 }
 
@@ -135,10 +153,7 @@ impl Digest for SHA256Operation {
     }
 
     fn digest_len(&self) -> KResult<usize> {
-        Ok(unsafe {
-            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA2_256)
-                as usize
-        })
+        Ok(Self::hashlen())
     }
 }
 
@@ -178,6 +193,19 @@ impl SHA384Operation {
             in_use: false,
         }
     }
+    pub fn hashlen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
+        }
+    }
+    pub fn blocklen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
+        }
+    }
+    pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
+        Spec_Hash_Definitions_SHA2_384
+    }
 }
 
 impl MechOperation for SHA384Operation {
@@ -189,6 +217,11 @@ impl MechOperation for SHA384Operation {
     }
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn reset(&mut self) -> KResult<()> {
+        self.finalized = false;
+        self.in_use = false;
+        Ok(())
     }
 }
 
@@ -263,10 +296,7 @@ impl Digest for SHA384Operation {
     }
 
     fn digest_len(&self) -> KResult<usize> {
-        Ok(unsafe {
-            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA2_384)
-                as usize
-        })
+        Ok(Self::hashlen())
     }
 }
 
@@ -306,6 +336,19 @@ impl SHA512Operation {
             in_use: false,
         }
     }
+    pub fn hashlen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
+        }
+    }
+    pub fn blocklen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
+        }
+    }
+    pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
+        Spec_Hash_Definitions_SHA2_512
+    }
 }
 
 impl MechOperation for SHA512Operation {
@@ -317,6 +360,11 @@ impl MechOperation for SHA512Operation {
     }
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn reset(&mut self) -> KResult<()> {
+        self.finalized = false;
+        self.in_use = false;
+        Ok(())
     }
 }
 
@@ -391,10 +439,7 @@ impl Digest for SHA512Operation {
     }
 
     fn digest_len(&self) -> KResult<usize> {
-        Ok(unsafe {
-            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA2_512)
-                as usize
-        })
+        Ok(Self::hashlen())
     }
 }
 

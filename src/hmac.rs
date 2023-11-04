@@ -7,6 +7,8 @@ use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::sha1;
+use super::sha2;
 use super::token;
 use cryptography::*;
 use error::{KError, KResult};
@@ -77,21 +79,14 @@ impl Mechanism for HMACMechanism {
         }
         let output_len = check_and_fetch_param(mech, self.minlen, self.maxlen)?;
         let key = check_and_fetch_key(keyobj, self.keytype)?;
-        match mech.mechanism {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => Ok(Box::new(
-                SHA1HMACOperation::sign_new(mech.mechanism, key, output_len),
-            )),
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => Ok(Box::new(
-                SHA256HMACOperation::sign_new(mech.mechanism, key, output_len),
-            )),
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => Ok(Box::new(
-                SHA384HMACOperation::sign_new(mech.mechanism, key, output_len),
-            )),
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => Ok(Box::new(
-                SHA512HMACOperation::sign_new(mech.mechanism, key, output_len),
-            )),
-            _ => err_rv!(CKR_MECHANISM_INVALID),
-        }
+        let hash = match mech.mechanism {
+            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => Spec_Hash_Definitions_SHA1,
+            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_256,
+            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_384,
+            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_512,
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        Ok(Box::new(HMACOperation::init(mech.mechanism, hash, key, output_len)?))
     }
 
     fn verify_new(
@@ -104,33 +99,14 @@ impl Mechanism for HMACMechanism {
         }
         let output_len = check_and_fetch_param(mech, self.minlen, self.maxlen)?;
         let key = check_and_fetch_key(keyobj, self.keytype)?;
-        match mech.mechanism {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => Ok(Box::new(
-                SHA1HMACOperation::verify_new(mech.mechanism, key, output_len),
-            )),
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => {
-                Ok(Box::new(SHA256HMACOperation::verify_new(
-                    mech.mechanism,
-                    key,
-                    output_len,
-                )))
-            }
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => {
-                Ok(Box::new(SHA384HMACOperation::verify_new(
-                    mech.mechanism,
-                    key,
-                    output_len,
-                )))
-            }
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => {
-                Ok(Box::new(SHA512HMACOperation::verify_new(
-                    mech.mechanism,
-                    key,
-                    output_len,
-                )))
-            }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
-        }
+        let hash = match mech.mechanism {
+            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => Spec_Hash_Definitions_SHA1,
+            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_256,
+            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_384,
+            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_512,
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        Ok(Box::new(HMACOperation::init(mech.mechanism, hash, key, output_len)?))
     }
 }
 
@@ -145,7 +121,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA_1_HMAC,
             minlen: 1,
-            maxlen: 20,
+            maxlen: sha1::SHA1Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -157,8 +133,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA_1_HMAC,
-            minlen: 20,
-            maxlen: 20,
+            minlen: sha1::SHA1Operation::hashlen(),
+            maxlen: sha1::SHA1Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -171,7 +147,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA256_HMAC,
             minlen: 1,
-            maxlen: 32,
+            maxlen: sha2::SHA256Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -183,8 +159,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA256_HMAC,
-            minlen: 32,
-            maxlen: 32,
+            minlen: sha2::SHA256Operation::hashlen(),
+            maxlen: sha2::SHA256Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -197,7 +173,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA384_HMAC,
             minlen: 1,
-            maxlen: 48,
+            maxlen: sha2::SHA384Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -209,8 +185,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA384_HMAC,
-            minlen: 48,
-            maxlen: 48,
+            minlen: sha2::SHA384Operation::hashlen(),
+            maxlen: sha2::SHA384Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -223,7 +199,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA512_HMAC,
             minlen: 1,
-            maxlen: 64,
+            maxlen: sha2::SHA512Operation::hashlen(),
         }),
     );
     mechs.add_mechanism(
@@ -235,57 +211,139 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA512_HMAC,
-            minlen: 64,
-            maxlen: 64,
+            minlen: sha2::SHA512Operation::hashlen(),
+            maxlen: sha2::SHA512Operation::hashlen(),
         }),
     );
 }
 
+/* HMAC spec From FIPS 198-1 */
 #[derive(Debug)]
-struct SHA1HMACOperation {
+struct HMACOperation {
     mech: CK_MECHANISM_TYPE,
-    key: Vec<u8>,
-    output_len: usize,
+    hashlen: usize,
+    blocklen: usize,
+    outputlen: usize,
+    state: Vec<u8>,
+    ipad: Vec<u8>,
+    opad: Vec<u8>,
+    inner: Operation,
     finalized: bool,
     in_use: bool,
 }
 
-impl Drop for SHA1HMACOperation {
+impl Drop for HMACOperation {
     fn drop(&mut self) {
-        self.key.zeroize();
+        self.state.zeroize();
+        self.ipad.zeroize();
+        self.opad.zeroize();
     }
 }
 
-impl SHA1HMACOperation {
-    fn sign_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA1HMACOperation {
-        SHA1HMACOperation {
+impl HMACOperation {
+    fn init(mech: CK_MECHANISM_TYPE,
+            hash: Spec_Hash_Definitions_hash_alg,
+            key: Vec<u8>,
+            outputlen: usize,
+        ) -> KResult<HMACOperation> {
+        let mut hmac = HMACOperation {
             mech: mech,
-            key: key,
-            output_len: outlen,
+            hashlen: 0usize,
+            blocklen: 0usize,
+            outputlen: outputlen,
+            state: Vec::new(),
+            ipad: Vec::new(),
+            opad: Vec::new(),
+            inner: Operation::Empty,
             finalized: false,
             in_use: false,
+        };
+        if hash == sha1::SHA1Operation::specdef() {
+            hmac.hashlen = sha1::SHA1Operation::hashlen();
+            hmac.blocklen = sha1::SHA1Operation::blocklen();
+            hmac.inner = Operation::Digest(Box::new(sha1::SHA1Operation::new()));
+        } else if hash == sha2::SHA256Operation::specdef() {
+            hmac.hashlen = sha2::SHA256Operation::hashlen();
+            hmac.blocklen = sha2::SHA256Operation::blocklen();
+            hmac.inner = Operation::Digest(Box::new(sha2::SHA256Operation::new()));
+        } else if hash == sha2::SHA384Operation::specdef() {
+            hmac.hashlen = sha2::SHA384Operation::hashlen();
+            hmac.blocklen = sha2::SHA384Operation::blocklen();
+            hmac.inner = Operation::Digest(Box::new(sha2::SHA384Operation::new()));
+        } else if hash == sha2::SHA512Operation::specdef() {
+            hmac.hashlen = sha2::SHA512Operation::hashlen();
+            hmac.blocklen = sha2::SHA512Operation::blocklen();
+            hmac.inner = Operation::Digest(Box::new(sha2::SHA512Operation::new()));
+        } else {
+            return err_rv!(CKR_GENERAL_ERROR);
+        };
+
+        /* K0 */
+        if key.len() <= hmac.blocklen {
+            hmac.state.extend_from_slice(key.as_slice());
+        } else {
+            hmac.state.resize(hmac.hashlen, 0);
+            match &mut hmac.inner {
+                Operation::Digest(op) =>
+                    op.digest(key.as_slice(), hmac.state.as_mut_slice())?,
+                _ => return err_rv!(CKR_GENERAL_ERROR),
+            }
+        }
+        hmac.state.resize(hmac.blocklen, 0);
+        /* K0 ^ ipad */
+        hmac.ipad.resize(hmac.blocklen, 0x36);
+        hmac.ipad.iter_mut()
+            .zip(hmac.state.iter())
+            .for_each(|(i1, i2)| *i1 ^= *i2);
+        /* K0 ^ opad */
+        hmac.opad.resize(hmac.blocklen, 0x5c);
+        hmac.opad.iter_mut()
+            .zip(hmac.state.iter())
+            .for_each(|(i1, i2)| *i1 ^= *i2);
+        /* H((K0 ^ ipad) || .. ) */
+        match &mut hmac.inner {
+            Operation::Digest(op) => {
+                op.reset()?;
+                op.digest_update(hmac.ipad.as_slice())?;
+            },
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        Ok(hmac)
+    }
+
+    fn update(&mut self, data: &[u8]) -> KResult<()> {
+        /* H( .. || text ..) */
+        match &mut self.inner {
+            Operation::Digest(op) => op.digest_update(data),
+            _ => err_rv!(CKR_GENERAL_ERROR),
         }
     }
-    fn verify_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA1HMACOperation {
-        SHA1HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
+    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+        self.state.resize(self.hashlen, 0);
+        /* state = H((K0 ^ ipad) || text) */
+        match &mut self.inner {
+            Operation::Digest(op) => {
+                op.digest_final(self.state.as_mut_slice())?;
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
         }
+        /* state = H((K0 ^ opad) || H((K0 ^ ipad) || text)) */
+        match &mut self.inner {
+            Operation::Digest(op) => {
+                op.reset()?;
+                op.digest_update(self.opad.as_slice())?;
+                op.digest_update(self.state.as_slice())?;
+                op.digest_final(self.state.as_mut_slice())?;
+            },
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        /* state -> output */
+        output.copy_from_slice(&self.state[..output.len()]);
+        Ok(())
     }
 }
 
-impl MechOperation for SHA1HMACOperation {
+impl MechOperation for HMACOperation {
     fn mechanism(&self) -> CK_MECHANISM_TYPE {
         self.mech
     }
@@ -297,594 +355,100 @@ impl MechOperation for SHA1HMACOperation {
     }
 }
 
-impl Sign for SHA1HMACOperation {
+impl Sign for HMACOperation {
     fn sign(
         &mut self,
-        _rng: &mut RNG,
+        rng: &mut RNG,
         data: &[u8],
         signature: &mut [u8],
     ) -> KResult<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        match self.sign_update(data) {
+            Err(e) => {
+                self.finalized = true;
+                return Err(e);
+            },
+            Ok(()) => (),
+        }
+        self.sign_final(rng, signature)
+    }
+
+    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        self.finalized = true;
-        if signature.len() != self.output_len {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        if self.output_len == 20 {
-            unsafe {
-                Hacl_HMAC_legacy_compute_sha1(
-                    signature.as_ptr() as *mut u8,
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-        } else {
-            let mut vec: Vec<u8> = vec![0; 20];
-            unsafe {
-                Hacl_HMAC_legacy_compute_sha1(
-                    vec.as_mut_ptr(),
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-            signature.copy_from_slice(&vec[..self.output_len]);
-        }
-        Ok(())
-    }
-
-    fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
+        self.in_use = true;
+        self.update(data)
     }
 
     fn sign_final(
         &mut self,
         _rng: &mut RNG,
-        _signature: &mut [u8],
-    ) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
-    }
-}
-
-impl Verify for SHA1HMACOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.output_len {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        let mut vec: Vec<u8> = vec![0; 20];
-        unsafe {
-            Hacl_HMAC_legacy_compute_sha1(
-                vec.as_mut_ptr(),
-                self.key.as_mut_ptr(),
-                self.key.len() as u32,
-                data.as_ptr() as *mut u8,
-                data.len() as u32,
-            );
-        }
-        vec.resize(self.output_len, 0);
-        if vec != signature {
-            return err_rv!(CKR_SIGNATURE_INVALID);
-        }
-        Ok(())
-    }
-
-    fn verify_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
-    }
-}
-
-#[derive(Debug)]
-struct SHA256HMACOperation {
-    mech: CK_MECHANISM_TYPE,
-    key: Vec<u8>,
-    output_len: usize,
-    finalized: bool,
-    in_use: bool,
-}
-
-impl Drop for SHA256HMACOperation {
-    fn drop(&mut self) {
-        self.key.zeroize();
-    }
-}
-
-impl SHA256HMACOperation {
-    fn sign_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA256HMACOperation {
-        SHA256HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
-        }
-    }
-    fn verify_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA256HMACOperation {
-        SHA256HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
-        }
-    }
-}
-
-impl MechOperation for SHA256HMACOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
-    fn finalized(&self) -> bool {
-        self.finalized
-    }
-}
-
-impl Sign for SHA256HMACOperation {
-    fn sign(
-        &mut self,
-        _rng: &mut RNG,
-        data: &[u8],
         signature: &mut [u8],
     ) -> KResult<()> {
-        if self.in_use {
+        if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         self.finalized = true;
-        if signature.len() != self.output_len {
+        if signature.len() != self.outputlen {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        if self.output_len == 32 {
-            unsafe {
-                Hacl_HMAC_compute_sha2_256(
-                    signature.as_ptr() as *mut u8,
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-        } else {
-            let mut vec: Vec<u8> = vec![0; 32];
-            unsafe {
-                Hacl_HMAC_compute_sha2_256(
-                    vec.as_mut_ptr(),
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-            signature.copy_from_slice(&vec[..self.output_len]);
-        }
-        Ok(())
-    }
-
-    fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn sign_final(
-        &mut self,
-        _rng: &mut RNG,
-        _signature: &mut [u8],
-    ) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
+        self.finalize(signature)
     }
 
     fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
+        Ok(self.outputlen)
     }
 }
 
-impl Verify for SHA256HMACOperation {
+impl Verify for HMACOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        match self.verify_update(data) {
+            Err(e) => {
+                self.finalized = true;
+                return Err(e);
+            },
+            Ok(()) => (),
+        }
+        self.verify_final(signature)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.in_use = true;
+        self.update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+        if !self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         self.finalized = true;
-        if signature.len() != self.output_len {
+        if signature.len() != self.outputlen {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        let mut vec: Vec<u8> = vec![0; 32];
-        unsafe {
-            Hacl_HMAC_compute_sha2_256(
-                vec.as_mut_ptr(),
-                self.key.as_mut_ptr(),
-                self.key.len() as u32,
-                data.as_ptr() as *mut u8,
-                data.len() as u32,
-            );
-        }
-        vec.resize(self.output_len, 0);
-        if vec != signature {
+        let mut verify: Vec<u8> = vec![0; self.outputlen];
+        self.finalize(verify.as_mut_slice())?;
+        if verify != signature {
             return err_rv!(CKR_SIGNATURE_INVALID);
         }
         Ok(())
     }
 
-    fn verify_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
     fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
-    }
-}
-
-#[derive(Debug)]
-struct SHA384HMACOperation {
-    mech: CK_MECHANISM_TYPE,
-    key: Vec<u8>,
-    output_len: usize,
-    finalized: bool,
-    in_use: bool,
-}
-
-impl Drop for SHA384HMACOperation {
-    fn drop(&mut self) {
-        self.key.zeroize();
-    }
-}
-
-impl SHA384HMACOperation {
-    fn sign_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA384HMACOperation {
-        SHA384HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
-        }
-    }
-    fn verify_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA384HMACOperation {
-        SHA384HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
-        }
-    }
-}
-
-impl MechOperation for SHA384HMACOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
-    fn finalized(&self) -> bool {
-        self.finalized
-    }
-}
-
-impl Sign for SHA384HMACOperation {
-    fn sign(
-        &mut self,
-        _rng: &mut RNG,
-        data: &[u8],
-        signature: &mut [u8],
-    ) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.output_len {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        if self.output_len == 48 {
-            unsafe {
-                Hacl_HMAC_compute_sha2_384(
-                    signature.as_ptr() as *mut u8,
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-        } else {
-            let mut vec: Vec<u8> = vec![0; 48];
-            unsafe {
-                Hacl_HMAC_compute_sha2_384(
-                    vec.as_mut_ptr(),
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-            signature.copy_from_slice(&vec[..self.output_len]);
-        }
-        Ok(())
-    }
-
-    fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn sign_final(
-        &mut self,
-        _rng: &mut RNG,
-        _signature: &mut [u8],
-    ) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
-    }
-}
-
-impl Verify for SHA384HMACOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.output_len {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        let mut vec: Vec<u8> = vec![0; 48];
-        unsafe {
-            Hacl_HMAC_compute_sha2_384(
-                vec.as_mut_ptr(),
-                self.key.as_mut_ptr(),
-                self.key.len() as u32,
-                data.as_ptr() as *mut u8,
-                data.len() as u32,
-            );
-        }
-        vec.resize(self.output_len, 0);
-        if vec != signature {
-            return err_rv!(CKR_SIGNATURE_INVALID);
-        }
-        Ok(())
-    }
-
-    fn verify_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
-    }
-}
-
-#[derive(Debug)]
-struct SHA512HMACOperation {
-    mech: CK_MECHANISM_TYPE,
-    key: Vec<u8>,
-    output_len: usize,
-    finalized: bool,
-    in_use: bool,
-}
-
-impl Drop for SHA512HMACOperation {
-    fn drop(&mut self) {
-        self.key.zeroize();
-    }
-}
-
-impl SHA512HMACOperation {
-    fn sign_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA512HMACOperation {
-        SHA512HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
-        }
-    }
-    fn verify_new(
-        mech: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
-        outlen: usize,
-    ) -> SHA512HMACOperation {
-        SHA512HMACOperation {
-            mech: mech,
-            key: key,
-            output_len: outlen,
-            finalized: false,
-            in_use: false,
-        }
-    }
-}
-
-impl MechOperation for SHA512HMACOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
-    fn finalized(&self) -> bool {
-        self.finalized
-    }
-}
-
-impl Sign for SHA512HMACOperation {
-    fn sign(
-        &mut self,
-        _rng: &mut RNG,
-        data: &[u8],
-        signature: &mut [u8],
-    ) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.output_len {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        if self.output_len == 64 {
-            unsafe {
-                Hacl_HMAC_compute_sha2_512(
-                    signature.as_ptr() as *mut u8,
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-        } else {
-            let mut vec: Vec<u8> = vec![0; 64];
-            unsafe {
-                Hacl_HMAC_compute_sha2_512(
-                    vec.as_mut_ptr(),
-                    self.key.as_mut_ptr(),
-                    self.key.len() as u32,
-                    data.as_ptr() as *mut u8,
-                    data.len() as u32,
-                );
-            }
-            signature.copy_from_slice(&vec[..self.output_len]);
-        }
-        Ok(())
-    }
-
-    fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn sign_final(
-        &mut self,
-        _rng: &mut RNG,
-        _signature: &mut [u8],
-    ) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
-    }
-}
-
-impl Verify for SHA512HMACOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.output_len {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        let mut vec: Vec<u8> = vec![0; 64];
-        unsafe {
-            Hacl_HMAC_compute_sha2_512(
-                vec.as_mut_ptr(),
-                self.key.as_mut_ptr(),
-                self.key.len() as u32,
-                data.as_ptr() as *mut u8,
-                data.len() as u32,
-            );
-        }
-        vec.resize(self.output_len, 0);
-        if vec != signature {
-            return err_rv!(CKR_SIGNATURE_INVALID);
-        }
-        Ok(())
-    }
-
-    fn verify_update(&mut self, _data: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
-        /* Hacl does not support streaming for HMAC yet */
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.output_len)
+        Ok(self.outputlen)
     }
 }

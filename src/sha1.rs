@@ -50,6 +50,19 @@ impl SHA1Operation {
             in_use: false,
         }
     }
+    pub fn hashlen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
+        }
+    }
+    pub fn blocklen() -> usize {
+        unsafe {
+            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
+        }
+    }
+    pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
+        Spec_Hash_Definitions_SHA1
+    }
 }
 
 impl MechOperation for SHA1Operation {
@@ -61,6 +74,11 @@ impl MechOperation for SHA1Operation {
     }
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn reset(&mut self) -> KResult<()> {
+        self.finalized = false;
+        self.in_use = false;
+        Ok(())
     }
 }
 
@@ -135,9 +153,7 @@ impl Digest for SHA1Operation {
     }
 
     fn digest_len(&self) -> KResult<usize> {
-        Ok(unsafe {
-            Hacl_Hash_Definitions_hash_len(Spec_Hash_Definitions_SHA1) as usize
-        })
+        Ok(Self::hashlen())
     }
 }
 
