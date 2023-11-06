@@ -16,6 +16,9 @@ use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
+use num_bigint::BigUint;
+use num_integer::Integer;
+use num_traits::{One, Zero};
 use object::{
     CommonKeyTemplate, OAFlags, Object, ObjectAttr, ObjectTemplate,
     ObjectTemplates, ObjectType, PrivKeyTemplate, PubKeyTemplate,
@@ -160,6 +163,71 @@ impl ObjectTemplate for RSAPrivTemplate {
         bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
         bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
 
+        let p = match obj.get_attr(CKA_PRIME_1) {
+            Some(a) => Some(a.get_value().clone()),
+            None => None,
+        };
+        let q = match obj.get_attr(CKA_PRIME_2) {
+            Some(a) => Some(a.get_value().clone()),
+            None => None,
+        };
+        let a = match obj.get_attr(CKA_EXPONENT_1) {
+            Some(a) => Some(a.get_value().clone()),
+            None => None,
+        };
+        let b = match obj.get_attr(CKA_EXPONENT_2) {
+            Some(a) => Some(a.get_value().clone()),
+            None => None,
+        };
+        let c = match obj.get_attr(CKA_COEFFICIENT) {
+            Some(a) => Some(a.get_value().clone()),
+            None => None,
+        };
+
+        if p == None || q == None || a == None || b == None || c == None {
+            let mut r = RsaBigUints::new(
+                obj.get_attr_as_bytes(CKA_MODULUS)?,
+                obj.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
+                obj.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
+            );
+            r.decompose()?;
+            match p {
+                Some(v) => comp(r.p.to_bytes_be(), v)?,
+                None => obj.set_attr(attribute::from_bytes(
+                    CKA_PRIME_1,
+                    r.p.to_bytes_be(),
+                ))?,
+            }
+            match q {
+                Some(v) => comp(r.q.to_bytes_be(), v)?,
+                None => obj.set_attr(attribute::from_bytes(
+                    CKA_PRIME_2,
+                    r.q.to_bytes_be(),
+                ))?,
+            }
+            match a {
+                Some(v) => comp(r.a.to_bytes_be(), v)?,
+                None => obj.set_attr(attribute::from_bytes(
+                    CKA_EXPONENT_1,
+                    r.a.to_bytes_be(),
+                ))?,
+            }
+            match b {
+                Some(v) => comp(r.b.to_bytes_be(), v)?,
+                None => obj.set_attr(attribute::from_bytes(
+                    CKA_EXPONENT_2,
+                    r.b.to_bytes_be(),
+                ))?,
+            }
+            match c {
+                Some(v) => comp(r.c.to_bytes_be(), v)?,
+                None => obj.set_attr(attribute::from_bytes(
+                    CKA_COEFFICIENT,
+                    r.c.to_bytes_be(),
+                ))?,
+            }
+        }
+
         Ok(obj)
     }
 
@@ -189,6 +257,136 @@ impl PrivKeyTemplate for RSAPrivTemplate {
 
     fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
         &mut self.attributes
+    }
+}
+
+fn comp(a: Vec<u8>, b: Vec<u8>) -> KResult<()> {
+    if a.len() > b.len() {
+        let d = a.len() - b.len();
+        match a[..d].iter().find(|&&v| v != 0) {
+            Some(_) => return err_rv!(CKR_KEY_INDIGESTIBLE),
+            None => (),
+        }
+        if &a[d..] != b {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+    } else if a.len() < b.len() {
+        let d = b.len() - a.len();
+        match b[..d].iter().find(|&&v| v != 0) {
+            Some(_) => return err_rv!(CKR_KEY_INDIGESTIBLE),
+            None => (),
+        }
+        if &b[d..] != a {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+    } else {
+        if a != b {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+    }
+    Ok(())
+}
+
+fn inner_mod_inv(
+    a: &BigUint,
+    b: &BigUint,
+    q: &BigUint,
+    n: &BigUint,
+) -> (BigUint, BigUint) {
+    let t = (q * a) % n;
+    let r = if b >= &t { b - t } else { n - t + b };
+    return (a.clone(), r);
+}
+
+fn mod_inv(a: &BigUint, n: &BigUint) -> KResult<BigUint> {
+    let mut r: BigUint = Zero::zero();
+    let mut i = n.clone();
+    let mut tr: BigUint = One::one();
+    let mut ti = a.clone();
+
+    while ti != Zero::zero() {
+        let q = &i / &ti;
+        (r, tr) = inner_mod_inv(&tr, &r, &q, n);
+        /* the following is guaranteed to converge to 0 */
+        (i, ti) = inner_mod_inv(&ti, &i, &q, n);
+    }
+
+    if i > One::one() {
+        return err_rv!(CKR_KEY_INDIGESTIBLE);
+    }
+    Ok(r)
+}
+
+#[derive(Debug)]
+struct RsaBigUints {
+    n: BigUint,
+    e: BigUint,
+    d: BigUint,
+    p: BigUint,
+    q: BigUint,
+    a: BigUint,
+    b: BigUint,
+    c: BigUint,
+}
+
+impl Drop for RsaBigUints {
+    fn drop(&mut self) {
+        /* TODO:
+        self.d.zeroize();
+        self.p.zeroize();
+        self.q.zeroize();
+        self.a.zeroize();
+        self.b.zeroize();
+        self.c.zeroize();
+        */
+    }
+}
+
+impl RsaBigUints {
+    pub fn new(n: &[u8], e: &[u8], d: &[u8]) -> RsaBigUints {
+        RsaBigUints {
+            n: BigUint::from_bytes_be(n),
+            e: BigUint::from_bytes_be(e),
+            d: BigUint::from_bytes_be(d),
+            p: Zero::zero(),
+            q: Zero::zero(),
+            a: Zero::zero(),
+            b: Zero::zero(),
+            c: Zero::zero(),
+        }
+    }
+
+    /* From SP 800 56B Appendix C.2 */
+    /* NOTE: this code does not give any guarantee in terms of zeroization of
+     * intermediate values or computation timing leaks and should not be used
+     * in any code path that is involved in actual cryptography computations.
+     *
+     * It is currently implemented only to serve as a stop gap for
+     * importing keys
+     */
+    pub fn decompose(&mut self) -> KResult<()> {
+        let des1: BigUint = &self.d * &self.e - 1u8;
+        let a = &des1 * &des1.gcd(&(&self.n - 1u8));
+        let m = a.div_floor(&self.n);
+        let r = a - &m * &self.n;
+        let (mut b, b_rem) = (&self.n - r).div_rem(&(m + 1u8));
+        if b_rem != Zero::zero() {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+        b += 1u8;
+        let sqb = b.pow(2);
+        let n4 = &self.n * 4u8;
+        if sqb <= n4 {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+        let gamma = (sqb - n4).sqrt();
+        self.p = (&b + &gamma) >> 1;
+        self.q = (&b - &gamma) >> 1;
+        self.a = &self.d % &(&self.p - 1u8);
+        self.b = &self.d % &(&self.q - 1u8);
+
+        self.c = mod_inv(&self.q, &self.p)?;
+        Ok(())
     }
 }
 

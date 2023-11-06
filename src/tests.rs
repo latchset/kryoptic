@@ -797,6 +797,61 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* Private RSA Key with missing Q,A,B parameters */
+    class = CKO_PRIVATE_KEY;
+    let mut ktype = CKK_RSA;
+    let mut encrypt: CK_BBOOL = CK_TRUE;
+    let label = "RSA Private Key";
+    let modulus = hex::decode("9d2e7820ce719b9194cdfe0fd751214193c4e9be9bfa24d0e91b0fc3541c85885cb3ca95f8fda4e129558ee41f653481e66a04ecb75808d57bd76ed9069767a2afc9c3188f2bd42f045d0575765ade27ad033b338dd5c2c1aaa899b89201a34bbb6ed9ccd0511325adcf1c69718bd27196447d567f17e35a5865a3bc1fb35b3a605c25294d2a02e5f53d170c57814d8246f50cae32321d8a5c44508238ac50519bd12221c740620198b762c2d1670a4b94655c783eaad0e9a1244f8ae86d3b4a3df26ac532b6a4eaa4fb4a35df5c3a1b755dc5c17e451643d2db722113c1e3e2ca59cfa592c80fb9b2d7056e19f5c84198371465ce7dfba7390c3ce19d878121").expect("Failed to decode modulus");
+    let pub_exponent =
+        hex::decode("010001").expect("Failed to decode public exponent");
+    let pri_exponent = hex::decode("14537d0f690302062a8314f6c17669618c956b50cde4e43bebd92709b067dbd0cd84268f8c5a68a7016c62051816435b050bf2c515d49997d9e2fb1faf9d86b6601b2c5291b92e404245313e8666abd1dfaaca4e196a6a3c1730a4685ce13f57bcce51f60d7e5e8681da85a7111aeec4e794c5cc98b4e31ebccdb005d4e7a1c54fcb81eb28a16d649489dfb2374bd3fbcf8e7e68197c08ed48601daa3512367961f4e8ba9a0ecae868365034ac1bba9accdfd0db0407142da7ea1a2b2e4c70e57707ac0db0b9b93f92b9839e5ce0dc61b4a804b60043f9f07675eb6e91eb029767c495682a9261344f9c825d22c148a9d2205d0fa5c521fadf8abbfae75fe591").expect("Failed to decode private exponent");
+    let prime_1 = hex::decode("00d76285da69d58f6bca20e85cd645ea5fca42d872e92f190b7cc76cf50d2903ba213a8599db5429dd429a938376b64085bd9e8dd56360470d0d06684a3c18536c4929b3ba7b5f4848ec49327c2094afdd22e66eadf4f6e1af6456e49b4b0f0155c007003d4da785296f49ae013b509c918cc76b48f197a13a67e5eb11f883f585").expect("Failed to decode prime 1");
+    let coefficient = hex::decode("26ee312416332f9b8e7c0ab1d0dcc3d7edaea735ffc43295efa876d1948991fd49f2f2a1a54e99ee13ea79903acc48520f0c4b5129687cf5efae60982f1848d54c490a452550d90bb68205d9f350f7134651c84ac9869047c455d1f0f31d6a3a6761ecab2e326190cedd65f775147dae147f1ec7d679cd198fc2a62422fb6178").expect("Failed to decode prime 1");
+    template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_SIGN, &mut encrypt as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_LABEL,
+            label.as_ptr() as *mut std::ffi::c_void,
+            label.len()
+        ),
+        make_attribute!(
+            CKA_MODULUS,
+            modulus.as_ptr() as *mut std::ffi::c_void,
+            modulus.len()
+        ),
+        make_attribute!(
+            CKA_PUBLIC_EXPONENT,
+            pub_exponent.as_ptr() as *mut std::ffi::c_void,
+            pub_exponent.len()
+        ),
+        make_attribute!(
+            CKA_PRIVATE_EXPONENT,
+            pri_exponent.as_ptr() as *mut std::ffi::c_void,
+            pri_exponent.len()
+        ),
+        make_attribute!(
+            CKA_PRIME_1,
+            prime_1.as_ptr() as *mut std::ffi::c_void,
+            prime_1.len()
+        ),
+        make_attribute!(
+            CKA_COEFFICIENT,
+            coefficient.as_ptr() as *mut std::ffi::c_void,
+            coefficient.len()
+        ),
+    ];
+
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
     let mut size: CK_ULONG = 0;
     ret = fn_get_object_size(session, handle, &mut size);
     assert_eq!(ret, CKR_OK);

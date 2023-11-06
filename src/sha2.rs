@@ -51,14 +51,10 @@ impl SHA256Operation {
         }
     }
     pub fn hashlen() -> usize {
-        unsafe {
-            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
-        }
+        unsafe { Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize }
     }
     pub fn blocklen() -> usize {
-        unsafe {
-            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
-        }
+        unsafe { Hacl_Hash_Definitions_block_len(Self::specdef()) as usize }
     }
     pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
         Spec_Hash_Definitions_SHA2_256
@@ -194,14 +190,10 @@ impl SHA384Operation {
         }
     }
     pub fn hashlen() -> usize {
-        unsafe {
-            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
-        }
+        unsafe { Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize }
     }
     pub fn blocklen() -> usize {
-        unsafe {
-            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
-        }
+        unsafe { Hacl_Hash_Definitions_block_len(Self::specdef()) as usize }
     }
     pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
         Spec_Hash_Definitions_SHA2_384
@@ -337,14 +329,10 @@ impl SHA512Operation {
         }
     }
     pub fn hashlen() -> usize {
-        unsafe {
-            Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize
-        }
+        unsafe { Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize }
     }
     pub fn blocklen() -> usize {
-        unsafe {
-            Hacl_Hash_Definitions_block_len(Self::specdef()) as usize
-        }
+        unsafe { Hacl_Hash_Definitions_block_len(Self::specdef()) as usize }
     }
     pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
         Spec_Hash_Definitions_SHA2_512

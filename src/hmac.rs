@@ -80,13 +80,26 @@ impl Mechanism for HMACMechanism {
         let output_len = check_and_fetch_param(mech, self.minlen, self.maxlen)?;
         let key = check_and_fetch_key(keyobj, self.keytype)?;
         let hash = match mech.mechanism {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => Spec_Hash_Definitions_SHA1,
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_256,
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_384,
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_512,
+            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA1
+            }
+            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA2_256
+            }
+            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA2_384
+            }
+            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA2_512
+            }
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
-        Ok(Box::new(HMACOperation::init(mech.mechanism, hash, key, output_len)?))
+        Ok(Box::new(HMACOperation::init(
+            mech.mechanism,
+            hash,
+            key,
+            output_len,
+        )?))
     }
 
     fn verify_new(
@@ -100,13 +113,26 @@ impl Mechanism for HMACMechanism {
         let output_len = check_and_fetch_param(mech, self.minlen, self.maxlen)?;
         let key = check_and_fetch_key(keyobj, self.keytype)?;
         let hash = match mech.mechanism {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => Spec_Hash_Definitions_SHA1,
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_256,
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_384,
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => Spec_Hash_Definitions_SHA2_512,
+            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA1
+            }
+            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA2_256
+            }
+            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA2_384
+            }
+            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => {
+                Spec_Hash_Definitions_SHA2_512
+            }
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
-        Ok(Box::new(HMACOperation::init(mech.mechanism, hash, key, output_len)?))
+        Ok(Box::new(HMACOperation::init(
+            mech.mechanism,
+            hash,
+            key,
+            output_len,
+        )?))
     }
 }
 
@@ -241,11 +267,12 @@ impl Drop for HMACOperation {
 }
 
 impl HMACOperation {
-    fn init(mech: CK_MECHANISM_TYPE,
-            hash: Spec_Hash_Definitions_hash_alg,
-            key: Vec<u8>,
-            outputlen: usize,
-        ) -> KResult<HMACOperation> {
+    fn init(
+        mech: CK_MECHANISM_TYPE,
+        hash: Spec_Hash_Definitions_hash_alg,
+        key: Vec<u8>,
+        outputlen: usize,
+    ) -> KResult<HMACOperation> {
         let mut hmac = HMACOperation {
             mech: mech,
             hashlen: 0usize,
@@ -261,19 +288,23 @@ impl HMACOperation {
         if hash == sha1::SHA1Operation::specdef() {
             hmac.hashlen = sha1::SHA1Operation::hashlen();
             hmac.blocklen = sha1::SHA1Operation::blocklen();
-            hmac.inner = Operation::Digest(Box::new(sha1::SHA1Operation::new()));
+            hmac.inner =
+                Operation::Digest(Box::new(sha1::SHA1Operation::new()));
         } else if hash == sha2::SHA256Operation::specdef() {
             hmac.hashlen = sha2::SHA256Operation::hashlen();
             hmac.blocklen = sha2::SHA256Operation::blocklen();
-            hmac.inner = Operation::Digest(Box::new(sha2::SHA256Operation::new()));
+            hmac.inner =
+                Operation::Digest(Box::new(sha2::SHA256Operation::new()));
         } else if hash == sha2::SHA384Operation::specdef() {
             hmac.hashlen = sha2::SHA384Operation::hashlen();
             hmac.blocklen = sha2::SHA384Operation::blocklen();
-            hmac.inner = Operation::Digest(Box::new(sha2::SHA384Operation::new()));
+            hmac.inner =
+                Operation::Digest(Box::new(sha2::SHA384Operation::new()));
         } else if hash == sha2::SHA512Operation::specdef() {
             hmac.hashlen = sha2::SHA512Operation::hashlen();
             hmac.blocklen = sha2::SHA512Operation::blocklen();
-            hmac.inner = Operation::Digest(Box::new(sha2::SHA512Operation::new()));
+            hmac.inner =
+                Operation::Digest(Box::new(sha2::SHA512Operation::new()));
         } else {
             return err_rv!(CKR_GENERAL_ERROR);
         };
@@ -284,20 +315,23 @@ impl HMACOperation {
         } else {
             hmac.state.resize(hmac.hashlen, 0);
             match &mut hmac.inner {
-                Operation::Digest(op) =>
-                    op.digest(key.as_slice(), hmac.state.as_mut_slice())?,
+                Operation::Digest(op) => {
+                    op.digest(key.as_slice(), hmac.state.as_mut_slice())?
+                }
                 _ => return err_rv!(CKR_GENERAL_ERROR),
             }
         }
         hmac.state.resize(hmac.blocklen, 0);
         /* K0 ^ ipad */
         hmac.ipad.resize(hmac.blocklen, 0x36);
-        hmac.ipad.iter_mut()
+        hmac.ipad
+            .iter_mut()
             .zip(hmac.state.iter())
             .for_each(|(i1, i2)| *i1 ^= *i2);
         /* K0 ^ opad */
         hmac.opad.resize(hmac.blocklen, 0x5c);
-        hmac.opad.iter_mut()
+        hmac.opad
+            .iter_mut()
             .zip(hmac.state.iter())
             .for_each(|(i1, i2)| *i1 ^= *i2);
         /* H((K0 ^ ipad) || .. ) */
@@ -305,7 +339,7 @@ impl HMACOperation {
             Operation::Digest(op) => {
                 op.reset()?;
                 op.digest_update(hmac.ipad.as_slice())?;
-            },
+            }
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         Ok(hmac)
@@ -334,7 +368,7 @@ impl HMACOperation {
                 op.digest_update(self.opad.as_slice())?;
                 op.digest_update(self.state.as_slice())?;
                 op.digest_final(self.state.as_mut_slice())?;
-            },
+            }
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         /* state -> output */
@@ -369,7 +403,7 @@ impl Sign for HMACOperation {
             Err(e) => {
                 self.finalized = true;
                 return Err(e);
-            },
+            }
             Ok(()) => (),
         }
         self.sign_final(rng, signature)
@@ -415,7 +449,7 @@ impl Verify for HMACOperation {
             Err(e) => {
                 self.finalized = true;
                 return Err(e);
-            },
+            }
             Ok(()) => (),
         }
         self.verify_final(signature)
