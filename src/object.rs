@@ -138,21 +138,22 @@ impl Object {
 bitflags! {
     #[derive(Debug, Clone)]
     pub struct OAFlags: u32 {
-        const Ignored              = 0b0000000000001;
-        const Sensitive            = 0b0000000000010;
-        const Defval               = 0b0000000000100;
-        const Required             = 0b0000000001000;
-        const RequiredOnCreate     = 0b0000000011000;
-        const RequiredOnGenerate   = 0b0000000101000;
-        const AlwaysRequired       = 0b0000000111000;
-        const Unsettable           = 0b0000001000000;
-        const UnsettableOnCreate   = 0b0000011000000;
-        const UnsettableOnGenerate = 0b0000101000000;
-        const NeverSettable        = 0b0000111000000;
-        const Unchangeable         = 0b0001000000000;
-        const ChangeToFalse        = 0b0011000000000;
-        const ChangeToTrue         = 0b0101000000000;
-        const ChangeOnCopy         = 0b1001000000000;
+        const Ignored              = 0b00000000000001;
+        const Sensitive            = 0b00000000000010;
+        const Defval               = 0b00000000000100;
+        const Required             = 0b00000000001000;
+        const RequiredOnCreate     = 0b00000000011000;
+        const RequiredOnGenerate   = 0b00000000101000;
+        const AlwaysRequired       = 0b00000000111000;
+        const Unsettable           = 0b00000001000000;
+        const UnsettableOnCreate   = 0b00000011000000;
+        const UnsettableOnGenerate = 0b00000101000000;
+        const UnsettableOnUnwrap   = 0b00001001000000;
+        const NeverSettable        = 0b00001111000000;
+        const Unchangeable         = 0b00010000000000;
+        const ChangeToFalse        = 0b00110000000000;
+        const ChangeToTrue         = 0b01010000000000;
+        const ChangeOnCopy         = 0b10010000000000;
     }
 }
 
@@ -187,18 +188,6 @@ impl ObjectAttr {
 macro_rules! attr_element {
     ($id:expr; $flags:expr; $from_type:expr; val $defval:expr) => {
         ObjectAttr::new($from_type($id, $defval), $flags)
-    };
-}
-
-macro_rules! bool_attr_never_set {
-    ($obj:expr; $id:expr) => {
-        match $obj.get_attr_as_bool($id) {
-            Ok(_) => return CKR_ATTRIBUTE_READ_ONLY,
-            Err(e) => match e {
-                KError::NotFound(_) => (),
-                _ => return CKR_GENERAL_ERROR,
-            },
-        }
     };
 }
 
@@ -567,16 +556,9 @@ pub trait CommonKeyTemplate {
         t.push(
             attr_element!(CKA_DERIVE; OAFlags::Defval; from_bool; val false),
         );
-        t.push(attr_element!(CKA_LOCAL; OAFlags::Defval; from_bool; val false));
-        t.push(attr_element!(CKA_KEY_GEN_MECHANISM; OAFlags::Defval; from_ulong; val CK_UNAVAILABLE_INFORMATION));
+        t.push(attr_element!(CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable; from_bool; val false));
+        t.push(attr_element!(CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable; from_ulong; val CK_UNAVAILABLE_INFORMATION));
         t.push(attr_element!(CKA_ALLOWED_MECHANISMS; OAFlags::empty(); from_bytes; val Vec::new()));
-    }
-
-    fn key_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
-        bool_attr_never_set!(obj; CKA_LOCAL);
-        bool_attr_never_set!(obj; CKA_KEY_GEN_MECHANISM);
-
-        CKR_OK
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
@@ -597,24 +579,10 @@ pub trait PubKeyTemplate {
         t.push(attr_element!(CKA_VERIFY_RECOVER; OAFlags::empty(); from_bool; val false));
         t.push(attr_element!(CKA_WRAP; OAFlags::empty(); from_bool; val false));
         t.push(
-            attr_element!(CKA_TRUSTED; OAFlags::empty(); from_bool; val false),
+            attr_element!(CKA_TRUSTED; OAFlags::NeverSettable; from_bool; val false),
         );
         t.push(attr_element!(CKA_WRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()));
         t.push(attr_element!(CKA_PUBLIC_KEY_INFO; OAFlags::empty(); from_bytes; val Vec::new()));
-    }
-
-    fn pubkey_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
-        match obj.get_attr_as_bool(CKA_TRUSTED) {
-            Ok(t) => {
-                if t == true {
-                    /* until we implement checking for SO auth */
-                    return CKR_ATTRIBUTE_READ_ONLY;
-                }
-            }
-            Err(_) => (),
-        }
-
-        CKR_OK
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
@@ -627,7 +595,7 @@ pub trait PrivKeyTemplate {
         let t = self.get_attributes_mut();
         t.push(attr_element!(CKA_SUBJECT; OAFlags::Defval; from_bytes; val Vec::new()));
         t.push(
-            attr_element!(CKA_SENSITIVE; OAFlags::Defval; from_bool; val true),
+            attr_element!(CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val true),
         );
         t.push(
             attr_element!(CKA_DECRYPT; OAFlags::empty(); from_bool; val false),
@@ -637,21 +605,52 @@ pub trait PrivKeyTemplate {
         t.push(
             attr_element!(CKA_UNWRAP; OAFlags::empty(); from_bool; val false),
         );
-        t.push(attr_element!(CKA_EXTRACTABLE; OAFlags::empty(); from_bool; val false));
-        t.push(attr_element!(CKA_ALWAYS_SENSITIVE; OAFlags::empty(); from_bool; val false));
-        t.push(attr_element!(CKA_NEVER_EXTRACTABLE; OAFlags::empty(); from_bool; val false));
-        t.push(attr_element!(CKA_WRAP_WITH_TRUSTED; OAFlags::Defval; from_bool; val false));
+        t.push(attr_element!(CKA_EXTRACTABLE; OAFlags::ChangeToFalse; from_bool; val false));
+        t.push(attr_element!(CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable; from_bool; val false));
+        t.push(attr_element!(CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable; from_bool; val false));
+        t.push(attr_element!(CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val false));
         t.push(attr_element!(CKA_UNWRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()));
         t.push(attr_element!(CKA_ALWAYS_AUTHENTICATE; OAFlags::Defval; from_bool; val false));
         t.push(attr_element!(CKA_PUBLIC_KEY_INFO; OAFlags::empty(); from_bytes; val Vec::new()));
         t.push(attr_element!(CKA_DERIVE_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()));
     }
 
-    fn privkey_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
-        bool_attr_never_set!(obj; CKA_ALWAYS_SENSITIVE);
-        bool_attr_never_set!(obj; CKA_NEVER_EXTRACTABLE);
+    fn get_attributes(&self) -> &Vec<ObjectAttr>;
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr>;
+}
 
-        CKR_OK
+/* pkcs11-spec-v3.1 4.10 Secre key objects */
+pub trait SecretKeyTemplate {
+    fn init_common_secret_key_attrs(&mut self) {
+        let t = self.get_attributes_mut();
+        t.push(
+            attr_element!(CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val true),
+        );
+        t.push(
+            attr_element!(CKA_ENCRYPT; OAFlags::empty(); from_bool; val false),
+        );
+        t.push(
+            attr_element!(CKA_DECRYPT; OAFlags::empty(); from_bool; val false),
+        );
+        t.push(attr_element!(CKA_SIGN; OAFlags::empty(); from_bool; val false));
+        t.push(
+            attr_element!(CKA_VERIFY; OAFlags::empty(); from_bool; val false),
+        );
+        t.push(attr_element!(CKA_WRAP; OAFlags::empty(); from_bool; val false));
+        t.push(
+            attr_element!(CKA_UNWRAP; OAFlags::empty(); from_bool; val false),
+        );
+        t.push(attr_element!(CKA_EXTRACTABLE; OAFlags::ChangeToFalse; from_bool; val false));
+        t.push(attr_element!(CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable; from_bool; val false));
+        t.push(attr_element!(CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable; from_bool; val false));
+        t.push(attr_element!(CKA_CHECK_VALUE; OAFlags::Ignored; from_ignore; val None));
+        t.push(attr_element!(CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val false));
+        t.push(
+            attr_element!(CKA_TRUSTED; OAFlags::NeverSettable; from_bool; val false),
+        );
+        t.push(attr_element!(CKA_WRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()));
+        t.push(attr_element!(CKA_UNWRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()));
+        t.push(attr_element!(CKA_DERIVE_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()));
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
@@ -672,8 +671,9 @@ impl GenericSecretKeyTemplate {
         data.init_common_object_attrs();
         data.init_common_storage_attrs();
         data.init_common_key_attrs();
-        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; from_bytes; val Vec::new()));
+        data.init_common_secret_key_attrs();
+        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::UnsettableOnGenerate | OAFlags::UnsettableOnUnwrap; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate | OAFlags::UnsettableOnCreate; from_bytes; val Vec::new()));
 
         /* default to private */
         let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
@@ -688,26 +688,12 @@ impl GenericSecretKeyTemplate {
 
         data
     }
-
-    fn gen_create_attrs_checks(&self, obj: &mut Object) -> CK_RV {
-        bool_attr_never_set!(obj; CKA_VALUE_LEN);
-
-        CKR_OK
-    }
 }
 
 impl ObjectTemplate for GenericSecretKeyTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let obj = self.default_object_create(template)?;
 
-        let mut ret = self.key_create_attrs_checks(&mut obj);
-        if ret != CKR_OK {
-            return err_rv!(ret);
-        }
-        ret = self.gen_create_attrs_checks(&mut obj);
-        if ret != CKR_OK {
-            return err_rv!(ret);
-        }
         bytes_attr_not_empty!(obj; CKA_VALUE);
 
         Ok(obj)
@@ -730,6 +716,16 @@ impl ObjectTemplate for GenericSecretKeyTemplate {
 }
 
 impl CommonKeyTemplate for GenericSecretKeyTemplate {
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        &mut self.attributes
+    }
+}
+
+impl SecretKeyTemplate for GenericSecretKeyTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
@@ -841,8 +837,22 @@ impl ObjectTemplates {
                     _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 }
             }
+            CKO_SECRET_KEY => {
+                let ktype =
+                    match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
+                        Some(k) => k.to_ulong()?,
+                        None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                    };
+                match ktype {
+                    CKK_GENERIC_SECRET | CKK_SHA_1_HMAC | CKK_SHA256_HMAC
+                    | CKK_SHA384_HMAC | CKK_SHA512_HMAC => self
+                        .get_template(ObjectType::GenericSecretKey)?
+                        .create(template),
+                    _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                }
+            }
             /* TODO:
-             *  CKO_SECRET_KEY, CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
+             *  CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
              *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
              *  CKO_VENDOR_DEFINED
              */

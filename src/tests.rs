@@ -852,6 +852,34 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* Test create secret key object */
+    class = CKO_SECRET_KEY;
+    ktype = CKK_GENERIC_SECRET;
+    let label = "Test Generic Secret";
+    let value = "Anything";
+    template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(
+            CKA_LABEL,
+            label.as_ptr() as *mut std::ffi::c_void,
+            label.len()
+        ),
+        make_attribute!(
+            CKA_VALUE,
+            value.as_ptr() as *mut std::ffi::c_void,
+            value.len()
+        ),
+    ];
+
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
     let mut size: CK_ULONG = 0;
     ret = fn_get_object_size(session, handle, &mut size);
     assert_eq!(ret, CKR_OK);
