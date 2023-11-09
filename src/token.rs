@@ -1587,4 +1587,23 @@ impl Token {
         session.set_operation(Operation::Empty);
         Ok(())
     }
+
+    pub fn generate_key(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        mech: &CK_MECHANISM,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<CK_OBJECT_HANDLE> {
+        /* check that session is valid */
+        let _ = self.sessions.get_session(s_handle)?;
+
+        if !self.user_login.logged_in {
+            return err_rv!(CKR_USER_NOT_LOGGED_IN);
+        }
+
+        let object =
+            self.object_templates
+                .genkey(&mut self.rng, mech, template)?;
+        self.insert_object(s_handle, object)
+    }
 }

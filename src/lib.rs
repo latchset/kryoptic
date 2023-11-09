@@ -1275,15 +1275,33 @@ extern "C" fn fn_decrypt_verify_update(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
 extern "C" fn fn_generate_key(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _template: CK_ATTRIBUTE_PTR,
-    _count: CK_ULONG,
-    _ph_key: CK_OBJECT_HANDLE_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    template: CK_ATTRIBUTE_PTR,
+    count: CK_ULONG,
+    key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+
+    let mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+
+    let kh = match token.generate_key(s_handle, mech, tmpl) {
+        Ok(h) => h,
+        Err(e) => return err_to_rv!(e),
+    };
+
+    unsafe {
+        core::ptr::write(key_handle as *mut _, kh);
+    }
+
+    CKR_OK
 }
+
 extern "C" fn fn_generate_key_pair(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,

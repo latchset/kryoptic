@@ -1982,3 +1982,61 @@ fn test_signatures() {
 
     testdata.finalize();
 }
+
+#[test]
+fn test_keygen() {
+    let mut testdata = TestData::new("testdata/test_keygen.json");
+    testdata.setup_db();
+
+    let mut args = testdata.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_GENERIC_SECRET_KEY_GEN,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+
+    let mut class = CKO_SECRET_KEY;
+    let mut len: CK_ULONG = 64;
+    let mut template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+    ];
+
+    ret = fn_generate_key(
+        session,
+        &mut mechanism,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
+}

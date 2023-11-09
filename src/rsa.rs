@@ -52,7 +52,7 @@ impl RSAPubTemplate {
 
 impl ObjectTemplate for RSAPubTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let obj = self.default_object_create(template)?;
 
         let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
             Ok(m) => m,

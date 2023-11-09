@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use super::attribute;
 use super::error;
 use super::interface;
+use super::token;
 use super::{err_not_found, err_rv};
 use attribute::{
     from_bool, from_bytes, from_date_bytes, from_ignore, from_string,
@@ -15,6 +16,7 @@ use attribute::{
 use error::{KError, KResult};
 use interface::*;
 use std::fmt::Debug;
+use token::RNG;
 
 use uuid::Uuid;
 
@@ -113,6 +115,10 @@ impl Object {
             None => self.attributes.push(a),
         }
         Ok(())
+    }
+
+    pub fn del_attr(&mut self, ck_type: CK_ULONG) {
+        self.attributes.retain(|a| a.get_type() != ck_type);
     }
 
     pub fn get_attributes(&self) -> &Vec<Attribute> {
@@ -215,6 +221,15 @@ pub trait ObjectTemplate: Debug + Send + Sync {
 
     fn copy(&self, obj: &Object, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         self.default_copy(obj, template)
+    }
+
+    fn genkey(
+        &self,
+        _rng: &mut RNG,
+        _template: &[CK_ATTRIBUTE],
+        _ktype: CK_KEY_TYPE,
+    ) -> KResult<Object> {
+        return err_rv!(CKR_GENERAL_ERROR);
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
@@ -686,7 +701,22 @@ impl GenericSecretKeyTemplate {
             None => data.attributes.push(private),
         }
 
+        /* CKA_KEY_TYPE not required on genkey because implicit in mechanism */
+        let key_type = attr_element!(CKA_KEY_TYPE; OAFlags::empty(); from_ulong; val CK_UNAVAILABLE_INFORMATION);
+        match data
+            .attributes
+            .iter()
+            .position(|x| x.get_type() == CKA_KEY_TYPE)
+        {
+            Some(idx) => data.attributes[idx] = key_type,
+            None => data.attributes.push(key_type),
+        }
+
         data
+    }
+
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
     }
 }
 
@@ -699,12 +729,55 @@ impl ObjectTemplate for GenericSecretKeyTemplate {
         Ok(obj)
     }
 
-    fn copy(
+    fn genkey(
         &self,
-        origin: &Object,
+        rng: &mut RNG,
         template: &[CK_ATTRIBUTE],
+        ktype: CK_KEY_TYPE,
     ) -> KResult<Object> {
-        self.default_copy(origin, template)
+        let attributes = self.get_attributes();
+        let mut obj = Object::new();
+        for ck_attr in template {
+            match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(attr) => {
+                    if attr.is(OAFlags::UnsettableOnGenerate) {
+                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                    }
+                    /* duplicate? */
+                    match obj.get_attr(ck_attr.type_) {
+                        Some(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                        None => (),
+                    }
+                    if !attr.is(OAFlags::Ignored) {
+                        obj.attributes.push(ck_attr.to_attribute()?);
+                    }
+                }
+                None => {
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+        }
+        for attr in attributes {
+            match obj.get_attr(attr.get_type()) {
+                Some(_) => (),
+                None => {
+                    if attr.has_default() {
+                        obj.attributes.push(attr.attribute.clone());
+                    } else if attr.is(OAFlags::RequiredOnGenerate) {
+                        return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                    }
+                }
+            }
+        }
+        let value_len = obj.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+        let mut value: Vec<u8> = vec![0; value_len];
+        rng.generate_random(value.as_mut_slice())?;
+        obj.del_attr(CKA_VALUE_LEN);
+        obj.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
+        obj.set_attr(attribute::from_ulong(CKA_KEY_TYPE, ktype))?;
+
+        obj.generate_unique();
+        Ok(obj)
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
@@ -719,7 +792,6 @@ impl CommonKeyTemplate for GenericSecretKeyTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
-
     fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
         &mut self.attributes
     }
@@ -729,7 +801,6 @@ impl SecretKeyTemplate for GenericSecretKeyTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
-
     fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
         &mut self.attributes
     }
@@ -1060,5 +1131,61 @@ impl ObjectTemplates {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
         self.get_object_template(obj)?.copy(obj, template)
+    }
+
+    pub fn genkey(
+        &self,
+        rng: &mut RNG,
+        mech: &CK_MECHANISM,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let class = match template.iter().find(|a| a.type_ == CKA_CLASS) {
+            Some(c) => c.to_ulong()?,
+            None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+        };
+        match class {
+            CKO_SECRET_KEY => {
+                let ktype =
+                    match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
+                        Some(k) => k.to_ulong()?,
+                        None => CK_UNAVAILABLE_INFORMATION,
+                    };
+                match mech.mechanism {
+                    CKM_GENERIC_SECRET_KEY_GEN => match ktype {
+                        CK_UNAVAILABLE_INFORMATION | CKK_GENERIC_SECRET => self
+                            .get_template(ObjectType::GenericSecretKey)?
+                            .genkey(rng, template, CKK_GENERIC_SECRET),
+                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    },
+                    CKM_SHA_1_KEY_GEN => match ktype {
+                        CK_UNAVAILABLE_INFORMATION | CKK_SHA_1_HMAC => self
+                            .get_template(ObjectType::GenericSecretKey)?
+                            .genkey(rng, template, CKK_SHA_1_HMAC),
+                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    },
+                    CKM_SHA256_KEY_GEN => match ktype {
+                        CK_UNAVAILABLE_INFORMATION | CKK_SHA256_HMAC => self
+                            .get_template(ObjectType::GenericSecretKey)?
+                            .genkey(rng, template, CKK_SHA256_HMAC),
+                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    },
+                    CKM_SHA384_KEY_GEN => match ktype {
+                        CK_UNAVAILABLE_INFORMATION | CKK_SHA384_HMAC => self
+                            .get_template(ObjectType::GenericSecretKey)?
+                            .genkey(rng, template, CKK_SHA384_HMAC),
+                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    },
+                    CKM_SHA512_KEY_GEN => match ktype {
+                        CK_UNAVAILABLE_INFORMATION | CKK_SHA512_HMAC => self
+                            .get_template(ObjectType::GenericSecretKey)?
+                            .genkey(rng, template, CKK_SHA512_HMAC),
+                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    },
+                    _ => err_rv!(CKR_MECHANISM_INVALID),
+                }
+            }
+            /* TODO: CKO_DOMAIN_PARAMETERS */
+            _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        }
     }
 }
