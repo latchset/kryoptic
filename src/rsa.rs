@@ -27,6 +27,7 @@ use std::fmt::Debug;
 use token::RNG;
 
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
+pub const MAX_RSA_SIZE_BITS: usize = 16536;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
 #[derive(Debug)]
@@ -43,10 +44,14 @@ impl RSAPubTemplate {
         data.init_common_storage_attrs();
         data.init_common_key_attrs();
         data.init_common_public_key_attrs();
-        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_MODULUS_BITS;  OAFlags::Unchangeable; from_ulong; val 0));
-        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_MODULUS_BITS; OAFlags::RequiredOnGenerate | OAFlags::Unchangeable; from_ulong; val 0));
+        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data
+    }
+
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
     }
 }
 
@@ -70,6 +75,67 @@ impl ObjectTemplate for RSAPubTemplate {
         }
         bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
 
+        Ok(obj)
+    }
+
+    fn stubpubkeyhalf(
+        &self,
+        pubkey_template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let attributes = self.get_attributes();
+        let mut obj = Object::new();
+        for ck_attr in pubkey_template {
+            match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(attr) => {
+                    if attr.is(OAFlags::UnsettableOnGenerate) {
+                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                    }
+                    /* duplicate? */
+                    match obj.get_attr(ck_attr.type_) {
+                        Some(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                        None => (),
+                    }
+                    if !attr.is(OAFlags::Ignored) {
+                        obj.set_attr(ck_attr.to_attribute()?)?;
+                    }
+                }
+                None => {
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+        }
+        for attr in attributes {
+            match obj.get_attr(attr.get_type()) {
+                Some(_) => (),
+                None => {
+                    if attr.has_default() {
+                        obj.set_attr(attr.clone_attr())?;
+                    } else if attr.is(OAFlags::RequiredOnGenerate) {
+                        return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                    }
+                }
+            }
+        }
+        match obj.get_attr(CKA_CLASS) {
+            Some(a) => {
+                if a.to_ulong()? != CKO_PUBLIC_KEY {
+                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                }
+            }
+            None => {
+                obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_PUBLIC_KEY))?
+            }
+        }
+        match obj.get_attr(CKA_KEY_TYPE) {
+            Some(a) => {
+                if a.to_ulong()? != CKK_RSA {
+                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                }
+            }
+            None => {
+                obj.set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
+            }
+        }
         Ok(obj)
     }
 
@@ -136,6 +202,10 @@ impl RSAPrivTemplate {
         }
 
         data
+    }
+
+    fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
     }
 }
 
@@ -218,6 +288,148 @@ impl ObjectTemplate for RSAPrivTemplate {
             }
         }
 
+        Ok(obj)
+    }
+
+    fn genkeypair(
+        &self,
+        rng: &mut RNG,
+        pubkey: &mut Object,
+        prikey_template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let bits = pubkey.get_attr_as_ulong(CKA_MODULUS_BITS)? as usize;
+        if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+        let exponent: &Vec<u8> = match pubkey.get_attr(CKA_PUBLIC_EXPONENT) {
+            Some(a) => a.get_value(),
+            None => {
+                pubkey.set_attr(attribute::from_bytes(
+                    CKA_PUBLIC_EXPONENT,
+                    vec![0x01, 0x00, 0x01],
+                ))?;
+                pubkey.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?
+            }
+        };
+
+        let attributes = self.get_attributes();
+        let mut obj = Object::new();
+        for ck_attr in prikey_template {
+            match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(attr) => {
+                    if attr.is(OAFlags::UnsettableOnGenerate) {
+                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                    }
+                    /* duplicate? */
+                    match obj.get_attr(ck_attr.type_) {
+                        Some(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                        None => (),
+                    }
+                    if !attr.is(OAFlags::Ignored) {
+                        obj.set_attr(ck_attr.to_attribute()?)?;
+                    }
+                }
+                None => {
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+        }
+        for attr in attributes {
+            match obj.get_attr(attr.get_type()) {
+                Some(_) => (),
+                None => {
+                    if attr.has_default() {
+                        obj.set_attr(attr.clone_attr())?;
+                    } else if attr.is(OAFlags::RequiredOnGenerate) {
+                        return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                    }
+                }
+            }
+        }
+        match obj.get_attr(CKA_CLASS) {
+            Some(a) => {
+                if a.to_ulong()? != CKO_PRIVATE_KEY {
+                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                }
+            }
+            None => {
+                obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_PRIVATE_KEY))?
+            }
+        }
+        match obj.get_attr(CKA_KEY_TYPE) {
+            Some(a) => {
+                if a.to_ulong()? != CKK_RSA {
+                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                }
+            }
+            None => {
+                obj.set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
+            }
+        }
+
+        let mut pubk: rsa_public_key = rsa_public_key::default();
+        unsafe {
+            nettle_rsa_public_key_init(&mut pubk);
+        }
+        unsafe {
+            nettle_mpz_set_str_256_u(
+                &mut pubk.e[0],
+                exponent.len(),
+                exponent.as_ptr(),
+            );
+        }
+        let mut prik: rsa_private_key = rsa_private_key::default();
+        unsafe {
+            nettle_rsa_private_key_init(&mut prik);
+        }
+        let res = unsafe {
+            nettle_rsa_generate_keypair(
+                &mut pubk,
+                &mut prik,
+                rng as *mut _ as *mut ::std::os::raw::c_void,
+                Some(get_random),
+                std::ptr::null_mut(),
+                None,
+                bits as ::std::os::raw::c_uint,
+                0,
+            )
+        };
+        if res == 0 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+
+        macro_rules! mpz_to_vec {
+            ($mpz:expr) => {{
+                unsafe {
+                    let mut v: Vec<u8> =
+                        vec![0; nettle_mpz_sizeinbase_256_u(&mut $mpz)];
+                    nettle_mpz_get_str_256(v.len(), v.as_mut_ptr(), &mut $mpz);
+                    v
+                }
+            }};
+        }
+
+        let n = mpz_to_vec!(pubk.n[0]);
+        pubkey.set_attr(attribute::from_bytes(CKA_MODULUS, n.clone()))?;
+
+        obj.set_attr(attribute::from_bytes(CKA_MODULUS, n))?;
+        let e = mpz_to_vec!(pubk.e[0]);
+        obj.set_attr(attribute::from_bytes(CKA_PUBLIC_EXPONENT, e))?;
+        let d = mpz_to_vec!(prik.d[0]);
+        obj.set_attr(attribute::from_bytes(CKA_PRIVATE_EXPONENT, d))?;
+        let p = mpz_to_vec!(prik.d[0]);
+        obj.set_attr(attribute::from_bytes(CKA_PRIME_1, p))?;
+        let q = mpz_to_vec!(prik.d[0]);
+        obj.set_attr(attribute::from_bytes(CKA_PRIME_2, q))?;
+        let a = mpz_to_vec!(prik.d[0]);
+        obj.set_attr(attribute::from_bytes(CKA_EXPONENT_1, a))?;
+        let b = mpz_to_vec!(prik.d[0]);
+        obj.set_attr(attribute::from_bytes(CKA_EXPONENT_2, b))?;
+        let c = mpz_to_vec!(prik.d[0]);
+        obj.set_attr(attribute::from_bytes(CKA_COEFFICIENT, c))?;
+
+        pubkey.generate_unique();
+        obj.generate_unique();
         Ok(obj)
     }
 
@@ -537,8 +749,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         CKM_RSA_PKCS,
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: 1024,
-                ulMaxKeySize: 16536,
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
                 flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_SIGN | CKF_VERIFY,
             },
         }),
@@ -547,8 +759,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         CKM_SHA1_RSA_PKCS,
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: 1024,
-                ulMaxKeySize: 16536,
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
                 flags: CKF_SIGN | CKF_VERIFY,
             },
         }),
@@ -558,8 +770,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         CKM_SHA256_RSA_PKCS,
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: 1024,
-                ulMaxKeySize: 16536,
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
                 flags: CKF_SIGN | CKF_VERIFY,
             },
         }),
@@ -569,8 +781,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         CKM_SHA384_RSA_PKCS,
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: 1024,
-                ulMaxKeySize: 16536,
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
                 flags: CKF_SIGN | CKF_VERIFY,
             },
         }),
@@ -580,8 +792,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         CKM_SHA512_RSA_PKCS,
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: 1024,
-                ulMaxKeySize: 16536,
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
                 flags: CKF_SIGN | CKF_VERIFY,
             },
         }),

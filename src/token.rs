@@ -1606,4 +1606,35 @@ impl Token {
                 .genkey(&mut self.rng, mech, template)?;
         self.insert_object(s_handle, object)
     }
+
+    pub fn generate_keypair(
+        &mut self,
+        s_handle: CK_SESSION_HANDLE,
+        mech: &CK_MECHANISM,
+        pubkey_template: &[CK_ATTRIBUTE],
+        prikey_template: &[CK_ATTRIBUTE],
+    ) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
+        /* check that session is valid */
+        let _ = self.sessions.get_session(s_handle)?;
+
+        if !self.user_login.logged_in {
+            return err_rv!(CKR_USER_NOT_LOGGED_IN);
+        }
+
+        let (pubkey, prikey) = self.object_templates.genkeypair(
+            &mut self.rng,
+            mech,
+            pubkey_template,
+            prikey_template,
+        )?;
+
+        let pubh = self.insert_object(s_handle, pubkey)?;
+        match self.insert_object(s_handle, prikey) {
+            Ok(h) => Ok((pubh, h)),
+            Err(e) => {
+                let _ = self.destroy_object(s_handle, pubh);
+                return Err(e);
+            }
+        }
+    }
 }

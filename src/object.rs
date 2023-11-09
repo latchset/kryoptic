@@ -181,6 +181,10 @@ impl ObjectAttr {
         self.attribute.get_type()
     }
 
+    pub fn clone_attr(&self) -> Attribute {
+        self.attribute.clone()
+    }
+
     pub fn is(&self, val: OAFlags) -> bool {
         self.flags.contains(val)
     }
@@ -228,6 +232,22 @@ pub trait ObjectTemplate: Debug + Send + Sync {
         _rng: &mut RNG,
         _template: &[CK_ATTRIBUTE],
         _ktype: CK_KEY_TYPE,
+    ) -> KResult<Object> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
+
+    fn stubpubkeyhalf(
+        &self,
+        _pubkey_template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
+
+    fn genkeypair(
+        &self,
+        _rng: &mut RNG,
+        _pubkey: &mut Object,
+        _prikey_template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
@@ -562,7 +582,7 @@ impl ObjectTemplate for X509Template {
 pub trait CommonKeyTemplate {
     fn init_common_key_attrs(&mut self) {
         let t = self.get_attributes_mut();
-        t.push(attr_element!(CKA_KEY_TYPE; OAFlags::Required; from_ulong; val CK_UNAVAILABLE_INFORMATION));
+        t.push(attr_element!(CKA_KEY_TYPE; OAFlags::RequiredOnCreate; from_ulong; val CK_UNAVAILABLE_INFORMATION));
         t.push(
             attr_element!(CKA_ID; OAFlags::empty(); from_bytes; val Vec::new()),
         );
@@ -699,17 +719,6 @@ impl GenericSecretKeyTemplate {
         {
             Some(idx) => data.attributes[idx] = private,
             None => data.attributes.push(private),
-        }
-
-        /* CKA_KEY_TYPE not required on genkey because implicit in mechanism */
-        let key_type = attr_element!(CKA_KEY_TYPE; OAFlags::empty(); from_ulong; val CK_UNAVAILABLE_INFORMATION);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_KEY_TYPE)
-        {
-            Some(idx) => data.attributes[idx] = key_type,
-            None => data.attributes.push(key_type),
         }
 
         data
@@ -1186,6 +1195,27 @@ impl ObjectTemplates {
             }
             /* TODO: CKO_DOMAIN_PARAMETERS */
             _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        }
+    }
+
+    pub fn genkeypair(
+        &self,
+        rng: &mut RNG,
+        mech: &CK_MECHANISM,
+        pubkey_template: &[CK_ATTRIBUTE],
+        prikey_template: &[CK_ATTRIBUTE],
+    ) -> KResult<(Object, Object)> {
+        match mech.mechanism {
+            CKM_RSA_PKCS_KEY_PAIR_GEN => {
+                let mut pubkey = self
+                    .get_template(ObjectType::RSAPubKey)?
+                    .stubpubkeyhalf(pubkey_template)?;
+                let prikey = self
+                    .get_template(ObjectType::RSAPrivKey)?
+                    .genkeypair(rng, &mut pubkey, prikey_template)?;
+                Ok((pubkey, prikey))
+            }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
         }
     }
 }

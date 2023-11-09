@@ -1303,16 +1303,44 @@ extern "C" fn fn_generate_key(
 }
 
 extern "C" fn fn_generate_key_pair(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _public_key_template: CK_ATTRIBUTE_PTR,
-    _public_key_attribute_count: CK_ULONG,
-    _private_key_template: CK_ATTRIBUTE_PTR,
-    _private_key_attribute_count: CK_ULONG,
-    _ph_public_key: CK_OBJECT_HANDLE_PTR,
-    _ph_private_key: CK_OBJECT_HANDLE_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    public_key_template: CK_ATTRIBUTE_PTR,
+    public_key_attribute_count: CK_ULONG,
+    private_key_template: CK_ATTRIBUTE_PTR,
+    private_key_attribute_count: CK_ULONG,
+    public_key: CK_OBJECT_HANDLE_PTR,
+    private_key: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rslots = global_rlock!(SLOTS);
+    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+
+    let mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let pubtmpl: &mut [CK_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts_mut(
+            public_key_template,
+            public_key_attribute_count as usize,
+        )
+    };
+    let pritmpl: &mut [CK_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts_mut(
+            private_key_template,
+            private_key_attribute_count as usize,
+        )
+    };
+
+    let (pubk, prik) =
+        match token.generate_keypair(s_handle, mech, pubtmpl, pritmpl) {
+            Ok(h) => (h.0, h.1),
+            Err(e) => return err_to_rv!(e),
+        };
+
+    unsafe {
+        core::ptr::write(public_key as *mut _, pubk);
+        core::ptr::write(private_key as *mut _, prik);
+    }
+
+    CKR_OK
 }
 extern "C" fn fn_wrap_key(
     _session: CK_SESSION_HANDLE,

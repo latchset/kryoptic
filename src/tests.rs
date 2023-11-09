@@ -2000,6 +2000,7 @@ fn test_keygen() {
         None,
         &mut session,
     );
+    assert_eq!(ret, CKR_OK);
 
     /* login */
     let pin = "12345678";
@@ -2011,6 +2012,7 @@ fn test_keygen() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* Generic Secret */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_GENERIC_SECRET_KEY_GEN,
         pParameter: std::ptr::null_mut(),
@@ -2032,6 +2034,43 @@ fn test_keygen() {
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
         &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* RSA key pair */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS_KEY_PAIR_GEN,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut pubkey = CK_INVALID_HANDLE;
+    let mut prikey = CK_INVALID_HANDLE;
+
+    let mut truebool = CK_TRUE;
+    let mut len: CK_ULONG = 2048;
+    let mut pub_template = vec![
+        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_MODULUS_BITS, &mut len as *mut _, CK_ULONG_SIZE),
+    ];
+    let mut pri_template = vec![
+        make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    ret = fn_generate_key_pair(
+        session,
+        &mut mechanism,
+        pub_template.as_mut_ptr(),
+        pub_template.len() as CK_ULONG,
+        pri_template.as_mut_ptr(),
+        pri_template.len() as CK_ULONG,
+        &mut pubkey,
+        &mut prikey,
     );
     assert_eq!(ret, CKR_OK);
 
