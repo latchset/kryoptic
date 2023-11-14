@@ -6,6 +6,8 @@ use std::ffi::CStr;
 use std::str::FromStr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use once_cell::sync::Lazy;
+
 mod interface {
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
@@ -152,36 +154,26 @@ impl SlotsState {
     }
 }
 
-macro_rules! sessions_or_err {
-    ($some:expr) => {
-        match $some {
-            Some(ref s) => s,
-            None => return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
-        }
-    };
-    ($some:expr; as_mut) => {
-        match $some {
-            Some(ref mut s) => s,
-            None => return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
-        }
-    };
+struct SlotSessions {
+    sessions: HashMap<CK_SESSION_HANDLE, RwLock<Session>>,
 }
 
 struct SessionsState {
-    /* We need to use an Option here,
-     * because this struct is instantiated as static */
-    sessions: Option<HashMap<CK_SESSION_HANDLE, RwLock<Session>>>,
+    slots: Vec<SlotSessions>,
+    sessionmap: HashMap<CK_SESSION_HANDLE, usize>,
     next_handle: CK_ULONG,
 }
 
 impl SessionsState {
     fn initialize(&mut self) {
-        self.sessions = Some(HashMap::new());
+        self.slots.clear();
+        self.sessionmap.clear();
         self.next_handle = 1;
     }
 
     fn finalize(&mut self) {
-        self.sessions = None;
+        self.slots.clear();
+        self.sessionmap.clear();
         self.next_handle = 0;
     }
 
@@ -193,8 +185,11 @@ impl SessionsState {
         &self,
         handle: CK_SESSION_HANDLE,
     ) -> KResult<RwLockReadGuard<'_, Session>> {
-        let sessions = sessions_or_err!(self.sessions);
-        match sessions.get(&handle) {
+        let slot_idx = match self.sessionmap.get(&handle) {
+            Some(s) => *s,
+            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+        };
+        match self.slots[slot_idx].sessions.get(&handle) {
             Some(s) => match s.read() {
                 Ok(sess) => Ok(sess),
                 Err(_) => err_rv!(CKR_GENERAL_ERROR),
@@ -207,8 +202,11 @@ impl SessionsState {
         &self,
         handle: CK_SESSION_HANDLE,
     ) -> KResult<RwLockWriteGuard<'_, Session>> {
-        let sessions = sessions_or_err!(self.sessions);
-        match sessions.get(&handle) {
+        let slot_idx = match self.sessionmap.get(&handle) {
+            Some(s) => *s,
+            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+        };
+        match self.slots[slot_idx].sessions.get(&handle) {
             Some(s) => match s.write() {
                 Ok(sess) => Ok(sess),
                 Err(_) => err_rv!(CKR_GENERAL_ERROR),
@@ -223,35 +221,42 @@ impl SessionsState {
         user_type: CK_USER_TYPE,
         flags: CK_FLAGS,
     ) -> KResult<CK_SESSION_HANDLE> {
-        let sessions = sessions_or_err!(self.sessions; as_mut);
+        let slot_idx = slot_id as usize;
+        if self.slots.len() < slot_idx {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
         let handle = self.next_handle;
         let session = Session::new(slot_id, handle, user_type, flags)?;
-        sessions.insert(handle, RwLock::new(session));
+        self.slots[slot_idx]
+            .sessions
+            .insert(handle, RwLock::new(session));
+        self.sessionmap.insert(handle, slot_idx);
         self.next_handle += 1;
         Ok(handle)
     }
 
     fn has_sessions(&self, slot_id: CK_SLOT_ID) -> KResult<bool> {
-        let sessions = sessions_or_err!(self.sessions);
-        for (_key, val) in sessions.iter() {
-            let session = val.read().unwrap();
-            if session.get_slot_id() == slot_id {
-                return Ok(true);
-            }
+        let slot_idx = slot_id as usize;
+        if self.slots.len() < slot_idx {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
+        if self.slots[slot_idx].sessions.len() > 0 {
+            return Ok(true);
         }
         Ok(false)
     }
 
     fn has_ro_sessions(&self, slot_id: CK_SLOT_ID) -> KResult<bool> {
-        let sessions = sessions_or_err!(self.sessions);
-        for (_key, val) in sessions.iter() {
+        let slot_idx = slot_id as usize;
+        if self.slots.len() < slot_idx {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
+        for (_key, val) in self.slots[slot_idx].sessions.iter() {
             let session = val.read().unwrap();
-            if session.get_slot_id() == slot_id {
-                match session.get_session_info().state {
-                    CKS_RO_PUBLIC_SESSION => return Ok(true),
-                    CKS_RO_USER_FUNCTIONS => return Ok(true),
-                    _ => continue,
-                }
+            match session.get_session_info().state {
+                CKS_RO_PUBLIC_SESSION => return Ok(true),
+                CKS_RO_USER_FUNCTIONS => return Ok(true),
+                _ => continue,
             }
         }
         Ok(false)
@@ -262,14 +267,14 @@ impl SessionsState {
         slot_id: CK_SLOT_ID,
         user_type: CK_USER_TYPE,
     ) -> KResult<()> {
-        let sessions = sessions_or_err!(self.sessions; as_mut);
-        for (_key, val) in sessions.iter_mut() {
-            let mut session = val.write().unwrap();
-            if session.get_slot_id() == slot_id {
-                let ret = session.change_session_state(user_type);
-                if ret != CKR_OK {
-                    return err_rv!(ret);
-                }
+        let slot_idx = slot_id as usize;
+        if self.slots.len() < slot_idx {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
+        for (_key, val) in self.slots[slot_idx].sessions.iter_mut() {
+            let ret = val.write().unwrap().change_session_state(user_type);
+            if ret != CKR_OK {
+                return err_rv!(ret);
             }
         }
         Ok(())
@@ -279,48 +284,60 @@ impl SessionsState {
         &mut self,
         slot_id: CK_SLOT_ID,
     ) -> KResult<()> {
-        let sessions = sessions_or_err!(self.sessions; as_mut);
-        for (_key, val) in sessions.iter_mut() {
-            let mut session = val.write().unwrap();
-            if session.get_slot_id() == slot_id {
-                let _ =
-                    session.change_session_state(CK_UNAVAILABLE_INFORMATION);
-            }
+        let slot_idx = slot_id as usize;
+        if self.slots.len() < slot_idx {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
+        for (_key, val) in self.slots[slot_idx].sessions.iter_mut() {
+            let _ = val
+                .write()
+                .unwrap()
+                .change_session_state(CK_UNAVAILABLE_INFORMATION);
         }
         Ok(())
     }
 
     fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
-        let sessions = sessions_or_err!(self.sessions; as_mut);
-        sessions.remove(&handle);
+        let slot_idx = match self.sessionmap.get(&handle) {
+            Some(s) => *s,
+            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+        };
+        self.slots[slot_idx].sessions.remove(&handle);
+        self.sessionmap.remove(&handle);
         Ok(())
     }
 
     fn drop_all_sessions_slot(
         &mut self,
         slot_id: CK_SLOT_ID,
-        token: &mut Token,
-    ) -> KResult<()> {
-        let sessions = sessions_or_err!(self.sessions; as_mut);
-        sessions.retain(|_key, val| {
-            let session = val.read().unwrap();
-            if session.get_slot_id() == slot_id {
-                token.drop_session_objects(session.get_handle());
+    ) -> KResult<Vec<CK_SESSION_HANDLE>> {
+        let slot_idx = slot_id as usize;
+        if self.slots.len() < slot_idx {
+            return err_rv!(CKR_SLOT_ID_INVALID);
+        }
+        let mut dropped_handles = Vec::<CK_SESSION_HANDLE>::new();
+        self.sessionmap.retain(|key, val| {
+            if *val == slot_idx {
+                dropped_handles.push(*key);
                 false
             } else {
                 true
             }
         });
-        Ok(())
+        self.slots[slot_idx].sessions.clear();
+        Ok(dropped_handles)
     }
 }
 
 static SLOTS: RwLock<SlotsState> =
     RwLock::new(SlotsState { slots: Vec::new() });
 
-static SESSIONS: RwLock<SessionsState> = RwLock::new(SessionsState {
-    sessions: None,
-    next_handle: 0,
+static SESSIONS: Lazy<RwLock<SessionsState>> = Lazy::new(|| {
+    RwLock::new(SessionsState {
+        slots: Vec::new(),
+        sessionmap: HashMap::new(),
+        next_handle: 0,
+    })
 });
 
 macro_rules! global_rlock {
@@ -619,7 +636,10 @@ extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut wsess = global_wlock!(SESSIONS);
     let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
-    let _ = res_or_ret!(wsess.drop_all_sessions_slot(slot_id, &mut token));
+    let dropped_sessions = res_or_ret!(wsess.drop_all_sessions_slot(slot_id));
+    for handle in dropped_sessions {
+        token.drop_session_objects(handle);
+    }
     CKR_OK
 }
 extern "C" fn fn_get_session_info(
