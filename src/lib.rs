@@ -44,6 +44,8 @@ mod token;
 
 use error::{KError, KResult};
 use interface::*;
+use mechanism::Operation;
+use session::Session;
 use token::Token;
 
 /* algorithms and ciphers */
@@ -67,6 +69,15 @@ macro_rules! ret_to_rv {
         match $ret {
             Ok(()) => CKR_OK,
             Err(e) => err_to_rv!(e),
+        }
+    };
+}
+
+macro_rules! res_or_ret {
+    ($ret:expr) => {
+        match $ret {
+            Ok(x) => x,
+            Err(e) => return err_to_rv!(e),
         }
     };
 }
@@ -141,8 +152,25 @@ impl SlotsState {
     }
 }
 
+macro_rules! sessions_or_err {
+    ($some:expr) => {
+        match $some {
+            Some(ref s) => s,
+            None => return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+        }
+    };
+    ($some:expr; as_mut) => {
+        match $some {
+            Some(ref mut s) => s,
+            None => return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+        }
+    };
+}
+
 struct SessionsState {
-    sessions: Option<HashMap<CK_SESSION_HANDLE, CK_SLOT_ID>>,
+    /* We need to use an Option here,
+     * because this struct is instantiated as static */
+    sessions: Option<HashMap<CK_SESSION_HANDLE, RwLock<Session>>>,
     next_handle: CK_ULONG,
 }
 
@@ -154,53 +182,136 @@ impl SessionsState {
 
     fn finalize(&mut self) {
         self.sessions = None;
+        self.next_handle = 0;
     }
 
     fn is_initialized(&self) -> bool {
-        self.sessions.is_none() == false
+        self.next_handle != 0
     }
 
-    fn get_session_slot(
+    fn get_session(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<CK_SLOT_ID> {
-        match self.sessions {
-            Some(ref s) => match s.get(&handle) {
-                Some(s) => Ok(*s),
-                None => err_rv!(CKR_SESSION_HANDLE_INVALID),
+    ) -> KResult<RwLockReadGuard<'_, Session>> {
+        let sessions = sessions_or_err!(self.sessions);
+        match sessions.get(&handle) {
+            Some(s) => match s.read() {
+                Ok(sess) => Ok(sess),
+                Err(_) => err_rv!(CKR_GENERAL_ERROR),
             },
-            None => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
+            None => err_rv!(CKR_SESSION_HANDLE_INVALID),
         }
     }
 
-    fn new_session_slot(&mut self, slot_id: CK_SLOT_ID) -> CK_SESSION_HANDLE {
-        match self.sessions {
-            Some(ref mut s) => {
-                let handle = self.next_handle;
-                self.next_handle += 1;
-                s.insert(handle, slot_id);
-                return handle;
-            }
-            None => return CK_UNAVAILABLE_INFORMATION,
+    fn get_session_mut(
+        &self,
+        handle: CK_SESSION_HANDLE,
+    ) -> KResult<RwLockWriteGuard<'_, Session>> {
+        let sessions = sessions_or_err!(self.sessions);
+        match sessions.get(&handle) {
+            Some(s) => match s.write() {
+                Ok(sess) => Ok(sess),
+                Err(_) => err_rv!(CKR_GENERAL_ERROR),
+            },
+            None => err_rv!(CKR_SESSION_HANDLE_INVALID),
         }
     }
 
-    fn clear_session_slot(&mut self, handle: CK_SESSION_HANDLE) {
-        match self.sessions {
-            Some(ref mut s) => {
-                s.remove(&handle);
-            }
-            None => (),
-        }
+    fn new_session(
+        &mut self,
+        slot_id: CK_SLOT_ID,
+        user_type: CK_USER_TYPE,
+        flags: CK_FLAGS,
+    ) -> KResult<CK_SESSION_HANDLE> {
+        let sessions = sessions_or_err!(self.sessions; as_mut);
+        let handle = self.next_handle;
+        let session = Session::new(slot_id, handle, user_type, flags)?;
+        sessions.insert(handle, RwLock::new(session));
+        self.next_handle += 1;
+        Ok(handle)
     }
 
-    fn clear_all_sessions_slot(&mut self, slot_id: CK_SLOT_ID) {
-        match self.sessions {
-            Some(ref mut s) => {
-                s.retain(|_key, val| *val != slot_id);
+    fn has_sessions(&self, slot_id: CK_SLOT_ID) -> KResult<bool> {
+        let sessions = sessions_or_err!(self.sessions);
+        for (_key, val) in sessions.iter() {
+            let session = val.read().unwrap();
+            if session.get_slot_id() == slot_id {
+                return Ok(true);
             }
-            None => (),
         }
+        Ok(false)
+    }
+
+    fn has_ro_sessions(&self, slot_id: CK_SLOT_ID) -> KResult<bool> {
+        let sessions = sessions_or_err!(self.sessions);
+        for (_key, val) in sessions.iter() {
+            let session = val.read().unwrap();
+            if session.get_slot_id() == slot_id {
+                match session.get_session_info().state {
+                    CKS_RO_PUBLIC_SESSION => return Ok(true),
+                    CKS_RO_USER_FUNCTIONS => return Ok(true),
+                    _ => continue,
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn change_session_states(
+        &mut self,
+        slot_id: CK_SLOT_ID,
+        user_type: CK_USER_TYPE,
+    ) -> KResult<()> {
+        let sessions = sessions_or_err!(self.sessions; as_mut);
+        for (_key, val) in sessions.iter_mut() {
+            let mut session = val.write().unwrap();
+            if session.get_slot_id() == slot_id {
+                let ret = session.change_session_state(user_type);
+                if ret != CKR_OK {
+                    return err_rv!(ret);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn invalidate_session_states(
+        &mut self,
+        slot_id: CK_SLOT_ID,
+    ) -> KResult<()> {
+        let sessions = sessions_or_err!(self.sessions; as_mut);
+        for (_key, val) in sessions.iter_mut() {
+            let mut session = val.write().unwrap();
+            if session.get_slot_id() == slot_id {
+                let _ =
+                    session.change_session_state(CK_UNAVAILABLE_INFORMATION);
+            }
+        }
+        Ok(())
+    }
+
+    fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+        let sessions = sessions_or_err!(self.sessions; as_mut);
+        sessions.remove(&handle);
+        Ok(())
+    }
+
+    fn drop_all_sessions_slot(
+        &mut self,
+        slot_id: CK_SLOT_ID,
+        token: &mut Token,
+    ) -> KResult<()> {
+        let sessions = sessions_or_err!(self.sessions; as_mut);
+        sessions.retain(|_key, val| {
+            let session = val.read().unwrap();
+            if session.get_slot_id() == slot_id {
+                token.drop_session_objects(session.get_handle());
+                false
+            } else {
+                true
+            }
+        });
+        Ok(())
     }
 }
 
@@ -209,7 +320,7 @@ static SLOTS: RwLock<SlotsState> =
 
 static SESSIONS: RwLock<SessionsState> = RwLock::new(SessionsState {
     sessions: None,
-    next_handle: 1,
+    next_handle: 0,
 });
 
 macro_rules! global_rlock {
@@ -249,23 +360,24 @@ macro_rules! global_wlock {
 macro_rules! token_from_session_handle {
     ($RSLOTS:expr, $HANDLE:expr) => {{
         let rsess = global_rlock!(SESSIONS);
-        let slot_id = match rsess.get_session_slot($HANDLE) {
+        let session = match rsess.get_session($HANDLE) {
             Ok(s) => s,
             Err(e) => return err_to_rv!(e),
         };
-        let token = match $RSLOTS.get_token_from_slot(slot_id) {
+        let token = match $RSLOTS.get_token_from_slot(session.get_slot_id()) {
             Ok(t) => t,
             Err(e) => return err_to_rv!(e),
         };
         token
     }};
-    ($WSLOTS:expr, $HANDLE:expr, as_mut) => {{
+    ($RSLOTS:expr, $HANDLE:expr, as_mut) => {{
         let rsess = global_rlock!(SESSIONS);
-        let slot_id = match rsess.get_session_slot($HANDLE) {
+        let session = match rsess.get_session($HANDLE) {
             Ok(s) => s,
             Err(e) => return err_to_rv!(e),
         };
-        let token = match $WSLOTS.get_token_from_slot_mut(slot_id) {
+        let token = match $RSLOTS.get_token_from_slot_mut(session.get_slot_id())
+        {
             Ok(t) => t,
             Err(e) => return err_to_rv!(e),
         };
@@ -322,14 +434,8 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         },
     }
 
-    let slot = match slot::Slot::new(slotnum, filename) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
-    match wslots.add_slot(slot) {
-        Ok(()) => (),
-        Err(e) => return err_to_rv!(e),
-    }
+    let slot = res_or_ret!(slot::Slot::new(slotnum, filename));
+    res_or_ret!(wslots.add_slot(slot));
 
     let mut wsess = global_wlock!(noinitcheck SESSIONS);
     if !wsess.is_initialized() {
@@ -341,10 +447,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     let mut wslots = global_wlock!(SLOTS);
     let mut ret = CKR_OK;
-    let slots = match wslots.get_slots() {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
+    let slots = res_or_ret!(wslots.get_slots());
     for slot in slots {
         let token = match slot.get_token() {
             Ok(t) => t,
@@ -374,10 +477,7 @@ extern "C" fn fn_get_mechanism_list(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let token = match rslots.get_token_from_slot(slot_id) {
-        Ok(t) => t,
-        Err(e) => return err_to_rv!(e),
-    };
+    let token = res_or_ret!(rslots.get_token_from_slot(slot_id));
     if mechanism_list.is_null() {
         unsafe {
             *count = token.get_mechs_num() as CK_ULONG;
@@ -408,14 +508,8 @@ extern "C" fn fn_get_mechanism_info(
     info: CK_MECHANISM_INFO_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let token = match rslots.get_token_from_slot(slot_id) {
-        Ok(t) => t,
-        Err(e) => return err_to_rv!(e),
-    };
-    let mech = match token.get_mech_info(typ) {
-        Ok(i) => i,
-        Err(e) => return err_to_rv!(e),
-    };
+    let token = res_or_ret!(rslots.get_token_from_slot(slot_id));
+    let mech = res_or_ret!(token.get_mech_info(typ));
     unsafe {
         core::ptr::write(info as *mut _, *mech);
     }
@@ -428,11 +522,8 @@ extern "C" fn fn_init_token(
     label: CK_UTF8CHAR_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = match rslots.get_token_from_slot_mut_nochecks(slot_id) {
-        Ok(t) => t,
-        Err(e) => return err_to_rv!(e),
-    };
-    if token.has_sessions() {
+    let rsess = global_rlock!(SESSIONS);
+    if res_or_ret!(rsess.has_sessions(slot_id)) {
         return CKR_SESSION_EXISTS;
     }
     let vpin: Vec<u8> =
@@ -444,6 +535,8 @@ extern "C" fn fn_init_token(
             std::slice::from_raw_parts(label, 32).to_vec()
         }
     };
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut_nochecks(slot_id));
     token.initialize(&vpin, &vlabel)
 }
 extern "C" fn fn_init_pin(
@@ -470,11 +563,8 @@ extern "C" fn fn_set_pin(
     new_len: CK_ULONG,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let session = match token.get_session(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
     if !session.is_writable() {
         return CKR_SESSION_READ_ONLY;
     }
@@ -485,6 +575,8 @@ extern "C" fn fn_set_pin(
         std::slice::from_raw_parts(old_pin, old_len as usize).to_vec()
     };
 
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
     token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, Some(&vold))
 }
 extern "C" fn fn_open_session(
@@ -495,61 +587,47 @@ extern "C" fn fn_open_session(
     ph_session: CK_SESSION_HANDLE_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = match rslots.get_token_from_slot_mut(slot_id) {
-        Ok(t) => t,
-        Err(e) => return err_to_rv!(e),
-    };
-    if flags & CKF_RW_SESSION == 0 {
-        if token.is_logged_in(CKU_SO) {
+    let token = res_or_ret!(rslots.get_token_from_slot(slot_id));
+    let mut user_type = CK_UNAVAILABLE_INFORMATION;
+    if token.is_logged_in(CKU_SO) {
+        if flags & CKF_RW_SESSION == 0 {
             return CKR_SESSION_READ_WRITE_SO_EXISTS;
         }
+        user_type = CKU_SO;
+    } else if token.is_logged_in(CKU_USER) {
+        user_type = CKU_USER;
     }
     let mut wsess = global_wlock!(SESSIONS);
-    let handle = wsess.new_session_slot(slot_id);
-    let session = match token.new_session(handle, flags) {
-        Ok(s) => s,
-        Err(e) => {
-            wsess.clear_session_slot(handle);
-            return err_to_rv!(e);
-        }
-    };
+    let handle = res_or_ret!(wsess.new_session(slot_id, user_type, flags));
     unsafe {
-        core::ptr::write(ph_session as *mut _, session.get_handle());
+        core::ptr::write(ph_session as *mut _, handle);
     }
     CKR_OK
 }
 extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let ret = match token.drop_session(s_handle) {
-        Ok(()) => CKR_OK,
-        Err(e) => err_to_rv!(e),
-    };
     let mut wsess = global_wlock!(SESSIONS);
-    wsess.clear_session_slot(s_handle);
-    ret
+    let session = res_or_ret!(wsess.get_session(s_handle));
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
+    token.drop_session_objects(session.get_handle());
+    drop(session);
+    let _ = res_or_ret!(wsess.drop_session(s_handle));
+    CKR_OK
 }
 extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let mut wsess = global_wlock!(SESSIONS);
-    wsess.clear_all_sessions_slot(slot_id);
-    let mut token = match rslots.get_token_from_slot_mut(slot_id) {
-        Ok(t) => t,
-        Err(e) => return err_to_rv!(e),
-    };
-    token.drop_all_sessions();
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    let _ = res_or_ret!(wsess.drop_all_sessions_slot(slot_id, &mut token));
     CKR_OK
 }
 extern "C" fn fn_get_session_info(
     s_handle: CK_SESSION_HANDLE,
     info: CK_SESSION_INFO_PTR,
 ) -> CK_RV {
-    let rslots = global_rlock!(SLOTS);
-    let token = token_from_session_handle!(rslots, s_handle);
-    let session = match token.get_session(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
     unsafe {
         core::ptr::write(info as *mut _, *session.get_session_info());
     }
@@ -578,22 +656,56 @@ extern "C" fn fn_login(
     pin_len: CK_ULONG,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let mut wsess = global_wlock!(SESSIONS);
+    let session = res_or_ret!(wsess.get_session(s_handle));
+    let slot_id = session.get_slot_id();
+    drop(session);
     if user_type == CKU_SO {
-        if token.has_ro_sessions() {
+        if res_or_ret!(wsess.has_ro_sessions(slot_id)) {
             return CKR_SESSION_READ_ONLY_EXISTS;
         }
     }
     let vpin: Vec<u8> =
         unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
-
-    token.login(user_type, &vpin)
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    match token.login(user_type, &vpin) {
+        CKR_OK => match wsess.change_session_states(slot_id, user_type) {
+            Ok(()) => CKR_OK,
+            Err(e) => {
+                token.logout();
+                let _ = wsess.invalidate_session_states(slot_id);
+                err_to_rv!(e)
+            }
+        },
+        err => err,
+    }
 }
 extern "C" fn fn_logout(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    token.logout()
+    let mut wsess = global_wlock!(SESSIONS);
+    let session = res_or_ret!(wsess.get_session(s_handle));
+    let slot_id = session.get_slot_id();
+    drop(session);
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    let ret = token.logout();
+    if ret == CKR_OK {
+        let _ = wsess.invalidate_session_states(slot_id);
+    }
+    ret
 }
+
+macro_rules! fail_if_cka_token_true {
+    ($template:expr) => {
+        for ck_attr in $template {
+            if ck_attr.type_ == CKA_TOKEN {
+                if res_or_ret!(ck_attr.to_bool()) {
+                    return CKR_SESSION_READ_ONLY;
+                }
+            }
+        }
+    };
+}
+
 extern "C" fn fn_create_object(
     s_handle: CK_SESSION_HANDLE,
     template: CK_ATTRIBUTE_PTR,
@@ -601,10 +713,15 @@ extern "C" fn fn_create_object(
     object_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(&*tmpl);
+    }
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
 
     let oh = match token.create_object(s_handle, tmpl) {
         Ok(h) => h,
@@ -625,15 +742,20 @@ extern "C" fn fn_copy_object(
     ph_new_object: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(&*tmpl);
+    }
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
 
-    let oh = match token.copy_object(s_handle, o_handle, tmpl) {
-        Ok(h) => h,
-        Err(e) => return err_to_rv!(e),
-    };
+    /* Pull object to check that operation is not prohibited */
+    /* TODO: return CKR_ACTION_PROHIBITED instead of CKR_USER_NOT_LOGGED_IN ? */
+    let _ = res_or_ret!(token.get_object_by_handle(o_handle, true));
+    let oh = res_or_ret!(token.copy_object(s_handle, o_handle, tmpl));
 
     unsafe {
         core::ptr::write(ph_new_object as *mut _, oh);
@@ -646,8 +768,16 @@ extern "C" fn fn_destroy_object(
     object: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    ret_to_rv!(token.destroy_object(s_handle, object))
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
+    /* TODO: return CKR_ACTION_PROHIBITED instead of CKR_USER_NOT_LOGGED_IN ? */
+    let obj = res_or_ret!(token.get_object_by_handle(object, true));
+    if obj.is_token() && !session.is_writable() {
+        return CKR_ACTION_PROHIBITED;
+    }
+    ret_to_rv!(token.destroy_object(object))
 }
 
 extern "C" fn fn_get_object_size(
@@ -657,10 +787,7 @@ extern "C" fn fn_get_object_size(
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
     let token = token_from_session_handle!(rslots, s_handle);
-    let len = match token.get_object_size(s_handle, object) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
-    };
+    let len = res_or_ret!(token.get_object_size(object));
     unsafe {
         *size = len as CK_ULONG;
     }
@@ -686,10 +813,22 @@ extern "C" fn fn_set_attribute_value(
     count: CK_ULONG,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
+    let obj = res_or_ret!(token.get_object_by_handle(o_handle, true));
+    if obj.is_token() {
+        if !session.is_auth_state() {
+            return CKR_USER_NOT_LOGGED_IN;
+        }
+        if !session.is_writable() {
+            return CKR_SESSION_READ_ONLY;
+        }
+    }
     let mut tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
-    ret_to_rv!(token.set_object_attrs(s_handle, o_handle, &mut tmpl))
+    ret_to_rv!(token.set_object_attrs(o_handle, &mut tmpl))
 }
 extern "C" fn fn_find_objects_init(
     s_handle: CK_SESSION_HANDLE,
@@ -697,10 +836,13 @@ extern "C" fn fn_find_objects_init(
     count: CK_ULONG,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
     let tmpl: &[CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts(template, count as usize) };
-    ret_to_rv!(token.search_objects(s_handle, tmpl))
+    ret_to_rv!(session.new_search_operation(&mut token, tmpl))
 }
 
 extern "C" fn fn_find_objects(
@@ -712,13 +854,14 @@ extern "C" fn fn_find_objects(
     if ph_object.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let handles =
-        match token.search_results(s_handle, max_object_count as usize) {
-            Ok(h) => h,
-            Err(e) => return err_to_rv!(e),
-        };
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Search(op) => op,
+        Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
+        _ => return CKR_OPERATION_ACTIVE,
+    };
+    let handles = res_or_ret!(operation.results(max_object_count as usize));
     let hlen = handles.len();
     if hlen > 0 {
         let mut idx = 0;
@@ -735,26 +878,55 @@ extern "C" fn fn_find_objects(
     CKR_OK
 }
 extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    ret_to_rv!(token.search_final(s_handle))
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    match session.get_operation_mut() {
+        Operation::Search(_) => (),
+        Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
+        _ => return CKR_OPERATION_ACTIVE,
+    };
+    session.set_operation(Operation::Empty);
+    CKR_OK
 }
+
+macro_rules! check_op_empty_or_fail {
+    ($sess:expr; $optype:ident; $ptr:expr) => {
+        let op = $sess.get_operation();
+        if !op.finalized() {
+            if $ptr.is_null() {
+                match op {
+                    Operation::$optype(_) => {
+                        $sess.set_operation(Operation::Empty);
+                        return CKR_OK;
+                    }
+                    _ => (),
+                }
+            }
+            return CKR_OPERATION_ACTIVE;
+        }
+    };
+}
+
 extern "C" fn fn_encrypt_init(
     s_handle: CK_SESSION_HANDLE,
     mechanism: CK_MECHANISM_PTR,
     key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; Encryption; mechanism);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
-    if mechanism.is_null() {
-        ret_to_rv!(token.encrypt_final(
-            s_handle,
-            std::ptr::null_mut(),
-            std::ptr::null_mut()
-        ));
+    let token = res_or_ret!(rslots.get_token_from_slot(session.get_slot_id()));
+    let obj = res_or_ret!(token.get_object_by_handle(key, true));
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
+        let operation = res_or_ret!(mech.encryption_new(data, obj));
+        session.set_operation(Operation::Encryption(operation));
+        CKR_OK
+    } else {
+        CKR_MECHANISM_INVALID
     }
-    ret_to_rv!(token.encrypt_init(s_handle, data, key))
 }
 
 extern "C" fn fn_encrypt(
@@ -768,12 +940,18 @@ extern "C" fn fn_encrypt(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Encryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     if encrypted_data.is_null() {
-        let encryption_len = match token.encryption_len(s_handle) {
-            Ok(l) => l,
-            Err(e) => return err_to_rv!(e),
-        };
+        let encryption_len = res_or_ret!(operation.encryption_len());
         unsafe {
             *pul_encrypted_data_len = encryption_len as CK_ULONG;
         }
@@ -781,8 +959,9 @@ extern "C" fn fn_encrypt(
     }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
-    ret_to_rv!(token.encrypt(
-        s_handle,
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    ret_to_rv!(operation.encrypt(
+        token.get_rng(),
         data,
         encrypted_data,
         pul_encrypted_data_len
@@ -799,11 +978,28 @@ extern "C" fn fn_encrypt_update(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Encryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if encrypted_part.is_null() {
+        let encryption_len = res_or_ret!(operation.encryption_len());
+        unsafe {
+            *pul_encrypted_part_len = encryption_len as CK_ULONG;
+        }
+        return CKR_OK;
+    }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    ret_to_rv!(token.encrypt_update(
-        s_handle,
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    ret_to_rv!(operation.encrypt(
+        token.get_rng(),
         data,
         encrypted_part,
         pul_encrypted_part_len
@@ -814,23 +1010,30 @@ extern "C" fn fn_encrypt_final(
     last_encrypted_part: CK_BYTE_PTR,
     pul_last_encrypted_part_len: CK_ULONG_PTR,
 ) -> CK_RV {
+    let rslots = global_rlock!(SLOTS);
     if last_encrypted_part.is_null() && pul_last_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Encryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     if last_encrypted_part.is_null() {
-        let encryption_len = match token.encryption_len(s_handle) {
-            Ok(l) => l,
-            Err(e) => return err_to_rv!(e),
-        };
+        let encryption_len = res_or_ret!(operation.encryption_len());
         unsafe {
             *pul_last_encrypted_part_len = encryption_len as CK_ULONG;
         }
         return CKR_OK;
     }
-    ret_to_rv!(token.encrypt_final(
-        s_handle,
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    ret_to_rv!(operation.encrypt_final(
+        token.get_rng(),
         last_encrypted_part,
         pul_last_encrypted_part_len
     ))
@@ -842,16 +1045,20 @@ extern "C" fn fn_decrypt_init(
     key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; Decryption; mechanism);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
-    if mechanism.is_null() {
-        ret_to_rv!(token.decrypt_final(
-            s_handle,
-            std::ptr::null_mut(),
-            std::ptr::null_mut()
-        ));
+    let token = res_or_ret!(rslots.get_token_from_slot(session.get_slot_id()));
+    let obj = res_or_ret!(token.get_object_by_handle(key, true));
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
+        let operation = res_or_ret!(mech.decryption_new(data, obj));
+        session.set_operation(Operation::Decryption(operation));
+        CKR_OK
+    } else {
+        CKR_MECHANISM_INVALID
     }
-    ret_to_rv!(token.decrypt_init(s_handle, data, key))
 }
 extern "C" fn fn_decrypt(
     s_handle: CK_SESSION_HANDLE,
@@ -864,12 +1071,18 @@ extern "C" fn fn_decrypt(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Decryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     if data.is_null() {
-        let decryption_len = match token.decryption_len(s_handle) {
-            Ok(l) => l,
-            Err(e) => return err_to_rv!(e),
-        };
+        let decryption_len = res_or_ret!(operation.decryption_len());
         unsafe {
             *pul_data_len = decryption_len as CK_ULONG;
         }
@@ -878,7 +1091,8 @@ extern "C" fn fn_decrypt(
     let enc: &[u8] = unsafe {
         std::slice::from_raw_parts(encrypted_data, encrypted_data_len as usize)
     };
-    ret_to_rv!(token.decrypt(s_handle, enc, data, pul_data_len,))
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    ret_to_rv!(operation.decrypt(token.get_rng(), enc, data, pul_data_len,))
 }
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -891,11 +1105,33 @@ extern "C" fn fn_decrypt_update(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Decryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if part.is_null() {
+        let decryption_len = res_or_ret!(operation.decryption_len());
+        unsafe {
+            *pul_part_len = decryption_len as CK_ULONG;
+        }
+        return CKR_OK;
+    }
     let enc: &[u8] = unsafe {
         std::slice::from_raw_parts(encrypted_part, encrypted_part_len as usize)
     };
-    ret_to_rv!(token.decrypt_update(s_handle, enc, part, pul_part_len,))
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    ret_to_rv!(operation.decrypt_update(
+        token.get_rng(),
+        enc,
+        part,
+        pul_part_len,
+    ))
 }
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -906,18 +1142,29 @@ extern "C" fn fn_decrypt_final(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Decryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     if last_part.is_null() {
-        let decryption_len = match token.decryption_len(s_handle) {
-            Ok(l) => l,
-            Err(e) => return err_to_rv!(e),
-        };
+        let decryption_len = res_or_ret!(operation.decryption_len());
         unsafe {
             *pul_last_part_len = decryption_len as CK_ULONG;
         }
         return CKR_OK;
     }
-    ret_to_rv!(token.decrypt_final(s_handle, last_part, pul_last_part_len))
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    ret_to_rv!(operation.decrypt_final(
+        token.get_rng(),
+        last_part,
+        pul_last_part_len
+    ))
 }
 
 extern "C" fn fn_digest_init(
@@ -925,12 +1172,18 @@ extern "C" fn fn_digest_init(
     mechanism: CK_MECHANISM_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; Digest; mechanism);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
-    if mechanism.is_null() {
-        ret_to_rv!(token.digest_terminate(s_handle))
+    let token = res_or_ret!(rslots.get_token_from_slot(session.get_slot_id()));
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
+        let operation = res_or_ret!(mech.digest_new(data));
+        session.set_operation(Operation::Digest(operation));
+        CKR_OK
     } else {
-        ret_to_rv!(token.digest_init(s_handle, data))
+        CKR_MECHANISM_INVALID
     }
 }
 
@@ -944,12 +1197,16 @@ extern "C" fn fn_digest(
     if pdata.is_null() || pul_digest_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let digest_len = match token.digest_len(s_handle) {
-        Ok(d) => d,
-        Err(e) => return err_to_rv!(e),
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Digest(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let digest_len = res_or_ret!(operation.digest_len());
     if pdigest.is_null() {
         unsafe {
             *pul_digest_len = digest_len as CK_ULONG;
@@ -965,7 +1222,7 @@ extern "C" fn fn_digest(
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
     let digest: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(pdigest, digest_len) };
-    let ret = ret_to_rv!(token.digest(s_handle, data, digest));
+    let ret = ret_to_rv!(operation.digest(data, digest));
     if ret == CKR_OK {
         unsafe {
             *pul_digest_len = digest_len as u64;
@@ -981,19 +1238,44 @@ extern "C" fn fn_digest_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Digest(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    ret_to_rv!(token.digest_update(s_handle, data))
+    ret_to_rv!(operation.digest_update(data))
 }
 extern "C" fn fn_digest_key(
     s_handle: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    ret_to_rv!(token.digest_key(s_handle, key))
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Digest(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let token = res_or_ret!(rslots.get_token_from_slot(slot_id));
+    let obj = res_or_ret!(token.get_object_by_handle(key, true));
+    if res_or_ret!(obj.get_attr_as_ulong(CKA_CLASS)) != CKO_SECRET_KEY {
+        return CKR_KEY_HANDLE_INVALID;
+    }
+    if res_or_ret!(obj.get_attr_as_ulong(CKA_KEY_TYPE)) != CKK_GENERIC_SECRET {
+        return CKR_KEY_INDIGESTIBLE;
+    }
+    let data = res_or_ret!(obj.get_attr_as_bytes(CKA_VALUE));
+    ret_to_rv!(operation.digest_update(data))
 }
 extern "C" fn fn_digest_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1003,12 +1285,16 @@ extern "C" fn fn_digest_final(
     if pul_digest_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let digest_len = match token.digest_len(s_handle) {
-        Ok(d) => d,
-        Err(e) => return err_to_rv!(e),
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Digest(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let digest_len = res_or_ret!(operation.digest_len());
     if pdigest.is_null() {
         unsafe {
             *pul_digest_len = digest_len as CK_ULONG;
@@ -1022,7 +1308,7 @@ extern "C" fn fn_digest_final(
     }
     let digest: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(pdigest, digest_len) };
-    let ret = ret_to_rv!(token.digest_final(s_handle, digest));
+    let ret = ret_to_rv!(operation.digest_final(digest));
     if ret == CKR_OK {
         unsafe {
             *pul_digest_len = digest_len as u64;
@@ -1037,12 +1323,19 @@ extern "C" fn fn_sign_init(
     key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; Sign; mechanism);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
-    if mechanism.is_null() {
-        ret_to_rv!(token.sign_terminate(s_handle))
+    let token = res_or_ret!(rslots.get_token_from_slot(session.get_slot_id()));
+    let obj = res_or_ret!(token.get_object_by_handle(key, true));
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_SIGN == CKF_SIGN {
+        let operation = res_or_ret!(mech.sign_new(data, obj));
+        session.set_operation(Operation::Sign(operation));
+        CKR_OK
     } else {
-        ret_to_rv!(token.sign_init(s_handle, data, key))
+        CKR_MECHANISM_INVALID
     }
 }
 extern "C" fn fn_sign(
@@ -1056,11 +1349,17 @@ extern "C" fn fn_sign(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let signature_len = match token.signature_len(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Sign(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let signature_len = res_or_ret!(operation.signature_len());
     if psignature.is_null() {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1076,7 +1375,9 @@ extern "C" fn fn_sign(
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
-    let ret = ret_to_rv!(token.sign(s_handle, data, signature));
+
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    let ret = ret_to_rv!(operation.sign(token.get_rng(), data, signature));
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1092,11 +1393,18 @@ extern "C" fn fn_sign_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Sign(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    ret_to_rv!(token.sign_update(s_handle, data))
+    ret_to_rv!(operation.sign_update(data))
 }
 extern "C" fn fn_sign_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1107,11 +1415,17 @@ extern "C" fn fn_sign_final(
         return CKR_ARGUMENTS_BAD;
     }
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let signature_len = match token.signature_len(s_handle) {
-        Ok(d) => d,
-        Err(e) => return err_to_rv!(e),
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
+    let operation = match session.get_operation_mut() {
+        Operation::Sign(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let signature_len = res_or_ret!(operation.signature_len());
     if psignature.is_null() {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1125,7 +1439,8 @@ extern "C" fn fn_sign_final(
     }
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
-    let ret = ret_to_rv!(token.sign_final(s_handle, signature));
+    let mut token = res_or_ret!(rslots.get_token_from_slot_mut(slot_id));
+    let ret = ret_to_rv!(operation.sign_final(token.get_rng(), signature));
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1155,12 +1470,19 @@ extern "C" fn fn_verify_init(
     key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; Verify; mechanism);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
-    if mechanism.is_null() {
-        ret_to_rv!(token.verify_terminate(s_handle))
+    let token = res_or_ret!(rslots.get_token_from_slot(session.get_slot_id()));
+    let obj = res_or_ret!(token.get_object_by_handle(key, true));
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
+        let operation = res_or_ret!(mech.verify_new(data, obj));
+        session.set_operation(Operation::Verify(operation));
+        CKR_OK
     } else {
-        ret_to_rv!(token.verify_init(s_handle, data, key))
+        CKR_MECHANISM_INVALID
     }
 }
 extern "C" fn fn_verify(
@@ -1173,12 +1495,16 @@ extern "C" fn fn_verify(
     if pdata.is_null() || psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let signature_len = match token.signature_len(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Verify(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let signature_len = res_or_ret!(operation.signature_len());
     if psignature_len != signature_len as CK_ULONG {
         return CKR_SIGNATURE_LEN_RANGE;
     }
@@ -1186,7 +1512,7 @@ extern "C" fn fn_verify(
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
     let signature: &[u8] =
         unsafe { std::slice::from_raw_parts(psignature, signature_len) };
-    ret_to_rv!(token.verify(s_handle, data, signature))
+    ret_to_rv!(operation.verify(data, signature))
 }
 extern "C" fn fn_verify_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1196,11 +1522,18 @@ extern "C" fn fn_verify_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Verify(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    ret_to_rv!(token.verify_update(s_handle, data))
+    ret_to_rv!(operation.verify_update(data))
 }
 extern "C" fn fn_verify_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1210,18 +1543,22 @@ extern "C" fn fn_verify_final(
     if psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-    let signature_len = match token.signature_len(s_handle) {
-        Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
+    let rsess = global_rlock!(SESSIONS);
+    let mut session = res_or_ret!(rsess.get_session_mut(s_handle));
+    let operation = match session.get_operation_mut() {
+        Operation::Verify(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    let signature_len = res_or_ret!(operation.signature_len());
     if psignature_len != signature_len as CK_ULONG {
         return CKR_SIGNATURE_LEN_RANGE;
     }
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
-    ret_to_rv!(token.verify_final(s_handle, signature))
+    ret_to_rv!(operation.verify_final(signature))
 }
 extern "C" fn fn_verify_recover_init(
     _session: CK_SESSION_HANDLE,
@@ -1284,16 +1621,19 @@ extern "C" fn fn_generate_key(
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-
-    let mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(&*tmpl);
+    }
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
 
-    let kh = match token.generate_key(s_handle, mech, tmpl) {
-        Ok(h) => h,
-        Err(e) => return err_to_rv!(e),
-    };
+    let mech: &CK_MECHANISM = unsafe { &*mechanism };
+
+    let kh = res_or_ret!(token.generate_key(s_handle, mech, tmpl));
 
     unsafe {
         core::ptr::write(key_handle as *mut _, kh);
@@ -1313,9 +1653,8 @@ extern "C" fn fn_generate_key_pair(
     private_key: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rslots = global_rlock!(SLOTS);
-    let mut token = token_from_session_handle!(rslots, s_handle, as_mut);
-
-    let mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let rsess = global_rlock!(SESSIONS);
+    let session = res_or_ret!(rsess.get_session(s_handle));
     let pubtmpl: &mut [CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts_mut(
             public_key_template,
@@ -1328,6 +1667,14 @@ extern "C" fn fn_generate_key_pair(
             private_key_attribute_count as usize,
         )
     };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(&*pritmpl);
+        fail_if_cka_token_true!(&*pubtmpl);
+    }
+    let mut token =
+        res_or_ret!(rslots.get_token_from_slot_mut(session.get_slot_id()));
+
+    let mech: &CK_MECHANISM = unsafe { &*mechanism };
 
     let (pubk, prik) =
         match token.generate_keypair(s_handle, mech, pubtmpl, pritmpl) {

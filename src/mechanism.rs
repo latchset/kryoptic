@@ -10,8 +10,7 @@ use super::object;
 use super::token;
 use error::{KError, KResult};
 use interface::*;
-use object::ObjectTemplates;
-use token::{TokenObjects, RNG};
+use token::RNG;
 
 use std::fmt::Debug;
 
@@ -167,14 +166,7 @@ pub trait Decryption: MechOperation {
 }
 
 pub trait SearchOperation: Debug + Send + Sync {
-    fn search(
-        &mut self,
-        _object_templates: &ObjectTemplates,
-        _objects: &mut TokenObjects,
-        _template: &[CK_ATTRIBUTE],
-    ) -> KResult<()> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
+    fn finalized(&self) -> bool;
     fn results(&mut self, _max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         err_rv!(CKR_GENERAL_ERROR)
     }
@@ -244,6 +236,20 @@ pub enum Operation {
     Digest(Box<dyn Digest>),
     Sign(Box<dyn Sign>),
     Verify(Box<dyn Verify>),
+}
+
+impl Operation {
+    pub fn finalized(&self) -> bool {
+        match self {
+            Operation::Empty => true,
+            Operation::Search(op) => op.finalized(),
+            Operation::Encryption(op) => op.finalized(),
+            Operation::Decryption(op) => op.finalized(),
+            Operation::Digest(op) => op.finalized(),
+            Operation::Sign(op) => op.finalized(),
+            Operation::Verify(op) => op.finalized(),
+        }
+    }
 }
 
 pub trait DRBG: Debug + Send + Sync {

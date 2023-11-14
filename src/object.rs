@@ -53,13 +53,15 @@ macro_rules! attr_as_type {
 #[derive(Debug, Clone)]
 pub struct Object {
     handle: CK_OBJECT_HANDLE,
+    session: CK_SESSION_HANDLE,
     attributes: Vec<Attribute>,
 }
 
 impl Object {
     pub fn new() -> Object {
         Object {
-            handle: CK_UNAVAILABLE_INFORMATION,
+            handle: CK_INVALID_HANDLE,
+            session: CK_INVALID_HANDLE,
             attributes: Vec::new(),
         }
     }
@@ -94,6 +96,14 @@ impl Object {
 
     pub fn get_handle(&self) -> CK_OBJECT_HANDLE {
         self.handle
+    }
+
+    pub fn set_session(&mut self, s: CK_SESSION_HANDLE) {
+        self.session = s
+    }
+
+    pub fn get_session(&self) -> CK_SESSION_HANDLE {
+        self.session
     }
 
     create_bool_checker! {make is_token; from CKA_TOKEN; def false}

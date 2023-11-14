@@ -25,7 +25,7 @@ pub struct Slot {
 
 impl Slot {
     pub fn new(slot_id: CK_SLOT_ID, filename: String) -> KResult<Slot> {
-        let mut token = Token::new(slot_id, filename);
+        let mut token = Token::new(filename);
         token.load()?;
         Ok(Slot {
             slot_id: slot_id,

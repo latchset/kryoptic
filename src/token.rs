@@ -15,16 +15,14 @@ use super::interface;
 use super::mechanism;
 use super::object;
 use super::rsa;
-use super::session;
 use super::sha1;
 use super::sha2;
 
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
-use mechanism::{Mechanisms, Operation};
+use mechanism::Mechanisms;
 use object::{Object, ObjectTemplates};
-use session::{Session, Sessions};
 
 use std::collections::hash_map::Iter;
 
@@ -267,14 +265,12 @@ impl TokenObjects {
         Ok(())
     }
 
-    fn clear_private_session_objects(&mut self) -> Vec<CK_OBJECT_HANDLE> {
-        let mut priv_handles = Vec::<CK_OBJECT_HANDLE>::new();
+    fn clear_private_session_objects(&mut self) {
         let mut priv_uids = Vec::<String>::new();
         for (_, obj) in &self.objects {
             if obj.is_private() {
                 let oh = obj.get_handle();
-                if oh != CK_UNAVAILABLE_INFORMATION {
-                    priv_handles.push(oh);
+                if oh != CK_INVALID_HANDLE {
                     let _ = self.handles.remove(&oh);
                 }
                 if !obj.is_token() {
@@ -292,12 +288,18 @@ impl TokenObjects {
         for uid in priv_uids {
             self.objects.remove(&uid);
         }
-        priv_handles
     }
 
-    pub fn clear_session_objects(&mut self, handles: &Vec<CK_OBJECT_HANDLE>) {
+    pub fn clear_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
+        let mut handles: Vec<CK_OBJECT_HANDLE> = Vec::new();
+        for (_, obj) in &self.objects {
+            if obj.get_session() == handle {
+                handles.push(obj.get_handle());
+            }
+        }
+
         for oh in handles {
-            let _ = self.remove(*oh, true);
+            let _ = self.remove(oh, true);
         }
     }
 
@@ -317,11 +319,9 @@ impl TokenObjects {
 #[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
-    slot_id: CK_SLOT_ID,
     filename: String,
     object_templates: ObjectTemplates,
     mechanisms: Mechanisms,
-    sessions: Sessions,
     objects: TokenObjects,
     dirty: bool,
     so_login: LoginData,
@@ -330,7 +330,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(slot_id: CK_SLOT_ID, filename: String) -> Token {
+    pub fn new(filename: String) -> Token {
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
@@ -352,11 +352,9 @@ impl Token {
                 firmwareVersion: CK_VERSION { major: 0, minor: 0 },
                 utcTime: *b"0000000000000000",
             },
-            slot_id: slot_id,
             filename: filename,
             object_templates: ObjectTemplates::new(),
             mechanisms: Mechanisms::new(),
-            sessions: Sessions::new(),
             objects: TokenObjects::new(),
             so_login: LoginData {
                 pin: None,
@@ -483,7 +481,7 @@ impl Token {
             Err(e) => return Err(e),
         };
         if checks && !self.user_login.logged_in && obj.is_private() {
-            return err_rv!(CKR_OBJECT_HANDLE_INVALID);
+            return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
         Ok(obj)
     }
@@ -540,7 +538,7 @@ impl Token {
     }
 
     pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
-        let mut ret = match user_type {
+        match user_type {
             CKU_SO => {
                 if self.so_login.logged_in {
                     return CKR_USER_ALREADY_LOGGED_IN;
@@ -574,22 +572,7 @@ impl Token {
                 self.user_login.check_pin(pin)
             }
             _ => return CKR_USER_TYPE_INVALID,
-        };
-        if ret != CKR_OK {
-            return ret;
         }
-
-        /* change session states to logged in values */
-        ret = self.sessions.change_session_states(user_type);
-        if ret != CKR_OK {
-            match user_type {
-                CKU_SO => self.so_login.logged_in = false,
-                CKU_USER => self.user_login.logged_in = false,
-                _ => return CKR_GENERAL_ERROR,
-            }
-            self.sessions.invalidate_session_states();
-        }
-        ret
     }
 
     pub fn logout(&mut self) -> CK_RV {
@@ -606,25 +589,8 @@ impl Token {
             return ret;
         }
 
-        /* remove private session objects and return all the removed handles */
-        let mut priv_handles = self.objects.clear_private_session_objects();
+        self.objects.clear_private_session_objects();
 
-        /* remove all refrences to private session handles for removed objects */
-        priv_handles.sort_unstable();
-        for s in self.sessions.get_sessions_iter_mut() {
-            let mut pub_handles = Vec::<CK_OBJECT_HANDLE>::new();
-            for oh in s.get_object_handles() {
-                match priv_handles.binary_search(oh) {
-                    Ok(_) => continue,
-                    Err(_) => pub_handles.push(*oh),
-                }
-            }
-            /* replace handles list with the remaining public object handles only */
-            s.set_object_handles(pub_handles);
-        }
-
-        /* reset all session states */
-        self.sessions.invalidate_session_states();
         CKR_OK
     }
 
@@ -738,18 +704,14 @@ impl Token {
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         };
         if is_token {
-            if !self.sessions.get_session(s_handle)?.is_writable() {
-                return err_rv!(CKR_SESSION_READ_ONLY);
-            }
             self.dirty = true;
+        } else {
+            obj.set_session(s_handle);
         }
         let handle = self.objects.next_handle();
         obj.set_handle(handle);
         self.objects.insert_handle(handle, uid.clone());
         self.objects.insert(uid.clone(), obj);
-        if !is_token {
-            self.sessions.get_session_mut(s_handle)?.add_handle(handle);
-        }
         Ok(handle)
     }
 
@@ -758,9 +720,6 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        /* check that session is valid */
-        let _ = self.sessions.get_session(s_handle)?;
-
         if !self.user_login.logged_in {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
@@ -771,21 +730,14 @@ impl Token {
 
     pub fn destroy_object(
         &mut self,
-        s_handle: CK_SESSION_HANDLE,
         o_handle: CK_OBJECT_HANDLE,
     ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(s_handle)?;
         let obj = self.objects.get_by_handle(o_handle)?;
-        if obj.is_private() && !self.user_login.logged_in {
-            return err_rv!(CKR_ACTION_PROHIBITED);
-        }
-        if obj.is_token() && !session.is_writable() {
-            return err_rv!(CKR_ACTION_PROHIBITED);
-        }
         if !obj.is_destroyable() {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
-        self.objects.remove(o_handle, false)
+        self.objects.remove(o_handle, false)?;
+        Ok(())
     }
 
     pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
@@ -799,13 +751,21 @@ impl Token {
     ) -> KResult<()> {
         match self.get_object_by_handle(handle, true) {
             Ok(o) => self.object_templates.get_object_attributes(o, template),
-            Err(e) => Err(e),
+            Err(e) => match e {
+                KError::RvError(e) => {
+                    if e.rv == CKR_USER_NOT_LOGGED_IN {
+                        err_rv!(CKR_OBJECT_HANDLE_INVALID)
+                    } else {
+                        err_rv!(e.rv)
+                    }
+                }
+                _ => Err(e),
+            },
         }
     }
 
     pub fn set_object_attrs(
         &mut self,
-        s_handle: CK_SESSION_HANDLE,
         handle: CK_OBJECT_HANDLE,
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
@@ -813,19 +773,6 @@ impl Token {
             Ok(o) => o,
             Err(e) => return Err(e),
         };
-        if !self.user_login.logged_in {
-            if obj.is_private() {
-                return err_rv!(CKR_OBJECT_HANDLE_INVALID);
-            }
-        }
-        if obj.is_token() {
-            if !self.user_login.logged_in {
-                return err_rv!(CKR_USER_NOT_LOGGED_IN);
-            }
-            if !self.sessions.get_session(s_handle)?.is_writable() {
-                return err_rv!(CKR_SESSION_READ_ONLY);
-            }
-        }
         self.object_templates.set_object_attributes(obj, template)?;
         self.dirty = true;
         Ok(())
@@ -835,39 +782,8 @@ impl Token {
         self.rng.generate_random(buffer)
     }
 
-    pub fn new_session(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        flags: CK_FLAGS,
-    ) -> KResult<&Session> {
-        self.sessions.new_session(self.slot_id, handle, flags)
-    }
-
-    pub fn get_session(&self, handle: CK_SESSION_HANDLE) -> KResult<&Session> {
-        self.sessions.get_session(handle)
-    }
-
-    pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
-        let session = self.sessions.get_session(handle)?;
-        let handles = session.get_object_handles();
-        self.objects.clear_session_objects(handles);
-        self.sessions.drop_session(handle)
-    }
-
-    pub fn drop_all_sessions(&mut self) {
-        for s in self.sessions.get_sessions() {
-            let handles = s.get_object_handles();
-            self.objects.clear_session_objects(handles);
-        }
-        self.sessions.drop_all_sessions();
-    }
-
-    pub fn has_sessions(&self) -> bool {
-        self.sessions.has_sessions()
-    }
-
-    pub fn has_ro_sessions(&self) -> bool {
-        self.sessions.has_ro_sessions()
+    pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
+        self.objects.clear_session_objects(handle);
     }
 
     pub fn get_mechs_num(&self) -> usize {
@@ -890,10 +806,8 @@ impl Token {
 
     pub fn get_object_size(
         &self,
-        s_handle: CK_SESSION_HANDLE,
         o_handle: CK_OBJECT_HANDLE,
     ) -> KResult<usize> {
-        let _ = self.sessions.get_session(s_handle)?;
         self.objects.object_rough_size(o_handle)
     }
 
@@ -903,689 +817,65 @@ impl Token {
         o_handle: CK_OBJECT_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        /* check that session is valid */
-        let _ = self.sessions.get_session(s_handle)?;
-
         let obj = self.objects.get_by_handle(o_handle)?;
-        if obj.is_private() && !self.user_login.logged_in {
-            return err_rv!(CKR_ACTION_PROHIBITED);
-        }
         let newobj = self.object_templates.copy(obj, template)?;
         self.insert_object(s_handle, newobj)
     }
 
     pub fn search_objects(
         &mut self,
-        handle: CK_SESSION_HANDLE,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<()> {
-        let logged_in = self.user_login.logged_in;
-        let session = self.sessions.get_session_mut(handle)?;
-        session.new_search_operation(logged_in)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Search(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        operation.search(&self.object_templates, &mut self.objects, template)
-    }
-
-    pub fn search_results(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        max: usize,
     ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Search(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        operation.results(max)
-    }
-
-    pub fn search_final(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        match session.get_operation() {
-            Operation::Search(_) => (),
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        session.set_operation(Operation::Empty);
-        Ok(())
-    }
-
-    pub fn encrypt_init(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &CK_MECHANISM,
-        key: CK_OBJECT_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session(handle)?;
-        match session.get_operation() {
-            Operation::Empty => (),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        }
-        let mech = self.mechanisms.get(data.mechanism)?;
-        let obj = self.get_object_by_handle(key, true)?;
-        if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
-            let operation = mech.encryption_new(data, obj)?;
-            let session = self.sessions.get_session_mut(handle)?;
-            session.set_operation(Operation::Encryption(operation));
-            Ok(())
-        } else {
-            err_rv!(CKR_MECHANISM_INVALID)
-        }
-    }
-
-    pub fn encrypt(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        plain: &[u8],
-        cipher: CK_BYTE_PTR,
-        cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Encryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result =
-            operation.encrypt(&mut self.rng, plain, cipher, cipher_len);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn encrypt_update(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        plain: &[u8],
-        cipher: CK_BYTE_PTR,
-        cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Encryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result =
-            operation.encrypt_update(&mut self.rng, plain, cipher, cipher_len);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn encrypt_final(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        cipher: CK_BYTE_PTR,
-        cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Encryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if cipher.is_null() && cipher_len.is_null() {
-            /* internal convention to ask to terminate the operation */
-            session.set_operation(Operation::Empty);
-            return Ok(());
-        }
-
-        let result = operation.encrypt_final(&mut self.rng, cipher, cipher_len);
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn encryption_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
-        let session = self.sessions.get_session(handle)?;
-        let operation = match session.get_operation() {
-            Operation::Encryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        operation.encryption_len()
-    }
-
-    pub fn decrypt_init(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &CK_MECHANISM,
-        key: CK_OBJECT_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session(handle)?;
-        match session.get_operation() {
-            Operation::Empty => (),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        }
-        let mech = self.mechanisms.get(data.mechanism)?;
-        let obj = self.get_object_by_handle(key, true)?;
-        if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
-            let operation = mech.decryption_new(data, obj)?;
-            let session = self.sessions.get_session_mut(handle)?;
-            session.set_operation(Operation::Decryption(operation));
-            Ok(())
-        } else {
-            err_rv!(CKR_MECHANISM_INVALID)
-        }
-    }
-
-    pub fn decrypt(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        cipher: &[u8],
-        plain: CK_BYTE_PTR,
-        plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Decryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.decrypt(&mut self.rng, cipher, plain, plain_len);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn decrypt_update(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        cipher: &[u8],
-        plain: CK_BYTE_PTR,
-        plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Decryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result =
-            operation.decrypt_update(&mut self.rng, cipher, plain, plain_len);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn decrypt_final(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        plain: CK_BYTE_PTR,
-        plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Decryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if plain.is_null() && plain_len.is_null() {
-            /* internal convention to ask to terminate the operation */
-            session.set_operation(Operation::Empty);
-            return Ok(());
-        }
-
-        let result = operation.decrypt_final(&mut self.rng, plain, plain_len);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn decryption_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
-        let session = self.sessions.get_session(handle)?;
-        let operation = match session.get_operation() {
-            Operation::Decryption(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        operation.decryption_len()
-    }
-
-    pub fn digest_init(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &CK_MECHANISM,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session(handle)?;
-        match session.get_operation() {
-            Operation::Empty => (),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        }
-        let mech = self.mechanisms.get(data.mechanism)?;
-        if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
-            let operation = mech.digest_new(data)?;
-            let session = self.sessions.get_session_mut(handle)?;
-            session.set_operation(Operation::Digest(operation));
-            Ok(())
-        } else {
-            err_rv!(CKR_MECHANISM_INVALID)
-        }
-    }
-
-    pub fn digest(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &[u8],
-        digest: &mut [u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Digest(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.digest(data, digest);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn digest_update(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &[u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Digest(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.digest_update(data);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn digest_key(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        key: CK_OBJECT_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Digest(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let obj = match self.objects.get_by_handle(key) {
-            Ok(o) => o,
-            Err(e) => return Err(e),
-        };
-        if !self.user_login.logged_in && obj.is_private() {
-            return err_rv!(CKR_KEY_HANDLE_INVALID);
-        }
-        if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
-            return err_rv!(CKR_KEY_HANDLE_INVALID);
-        }
-        if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
-            return err_rv!(CKR_KEY_INDIGESTIBLE);
-        }
-        let data = obj.get_attr_as_bytes(CKA_VALUE)?;
-        let result = operation.digest_update(data);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn digest_final(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        digest: &mut [u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Digest(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-
-        let result = operation.digest_final(digest);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn digest_terminate(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Digest(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        session.set_operation(Operation::Empty);
-        Ok(())
-    }
-
-    pub fn digest_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
-        let session = self.sessions.get_session(handle)?;
-        let operation = match session.get_operation() {
-            Operation::Digest(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        operation.digest_len()
-    }
-
-    pub fn sign_init(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &CK_MECHANISM,
-        key: CK_OBJECT_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session(handle)?;
-        match session.get_operation() {
-            Operation::Empty => (),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        }
-        let mech = self.mechanisms.get(data.mechanism)?;
-        let obj = self.get_object_by_handle(key, true)?;
-        if mech.info().flags & CKF_SIGN == CKF_SIGN {
-            let operation = mech.sign_new(data, obj)?;
-            let session = self.sessions.get_session_mut(handle)?;
-            session.set_operation(Operation::Sign(operation));
-            Ok(())
-        } else {
-            err_rv!(CKR_MECHANISM_INVALID)
-        }
-    }
-
-    pub fn sign(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &[u8],
-        signature: &mut [u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Sign(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.sign(&mut self.rng, data, signature);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn sign_update(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &[u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Sign(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.sign_update(data);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn sign_final(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        signature: &mut [u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Sign(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-
-        let result = operation.sign_final(&mut self.rng, signature);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn sign_terminate(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Sign(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        session.set_operation(Operation::Empty);
-        Ok(())
-    }
-
-    pub fn signature_len(&self, handle: CK_SESSION_HANDLE) -> KResult<usize> {
-        let session = self.sessions.get_session(handle)?;
-        let len = match session.get_operation() {
-            Operation::Sign(operation) => {
-                if operation.finalized() {
-                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-                }
-                operation.signature_len()?
+        let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
+        let mut needs_handle = Vec::<String>::new();
+        for (_, o) in self.objects.iter() {
+            if !self.is_logged_in(CK_UNAVAILABLE_INFORMATION) && o.is_private()
+            {
+                continue;
             }
-            Operation::Verify(operation) => {
-                if operation.finalized() {
-                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+
+            if o.is_sensitive() {
+                match self.object_templates.check_sensitive(o, template) {
+                    Err(_) => continue,
+                    Ok(()) => (),
                 }
-                operation.signature_len()?
             }
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        Ok(len)
+
+            if o.match_template(template) {
+                let oh = o.get_handle();
+                if oh == CK_INVALID_HANDLE {
+                    let uid = match o.get_attr_as_string(CKA_UNIQUE_ID) {
+                        Ok(s) => s,
+                        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                    };
+                    needs_handle.push(uid.clone());
+                } else {
+                    handles.push(oh);
+                }
+            }
+        }
+        while let Some(uid) = needs_handle.pop() {
+            let oh = self.objects.next_handle();
+            let obj = match self.objects.get_mut(&uid) {
+                Some(o) => o,
+                None => continue,
+            };
+            obj.set_handle(oh);
+            self.objects.insert_handle(oh, uid);
+            handles.push(oh);
+        }
+        Ok(handles)
     }
 
-    pub fn verify_init(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &CK_MECHANISM,
-        key: CK_OBJECT_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session(handle)?;
-        match session.get_operation() {
-            Operation::Empty => (),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        }
-        let mech = self.mechanisms.get(data.mechanism)?;
-        let obj = self.get_object_by_handle(key, true)?;
-        if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
-            let operation = mech.verify_new(data, obj)?;
-            let session = self.sessions.get_session_mut(handle)?;
-            session.set_operation(Operation::Verify(operation));
-            Ok(())
-        } else {
-            err_rv!(CKR_MECHANISM_INVALID)
-        }
+    pub fn get_mech(
+        &self,
+        mech_type: CK_MECHANISM_TYPE,
+    ) -> KResult<&Box<dyn mechanism::Mechanism>> {
+        self.mechanisms.get(mech_type)
     }
 
-    pub fn verify(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &[u8],
-        signature: &[u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Verify(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.verify(data, signature);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn verify_update(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        data: &[u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Verify(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        let result = operation.verify_update(data);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn verify_final(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-        signature: &[u8],
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Verify(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-
-        let result = operation.verify_final(signature);
-
-        if operation.finalized() {
-            session.set_operation(Operation::Empty);
-        }
-
-        result
-    }
-
-    pub fn verify_terminate(
-        &mut self,
-        handle: CK_SESSION_HANDLE,
-    ) -> KResult<()> {
-        let session = self.sessions.get_session_mut(handle)?;
-        let operation = match session.get_operation_mut() {
-            Operation::Verify(op) => op,
-            Operation::Empty => return err_rv!(CKR_OPERATION_NOT_INITIALIZED),
-            _ => return err_rv!(CKR_OPERATION_ACTIVE),
-        };
-        if operation.finalized() {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        session.set_operation(Operation::Empty);
-        Ok(())
+    pub fn get_rng(&mut self) -> &mut RNG {
+        &mut self.rng
     }
 
     pub fn generate_key(
@@ -1594,9 +884,6 @@ impl Token {
         mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        /* check that session is valid */
-        let _ = self.sessions.get_session(s_handle)?;
-
         if !self.user_login.logged_in {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
@@ -1614,9 +901,6 @@ impl Token {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
-        /* check that session is valid */
-        let _ = self.sessions.get_session(s_handle)?;
-
         if !self.user_login.logged_in {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
@@ -1632,7 +916,7 @@ impl Token {
         match self.insert_object(s_handle, prikey) {
             Ok(h) => Ok((pubh, h)),
             Err(e) => {
-                let _ = self.destroy_object(s_handle, pubh);
+                let _ = self.destroy_object(pubh);
                 return Err(e);
             }
         }
