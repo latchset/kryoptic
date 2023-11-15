@@ -7,9 +7,9 @@ use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::rng;
 use super::sha1;
 use super::sha2;
-use super::token;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 use attribute::{from_bool, from_bytes, from_ulong};
 use cryptography::*;
@@ -23,8 +23,8 @@ use object::{
     CommonKeyTemplate, OAFlags, Object, ObjectAttr, ObjectTemplate,
     ObjectTemplates, ObjectType, PrivKeyTemplate, PubKeyTemplate,
 };
+use rng::RNG;
 use std::fmt::Debug;
-use token::RNG;
 
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
 pub const MAX_RSA_SIZE_BITS: usize = 16536;

@@ -7,10 +7,10 @@ use super::err_rv;
 use super::error;
 use super::interface;
 use super::object;
-use super::token;
+use super::rng;
 use error::{KError, KResult};
 use interface::*;
-use token::RNG;
+use rng::RNG;
 
 use std::fmt::Debug;
 

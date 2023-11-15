@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use super::attribute;
-use super::drbg;
 use super::error;
 use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::rng;
 use super::rsa;
 use super::sha1;
 use super::sha2;
@@ -98,30 +98,6 @@ impl LoginData {
             return ret;
         }
         self.set_pin(info, pin)
-    }
-}
-
-#[derive(Debug)]
-pub struct RNG {
-    drbg: Box<dyn mechanism::DRBG>,
-}
-
-impl RNG {
-    pub fn new(alg: &str) -> KResult<RNG> {
-        match alg {
-            "HMAC DRBG SHA256" => Ok(RNG {
-                drbg: Box::new(drbg::HmacSha256Drbg::new()?),
-            }),
-            "HMAC DRBG SHA512" => Ok(RNG {
-                drbg: Box::new(drbg::HmacSha512Drbg::new()?),
-            }),
-            _ => err_rv!(CKR_RANDOM_NO_RNG),
-        }
-    }
-
-    pub fn generate_random(&mut self, buffer: &mut [u8]) -> KResult<()> {
-        let noaddtl: [u8; 0] = [];
-        self.drbg.generate(&noaddtl, buffer)
     }
 }
 
@@ -326,7 +302,6 @@ pub struct Token {
     dirty: bool,
     so_login: LoginData,
     user_login: LoginData,
-    rng: RNG,
 }
 
 impl Token {
@@ -369,7 +344,6 @@ impl Token {
                 logged_in: false,
             },
             dirty: false,
-            rng: RNG::new("HMAC DRBG SHA256").unwrap(),
         };
 
         /* register mechanisms and templates */
@@ -778,10 +752,6 @@ impl Token {
         Ok(())
     }
 
-    pub fn generate_random(&mut self, buffer: &mut [u8]) -> KResult<()> {
-        self.rng.generate_random(buffer)
-    }
-
     pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
         self.objects.clear_session_objects(handle);
     }
@@ -874,12 +844,9 @@ impl Token {
         self.mechanisms.get(mech_type)
     }
 
-    pub fn get_rng(&mut self) -> &mut RNG {
-        &mut self.rng
-    }
-
     pub fn generate_key(
         &mut self,
+        rng: &mut rng::RNG,
         s_handle: CK_SESSION_HANDLE,
         mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
@@ -888,14 +855,13 @@ impl Token {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
-        let object =
-            self.object_templates
-                .genkey(&mut self.rng, mech, template)?;
+        let object = self.object_templates.genkey(rng, mech, template)?;
         self.insert_object(s_handle, object)
     }
 
     pub fn generate_keypair(
         &mut self,
+        rng: &mut rng::RNG,
         s_handle: CK_SESSION_HANDLE,
         mech: &CK_MECHANISM,
         pubkey_template: &[CK_ATTRIBUTE],
@@ -906,7 +872,7 @@ impl Token {
         }
 
         let (pubkey, prikey) = self.object_templates.genkeypair(
-            &mut self.rng,
+            rng,
             mech,
             pubkey_template,
             prikey_template,

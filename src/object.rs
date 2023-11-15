@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use super::attribute;
 use super::error;
 use super::interface;
-use super::token;
+use super::rng;
 use super::{err_not_found, err_rv};
 use attribute::{
     from_bool, from_bytes, from_date_bytes, from_ignore, from_string,
@@ -15,8 +15,8 @@ use attribute::{
 };
 use error::{KError, KResult};
 use interface::*;
+use rng::RNG;
 use std::fmt::Debug;
-use token::RNG;
 
 use uuid::Uuid;
 

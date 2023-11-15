@@ -7,16 +7,16 @@ use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::rng;
 use super::sha1;
 use super::sha2;
-use super::token;
 use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectTemplates};
+use rng::RNG;
 use std::fmt::Debug;
-use token::RNG;
 use zeroize::Zeroize;
 
 fn check_and_fetch_key(key: &Object, keytype: CK_KEY_TYPE) -> KResult<Vec<u8>> {

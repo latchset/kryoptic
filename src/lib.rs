@@ -1,6 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::str::FromStr;
@@ -40,6 +41,7 @@ mod cryptography;
 mod error;
 mod mechanism;
 mod object;
+mod rng;
 mod session;
 mod slot;
 mod token;
@@ -47,6 +49,7 @@ mod token;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::Operation;
+use rng::RNG;
 use session::Session;
 use slot::Slot;
 use token::Token;
@@ -84,6 +87,8 @@ macro_rules! res_or_ret {
         }
     };
 }
+
+thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
 struct State {
     slots: HashMap<CK_SLOT_ID, Slot>,
@@ -840,7 +845,6 @@ extern "C" fn fn_encrypt(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Encryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -857,13 +861,14 @@ extern "C" fn fn_encrypt(
     }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(operation.encrypt(
-        token.get_rng(),
-        data,
-        encrypted_data,
-        pul_encrypted_data_len
-    ))
+    CSPRNG.with(|rng| {
+        ret_to_rv!(operation.encrypt(
+            &mut *rng.borrow_mut(),
+            data,
+            encrypted_data,
+            pul_encrypted_data_len
+        ))
+    })
 }
 extern "C" fn fn_encrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -877,7 +882,6 @@ extern "C" fn fn_encrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Encryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -894,13 +898,14 @@ extern "C" fn fn_encrypt_update(
     }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(operation.encrypt(
-        token.get_rng(),
-        data,
-        encrypted_part,
-        pul_encrypted_part_len
-    ))
+    CSPRNG.with(|rng| {
+        ret_to_rv!(operation.encrypt(
+            &mut *rng.borrow_mut(),
+            data,
+            encrypted_part,
+            pul_encrypted_part_len
+        ))
+    })
 }
 extern "C" fn fn_encrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -912,7 +917,6 @@ extern "C" fn fn_encrypt_final(
         return CKR_ARGUMENTS_BAD;
     }
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Encryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -927,12 +931,13 @@ extern "C" fn fn_encrypt_final(
         }
         return CKR_OK;
     }
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(operation.encrypt_final(
-        token.get_rng(),
-        last_encrypted_part,
-        pul_last_encrypted_part_len
-    ))
+    CSPRNG.with(|rng| {
+        ret_to_rv!(operation.encrypt_final(
+            &mut *rng.borrow_mut(),
+            last_encrypted_part,
+            pul_last_encrypted_part_len
+        ))
+    })
 }
 
 extern "C" fn fn_decrypt_init(
@@ -967,7 +972,6 @@ extern "C" fn fn_decrypt(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Decryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -985,8 +989,14 @@ extern "C" fn fn_decrypt(
     let enc: &[u8] = unsafe {
         std::slice::from_raw_parts(encrypted_data, encrypted_data_len as usize)
     };
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(operation.decrypt(token.get_rng(), enc, data, pul_data_len,))
+    CSPRNG.with(|rng| {
+        ret_to_rv!(operation.decrypt(
+            &mut *rng.borrow_mut(),
+            enc,
+            data,
+            pul_data_len,
+        ))
+    })
 }
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1000,7 +1010,6 @@ extern "C" fn fn_decrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Decryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -1018,13 +1027,14 @@ extern "C" fn fn_decrypt_update(
     let enc: &[u8] = unsafe {
         std::slice::from_raw_parts(encrypted_part, encrypted_part_len as usize)
     };
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(operation.decrypt_update(
-        token.get_rng(),
-        enc,
-        part,
-        pul_part_len,
-    ))
+    CSPRNG.with(|rng| {
+        ret_to_rv!(operation.decrypt_update(
+            &mut *rng.borrow_mut(),
+            enc,
+            part,
+            pul_part_len,
+        ))
+    })
 }
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1036,7 +1046,6 @@ extern "C" fn fn_decrypt_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Decryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -1051,12 +1060,13 @@ extern "C" fn fn_decrypt_final(
         }
         return CKR_OK;
     }
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(operation.decrypt_final(
-        token.get_rng(),
-        last_part,
-        pul_last_part_len
-    ))
+    CSPRNG.with(|rng| {
+        ret_to_rv!(operation.decrypt_final(
+            &mut *rng.borrow_mut(),
+            last_part,
+            pul_last_part_len
+        ))
+    })
 }
 
 extern "C" fn fn_digest_init(
@@ -1239,7 +1249,6 @@ extern "C" fn fn_sign(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Sign(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -1264,8 +1273,9 @@ extern "C" fn fn_sign(
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
 
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let ret = ret_to_rv!(operation.sign(token.get_rng(), data, signature));
+    let ret = CSPRNG.with(|rng| {
+        ret_to_rv!(operation.sign(&mut *rng.borrow_mut(), data, signature))
+    });
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1304,7 +1314,6 @@ extern "C" fn fn_sign_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let slot_id = session.get_slot_id();
     let operation = match session.get_operation_mut() {
         Operation::Sign(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -1326,8 +1335,9 @@ extern "C" fn fn_sign_final(
     }
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
-    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let ret = ret_to_rv!(operation.sign_final(token.get_rng(), signature));
+    let ret = CSPRNG.with(|rng| {
+        ret_to_rv!(operation.sign_final(&mut *rng.borrow_mut(), signature))
+    });
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1518,7 +1528,14 @@ extern "C" fn fn_generate_key(
 
     let mech: &CK_MECHANISM = unsafe { &*mechanism };
 
-    let kh = res_or_ret!(token.generate_key(s_handle, mech, tmpl));
+    let kh = CSPRNG.with(|rng| {
+        res_or_ret!(token.generate_key(
+            &mut *rng.borrow_mut(),
+            s_handle,
+            mech,
+            tmpl
+        ))
+    });
 
     unsafe {
         core::ptr::write(key_handle as *mut _, kh);
@@ -1560,19 +1577,25 @@ extern "C" fn fn_generate_key_pair(
 
     let mech: &CK_MECHANISM = unsafe { &*mechanism };
 
-    let (pubk, prik) =
-        match token.generate_keypair(s_handle, mech, pubtmpl, pritmpl) {
-            Ok(h) => (h.0, h.1),
-            Err(e) => return err_to_rv!(e),
-        };
-
-    unsafe {
-        core::ptr::write(public_key as *mut _, pubk);
-        core::ptr::write(private_key as *mut _, prik);
+    let result = CSPRNG.with(|rng| {
+        token.generate_keypair(
+            &mut *rng.borrow_mut(),
+            s_handle,
+            mech,
+            pubtmpl,
+            pritmpl,
+        )
+    });
+    match result {
+        Ok(keys) => unsafe {
+            core::ptr::write(public_key as *mut _, keys.0);
+            core::ptr::write(private_key as *mut _, keys.1);
+            CKR_OK
+        },
+        Err(e) => err_to_rv!(e),
     }
-
-    CKR_OK
 }
+
 extern "C" fn fn_wrap_key(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
@@ -1617,12 +1640,12 @@ extern "C" fn fn_generate_random(
     random_data: CK_BYTE_PTR,
     random_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
-    let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
+    /* check session is valid */
+    let _ = global_rlock!(STATE).get_session(s_handle);
     let data: &mut [u8] = unsafe {
         std::slice::from_raw_parts_mut(random_data, random_len as usize)
     };
-    ret_to_rv!(token.generate_random(data))
+    CSPRNG.with(|rng| ret_to_rv!(rng.borrow_mut().generate_random(data)))
 }
 extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
