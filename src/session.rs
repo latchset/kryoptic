@@ -39,8 +39,6 @@ impl SearchOperation for SessionSearch {
 
 #[derive(Debug)]
 pub struct Session {
-    handle: CK_SESSION_HANDLE,
-
     info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
@@ -50,20 +48,15 @@ pub struct Session {
 impl Session {
     pub fn new(
         slotid: CK_SLOT_ID,
-        handle: CK_SESSION_HANDLE,
         user_type: CK_USER_TYPE,
         flags: CK_FLAGS,
     ) -> KResult<Session> {
-        if handle == CK_INVALID_HANDLE {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
         if flags & CKF_SERIAL_SESSION != CKF_SERIAL_SESSION {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
         let rw = flags & CKF_RW_SESSION == CKF_RW_SESSION;
 
         Ok(Session {
-            handle: handle,
             info: CK_SESSION_INFO {
                 slotID: slotid,
                 state: match user_type {
@@ -97,10 +90,6 @@ impl Session {
             //notify: unsafe { std::ptr::null_mut() },
             operation: Operation::Empty,
         })
-    }
-
-    pub fn get_handle(&self) -> CK_SESSION_HANDLE {
-        self.handle
     }
 
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
