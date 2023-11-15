@@ -332,30 +332,32 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     }
     let args = _init_args as *const CK_C_INITIALIZE_ARGS;
 
-    if unsafe { (*args).pReserved.is_null() } {
-        return CKR_ARGUMENTS_BAD;
+    let mut slotnum: CK_SLOT_ID = 0;
+    let mut filename = String::new();
+
+    if unsafe { !(*args).pReserved.is_null() } {
+        let reserved =
+            match unsafe { CStr::from_ptr((*args).pReserved as *const _) }
+                .to_str()
+            {
+                Ok(f) => f,
+                Err(_e) => return CKR_ARGUMENTS_BAD,
+            };
+        let v: Vec<&str> = reserved.split(':').collect();
+        if v.len() > 1 {
+            slotnum = match CK_SLOT_ID::from_str(v[1]) {
+                Ok(n) => n,
+                Err(_) => return CKR_ARGUMENTS_BAD,
+            };
+        }
+        filename = v[0].to_string();
     }
-    let reserved =
-        match unsafe { CStr::from_ptr((*args).pReserved as *const _) }.to_str()
-        {
-            Ok(f) => f,
-            Err(_e) => return CKR_ARGUMENTS_BAD,
-        };
 
     let mut wstate = global_wlock!(noinitcheck STATE);
     if !wstate.is_initialized() {
         wstate.initialize();
     }
 
-    let mut slotnum: CK_SLOT_ID = 0;
-    let v: Vec<&str> = reserved.split(':').collect();
-    if v.len() > 1 {
-        slotnum = match CK_SLOT_ID::from_str(v[1]) {
-            Ok(n) => n,
-            Err(_) => return CKR_ARGUMENTS_BAD,
-        };
-    }
-    let filename = v[0].to_string();
     /* check that this slot was not already initialized with a different db */
     match wstate.get_token_from_slot(slotnum) {
         Ok(token) => {
@@ -375,6 +377,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         },
     }
 
+    /* will initialize a memory only token if filenam eis empty */
     wstate.add_slot(slotnum, res_or_ret!(Slot::new(filename)))
 }
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {

@@ -28,7 +28,13 @@ pub struct Slot {
 impl Slot {
     pub fn new(filename: String) -> KResult<Slot> {
         let mut token = Token::new(filename);
-        token.load()?;
+        if token.get_filename().len() > 0 {
+            token.load()?;
+        } else {
+            /* when no filenmae is provide we assume a memory only
+             * token that has no backing store */
+            token.meminit();
+        }
         Ok(Slot {
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,

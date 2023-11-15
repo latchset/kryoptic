@@ -299,6 +299,7 @@ pub struct Token {
     object_templates: ObjectTemplates,
     mechanisms: Mechanisms,
     objects: TokenObjects,
+    memory_only: bool,
     dirty: bool,
     so_login: LoginData,
     user_login: LoginData,
@@ -343,6 +344,7 @@ impl Token {
                 attempts: 0,
                 logged_in: false,
             },
+            memory_only: false,
             dirty: false,
         };
 
@@ -377,6 +379,12 @@ impl Token {
         };
         self.info.flags |= CKF_TOKEN_INITIALIZED;
         Ok(())
+    }
+
+    pub fn meminit(&mut self) {
+        self.memory_only = true;
+        self.info.flags &= !CKF_LOGIN_REQUIRED;
+        self.info.flags |= CKF_TOKEN_INITIALIZED;
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -651,7 +659,7 @@ impl Token {
     }
 
     pub fn save(&self) -> KResult<()> {
-        if !self.dirty {
+        if !self.dirty || self.memory_only {
             return Ok(());
         }
         let token = JsonToken {
