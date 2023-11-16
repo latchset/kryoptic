@@ -40,10 +40,10 @@ impl RSAPubTemplate {
         let mut data: RSAPubTemplate = RSAPubTemplate {
             attributes: Vec::new(),
         };
-        data.init_common_object_attrs();
-        data.init_common_storage_attrs();
-        data.init_common_key_attrs();
-        data.init_common_public_key_attrs();
+        data.attributes.append(&mut data.init_common_object_attrs());
+        data.attributes.append(&mut data.init_common_storage_attrs());
+        data.attributes.append(&mut data.init_common_key_attrs());
+        data.attributes.append(&mut data.init_common_public_key_attrs());
         data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_MODULUS_BITS; OAFlags::RequiredOnGenerate | OAFlags::Unchangeable; from_ulong; val 0));
         data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
@@ -142,28 +142,17 @@ impl ObjectTemplate for RSAPubTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
-    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.attributes
-    }
 }
 
 impl CommonKeyTemplate for RSAPubTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
-
-    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.attributes
-    }
 }
 
 impl PubKeyTemplate for RSAPubTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
-    }
-
-    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.attributes
     }
 }
 
@@ -177,10 +166,10 @@ impl RSAPrivTemplate {
         let mut data: RSAPrivTemplate = RSAPrivTemplate {
             attributes: Vec::new(),
         };
-        data.init_common_object_attrs();
-        data.init_common_storage_attrs();
-        data.init_common_key_attrs();
-        data.init_common_private_key_attrs();
+        data.attributes.append(&mut data.init_common_object_attrs());
+        data.attributes.append(&mut data.init_common_storage_attrs());
+        data.attributes.append(&mut data.init_common_key_attrs());
+        data.attributes.append(&mut data.init_common_private_key_attrs());
         data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_PRIVATE_EXPONENT; OAFlags::Sensitive | OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
@@ -436,29 +425,17 @@ impl ObjectTemplate for RSAPrivTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
-
-    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.attributes
-    }
 }
 
 impl CommonKeyTemplate for RSAPrivTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
-
-    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.attributes
-    }
 }
 
 impl PrivKeyTemplate for RSAPrivTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
-    }
-
-    fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
-        &mut self.attributes
     }
 }
 
