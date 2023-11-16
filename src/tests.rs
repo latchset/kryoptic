@@ -1109,7 +1109,6 @@ fn test_get_mechs() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(true, count > 4);
-    assert_eq!(mechs[0], 1);
     let mut info: CK_MECHANISM_INFO = Default::default();
     ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);

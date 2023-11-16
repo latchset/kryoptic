@@ -799,6 +799,17 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         }),
     );
 
+    mechs.add_mechanism(
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+    );
+
     ot.add_template(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
     ot.add_template(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
 }
