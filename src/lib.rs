@@ -34,6 +34,8 @@ mod interface {
     pub const KRYERR_OFFSET: CK_ULONG = 485259;
     pub const KRYERR_TOKEN_NOT_INITIALIZED: CK_ULONG =
         CKR_VENDOR_DEFINED + KRYERR_OFFSET + 1;
+
+    pub const KRY_UNSPEC: CK_ULONG = CK_UNAVAILABLE_INFORMATION;
 }
 
 mod attribute;
@@ -728,7 +730,7 @@ extern "C" fn fn_set_attribute_value(
         res_or_ret!(rstate.get_token_from_slot_mut(session.get_slot_id()));
     let obj = res_or_ret!(token.get_object_by_handle(o_handle, true));
     if obj.is_token() {
-        if !session.is_auth_state() {
+        if !token.is_logged_in(KRY_UNSPEC) {
             return CKR_USER_NOT_LOGGED_IN;
         }
         if !session.is_writable() {

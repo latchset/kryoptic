@@ -391,6 +391,10 @@ impl Token {
         self.info.flags & CKF_TOKEN_INITIALIZED == CKF_TOKEN_INITIALIZED
     }
 
+    fn is_login_required(&self) -> bool {
+        self.info.flags & CKF_LOGIN_REQUIRED == CKF_LOGIN_REQUIRED
+    }
+
     fn store_pin_object(
         &mut self,
         uid: String,
@@ -453,6 +457,20 @@ impl Token {
         }
     }
 
+    pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
+        if user_type != CKU_SO && !self.is_login_required() {
+            return true;
+        }
+        match user_type {
+            KRY_UNSPEC => {
+                self.so_login.logged_in || self.user_login.logged_in
+            }
+            CKU_SO => self.so_login.logged_in,
+            CKU_USER => self.user_login.logged_in,
+            _ => false,
+        }
+    }
+
     pub fn get_object_by_handle(
         &self,
         handle: CK_OBJECT_HANDLE,
@@ -462,7 +480,7 @@ impl Token {
             Ok(o) => o,
             Err(e) => return Err(e),
         };
-        if checks && !self.user_login.logged_in && obj.is_private() {
+        if checks && !self.is_logged_in(KRY_UNSPEC) && obj.is_private() {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
         Ok(obj)
@@ -520,6 +538,9 @@ impl Token {
     }
 
     pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
+        if !self.is_login_required() {
+            return CKR_OK;
+        }
         match user_type {
             CKU_SO => {
                 if self.so_login.logged_in {
@@ -559,6 +580,9 @@ impl Token {
 
     pub fn logout(&mut self) -> CK_RV {
         let mut ret = CKR_USER_NOT_LOGGED_IN;
+        if !self.is_login_required() {
+            ret = CKR_OK;
+        }
         if self.user_login.logged_in {
             self.user_login.logged_in = false;
             ret = CKR_OK;
@@ -574,17 +598,6 @@ impl Token {
         self.objects.clear_private_session_objects();
 
         CKR_OK
-    }
-
-    pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
-        match user_type {
-            CK_UNAVAILABLE_INFORMATION => {
-                self.so_login.logged_in || self.user_login.logged_in
-            }
-            CKU_SO => self.so_login.logged_in,
-            CKU_USER => self.user_login.logged_in,
-            _ => false,
-        }
     }
 
     pub fn set_pin(
@@ -651,6 +664,9 @@ impl Token {
             _ => return CKR_GENERAL_ERROR,
         }
 
+        /* If we set a PIN it means we switched to require Logins */
+        self.info.flags |= CKF_LOGIN_REQUIRED;
+
         self.dirty = true;
         match self.save() {
             Ok(()) => CKR_OK,
@@ -702,7 +718,7 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        if !self.user_login.logged_in {
+        if !self.is_logged_in(KRY_UNSPEC) {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
@@ -807,7 +823,7 @@ impl Token {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         let mut needs_handle = Vec::<String>::new();
         for (_, o) in self.objects.iter() {
-            if !self.is_logged_in(CK_UNAVAILABLE_INFORMATION) && o.is_private()
+            if !self.is_logged_in(KRY_UNSPEC) && o.is_private()
             {
                 continue;
             }
@@ -859,7 +875,7 @@ impl Token {
         mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        if !self.user_login.logged_in {
+        if !self.is_logged_in(KRY_UNSPEC) {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
@@ -875,7 +891,7 @@ impl Token {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
-        if !self.user_login.logged_in {
+        if !self.is_logged_in(KRY_UNSPEC) {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 

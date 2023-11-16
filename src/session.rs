@@ -164,15 +164,6 @@ impl Session {
         }
     }
 
-    pub fn is_auth_state(&self) -> bool {
-        match self.info.state {
-            CKS_RO_USER_FUNCTIONS => true,
-            CKS_RW_USER_FUNCTIONS => true,
-            CKS_RW_SO_FUNCTIONS => true,
-            _ => false,
-        }
-    }
-
     pub fn new_search_operation(
         &mut self,
         token: &mut Token,
