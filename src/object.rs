@@ -20,6 +20,8 @@ use std::fmt::Debug;
 
 use uuid::Uuid;
 
+use once_cell::sync::Lazy;
+
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
         #[allow(dead_code)]
@@ -408,7 +410,8 @@ impl DataTemplate {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes.append(&mut data.init_common_storage_attrs());
+        data.attributes
+            .append(&mut data.init_common_storage_attrs());
         data.attributes.push(attr_element!(CKA_APPLICATION; OAFlags::Defval; from_string; val String::new()));
         data.attributes.push(attr_element!(CKA_OBJECT_ID; OAFlags::empty(); from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval; from_bytes; val Vec::new()));
@@ -487,8 +490,10 @@ impl X509Template {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes.append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_certificate_attrs());
+        data.attributes
+            .append(&mut data.init_common_storage_attrs());
+        data.attributes
+            .append(&mut data.init_common_certificate_attrs());
         data.attributes.push(attr_element!(CKA_SUBJECT; OAFlags::Required; from_bytes; val Vec::new()));
         data.attributes.push(
             attr_element!(CKA_ID; OAFlags::Defval; from_bytes; val Vec::new()),
@@ -667,9 +672,11 @@ impl GenericSecretKeyTemplate {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes.append(&mut data.init_common_storage_attrs());
+        data.attributes
+            .append(&mut data.init_common_storage_attrs());
         data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes.append(&mut data.init_common_secret_key_attrs());
+        data.attributes
+            .append(&mut data.init_common_secret_key_attrs());
         data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::UnsettableOnGenerate | OAFlags::UnsettableOnUnwrap; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate | OAFlags::UnsettableOnCreate; from_bytes; val Vec::new()));
 
@@ -778,9 +785,18 @@ pub enum ObjectType {
     GenericSecretKey,
 }
 
+static DATA_OBJECT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(DataTemplate::new()));
+
+static X509_CERT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(X509Template::new()));
+
+static GENERIC_SECRET_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(GenericSecretKeyTemplate::new()));
+
 #[derive(Debug)]
 pub struct ObjectTemplates {
-    templates: HashMap<ObjectType, Box<dyn ObjectTemplate>>,
+    templates: HashMap<ObjectType, &'static Box<dyn ObjectTemplate>>,
 }
 
 impl ObjectTemplates {
@@ -789,20 +805,18 @@ impl ObjectTemplates {
             templates: HashMap::new(),
         };
         ot.templates
-            .insert(ObjectType::DataObj, Box::new(DataTemplate::new()));
+            .insert(ObjectType::DataObj, &DATA_OBJECT_TEMPLATE);
         ot.templates
-            .insert(ObjectType::X509CertObj, Box::new(X509Template::new()));
-        ot.templates.insert(
-            ObjectType::GenericSecretKey,
-            Box::new(GenericSecretKeyTemplate::new()),
-        );
+            .insert(ObjectType::X509CertObj, &X509_CERT_TEMPLATE);
+        ot.templates
+            .insert(ObjectType::GenericSecretKey, &GENERIC_SECRET_TEMPLATE);
         ot
     }
 
     pub fn add_template(
         &mut self,
         typ: ObjectType,
-        templ: Box<dyn ObjectTemplate>,
+        templ: &'static Box<dyn ObjectTemplate>,
     ) {
         self.templates.insert(typ, templ);
     }

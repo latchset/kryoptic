@@ -26,6 +26,8 @@ use object::{
 use rng::RNG;
 use std::fmt::Debug;
 
+use once_cell::sync::Lazy;
+
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
 pub const MAX_RSA_SIZE_BITS: usize = 16536;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
@@ -41,9 +43,11 @@ impl RSAPubTemplate {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes.append(&mut data.init_common_storage_attrs());
+        data.attributes
+            .append(&mut data.init_common_storage_attrs());
         data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes.append(&mut data.init_common_public_key_attrs());
+        data.attributes
+            .append(&mut data.init_common_public_key_attrs());
         data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_MODULUS_BITS; OAFlags::RequiredOnGenerate | OAFlags::Unchangeable; from_ulong; val 0));
         data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
@@ -167,9 +171,11 @@ impl RSAPrivTemplate {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes.append(&mut data.init_common_storage_attrs());
+        data.attributes
+            .append(&mut data.init_common_storage_attrs());
         data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes.append(&mut data.init_common_private_key_attrs());
+        data.attributes
+            .append(&mut data.init_common_private_key_attrs());
         data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_PRIVATE_EXPONENT; OAFlags::Sensitive | OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
@@ -721,6 +727,12 @@ impl Mechanism for RsaPKCSMechanism {
     }
 }
 
+static PUBLIC_KEY_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(RSAPubTemplate::new()));
+
+static PRIVATE_KEY_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(RSAPrivTemplate::new()));
+
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
     mechs.add_mechanism(
         CKM_RSA_PKCS,
@@ -787,8 +799,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         }),
     );
 
-    ot.add_template(ObjectType::RSAPubKey, Box::new(RSAPubTemplate::new()));
-    ot.add_template(ObjectType::RSAPrivKey, Box::new(RSAPrivTemplate::new()));
+    ot.add_template(ObjectType::RSAPubKey, &PUBLIC_KEY_TEMPLATE);
+    ot.add_template(ObjectType::RSAPrivKey, &PRIVATE_KEY_TEMPLATE);
 }
 
 unsafe extern "C" fn get_random(

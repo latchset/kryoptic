@@ -462,9 +462,7 @@ impl Token {
             return true;
         }
         match user_type {
-            KRY_UNSPEC => {
-                self.so_login.logged_in || self.user_login.logged_in
-            }
+            KRY_UNSPEC => self.so_login.logged_in || self.user_login.logged_in,
             CKU_SO => self.so_login.logged_in,
             CKU_USER => self.user_login.logged_in,
             _ => false,
@@ -823,8 +821,7 @@ impl Token {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         let mut needs_handle = Vec::<String>::new();
         for (_, o) in self.objects.iter() {
-            if !self.is_logged_in(KRY_UNSPEC) && o.is_private()
-            {
+            if !self.is_logged_in(KRY_UNSPEC) && o.is_private() {
                 continue;
             }
 
