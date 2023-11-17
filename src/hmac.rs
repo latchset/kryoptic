@@ -241,6 +241,22 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             maxlen: sha2::SHA512Operation::hashlen(),
         }),
     );
+    mechs.add_mechanism(
+        CKM_SHA_1_KEY_GEN,
+        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA_1_HMAC)),
+    );
+    mechs.add_mechanism(
+        CKM_SHA256_KEY_GEN,
+        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA256_HMAC)),
+    );
+    mechs.add_mechanism(
+        CKM_SHA384_KEY_GEN,
+        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA256_HMAC)),
+    );
+    mechs.add_mechanism(
+        CKM_SHA512_KEY_GEN,
+        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA256_HMAC)),
+    );
 }
 
 /* HMAC spec From FIPS 198-1 */

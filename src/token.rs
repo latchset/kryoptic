@@ -13,7 +13,6 @@ use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::rng;
 use super::rsa;
 use super::sha1;
 use super::sha2;
@@ -349,6 +348,7 @@ impl Token {
         };
 
         /* register mechanisms and templates */
+        object::register(&mut token.mechanisms, &mut token.object_templates);
         rsa::register(&mut token.mechanisms, &mut token.object_templates);
         sha2::register(&mut token.mechanisms, &mut token.object_templates);
         sha1::register(&mut token.mechanisms, &mut token.object_templates);
@@ -689,7 +689,7 @@ impl Token {
         }
     }
 
-    fn insert_object(
+    pub fn insert_object(
         &mut self,
         s_handle: CK_SESSION_HANDLE,
         mut obj: Object,
@@ -700,6 +700,9 @@ impl Token {
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         };
         if is_token {
+            if !self.is_logged_in(KRY_UNSPEC) {
+                return err_rv!(CKR_USER_NOT_LOGGED_IN);
+            }
             self.dirty = true;
         } else {
             obj.set_session(s_handle);
@@ -863,49 +866,5 @@ impl Token {
         mech_type: CK_MECHANISM_TYPE,
     ) -> KResult<&Box<dyn mechanism::Mechanism>> {
         self.mechanisms.get(mech_type)
-    }
-
-    pub fn generate_key(
-        &mut self,
-        rng: &mut rng::RNG,
-        s_handle: CK_SESSION_HANDLE,
-        mech: &CK_MECHANISM,
-        template: &[CK_ATTRIBUTE],
-    ) -> KResult<CK_OBJECT_HANDLE> {
-        if !self.is_logged_in(KRY_UNSPEC) {
-            return err_rv!(CKR_USER_NOT_LOGGED_IN);
-        }
-
-        let object = self.object_templates.genkey(rng, mech, template)?;
-        self.insert_object(s_handle, object)
-    }
-
-    pub fn generate_keypair(
-        &mut self,
-        rng: &mut rng::RNG,
-        s_handle: CK_SESSION_HANDLE,
-        mech: &CK_MECHANISM,
-        pubkey_template: &[CK_ATTRIBUTE],
-        prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
-        if !self.is_logged_in(KRY_UNSPEC) {
-            return err_rv!(CKR_USER_NOT_LOGGED_IN);
-        }
-
-        let (pubkey, prikey) = self.object_templates.genkeypair(
-            rng,
-            mech,
-            pubkey_template,
-            prikey_template,
-        )?;
-
-        let pubh = self.insert_object(s_handle, pubkey)?;
-        match self.insert_object(s_handle, prikey) {
-            Ok(h) => Ok((pubh, h)),
-            Err(e) => {
-                let _ = self.destroy_object(pubh);
-                return Err(e);
-            }
-        }
     }
 }

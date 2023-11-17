@@ -10,6 +10,7 @@ use super::object;
 use super::rng;
 use error::{KError, KResult};
 use interface::*;
+use object::Object;
 use rng::RNG;
 
 use std::fmt::Debug;
@@ -45,6 +46,25 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &CK_MECHANISM,
         _: &object::Object,
     ) -> KResult<Box<dyn Verify>> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
+
+    fn generate_key(
+        &self,
+        _: &mut rng::RNG,
+        _: &CK_MECHANISM,
+        _: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
+
+    fn generate_keypair(
+        &self,
+        _: &mut rng::RNG,
+        _: &CK_MECHANISM,
+        _pubkey_template: &[CK_ATTRIBUTE],
+        _prikey_template: &[CK_ATTRIBUTE],
+    ) -> KResult<(Object, Object)> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 }

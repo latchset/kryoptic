@@ -1523,30 +1523,34 @@ extern "C" fn fn_generate_key(
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let data: &CK_MECHANISM = unsafe { &*mechanism };
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*tmpl);
     }
+
     let mut token =
         res_or_ret!(rstate.get_token_from_slot_mut(session.get_slot_id()));
 
-    let mech: &CK_MECHANISM = unsafe { &*mechanism };
-
-    let kh = CSPRNG.with(|rng| {
-        res_or_ret!(token.generate_key(
-            &mut *rng.borrow_mut(),
-            s_handle,
-            mech,
-            tmpl
-        ))
-    });
-
-    unsafe {
-        core::ptr::write(key_handle as *mut _, kh);
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_GENERATE != CKF_GENERATE {
+        return CKR_MECHANISM_INVALID;
     }
 
-    CKR_OK
+    let result = CSPRNG
+        .with(|rng| mech.generate_key(&mut *rng.borrow_mut(), data, tmpl));
+    match result {
+        Ok(obj) => {
+            let kh = res_or_ret!(token.insert_object(s_handle, obj));
+            unsafe {
+                core::ptr::write(key_handle as *mut _, kh);
+            }
+            CKR_OK
+        }
+        Err(e) => err_to_rv!(e),
+    }
 }
 
 extern "C" fn fn_generate_key_pair(
@@ -1561,6 +1565,8 @@ extern "C" fn fn_generate_key_pair(
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let data: &CK_MECHANISM = unsafe { &*mechanism };
     let pubtmpl: &mut [CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts_mut(
             public_key_template,
@@ -1577,26 +1583,35 @@ extern "C" fn fn_generate_key_pair(
         fail_if_cka_token_true!(&*pritmpl);
         fail_if_cka_token_true!(&*pubtmpl);
     }
+
     let mut token =
         res_or_ret!(rstate.get_token_from_slot_mut(session.get_slot_id()));
 
-    let mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    if mech.info().flags & CKF_GENERATE_KEY_PAIR != CKF_GENERATE_KEY_PAIR {
+        return CKR_MECHANISM_INVALID;
+    }
 
     let result = CSPRNG.with(|rng| {
-        token.generate_keypair(
-            &mut *rng.borrow_mut(),
-            s_handle,
-            mech,
-            pubtmpl,
-            pritmpl,
-        )
+        mech.generate_keypair(&mut *rng.borrow_mut(), data, pubtmpl, pritmpl)
     });
     match result {
-        Ok(keys) => unsafe {
-            core::ptr::write(public_key as *mut _, keys.0);
-            core::ptr::write(private_key as *mut _, keys.1);
-            CKR_OK
-        },
+        Ok((pubkey, privkey)) => {
+            let pubh = res_or_ret!(token.insert_object(s_handle, pubkey));
+            match token.insert_object(s_handle, privkey) {
+                Ok(privh) => {
+                    unsafe {
+                        core::ptr::write(public_key as *mut _, pubh);
+                        core::ptr::write(private_key as *mut _, privh);
+                    }
+                    CKR_OK
+                }
+                Err(e) => {
+                    let _ = token.destroy_object(pubh);
+                    err_to_rv!(e)
+                }
+            }
+        }
         Err(e) => err_to_rv!(e),
     }
 }

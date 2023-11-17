@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use super::attribute;
 use super::error;
 use super::interface;
+use super::mechanism;
 use super::rng;
 use super::{err_not_found, err_rv};
 use attribute::{
@@ -15,7 +16,7 @@ use attribute::{
 };
 use error::{KError, KResult};
 use interface::*;
-use rng::RNG;
+use mechanism::{Mechanism, Mechanisms};
 use std::fmt::Debug;
 
 use uuid::Uuid;
@@ -129,6 +130,19 @@ impl Object {
         Ok(())
     }
 
+    pub fn check_or_set_attr(&mut self, a: Attribute) -> KResult<bool> {
+        let atype = a.get_type();
+        match self.attributes.iter().find(|r| r.get_type() == atype) {
+            Some(attr) => {
+                if attr.get_value() != a.get_value() {
+                    return Ok(false);
+                }
+            }
+            None => self.attributes.push(a),
+        }
+        Ok(true)
+    }
+
     pub fn del_attr(&mut self, ck_type: CK_ULONG) {
         self.attributes.retain(|a| a.get_type() != ck_type);
     }
@@ -154,7 +168,7 @@ impl Object {
 }
 
 bitflags! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     pub struct OAFlags: u32 {
         const Ignored              = 0b00000000000001;
         const Sensitive            = 0b00000000000010;
@@ -191,10 +205,6 @@ impl ObjectAttr {
 
     pub fn get_type(&self) -> CK_ULONG {
         self.attribute.get_type()
-    }
-
-    pub fn clone_attr(&self) -> Attribute {
-        self.attribute.clone()
     }
 
     pub fn is(&self, val: OAFlags) -> bool {
@@ -239,31 +249,6 @@ pub trait ObjectTemplate: Debug + Send + Sync {
         self.default_copy(obj, template)
     }
 
-    fn genkey(
-        &self,
-        _rng: &mut RNG,
-        _template: &[CK_ATTRIBUTE],
-        _ktype: CK_KEY_TYPE,
-    ) -> KResult<Object> {
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn stubpubkeyhalf(
-        &self,
-        _pubkey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
-    fn genkeypair(
-        &self,
-        _rng: &mut RNG,
-        _pubkey: &mut Object,
-        _prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
-        return err_rv!(CKR_GENERAL_ERROR);
-    }
-
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
 
     fn init_common_object_attrs(&self) -> Vec<ObjectAttr> {
@@ -286,13 +271,26 @@ pub trait ObjectTemplate: Debug + Send + Sync {
     fn default_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
+        generate: bool,
     ) -> KResult<Object> {
         let attributes = self.get_attributes();
         let mut obj = Object::new();
+
+        let unsettable_flags = if generate {
+            OAFlags::UnsettableOnGenerate
+        } else {
+            OAFlags::UnsettableOnCreate
+        };
+        let required_flags = if generate {
+            OAFlags::RequiredOnGenerate
+        } else {
+            OAFlags::RequiredOnCreate
+        };
+
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
-                    if attr.is(OAFlags::UnsettableOnCreate) {
+                    if attr.is(unsettable_flags) {
                         return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
                     }
                     /* duplicate? */
@@ -315,7 +313,7 @@ pub trait ObjectTemplate: Debug + Send + Sync {
                 None => {
                     if attr.has_default() {
                         obj.attributes.push(attr.attribute.clone());
-                    } else if attr.is(OAFlags::RequiredOnCreate) {
+                    } else if attr.is(required_flags) {
                         return err_rv!(CKR_TEMPLATE_INCOMPLETE);
                     }
                 }
@@ -421,7 +419,7 @@ impl DataTemplate {
 
 impl ObjectTemplate for DataTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        self.default_object_create(template)
+        self.default_object_create(template, false)
     }
 
     fn copy(
@@ -518,7 +516,7 @@ impl CertTemplate for X509Template {
 
 impl ObjectTemplate for X509Template {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_object_create(template, false)?;
 
         let ret = self.basic_cert_object_create_checks(&mut obj);
         if ret != CKR_OK {
@@ -693,69 +691,14 @@ impl GenericSecretKeyTemplate {
 
         data
     }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
 }
 
 impl ObjectTemplate for GenericSecretKeyTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template)?;
+        let obj = self.default_object_create(template, false)?;
 
         bytes_attr_not_empty!(obj; CKA_VALUE);
 
-        Ok(obj)
-    }
-
-    fn genkey(
-        &self,
-        rng: &mut RNG,
-        template: &[CK_ATTRIBUTE],
-        ktype: CK_KEY_TYPE,
-    ) -> KResult<Object> {
-        let attributes = self.get_attributes();
-        let mut obj = Object::new();
-        for ck_attr in template {
-            match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
-                Some(attr) => {
-                    if attr.is(OAFlags::UnsettableOnGenerate) {
-                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
-                    }
-                    /* duplicate? */
-                    match obj.get_attr(ck_attr.type_) {
-                        Some(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
-                        None => (),
-                    }
-                    if !attr.is(OAFlags::Ignored) {
-                        obj.attributes.push(ck_attr.to_attribute()?);
-                    }
-                }
-                None => {
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-                }
-            }
-        }
-        for attr in attributes {
-            match obj.get_attr(attr.get_type()) {
-                Some(_) => (),
-                None => {
-                    if attr.has_default() {
-                        obj.attributes.push(attr.attribute.clone());
-                    } else if attr.is(OAFlags::RequiredOnGenerate) {
-                        return err_rv!(CKR_TEMPLATE_INCOMPLETE);
-                    }
-                }
-            }
-        }
-        let value_len = obj.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
-        let mut value: Vec<u8> = vec![0; value_len];
-        rng.generate_random(value.as_mut_slice())?;
-        obj.del_attr(CKA_VALUE_LEN);
-        obj.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
-        obj.set_attr(attribute::from_ulong(CKA_KEY_TYPE, ktype))?;
-
-        obj.generate_unique();
         Ok(obj)
     }
 
@@ -776,6 +719,65 @@ impl SecretKeyTemplate for GenericSecretKeyTemplate {
     }
 }
 
+#[derive(Debug)]
+pub struct GenericSecretKeyMechanism {
+    info: CK_MECHANISM_INFO,
+    keytype: CK_KEY_TYPE,
+}
+
+impl GenericSecretKeyMechanism {
+    pub fn new(keytype: CK_KEY_TYPE) -> GenericSecretKeyMechanism {
+        GenericSecretKeyMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_EFFECTIVELY_INFINITE,
+                ulMaxKeySize: CK_EFFECTIVELY_INFINITE,
+                flags: CKF_GENERATE,
+            },
+            keytype: keytype,
+        }
+    }
+    fn keytype(&self) -> CK_KEY_TYPE {
+        self.keytype
+    }
+}
+
+impl Mechanism for GenericSecretKeyMechanism {
+    fn info(&self) -> &CK_MECHANISM_INFO {
+        &self.info
+    }
+
+    fn generate_key(
+        &self,
+        rng: &mut rng::RNG,
+        _mech: &CK_MECHANISM,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let mut key =
+            GENERIC_SECRET_TEMPLATE.default_object_create(template, true)?;
+        if !key.check_or_set_attr(attribute::from_ulong(
+            CKA_CLASS,
+            CKO_SECRET_KEY,
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_ulong(
+            CKA_KEY_TYPE,
+            self.keytype(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+
+        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+        key.del_attr(CKA_VALUE_LEN);
+
+        let mut value: Vec<u8> = vec![0; value_len];
+        rng.generate_random(value.as_mut_slice())?;
+        key.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
+
+        Ok(key)
+    }
+}
+
 #[derive(Debug, Eq, Hash, PartialEq)]
 pub enum ObjectType {
     DataObj,
@@ -785,15 +787,6 @@ pub enum ObjectType {
     GenericSecretKey,
 }
 
-static DATA_OBJECT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(DataTemplate::new()));
-
-static X509_CERT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(X509Template::new()));
-
-static GENERIC_SECRET_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(GenericSecretKeyTemplate::new()));
-
 #[derive(Debug)]
 pub struct ObjectTemplates {
     templates: HashMap<ObjectType, &'static Box<dyn ObjectTemplate>>,
@@ -801,16 +794,9 @@ pub struct ObjectTemplates {
 
 impl ObjectTemplates {
     pub fn new() -> ObjectTemplates {
-        let mut ot: ObjectTemplates = ObjectTemplates {
+        ObjectTemplates {
             templates: HashMap::new(),
-        };
-        ot.templates
-            .insert(ObjectType::DataObj, &DATA_OBJECT_TEMPLATE);
-        ot.templates
-            .insert(ObjectType::X509CertObj, &X509_CERT_TEMPLATE);
-        ot.templates
-            .insert(ObjectType::GenericSecretKey, &GENERIC_SECRET_TEMPLATE);
-        ot
+        }
     }
 
     pub fn add_template(
@@ -1109,81 +1095,24 @@ impl ObjectTemplates {
         }
         self.get_object_template(obj)?.copy(obj, template)
     }
+}
 
-    pub fn genkey(
-        &self,
-        rng: &mut RNG,
-        mech: &CK_MECHANISM,
-        template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
-        let class = match template.iter().find(|a| a.type_ == CKA_CLASS) {
-            Some(c) => c.to_ulong()?,
-            None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-        };
-        match class {
-            CKO_SECRET_KEY => {
-                let ktype =
-                    match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
-                        Some(k) => k.to_ulong()?,
-                        None => CK_UNAVAILABLE_INFORMATION,
-                    };
-                match mech.mechanism {
-                    CKM_GENERIC_SECRET_KEY_GEN => match ktype {
-                        CK_UNAVAILABLE_INFORMATION | CKK_GENERIC_SECRET => self
-                            .get_template(ObjectType::GenericSecretKey)?
-                            .genkey(rng, template, CKK_GENERIC_SECRET),
-                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
-                    },
-                    CKM_SHA_1_KEY_GEN => match ktype {
-                        CK_UNAVAILABLE_INFORMATION | CKK_SHA_1_HMAC => self
-                            .get_template(ObjectType::GenericSecretKey)?
-                            .genkey(rng, template, CKK_SHA_1_HMAC),
-                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
-                    },
-                    CKM_SHA256_KEY_GEN => match ktype {
-                        CK_UNAVAILABLE_INFORMATION | CKK_SHA256_HMAC => self
-                            .get_template(ObjectType::GenericSecretKey)?
-                            .genkey(rng, template, CKK_SHA256_HMAC),
-                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
-                    },
-                    CKM_SHA384_KEY_GEN => match ktype {
-                        CK_UNAVAILABLE_INFORMATION | CKK_SHA384_HMAC => self
-                            .get_template(ObjectType::GenericSecretKey)?
-                            .genkey(rng, template, CKK_SHA384_HMAC),
-                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
-                    },
-                    CKM_SHA512_KEY_GEN => match ktype {
-                        CK_UNAVAILABLE_INFORMATION | CKK_SHA512_HMAC => self
-                            .get_template(ObjectType::GenericSecretKey)?
-                            .genkey(rng, template, CKK_SHA512_HMAC),
-                        _ => err_rv!(CKR_TEMPLATE_INCONSISTENT),
-                    },
-                    _ => err_rv!(CKR_MECHANISM_INVALID),
-                }
-            }
-            /* TODO: CKO_DOMAIN_PARAMETERS */
-            _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-        }
-    }
+static DATA_OBJECT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(DataTemplate::new()));
 
-    pub fn genkeypair(
-        &self,
-        rng: &mut RNG,
-        mech: &CK_MECHANISM,
-        pubkey_template: &[CK_ATTRIBUTE],
-        prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<(Object, Object)> {
-        match mech.mechanism {
-            CKM_RSA_PKCS_KEY_PAIR_GEN => {
-                let mut pubkey = self
-                    .get_template(ObjectType::RSAPubKey)?
-                    .stubpubkeyhalf(pubkey_template)?;
-                let prikey = self
-                    .get_template(ObjectType::RSAPrivKey)?
-                    .genkeypair(rng, &mut pubkey, prikey_template)?;
-                Ok((pubkey, prikey))
-            }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
-        }
-    }
+static X509_CERT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(X509Template::new()));
+
+static GENERIC_SECRET_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
+    Lazy::new(|| Box::new(GenericSecretKeyTemplate::new()));
+
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
+    mechs.add_mechanism(
+        CKM_GENERIC_SECRET_KEY_GEN,
+        Box::new(GenericSecretKeyMechanism::new(CKK_GENERIC_SECRET)),
+    );
+
+    ot.add_template(ObjectType::DataObj, &DATA_OBJECT_TEMPLATE);
+    ot.add_template(ObjectType::X509CertObj, &X509_CERT_TEMPLATE);
+    ot.add_template(ObjectType::GenericSecretKey, &GENERIC_SECRET_TEMPLATE);
 }
