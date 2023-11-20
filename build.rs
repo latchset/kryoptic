@@ -54,6 +54,16 @@ impl bindgen::callbacks::ParseCallbacks for HaclCallbacks {
                 name: "u8",
                 is_signed: false,
             })
+        } else if name.starts_with("EverCrypt_Error_") {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "u8",
+                is_signed: false,
+            })
+        } else if name.ends_with("_HASH_LEN") {
+            Some(bindgen::callbacks::IntKind::Custom {
+                name: "usize",
+                is_signed: false,
+            })
         } else {
             None
         }
@@ -121,10 +131,16 @@ fn main() {
         .header(hacl_h.to_str().unwrap())
         .clang_arg(format!("-I{}", hacl_krml_include.display()))
         .clang_arg(format!("-I{}", hacl_krml_dist.display()))
+        /* https://github.com/rust-lang/rust-bindgen/issues/2500 */
+        .clang_arg("-D__AVX512VLFP16INTRIN_H") /* workaround */
+        .clang_arg("-D__AVX512FP16INTRIN_H") /* workaround */
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
-        .allowlist_item("Hacl_.*")
+        .allowlist_item("EverCrypt_.*")
+        .allowlist_item("Hacl_Hash_Definitions.*")
+        .allowlist_item("Hacl_HMAC_DRBG.*")
         .allowlist_item("Spec_.*")
+        .allowlist_item("SHA.*_HASH_LEN")
         .parse_callbacks(Box::new(HaclCallbacks))
         .generate()
         .expect("Unable to generate bindings")

@@ -4,12 +4,11 @@
 use super::cryptography;
 use super::err_rv;
 use super::error;
+use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
 use super::rng;
-use super::sha1;
-use super::sha2;
 use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
@@ -80,18 +79,10 @@ impl Mechanism for HMACMechanism {
         let output_len = check_and_fetch_param(mech, self.minlen, self.maxlen)?;
         let key = check_and_fetch_key(keyobj, self.keytype)?;
         let hash = match mech.mechanism {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA1
-            }
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA2_256
-            }
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA2_384
-            }
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA2_512
-            }
+            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => CKM_SHA_1,
+            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => CKM_SHA256,
+            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => CKM_SHA384,
+            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => CKM_SHA512,
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         Ok(Box::new(HMACOperation::init(
@@ -113,18 +104,10 @@ impl Mechanism for HMACMechanism {
         let output_len = check_and_fetch_param(mech, self.minlen, self.maxlen)?;
         let key = check_and_fetch_key(keyobj, self.keytype)?;
         let hash = match mech.mechanism {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA1
-            }
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA2_256
-            }
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA2_384
-            }
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => {
-                Spec_Hash_Definitions_SHA2_512
-            }
+            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => CKM_SHA_1,
+            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => CKM_SHA256,
+            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => CKM_SHA384,
+            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => CKM_SHA512,
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         Ok(Box::new(HMACOperation::init(
@@ -147,7 +130,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA_1_HMAC,
             minlen: 1,
-            maxlen: sha1::SHA1Operation::hashlen(),
+            maxlen: SHA1_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -159,8 +142,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA_1_HMAC,
-            minlen: sha1::SHA1Operation::hashlen(),
-            maxlen: sha1::SHA1Operation::hashlen(),
+            minlen: SHA1_HASH_LEN,
+            maxlen: SHA1_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -173,7 +156,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA256_HMAC,
             minlen: 1,
-            maxlen: sha2::SHA256Operation::hashlen(),
+            maxlen: SHA2_256_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -185,8 +168,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA256_HMAC,
-            minlen: sha2::SHA256Operation::hashlen(),
-            maxlen: sha2::SHA256Operation::hashlen(),
+            minlen: SHA2_256_HASH_LEN,
+            maxlen: SHA2_256_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -199,7 +182,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA384_HMAC,
             minlen: 1,
-            maxlen: sha2::SHA384Operation::hashlen(),
+            maxlen: SHA2_384_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -211,8 +194,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA384_HMAC,
-            minlen: sha2::SHA384Operation::hashlen(),
-            maxlen: sha2::SHA384Operation::hashlen(),
+            minlen: SHA2_384_HASH_LEN,
+            maxlen: SHA2_384_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -225,7 +208,7 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             },
             keytype: CKK_SHA512_HMAC,
             minlen: 1,
-            maxlen: sha2::SHA512Operation::hashlen(),
+            maxlen: SHA2_512_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -237,8 +220,8 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
                 flags: CKF_SIGN | CKF_VERIFY,
             },
             keytype: CKK_SHA512_HMAC,
-            minlen: sha2::SHA512Operation::hashlen(),
-            maxlen: sha2::SHA512Operation::hashlen(),
+            minlen: SHA2_512_HASH_LEN,
+            maxlen: SHA2_512_HASH_LEN,
         }),
     );
     mechs.add_mechanism(
@@ -285,7 +268,7 @@ impl Drop for HMACOperation {
 impl HMACOperation {
     fn init(
         mech: CK_MECHANISM_TYPE,
-        hash: Spec_Hash_Definitions_hash_alg,
+        hash: CK_MECHANISM_TYPE,
         key: Vec<u8>,
         outputlen: usize,
     ) -> KResult<HMACOperation> {
@@ -301,29 +284,12 @@ impl HMACOperation {
             finalized: false,
             in_use: false,
         };
-        if hash == sha1::SHA1Operation::specdef() {
-            hmac.hashlen = sha1::SHA1Operation::hashlen();
-            hmac.blocklen = sha1::SHA1Operation::blocklen();
-            hmac.inner =
-                Operation::Digest(Box::new(sha1::SHA1Operation::new()));
-        } else if hash == sha2::SHA256Operation::specdef() {
-            hmac.hashlen = sha2::SHA256Operation::hashlen();
-            hmac.blocklen = sha2::SHA256Operation::blocklen();
-            hmac.inner =
-                Operation::Digest(Box::new(sha2::SHA256Operation::new()));
-        } else if hash == sha2::SHA384Operation::specdef() {
-            hmac.hashlen = sha2::SHA384Operation::hashlen();
-            hmac.blocklen = sha2::SHA384Operation::blocklen();
-            hmac.inner =
-                Operation::Digest(Box::new(sha2::SHA384Operation::new()));
-        } else if hash == sha2::SHA512Operation::specdef() {
-            hmac.hashlen = sha2::SHA512Operation::hashlen();
-            hmac.blocklen = sha2::SHA512Operation::blocklen();
-            hmac.inner =
-                Operation::Digest(Box::new(sha2::SHA512Operation::new()));
-        } else {
-            return err_rv!(CKR_GENERAL_ERROR);
-        };
+        /* The hash mechanism is unimportant here,
+         * what matters is the psecdef algorithm */
+        let hashop = hash::HashOperation::new(hash)?;
+        hmac.hashlen = hashop.hashlen();
+        hmac.blocklen = hashop.blocklen();
+        hmac.inner = Operation::Digest(Box::new(hashop));
 
         /* K0 */
         if key.len() <= hmac.blocklen {

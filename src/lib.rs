@@ -58,10 +58,9 @@ use token::Token;
 
 /* algorithms and ciphers */
 mod drbg;
+mod hash;
 mod hmac;
 mod rsa;
-mod sha1;
-mod sha2;
 
 macro_rules! err_to_rv {
     ($err:expr) => {
@@ -100,6 +99,7 @@ struct State {
 
 impl State {
     fn initialize(&mut self) {
+        cryptography::evercrypt_autoconf();
         self.slots.clear();
         self.sessionmap.clear();
         self.next_handle = 1;

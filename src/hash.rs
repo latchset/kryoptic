@@ -15,55 +15,61 @@ use mechanism::*;
 use std::fmt::Debug;
 
 #[derive(Debug)]
-struct SHA1Mechanism {
+struct HashMechanism {
     info: CK_MECHANISM_INFO,
 }
 
-impl Mechanism for SHA1Mechanism {
+impl Mechanism for HashMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
     }
 
     fn digest_new(&self, mech: &CK_MECHANISM) -> KResult<Box<dyn Digest>> {
-        if mech.mechanism != CKM_SHA_1 {
-            return err_rv!(CKR_MECHANISM_INVALID);
-        }
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        Ok(Box::new(SHA1Operation::new()))
+        Ok(Box::new(HashOperation::new(mech.mechanism)?))
     }
 }
 
 #[derive(Debug)]
-pub struct SHA1Operation {
-    state: SHA1state,
+pub struct HashOperation {
+    mech: CK_MECHANISM_TYPE,
+    state: HashState,
     finalized: bool,
     in_use: bool,
 }
 
-impl SHA1Operation {
-    pub fn new() -> SHA1Operation {
-        SHA1Operation {
-            state: SHA1state::new(),
+impl HashOperation {
+    pub fn new(mech: CK_MECHANISM_TYPE) -> KResult<HashOperation> {
+        let alg = match mech {
+            CKM_SHA_1 => Spec_Hash_Definitions_SHA1,
+            CKM_SHA256 => Spec_Hash_Definitions_SHA2_256,
+            CKM_SHA384 => Spec_Hash_Definitions_SHA2_384,
+            CKM_SHA512 => Spec_Hash_Definitions_SHA2_512,
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        Ok(HashOperation {
+            mech: mech,
+            state: HashState::new(alg),
             finalized: false,
             in_use: false,
-        }
+        })
     }
-    pub fn hashlen() -> usize {
-        unsafe { Hacl_Hash_Definitions_hash_len(Self::specdef()) as usize }
+    pub fn hashlen(&self) -> usize {
+        unsafe { Hacl_Hash_Definitions_hash_len(self.specdef()) as usize }
     }
-    pub fn blocklen() -> usize {
-        unsafe { Hacl_Hash_Definitions_block_len(Self::specdef()) as usize }
+    pub fn blocklen(&self) -> usize {
+        unsafe { Hacl_Hash_Definitions_block_len(self.specdef()) as usize }
     }
-    pub fn specdef() -> Spec_Hash_Definitions_hash_alg {
-        Spec_Hash_Definitions_SHA1
+    pub fn specdef(&self) -> Spec_Hash_Definitions_hash_alg {
+        self.state.get_alg()
     }
 }
 
-impl MechOperation for SHA1Operation {
+impl MechOperation for HashOperation {
     fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        CKM_SHA_1
+        self.mech
     }
     fn in_use(&self) -> bool {
         self.in_use
@@ -78,7 +84,7 @@ impl MechOperation for SHA1Operation {
     }
 }
 
-impl Digest for SHA1Operation {
+impl Digest for HashOperation {
     fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> KResult<()> {
         if self.in_use || self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
@@ -89,11 +95,12 @@ impl Digest for SHA1Operation {
         self.finalized = true;
         /* NOTE: It is ok if data and digest point to the same buffer*/
         unsafe {
-            Hacl_Streaming_SHA1_legacy_hash(
+            EverCrypt_Hash_Incremental_hash(
+                self.specdef(),
+                digest.as_mut_ptr(),
                 data.as_ptr() as *mut u8,
                 data.len() as u32,
-                digest.as_mut_ptr(),
-            )
+            );
         }
         Ok(())
     }
@@ -103,21 +110,19 @@ impl Digest for SHA1Operation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if !self.in_use {
-            unsafe {
-                Hacl_Streaming_SHA1_legacy_init(self.state.get_state());
-            }
+            self.state.reset();
             self.in_use = true;
         }
         let r = unsafe {
-            Hacl_Streaming_SHA1_legacy_update(
+            EverCrypt_Hash_Incremental_update(
                 self.state.get_state(),
                 data.as_ptr() as *mut u8,
                 data.len() as u32,
             )
         };
         match r {
-            cryptography::Hacl_Streaming_Types_Success => Ok(()),
-            cryptography::Hacl_Streaming_Types_MaximumLengthExceeded => {
+            cryptography::EverCrypt_Error_Success => Ok(()),
+            cryptography::EverCrypt_Error_MaximumLengthExceeded => {
                 self.finalized = true;
                 err_rv!(CKR_DATA_LEN_RANGE)
             }
@@ -140,7 +145,7 @@ impl Digest for SHA1Operation {
         }
         self.finalized = true;
         unsafe {
-            Hacl_Streaming_SHA1_legacy_finish(
+            EverCrypt_Hash_Incremental_finish(
                 self.state.get_state(),
                 digest.as_mut_ptr(),
             );
@@ -149,14 +154,44 @@ impl Digest for SHA1Operation {
     }
 
     fn digest_len(&self) -> KResult<usize> {
-        Ok(Self::hashlen())
+        Ok(self.hashlen())
     }
 }
 
 pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectTemplates) {
     mechs.add_mechanism(
         CKM_SHA_1,
-        Box::new(SHA1Mechanism {
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA256,
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA384,
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA512,
+        Box::new(HashMechanism {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: 0,
                 ulMaxKeySize: 0,

@@ -4,12 +4,11 @@
 use super::attribute;
 use super::cryptography;
 use super::error;
+use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
 use super::rng;
-use super::sha1;
-use super::sha2;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 use attribute::{from_bool, from_bytes, from_ulong};
 use cryptography::*;
@@ -809,18 +808,18 @@ impl RsaPKCSOperation {
             output_len: modulus.len(),
             inner: match mech.mechanism {
                 CKM_RSA_PKCS => Operation::Empty,
-                CKM_SHA1_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha1::SHA1Operation::new()))
-                }
-                CKM_SHA256_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha2::SHA256Operation::new()))
-                }
-                CKM_SHA384_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha2::SHA384Operation::new()))
-                }
-                CKM_SHA512_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha2::SHA512Operation::new()))
-                }
+                CKM_SHA1_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA_1)?,
+                )),
+                CKM_SHA256_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA256)?,
+                )),
+                CKM_SHA384_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA384)?,
+                )),
+                CKM_SHA512_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA512)?,
+                )),
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             public_key: object_to_rsa_public_key(key)?,
@@ -856,18 +855,18 @@ impl RsaPKCSOperation {
             output_len: modulus.len(),
             inner: match mech.mechanism {
                 CKM_RSA_PKCS => Operation::Empty,
-                CKM_SHA1_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha1::SHA1Operation::new()))
-                }
-                CKM_SHA256_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha2::SHA256Operation::new()))
-                }
-                CKM_SHA384_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha2::SHA384Operation::new()))
-                }
-                CKM_SHA512_RSA_PKCS => {
-                    Operation::Digest(Box::new(sha2::SHA512Operation::new()))
-                }
+                CKM_SHA1_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA_1)?,
+                )),
+                CKM_SHA256_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA256)?,
+                )),
+                CKM_SHA384_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA384)?,
+                )),
+                CKM_SHA512_RSA_PKCS => Operation::Digest(Box::new(
+                    hash::HashOperation::new(CKM_SHA512)?,
+                )),
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             public_key: object_to_rsa_public_key(key)?,

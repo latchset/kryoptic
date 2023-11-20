@@ -1,3 +1,5 @@
+#include "EverCrypt_AutoConfig2.h"
+#include "EverCrypt_Hash.h"
 #include "Hacl_Hash_Base.h"
 #include "Hacl_Hash_SHA1.h"
 #include "Hacl_Hash_SHA2.h"

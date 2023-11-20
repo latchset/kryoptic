@@ -9,13 +9,12 @@ use serde_json;
 
 use super::attribute;
 use super::error;
+use super::hash;
 use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
 use super::rsa;
-use super::sha1;
-use super::sha2;
 
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
@@ -350,8 +349,7 @@ impl Token {
         /* register mechanisms and templates */
         object::register(&mut token.mechanisms, &mut token.object_templates);
         rsa::register(&mut token.mechanisms, &mut token.object_templates);
-        sha2::register(&mut token.mechanisms, &mut token.object_templates);
-        sha1::register(&mut token.mechanisms, &mut token.object_templates);
+        hash::register(&mut token.mechanisms, &mut token.object_templates);
         hmac::register(&mut token.mechanisms, &mut token.object_templates);
 
         token
