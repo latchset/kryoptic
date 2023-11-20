@@ -133,4 +133,31 @@
         "CKA_TOKEN": true,
         "CKA_VALUE": "SGVsbG8gU0hBNTEyIEhNQUM="
     }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "10",
+        "CKA_CLASS": 4,
+        "CKA_KEY_TYPE": 16,
+        "CKA_ID": "SE1BQyBTSEEtMy0yNTYgVGVzdCBLZXk=",
+        "CKA_LABEL": "HMAC SHA-3-256 Test Key",
+        "CKA_EXTRACTABLE": false,
+        "CKA_DESTROYABLE": false,
+        "CKA_PRIVATE": true,
+        "CKA_SENSITIVE": true,
+        "CKA_VALUE": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "CKA_TOKEN": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "11",
+        "CKA_APPLICATION": "CKM_SHA3_256_HMAC",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "SHA 3 256 HMAC",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "T+jiAsTwWOjd3CPYw05Gc0PiNVXiT8LwJdWY9Vj2cgU=",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "U2FtcGxlIG1lc3NhZ2UgZm9yIGtleWxlbjxibG9ja2xlbg=="
+    }
 }]}

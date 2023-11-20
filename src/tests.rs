@@ -1976,6 +1976,36 @@ fn test_signatures() {
         &mut mechanism,
     );
 
+    /* ### SHA3 256 HMAC ### */
+
+    /* get test keys */
+    let key_handle =
+        get_test_key_handle(session, "HMAC SHA-3-256 Test Key", CKO_SECRET_KEY);
+
+    /* get test data */
+    let mut testcase = get_test_case_data(session, "CKM_SHA3_256_HMAC");
+
+    /* verify test vector */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA3_256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    sig_verify(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+    let _ = sig_and_check(
+        session,
+        key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 

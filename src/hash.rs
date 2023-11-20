@@ -44,9 +44,14 @@ impl HashOperation {
     pub fn new(mech: CK_MECHANISM_TYPE) -> KResult<HashOperation> {
         let alg = match mech {
             CKM_SHA_1 => Spec_Hash_Definitions_SHA1,
+            CKM_SHA224 => Spec_Hash_Definitions_SHA2_224,
             CKM_SHA256 => Spec_Hash_Definitions_SHA2_256,
             CKM_SHA384 => Spec_Hash_Definitions_SHA2_384,
             CKM_SHA512 => Spec_Hash_Definitions_SHA2_512,
+            CKM_SHA3_224 => Spec_Hash_Definitions_SHA3_224,
+            CKM_SHA3_256 => Spec_Hash_Definitions_SHA3_256,
+            CKM_SHA3_384 => Spec_Hash_Definitions_SHA3_384,
+            CKM_SHA3_512 => Spec_Hash_Definitions_SHA3_512,
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         Ok(HashOperation {
@@ -191,6 +196,36 @@ pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectTemplates) {
     );
     mechs.add_mechanism(
         CKM_SHA512,
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA3_256,
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA3_384,
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_SHA3_512,
         Box::new(HashMechanism {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: 0,
