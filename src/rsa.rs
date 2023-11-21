@@ -927,6 +927,20 @@ impl RsaPKCSOperation {
                 emsa.extend([0; 20]);
                 Ok(emsa)
             }
+            CKM_SHA224_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 49,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04,
+                        0x05, 0,
+                      0x04, 28,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 28]);
+                Ok(emsa)
+            }
             CKM_SHA256_RSA_PKCS => {
                 #[rustfmt::skip]
                 let mut emsa: Vec<u8> = vec![
@@ -962,6 +976,62 @@ impl RsaPKCSOperation {
                       0x30, 13,
                         0x06, 9,
                           0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03,
+                        0x05, 0,
+                      0x04, 64,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 64]);
+                Ok(emsa)
+            }
+            CKM_SHA3_224_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 49,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x07,
+                        0x05, 0,
+                      0x04, 28,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 28]);
+                Ok(emsa)
+            }
+            CKM_SHA3_256_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 49,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x08,
+                        0x05, 0,
+                      0x04, 32,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 32]);
+                Ok(emsa)
+            }
+            CKM_SHA3_384_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 65,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x09,
+                        0x05, 0,
+                      0x04, 48,
+                ];
+                *digest_idx = emsa.len();
+                emsa.extend([0; 48]);
+                Ok(emsa)
+            }
+            CKM_SHA3_512_RSA_PKCS => {
+                #[rustfmt::skip]
+                let mut emsa: Vec<u8> = vec![
+                    0x30, 81,
+                      0x30, 13,
+                        0x06, 9,
+                          0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x0a,
                         0x05, 0,
                       0x04, 64,
                 ];
@@ -1258,9 +1328,14 @@ impl Sign for RsaPKCSOperation {
                 return self.pkcs1_sign(rng, data, signature);
             }
             CKM_SHA1_RSA_PKCS => (),
+            CKM_SHA224_RSA_PKCS => (),
             CKM_SHA256_RSA_PKCS => (),
             CKM_SHA384_RSA_PKCS => (),
             CKM_SHA512_RSA_PKCS => (),
+            CKM_SHA3_224_RSA_PKCS => (),
+            CKM_SHA3_256_RSA_PKCS => (),
+            CKM_SHA3_384_RSA_PKCS => (),
+            CKM_SHA3_512_RSA_PKCS => (),
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         self.sign_update(data)?;
@@ -1334,9 +1409,14 @@ impl Verify for RsaPKCSOperation {
                 return self.pkcs1_verify(data, signature);
             }
             CKM_SHA1_RSA_PKCS => (),
+            CKM_SHA224_RSA_PKCS => (),
             CKM_SHA256_RSA_PKCS => (),
             CKM_SHA384_RSA_PKCS => (),
             CKM_SHA512_RSA_PKCS => (),
+            CKM_SHA3_224_RSA_PKCS => (),
+            CKM_SHA3_256_RSA_PKCS => (),
+            CKM_SHA3_384_RSA_PKCS => (),
+            CKM_SHA3_512_RSA_PKCS => (),
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         self.verify_update(data)?;
