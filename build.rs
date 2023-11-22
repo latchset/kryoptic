@@ -70,24 +70,7 @@ impl bindgen::callbacks::ParseCallbacks for HaclCallbacks {
     }
 }
 
-fn main() {
-    println!("cargo:rerun-if-changed=pkcs11_headers/3.1/pkcs11.h");
-
-    /* PKCS11 Headers */
-    bindgen::Builder::default()
-        .header("pkcs11_headers/3.1/pkcs11.h")
-        .derive_default(true)
-        .formatter(bindgen::Formatter::Prettyplease)
-        .blocklist_type("CK_FUNCTION_LIST_PTR")
-        .blocklist_type("CK_FUNCTION_LIST_3_0_PTR")
-        .blocklist_type("CK_INTERFACE")
-        .parse_callbacks(Box::new(Pkcs11Callbacks))
-        .generate()
-        .expect("Unable to generate bindings")
-        .write_to_file("src/pkcs11_bindings.rs")
-        .expect("Couldn't write bindings!");
-
-    /* HACL Code */
+fn build_hacl() {
     let hacl_path = std::path::PathBuf::from("hacl/gcc-compatible")
         .canonicalize()
         .expect("cannot canonicalize path");
@@ -103,9 +86,6 @@ fn main() {
         .expect("cannot canonicalize path");
     let hacl_h = hacl_path.join("hacl.h");
 
-    println!("cargo:rustc-link-search={}", hacl_path.to_str().unwrap());
-    println!("cargo:rustc-link-lib=evercrypt");
-    println!("cargo:rerun-if-changed={}", hacl_conf.to_str().unwrap());
     if !std::process::Command::new("./configure")
         .current_dir(&hacl_path)
         .output()
@@ -127,6 +107,11 @@ fn main() {
         // Panic if the command was not successful.
         panic!("could not build HACL library");
     }
+
+    println!("cargo:rustc-link-search={}", hacl_path.to_str().unwrap());
+    println!("cargo:rustc-link-lib=evercrypt");
+    println!("cargo:rerun-if-changed={}", hacl_conf.to_str().unwrap());
+
     bindgen::Builder::default()
         .header(hacl_h.to_str().unwrap())
         .clang_arg(format!("-I{}", hacl_krml_include.display()))
@@ -146,12 +131,90 @@ fn main() {
         .expect("Unable to generate bindings")
         .write_to_file("src/hacl_bindings.rs")
         .expect("Couldn't write bindings!");
+}
+
+fn build_gmp() {
+    let gmp_path = std::path::PathBuf::from("gmp")
+        .canonicalize()
+        .expect("cannot canonicalize gmp_path");
+
+    let gmp_h = gmp_path
+        .join("gmp-h.in")
+        .canonicalize()
+        .expect("cannot canonicalize gmp_h path");
+
+    if !std::process::Command::new("./.bootstrap")
+        .current_dir(&gmp_path)
+        .output()
+        .expect("could not run gmp `.bootstrap`")
+        .status
+        .success()
+    {
+        // Panic if the command was not successful.
+        panic!("could not configure GMP");
+    }
+
+    if !std::process::Command::new("./configure")
+        .current_dir(&gmp_path)
+        .env("CFLAGS", "-fPIC -ggdb3")
+        .arg("--disable-shared")
+        .output()
+        .expect("could not run gmp `configure`")
+        .status
+        .success()
+    {
+        // Panic if the command was not successful.
+        panic!("could not configure GMP");
+    }
+
+    if !std::process::Command::new("make")
+        .current_dir(&gmp_path)
+        .output()
+        .expect("could not run gmp `make`")
+        .status
+        .success()
+    {
+        // Panic if the command was not successful.
+        panic!("could not build GMP library");
+    }
+
+    let gmp_lib = gmp_path
+        .join(".libs")
+        .canonicalize()
+        .expect("cannot canonicalize gmp_lib path");
+
+    println!("cargo:rustc-link-search={}", gmp_lib.to_str().unwrap());
+    println!("cargo:rustc-link-lib=gmp");
+    println!("cargo:rerun-if-changed={}", gmp_h.to_str().unwrap());
+}
+
+fn main() {
+    println!("cargo:rerun-if-changed=pkcs11_headers/3.1/pkcs11.h");
+
+    /* PKCS11 Headers */
+    bindgen::Builder::default()
+        .header("pkcs11_headers/3.1/pkcs11.h")
+        .derive_default(true)
+        .formatter(bindgen::Formatter::Prettyplease)
+        .blocklist_type("CK_FUNCTION_LIST_PTR")
+        .blocklist_type("CK_FUNCTION_LIST_3_0_PTR")
+        .blocklist_type("CK_INTERFACE")
+        .parse_callbacks(Box::new(Pkcs11Callbacks))
+        .generate()
+        .expect("Unable to generate bindings")
+        .write_to_file("src/pkcs11_bindings.rs")
+        .expect("Couldn't write bindings!");
+
+    /* HACL Code */
+    build_hacl();
+
+    /* GMP for Nettle */
+    build_gmp();
 
     /* Nettle for RSA */
     println!("cargo:rerun-if-changed=nettle.h");
     println!("cargo:rustc-link-lib=nettle");
     println!("cargo:rustc-link-lib=hogweed");
-    println!("cargo:rustc-link-lib=gmp");
     bindgen::Builder::default()
         .header("nettle.h")
         .derive_default(true)
