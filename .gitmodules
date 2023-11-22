@@ -1,0 +1,4 @@
+[submodule "gmp"]
+	path = gmp
+	url = https://github.com/simo5/gmp.git
+	branch = gmp-6.3
