@@ -72,24 +72,56 @@ impl Drop for rsa_private_key {
     }
 }
 
-pub struct mpz_struct_wrapper {
+impl Debug for __mpz_struct {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        f.debug_struct("__mpz_struct")
+            .field("_mp_alloc", &self._mp_alloc)
+            .field("_mp_size", &self._mp_size)
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct mpz_wrapper {
     mpz: __mpz_struct,
 }
 
-impl mpz_struct_wrapper {
-    pub fn new() -> mpz_struct_wrapper {
-        let mut x = mpz_struct_wrapper {
+impl mpz_wrapper {
+    pub fn new() -> mpz_wrapper {
+        let mut x = mpz_wrapper {
             mpz: __mpz_struct::default(),
         };
         unsafe { __gmpz_init(&mut x.mpz) };
         x
     }
+    pub fn as_ptr(&self) -> &__mpz_struct {
+        &self.mpz
+    }
     pub fn as_mut_ptr(&mut self) -> &mut __mpz_struct {
         &mut self.mpz
     }
+
+    pub fn get_len(&mut self) -> usize {
+        unsafe { nettle_mpz_sizeinbase_256_u(&mut self.mpz) }
+    }
+
+    pub fn import(&mut self, src: &[u8]) {
+        unsafe {
+            nettle_mpz_set_str_256_u(&mut self.mpz, src.len(), src.as_ptr());
+        }
+    }
+
+    pub fn as_slice(&self) -> &[mp_limb_t] {
+        unsafe {
+            std::slice::from_raw_parts(
+                self.mpz._mp_d,
+                self.mpz._mp_size as usize,
+            )
+        }
+    }
 }
 
-impl Drop for mpz_struct_wrapper {
+impl Drop for mpz_wrapper {
     fn drop(&mut self) {
         zero_mpz_struct!(self.mpz);
         unsafe { __gmpz_clear(&mut self.mpz) };

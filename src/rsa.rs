@@ -15,9 +15,6 @@ use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
-use num_bigint::BigUint;
-use num_integer::Integer;
-use num_traits::{One, Zero};
 use object::{
     CommonKeyTemplate, OAFlags, Object, ObjectAttr, ObjectTemplate,
     ObjectTemplates, ObjectType, PrivKeyTemplate, PubKeyTemplate,
@@ -26,10 +23,23 @@ use rng::RNG;
 use std::fmt::Debug;
 
 use once_cell::sync::Lazy;
+use zeroize::Zeroize;
 
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
 pub const MAX_RSA_SIZE_BITS: usize = 16536;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
+
+macro_rules! import_mpz {
+    ($obj:expr; $id:expr; $mpz:expr) => {{
+        let x = match $obj.get_attr_as_bytes($id) {
+            Ok(b) => b,
+            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+        };
+        unsafe {
+            nettle_mpz_set_str_256_u(&mut $mpz, x.len(), x.as_ptr());
+        }
+    }};
+}
 
 #[derive(Debug)]
 pub struct RSAPubTemplate {
@@ -170,45 +180,87 @@ impl ObjectTemplate for RSAPrivTemplate {
         };
 
         if p == None || q == None || a == None || b == None || c == None {
-            let mut r = RsaBigUints::new(
-                obj.get_attr_as_bytes(CKA_MODULUS)?,
-                obj.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
-                obj.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
+            let mut r = RsaDecompose::new(
+                match obj.get_attr(CKA_MODULUS) {
+                    Some(n) => n.get_value(),
+                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                },
+                match obj.get_attr(CKA_PUBLIC_EXPONENT) {
+                    Some(n) => n.get_value(),
+                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                },
+                match obj.get_attr(CKA_PRIVATE_EXPONENT) {
+                    Some(n) => n.get_value(),
+                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                },
             );
+
             r.decompose()?;
+
             match p {
-                Some(v) => comp(r.p.to_bytes_be(), v)?,
+                Some(v) => {
+                    if r.p.cmp(&Zvec::from_bytes(v.as_slice(), r.p.capacity()))
+                        != 0
+                    {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
                 None => obj.set_attr(attribute::from_bytes(
                     CKA_PRIME_1,
-                    r.p.to_bytes_be(),
+                    r.p.to_bytes(),
                 ))?,
             }
+
             match q {
-                Some(v) => comp(r.q.to_bytes_be(), v)?,
+                Some(v) => {
+                    if r.q.cmp(&Zvec::from_bytes(v.as_slice(), r.q.capacity()))
+                        != 0
+                    {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
                 None => obj.set_attr(attribute::from_bytes(
                     CKA_PRIME_2,
-                    r.q.to_bytes_be(),
+                    r.q.to_bytes(),
                 ))?,
             }
             match a {
-                Some(v) => comp(r.a.to_bytes_be(), v)?,
+                Some(v) => {
+                    if r.a.cmp(&Zvec::from_bytes(v.as_slice(), r.a.capacity()))
+                        != 0
+                    {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
                 None => obj.set_attr(attribute::from_bytes(
                     CKA_EXPONENT_1,
-                    r.a.to_bytes_be(),
+                    r.a.to_bytes(),
                 ))?,
             }
             match b {
-                Some(v) => comp(r.b.to_bytes_be(), v)?,
+                Some(v) => {
+                    if r.b.cmp(&Zvec::from_bytes(v.as_slice(), r.b.capacity()))
+                        != 0
+                    {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
                 None => obj.set_attr(attribute::from_bytes(
                     CKA_EXPONENT_2,
-                    r.b.to_bytes_be(),
+                    r.b.to_bytes(),
                 ))?,
             }
             match c {
-                Some(v) => comp(r.c.to_bytes_be(), v)?,
+                Some(v) => {
+                    if r.c.cmp(&Zvec::from_bytes(v.as_slice(), r.c.capacity()))
+                        != 0
+                    {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
                 None => obj.set_attr(attribute::from_bytes(
                     CKA_COEFFICIENT,
-                    r.c.to_bytes_be(),
+                    r.c.to_bytes(),
                 ))?,
             }
         }
@@ -233,132 +285,477 @@ impl PrivKeyTemplate for RSAPrivTemplate {
     }
 }
 
-fn comp(a: Vec<u8>, b: Vec<u8>) -> KResult<()> {
-    if a.len() > b.len() {
-        let d = a.len() - b.len();
-        match a[..d].iter().find(|&&v| v != 0) {
-            Some(_) => return err_rv!(CKR_KEY_INDIGESTIBLE),
-            None => (),
-        }
-        if &a[d..] != b {
-            return err_rv!(CKR_KEY_INDIGESTIBLE);
-        }
-    } else if a.len() < b.len() {
-        let d = b.len() - a.len();
-        match b[..d].iter().find(|&&v| v != 0) {
-            Some(_) => return err_rv!(CKR_KEY_INDIGESTIBLE),
-            None => (),
-        }
-        if &b[d..] != a {
-            return err_rv!(CKR_KEY_INDIGESTIBLE);
-        }
-    } else {
-        if a != b {
-            return err_rv!(CKR_KEY_INDIGESTIBLE);
-        }
-    }
-    Ok(())
+#[derive(Clone)]
+struct Zvec {
+    vec: Vec<u64>,
+    size: usize,
 }
 
-fn inner_mod_inv(
-    a: &BigUint,
-    b: &BigUint,
-    q: &BigUint,
-    n: &BigUint,
-) -> (BigUint, BigUint) {
-    let t = (q * a) % n;
-    let r = if b >= &t { b - t } else { n - t + b };
-    return (a.clone(), r);
-}
-
-fn mod_inv(a: &BigUint, n: &BigUint) -> KResult<BigUint> {
-    let mut r: BigUint = Zero::zero();
-    let mut i = n.clone();
-    let mut tr: BigUint = One::one();
-    let mut ti = a.clone();
-
-    while ti != Zero::zero() {
-        let q = &i / &ti;
-        (r, tr) = inner_mod_inv(&tr, &r, &q, n);
-        /* the following is guaranteed to converge to 0 */
-        (i, ti) = inner_mod_inv(&ti, &i, &q, n);
-    }
-
-    if i > One::one() {
-        return err_rv!(CKR_KEY_INDIGESTIBLE);
-    }
-    Ok(r)
-}
-
-#[derive(Debug)]
-struct RsaBigUints {
-    n: BigUint,
-    e: BigUint,
-    d: BigUint,
-    p: BigUint,
-    q: BigUint,
-    a: BigUint,
-    b: BigUint,
-    c: BigUint,
-}
-
-impl Drop for RsaBigUints {
+impl Drop for Zvec {
     fn drop(&mut self) {
-        /* TODO:
-        self.d.zeroize();
-        self.p.zeroize();
-        self.q.zeroize();
-        self.a.zeroize();
-        self.b.zeroize();
-        self.c.zeroize();
-        */
+        self.vec.zeroize();
     }
 }
 
-impl RsaBigUints {
-    pub fn new(n: &[u8], e: &[u8], d: &[u8]) -> RsaBigUints {
-        RsaBigUints {
-            n: BigUint::from_bytes_be(n),
-            e: BigUint::from_bytes_be(e),
-            d: BigUint::from_bytes_be(d),
-            p: Zero::zero(),
-            q: Zero::zero(),
-            a: Zero::zero(),
-            b: Zero::zero(),
-            c: Zero::zero(),
+impl Zvec {
+    pub fn new(size: usize, capacity: usize) -> Zvec {
+        assert!(size <= capacity);
+        Zvec {
+            vec: vec![0; capacity],
+            size: size,
+        }
+    }
+
+    pub fn raw(size: usize) -> Zvec {
+        let mut z = Zvec {
+            vec: Vec::with_capacity(size),
+            size: size,
+        };
+        unsafe {
+            z.vec.set_len(size);
+        }
+        z
+    }
+
+    pub fn from_slice(s: &[u64], capacity: usize) -> Zvec {
+        let mut z = Self::raw(capacity);
+        let (left, right) = z.vec.as_mut_slice().split_at_mut(s.len());
+        left.copy_from_slice(s);
+        for i in right {
+            *i = 0;
+        }
+        z.size = s.len();
+        z
+    }
+
+    pub fn from_bytes(s: &[u8], capacity: usize) -> Zvec {
+        let mut z = Self::raw(capacity);
+        z.size = (s.len() + 7) / 8;
+        assert!(z.size <= capacity);
+        let (lvec, rvec) = z.vec.as_mut_slice().split_at_mut(z.size);
+        for i in rvec {
+            *i = 0;
+        }
+        let mut n = s.len();
+        let mut i = 0;
+        while n > 8 {
+            n -= 8;
+            lvec[i] = u64::from_be_bytes(s[n..(n + 8)].try_into().unwrap());
+            i += 1;
+        }
+        if n > 0 {
+            let mut last = [0u8; 8];
+            let (_, rlast) = last.split_at_mut(8 - n);
+            rlast.copy_from_slice(&s[0..n]);
+            lvec[i] = u64::from_be_bytes(last);
+        }
+        z
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut n = self.size;
+        let mut v: Vec<u8> = vec![0; n * 8];
+        let mut i = 0;
+        while n > 0 {
+            n -= 1;
+            v[i..(i + 8)].copy_from_slice(&self.vec[n].to_be_bytes());
+            i += 8;
+        }
+        v
+    }
+
+    pub fn from_val(s: u64, capacity: usize) -> Zvec {
+        let mut z = Self::new(1, capacity);
+        z.vec[0] = s;
+        z
+    }
+
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.vec.len()
+    }
+
+    pub fn as_ptr(&self) -> *const u64 {
+        self.vec.as_ptr()
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut u64 {
+        self.vec.as_mut_ptr()
+    }
+
+    pub fn as_slice(&self) -> &[u64] {
+        unsafe { std::slice::from_raw_parts(self.vec.as_ptr(), self.size) }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u64] {
+        unsafe {
+            std::slice::from_raw_parts_mut(self.vec.as_mut_ptr(), self.size)
+        }
+    }
+
+    /* carry ignored, the operand should always be >= 1 */
+    fn decrement(&mut self) {
+        let len = self.size as mp_size_t;
+        let tmp_size = unsafe { __gmpn_sec_sub_1_itch(len) as usize };
+        let mut tmp = Zvec::raw(tmp_size);
+        let rp = self.vec.as_mut_ptr();
+        unsafe {
+            __gmpn_sec_sub_1(rp, rp, len, 1, tmp.as_mut_ptr());
+        }
+    }
+
+    fn increment(&mut self) {
+        assert!(self.len() < self.capacity());
+        let len = self.size as mp_size_t;
+        let tmp_size = unsafe { __gmpn_sec_add_1_itch(len) as usize };
+        let mut tmp = Zvec::raw(tmp_size);
+        let rp = self.vec.as_mut_ptr();
+        let c = unsafe { __gmpn_sec_add_1(rp, rp, len, 1, tmp.as_mut_ptr()) };
+        self.vec[self.size] = c;
+        self.resize(self.size + 1);
+    }
+
+    fn rshift(&mut self) {
+        unsafe {
+            __gmpn_rshift(
+                self.vec.as_mut_ptr(),
+                self.vec.as_ptr(),
+                self.vec.len() as mp_size_t,
+                1,
+            );
+        }
+    }
+
+    fn resize(&mut self, size: usize) {
+        assert!(size <= self.capacity());
+        self.size = size;
+    }
+
+    fn reduce(&mut self) {
+        let mut n = self.len();
+        while n > 0 {
+            n -= 1;
+            if self.vec[n] != 0 {
+                break;
+            }
+        }
+        self.size = n + 1;
+    }
+
+    fn is_zero(&self) -> bool {
+        let mut zero: u64 = 0;
+        let mut n = 0;
+        while n < self.len() {
+            zero |= self.vec[n];
+            n += 1;
+        }
+        zero == 0
+    }
+
+    /* not timing safe */
+    fn cmp_int(a: &Vec<u64>, alen: usize, b: &Vec<u64>, blen: usize) -> i8 {
+        let mut n = alen;
+        while n > blen {
+            n -= 1;
+            if a[n] > 0 {
+                return 1;
+            }
+        }
+        while n > 0 {
+            n -= 1;
+            if a[n] > b[n] {
+                return 1;
+            } else if b[n] > a[n] {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    fn cmp(&self, o: &Zvec) -> i8 {
+        if self.size > o.size {
+            Self::cmp_int(&self.vec, self.size, &o.vec, o.size)
+        } else {
+            -1i8 * Self::cmp_int(&o.vec, o.size, &self.vec, self.size)
+        }
+    }
+}
+
+struct RsaDecompose {
+    n: Zvec,
+    e: Zvec,
+    d: Zvec,
+    p: Zvec,
+    q: Zvec,
+    a: Zvec,
+    b: Zvec,
+    c: Zvec,
+    capacity: usize,
+}
+
+impl RsaDecompose {
+    pub fn new(n: &[u8], e: &[u8], d: &[u8]) -> RsaDecompose {
+        let capacity = ((n.len() + 7) / 8) * 2;
+        RsaDecompose {
+            n: Zvec::from_bytes(n, capacity),
+            e: Zvec::from_bytes(e, capacity),
+            d: Zvec::from_bytes(d, capacity),
+            p: Zvec::new(0, capacity),
+            q: Zvec::new(0, capacity),
+            a: Zvec::new(0, capacity),
+            b: Zvec::new(0, capacity),
+            c: Zvec::new(0, capacity),
+            capacity: capacity,
+        }
+    }
+
+    fn sec_mul_int(
+        &self,
+        a: *const u64,
+        b: *const u64,
+        al: mp_size_t,
+        bl: mp_size_t,
+    ) -> Zvec {
+        let rlen = (al + bl) as usize;
+        let mut r = Zvec::new(rlen, self.capacity);
+        let tl = unsafe { __gmpn_sec_mul_itch(al, bl) as usize };
+        let mut t = Zvec::raw(tl);
+        unsafe {
+            __gmpn_sec_mul(r.as_mut_ptr(), a, al, b, bl, t.as_mut_ptr());
+        }
+        r
+    }
+
+    fn sec_mul(&self, a: &Zvec, b: &Zvec) -> Zvec {
+        if a.len() >= b.len() {
+            let aa: *const u64 = a.as_ptr();
+            let al = a.len() as mp_size_t;
+            let bb: *const u64 = b.as_ptr();
+            let bl = b.len() as mp_size_t;
+            self.sec_mul_int(aa, bb, al, bl)
+        } else {
+            let bb = a.as_ptr();
+            let bl = a.len() as mp_size_t;
+            let aa = b.as_ptr();
+            let al = b.len() as mp_size_t;
+            self.sec_mul_int(aa, bb, al, bl)
+        }
+    }
+
+    fn gcd(&self, a: &Zvec, b: &Zvec) -> Zvec {
+        unsafe {
+            let mut x = __mpz_struct::default();
+            let _ = __gmpz_roinit_n(&mut x, a.as_ptr(), a.len() as mp_size_t);
+            let mut y = __mpz_struct::default();
+            let _ = __gmpz_roinit_n(&mut y, b.as_ptr(), b.len() as mp_size_t);
+
+            let mut r = mpz_wrapper::new();
+            __gmpz_gcd(r.as_mut_ptr(), &x, &y);
+            Zvec::from_slice(r.as_slice(), self.capacity)
+        }
+    }
+
+    fn sec_add_n(&self, a: &Zvec, d: &Zvec) -> Zvec {
+        let mut r = Zvec::new(a.len(), self.capacity);
+        unsafe {
+            __gmpn_add_n(
+                r.as_mut_ptr(),
+                a.as_ptr(),
+                d.as_ptr(),
+                r.len() as mp_size_t,
+            );
+        }
+        r
+    }
+
+    fn sec_sub_n(&self, m: &Zvec, s: &Zvec) -> Zvec {
+        let mut r = Zvec::new(m.len(), self.capacity);
+        unsafe {
+            __gmpn_sub_n(
+                r.as_mut_ptr(),
+                m.as_ptr(),
+                s.as_ptr(),
+                r.len() as mp_size_t,
+            );
+        }
+        r
+    }
+
+    fn sec_div_qr(&self, n: &Zvec, d: &Zvec) -> (Zvec, Zvec) {
+        let nlen = n.len() as mp_size_t;
+        let dlen = d.len() as mp_size_t;
+        let qlen = n.len() - d.len() + 1;
+        let mut q = Zvec::new(qlen, self.capacity);
+        let mut r = Zvec::from_slice(n.as_slice(), self.capacity);
+        let tmp_size = unsafe { __gmpn_sec_div_qr_itch(nlen, dlen) as usize };
+        let mut tmp = Zvec::raw(tmp_size);
+        let res = unsafe {
+            __gmpn_sec_div_qr(
+                q.as_mut_ptr(),
+                r.as_mut_ptr(),
+                nlen,
+                d.as_ptr(),
+                dlen,
+                tmp.as_mut_ptr(),
+            )
+        };
+        q.as_mut_slice()[qlen - 1] = res;
+        r.resize(d.len());
+        (q, r)
+    }
+
+    fn sec_sqr(&self, op: &Zvec) -> Zvec {
+        let len = op.len() as mp_size_t;
+        let mut r = Zvec::new(op.len() * 2, self.capacity);
+        let tmp_size = unsafe { __gmpn_sec_sqr_itch(len) as usize };
+        let mut tmp = Zvec::raw(tmp_size);
+        unsafe {
+            __gmpn_sec_sqr(r.as_mut_ptr(), op.as_ptr(), len, tmp.as_mut_ptr());
+        }
+        r
+    }
+
+    fn sqrt(&self, op: &Zvec) -> (Zvec, bool) {
+        let mut r = Zvec::new((op.len() + 1) / 2, self.capacity);
+        let b = unsafe {
+            __gmpn_sqrtrem(
+                r.as_mut_ptr(),
+                std::ptr::null_mut(),
+                op.as_ptr(),
+                op.len() as mp_size_t,
+            ) == 0
+        };
+        (r, b)
+    }
+
+    fn modulus(&self, n: &Zvec, d: &Zvec) -> Zvec {
+        let tmp_size = unsafe {
+            __gmpn_sec_div_r_itch(n.len() as mp_size_t, d.len() as mp_size_t)
+                as usize
+        };
+        let mut tmp: Vec<u64> = Vec::with_capacity(tmp_size);
+        let mut r = Zvec::from_slice(n.as_slice(), self.capacity);
+        unsafe {
+            __gmpn_sec_div_r(
+                r.as_mut_ptr(),
+                r.len() as mp_size_t,
+                d.as_ptr(),
+                d.len() as mp_size_t,
+                tmp.as_mut_ptr(),
+            );
+        }
+        r.resize(d.len());
+        r
+    }
+
+    fn sec_invert(&self, a: &Zvec, m: &Zvec) -> Option<Zvec> {
+        let len = m.len() as mp_size_t;
+        let tmp_size = unsafe { __gmpn_sec_invert_itch(len) as usize };
+        let mut tmp: Vec<u64> = Vec::with_capacity(tmp_size);
+        let mut r = Zvec::from_slice(a.as_slice(), self.capacity);
+        let mut aa = Zvec::from_slice(a.as_slice(), self.capacity);
+        let ret = unsafe {
+            __gmpn_sec_invert(
+                r.as_mut_ptr(),
+                aa.as_mut_ptr(),
+                m.as_ptr(),
+                len,
+                (len * 2 * 64) as mp_bitcnt_t,
+                tmp.as_mut_ptr(),
+            )
+        };
+        if ret == 1 {
+            r.resize(m.len());
+            Some(r)
+        } else {
+            None
         }
     }
 
     /* From SP 800 56B Appendix C.2 */
-    /* NOTE: this code does not give any guarantee in terms of zeroization of
-     * intermediate values or computation timing leaks and should not be used
-     * in any code path that is involved in actual cryptography computations.
+    /* NOTE: this code does not give strong guarantees in terms of
+     * side-channel resistance because some of he functions used are
+     * not side-channel safe as GMP does not offer safe channel
+     * variants
      *
-     * It is currently implemented only to serve as a stop gap for
-     * importing keys
+     * This is currently implemented only to serve as a stop gap for
+     * importing keys for tests, and should not be used in any
+     * cryptographic operation.
      */
     pub fn decompose(&mut self) -> KResult<()> {
-        let des1: BigUint = &self.d * &self.e - 1u8;
-        let a = &des1 * &des1.gcd(&(&self.n - 1u8));
-        let m = a.div_floor(&self.n);
-        let r = a - &m * &self.n;
-        let (mut b, b_rem) = (&self.n - r).div_rem(&(m + 1u8));
-        if b_rem != Zero::zero() {
-            return err_rv!(CKR_KEY_INDIGESTIBLE);
-        }
-        b += 1u8;
-        let sqb = b.pow(2);
-        let n4 = &self.n * 4u8;
-        if sqb <= n4 {
-            return err_rv!(CKR_KEY_INDIGESTIBLE);
-        }
-        let gamma = (sqb - n4).sqrt();
-        self.p = (&b + &gamma) >> 1;
-        self.q = (&b - &gamma) >> 1;
-        self.a = &self.d % &(&self.p - 1u8);
-        self.b = &self.d % &(&self.q - 1u8);
+        /* (de – 1) */
+        let mut de_1 = self.sec_mul(&self.d, &self.e);
+        de_1.decrement();
 
-        self.c = mod_inv(&self.q, &self.p)?;
+        /* (n - 1) */
+        let mut n_1 = self.n.clone();
+        n_1.decrement();
+
+        /* a = (de - 1) x GCD(n – 1, de – 1) */
+        /* this is not side-channel safe :-/ */
+        let a = self.sec_mul(&de_1, &self.gcd(&n_1, &de_1));
+
+        /* m = a / n, r = a - mn  [m = quotient, r = reminder of a/n] */
+        let (mut m, r) = self.sec_div_qr(&a, &self.n);
+
+        /* b = ( (n – r)/(m + 1) ) + 1 */
+        let mut bn = self.sec_sub_n(&self.n, &r);
+        bn.reduce();
+        m.increment();
+        m.reduce();
+        let (mut b, r) = self.sec_div_qr(&bn, &m);
+        if !r.is_zero() {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+        b.increment();
+        b.reduce();
+
+        /* y = sqrt(b^2 – 4n) */
+        /* It'd be nice to use the proper letter ϒ here, but rust says no! */
+        let b2 = self.sec_sqr(&b);
+        let four = Zvec::from_val(4, self.capacity);
+        let mut n4 = self.sec_mul(&self.n, &four);
+        if b2.cmp(&n4) != 1 {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+        n4.resize(b2.len());
+        let mut y2 = self.sec_sub_n(&b2, &n4);
+        y2.reduce();
+        let (y, perfect) = self.sqrt(&y2);
+        if !perfect {
+            return err_rv!(CKR_KEY_INDIGESTIBLE);
+        }
+
+        /* p = (b + ϒ)/2 */
+        self.p = self.sec_add_n(&b, &y);
+        self.p.rshift();
+        self.p.reduce();
+
+        /* q = (b – ϒ)/2 */
+        self.q = self.sec_sub_n(&b, &y);
+        self.q.rshift();
+        self.q.reduce();
+
+        /* coefficients */
+        /* a = d mod (p - 1) */
+        let mut tp = self.p.clone();
+        tp.decrement();
+        self.a = self.modulus(&self.d, &tp);
+
+        /* b = d mod (q - 1) */
+        let mut tq = self.q.clone();
+        tq.decrement();
+        self.b = self.modulus(&self.d, &tq);
+
+        /* c = q mod_inv p */
+        self.c = match self.sec_invert(&self.q, &self.p) {
+            Some(c) => c,
+            None => return err_rv!(CKR_KEY_INDIGESTIBLE),
+        };
+
         Ok(())
     }
 }
@@ -390,18 +787,6 @@ fn check_key_object(key: &Object, public: bool, op: CK_ULONG) -> KResult<()> {
         Err(_) => return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED),
     }
     Ok(())
-}
-
-macro_rules! import_mpz {
-    ($obj:expr; $id:expr; $mpz:expr) => {{
-        let x = match $obj.get_attr_as_bytes($id) {
-            Ok(b) => b,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-        unsafe {
-            nettle_mpz_set_str_256_u(&mut $mpz, x.len(), x.as_ptr());
-        }
-    }};
 }
 
 macro_rules! mpz_to_vec {
@@ -1050,7 +1435,7 @@ impl RsaPKCSOperation {
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        let mut c: mpz_struct_wrapper = mpz_struct_wrapper::new();
+        let mut c: mpz_wrapper = mpz_wrapper::new();
 
         let res = unsafe {
             nettle_rsa_encrypt(
@@ -1084,7 +1469,7 @@ impl RsaPKCSOperation {
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        let mut c: mpz_struct_wrapper = mpz_struct_wrapper::new();
+        let mut c: mpz_wrapper = mpz_wrapper::new();
         unsafe {
             nettle_mpz_init_set_str_256_u(
                 c.as_mut_ptr(),
@@ -1124,7 +1509,7 @@ impl RsaPKCSOperation {
         digest: &[u8],
         signature: &mut [u8],
     ) -> KResult<()> {
-        let mut s: mpz_struct_wrapper = mpz_struct_wrapper::new();
+        let mut s: mpz_wrapper = mpz_wrapper::new();
 
         let res = unsafe {
             nettle_rsa_pkcs1_sign_tr(
@@ -1152,7 +1537,7 @@ impl RsaPKCSOperation {
     }
 
     fn pkcs1_verify(&self, digest: &[u8], signature: &[u8]) -> KResult<()> {
-        let mut s: mpz_struct_wrapper = mpz_struct_wrapper::new();
+        let mut s: mpz_wrapper = mpz_wrapper::new();
         unsafe {
             nettle_mpz_init_set_str_256_u(
                 s.as_mut_ptr(),
