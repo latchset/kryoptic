@@ -7,3 +7,7 @@
 	path = nettle
 	url = https://gitlab.com/gnutls/nettle.git
         ignore = untracked
+[submodule "openssl"]
+	path = openssl
+	url = https://github.com/openssl/openssl
+	branch = openssl-3.1

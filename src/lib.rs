@@ -57,6 +57,9 @@ use slot::Slot;
 use token::Token;
 
 /* algorithms and ciphers */
+#[cfg(feature = "fips")]
+mod fips_wrapper;
+
 mod drbg;
 mod hash;
 mod hmac;
@@ -99,6 +102,9 @@ struct State {
 
 impl State {
     fn initialize(&mut self) {
+        #[cfg(feature = "fips")]
+        fips_wrapper::init();
+
         cryptography::evercrypt_autoconf();
         self.slots.clear();
         self.sessionmap.clear();
