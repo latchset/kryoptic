@@ -2,8 +2,8 @@
 /Cargo.lock
 /src/pkcs11_bindings.rs
 /src/nettle_bindings.rs
-/src/hacl_bindings.rs
-/src/fips_bindings.rs
+/src/hacl/bindings.rs
+/src/fips/bindings.rs
 /test.json
 *.o
 *.a

@@ -1,7 +1,6 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::cryptography;
 use super::err_rv;
 use super::error;
 use super::hash;
@@ -9,7 +8,6 @@ use super::interface;
 use super::mechanism;
 use super::object;
 use super::rng;
-use cryptography::*;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
@@ -122,276 +120,109 @@ impl Mechanism for HMACMechanism {
 }
 
 pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
-    mechs.add_mechanism(
-        CKM_SHA_1_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA_1_HMAC,
-            minlen: 1,
-            maxlen: SHA1_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA_1_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA_1_HMAC,
-            minlen: SHA1_HASH_LEN,
-            maxlen: SHA1_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA224_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA224_HMAC,
-            minlen: 1,
-            maxlen: SHA2_224_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA224_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA224_HMAC,
-            minlen: SHA2_224_HASH_LEN,
-            maxlen: SHA2_224_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA256_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA256_HMAC,
-            minlen: 1,
-            maxlen: SHA2_256_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA256_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA256_HMAC,
-            minlen: SHA2_256_HASH_LEN,
-            maxlen: SHA2_256_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA384_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA384_HMAC,
-            minlen: 1,
-            maxlen: SHA2_384_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA384_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA384_HMAC,
-            minlen: SHA2_384_HASH_LEN,
-            maxlen: SHA2_384_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA512_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA512_HMAC,
-            minlen: 1,
-            maxlen: SHA2_512_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA512_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA512_HMAC,
-            minlen: SHA2_512_HASH_LEN,
-            maxlen: SHA2_512_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_224_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_224_HMAC,
-            minlen: 1,
-            maxlen: SHA3_224_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_224_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_224_HMAC,
-            minlen: SHA3_224_HASH_LEN,
-            maxlen: SHA3_224_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_256_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_256_HMAC,
-            minlen: 1,
-            maxlen: SHA3_256_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_256_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_256_HMAC,
-            minlen: SHA3_256_HASH_LEN,
-            maxlen: SHA3_256_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_384_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_384_HMAC,
-            minlen: 1,
-            maxlen: SHA3_384_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_384_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_384_HMAC,
-            minlen: SHA3_384_HASH_LEN,
-            maxlen: SHA3_384_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_512_HMAC_GENERAL,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_512_HMAC,
-            minlen: 1,
-            maxlen: SHA3_512_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_512_HMAC,
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: CKK_SHA3_512_HMAC,
-            minlen: SHA3_512_HASH_LEN,
-            maxlen: SHA3_512_HASH_LEN,
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA_1_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA_1_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA224_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA224_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA256_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA256_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA384_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA384_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA512_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA512_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_224_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA3_224_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_256_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA3_256_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_384_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA3_384_HMAC)),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_512_KEY_GEN,
-        Box::new(object::GenericSecretKeyMechanism::new(CKK_SHA3_512_HMAC)),
-    );
+    let regset = [
+        (
+            CKM_SHA_1,
+            CKM_SHA_1_HMAC,
+            CKM_SHA_1_HMAC_GENERAL,
+            CKM_SHA_1_KEY_GEN,
+            CKK_SHA_1_HMAC,
+        ),
+        (
+            CKM_SHA224,
+            CKM_SHA224_HMAC,
+            CKM_SHA224_HMAC_GENERAL,
+            CKM_SHA224_KEY_GEN,
+            CKK_SHA224_HMAC,
+        ),
+        (
+            CKM_SHA256,
+            CKM_SHA256_HMAC,
+            CKM_SHA256_HMAC_GENERAL,
+            CKM_SHA256_KEY_GEN,
+            CKK_SHA256_HMAC,
+        ),
+        (
+            CKM_SHA384,
+            CKM_SHA384_HMAC,
+            CKM_SHA384_HMAC_GENERAL,
+            CKM_SHA384_KEY_GEN,
+            CKK_SHA384_HMAC,
+        ),
+        (
+            CKM_SHA512,
+            CKM_SHA512_HMAC,
+            CKM_SHA512_HMAC_GENERAL,
+            CKM_SHA512_KEY_GEN,
+            CKK_SHA512_HMAC,
+        ),
+        (
+            CKM_SHA3_224,
+            CKM_SHA3_224_HMAC,
+            CKM_SHA3_224_HMAC_GENERAL,
+            CKM_SHA3_224_KEY_GEN,
+            CKK_SHA3_224_HMAC,
+        ),
+        (
+            CKM_SHA3_256,
+            CKM_SHA3_256_HMAC,
+            CKM_SHA3_256_HMAC_GENERAL,
+            CKM_SHA3_256_KEY_GEN,
+            CKK_SHA3_256_HMAC,
+        ),
+        (
+            CKM_SHA3_384,
+            CKM_SHA3_384_HMAC,
+            CKM_SHA3_384_HMAC_GENERAL,
+            CKM_SHA3_384_KEY_GEN,
+            CKK_SHA3_384_HMAC,
+        ),
+        (
+            CKM_SHA3_512,
+            CKM_SHA3_512_HMAC,
+            CKM_SHA3_512_HMAC_GENERAL,
+            CKM_SHA3_512_KEY_GEN,
+            CKK_SHA3_512_HMAC,
+        ),
+    ];
+    for rs in regset {
+        /* skip HMACs for which we do not have a valid HASHes */
+        let hashop = match hash::HashOperation::new(rs.0) {
+            Ok(op) => op,
+            Err(_) => continue,
+        };
+        let hashlen = hashop.hashlen();
+        mechs.add_mechanism(
+            rs.1,
+            Box::new(HMACMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: 0,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+                keytype: rs.1,
+                minlen: hashlen,
+                maxlen: hashlen,
+            }),
+        );
+        mechs.add_mechanism(
+            rs.2,
+            Box::new(HMACMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: 0,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+                keytype: rs.1,
+                minlen: 1,
+                maxlen: hashlen,
+            }),
+        );
+        mechs.add_mechanism(
+            rs.3,
+            Box::new(object::GenericSecretKeyMechanism::new(rs.4)),
+        );
+    }
 }
 
 /* HMAC spec From FIPS 198-1 */

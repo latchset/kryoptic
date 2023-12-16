@@ -134,9 +134,11 @@ fn build_fips() {
         .allowlist_item("OPENSSL_.*")
         .allowlist_item("CRYPTO_.*")
         .allowlist_item("c_.*")
+        .allowlist_item("EVP_.*")
+        .allowlist_item("evp_.*")
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("src/fips_bindings.rs")
+        .write_to_file("src/fips/bindings.rs")
         .expect("Couldn't write bindings!");
 }
 
@@ -206,7 +208,7 @@ fn build_hacl() {
         .parse_callbacks(Box::new(HaclCallbacks))
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("src/hacl_bindings.rs")
+        .write_to_file("src/hacl/bindings.rs")
         .expect("Couldn't write bindings!");
 }
 

@@ -5,7 +5,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 #![allow(non_snake_case)]
-include!("fips_bindings.rs");
+include!("fips/bindings.rs");
 
 use libc;
 use once_cell::sync::Lazy;
@@ -102,7 +102,7 @@ unsafe extern "C" fn fips_get_params(
 unsafe extern "C" fn fips_get_libctx(
     _prov: *const OSSL_CORE_HANDLE,
 ) -> *mut OPENSSL_CORE_CTX {
-    FIPS_PROVIDER.libctx
+    get_libctx() as *mut OPENSSL_CORE_CTX
 }
 
 unsafe extern "C" fn fips_thread_start(
@@ -401,7 +401,6 @@ unsafe extern "C" fn fips_secure_allocated(
 }
 
 struct FipsProvider {
-    libctx: *mut OPENSSL_CORE_CTX, /* unused, just a sentinel */
     provider: *mut OSSL_PROVIDER,
     dispatch: *const OSSL_DISPATCH,
 }
@@ -504,7 +503,6 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
     assert!(ret == 1);
 
     FipsProvider {
-        libctx: Box::into_raw(Box::new(openssl_core_ctx_st { _unused: [] })),
         provider: provider,
         dispatch: fips_dispatch,
     }
@@ -512,4 +510,8 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
 
 pub fn init() {
     assert!(FIPS_PROVIDER.provider != std::ptr::null_mut());
+}
+
+pub fn get_libctx() -> *mut OSSL_LIB_CTX {
+    unsafe { ossl_prov_ctx_get0_libctx(FIPS_PROVIDER.provider) }
 }
