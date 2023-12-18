@@ -1,7 +1,7 @@
 /target
 /Cargo.lock
 /src/pkcs11_bindings.rs
-/src/nettle_bindings.rs
+/src/nettle/bindings.rs
 /src/hacl/bindings.rs
 /src/fips/bindings.rs
 /test.json
@@ -9,4 +9,5 @@
 *.a
 *.d
 *.config
+*.swp
 /hacl/gcc-compatible/config.h

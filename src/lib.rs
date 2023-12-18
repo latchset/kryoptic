@@ -39,14 +39,15 @@ mod interface {
 }
 
 mod attribute;
-mod cryptography;
 mod error;
 mod mechanism;
+mod nettle;
 mod object;
 mod rng;
 mod session;
 mod slot;
 mod token;
+mod util;
 
 use error::{KError, KResult};
 use interface::*;

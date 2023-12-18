@@ -88,33 +88,33 @@ fn build_fips() {
     )
     .try_exists()
     {
-        Ok(true) => return,
-        _ => (),
-    }
+        Ok(true) => (),
+        _ => {
+            /* openssl: ./Configure --debug enable-fips */
+            if !std::process::Command::new("./Configure")
+                .current_dir(&openssl_path)
+                .arg("--debug")
+                .arg("enable-fips")
+                .output()
+                .expect("could not run openssl `Configure`")
+                .status
+                .success()
+            {
+                // Panic if the command was not successful.
+                panic!("could not configure OpenSSL");
+            }
 
-    /* openssl: ./Configure --debug enable-fips */
-    if !std::process::Command::new("./Configure")
-        .current_dir(&openssl_path)
-        .arg("--debug")
-        .arg("enable-fips")
-        .output()
-        .expect("could not run openssl `Configure`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not configure OpenSSL");
-    }
-
-    if !std::process::Command::new("make")
-        .current_dir(&openssl_path)
-        .output()
-        .expect("could not run openssl `make`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not build OpenSSL");
+            if !std::process::Command::new("make")
+                .current_dir(&openssl_path)
+                .output()
+                .expect("could not run openssl `make`")
+                .status
+                .success()
+            {
+                // Panic if the command was not successful.
+                panic!("could not build OpenSSL");
+            }
+        }
     }
 
     let include_path = openssl_path
@@ -136,6 +136,7 @@ fn build_fips() {
         .allowlist_item("c_.*")
         .allowlist_item("EVP_.*")
         .allowlist_item("evp_.*")
+        .allowlist_item("BN_.*")
         .generate()
         .expect("Unable to generate bindings")
         .write_to_file("src/fips/bindings.rs")
@@ -374,7 +375,7 @@ fn build_nettle() {
         .blocklist_item("__gmp.*rand.*")
         .generate()
         .expect("Unable to generate nettle bindings")
-        .write_to_file("src/nettle_bindings.rs")
+        .write_to_file("src/nettle/bindings.rs")
         .expect("Couldn't write bindings!");
 }
 

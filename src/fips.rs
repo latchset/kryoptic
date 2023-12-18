@@ -16,9 +16,18 @@ use std::io::Read;
 use std::io::Result;
 use std::io::Seek;
 use std::io::SeekFrom;
+use std::os::raw::c_char;
+use std::os::raw::c_uchar;
+use std::os::raw::c_void;
 use std::path::Path;
 use std::slice;
 use zeroize::Zeroize;
+
+use super::err_rv;
+use super::error;
+use super::interface;
+use error::{KError, KResult};
+use interface::CKR_DEVICE_ERROR;
 
 /* Entropy Stuff */
 
@@ -112,7 +121,7 @@ static FIPS_INSTALL_MAC: &str = "41:9C:38:C2:8F:59:09:43:2C:AA:2F:58:36:2D:D9:04
 static FIPS_INSTALL_STATUS: &str = "INSTALL_SELF_TEST_KATS_RUN\0";
 static FIPS_INSTALL_VERSION: &str = "1\0";
 static FIPS_CONDITIONAL_ERRORS: &str = "1\0";
-static FIPS_SECURITY_CHECKS: &str = "1\0";
+static FIPS_SECURITY_CHECKS: &str = "0\0";
 static FIPS_PARAM_TLS1_PRF_EMS_CHECK: &str = "1\0";
 static FIPS_PARAM_DRBG_TRUNC_DIGEST: &str = "1\0";
 
@@ -630,4 +639,202 @@ pub fn init() {
 
 pub fn get_libctx() -> *mut OSSL_LIB_CTX {
     unsafe { ossl_prov_ctx_get0_libctx(FIPS_PROVIDER.provider) }
+}
+
+macro_rules! ptr_wrapper {
+    ($name:ident; $ossl:ident; $free:expr) => {
+        #[derive(Debug)]
+        pub struct $name {
+            ptr: *mut $ossl,
+        }
+
+        impl $name {
+            pub fn from_ptr(ptr: *mut $ossl) -> KResult<$name> {
+                if ptr.is_null() {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                Ok($name { ptr: ptr })
+            }
+
+            pub fn empty() -> $name {
+                $name {
+                    ptr: std::ptr::null_mut(),
+                }
+            }
+
+            pub fn as_ptr(&self) -> *const $ossl {
+                self.ptr
+            }
+
+            pub fn as_mut_ptr(&mut self) -> *mut $ossl {
+                self.ptr
+            }
+        }
+
+        impl Drop for $name {
+            fn drop(&mut self) {
+                unsafe {
+                    $free(self.ptr);
+                }
+            }
+        }
+
+        unsafe impl Send for $name {}
+        unsafe impl Sync for $name {}
+    };
+}
+
+ptr_wrapper!(EvpPkey; EVP_PKEY; EVP_PKEY_free);
+ptr_wrapper!(EvpPkeyCtx; EVP_PKEY_CTX; EVP_PKEY_CTX_free);
+ptr_wrapper!(EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_free);
+ptr_wrapper!(BigNum; BIGNUM; BN_free);
+ptr_wrapper!(OsslParam; OSSL_PARAM; OSSL_PARAM_free);
+
+/* The OpenSSL FIPS Provider do not export helper functions to set up
+ * digest-sign operations. So we'll just have to brute force it */
+
+macro_rules! res_to_err {
+    ($res:expr) => {
+        if $res == 1 {
+            Ok(())
+        } else {
+            err_rv!(CKR_DEVICE_ERROR)
+        }
+    };
+}
+
+#[derive(Debug)]
+pub struct ProviderSignatureCtx {
+    vtable: *mut EVP_SIGNATURE,
+    ctx: *mut c_void,
+}
+
+impl ProviderSignatureCtx {
+    pub fn new(alg: *const c_char) -> KResult<ProviderSignatureCtx> {
+        let sigtable =
+            unsafe { EVP_SIGNATURE_fetch(get_libctx(), alg, std::ptr::null()) };
+        if sigtable.is_null() {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+
+        let ctx = unsafe {
+            match (*sigtable).newctx {
+                Some(f) => {
+                    f(FIPS_PROVIDER.provider as *mut c_void, std::ptr::null())
+                }
+                None => return err_rv!(CKR_DEVICE_ERROR),
+            }
+        };
+        if ctx.is_null() {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+
+        Ok(ProviderSignatureCtx {
+            vtable: sigtable,
+            ctx: ctx,
+        })
+    }
+
+    pub fn digest_sign_init(
+        &mut self,
+        mdname: *const c_char,
+        pkey: &EvpPkey,
+        params: *const OSSL_PARAM,
+    ) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_sign_init {
+                Some(f) => res_to_err!(f(
+                    self.ctx,
+                    mdname,
+                    (*pkey.as_ptr()).keydata as *mut c_void,
+                    params
+                )),
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
+    pub fn digest_sign_update(&mut self, data: &[u8]) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_sign_update {
+                Some(f) => res_to_err!(f(
+                    self.ctx,
+                    data.as_ptr() as *const c_uchar,
+                    data.len()
+                )),
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
+    pub fn digest_sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_sign_final {
+                Some(f) => {
+                    let mut siglen = 0usize;
+                    let siglen_ptr: *mut usize = &mut siglen;
+                    res_to_err!(f(
+                        self.ctx,
+                        signature.as_mut_ptr() as *mut c_uchar,
+                        siglen_ptr,
+                        signature.len()
+                    ))
+                }
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
+    pub fn digest_verify_init(
+        &mut self,
+        mdname: *const c_char,
+        pkey: &EvpPkey,
+        params: *const OSSL_PARAM,
+    ) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_verify_init {
+                Some(f) => res_to_err!(f(
+                    self.ctx,
+                    mdname,
+                    (*pkey.as_ptr()).keydata as *mut c_void,
+                    params
+                )),
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
+    pub fn digest_verify_update(&mut self, data: &[u8]) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_verify_update {
+                Some(f) => res_to_err!(f(
+                    self.ctx,
+                    data.as_ptr() as *const c_uchar,
+                    data.len()
+                )),
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
+    pub fn digest_verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_verify_final {
+                Some(f) => res_to_err!(f(
+                    self.ctx,
+                    signature.as_ptr() as *const c_uchar,
+                    signature.len()
+                )),
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+}
+
+unsafe impl Send for ProviderSignatureCtx {}
+unsafe impl Sync for ProviderSignatureCtx {}
+
+pub fn bn_num_bytes(a: *const BIGNUM) -> usize {
+    let x = unsafe { (BN_num_bits(a) + 7) / 8 };
+    x as usize
 }
