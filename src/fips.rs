@@ -7,6 +7,7 @@
 #![allow(non_snake_case)]
 include!("fips/bindings.rs");
 
+use getrandom;
 use libc;
 use once_cell::sync::Lazy;
 use std::ffi::CStr;
@@ -18,6 +19,92 @@ use std::io::SeekFrom;
 use std::path::Path;
 use std::slice;
 use zeroize::Zeroize;
+
+/* Entropy Stuff */
+
+unsafe extern "C" fn fips_get_entropy(
+    _handle: *const OSSL_CORE_HANDLE,
+    pout: *mut *mut ::std::os::raw::c_uchar,
+    entropy: ::std::os::raw::c_int,
+    min_len: usize,
+    max_len: usize,
+) -> usize {
+    let mut len = entropy as usize;
+    if len < min_len {
+        len = min_len;
+    }
+    if len > max_len {
+        len = max_len;
+    }
+    /* FIXME: use secure alloc */
+    let out = fips_malloc(len, std::ptr::null(), 0);
+    if out == std::ptr::null_mut() {
+        return 0;
+    }
+    let r = slice::from_raw_parts_mut(out as *mut u8, len);
+    if getrandom::getrandom(r).is_err() {
+        fips_clear_free(out, len, std::ptr::null(), 0);
+        return 0;
+    }
+    *pout = out as *mut u8;
+    len
+}
+
+unsafe extern "C" fn fips_cleanup_entropy(
+    _handle: *const OSSL_CORE_HANDLE,
+    buf: *mut ::std::os::raw::c_uchar,
+    len: usize,
+) {
+    fips_clear_free(
+        buf as *mut ::std::os::raw::c_void,
+        len,
+        std::ptr::null(),
+        0,
+    );
+}
+
+unsafe extern "C" fn fips_get_nonce(
+    handle: *const OSSL_CORE_HANDLE,
+    pout: *mut *mut ::std::os::raw::c_uchar,
+    min_len: usize,
+    max_len: usize,
+    salt: *const ::std::os::raw::c_void,
+    salt_len: usize,
+) -> usize {
+    /* FIXME: OpenSSL returns some tiemr + salt string,
+     * we return just getrandom data | salt string.
+     * Need to check if this is ok */
+
+    let out = fips_get_entropy(
+        handle,
+        pout,
+        min_len as ::std::os::raw::c_int,
+        min_len,
+        max_len,
+    );
+    if out == 0 {
+        return 0;
+    }
+    if out < min_len {
+        fips_cleanup_entropy(handle, *pout, out);
+        *pout = std::ptr::null_mut();
+        return 0;
+    }
+
+    let mut len = out;
+    if salt_len < len {
+        len = salt_len;
+    }
+
+    let r = slice::from_raw_parts_mut(*pout as *mut u8, len);
+    let s = slice::from_raw_parts(salt as *const u8, len);
+
+    for p in r.iter_mut().zip(s.iter()) {
+        *p.0 |= *p.1;
+    }
+
+    return out;
+}
 
 static FIPS_MODULE_FILE_NAME: &str = "./dummy.txt\0";
 static FIPS_MODULE_MAC: &str = "C5:91:22:79:AF:0D:28:F7:DD:6B:BF:03:6B:01:D0:E5:50:81:C5:93:18:8C:7C:77:A3:97:98:CE:56:1B:67:80\0";
@@ -114,7 +201,9 @@ unsafe extern "C" fn fips_thread_start(
     return 1;
 }
 
+/* Error reporting */
 /* FIXME: deal with error reporting */
+
 unsafe extern "C" fn fips_new_error(_prov: *const OSSL_CORE_HANDLE) {}
 unsafe extern "C" fn fips_set_error_debug(
     _prov: *const OSSL_CORE_HANDLE,
@@ -145,6 +234,8 @@ unsafe extern "C" fn fips_pop_error_to_mark(
 ) -> ::std::os::raw::c_int {
     return 1;
 }
+
+/* BIO functions */
 
 struct FileBio {
     file: File,
@@ -303,6 +394,8 @@ unsafe extern "C" fn fips_bio_vsnprintf(
     return 0;
 }
 
+/* Allocation functions */
+
 unsafe fn fips_cleanse(
     addr: *mut ::std::os::raw::c_void,
     pos: usize,
@@ -344,10 +437,12 @@ unsafe extern "C" fn fips_clear_free(
     file: *const ::std::os::raw::c_char,
     line: ::std::os::raw::c_int,
 ) {
-    if num != 0 {
-        fips_cleanse(ptr, 0, num);
+    if ptr != std::ptr::null_mut() {
+        if num != 0 {
+            fips_cleanse(ptr, 0, num);
+        }
+        fips_free(ptr, file, line)
     }
-    fips_free(ptr, file, line)
 }
 
 unsafe extern "C" fn fips_realloc(
@@ -399,6 +494,8 @@ unsafe extern "C" fn fips_secure_allocated(
     /* FIXME: once we have secure memory, return something sensible */
     return 0;
 }
+
+/* FIPS Provider wrapping an intialization */
 
 struct FipsProvider {
     provider: *mut OSSL_PROVIDER,
@@ -454,12 +551,31 @@ macro_rules! dispatcher_struct {
             >($fn)),
         }
     };
+    (args6; $fn_id:expr; $fn:expr) => {
+        OSSL_DISPATCH {
+            function_id: $fn_id as i32,
+            function: Some(std::mem::transmute::<
+                unsafe extern "C" fn(_, _, _, _, _, _) -> _,
+                unsafe extern "C" fn(),
+            >($fn)),
+        }
+    };
 }
 
 static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
     let core_dispatch = [
-        dispatcher_struct!(args2; OSSL_FUNC_CORE_GET_PARAMS; fips_get_params ),
-        dispatcher_struct!(args1; OSSL_FUNC_CORE_GET_LIBCTX; fips_get_libctx ),
+        /* Seeding functions */
+        dispatcher_struct!(args5; OSSL_FUNC_GET_ENTROPY; fips_get_entropy),
+        dispatcher_struct!(args5; OSSL_FUNC_GET_USER_ENTROPY; fips_get_entropy),
+        dispatcher_struct!(args3; OSSL_FUNC_CLEANUP_ENTROPY; fips_cleanup_entropy),
+        dispatcher_struct!(args3; OSSL_FUNC_CLEANUP_USER_ENTROPY; fips_cleanup_entropy),
+        dispatcher_struct!(args6; OSSL_FUNC_GET_NONCE; fips_get_nonce),
+        dispatcher_struct!(args6; OSSL_FUNC_GET_USER_NONCE; fips_get_nonce),
+        dispatcher_struct!(args3; OSSL_FUNC_CLEANUP_NONCE; fips_cleanup_entropy),
+        dispatcher_struct!(args3; OSSL_FUNC_CLEANUP_USER_NONCE; fips_cleanup_entropy),
+        /* Initialization related functions */
+        dispatcher_struct!(args2; OSSL_FUNC_CORE_GET_PARAMS; fips_get_params),
+        dispatcher_struct!(args1; OSSL_FUNC_CORE_GET_LIBCTX; fips_get_libctx),
         dispatcher_struct!(args3; OSSL_FUNC_CORE_THREAD_START; fips_thread_start),
         /* FIXME: error handling is all a no-op */
         dispatcher_struct!(args1; OSSL_FUNC_CORE_NEW_ERROR; fips_new_error),

@@ -60,6 +60,7 @@ use token::Token;
 #[cfg(feature = "fips")]
 mod fips;
 
+#[cfg(not(feature = "fips"))]
 mod hacl;
 
 mod drbg;
@@ -107,7 +108,9 @@ impl State {
         #[cfg(feature = "fips")]
         fips::init();
 
+        #[cfg(not(feature = "fips"))]
         hacl::evercrypt_autoconf();
+
         self.slots.clear();
         self.sessionmap.clear();
         self.next_handle = 1;
