@@ -41,13 +41,11 @@ mod interface {
 mod attribute;
 mod error;
 mod mechanism;
-mod nettle;
 mod object;
 mod rng;
 mod session;
 mod slot;
 mod token;
-mod util;
 
 use error::{KError, KResult};
 use interface::*;
@@ -60,6 +58,9 @@ use token::Token;
 /* algorithms and ciphers */
 #[cfg(feature = "fips")]
 mod fips;
+
+#[cfg(not(feature = "fips"))]
+mod ossl;
 
 #[cfg(not(feature = "fips"))]
 mod hacl;

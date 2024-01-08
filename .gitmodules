@@ -1,12 +1,3 @@
-[submodule "gmp"]
-	path = gmp
-	url = https://github.com/simo5/gmp.git
-	branch = gmp-6.3
-        ignore = untracked
-[submodule "nettle"]
-	path = nettle
-	url = https://gitlab.com/gnutls/nettle.git
-        ignore = untracked
 [submodule "openssl"]
 	path = openssl
 	url = https://github.com/openssl/openssl

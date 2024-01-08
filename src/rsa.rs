@@ -396,4 +396,4 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
 include!("fips/rsa.rs");
 
 #[cfg(not(feature = "fips"))]
-include!("nettle/rsa.rs");
+include!("ossl/rsa.rs");

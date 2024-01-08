@@ -143,6 +143,77 @@ fn build_fips() {
         .expect("Couldn't write bindings!");
 }
 
+#[cfg(not(feature = "fips"))]
+fn build_ossl() {
+    let openssl_path = std::path::PathBuf::from("openssl")
+        .canonicalize()
+        .expect("cannot canonicalize path");
+
+    println!(
+        "cargo:rustc-link-search={}",
+        openssl_path.to_str().unwrap()
+    );
+    println!("cargo:rustc-link-lib=static=crypto");
+
+    match std::path::Path::new(
+        format!("{}/libcrypto.a", openssl_path.to_str().unwrap()).as_str(),
+    )
+    .try_exists()
+    {
+        Ok(true) => (),
+        _ => {
+            /* openssl: ./Configure --debug enable-fips */
+            if !std::process::Command::new("./Configure")
+                .current_dir(&openssl_path)
+                .arg("--debug")
+                .output()
+                .expect("could not run openssl `Configure`")
+                .status
+                .success()
+            {
+                // Panic if the command was not successful.
+                panic!("could not configure OpenSSL");
+            }
+
+            if !std::process::Command::new("make")
+                .current_dir(&openssl_path)
+                .output()
+                .expect("could not run openssl `make`")
+                .status
+                .success()
+            {
+                // Panic if the command was not successful.
+                panic!("could not build OpenSSL");
+            }
+        }
+    }
+
+    let include_path = openssl_path
+        .join("include")
+        .canonicalize()
+        .expect("OpenSSL include path unavailable");
+
+    bindgen::Builder::default()
+        .header("ossl.h")
+        .clang_arg(format!("-I{}", include_path.to_str().unwrap()))
+        .clang_arg("-std=c90") /* workaround [-Wimplicit-int] */
+        .derive_default(true)
+        .formatter(bindgen::Formatter::Prettyplease)
+        .allowlist_item("ossl_.*")
+        .allowlist_item("OSSL_.*")
+        .allowlist_item("openssl_.*")
+        .allowlist_item("OPENSSL_.*")
+        .allowlist_item("CRYPTO_.*")
+        .allowlist_item("c_.*")
+        .allowlist_item("EVP_.*")
+        .allowlist_item("evp_.*")
+        .allowlist_item("BN_.*")
+        .generate()
+        .expect("Unable to generate bindings")
+        .write_to_file("src/ossl/bindings.rs")
+        .expect("Couldn't write bindings!");
+}
+
 fn build_hacl() {
     let hacl_path = std::path::PathBuf::from("hacl/gcc-compatible")
         .canonicalize()
@@ -213,172 +284,6 @@ fn build_hacl() {
         .expect("Couldn't write bindings!");
 }
 
-fn build_gmp() {
-    let gmp_path = std::path::PathBuf::from("gmp")
-        .canonicalize()
-        .expect("cannot canonicalize gmp_path");
-
-    let gmp_lib = gmp_path
-        .join(".libs")
-        .canonicalize()
-        .expect("cannot canonicalize gmp_lib path");
-
-    println!("cargo:rustc-link-search={}", gmp_lib.to_str().unwrap());
-    println!("cargo:rustc-link-lib=static=gmp");
-
-    match std::path::Path::new(
-        format!("{}/libgmp.a", gmp_lib.to_str().unwrap()).as_str(),
-    )
-    .try_exists()
-    {
-        Ok(true) => return,
-        _ => (),
-    }
-
-    if !std::process::Command::new("./.bootstrap")
-        .current_dir(&gmp_path)
-        .output()
-        .expect("could not run gmp `.bootstrap`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not configure GMP");
-    }
-
-    if !std::process::Command::new("./configure")
-        .current_dir(&gmp_path)
-        .env("CFLAGS", "-fPIC -ggdb3")
-        .arg("--disable-shared")
-        .output()
-        .expect("could not run gmp `configure`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not configure GMP");
-    }
-
-    if !std::process::Command::new("make")
-        .current_dir(&gmp_path)
-        .output()
-        .expect("could not run gmp `make`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not build GMP library");
-    }
-}
-
-fn build_nettle() {
-    let nettle_path = std::path::PathBuf::from("nettle")
-        .canonicalize()
-        .expect("cannot canonicalize nettle_path");
-
-    println!("cargo:rustc-link-search={}", nettle_path.to_str().unwrap());
-    println!("cargo:rustc-link-lib=static=nettle");
-    println!("cargo:rustc-link-lib=static=hogweed");
-
-    match std::path::Path::new(
-        format!("{}/libnettle.a", nettle_path.to_str().unwrap()).as_str(),
-    )
-    .try_exists()
-    {
-        Ok(true) => return,
-        _ => (),
-    }
-
-    if !std::process::Command::new("autoreconf")
-        .current_dir(&nettle_path)
-        .arg("-fi")
-        .output()
-        .expect("could not reconfigure nettle")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not configure Nettle");
-    }
-
-    let gmp_path = std::path::PathBuf::from("gmp")
-        .canonicalize()
-        .expect("cannot canonicalize gmp_path");
-    let gmp_lib = gmp_path
-        .join(".libs")
-        .canonicalize()
-        .expect("cannot canonicalize gmp_lib path");
-
-    if !std::process::Command::new("./configure")
-        .current_dir(&nettle_path)
-        .arg(format!(
-            "--with-include-path={}",
-            gmp_path.to_str().unwrap()
-        ))
-        .arg(format!("--with-lib-path={}", gmp_lib.to_str().unwrap()))
-        .arg("--disable-shared")
-        .arg("--disable-openssl")
-        .arg("--disable-documentation")
-        .output()
-        .expect("could not run nettle's `configure`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not configure Nettle");
-    }
-
-    if !std::process::Command::new("make")
-        .current_dir(&nettle_path)
-        .output()
-        .expect("could not run nettle `make`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not build Nettle library");
-    }
-
-    bindgen::Builder::default()
-        .header("nettle.h")
-        .clang_arg(format!("-I{}", gmp_path.to_str().unwrap()))
-        .derive_default(true)
-        .formatter(bindgen::Formatter::Prettyplease)
-        .blocklist_type("_.*_t")
-        .blocklist_type("__u_.*")
-        .blocklist_type(".*int_.*_t")
-        .blocklist_type(".*intmax_t")
-        .blocklist_type("gmp_.*")
-        .blocklist_item(".*_MIN")
-        .blocklist_item(".*_MAX")
-        .blocklist_item("NR_OPEN")
-        .blocklist_item("MAX_.*")
-        .blocklist_item("PIPE_BUF")
-        .blocklist_item("PTHREAD_.*")
-        .blocklist_item("_.*_H")
-        .blocklist_item("_.*_T")
-        .blocklist_item("__GNU_.*")
-        .blocklist_item("__HAVE_.*")
-        .blocklist_item("__USE_.*")
-        .blocklist_item("_POSIX_.*")
-        .blocklist_item("_.*LIBC_.*")
-        .blocklist_item(".*GMP_.*")
-        .blocklist_item("__STDC_.*")
-        .blocklist_item("__.*TIME.*")
-        .blocklist_item("_.*SOURCE.*")
-        .blocklist_item("_.*WORDSIZE.*")
-        .blocklist_item("__glibc.*")
-        .blocklist_item("__LDOUBLE.*")
-        .blocklist_item("__STATFS.*")
-        .blocklist_item("__FD.*")
-        .blocklist_item("max_align_t")
-        .blocklist_item("__gmp.*rand.*")
-        .generate()
-        .expect("Unable to generate nettle bindings")
-        .write_to_file("src/nettle/bindings.rs")
-        .expect("Couldn't write bindings!");
-}
-
 fn main() {
     /* PKCS11 Headers */
     bindgen::Builder::default()
@@ -398,12 +303,10 @@ fn main() {
     #[cfg(feature = "fips")]
     build_fips();
 
+    /* OpenSSL Cryptography */
+    #[cfg(not(feature = "fips"))]
+    build_ossl();
+
     /* HACL Code */
     build_hacl();
-
-    /* GMP for Nettle */
-    build_gmp();
-
-    /* Nettle for RSA */
-    build_nettle();
 }
