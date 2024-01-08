@@ -113,7 +113,7 @@ pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectTemplates) {
 }
 
 #[cfg(feature = "fips")]
-include!("fips/hash.rs");
+include! {"ossl/hash.rs"}
 
 #[cfg(not(feature = "fips"))]
-include!("hacl/hash.rs");
+include! {"ossl/hash.rs"}

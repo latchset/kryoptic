@@ -75,6 +75,7 @@ macro_rules! ptr_wrapper {
     };
 }
 
+ptr_wrapper!(EvpMd; EVP_MD; EVP_MD_free);
 ptr_wrapper!(EvpPkey; EVP_PKEY; EVP_PKEY_free);
 ptr_wrapper!(EvpPkeyCtx; EVP_PKEY_CTX; EVP_PKEY_CTX_free);
 ptr_wrapper!(EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_free);

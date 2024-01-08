@@ -1,78 +1,10 @@
-// Copyright 2023 Simo Sorce
-// See LICENSE.txt file for terms
+#[cfg(feature = "fips")]
+use {super::fips, fips::*};
 
-use super::fips;
-
-use fips::*;
+#[cfg(not(feature = "fips"))]
+use {super::ossl, ossl::*};
 
 use std::os::raw::*;
-use std::ptr::NonNull;
-
-#[derive(Debug)]
-pub struct EvpMd {
-    ptr: NonNull<EVP_MD>,
-}
-
-impl EvpMd {
-    fn new(ptr: *mut EVP_MD) -> KResult<EvpMd> {
-        Ok(EvpMd {
-            ptr: match NonNull::new(ptr) {
-                Some(p) => p,
-                None => return err_rv!(CKR_DEVICE_ERROR),
-            },
-        })
-    }
-
-    pub fn as_ptr(&self) -> *const EVP_MD {
-        self.ptr.as_ptr()
-    }
-
-    #[allow(dead_code)]
-    pub fn as_mut_ptr(&mut self) -> *mut EVP_MD {
-        unsafe { self.ptr.as_mut() }
-    }
-}
-
-impl Drop for EvpMd {
-    fn drop(&mut self) {
-        unsafe {
-            EVP_MD_free(self.ptr.as_mut());
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct EvpMdCtx {
-    ptr: NonNull<EVP_MD_CTX>,
-}
-
-impl EvpMdCtx {
-    fn new(ptr: *mut EVP_MD_CTX) -> KResult<EvpMdCtx> {
-        Ok(EvpMdCtx {
-            ptr: match NonNull::new(ptr) {
-                Some(p) => p,
-                None => return err_rv!(CKR_HOST_MEMORY),
-            },
-        })
-    }
-
-    #[allow(dead_code)]
-    pub fn as_ptr(&self) -> *const EVP_MD_CTX {
-        self.ptr.as_ptr()
-    }
-
-    pub fn as_mut_ptr(&mut self) -> *mut EVP_MD_CTX {
-        unsafe { self.ptr.as_mut() }
-    }
-}
-
-impl Drop for EvpMdCtx {
-    fn drop(&mut self) {
-        unsafe {
-            EVP_MD_CTX_free(self.ptr.as_mut());
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct HashState {
@@ -85,12 +17,12 @@ impl HashState {
         unsafe {
             let libctx = get_libctx();
             Ok(HashState {
-                md: EvpMd::new(EVP_MD_fetch(
+                md: EvpMd::from_ptr(EVP_MD_fetch(
                     libctx,
                     alg.as_ptr() as *const c_char,
                     std::ptr::null_mut(),
                 ))?,
-                ctx: EvpMdCtx::new(EVP_MD_CTX_new())?,
+                ctx: EvpMdCtx::from_ptr(EVP_MD_CTX_new())?,
             })
         }
     }
