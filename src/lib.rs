@@ -2235,5 +2235,16 @@ pub extern "C" fn C_GetInterface(
     CKR_OK
 }
 
+#[cfg(feature = "fips")]
+#[no_mangle]
+pub extern "C" fn OSSL_provider_init(
+    handle: *const fips::OSSL_CORE_HANDLE,
+    in_: *const fips::OSSL_DISPATCH,
+    out: *mut *const fips::OSSL_DISPATCH,
+    provctx: *mut *mut ::std::os::raw::c_void,
+) -> ::std::os::raw::c_int {
+    unsafe { fips::OSSL_provider_init_int(handle, in_, out, provctx) }
+}
+
 #[cfg(test)]
 mod tests;
