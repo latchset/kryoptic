@@ -62,9 +62,6 @@ mod fips;
 #[cfg(not(feature = "fips"))]
 mod ossl;
 
-#[cfg(not(feature = "fips"))]
-mod hacl;
-
 mod drbg;
 mod hash;
 mod hmac;
@@ -109,9 +106,6 @@ impl State {
     fn initialize(&mut self) {
         #[cfg(feature = "fips")]
         fips::init();
-
-        #[cfg(not(feature = "fips"))]
-        hacl::evercrypt_autoconf();
 
         self.slots.clear();
         self.sessionmap.clear();

@@ -1,16 +1,17 @@
-// Copyright 2023 Simo Sorce
-// See LICENSE.txt file for terms
-
 use super::err_rv;
 use super::error;
-use super::fips;
 use super::interface;
 use super::mechanism;
 use error::{KError, KResult};
-use fips::*;
 use interface::*;
 use mechanism::*;
 use std::fmt::Debug;
+
+#[cfg(feature = "fips")]
+use {super::fips, fips::*};
+
+#[cfg(not(feature = "fips"))]
+use {super::ossl, ossl::*};
 
 #[derive(Debug)]
 pub struct HmacSha256Drbg {

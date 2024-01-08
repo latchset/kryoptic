@@ -31,41 +31,6 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     }
 }
 
-#[derive(Debug)]
-pub struct HaclCallbacks;
-
-impl bindgen::callbacks::ParseCallbacks for HaclCallbacks {
-    fn int_macro(
-        &self,
-        name: &str,
-        _: i64,
-    ) -> Option<bindgen::callbacks::IntKind> {
-        if name.starts_with("Spec_") {
-            Some(bindgen::callbacks::IntKind::Custom {
-                name: "u8",
-                is_signed: false,
-            })
-        } else if name.starts_with("Hacl_Streaming_Types_") {
-            Some(bindgen::callbacks::IntKind::Custom {
-                name: "u8",
-                is_signed: false,
-            })
-        } else if name.starts_with("EverCrypt_Error_") {
-            Some(bindgen::callbacks::IntKind::Custom {
-                name: "u8",
-                is_signed: false,
-            })
-        } else if name.ends_with("_HASH_LEN") {
-            Some(bindgen::callbacks::IntKind::Custom {
-                name: "usize",
-                is_signed: false,
-            })
-        } else {
-            None
-        }
-    }
-}
-
 #[cfg(feature = "fips")]
 fn build_fips() {
     let openssl_path = std::path::PathBuf::from("openssl")
@@ -214,76 +179,6 @@ fn build_ossl() {
         .expect("Couldn't write bindings!");
 }
 
-fn build_hacl() {
-    let hacl_path = std::path::PathBuf::from("hacl/gcc-compatible")
-        .canonicalize()
-        .expect("cannot canonicalize path");
-
-    println!("cargo:rustc-link-search={}", hacl_path.to_str().unwrap());
-    println!("cargo:rustc-link-lib=static=evercrypt");
-
-    match std::path::Path::new(
-        format!("{}/libevercrypt.a", hacl_path.to_str().unwrap()).as_str(),
-    )
-    .try_exists()
-    {
-        Ok(true) => return,
-        _ => (),
-    }
-
-    let hacl_krml_include = hacl_path
-        .join("../karamel/include")
-        .canonicalize()
-        .expect("cannot canonicalize path");
-    let hacl_krml_dist = hacl_path
-        .join("../karamel/krmllib/dist/minimal")
-        .canonicalize()
-        .expect("cannot canonicalize path");
-    let hacl_h = hacl_path.join("hacl.h");
-
-    if !std::process::Command::new("./configure")
-        .current_dir(&hacl_path)
-        .output()
-        .expect("could not run hacl `configure`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not configure HACL");
-    }
-
-    if !std::process::Command::new("make")
-        .current_dir(&hacl_path)
-        .output()
-        .expect("could not run hacl `make`")
-        .status
-        .success()
-    {
-        // Panic if the command was not successful.
-        panic!("could not build HACL library");
-    }
-
-    bindgen::Builder::default()
-        .header(hacl_h.to_str().unwrap())
-        .clang_arg(format!("-I{}", hacl_krml_include.display()))
-        .clang_arg(format!("-I{}", hacl_krml_dist.display()))
-        /* https://github.com/rust-lang/rust-bindgen/issues/2500 */
-        .clang_arg("-D__AVX512VLFP16INTRIN_H") /* workaround */
-        .clang_arg("-D__AVX512FP16INTRIN_H") /* workaround */
-        .derive_default(true)
-        .formatter(bindgen::Formatter::Prettyplease)
-        .allowlist_item("EverCrypt_.*")
-        .allowlist_item("Hacl_Hash_Definitions.*")
-        .allowlist_item("Hacl_HMAC_DRBG.*")
-        .allowlist_item("Spec_.*")
-        .allowlist_item("SHA.*_HASH_LEN")
-        .parse_callbacks(Box::new(HaclCallbacks))
-        .generate()
-        .expect("Unable to generate bindings")
-        .write_to_file("src/hacl/bindings.rs")
-        .expect("Couldn't write bindings!");
-}
-
 fn main() {
     /* PKCS11 Headers */
     bindgen::Builder::default()
@@ -306,7 +201,4 @@ fn main() {
     /* OpenSSL Cryptography */
     #[cfg(not(feature = "fips"))]
     build_ossl();
-
-    /* HACL Code */
-    build_hacl();
 }
