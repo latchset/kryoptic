@@ -191,7 +191,7 @@ fn main() {
         .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("src/pkcs11_bindings.rs")
+        .write_to_file("src/pkcs11/bindings.rs")
         .expect("Couldn't write bindings!");
 
     /* OpenSSL FIPS provider */
