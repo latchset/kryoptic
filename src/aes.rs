@@ -18,9 +18,6 @@ use object::{
 use super::mechanism;
 use mechanism::*;
 
-use super::rng;
-use rng::RNG;
-
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
@@ -157,7 +154,6 @@ impl Mechanism for AesMechanism {
 
     fn generate_key(
         &self,
-        rng: &mut rng::RNG,
         mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
@@ -182,7 +178,12 @@ impl Mechanism for AesMechanism {
         key.del_attr(CKA_VALUE_LEN);
 
         let mut value: Vec<u8> = vec![0; value_len];
-        rng.generate_random(value.as_mut_slice())?;
+        match super::CSPRNG
+            .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
+        {
+            Ok(()) => (),
+            Err(e) => return Err(e),
+        }
         key.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
 
         Ok(key)

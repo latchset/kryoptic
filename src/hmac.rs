@@ -7,12 +7,10 @@ use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::rng;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectTemplates};
-use rng::RNG;
 use std::fmt::Debug;
 use zeroize::Zeroize;
 
@@ -355,12 +353,7 @@ impl MechOperation for HMACOperation {
 }
 
 impl Sign for HMACOperation {
-    fn sign(
-        &mut self,
-        rng: &mut RNG,
-        data: &[u8],
-        signature: &mut [u8],
-    ) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -371,7 +364,7 @@ impl Sign for HMACOperation {
             }
             Ok(()) => (),
         }
-        self.sign_final(rng, signature)
+        self.sign_final(signature)
     }
 
     fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
@@ -382,11 +375,7 @@ impl Sign for HMACOperation {
         self.update(data)
     }
 
-    fn sign_final(
-        &mut self,
-        _rng: &mut RNG,
-        signature: &mut [u8],
-    ) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

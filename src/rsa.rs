@@ -262,7 +262,6 @@ impl Mechanism for RsaPKCSMechanism {
 
     fn generate_keypair(
         &self,
-        rng: &mut rng::RNG,
         _mech: &CK_MECHANISM,
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
@@ -311,7 +310,6 @@ impl Mechanism for RsaPKCSMechanism {
         }
 
         RsaPKCSOperation::generate_keypair(
-            rng,
             exponent,
             bits,
             &mut pubkey,

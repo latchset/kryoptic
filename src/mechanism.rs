@@ -7,11 +7,9 @@ use super::err_rv;
 use super::error;
 use super::interface;
 use super::object;
-use super::rng;
 use error::{KError, KResult};
 use interface::*;
 use object::Object;
-use rng::RNG;
 
 use std::fmt::Debug;
 
@@ -51,7 +49,6 @@ pub trait Mechanism: Debug + Send + Sync {
 
     fn generate_key(
         &self,
-        _: &mut rng::RNG,
         _: &CK_MECHANISM,
         _: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
@@ -60,7 +57,6 @@ pub trait Mechanism: Debug + Send + Sync {
 
     fn generate_keypair(
         &self,
-        _: &mut rng::RNG,
         _: &CK_MECHANISM,
         _pubkey_template: &[CK_ATTRIBUTE],
         _prikey_template: &[CK_ATTRIBUTE],
@@ -145,7 +141,6 @@ pub trait MechOperation: Debug + Send + Sync {
 pub trait Encryption: MechOperation {
     fn encrypt(
         &mut self,
-        _rng: &mut RNG,
         _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
@@ -154,7 +149,6 @@ pub trait Encryption: MechOperation {
     }
     fn encrypt_update(
         &mut self,
-        _rng: &mut RNG,
         _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
@@ -163,7 +157,6 @@ pub trait Encryption: MechOperation {
     }
     fn encrypt_final(
         &mut self,
-        _rng: &mut RNG,
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -177,7 +170,6 @@ pub trait Encryption: MechOperation {
 pub trait Decryption: MechOperation {
     fn decrypt(
         &mut self,
-        _rng: &mut RNG,
         _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
@@ -186,7 +178,6 @@ pub trait Decryption: MechOperation {
     }
     fn decrypt_update(
         &mut self,
-        _rng: &mut RNG,
         _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
@@ -195,7 +186,6 @@ pub trait Decryption: MechOperation {
     }
     fn decrypt_final(
         &mut self,
-        _rng: &mut RNG,
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -229,22 +219,13 @@ pub trait Digest: MechOperation {
 }
 
 pub trait Sign: MechOperation {
-    fn sign(
-        &mut self,
-        _rng: &mut RNG,
-        _data: &[u8],
-        _signature: &mut [u8],
-    ) -> KResult<()> {
+    fn sign(&mut self, _data: &[u8], _signature: &mut [u8]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn sign_final(
-        &mut self,
-        _rng: &mut RNG,
-        _signature: &mut [u8],
-    ) -> KResult<()> {
+    fn sign_final(&mut self, _signature: &mut [u8]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn signature_len(&self) -> KResult<usize> {

@@ -3,11 +3,9 @@
 
 use super::fips;
 use super::mechanism;
-use super::rng;
 
 use fips::*;
 use mechanism::*;
-use rng::RNG;
 
 use std::slice;
 use zeroize::Zeroize;
@@ -378,7 +376,6 @@ impl RsaPKCSOperation {
     }
 
     fn generate_keypair(
-        _rng: &mut rng::RNG,
         exponent: Vec<u8>,
         bits: usize,
         pubkey: &mut Object,
@@ -491,7 +488,6 @@ impl MechOperation for RsaPKCSOperation {
 impl Encryption for RsaPKCSOperation {
     fn encrypt(
         &mut self,
-        _rng: &mut RNG,
         plain: &[u8],
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
@@ -577,7 +573,6 @@ impl Encryption for RsaPKCSOperation {
 
     fn encrypt_update(
         &mut self,
-        _rng: &mut RNG,
         _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
@@ -588,7 +583,6 @@ impl Encryption for RsaPKCSOperation {
 
     fn encrypt_final(
         &mut self,
-        _rng: &mut RNG,
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -607,7 +601,6 @@ impl Encryption for RsaPKCSOperation {
 impl Decryption for RsaPKCSOperation {
     fn decrypt(
         &mut self,
-        _rng: &mut RNG,
         cipher: &[u8],
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
@@ -679,7 +672,6 @@ impl Decryption for RsaPKCSOperation {
 
     fn decrypt_update(
         &mut self,
-        _rng: &mut RNG,
         _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
@@ -690,7 +682,6 @@ impl Decryption for RsaPKCSOperation {
 
     fn decrypt_final(
         &mut self,
-        _rng: &mut RNG,
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -707,12 +698,7 @@ impl Decryption for RsaPKCSOperation {
 }
 
 impl Sign for RsaPKCSOperation {
-    fn sign(
-        &mut self,
-        rng: &mut RNG,
-        data: &[u8],
-        signature: &mut [u8],
-    ) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -790,7 +776,7 @@ impl Sign for RsaPKCSOperation {
             return Ok(());
         }
         self.sign_update(data)?;
-        self.sign_final(rng, signature)
+        self.sign_final(signature)
     }
 
     fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
@@ -823,11 +809,7 @@ impl Sign for RsaPKCSOperation {
         self.sigctx.as_mut().unwrap().digest_sign_update(data)
     }
 
-    fn sign_final(
-        &mut self,
-        _rng: &mut RNG,
-        signature: &mut [u8],
-    ) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

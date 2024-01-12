@@ -371,7 +371,6 @@ impl MechOperation for AesOperation {
 impl Encryption for AesOperation {
     fn encrypt(
         &mut self,
-        rng: &mut RNG,
         plain: &[u8],
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
@@ -385,7 +384,7 @@ impl Encryption for AesOperation {
         let clen: CK_ULONG = unsafe { *cipher_len };
         let mut outb: *mut u8 = cipher;
         let mut outl: CK_ULONG = unsafe { *cipher_len };
-        self.encrypt_update(rng, plain, outb, &mut outl)?;
+        self.encrypt_update(plain, outb, &mut outl)?;
         if outl > clen {
             self.finalized = true;
             return err_rv!(CKR_DEVICE_ERROR);
@@ -397,14 +396,13 @@ impl Encryption for AesOperation {
         }
         let mut foutl = clen - outl;
         outb = unsafe { cipher.add(outl as usize) };
-        self.encrypt_final(rng, outb, &mut foutl)?;
+        self.encrypt_final(outb, &mut foutl)?;
         unsafe { *cipher_len = foutl + outl };
         Ok(())
     }
 
     fn encrypt_update(
         &mut self,
-        _rng: &mut RNG,
         plain: &[u8],
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
@@ -500,7 +498,6 @@ impl Encryption for AesOperation {
 
     fn encrypt_final(
         &mut self,
-        _rng: &mut RNG,
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
@@ -609,7 +606,6 @@ impl Encryption for AesOperation {
 impl Decryption for AesOperation {
     fn decrypt(
         &mut self,
-        rng: &mut RNG,
         cipher: &[u8],
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
@@ -623,7 +619,7 @@ impl Decryption for AesOperation {
         let plen: CK_ULONG = unsafe { *plain_len };
         let mut outb: *mut u8 = plain;
         let mut outl: CK_ULONG = unsafe { *plain_len };
-        self.decrypt_update(rng, cipher, outb, &mut outl)?;
+        self.decrypt_update(cipher, outb, &mut outl)?;
         if outl > plen {
             self.finalized = true;
             return err_rv!(CKR_DEVICE_ERROR);
@@ -635,14 +631,13 @@ impl Decryption for AesOperation {
         }
         let mut foutl = plen - outl;
         outb = unsafe { plain.add(outl as usize) };
-        self.decrypt_final(rng, outb, &mut foutl)?;
+        self.decrypt_final(outb, &mut foutl)?;
         unsafe { *plain_len = foutl + outl };
         Ok(())
     }
 
     fn decrypt_update(
         &mut self,
-        _rng: &mut RNG,
         cipher: &[u8],
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
@@ -738,7 +733,6 @@ impl Decryption for AesOperation {
 
     fn decrypt_final(
         &mut self,
-        _rng: &mut RNG,
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {

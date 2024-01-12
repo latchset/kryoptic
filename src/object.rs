@@ -8,7 +8,6 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::mechanism;
-use super::rng;
 use super::{err_not_found, err_rv};
 use attribute::{
     from_bool, from_bytes, from_date_bytes, from_ignore, from_string,
@@ -748,7 +747,6 @@ impl Mechanism for GenericSecretKeyMechanism {
 
     fn generate_key(
         &self,
-        rng: &mut rng::RNG,
         _mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
@@ -771,7 +769,12 @@ impl Mechanism for GenericSecretKeyMechanism {
         key.del_attr(CKA_VALUE_LEN);
 
         let mut value: Vec<u8> = vec![0; value_len];
-        rng.generate_random(value.as_mut_slice())?;
+        match super::CSPRNG
+            .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
+        {
+            Ok(()) => (),
+            Err(e) => return Err(e),
+        }
         key.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
 
         Ok(key)

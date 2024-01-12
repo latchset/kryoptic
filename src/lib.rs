@@ -874,14 +874,7 @@ extern "C" fn fn_encrypt(
     }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
-    CSPRNG.with(|rng| {
-        ret_to_rv!(operation.encrypt(
-            &mut *rng.borrow_mut(),
-            data,
-            encrypted_data,
-            pul_encrypted_data_len
-        ))
-    })
+    ret_to_rv!(operation.encrypt(data, encrypted_data, pul_encrypted_data_len))
 }
 extern "C" fn fn_encrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -911,14 +904,7 @@ extern "C" fn fn_encrypt_update(
     }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    CSPRNG.with(|rng| {
-        ret_to_rv!(operation.encrypt(
-            &mut *rng.borrow_mut(),
-            data,
-            encrypted_part,
-            pul_encrypted_part_len
-        ))
-    })
+    ret_to_rv!(operation.encrypt(data, encrypted_part, pul_encrypted_part_len))
 }
 extern "C" fn fn_encrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -944,13 +930,8 @@ extern "C" fn fn_encrypt_final(
         }
         return CKR_OK;
     }
-    CSPRNG.with(|rng| {
-        ret_to_rv!(operation.encrypt_final(
-            &mut *rng.borrow_mut(),
-            last_encrypted_part,
-            pul_last_encrypted_part_len
-        ))
-    })
+    ret_to_rv!(operation
+        .encrypt_final(last_encrypted_part, pul_last_encrypted_part_len))
 }
 
 extern "C" fn fn_decrypt_init(
@@ -1002,14 +983,7 @@ extern "C" fn fn_decrypt(
     let enc: &[u8] = unsafe {
         std::slice::from_raw_parts(encrypted_data, encrypted_data_len as usize)
     };
-    CSPRNG.with(|rng| {
-        ret_to_rv!(operation.decrypt(
-            &mut *rng.borrow_mut(),
-            enc,
-            data,
-            pul_data_len,
-        ))
-    })
+    ret_to_rv!(operation.decrypt(enc, data, pul_data_len,))
 }
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1040,14 +1014,7 @@ extern "C" fn fn_decrypt_update(
     let enc: &[u8] = unsafe {
         std::slice::from_raw_parts(encrypted_part, encrypted_part_len as usize)
     };
-    CSPRNG.with(|rng| {
-        ret_to_rv!(operation.decrypt_update(
-            &mut *rng.borrow_mut(),
-            enc,
-            part,
-            pul_part_len,
-        ))
-    })
+    ret_to_rv!(operation.decrypt_update(enc, part, pul_part_len,))
 }
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1073,13 +1040,7 @@ extern "C" fn fn_decrypt_final(
         }
         return CKR_OK;
     }
-    CSPRNG.with(|rng| {
-        ret_to_rv!(operation.decrypt_final(
-            &mut *rng.borrow_mut(),
-            last_part,
-            pul_last_part_len
-        ))
-    })
+    ret_to_rv!(operation.decrypt_final(last_part, pul_last_part_len))
 }
 
 extern "C" fn fn_digest_init(
@@ -1286,9 +1247,7 @@ extern "C" fn fn_sign(
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
 
-    let ret = CSPRNG.with(|rng| {
-        ret_to_rv!(operation.sign(&mut *rng.borrow_mut(), data, signature))
-    });
+    let ret = ret_to_rv!(operation.sign(data, signature));
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1348,9 +1307,7 @@ extern "C" fn fn_sign_final(
     }
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
-    let ret = CSPRNG.with(|rng| {
-        ret_to_rv!(operation.sign_final(&mut *rng.borrow_mut(), signature))
-    });
+    let ret = ret_to_rv!(operation.sign_final(signature));
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = signature_len as CK_ULONG;
@@ -1547,8 +1504,7 @@ extern "C" fn fn_generate_key(
         return CKR_MECHANISM_INVALID;
     }
 
-    let result = CSPRNG
-        .with(|rng| mech.generate_key(&mut *rng.borrow_mut(), data, tmpl));
+    let result = mech.generate_key(data, tmpl);
     match result {
         Ok(obj) => {
             let kh = res_or_ret!(token.insert_object(s_handle, obj));
@@ -1600,9 +1556,7 @@ extern "C" fn fn_generate_key_pair(
         return CKR_MECHANISM_INVALID;
     }
 
-    let result = CSPRNG.with(|rng| {
-        mech.generate_keypair(&mut *rng.borrow_mut(), data, pubtmpl, pritmpl)
-    });
+    let result = mech.generate_keypair(data, pubtmpl, pritmpl);
     match result {
         Ok((pubkey, privkey)) => {
             let pubh = res_or_ret!(token.insert_object(s_handle, pubkey));
