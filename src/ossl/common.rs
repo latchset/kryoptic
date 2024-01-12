@@ -1,3 +1,6 @@
+// Copyright 2024 Simo Sorce
+// See LICENSE.txt file for terms
+
 macro_rules! ptr_wrapper {
     ($name:ident; $ossl:ident; $free:expr) => {
         #[derive(Debug)]
@@ -47,6 +50,8 @@ ptr_wrapper!(EvpPkeyCtx; EVP_PKEY_CTX; EVP_PKEY_CTX_free);
 ptr_wrapper!(EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_free);
 ptr_wrapper!(BigNum; BIGNUM; BN_free);
 ptr_wrapper!(OsslParam; OSSL_PARAM; OSSL_PARAM_free);
+ptr_wrapper!(EvpCipherCtx; EVP_CIPHER_CTX; EVP_CIPHER_CTX_free);
+ptr_wrapper!(EvpCipher; EVP_CIPHER; EVP_CIPHER_free);
 
 pub fn bn_num_bytes(a: *const BIGNUM) -> usize {
     let x = unsafe { (BN_num_bits(a) + 7) / 8 };

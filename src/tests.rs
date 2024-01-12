@@ -1118,6 +1118,352 @@ fn test_get_mechs() {
 }
 
 #[test]
+fn test_aes_operations() {
+    let mut testdata = TestData::new("testdata/test_aes_operations.json");
+    testdata.setup_db();
+
+    let mut args = testdata.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* open session */
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Generate AES key */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_GEN,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+
+    let mut class = CKO_SECRET_KEY;
+    let mut len: CK_ULONG = 16;
+    let mut truebool = CK_TRUE;
+    let mut template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    ret = fn_generate_key(
+        session,
+        &mut mechanism,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    {
+        /* AES ECB */
+
+        /* encrypt init */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_ECB,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Data need to be exactly one block in size */
+        let data = "0123456789ABCDEF";
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 16);
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec);
+    }
+
+    {
+        /* AES CBC */
+
+        /* encrypt init */
+        let iv = "FEDCBA0987654321";
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CBC,
+            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Data need to be exactly one block in size */
+        let data = "0123456789ABCDEF";
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 16);
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec);
+    }
+
+    {
+        /* AES CBC and Padding */
+
+        /* encrypt init */
+        let iv = "FEDCBA0987654321";
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CBC_PAD,
+            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Data of exactly one block in size will cause two blocks output */
+        let data = "0123456789ABCDEF";
+        let enc: [u8; 32] = [0; 32];
+        let mut enc_len: CK_ULONG = 32;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 32);
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 32] = [0; 32];
+        let mut dec_len: CK_ULONG = 32;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
+    #[cfg(not(feature = "fips"))]
+    {
+        /* AES OFB */
+
+        /* encrypt init */
+        let iv = "FEDCBA0987654321";
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_OFB,
+            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let data = "01234567";
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
+    #[cfg(not(feature = "fips"))]
+    {
+        /* AES CFB */
+
+        /* encrypt init */
+        let iv = "FEDCBA0987654321";
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CFB1,
+            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let data = "01234567";
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
+    {
+        /* AES CTR */
+
+        /* encrypt init */
+        let mut param = CK_AES_CTR_PARAMS {
+            ulCounterBits: 128,
+            cb: [
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+            ],
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CTR,
+            pParameter: &mut param as *mut CK_AES_CTR_PARAMS as CK_VOID_PTR,
+            ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
+                as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let data = "01234567";
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
+}
+
+#[test]
 fn test_rsa_operations() {
     let mut testdata = TestData::new("testdata/test_rsa_operations.json");
 

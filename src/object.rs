@@ -785,6 +785,7 @@ pub enum ObjectType {
     RSAPubKey,
     RSAPrivKey,
     GenericSecretKey,
+    AesKey,
 }
 
 #[derive(Debug)]
@@ -882,6 +883,9 @@ impl ObjectTemplates {
                     | CKK_SHA384_HMAC | CKK_SHA512_HMAC => self
                         .get_template(ObjectType::GenericSecretKey)?
                         .create(template),
+                    CKK_AES => {
+                        self.get_template(ObjectType::AesKey)?.create(template)
+                    }
                     _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 }
             }
@@ -934,6 +938,7 @@ impl ObjectTemplates {
                         | CKK_SHA512_HMAC => {
                             self.get_template(ObjectType::GenericSecretKey)
                         }
+                        CKK_AES => self.get_template(ObjectType::AesKey),
                         _ => err_rv!(CKR_DEVICE_ERROR),
                     },
                 },

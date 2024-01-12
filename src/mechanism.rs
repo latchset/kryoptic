@@ -67,6 +67,27 @@ pub trait Mechanism: Debug + Send + Sync {
     ) -> KResult<(Object, Object)> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
+
+    fn wrap_key(
+        &self,
+        _: &CK_MECHANISM,
+        _: &object::Object,
+        _: &object::Object,
+        _: CK_BYTE_PTR,
+        _: CK_ULONG_PTR,
+    ) -> KResult<()> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
+
+    fn unwrap_key(
+        &self,
+        _: &CK_MECHANISM,
+        _: &object::Object,
+        _: &[u8],
+        _: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
 }
 
 #[derive(Debug)]

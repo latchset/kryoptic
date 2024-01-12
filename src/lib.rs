@@ -62,6 +62,7 @@ mod fips;
 #[cfg(not(feature = "fips"))]
 mod ossl;
 
+mod aes;
 mod drbg;
 mod hash;
 mod hmac;

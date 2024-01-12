@@ -7,6 +7,7 @@ use std::vec::Vec;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
+use super::aes;
 use super::attribute;
 use super::error;
 use super::hash;
@@ -348,6 +349,7 @@ impl Token {
 
         /* register mechanisms and templates */
         object::register(&mut token.mechanisms, &mut token.object_templates);
+        aes::register(&mut token.mechanisms, &mut token.object_templates);
         rsa::register(&mut token.mechanisms, &mut token.object_templates);
         hash::register(&mut token.mechanisms, &mut token.object_templates);
         hmac::register(&mut token.mechanisms, &mut token.object_templates);
