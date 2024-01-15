@@ -155,6 +155,7 @@ fn object_to_raw_key(key: &Object) -> KResult<AesKey> {
 struct AesParams {
     pad: bool,
     iv: Vec<u8>,
+    maxblocks: u128,
 }
 
 #[derive(Debug)]
@@ -167,6 +168,7 @@ struct AesOperation {
     ctx: Option<EvpCipherCtx>,
     blocksize: usize,
     finalbuf: Vec<u8>,
+    blockctr: u128,
 }
 
 impl Drop for AesOperation {
@@ -177,6 +179,7 @@ impl Drop for AesOperation {
 
 impl AesOperation {
     fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
+        let mut maxblocks = 0u128;
         let pad = match mech.mechanism {
             CKM_AES_CTR | CKM_AES_CBC | CKM_AES_ECB => false,
             CKM_AES_CBC_PAD => true,
@@ -193,19 +196,46 @@ impl AesOperation {
                 } else {
                     let ctr_params =
                         mech.pParameter as *const CK_AES_CTR_PARAMS;
+                    let iv = unsafe { (*ctr_params).cb.to_vec() };
                     let ctrbits =
                         unsafe { (*ctr_params).ulCounterBits } as usize;
-                    if ctrbits != (AES_BLOCK_SIZE * 8) {
-                        /* FIXME: support arbitrary counterbits.
+                    if ctrbits < (AES_BLOCK_SIZE * 8) {
+                        /* FIXME: support arbitrary counterbits wrapping.
                          * OpenSSL CTR mode is built to handle the whole IV
-                         * as a 128bit counter unconditionally, so we can
-                         * only support 128 as the allowed value for now. */
+                         * as a 128bit counter unconditionally.
+                         * For callers that want a smaller counterbit size all
+                         * we can do is to set a maximum number of blocks so
+                         * that the counter space does *not* wrap (because
+                         * openssl won't wrap it but proceed to increment the
+                         * octects part of the IV/Nonce). This means that for
+                         * applications that initialize the counter to a value
+                         * like 1 all will be fine, but application that
+                         * initialize the counter to a random value and expect
+                         * wrapping will see a failure instead of wrapping */
+                        maxblocks = (1 << ctrbits) - 1;
+                        let fulloctects = ctrbits / 8;
+                        let mut idx = 0;
+                        while fulloctects > idx {
+                            maxblocks -= (iv[15 - idx] as u128) << (idx * 8);
+                            idx += 1;
+                        }
+                        let part = ctrbits % 8;
+                        if part > 0 {
+                            maxblocks -= ((iv[15 - idx] as u128)
+                                & (part as u128))
+                                << (idx * 8);
+                        }
+                        if maxblocks == 0 {
+                            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        }
+                    } else if ctrbits > (AES_BLOCK_SIZE * 8) {
                         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                     }
 
                     Ok(AesParams {
                         pad: pad,
-                        iv: unsafe { (*ctr_params).cb.to_vec() },
+                        iv: iv,
+                        maxblocks: maxblocks,
                     })
                 }
             }
@@ -222,12 +252,14 @@ impl AesOperation {
                             )
                             .to_vec()
                         },
+                        maxblocks: maxblocks,
                     })
                 }
             }
             CKM_AES_ECB => Ok(AesParams {
                 pad: pad,
                 iv: Vec::with_capacity(0),
+                maxblocks: maxblocks,
             }),
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
@@ -243,6 +275,7 @@ impl AesOperation {
                             )
                             .to_vec()
                         },
+                        maxblocks: maxblocks,
                     })
                 }
             }
@@ -321,6 +354,7 @@ impl AesOperation {
             ctx: Some(EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?),
             blocksize: 0,
             finalbuf: Vec::new(),
+            blockctr: 0,
         })
     }
 
@@ -334,6 +368,7 @@ impl AesOperation {
             ctx: Some(EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?),
             blocksize: 0,
             finalbuf: Vec::new(),
+            blockctr: 0,
         })
     }
 
@@ -476,6 +511,16 @@ impl Encryption for AesOperation {
             }
         }
 
+        if self.params.maxblocks > 0 {
+            let reqblocks =
+                ((plain.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) as u128;
+            if self.blockctr + reqblocks > self.params.maxblocks {
+                self.finalized = true;
+                return err_rv!(CKR_DATA_LEN_RANGE);
+            }
+            self.blockctr += reqblocks;
+        }
+
         let mut outl: std::os::raw::c_int = 0;
         if unsafe {
             EVP_EncryptUpdate(
@@ -530,6 +575,12 @@ impl Encryption for AesOperation {
         if !self.params.pad {
             self.finalized = true;
             return Ok(());
+        }
+
+        if self.params.maxblocks > 0 {
+            if self.blockctr >= self.params.maxblocks {
+                return err_rv!(CKR_DATA_LEN_RANGE);
+            }
         }
 
         let mut cipher_buf: *mut u8 = cipher;
@@ -711,6 +762,16 @@ impl Decryption for AesOperation {
             }
         }
 
+        if self.params.maxblocks > 0 {
+            let reqblocks =
+                ((cipher.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) as u128;
+            if self.blockctr + reqblocks > self.params.maxblocks {
+                self.finalized = true;
+                return err_rv!(CKR_DATA_LEN_RANGE);
+            }
+            self.blockctr += reqblocks;
+        }
+
         let mut outl: std::os::raw::c_int = 0;
         if unsafe {
             EVP_DecryptUpdate(
@@ -767,6 +828,11 @@ impl Decryption for AesOperation {
             return Ok(());
         }
 
+        if self.params.maxblocks > 0 {
+            if self.blockctr >= self.params.maxblocks {
+                return err_rv!(CKR_DATA_LEN_RANGE);
+            }
+        }
         let mut plain_buf: *mut u8 = plain;
         let plain_ulen = unsafe { *plain_len } as usize;
         /* check if this is a second call where we saved the final buffer */

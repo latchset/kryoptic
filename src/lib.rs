@@ -883,7 +883,11 @@ extern "C" fn fn_encrypt_update(
     }
     let data: &[u8] =
         unsafe { std::slice::from_raw_parts(part, part_len as usize) };
-    ret_to_rv!(operation.encrypt(data, encrypted_part, pul_encrypted_part_len))
+    ret_to_rv!(operation.encrypt_update(
+        data,
+        encrypted_part,
+        pul_encrypted_part_len
+    ))
 }
 extern "C" fn fn_encrypt_final(
     s_handle: CK_SESSION_HANDLE,

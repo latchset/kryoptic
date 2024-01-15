@@ -1454,7 +1454,55 @@ fn test_aes_operations() {
         );
         assert_eq!(ret, CKR_OK);
         assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
+
+        /* Counterbits edge cases */
+
+        /* 9 bit counter, counter value should allow a singe block before
+         * wrap around */
+        let mut param = CK_AES_CTR_PARAMS {
+            ulCounterBits: 9,
+            cb: [
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x01, 0xFE,
+            ],
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CTR,
+            pParameter: &mut param as *mut CK_AES_CTR_PARAMS as CK_VOID_PTR,
+            ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
+                as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let mut data: [u8; 16] = [255u8; 16];
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+
+        /* First block should suceed */
+        ret = fn_encrypt_update(
+            session,
+            data.as_mut_ptr(),
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        /* Second should fail */
+        ret = fn_encrypt_update(
+            session,
+            data.as_mut_ptr(),
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_DATA_LEN_RANGE);
     }
 
     ret = fn_close_session(session);
