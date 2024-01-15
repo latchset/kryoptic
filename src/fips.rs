@@ -115,10 +115,35 @@ unsafe extern "C" fn fips_get_nonce(
     return out;
 }
 
-static FIPS_MODULE_FILE_NAME: &str = "./dummy.txt\0";
+cfg_if::cfg_if! {
+    if #[cfg(test)] {
+        static FIPS_MODULE_FILE_NAME: &str = "./dummy.txt\0";
+    } else {
+        static FIPS_MODULE_FILE_NAME: Lazy<&CStr> = Lazy::new(|| unsafe {
+            let mut dlinfo = libc::Dl_info {
+                dli_fname: std::ptr::null(),
+                dli_fbase: std::ptr::null_mut(),
+                dli_sname: std::ptr::null(),
+                dli_saddr: std::ptr::null_mut(),
+            };
+            let res = libc::dladdr(OSSL_provider_init_int as *const c_void, &mut dlinfo);
+            if res == 0 {
+                /* uh oh! */
+                CStr::from_bytes_with_nul(&[0u8; 1]).unwrap()
+            } else {
+                CStr::from_ptr(dlinfo.dli_fname)
+            }
+        });
+    }
+}
+
+#[cfg(test)]
 static FIPS_MODULE_MAC: &str = "C5:91:22:79:AF:0D:28:F7:DD:6B:BF:03:6B:01:D0:E5:50:81:C5:93:18:8C:7C:77:A3:97:98:CE:56:1B:67:80\0";
-static FIPS_INSTALL_MAC: &str = "41:9C:38:C2:8F:59:09:43:2C:AA:2F:58:36:2D:D9:04:F9:6C:56:8B:09:E0:18:3A:2E:D6:CC:69:05:04:E1:11\0";
-static FIPS_INSTALL_STATUS: &str = "INSTALL_SELF_TEST_KATS_RUN\0";
+
+/* Lets always run KATS for now:
+ * static FIPS_INSTALL_MAC: &str = "41:9C:38:C2:8F:59:09:43:2C:AA:2F:58:36:2D:D9:04:F9:6C:56:8B:09:E0:18:3A:2E:D6:CC:69:05:04:E1:11\0";
+ * static FIPS_INSTALL_STATUS: &str = "INSTALL_SELF_TEST_KATS_RUN\0"; */
+
 static FIPS_INSTALL_VERSION: &str = "1\0";
 static FIPS_CONDITIONAL_ERRORS: &str = "1\0";
 static FIPS_SECURITY_CHECKS: &str = "0\0";
@@ -149,21 +174,24 @@ unsafe extern "C" fn fips_get_params(
         FIPS_MODULE_FILE_NAME
     );
 
+    #[cfg(test)]
     set_config_string!(
         params,
         OSSL_PROV_FIPS_PARAM_MODULE_MAC,
         FIPS_MODULE_MAC
     );
-    set_config_string!(
-        params,
-        OSSL_PROV_FIPS_PARAM_INSTALL_MAC,
-        FIPS_INSTALL_MAC
-    );
-    set_config_string!(
-        params,
-        OSSL_PROV_FIPS_PARAM_INSTALL_STATUS,
-        FIPS_INSTALL_STATUS
-    );
+    /* Lets always run KATS for now:
+     *  set_config_string!(
+     *      params,
+     *      OSSL_PROV_FIPS_PARAM_INSTALL_MAC,
+     *      FIPS_INSTALL_MAC
+     *  );
+     *  set_config_string!(
+     *      params,
+     *      OSSL_PROV_FIPS_PARAM_INSTALL_STATUS,
+     *      FIPS_INSTALL_STATUS
+     *  );
+     */
     set_config_string!(
         params,
         OSSL_PROV_FIPS_PARAM_INSTALL_VERSION,
