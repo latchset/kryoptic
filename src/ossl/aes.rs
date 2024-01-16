@@ -7,9 +7,13 @@ use {super::fips, fips::*};
 #[cfg(not(feature = "fips"))]
 use {super::ossl, ossl::*};
 
+use std::ffi::c_char;
 use zeroize::Zeroize;
 
 const AES_BLOCK_SIZE: usize = 16;
+const AES_128_CTS_NAME: &[u8; 16] = b"AES-128-CBC-CTS\0";
+const AES_192_CTS_NAME: &[u8; 16] = b"AES-192-CBC-CTS\0";
+const AES_256_CTS_NAME: &[u8; 16] = b"AES-256-CBC-CTS\0";
 const AES_128_CTR_NAME: &[u8; 12] = b"AES-128-CTR\0";
 const AES_192_CTR_NAME: &[u8; 12] = b"AES-192-CTR\0";
 const AES_256_CTR_NAME: &[u8; 12] = b"AES-256-CTR\0";
@@ -40,6 +44,9 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(feature = "fips")] {
         struct AesCiphers {
+            aes128cts: EvpCipher,
+            aes192cts: EvpCipher,
+            aes256cts: EvpCipher,
             aes128ctr: EvpCipher,
             aes192ctr: EvpCipher,
             aes256ctr: EvpCipher,
@@ -52,6 +59,9 @@ cfg_if::cfg_if! {
         }
     } else {
         struct AesCiphers {
+            aes128cts: EvpCipher,
+            aes192cts: EvpCipher,
+            aes256cts: EvpCipher,
             aes128ctr: EvpCipher,
             aes192ctr: EvpCipher,
             aes256ctr: EvpCipher,
@@ -97,6 +107,9 @@ fn init_cipher(name: &[u8]) -> EvpCipher {
 cfg_if::cfg_if! {
     if #[cfg(feature = "fips")] {
         static AES_CIPHERS: Lazy<AesCiphers> = Lazy::new(|| AesCiphers {
+            aes128cts: init_cipher(AES_128_CTS_NAME),
+            aes192cts: init_cipher(AES_192_CTS_NAME),
+            aes256cts: init_cipher(AES_256_CTS_NAME),
             aes128ctr: init_cipher(AES_128_CTR_NAME),
             aes192ctr: init_cipher(AES_192_CTR_NAME),
             aes256ctr: init_cipher(AES_256_CTR_NAME),
@@ -109,6 +122,9 @@ cfg_if::cfg_if! {
         });
     } else {
         static AES_CIPHERS: Lazy<AesCiphers> = Lazy::new(|| AesCiphers {
+            aes128cts: init_cipher(AES_128_CTS_NAME),
+            aes192cts: init_cipher(AES_192_CTS_NAME),
+            aes256cts: init_cipher(AES_256_CTS_NAME),
             aes128ctr: init_cipher(AES_128_CTR_NAME),
             aes192ctr: init_cipher(AES_192_CTR_NAME),
             aes256ctr: init_cipher(AES_256_CTR_NAME),
@@ -156,6 +172,7 @@ struct AesParams {
     pad: bool,
     iv: Vec<u8>,
     maxblocks: u128,
+    ctsmode: u8,
 }
 
 #[derive(Debug)]
@@ -181,12 +198,16 @@ impl AesOperation {
     fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
         let mut maxblocks = 0u128;
         let pad = match mech.mechanism {
-            CKM_AES_CTR | CKM_AES_CBC | CKM_AES_ECB => false,
+            CKM_AES_CTS | CKM_AES_CTR | CKM_AES_CBC | CKM_AES_ECB => false,
             CKM_AES_CBC_PAD => true,
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => false,
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
+        let mut ctsmode = 0u8;
+        if mech.mechanism == CKM_AES_CTS {
+            ctsmode = 1u8;
+        }
         match mech.mechanism {
             CKM_AES_CTR => {
                 if mech.ulParameterLen as usize
@@ -236,10 +257,11 @@ impl AesOperation {
                         pad: pad,
                         iv: iv,
                         maxblocks: maxblocks,
+                        ctsmode: 0,
                     })
                 }
             }
-            CKM_AES_CBC | CKM_AES_CBC_PAD => {
+            CKM_AES_CTS | CKM_AES_CBC | CKM_AES_CBC_PAD => {
                 if mech.ulParameterLen != 16 {
                     err_rv!(CKR_ARGUMENTS_BAD)
                 } else {
@@ -253,6 +275,7 @@ impl AesOperation {
                             .to_vec()
                         },
                         maxblocks: maxblocks,
+                        ctsmode: ctsmode,
                     })
                 }
             }
@@ -260,6 +283,7 @@ impl AesOperation {
                 pad: pad,
                 iv: Vec::with_capacity(0),
                 maxblocks: maxblocks,
+                ctsmode: 0,
             }),
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
@@ -276,6 +300,7 @@ impl AesOperation {
                             .to_vec()
                         },
                         maxblocks: maxblocks,
+                        ctsmode: 0,
                     })
                 }
             }
@@ -288,6 +313,12 @@ impl AesOperation {
         keylen: usize,
     ) -> KResult<&'static EvpCipher> {
         Ok(match mech {
+            CKM_AES_CTS => match keylen {
+                16 => &AES_CIPHERS.aes128cts,
+                24 => &AES_CIPHERS.aes192cts,
+                32 => &AES_CIPHERS.aes256cts,
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
             CKM_AES_CTR => match keylen {
                 16 => &AES_CIPHERS.aes128ctr,
                 24 => &AES_CIPHERS.aes192ctr,
@@ -448,6 +479,21 @@ impl Encryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        if self.params.ctsmode != 0 {
+            if plain.len() < AES_BLOCK_SIZE {
+                self.finalized = true;
+                return err_rv!(CKR_DATA_LEN_RANGE);
+            }
+
+            /* CTS mode is one shot, and we use blockctr to mark that update
+             * has already been called once */
+            if self.blockctr == 0 {
+                self.blockctr = 1;
+            } else {
+                self.finalized = true;
+                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            }
+        }
         if !self.in_use {
             self.in_use = true;
 
@@ -460,17 +506,48 @@ impl Encryption for AesOperation {
                     }
                 };
 
+            let mut params: Vec<OSSL_PARAM> = Vec::new();
+            if self.params.ctsmode != 0 {
+                unsafe {
+                    params = vec![
+                        OSSL_PARAM_construct_utf8_string(
+                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
+                                as *const c_char,
+                            match self.params.ctsmode {
+                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
+                                    as *mut c_char,
+                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
+                                    as *mut c_char,
+                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
+                                    as *mut c_char,
+                                _ => {
+                                    self.finalized = true;
+                                    return err_rv!(CKR_GENERAL_ERROR);
+                                }
+                            },
+                            0,
+                        ),
+                        OSSL_PARAM_construct_end(),
+                    ];
+                }
+            }
+            let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
+                params.as_ptr()
+            } else {
+                std::ptr::null()
+            };
+
             if unsafe {
-                EVP_EncryptInit_ex(
+                EVP_EncryptInit_ex2(
                     self.ctx.as_mut().unwrap().as_mut_ptr(),
                     evpcipher.as_ptr(),
-                    std::ptr::null_mut(),
                     self.key.raw.as_ptr(),
                     if self.params.iv.len() != 0 {
                         self.params.iv.as_ptr()
                     } else {
                         std::ptr::null()
                     },
+                    params_ptr,
                 )
             } != 1
             {
@@ -490,6 +567,13 @@ impl Encryption for AesOperation {
             self.blocksize =
                 unsafe { EVP_CIPHER_get_block_size(evpcipher.as_ptr()) }
                     as usize;
+            if self.params.ctsmode > 0 {
+                /* although CTS has a blocksize of 16, it allows arbitrary
+                 * sized output, so we force the apparent blocksize to 1
+                 * to make the follwing calculation work out to check
+                 * valid buffer lengths */
+                self.blocksize = 1;
+            }
         }
 
         let cipher_ulen = unsafe { *cipher_len } as usize;
@@ -699,6 +783,21 @@ impl Decryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        if self.params.ctsmode != 0 {
+            if cipher.len() < AES_BLOCK_SIZE {
+                self.finalized = true;
+                return err_rv!(CKR_DATA_LEN_RANGE);
+            }
+
+            /* CTS mode is one shot, and we use blockctr to mark that update
+             * has already been called once */
+            if self.blockctr == 0 {
+                self.blockctr = 1;
+            } else {
+                self.finalized = true;
+                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            }
+        }
         if !self.in_use {
             self.in_use = true;
 
@@ -711,17 +810,48 @@ impl Decryption for AesOperation {
                     }
                 };
 
+            let mut params: Vec<OSSL_PARAM> = Vec::new();
+            if self.params.ctsmode != 0 {
+                unsafe {
+                    params = vec![
+                        OSSL_PARAM_construct_utf8_string(
+                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
+                                as *const c_char,
+                            match self.params.ctsmode {
+                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
+                                    as *mut c_char,
+                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
+                                    as *mut c_char,
+                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
+                                    as *mut c_char,
+                                _ => {
+                                    self.finalized = true;
+                                    return err_rv!(CKR_GENERAL_ERROR);
+                                }
+                            },
+                            0,
+                        ),
+                        OSSL_PARAM_construct_end(),
+                    ];
+                }
+            }
+            let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
+                params.as_ptr()
+            } else {
+                std::ptr::null()
+            };
+
             if unsafe {
-                EVP_DecryptInit_ex(
+                EVP_DecryptInit_ex2(
                     self.ctx.as_mut().unwrap().as_mut_ptr(),
                     evpcipher.as_ptr(),
-                    std::ptr::null_mut(),
                     self.key.raw.as_ptr(),
                     if self.params.iv.len() != 0 {
                         self.params.iv.as_ptr()
                     } else {
                         std::ptr::null()
                     },
+                    params_ptr,
                 )
             } != 1
             {
@@ -741,6 +871,13 @@ impl Decryption for AesOperation {
             self.blocksize =
                 unsafe { EVP_CIPHER_get_block_size(evpcipher.as_ptr()) }
                     as usize;
+            if self.params.ctsmode > 0 {
+                /* although CTS has a blocksize of 16, it allows arbitrary
+                 * sized output, so we force the apparent blocksize to 1
+                 * to make the follwing calculation work out to check
+                 * valid buffer lengths */
+                self.blocksize = 1;
+            }
         }
 
         let plain_ulen = unsafe { *plain_len } as usize;

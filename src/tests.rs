@@ -1505,6 +1505,67 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_DATA_LEN_RANGE);
     }
 
+    {
+        /* AES CTS */
+
+        /* encrypt init */
+        let iv = "FEDCBA0987654321";
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CTS,
+            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* CTS requires at least one block */
+        let data = "01234567";
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_DATA_LEN_RANGE);
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* CTS requires at least one block */
+        let data = "0123456789ABCDEF1111";
+        let enc: [u8; 32] = [0; 32];
+        let mut enc_len: CK_ULONG = 32;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 32] = [0; 32];
+        let mut dec_len: CK_ULONG = 32;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
