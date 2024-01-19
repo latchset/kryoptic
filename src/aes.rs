@@ -364,6 +364,17 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
     );
 
     mechs.add_mechanism(
+        CKM_AES_GCM,
+        Box::new(AesMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 16,
+                ulMaxKeySize: 32,
+                flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
         CKM_AES_KEY_GEN,
         Box::new(AesMechanism {
             info: CK_MECHANISM_INFO {

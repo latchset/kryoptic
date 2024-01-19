@@ -1566,6 +1566,64 @@ fn test_aes_operations() {
         assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
     }
 
+    {
+        /* AES-GCM */
+
+        let tag_len = 4usize;
+
+        /* IV needs to be of size 12 for the test to work in FIPS mode as well */
+        let iv = "BA0987654321";
+        let aad = "AUTH ME";
+        let mut param = CK_GCM_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvBits: (iv.len() * 8) as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulTagBits: (tag_len * 8) as CK_ULONG,
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: &mut param as *mut CK_GCM_PARAMS as CK_VOID_PTR,
+            ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let data = "01234567";
+        /* enc needs enough space for the tag */
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len: CK_ULONG = 16;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len() + tag_len);
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 

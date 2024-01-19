@@ -7,10 +7,13 @@ use {super::fips, fips::*};
 #[cfg(not(feature = "fips"))]
 use {super::ossl, ossl::*};
 
-use std::ffi::c_char;
+use std::ffi::{c_char, c_int, c_void};
 use zeroize::Zeroize;
 
 const AES_BLOCK_SIZE: usize = 16;
+const AES_128_GCM_NAME: &[u8; 12] = b"AES-128-GCM\0";
+const AES_192_GCM_NAME: &[u8; 12] = b"AES-192-GCM\0";
+const AES_256_GCM_NAME: &[u8; 12] = b"AES-256-GCM\0";
 const AES_128_CTS_NAME: &[u8; 16] = b"AES-128-CBC-CTS\0";
 const AES_192_CTS_NAME: &[u8; 16] = b"AES-192-CBC-CTS\0";
 const AES_256_CTS_NAME: &[u8; 16] = b"AES-256-CBC-CTS\0";
@@ -44,6 +47,9 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(feature = "fips")] {
         struct AesCiphers {
+            aes128gcm: EvpCipher,
+            aes192gcm: EvpCipher,
+            aes256gcm: EvpCipher,
             aes128cts: EvpCipher,
             aes192cts: EvpCipher,
             aes256cts: EvpCipher,
@@ -59,6 +65,9 @@ cfg_if::cfg_if! {
         }
     } else {
         struct AesCiphers {
+            aes128gcm: EvpCipher,
+            aes192gcm: EvpCipher,
+            aes256gcm: EvpCipher,
             aes128cts: EvpCipher,
             aes192cts: EvpCipher,
             aes256cts: EvpCipher,
@@ -107,6 +116,9 @@ fn init_cipher(name: &[u8]) -> EvpCipher {
 cfg_if::cfg_if! {
     if #[cfg(feature = "fips")] {
         static AES_CIPHERS: Lazy<AesCiphers> = Lazy::new(|| AesCiphers {
+            aes128gcm: init_cipher(AES_128_GCM_NAME),
+            aes192gcm: init_cipher(AES_192_GCM_NAME),
+            aes256gcm: init_cipher(AES_256_GCM_NAME),
             aes128cts: init_cipher(AES_128_CTS_NAME),
             aes192cts: init_cipher(AES_192_CTS_NAME),
             aes256cts: init_cipher(AES_256_CTS_NAME),
@@ -122,6 +134,9 @@ cfg_if::cfg_if! {
         });
     } else {
         static AES_CIPHERS: Lazy<AesCiphers> = Lazy::new(|| AesCiphers {
+            aes128gcm: init_cipher(AES_128_GCM_NAME),
+            aes192gcm: init_cipher(AES_192_GCM_NAME),
+            aes256gcm: init_cipher(AES_256_GCM_NAME),
             aes128cts: init_cipher(AES_128_CTS_NAME),
             aes192cts: init_cipher(AES_192_CTS_NAME),
             aes256cts: init_cipher(AES_256_CTS_NAME),
@@ -173,6 +188,8 @@ struct AesParams {
     iv: Vec<u8>,
     maxblocks: u128,
     ctsmode: u8,
+    aad: Vec<u8>,
+    tagbits: usize,
 }
 
 #[derive(Debug)]
@@ -198,7 +215,8 @@ impl AesOperation {
     fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
         let mut maxblocks = 0u128;
         let pad = match mech.mechanism {
-            CKM_AES_CTS | CKM_AES_CTR | CKM_AES_CBC | CKM_AES_ECB => false,
+            CKM_AES_GCM | CKM_AES_CTS | CKM_AES_CTR | CKM_AES_CBC
+            | CKM_AES_ECB => false,
             CKM_AES_CBC_PAD => true,
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => false,
@@ -209,100 +227,147 @@ impl AesOperation {
             ctsmode = 1u8;
         }
         match mech.mechanism {
+            CKM_AES_GCM => {
+                if mech.ulParameterLen as usize
+                    != ::std::mem::size_of::<CK_GCM_PARAMS>()
+                {
+                    return err_rv!(CKR_ARGUMENTS_BAD);
+                }
+                let gcm_params = mech.pParameter as *const CK_GCM_PARAMS;
+                unsafe {
+                    if (*gcm_params).ulIvLen == 0
+                        || (*gcm_params).ulIvLen > (1 << 32) - 1
+                    {
+                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    }
+                    if (*gcm_params).ulAADLen > (1 << 32) - 1 {
+                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    }
+                    if (*gcm_params).ulTagBits > 128 {
+                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    }
+                }
+                Ok(AesParams {
+                    pad: pad,
+                    iv: unsafe {
+                        std::slice::from_raw_parts(
+                            (*gcm_params).pIv,
+                            (*gcm_params).ulIvLen as usize,
+                        )
+                        .to_vec()
+                    },
+                    maxblocks: maxblocks,
+                    ctsmode: 0,
+                    aad: unsafe {
+                        if (*gcm_params).ulAADLen > 0 {
+                            std::slice::from_raw_parts(
+                                (*gcm_params).pAAD,
+                                (*gcm_params).ulAADLen as usize,
+                            )
+                            .to_vec()
+                        } else {
+                            Vec::new()
+                        }
+                    },
+                    tagbits: unsafe { (*gcm_params).ulTagBits } as usize,
+                })
+            }
             CKM_AES_CTR => {
                 if mech.ulParameterLen as usize
                     != ::std::mem::size_of::<CK_AES_CTR_PARAMS>()
                 {
-                    err_rv!(CKR_ARGUMENTS_BAD)
-                } else {
-                    let ctr_params =
-                        mech.pParameter as *const CK_AES_CTR_PARAMS;
-                    let iv = unsafe { (*ctr_params).cb.to_vec() };
-                    let ctrbits =
-                        unsafe { (*ctr_params).ulCounterBits } as usize;
-                    if ctrbits < (AES_BLOCK_SIZE * 8) {
-                        /* FIXME: support arbitrary counterbits wrapping.
-                         * OpenSSL CTR mode is built to handle the whole IV
-                         * as a 128bit counter unconditionally.
-                         * For callers that want a smaller counterbit size all
-                         * we can do is to set a maximum number of blocks so
-                         * that the counter space does *not* wrap (because
-                         * openssl won't wrap it but proceed to increment the
-                         * octects part of the IV/Nonce). This means that for
-                         * applications that initialize the counter to a value
-                         * like 1 all will be fine, but application that
-                         * initialize the counter to a random value and expect
-                         * wrapping will see a failure instead of wrapping */
-                        maxblocks = (1 << ctrbits) - 1;
-                        let fulloctects = ctrbits / 8;
-                        let mut idx = 0;
-                        while fulloctects > idx {
-                            maxblocks -= (iv[15 - idx] as u128) << (idx * 8);
-                            idx += 1;
-                        }
-                        let part = ctrbits % 8;
-                        if part > 0 {
-                            maxblocks -= ((iv[15 - idx] as u128)
-                                & (part as u128))
-                                << (idx * 8);
-                        }
-                        if maxblocks == 0 {
-                            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-                        }
-                    } else if ctrbits > (AES_BLOCK_SIZE * 8) {
+                    return err_rv!(CKR_ARGUMENTS_BAD);
+                }
+                let ctr_params = mech.pParameter as *const CK_AES_CTR_PARAMS;
+                let iv = unsafe { (*ctr_params).cb.to_vec() };
+                let ctrbits = unsafe { (*ctr_params).ulCounterBits } as usize;
+                if ctrbits < (AES_BLOCK_SIZE * 8) {
+                    /* FIXME: support arbitrary counterbits wrapping.
+                     * OpenSSL CTR mode is built to handle the whole IV
+                     * as a 128bit counter unconditionally.
+                     * For callers that want a smaller counterbit size all
+                     * we can do is to set a maximum number of blocks so
+                     * that the counter space does *not* wrap (because
+                     * openssl won't wrap it but proceed to increment the
+                     * octects part of the IV/Nonce). This means that for
+                     * applications that initialize the counter to a value
+                     * like 1 all will be fine, but application that
+                     * initialize the counter to a random value and expect
+                     * wrapping will see a failure instead of wrapping */
+                    maxblocks = (1 << ctrbits) - 1;
+                    let fulloctects = ctrbits / 8;
+                    let mut idx = 0;
+                    while fulloctects > idx {
+                        maxblocks -= (iv[15 - idx] as u128) << (idx * 8);
+                        idx += 1;
+                    }
+                    let part = ctrbits % 8;
+                    if part > 0 {
+                        maxblocks -= ((iv[15 - idx] as u128) & (part as u128))
+                            << (idx * 8);
+                    }
+                    if maxblocks == 0 {
                         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                     }
-
-                    Ok(AesParams {
-                        pad: pad,
-                        iv: iv,
-                        maxblocks: maxblocks,
-                        ctsmode: 0,
-                    })
+                } else if ctrbits > (AES_BLOCK_SIZE * 8) {
+                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
+
+                Ok(AesParams {
+                    pad: pad,
+                    iv: iv,
+                    maxblocks: maxblocks,
+                    ctsmode: 0,
+                    aad: Vec::new(),
+                    tagbits: 0,
+                })
             }
             CKM_AES_CTS | CKM_AES_CBC | CKM_AES_CBC_PAD => {
                 if mech.ulParameterLen != 16 {
-                    err_rv!(CKR_ARGUMENTS_BAD)
-                } else {
-                    Ok(AesParams {
-                        pad: pad,
-                        iv: unsafe {
-                            std::slice::from_raw_parts(
-                                mech.pParameter as *mut u8,
-                                mech.ulParameterLen as usize,
-                            )
-                            .to_vec()
-                        },
-                        maxblocks: maxblocks,
-                        ctsmode: ctsmode,
-                    })
+                    return err_rv!(CKR_ARGUMENTS_BAD);
                 }
+                Ok(AesParams {
+                    pad: pad,
+                    iv: unsafe {
+                        std::slice::from_raw_parts(
+                            mech.pParameter as *mut u8,
+                            mech.ulParameterLen as usize,
+                        )
+                        .to_vec()
+                    },
+                    maxblocks: maxblocks,
+                    ctsmode: ctsmode,
+                    aad: Vec::new(),
+                    tagbits: 0,
+                })
             }
             CKM_AES_ECB => Ok(AesParams {
                 pad: pad,
                 iv: Vec::with_capacity(0),
                 maxblocks: maxblocks,
                 ctsmode: 0,
+                aad: Vec::new(),
+                tagbits: 0,
             }),
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                 if mech.ulParameterLen != 16 {
-                    err_rv!(CKR_ARGUMENTS_BAD)
-                } else {
-                    Ok(AesParams {
-                        pad: pad,
-                        iv: unsafe {
-                            std::slice::from_raw_parts(
-                                mech.pParameter as *mut u8,
-                                mech.ulParameterLen as usize,
-                            )
-                            .to_vec()
-                        },
-                        maxblocks: maxblocks,
-                        ctsmode: 0,
-                    })
+                    return err_rv!(CKR_ARGUMENTS_BAD);
                 }
+                Ok(AesParams {
+                    pad: pad,
+                    iv: unsafe {
+                        std::slice::from_raw_parts(
+                            mech.pParameter as *mut u8,
+                            mech.ulParameterLen as usize,
+                        )
+                        .to_vec()
+                    },
+                    maxblocks: maxblocks,
+                    ctsmode: 0,
+                    aad: Vec::new(),
+                    tagbits: 0,
+                })
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
         }
@@ -313,6 +378,12 @@ impl AesOperation {
         keylen: usize,
     ) -> KResult<&'static EvpCipher> {
         Ok(match mech {
+            CKM_AES_GCM => match keylen {
+                16 => &AES_CIPHERS.aes128gcm,
+                24 => &AES_CIPHERS.aes192gcm,
+                32 => &AES_CIPHERS.aes256gcm,
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
             CKM_AES_CTS => match keylen {
                 16 => &AES_CIPHERS.aes128cts,
                 24 => &AES_CIPHERS.aes192cts,
@@ -461,7 +532,7 @@ impl Encryption for AesOperation {
             return Ok(());
         }
         let mut foutl = clen - outl;
-        outb = unsafe { cipher.add(outl as usize) };
+        outb = unsafe { cipher.offset(outl as isize) };
         self.encrypt_final(outb, &mut foutl)?;
         unsafe { *cipher_len = foutl + outl };
         Ok(())
@@ -507,7 +578,26 @@ impl Encryption for AesOperation {
                 };
 
             let mut params: Vec<OSSL_PARAM> = Vec::new();
-            if self.params.ctsmode != 0 {
+            let mut ivsize = self.params.iv.len();
+            if self.mech == CKM_AES_GCM && ivsize > 0 {
+                /* The IV size must be 12 in FIPS mode and if we try to
+                 * actively set it to any value (including 12) in FIPS
+                 * mode it will cause a cipher failure due to how
+                 * OpenSSL sets internal states. So avoid setting the IVLEN
+                 * when the ivsize matches the default */
+                if ivsize != 12 {
+                    unsafe {
+                        params = vec![
+                            OSSL_PARAM_construct_size_t(
+                                OSSL_CIPHER_PARAM_IVLEN.as_ptr()
+                                    as *const c_char,
+                                &mut ivsize,
+                            ),
+                            OSSL_PARAM_construct_end(),
+                        ];
+                    }
+                }
+            } else if self.params.ctsmode != 0 {
                 unsafe {
                     params = vec![
                         OSSL_PARAM_construct_utf8_string(
@@ -574,14 +664,37 @@ impl Encryption for AesOperation {
                  * valid buffer lengths */
                 self.blocksize = 1;
             }
+
+            if self.mech == CKM_AES_GCM {
+                if self.params.aad.len() > 0 {
+                    let mut outl: c_int = 0;
+                    if unsafe {
+                        EVP_EncryptUpdate(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            std::ptr::null_mut(),
+                            &mut outl,
+                            self.params.aad.as_ptr(),
+                            self.params.aad.len() as c_int,
+                        )
+                    } != 1
+                    {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                }
+            }
         }
 
         let cipher_ulen = unsafe { *cipher_len } as usize;
         let outblocks = plain.len() / self.blocksize;
         let outlen = outblocks * self.blocksize;
+        let mut retlen = outlen;
+        if self.mech == CKM_AES_GCM {
+            retlen += (self.params.tagbits + 7) / 8;
+        }
         if cipher.is_null() {
             unsafe {
-                *cipher_len = outlen as CK_ULONG;
+                *cipher_len = retlen as CK_ULONG;
             }
             return Ok(());
         } else {
@@ -589,7 +702,7 @@ impl Encryption for AesOperation {
                 self.finalized = true;
                 return err_rv!(CKR_DATA_LEN_RANGE);
             }
-            if cipher_ulen < outlen {
+            if cipher_ulen < retlen {
                 /* This is the only, non-fatal error */
                 return err_rv!(CKR_BUFFER_TOO_SMALL);
             }
@@ -605,19 +718,50 @@ impl Encryption for AesOperation {
             self.blockctr += reqblocks;
         }
 
-        let mut outl: std::os::raw::c_int = 0;
+        let mut cipher_buf: *mut u8 = cipher;
+        let mut outl: c_int = 0;
         if unsafe {
             EVP_EncryptUpdate(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),
-                cipher,
+                cipher_buf,
                 &mut outl,
                 plain.as_ptr(),
-                plain.len() as std::os::raw::c_int,
+                plain.len() as c_int,
             )
         } != 1
         {
             self.finalized = true;
             return err_rv!(CKR_DEVICE_ERROR);
+        }
+        if self.mech == CKM_AES_GCM {
+            let mut foutl: c_int = 0;
+            if unsafe {
+                cipher_buf = cipher.offset(outl as isize);
+                EVP_EncryptFinal_ex(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    cipher_buf,
+                    &mut foutl,
+                )
+            } != 1
+            {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+            outl += foutl;
+            if unsafe {
+                cipher_buf = cipher.offset(outl as isize);
+                EVP_CIPHER_CTX_ctrl(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    EVP_CTRL_AEAD_GET_TAG as c_int,
+                    ((self.params.tagbits + 7) / 8) as c_int,
+                    cipher_buf as *mut c_void,
+                )
+            } != 1
+            {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+            outl += ((self.params.tagbits + 7) / 8) as c_int;
         }
         unsafe {
             *cipher_len = outl as CK_ULONG;
@@ -695,7 +839,7 @@ impl Encryption for AesOperation {
             self.finalized = true;
         }
 
-        let mut outl: std::os::raw::c_int = 0;
+        let mut outl: c_int = 0;
         if unsafe {
             EVP_EncryptFinal_ex(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),
@@ -765,7 +909,7 @@ impl Decryption for AesOperation {
             return Ok(());
         }
         let mut foutl = plen - outl;
-        outb = unsafe { plain.add(outl as usize) };
+        outb = unsafe { plain.offset(outl as isize) };
         self.decrypt_final(outb, &mut foutl)?;
         unsafe { *plain_len = foutl + outl };
         Ok(())
@@ -811,7 +955,26 @@ impl Decryption for AesOperation {
                 };
 
             let mut params: Vec<OSSL_PARAM> = Vec::new();
-            if self.params.ctsmode != 0 {
+            let mut ivsize = self.params.iv.len();
+            if self.mech == CKM_AES_GCM && ivsize > 0 {
+                /* The IV size must be 12 in FIPS mode and if we try to
+                 * actively set it to any value (including 12) in FIPS
+                 * mode it will cause a cipher failure due to how
+                 * OpenSSL sets internal states. So avoid setting the IVLEN
+                 * when the ivsize matches the default */
+                if ivsize != 12 {
+                    unsafe {
+                        params = vec![
+                            OSSL_PARAM_construct_size_t(
+                                OSSL_CIPHER_PARAM_IVLEN.as_ptr()
+                                    as *const c_char,
+                                &mut ivsize,
+                            ),
+                            OSSL_PARAM_construct_end(),
+                        ];
+                    }
+                }
+            } else if self.params.ctsmode != 0 {
                 unsafe {
                     params = vec![
                         OSSL_PARAM_construct_utf8_string(
@@ -878,14 +1041,55 @@ impl Decryption for AesOperation {
                  * valid buffer lengths */
                 self.blocksize = 1;
             }
+
+            if self.mech == CKM_AES_GCM {
+                if self.params.aad.len() > 0 {
+                    let mut outl: c_int = 0;
+                    if unsafe {
+                        EVP_DecryptUpdate(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            std::ptr::null_mut(),
+                            &mut outl,
+                            self.params.aad.as_ptr(),
+                            self.params.aad.len() as c_int,
+                        )
+                    } != 1
+                    {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                }
+                if self.params.tagbits > 0 {
+                    let taglen = (self.params.tagbits + 7) / 8;
+                    if unsafe {
+                        let cipher_buf = cipher
+                            .as_ptr()
+                            .offset((cipher.len() - taglen) as isize);
+                        EVP_CIPHER_CTX_ctrl(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            EVP_CTRL_AEAD_SET_TAG as c_int,
+                            taglen as c_int,
+                            cipher_buf as *mut c_void,
+                        )
+                    } != 1
+                    {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                }
+            }
         }
 
         let plain_ulen = unsafe { *plain_len } as usize;
         let outblocks = cipher.len() / self.blocksize;
         let outlen = outblocks * self.blocksize;
+        let mut retlen = outlen;
+        if self.mech == CKM_AES_GCM {
+            retlen -= (self.params.tagbits + 7) / 8;
+        }
         if plain.is_null() {
             unsafe {
-                *plain_len = outlen as CK_ULONG;
+                *plain_len = retlen as CK_ULONG;
             }
             return Ok(());
         } else {
@@ -893,7 +1097,7 @@ impl Decryption for AesOperation {
                 self.finalized = true;
                 return err_rv!(CKR_DATA_LEN_RANGE);
             }
-            if plain_ulen < outlen {
+            if plain_ulen < retlen {
                 /* This is the only, non-fatal error */
                 return err_rv!(CKR_BUFFER_TOO_SMALL);
             }
@@ -909,19 +1113,41 @@ impl Decryption for AesOperation {
             self.blockctr += reqblocks;
         }
 
-        let mut outl: std::os::raw::c_int = 0;
+        let mut outl: c_int = 0;
+        let mut cipher_len = cipher.len();
+        if self.mech == CKM_AES_GCM {
+            cipher_len -= (self.params.tagbits + 7) / 8;
+        }
         if unsafe {
             EVP_DecryptUpdate(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),
                 plain,
                 &mut outl,
                 cipher.as_ptr(),
-                cipher.len() as std::os::raw::c_int,
+                cipher_len as c_int,
             )
         } != 1
         {
             self.finalized = true;
             return err_rv!(CKR_DEVICE_ERROR);
+        }
+        if self.mech == CKM_AES_GCM {
+            let mut foutl: c_int = 0;
+            if unsafe {
+                EVP_DecryptFinal_ex(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    &mut foutl,
+                )
+            } != 1
+            {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+            if foutl != 0 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
         }
         unsafe {
             *plain_len = outl as CK_ULONG;
@@ -998,7 +1224,7 @@ impl Decryption for AesOperation {
             self.finalized = true;
         }
 
-        let mut outl: std::os::raw::c_int = 0;
+        let mut outl: c_int = 0;
         if unsafe {
             EVP_DecryptFinal_ex(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),
