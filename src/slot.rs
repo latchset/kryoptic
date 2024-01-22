@@ -31,7 +31,7 @@ impl Slot {
         if token.get_filename().len() > 0 {
             token.load()?;
         } else {
-            /* when no filenmae is provide we assume a memory only
+            /* when no filename is provided we assume a memory only
              * token that has no backing store */
             token.meminit();
         }

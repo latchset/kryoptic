@@ -366,7 +366,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         },
     }
 
-    /* will initialize a memory only token if filenam eis empty */
+    /* will initialize a memory only token if filename is empty */
     wstate.add_slot(slotnum, res_or_ret!(Slot::new(filename)))
 }
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
