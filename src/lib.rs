@@ -24,6 +24,7 @@ mod object;
 mod rng;
 mod session;
 mod slot;
+mod storage;
 mod token;
 
 use error::{KError, KResult};

@@ -4,9 +4,6 @@
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use serde::{Deserialize, Serialize};
-use serde_json;
-
 use super::aes;
 use super::attribute;
 use super::error;
@@ -16,6 +13,7 @@ use super::interface;
 use super::mechanism;
 use super::object;
 use super::rsa;
+use super::storage;
 
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
@@ -31,16 +29,6 @@ static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic                        ";
 static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonToken {
-    objects: Vec<JsonObject>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonObject {
-    attributes: serde_json::Map<String, serde_json::Value>,
-}
 
 #[derive(Debug, Clone)]
 struct LoginData {
@@ -122,6 +110,10 @@ impl TokenObjects {
         self.next_handle = 1;
     }
 
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
     fn get(&self, uid: &String) -> Option<&Object> {
         self.objects.get(uid)
     }
@@ -130,7 +122,7 @@ impl TokenObjects {
         self.objects.get_mut(uid)
     }
 
-    fn insert(&mut self, uid: String, obj: Object) {
+    pub fn insert(&mut self, uid: String, obj: Object) {
         self.objects.insert(uid, obj);
     }
 
@@ -196,50 +188,6 @@ impl TokenObjects {
         self.handles.insert(oh, uid);
     }
 
-    fn object_to_json(&self, o: &Object) -> JsonObject {
-        let mut jo = JsonObject {
-            attributes: serde_json::Map::new(),
-        };
-        for a in o.get_attributes() {
-            jo.attributes.insert(a.name(), a.json_value());
-        }
-        jo
-    }
-
-    fn to_json(&self) -> Vec<JsonObject> {
-        let mut jobjs = Vec::new();
-
-        for (_h, o) in &self.objects {
-            if !o.is_token() {
-                continue;
-            }
-            jobjs.push(self.object_to_json(o));
-        }
-        jobjs
-    }
-
-    fn from_json(&mut self, jobjs: &Vec<JsonObject>) -> KResult<()> {
-        for jo in jobjs {
-            let mut obj = Object::new();
-            let mut uid: String = String::new();
-            for (key, val) in &jo.attributes {
-                let attr = attribute::from_value(key.clone(), &val)?;
-                obj.set_attr(attr)?;
-                if key == "CKA_UNIQUE_ID" {
-                    uid = match val.as_str() {
-                        Some(s) => s.to_string(),
-                        None => return err_rv!(CKR_DEVICE_ERROR),
-                    }
-                }
-            }
-            if uid.len() == 0 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            self.objects.insert(uid, obj);
-        }
-        Ok(())
-    }
-
     fn clear_private_session_objects(&mut self) {
         let mut priv_uids = Vec::<String>::new();
         for (_, obj) in &self.objects {
@@ -283,11 +231,8 @@ impl TokenObjects {
         handle: CK_OBJECT_HANDLE,
     ) -> KResult<usize> {
         let obj = self.get_by_handle(handle)?;
-        let jo = self.object_to_json(obj);
-        match serde_json::to_string(&jo) {
-            Ok(js) => Ok(js.len()),
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
-        }
+        let jo = storage::JsonObject::from_object(obj);
+        jo.rough_size()
     }
 }
 
@@ -305,7 +250,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(filename: String) -> Token {
+    pub fn new(filename: String) -> KResult<Token> {
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
@@ -354,37 +299,34 @@ impl Token {
         hash::register(&mut token.mechanisms, &mut token.object_templates);
         hmac::register(&mut token.mechanisms, &mut token.object_templates);
 
-        token
+        /* when no filename is provided we assume a memory only
+         * token that has no backing store */
+        if token.filename.len() > 0 {
+            match storage::JsonToken::load(&token.filename) {
+                Ok(jt) => {
+                    jt.to_objects(&mut token.objects)?;
+                    token.info.flags |= CKF_TOKEN_INITIALIZED;
+                }
+                Err(err) => match err {
+                    KError::RvError(ref e) => {
+                        if e.rv != CKR_CRYPTOKI_NOT_INITIALIZED {
+                            /* empty file is legal but leaves the token uninitialized */
+                            return Err(err);
+                        }
+                    }
+                    _ => return Err(err),
+                },
+            }
+        } else {
+            token.memory_only = true;
+            token.info.flags &= !CKF_LOGIN_REQUIRED;
+            token.info.flags |= CKF_TOKEN_INITIALIZED;
+        }
+        Ok(token)
     }
 
     pub fn get_filename(&self) -> &String {
         &self.filename
-    }
-
-    pub fn load(&mut self) -> KResult<()> {
-        if self.is_initialized() {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        match std::fs::File::open(&self.filename) {
-            Ok(f) => {
-                match serde_json::from_reader::<std::fs::File, JsonToken>(f) {
-                    Ok(j) => self.objects.from_json(&j.objects)?,
-                    Err(e) => return Err(KError::JsonError(e)),
-                }
-            }
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => return Ok(()),
-                _ => return Err(KError::FileError(e)),
-            },
-        };
-        self.info.flags |= CKF_TOKEN_INITIALIZED;
-        Ok(())
-    }
-
-    pub fn meminit(&mut self) {
-        self.memory_only = true;
-        self.info.flags &= !CKF_LOGIN_REQUIRED;
-        self.info.flags |= CKF_TOKEN_INITIALIZED;
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -676,17 +618,8 @@ impl Token {
         if !self.dirty || self.memory_only {
             return Ok(());
         }
-        let token = JsonToken {
-            objects: self.objects.to_json(),
-        };
-        let j = match serde_json::to_string_pretty(&token) {
-            Ok(j) => j,
-            Err(e) => return Err(KError::JsonError(e)),
-        };
-        match std::fs::write(&self.filename, j) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(KError::FileError(e)),
-        }
+        let jt = storage::JsonToken::from_objects(&self.objects);
+        jt.save(&self.filename)
     }
 
     pub fn insert_object(

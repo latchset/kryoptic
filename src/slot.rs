@@ -27,14 +27,6 @@ pub struct Slot {
 
 impl Slot {
     pub fn new(filename: String) -> KResult<Slot> {
-        let mut token = Token::new(filename);
-        if token.get_filename().len() > 0 {
-            token.load()?;
-        } else {
-            /* when no filename is provided we assume a memory only
-             * token that has no backing store */
-            token.meminit();
-        }
         Ok(Slot {
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
@@ -43,7 +35,7 @@ impl Slot {
                 hardwareVersion: CK_VERSION { major: 0, minor: 0 },
                 firmwareVersion: CK_VERSION { major: 0, minor: 0 },
             },
-            token: RwLock::new(token),
+            token: RwLock::new(Token::new(filename)?),
             sessions: HashMap::new(),
         })
     }

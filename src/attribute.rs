@@ -1,9 +1,6 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use data_encoding::BASE64;
-use serde_json::{Number, Value};
-
 use super::error;
 use super::interface;
 
@@ -220,13 +217,6 @@ impl Attribute {
         }
         Ok(true)
     }
-    fn to_bool_value(&self) -> Value {
-        match self.to_bool() {
-            Ok(b) => Value::Bool(b),
-            Err(_) => Value::Null,
-        }
-    }
-
     pub fn to_ulong(&self) -> KResult<CK_ULONG> {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
@@ -237,13 +227,6 @@ impl Attribute {
         )
     }
 
-    fn to_ulong_value(&self) -> Value {
-        match self.to_ulong() {
-            Ok(l) => Value::Number(Number::from(l as u64)),
-            Err(_) => Value::Null,
-        }
-    }
-
     pub fn to_string(&self) -> KResult<String> {
         match std::str::from_utf8(&self.value) {
             Ok(s) => Ok(s.to_string()),
@@ -251,23 +234,8 @@ impl Attribute {
         }
     }
 
-    fn to_string_value(&self) -> Value {
-        match self.to_string() {
-            Ok(s) => Value::String(s),
-            Err(_) => self.to_b64_string_value(),
-        }
-    }
-
     pub fn to_bytes(&self) -> KResult<&Vec<u8>> {
         Ok(&self.value)
-    }
-
-    pub fn to_b64_string(&self) -> KResult<String> {
-        Ok(BASE64.encode(&self.value))
-    }
-
-    fn to_b64_string_value(&self) -> Value {
-        Value::String(BASE64.encode(&self.value))
     }
 
     pub fn to_date_string(&self) -> KResult<String> {
@@ -287,25 +255,6 @@ impl Attribute {
             char::from(self.value[7]),
         ];
         Ok(chars.iter().collect())
-    }
-
-    fn to_date_value(&self) -> Value {
-        match self.to_date_string() {
-            Ok(d) => Value::String(d),
-            Err(_) => Value::String(String::new()),
-        }
-    }
-
-    pub fn json_value(&self) -> serde_json::Value {
-        match self.attrtype {
-            AttrType::BoolType => self.to_bool_value(),
-            AttrType::NumType => self.to_ulong_value(),
-            AttrType::StringType => self.to_string_value(),
-            AttrType::BytesType => self.to_b64_string_value(),
-            AttrType::DateType => self.to_date_value(),
-            AttrType::IgnoreType => Value::Null,
-            AttrType::DenyType => Value::Null,
-        }
     }
 }
 
@@ -407,7 +356,7 @@ fn vec_to_date_validate(val: Vec<u8>) -> KResult<CK_DATE> {
     Ok(vec_to_date(val))
 }
 
-fn string_to_ck_date(date: &str) -> KResult<CK_DATE> {
+pub fn string_to_ck_date(date: &str) -> KResult<CK_DATE> {
     let s = date.as_bytes().to_vec();
     if s.len() != 10 {
         return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
@@ -443,56 +392,13 @@ pub fn from_ignore(t: CK_ULONG, _val: Option<()>) -> Attribute {
     }
 }
 
-pub fn from_value(s: String, v: &Value) -> KResult<Attribute> {
-    /* skips invalid types */
+pub fn attr_name_to_id_type(s: &String) -> KResult<(CK_ULONG, AttrType)> {
     for a in &ATTRMAP {
-        if a.name == &s {
-            match a.atype {
-                AttrType::BoolType => match v.as_bool() {
-                    Some(b) => return Ok(from_bool(a.id, b)),
-                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                },
-                AttrType::NumType => match v.as_u64() {
-                    Some(n) => return Ok(from_ulong(a.id, n as CK_ULONG)),
-                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                },
-                AttrType::StringType => match v.as_str() {
-                    Some(s) => return Ok(from_string(a.id, s.to_string())),
-                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                },
-                AttrType::BytesType => match v.as_str() {
-                    Some(s) => {
-                        let len = match BASE64.decode_len(s.len()) {
-                            Ok(l) => l,
-                            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-                        };
-                        let mut v = vec![0; len];
-                        match BASE64.decode_mut(s.as_bytes(), &mut v) {
-                            Ok(l) => {
-                                return Ok(from_bytes(a.id, v[0..l].to_vec()))
-                            }
-                            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-                        }
-                    }
-                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                },
-                AttrType::DateType => match v.as_str() {
-                    Some(s) => {
-                        if s.len() == 0 {
-                            /* special case for default empty value */
-                            return Ok(from_date_bytes(a.id, Vec::new()));
-                        } else {
-                            return Ok(from_date(a.id, string_to_ck_date(&s)?));
-                        }
-                    }
-                    None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                },
-                AttrType::DenyType => (),
-                AttrType::IgnoreType => (),
-            }
+        if a.name == s {
+            return Ok((a.id, a.atype));
         }
     }
-    err_not_found!(s)
+    err_not_found!(s.clone())
 }
 
 impl CK_ATTRIBUTE {
