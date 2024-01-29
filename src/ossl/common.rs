@@ -203,6 +203,50 @@ impl OsslParam {
         self.add_bn(key, val)
     }
 
+    pub fn add_utf8_string(
+        mut self,
+        key: *const c_char,
+        v: &Vec<u8>,
+    ) -> KResult<OsslParam> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let mut container = v.clone();
+        let param = unsafe {
+            OSSL_PARAM_construct_utf8_string(
+                key,
+                container.as_mut_ptr() as *mut i8,
+                0,
+            )
+        };
+        self.v.push(container);
+        self.p.push(param);
+        Ok(self)
+    }
+
+    pub fn add_octet_string(
+        mut self,
+        key: *const c_char,
+        v: &Vec<u8>,
+    ) -> KResult<OsslParam> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let mut container = v.clone();
+        let param = unsafe {
+            OSSL_PARAM_construct_octet_string(
+                key,
+                container.as_mut_ptr() as *mut std::os::raw::c_void,
+                container.len(),
+            )
+        };
+        self.v.push(container);
+        self.p.push(param);
+        Ok(self)
+    }
+
     pub fn add_size_t(
         mut self,
         key: *const c_char,
@@ -273,5 +317,45 @@ impl OsslParam {
             vec.set_len(len);
         }
         Ok(vec)
+    }
+
+    pub fn get_octet_string(&self, key: *const c_char) -> KResult<Vec<u8>> {
+        if !self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let p = unsafe { OSSL_PARAM_locate(self.ptr, key) };
+        if p.is_null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        // get length
+        let mut buf_len = 0;
+        let res = unsafe {
+            OSSL_PARAM_get_octet_string(
+                p,
+                std::ptr::null_mut(),
+                0,
+                &mut buf_len,
+            )
+        };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let mut octet = Vec::with_capacity(buf_len);
+        let buf_ptr = &mut octet.as_ptr();
+        let res = unsafe {
+            OSSL_PARAM_get_octet_string(
+                p,
+                buf_ptr as *mut _ as *mut *mut std::os::raw::c_void,
+                buf_len,
+                &mut buf_len,
+            )
+        };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        unsafe {
+            octet.set_len(buf_len);
+        }
+        Ok(octet)
     }
 }

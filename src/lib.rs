@@ -47,6 +47,7 @@ mod drbg;
 mod hash;
 mod hmac;
 mod rsa;
+mod ecc;
 
 /* Helper code */
 mod kasn1;
