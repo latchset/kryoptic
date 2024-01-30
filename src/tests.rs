@@ -1117,10 +1117,73 @@ fn test_get_mechs() {
     testdata.finalize();
 }
 
+fn get_test_data(
+    session: CK_SESSION_HANDLE,
+    name: &str,
+    data: &str,
+) -> Result<Vec<u8>, CK_RV> {
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![
+        make_attribute!(
+            CKA_APPLICATION,
+            CString::new(name).unwrap().into_raw(),
+            name.len()
+        ),
+        make_attribute!(
+            CKA_LABEL,
+            CString::new(data).unwrap().into_raw(),
+            data.len()
+        ),
+    ];
+    let mut ret = fn_find_objects_init(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return Err(ret);
+    }
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    if ret != CKR_OK {
+        return Err(ret);
+    }
+    ret = fn_find_objects_final(session);
+    if ret != CKR_OK {
+        return Err(ret);
+    }
+
+    /* get value */
+    template.clear();
+    template.push(make_attribute!(CKA_VALUE, std::ptr::null_mut(), 0));
+    ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return Err(ret);
+    }
+
+    let mut value = vec![0; template[0].ulValueLen as usize];
+    template[0].pValue = value.as_mut_ptr() as CK_VOID_PTR;
+    ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return Err(ret);
+    }
+
+    Ok(value)
+}
+
 #[test]
 fn test_aes_operations() {
     let mut testdata = TestData::new("testdata/test_aes_operations.json");
-    testdata.setup_db();
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -1160,11 +1223,12 @@ fn test_aes_operations() {
     let mut class = CKO_SECRET_KEY;
     let mut len: CK_ULONG = 16;
     let mut truebool = CK_TRUE;
+    let mut falsebool = CK_FALSE;
     let mut template = vec![
         make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
         make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
         make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &mut falsebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
     ];
@@ -1622,6 +1686,150 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
         assert_eq!(dec_len as usize, data.len());
         assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
+    /* Some sample test vectors taken from:
+     * https://github.com/pyca/cryptography/blob/main/vectors/cryptography_vectors/ciphers/AES
+     */
+
+    {
+        /* ECB */
+        let testname = "ECBMMT256 DECRYPT 0";
+        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let mut ciphertext =
+            match get_test_data(session, testname, "ciphertext") {
+                Ok(vec) => vec,
+                Err(ret) => return assert_eq!(ret, CKR_OK),
+            };
+        let plaintext = match get_test_data(session, testname, "plaintext") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+
+        /* encrypt init */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_ECB,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        ret = fn_decrypt_init(session, &mut mechanism, key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut dec = vec![0u8; plaintext.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        ret = fn_decrypt(
+            session,
+            ciphertext.as_mut_ptr(),
+            ciphertext.len() as CK_ULONG,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len, dec.len() as CK_ULONG);
+        assert_eq!(&dec, &plaintext);
+    }
+
+    {
+        /* CBC */
+
+        let testname = "CBCMMT128 ENCRYPT 9";
+        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let mut iv = match get_test_data(session, testname, "iv") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let mut plaintext = match get_test_data(session, testname, "plaintext")
+        {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let ciphertext = match get_test_data(session, testname, "ciphertext") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CBC,
+            pParameter: iv.as_mut_ptr() as CK_VOID_PTR,
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut enc = vec![0u8; ciphertext.len()];
+        let mut enc_len = enc.len() as CK_ULONG;
+        ret = fn_encrypt(
+            session,
+            plaintext.as_mut_ptr(),
+            plaintext.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, enc.len() as CK_ULONG);
+        assert_eq!(&enc, &ciphertext);
+    }
+
+    {
+        /* GCM */
+
+        let testname = "gcmDecrypt128 96,104,128,128 0";
+        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let mut iv = match get_test_data(session, testname, "IV") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let mut aad = match get_test_data(session, testname, "AAD") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let tag = match get_test_data(session, testname, "Tag") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let ct = match get_test_data(session, testname, "CT") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let plaintext = match get_test_data(session, testname, "PT") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+
+        let mut param = CK_GCM_PARAMS {
+            pIv: iv.as_mut_ptr(),
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvBits: (iv.len() * 8) as CK_ULONG,
+            pAAD: aad.as_mut_ptr(),
+            ulAADLen: aad.len() as CK_ULONG,
+            ulTagBits: (tag.len() * 8) as CK_ULONG,
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: &mut param as *mut CK_GCM_PARAMS as CK_VOID_PTR,
+            ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>() as CK_ULONG,
+        };
+
+        ret = fn_decrypt_init(session, &mut mechanism, key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut ciphertext = [&ct[..], &tag[..]].concat();
+
+        let mut dec = vec![0u8; plaintext.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        ret = fn_decrypt(
+            session,
+            ciphertext.as_mut_ptr(),
+            ciphertext.len() as CK_ULONG,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len, dec.len() as CK_ULONG);
+        assert_eq!(&dec, &plaintext);
     }
 
     ret = fn_close_session(session);
@@ -2188,7 +2396,12 @@ struct TestCase {
     result: Vec<u8>,
 }
 
-/* name in CKA_APPLICATION, value in CKA_VALUE, result in CKA_OBJECT_ID */
+/* name in CKA_APPLICATION
+ * value in CKA_VALUE
+ * result in CKA_OBJECT_ID
+ * additional value (like an IV) in CKA_LABEL as a Base64 encoded text
+ */
+
 fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let mut template = vec![make_attribute!(

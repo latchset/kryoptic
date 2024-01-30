@@ -927,8 +927,10 @@ impl Decryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        let cipher_buf = cipher.as_ptr();
+        let mut cipher_len = cipher.len();
         if self.params.ctsmode != 0 {
-            if cipher.len() < AES_BLOCK_SIZE {
+            if cipher_len < AES_BLOCK_SIZE {
                 self.finalized = true;
                 return err_rv!(CKR_DATA_LEN_RANGE);
             }
@@ -1061,15 +1063,18 @@ impl Decryption for AesOperation {
                 }
                 if self.params.tagbits > 0 {
                     let taglen = (self.params.tagbits + 7) / 8;
+                    if taglen >= cipher_len {
+                        self.finalized = true;
+                        return err_rv!(CKR_DATA_LEN_RANGE);
+                    }
                     if unsafe {
-                        let cipher_buf = cipher
-                            .as_ptr()
-                            .offset((cipher.len() - taglen) as isize);
+                        cipher_len -= taglen;
+                        let cipher_tag = cipher_buf.offset(cipher_len as isize);
                         EVP_CIPHER_CTX_ctrl(
                             self.ctx.as_mut().unwrap().as_mut_ptr(),
                             EVP_CTRL_AEAD_SET_TAG as c_int,
                             taglen as c_int,
-                            cipher_buf as *mut c_void,
+                            cipher_tag as *mut c_void,
                         )
                     } != 1
                     {
@@ -1081,23 +1086,19 @@ impl Decryption for AesOperation {
         }
 
         let plain_ulen = unsafe { *plain_len } as usize;
-        let outblocks = cipher.len() / self.blocksize;
+        let outblocks = cipher_len / self.blocksize;
         let outlen = outblocks * self.blocksize;
-        let mut retlen = outlen;
-        if self.mech == CKM_AES_GCM {
-            retlen -= (self.params.tagbits + 7) / 8;
-        }
         if plain.is_null() {
             unsafe {
-                *plain_len = retlen as CK_ULONG;
+                *plain_len = outlen as CK_ULONG;
             }
             return Ok(());
         } else {
-            if !self.params.pad && cipher.len() != outlen {
+            if !self.params.pad && cipher_len != outlen {
                 self.finalized = true;
                 return err_rv!(CKR_DATA_LEN_RANGE);
             }
-            if plain_ulen < retlen {
+            if plain_ulen < outlen {
                 /* This is the only, non-fatal error */
                 return err_rv!(CKR_BUFFER_TOO_SMALL);
             }
@@ -1105,7 +1106,7 @@ impl Decryption for AesOperation {
 
         if self.params.maxblocks > 0 {
             let reqblocks =
-                ((cipher.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) as u128;
+                ((cipher_len + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) as u128;
             if self.blockctr + reqblocks > self.params.maxblocks {
                 self.finalized = true;
                 return err_rv!(CKR_DATA_LEN_RANGE);
@@ -1114,16 +1115,12 @@ impl Decryption for AesOperation {
         }
 
         let mut outl: c_int = 0;
-        let mut cipher_len = cipher.len();
-        if self.mech == CKM_AES_GCM {
-            cipher_len -= (self.params.tagbits + 7) / 8;
-        }
         if unsafe {
             EVP_DecryptUpdate(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),
                 plain,
                 &mut outl,
-                cipher.as_ptr(),
+                cipher_buf,
                 cipher_len as c_int,
             )
         } != 1
