@@ -182,4 +182,56 @@
         "CKA_TOKEN": true,
         "CKA_VALUE": "Lvuu3+w8/krDLyAfpQ=="
     }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "104",
+        "CKA_CLASS": 4,
+        "CKA_KEY_TYPE": 31,
+        "CKA_ID": "YWVzLTE5Mi1jdHIgRU5DUllQVCAy",
+        "CKA_LABEL": "aes-192-ctr ENCRYPT 2",
+        "CKA_ENCRYPT": true,
+        "CKA_EXTRACTABLE": false,
+        "CKA_DESTROYABLE": false,
+        "CKA_PRIVATE": true,
+        "CKA_SENSITIVE": true,
+        "CKA_VALUE": "Ar85HujssVm5WWF7CWUnm/WbYKeG0+D+",
+        "CKA_TOKEN": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "1040",
+        "CKA_APPLICATION": "aes-192-ctr ENCRYPT 2",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "iv",
+        "CKA_MODIFIABLE": false,
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "AAe9/Vy9YCeNzAkSAAAAAQ=="
+    }
+
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "1041",
+        "CKA_APPLICATION": "aes-192-ctr ENCRYPT 2",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "plaintext",
+        "CKA_MODIFIABLE": false,
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIj"
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "1042",
+        "CKA_APPLICATION": "aes-192-ctr ENCRYPT 2",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "ciphertext",
+        "CKA_MODIFIABLE": false,
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "lok/xV5cci9UC33R3ffnWNKIvJXGkWWIRTbIEWYvIYir7gk1"
+    }
 }]}

@@ -1832,6 +1832,54 @@ fn test_aes_operations() {
         assert_eq!(&dec, &plaintext);
     }
 
+    {
+        /* CTR */
+        let testname = "aes-192-ctr ENCRYPT 2";
+        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let iv = match get_test_data(session, testname, "iv") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let mut plaintext = match get_test_data(session, testname, "plaintext")
+        {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let ciphertext = match get_test_data(session, testname, "ciphertext") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+
+        let mut param = CK_AES_CTR_PARAMS {
+            ulCounterBits: 32,
+            cb: [0u8; 16],
+        };
+        param.cb.copy_from_slice(iv.as_slice());
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CTR,
+            pParameter: &mut param as *mut CK_AES_CTR_PARAMS as CK_VOID_PTR,
+            ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
+                as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut enc = vec![0u8; ciphertext.len()];
+        let mut enc_len = enc.len() as CK_ULONG;
+        ret = fn_encrypt(
+            session,
+            plaintext.as_mut_ptr(),
+            plaintext.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, enc.len() as CK_ULONG);
+        assert_eq!(&enc, &ciphertext);
+    }
+
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
