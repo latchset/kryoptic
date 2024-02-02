@@ -9,7 +9,7 @@ use super::interface;
 use super::object;
 use error::{KError, KResult};
 use interface::*;
-use object::Object;
+use object::{Object, ObjectTemplate};
 
 use std::fmt::Debug;
 
@@ -71,6 +71,7 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &object::Object,
         _: CK_BYTE_PTR,
         _: CK_ULONG_PTR,
+        _: &Box<dyn ObjectTemplate>,
     ) -> KResult<()> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
@@ -81,6 +82,7 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &object::Object,
         _: &[u8],
         _: &[CK_ATTRIBUTE],
+        _: &Box<dyn ObjectTemplate>,
     ) -> KResult<Object> {
         err_rv!(CKR_MECHANISM_INVALID)
     }

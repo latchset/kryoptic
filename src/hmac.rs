@@ -117,7 +117,7 @@ impl Mechanism for HMACMechanism {
     }
 }
 
-pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
     let regset = [
         (
             CKM_SHA_1,
@@ -221,6 +221,22 @@ pub fn register(mechs: &mut Mechanisms, _ot: &mut ObjectTemplates) {
             Box::new(object::GenericSecretKeyMechanism::new(rs.4)),
         );
     }
+    ot.add_template(
+        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA_1_HMAC),
+        &object::get_generic_secret_template(),
+    );
+    ot.add_template(
+        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA256_HMAC),
+        &object::get_generic_secret_template(),
+    );
+    ot.add_template(
+        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA384_HMAC),
+        &object::get_generic_secret_template(),
+    );
+    ot.add_template(
+        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA512_HMAC),
+        &object::get_generic_secret_template(),
+    );
 }
 
 /* HMAC spec From FIPS 198-1 */

@@ -800,4 +800,28 @@ impl Token {
     ) -> KResult<&Box<dyn mechanism::Mechanism>> {
         self.mechanisms.get(mech_type)
     }
+
+    pub fn get_obj_template(
+        &self,
+        obj: &Object,
+    ) -> KResult<&Box<dyn object::ObjectTemplate>> {
+        self.object_templates.get_object_template(obj)
+    }
+
+    pub fn get_obj_template_from_key_template(
+        &self,
+        attrs: &[CK_ATTRIBUTE],
+    ) -> KResult<&Box<dyn object::ObjectTemplate>> {
+        let class = match attrs.iter().position(|x| x.type_ == CKA_CLASS) {
+            Some(idx) => attrs[idx].to_ulong()?,
+            None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+        };
+        let key_type = match attrs.iter().position(|x| x.type_ == CKA_KEY_TYPE)
+        {
+            Some(idx) => attrs[idx].to_ulong()?,
+            None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+        };
+        self.object_templates
+            .get_template(object::ObjectType::new(class, key_type))
+    }
 }

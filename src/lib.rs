@@ -1563,27 +1563,99 @@ extern "C" fn fn_generate_key_pair(
 }
 
 extern "C" fn fn_wrap_key(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _wrapping_key: CK_OBJECT_HANDLE,
-    _key: CK_OBJECT_HANDLE,
-    _wrapped_key: CK_BYTE_PTR,
-    _pul_wrapped_key_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    wrapping_key: CK_OBJECT_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    wrapped_key: CK_BYTE_PTR,
+    pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let token = res_or_ret!(rstate.get_token_from_slot(session.get_slot_id()));
+    let kobj = res_or_ret!(token.get_object_by_handle(key, true));
+    let obj_template = res_or_ret!(token.get_obj_template(kobj));
+    let mech = res_or_ret!(token.get_mech(ck_mech.mechanism));
+    if mech.info().flags & CKF_WRAP != CKF_WRAP {
+        return CKR_MECHANISM_INVALID;
+    }
+    let wkobj = res_or_ret!(token.get_object_by_handle(wrapping_key, true));
+
+    /* key checks */
+    if !res_or_ret!(wkobj.get_attr_as_bool(CKA_WRAP)) {
+        return CKR_WRAPPING_KEY_HANDLE_INVALID;
+    }
+    let require_trusted =
+        res_or_ret!(kobj.get_attr_as_bool(CKA_WRAP_WITH_TRUSTED));
+    if require_trusted {
+        if !res_or_ret!(wkobj.get_attr_as_bool(CKA_TRUSTED)) {
+            return CKR_WRAPPING_KEY_HANDLE_INVALID;
+        }
+    }
+
+    ret_to_rv!(mech.wrap_key(
+        ck_mech,
+        wkobj,
+        kobj,
+        wrapped_key,
+        pul_wrapped_key_len,
+        obj_template
+    ))
 }
+
 extern "C" fn fn_unwrap_key(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _unwrapping_key: CK_OBJECT_HANDLE,
-    _wrapped_key: CK_BYTE_PTR,
-    _wrapped_key_len: CK_ULONG,
-    _template: CK_ATTRIBUTE_PTR,
-    _attribute_count: CK_ULONG,
-    _ph_key: CK_OBJECT_HANDLE_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    unwrapping_key: CK_OBJECT_HANDLE,
+    wrapped_key: CK_BYTE_PTR,
+    wrapped_key_len: CK_ULONG,
+    template: CK_ATTRIBUTE_PTR,
+    attribute_count: CK_ULONG,
+    key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts_mut(template, attribute_count as usize)
+    };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(&*tmpl);
+    }
+    let mut token =
+        res_or_ret!(rstate.get_token_from_slot_mut(session.get_slot_id()));
+    let kobj = res_or_ret!(token.get_object_by_handle(unwrapping_key, true));
+    let obj_template =
+        res_or_ret!(token.get_obj_template_from_key_template(tmpl));
+    let data: &[u8] = unsafe {
+        std::slice::from_raw_parts(wrapped_key, wrapped_key_len as usize)
+    };
+    let mech = res_or_ret!(token.get_mech(ck_mech.mechanism));
+    if mech.info().flags & CKF_WRAP != CKF_WRAP {
+        return CKR_MECHANISM_INVALID;
+    }
+
+    /* key checks */
+    if !res_or_ret!(kobj.get_attr_as_bool(CKA_UNWRAP)) {
+        return CKR_WRAPPING_KEY_HANDLE_INVALID;
+    }
+
+    let result = mech.unwrap_key(ck_mech, kobj, data, tmpl, obj_template);
+    match result {
+        Ok(obj) => {
+            let kh = res_or_ret!(token.insert_object(s_handle, obj));
+            unsafe {
+                core::ptr::write(key_handle as *mut _, kh);
+            }
+            CKR_OK
+        }
+        Err(e) => err_to_rv!(e),
+    }
 }
+
 extern "C" fn fn_derive_key(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,

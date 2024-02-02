@@ -84,7 +84,7 @@ impl AesKeyTemplate {
 
 impl ObjectTemplate for AesKeyTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template, false)?;
+        let obj = self.default_object_create(template)?;
 
         let val = obj.get_attr_as_bytes(CKA_VALUE)?;
         check_key_len(val.len())?;
@@ -106,6 +106,13 @@ impl CommonKeyTemplate for AesKeyTemplate {
 impl SecretKeyTemplate for AesKeyTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
+    }
+
+    fn default_object_unwrap(
+        &self,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        ObjectTemplate::default_object_unwrap(self, template)
     }
 }
 
@@ -160,7 +167,7 @@ impl Mechanism for AesMechanism {
         if mech.mechanism != CKM_AES_KEY_GEN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        let mut key = AES_KEY_TEMPLATE.default_object_create(template, true)?;
+        let mut key = AES_KEY_TEMPLATE.default_object_generate(template)?;
         if !key.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_SECRET_KEY,
@@ -196,21 +203,19 @@ impl Mechanism for AesMechanism {
         key: &Object,
         data: CK_BYTE_PTR,
         data_len: CK_ULONG_PTR,
+        key_template: &Box<dyn ObjectTemplate>,
     ) -> KResult<()> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(wrapping_key, CKA_WRAP) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-        /* FIXME: move to token/lib wrapper */
-        match check_key_object(key, CKA_EXTRACTABLE) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-        /* FIXME: deal with CKA_WRAP_WITH_TRUSTED */
-        AesOperation::wrap(mech, wrapping_key, key, data, data_len)
+
+        AesOperation::wrap(
+            mech,
+            wrapping_key,
+            key_template.export_for_wrapping(key)?,
+            data,
+            data_len,
+        )
     }
 
     fn unwrap_key(
@@ -219,42 +224,13 @@ impl Mechanism for AesMechanism {
         wrapping_key: &Object,
         data: &[u8],
         template: &[CK_ATTRIBUTE],
+        key_template: &Box<dyn ObjectTemplate>,
     ) -> KResult<Object> {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(wrapping_key, CKA_UNWRAP) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-        let value = AesOperation::unwrap(mech, wrapping_key, data)?;
-
-        check_key_len(value.len())?;
-
-        let mut key = AES_KEY_TEMPLATE.default_object_create(template, true)?;
-        if !key.check_or_set_attr(attribute::from_ulong(
-            CKA_CLASS,
-            CKO_SECRET_KEY,
-        ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
-        }
-        if !key
-            .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?
-        {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
-        }
-
-        match key.get_attr_as_ulong(CKA_VALUE_LEN) {
-            Ok(len) => {
-                if len as usize != value.len() {
-                    return err_rv!(CKR_KEY_SIZE_RANGE);
-                }
-            }
-            Err(_) => (),
-        }
-        key.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
-
-        Ok(key)
+        let keydata = AesOperation::unwrap(mech, wrapping_key, data)?;
+        key_template.import_from_wrapped(keydata, template)
     }
 }
 
@@ -385,7 +361,10 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         }),
     );
 
-    ot.add_template(ObjectType::AesKey, &AES_KEY_TEMPLATE);
+    ot.add_template(
+        ObjectType::new(CKO_SECRET_KEY, CKK_AES),
+        &AES_KEY_TEMPLATE,
+    );
 }
 
 #[cfg(feature = "fips")]

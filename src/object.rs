@@ -270,21 +270,44 @@ pub trait ObjectTemplate: Debug + Send + Sync {
     fn default_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
-        generate: bool,
+    ) -> KResult<Object> {
+        self.internal_object_create(
+            template,
+            OAFlags::UnsettableOnCreate,
+            OAFlags::RequiredOnCreate,
+        )
+    }
+
+    fn default_object_generate(
+        &self,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        self.internal_object_create(
+            template,
+            OAFlags::UnsettableOnGenerate,
+            OAFlags::RequiredOnGenerate,
+        )
+    }
+
+    fn default_object_unwrap(
+        &self,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        self.internal_object_create(
+            template,
+            OAFlags::UnsettableOnUnwrap,
+            OAFlags::RequiredOnCreate,
+        )
+    }
+
+    fn internal_object_create(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        unsettable_flags: OAFlags,
+        required_flags: OAFlags,
     ) -> KResult<Object> {
         let attributes = self.get_attributes();
         let mut obj = Object::new();
-
-        let unsettable_flags = if generate {
-            OAFlags::UnsettableOnGenerate
-        } else {
-            OAFlags::UnsettableOnCreate
-        };
-        let required_flags = if generate {
-            OAFlags::RequiredOnGenerate
-        } else {
-            OAFlags::RequiredOnCreate
-        };
 
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
@@ -393,6 +416,18 @@ pub trait ObjectTemplate: Debug + Send + Sync {
 
         Ok(obj)
     }
+
+    fn export_for_wrapping(&self, _obj: &Object) -> KResult<Vec<u8>> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
+
+    fn import_from_wrapped(
+        &self,
+        mut _data: Vec<u8>,
+        _template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
 }
 
 /* pkcs11-spec-v3.1 4.5 Data Objects */
@@ -418,7 +453,7 @@ impl DataTemplate {
 
 impl ObjectTemplate for DataTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        self.default_object_create(template, false)
+        self.default_object_create(template)
     }
 
     fn copy(
@@ -515,7 +550,7 @@ impl CertTemplate for X509Template {
 
 impl ObjectTemplate for X509Template {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let mut obj = self.default_object_create(template, false)?;
+        let mut obj = self.default_object_create(template)?;
 
         let ret = self.basic_cert_object_create_checks(&mut obj);
         if ret != CKR_OK {
@@ -629,6 +664,18 @@ pub trait PrivKeyTemplate {
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
+
+    fn export_for_wrapping(&self, _obj: &Object) -> KResult<Vec<u8>> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
+
+    fn import_from_wrapped(
+        &self,
+        mut _data: Vec<u8>,
+        _template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
 }
 
 /* pkcs11-spec-v3.1 4.10 Secre key objects */
@@ -655,6 +702,43 @@ pub trait SecretKeyTemplate {
     }
 
     fn get_attributes(&self) -> &Vec<ObjectAttr>;
+
+    fn export_for_wrapping(&self, obj: &Object) -> KResult<Vec<u8>> {
+        if !obj.is_extractable() {
+            return err_rv!(CKR_KEY_UNEXTRACTABLE);
+        }
+        match obj.get_attr_as_bytes(CKA_VALUE) {
+            Ok(v) => Ok(v.clone()),
+            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+        }
+    }
+
+    fn import_from_wrapped(
+        &self,
+        mut data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let mut attrs = template.to_vec();
+        match attrs.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
+            Some(idx) => {
+                let len = attrs[idx].to_ulong()?;
+                if (len as usize) < data.len() {
+                    unsafe { data.set_len(len as usize) };
+                }
+                if (len as usize) > data.len() {
+                    return err_rv!(CKR_KEY_SIZE_RANGE);
+                }
+                attrs[idx] = CK_ATTRIBUTE::from_slice(CKA_VALUE, &data);
+            }
+            None => attrs.push(CK_ATTRIBUTE::from_slice(CKA_VALUE, &data)),
+        }
+        self.default_object_unwrap(template)
+    }
+
+    fn default_object_unwrap(
+        &self,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object>;
 }
 
 /* pkcs11-spec-v3.1 6.8 Generic secret key */
@@ -694,7 +778,7 @@ impl GenericSecretKeyTemplate {
 
 impl ObjectTemplate for GenericSecretKeyTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template, false)?;
+        let obj = self.default_object_create(template)?;
 
         bytes_attr_not_empty!(obj; CKA_VALUE);
 
@@ -715,6 +799,13 @@ impl CommonKeyTemplate for GenericSecretKeyTemplate {
 impl SecretKeyTemplate for GenericSecretKeyTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
+    }
+
+    fn default_object_unwrap(
+        &self,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        ObjectTemplate::default_object_unwrap(self, template)
     }
 }
 
@@ -751,7 +842,7 @@ impl Mechanism for GenericSecretKeyMechanism {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         let mut key =
-            GENERIC_SECRET_TEMPLATE.default_object_create(template, true)?;
+            GENERIC_SECRET_TEMPLATE.default_object_generate(template)?;
         if !key.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_SECRET_KEY,
@@ -782,13 +873,18 @@ impl Mechanism for GenericSecretKeyMechanism {
 }
 
 #[derive(Debug, Eq, Hash, PartialEq)]
-pub enum ObjectType {
-    DataObj,
-    X509CertObj,
-    RSAPubKey,
-    RSAPrivKey,
-    GenericSecretKey,
-    AesKey,
+pub struct ObjectType {
+    class: CK_ULONG,
+    type_: CK_ULONG,
+}
+
+impl ObjectType {
+    pub fn new(class: CK_ULONG, type_: CK_ULONG) -> ObjectType {
+        ObjectType {
+            class: class,
+            type_: type_,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -805,13 +901,13 @@ impl ObjectTemplates {
 
     pub fn add_template(
         &mut self,
-        typ: ObjectType,
+        otype: ObjectType,
         templ: &'static Box<dyn ObjectTemplate>,
     ) {
-        self.templates.insert(typ, templ);
+        self.templates.insert(otype, templ);
     }
 
-    fn get_template(
+    pub fn get_template(
         &self,
         otype: ObjectType,
     ) -> KResult<&Box<dyn ObjectTemplate>> {
@@ -826,70 +922,31 @@ impl ObjectTemplates {
             Some(c) => c.to_ulong()?,
             None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
         };
-        match class {
-            CKO_DATA => {
-                self.get_template(ObjectType::DataObj)?.create(template)
-            }
+        let type_ = match class {
+            CKO_DATA => 0,
             CKO_CERTIFICATE => {
-                let ctype = match template
-                    .iter()
-                    .find(|a| a.type_ == CKA_CERTIFICATE_TYPE)
+                match template.iter().find(|a| a.type_ == CKA_CERTIFICATE_TYPE)
                 {
                     Some(c) => c.to_ulong()?,
                     None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-                };
-                match ctype {
-                    CKC_X_509 => self
-                        .get_template(ObjectType::X509CertObj)?
-                        .create(template),
-                    /* not supported yet */
-                    CKC_X_509_ATTR_CERT => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    /* not supported yet */
-                    CKC_WTLS => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                 }
             }
             CKO_PUBLIC_KEY => {
-                let ktype =
-                    match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
-                        Some(k) => k.to_ulong()?,
-                        None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-                    };
-                match ktype {
-                    CKK_RSA => self
-                        .get_template(ObjectType::RSAPubKey)?
-                        .create(template),
-                    _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
+                    Some(k) => k.to_ulong()?,
+                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
                 }
             }
             CKO_PRIVATE_KEY => {
-                let ktype =
-                    match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
-                        Some(k) => k.to_ulong()?,
-                        None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-                    };
-                match ktype {
-                    CKK_RSA => self
-                        .get_template(ObjectType::RSAPrivKey)?
-                        .create(template),
-                    _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
+                    Some(k) => k.to_ulong()?,
+                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
                 }
             }
             CKO_SECRET_KEY => {
-                let ktype =
-                    match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
-                        Some(k) => k.to_ulong()?,
-                        None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-                    };
-                match ktype {
-                    CKK_GENERIC_SECRET | CKK_SHA_1_HMAC | CKK_SHA256_HMAC
-                    | CKK_SHA384_HMAC | CKK_SHA512_HMAC => self
-                        .get_template(ObjectType::GenericSecretKey)?
-                        .create(template),
-                    CKK_AES => {
-                        self.get_template(ObjectType::AesKey)?.create(template)
-                    }
-                    _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
+                    Some(k) => k.to_ulong()?,
+                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
                 }
             }
             /* TODO:
@@ -897,62 +954,31 @@ impl ObjectTemplates {
              *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
              *  CKO_VENDOR_DEFINED
              */
-            _ => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-        }
+            _ => return err_rv!(CKR_DEVICE_ERROR),
+        };
+        self.get_template(ObjectType::new(class, type_))?
+            .create(template)
     }
 
-    fn get_object_template(
+    pub fn get_object_template(
         &self,
         obj: &Object,
     ) -> KResult<&Box<dyn ObjectTemplate>> {
-        match obj.get_attr_as_ulong(CKA_CLASS) {
-            Err(_) => err_rv!(CKR_DEVICE_ERROR),
-            Ok(class) => match class {
-                CKO_DATA => self.get_template(ObjectType::DataObj),
-                CKO_CERTIFICATE => match obj
-                    .get_attr_as_ulong(CKA_CERTIFICATE_TYPE)
-                {
-                    Err(_) => err_rv!(CKR_DEVICE_ERROR),
-                    Ok(ctype) => match ctype {
-                        CKC_X_509 => self.get_template(ObjectType::X509CertObj),
-                        /* not supported yet: CKC_X_509_ATTR_CERT, CKC_WTLS */
-                        _ => err_rv!(CKR_DEVICE_ERROR),
-                    },
-                },
-                CKO_PUBLIC_KEY => match obj.get_attr_as_ulong(CKA_KEY_TYPE) {
-                    Err(_) => err_rv!(CKR_DEVICE_ERROR),
-                    Ok(ktype) => match ktype {
-                        CKK_RSA => self.get_template(ObjectType::RSAPubKey),
-                        _ => err_rv!(CKR_DEVICE_ERROR),
-                    },
-                },
-                CKO_PRIVATE_KEY => match obj.get_attr_as_ulong(CKA_KEY_TYPE) {
-                    Err(_) => err_rv!(CKR_DEVICE_ERROR),
-                    Ok(ktype) => match ktype {
-                        CKK_RSA => self.get_template(ObjectType::RSAPrivKey),
-                        _ => err_rv!(CKR_DEVICE_ERROR),
-                    },
-                },
-                CKO_SECRET_KEY => match obj.get_attr_as_ulong(CKA_KEY_TYPE) {
-                    Err(_) => err_rv!(CKR_DEVICE_ERROR),
-                    Ok(ktype) => match ktype {
-                        CKK_GENERIC_SECRET | CKK_SHA_1_HMAC
-                        | CKK_SHA256_HMAC | CKK_SHA384_HMAC
-                        | CKK_SHA512_HMAC => {
-                            self.get_template(ObjectType::GenericSecretKey)
-                        }
-                        CKK_AES => self.get_template(ObjectType::AesKey),
-                        _ => err_rv!(CKR_DEVICE_ERROR),
-                    },
-                },
-                /* TODO:
-                 *  CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
-                 *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
-                 *  CKO_VENDOR_DEFINED
-                 */
-                _ => err_rv!(CKR_DEVICE_ERROR),
-            },
-        }
+        let class = obj.get_attr_as_ulong(CKA_CLASS)?;
+        let type_ = match class {
+            CKO_DATA => 0,
+            CKO_CERTIFICATE => obj.get_attr_as_ulong(CKA_CERTIFICATE_TYPE)?,
+            CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+                obj.get_attr_as_ulong(CKA_KEY_TYPE)?
+            }
+            /* TODO:
+             *  CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
+             *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
+             *  CKO_VENDOR_DEFINED
+             */
+            _ => return err_rv!(CKR_DEVICE_ERROR),
+        };
+        self.get_template(ObjectType::new(class, type_))
     }
 
     pub fn check_sensitive(
@@ -1114,13 +1140,23 @@ static X509_CERT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
 static GENERIC_SECRET_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
     Lazy::new(|| Box::new(GenericSecretKeyTemplate::new()));
 
+pub fn get_generic_secret_template() -> &'static Box<dyn ObjectTemplate> {
+    &GENERIC_SECRET_TEMPLATE
+}
+
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
     mechs.add_mechanism(
         CKM_GENERIC_SECRET_KEY_GEN,
         Box::new(GenericSecretKeyMechanism::new(CKK_GENERIC_SECRET)),
     );
 
-    ot.add_template(ObjectType::DataObj, &DATA_OBJECT_TEMPLATE);
-    ot.add_template(ObjectType::X509CertObj, &X509_CERT_TEMPLATE);
-    ot.add_template(ObjectType::GenericSecretKey, &GENERIC_SECRET_TEMPLATE);
+    ot.add_template(ObjectType::new(CKO_DATA, 0), &DATA_OBJECT_TEMPLATE);
+    ot.add_template(
+        ObjectType::new(CKO_CERTIFICATE, CKC_X_509),
+        &X509_CERT_TEMPLATE,
+    );
+    ot.add_template(
+        ObjectType::new(CKO_SECRET_KEY, CKK_GENERIC_SECRET),
+        &GENERIC_SECRET_TEMPLATE,
+    );
 }

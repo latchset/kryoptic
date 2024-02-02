@@ -2787,8 +2787,8 @@ fn test_signatures() {
 }
 
 #[test]
-fn test_keygen() {
-    let mut testdata = TestData::new("testdata/test_keygen.json");
+fn test_key() {
+    let mut testdata = TestData::new("testdata/test_key.json");
     testdata.setup_db();
 
     let mut args = testdata.make_init_args();
@@ -2825,10 +2825,13 @@ fn test_keygen() {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
     let mut class = CKO_SECRET_KEY;
-    let mut len: CK_ULONG = 64;
+    let mut len: CK_ULONG = 16;
+    let mut truebool = CK_TRUE;
     let mut template = vec![
         make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
         make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_WRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_UNWRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
     ];
 
     ret = fn_generate_key(
@@ -2850,19 +2853,27 @@ fn test_keygen() {
     let mut pubkey = CK_INVALID_HANDLE;
     let mut prikey = CK_INVALID_HANDLE;
 
-    let mut truebool = CK_TRUE;
     let mut len: CK_ULONG = 2048;
     let mut pub_template = vec![
         make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_MODULUS_BITS, &mut len as *mut _, CK_ULONG_SIZE),
     ];
+    let mut class = CKO_PRIVATE_KEY;
+    let mut ktype = CKK_RSA;
     let mut pri_template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
         make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_EXTRACTABLE,
+            &mut truebool as *mut _,
+            CK_BBOOL_SIZE
+        ),
     ];
 
     ret = fn_generate_key_pair(
@@ -2874,6 +2885,39 @@ fn test_keygen() {
         pri_template.len() as CK_ULONG,
         &mut pubkey,
         &mut prikey,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut wrapped = vec![0u8; 65536];
+    let mut wrapped_len = wrapped.len() as CK_ULONG;
+
+    /* Wrap RSA key in AES */
+    ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        handle,
+        prikey,
+        wrapped.as_mut_ptr(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut prikey2 = CK_INVALID_HANDLE;
+    ret = fn_unwrap_key(
+        session,
+        &mut mechanism,
+        handle,
+        wrapped.as_mut_ptr(),
+        wrapped_len,
+        pri_template.as_mut_ptr(),
+        pri_template.len() as CK_ULONG,
+        &mut prikey2,
     );
     assert_eq!(ret, CKR_OK);
 

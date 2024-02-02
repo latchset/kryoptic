@@ -476,4 +476,26 @@ impl CK_ATTRIBUTE {
             AttrType::IgnoreType => Ok(from_ignore(self.type_, None)),
         }
     }
+
+    pub fn from_slice<'a>(
+        type_: CK_ATTRIBUTE_TYPE,
+        value: &'a [u8],
+    ) -> CK_ATTRIBUTE {
+        CK_ATTRIBUTE {
+            type_: type_,
+            pValue: value.as_ptr() as *mut std::ffi::c_void,
+            ulValueLen: value.len() as CK_ULONG,
+        }
+    }
+
+    pub fn from_ulong<'a>(
+        type_: CK_ATTRIBUTE_TYPE,
+        value: &'a CK_ULONG,
+    ) -> CK_ATTRIBUTE {
+        CK_ATTRIBUTE {
+            type_: type_,
+            pValue: value as *const u64 as *mut std::ffi::c_void,
+            ulValueLen: std::mem::size_of::<CK_ULONG>() as CK_ULONG,
+        }
+    }
 }

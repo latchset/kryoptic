@@ -15,6 +15,7 @@ use object::{
     ObjectTemplates, ObjectType, PrivKeyTemplate, PubKeyTemplate,
 };
 
+use asn1;
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
@@ -47,7 +48,7 @@ impl RSAPubTemplate {
 
 impl ObjectTemplate for RSAPubTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template, false)?;
+        let obj = self.default_object_create(template)?;
 
         let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
             Ok(m) => m,
@@ -83,6 +84,29 @@ impl PubKeyTemplate for RSAPubTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
+}
+
+type Version = u64;
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct OtherPrimeInfo<'a> {
+    prime: asn1::BigUint<'a>,
+    exponent: asn1::BigUint<'a>,
+    coefficient: asn1::BigUint<'a>,
+}
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct RSAPrivateKey<'a> {
+    version: Version,
+    modulus: asn1::BigUint<'a>,
+    public_exponent: asn1::BigUint<'a>,
+    private_exponent: asn1::BigUint<'a>,
+    prime1: asn1::BigUint<'a>,
+    prime2: asn1::BigUint<'a>,
+    exponent1: asn1::BigUint<'a>,
+    exponent2: asn1::BigUint<'a>,
+    coefficient: asn1::BigUint<'a>,
+    other_prime_infos: Option<asn1::SequenceOf<'a, OtherPrimeInfo<'a>>>,
 }
 
 #[derive(Debug)]
@@ -125,9 +149,100 @@ impl RSAPrivTemplate {
     }
 }
 
+macro_rules! val_to_dermin {
+    ($vec:expr) => {{
+        if $vec[0] & 0x80 == 0x80 {
+            let mut v = Vec::with_capacity($vec.len() + 1);
+            v.push(0);
+            v.extend_from_slice($vec.as_slice());
+            v
+        } else {
+            $vec.clone()
+        }
+    }};
+}
+
+macro_rules! biguint_or_err {
+    ($vec:expr) => {{
+        match asn1::BigUint::new($vec.as_slice()) {
+            Some(v) => v,
+            None => {
+                return err_rv!(CKR_GENERAL_ERROR);
+            }
+        }
+    }};
+}
+
+struct DERMinRsaPkey {
+    modulus: Vec<u8>,
+    public_exponent: Vec<u8>,
+    private_exponent: Vec<u8>,
+    prime1: Vec<u8>,
+    prime2: Vec<u8>,
+    exponent1: Vec<u8>,
+    exponent2: Vec<u8>,
+    coefficient: Vec<u8>,
+}
+
+impl Drop for DERMinRsaPkey {
+    fn drop(&mut self) {
+        self.modulus.zeroize();
+        self.public_exponent.zeroize();
+        self.private_exponent.zeroize();
+        self.prime1.zeroize();
+        self.prime2.zeroize();
+        self.exponent1.zeroize();
+        self.exponent2.zeroize();
+        self.coefficient.zeroize();
+    }
+}
+
+impl DERMinRsaPkey {
+    pub fn new(
+        modulus: &Vec<u8>,
+        public_exponent: &Vec<u8>,
+        private_exponent: &Vec<u8>,
+        prime1: &Vec<u8>,
+        prime2: &Vec<u8>,
+        exponent1: &Vec<u8>,
+        exponent2: &Vec<u8>,
+        coefficient: &Vec<u8>,
+    ) -> DERMinRsaPkey {
+        DERMinRsaPkey {
+            modulus: val_to_dermin!(modulus),
+            public_exponent: val_to_dermin!(public_exponent),
+            private_exponent: val_to_dermin!(private_exponent),
+            prime1: val_to_dermin!(prime1),
+            prime2: val_to_dermin!(prime2),
+            exponent1: val_to_dermin!(exponent1),
+            exponent2: val_to_dermin!(exponent2),
+            coefficient: val_to_dermin!(coefficient),
+        }
+    }
+
+    pub fn to_asn1(&self) -> KResult<Vec<u8>> {
+        let pkey = RSAPrivateKey {
+            version: 0,
+            modulus: biguint_or_err!(self.modulus),
+            public_exponent: biguint_or_err!(self.public_exponent),
+            private_exponent: biguint_or_err!(self.private_exponent),
+            prime1: biguint_or_err!(self.prime1),
+            prime2: biguint_or_err!(self.prime2),
+            exponent1: biguint_or_err!(self.exponent1),
+            exponent2: biguint_or_err!(self.exponent2),
+            coefficient: biguint_or_err!(self.coefficient),
+            other_prime_infos: None,
+        };
+        match asn1::write_single(&pkey) {
+            Ok(x) => Ok(x),
+            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+}
+
 impl ObjectTemplate for RSAPrivTemplate {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let mut obj = self.default_object_create(template, false)?;
+        let mut obj = self.default_object_create(template)?;
 
         rsa_import(&mut obj)?;
 
@@ -136,6 +251,18 @@ impl ObjectTemplate for RSAPrivTemplate {
 
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
+    }
+
+    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+        PrivKeyTemplate::export_for_wrapping(self, key)
+    }
+
+    fn import_from_wrapped(
+        &self,
+        data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        PrivKeyTemplate::import_from_wrapped(self, data, template)
     }
 }
 
@@ -148,6 +275,89 @@ impl CommonKeyTemplate for RSAPrivTemplate {
 impl PrivKeyTemplate for RSAPrivTemplate {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
+    }
+
+    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+        check_key_object(key, false, CKA_EXTRACTABLE)?;
+
+        let pkey = DERMinRsaPkey::new(
+            key.get_attr_as_bytes(CKA_MODULUS)?,
+            key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
+            key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
+            key.get_attr_as_bytes(CKA_PRIME_1)?,
+            key.get_attr_as_bytes(CKA_PRIME_2)?,
+            key.get_attr_as_bytes(CKA_EXPONENT_1)?,
+            key.get_attr_as_bytes(CKA_EXPONENT_2)?,
+            key.get_attr_as_bytes(CKA_COEFFICIENT)?,
+        );
+
+        pkey.to_asn1()
+    }
+
+    fn import_from_wrapped(
+        &self,
+        data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let mut attrs = template.to_vec();
+        let class = CKO_PRIVATE_KEY;
+        let key_type = CKK_RSA;
+        let rsapkey = match asn1::parse_single::<RSAPrivateKey>(&data) {
+            Ok(k) => k,
+            Err(_) => {
+                return err_rv!(CKR_WRAPPED_KEY_INVALID);
+            }
+        };
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_MODULUS,
+            rsapkey.modulus.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_PUBLIC_EXPONENT,
+            rsapkey.public_exponent.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_PRIVATE_EXPONENT,
+            rsapkey.private_exponent.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_PRIME_1,
+            rsapkey.prime1.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_PRIME_2,
+            rsapkey.prime2.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_EXPONENT_1,
+            rsapkey.exponent1.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_EXPONENT_2,
+            rsapkey.exponent2.as_bytes(),
+        ));
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_COEFFICIENT,
+            rsapkey.coefficient.as_bytes(),
+        ));
+
+        if match attrs.iter().position(|x| x.type_ == CKA_CLASS) {
+            Some(idx) => attrs[idx].to_ulong()?,
+            None => CK_UNAVAILABLE_INFORMATION,
+        } != class
+        {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+
+        if match attrs.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
+            Some(idx) => attrs[idx].to_ulong()?,
+            None => CK_UNAVAILABLE_INFORMATION,
+        } != key_type
+        {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+
+        self.default_object_unwrap(&attrs)
     }
 }
 
@@ -267,7 +477,7 @@ impl Mechanism for RsaPKCSMechanism {
         prikey_template: &[CK_ATTRIBUTE],
     ) -> KResult<(Object, Object)> {
         let mut pubkey =
-            PUBLIC_KEY_TEMPLATE.default_object_create(pubkey_template, true)?;
+            PUBLIC_KEY_TEMPLATE.default_object_generate(pubkey_template)?;
         if !pubkey.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_PUBLIC_KEY,
@@ -295,11 +505,11 @@ impl Mechanism for RsaPKCSMechanism {
             }
         };
 
-        let mut privkey = PRIVATE_KEY_TEMPLATE
-            .default_object_create(prikey_template, true)?;
+        let mut privkey =
+            PRIVATE_KEY_TEMPLATE.default_object_generate(prikey_template)?;
         if !privkey.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
-            CKO_PUBLIC_KEY,
+            CKO_PRIVATE_KEY,
         ))? {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
@@ -386,8 +596,14 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         }),
     );
 
-    ot.add_template(ObjectType::RSAPubKey, &PUBLIC_KEY_TEMPLATE);
-    ot.add_template(ObjectType::RSAPrivKey, &PRIVATE_KEY_TEMPLATE);
+    ot.add_template(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
+        &PUBLIC_KEY_TEMPLATE,
+    );
+    ot.add_template(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_RSA),
+        &PRIVATE_KEY_TEMPLATE,
+    );
 }
 
 #[cfg(feature = "fips")]

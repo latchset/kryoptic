@@ -475,21 +475,60 @@ impl AesOperation {
     }
 
     fn wrap(
-        _mech: &CK_MECHANISM,
-        _wrapping_key: &Object,
-        _key: &Object,
-        _data: CK_BYTE_PTR,
-        _data_len: CK_ULONG_PTR,
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        mut keydata: Vec<u8>,
+        output: CK_BYTE_PTR,
+        output_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        return err_rv!(CKR_DEVICE_ERROR);
+        let mut op = match Self::encrypt_new(mech, wrapping_key) {
+            Ok(o) => o,
+            Err(e) => {
+                keydata.zeroize();
+                return Err(e);
+            }
+        };
+
+        match mech.mechanism {
+            CKM_AES_CBC | CKM_AES_ECB => {
+                /* non-padding block modes needs 0 padding for the input */
+                let pad = keydata.len() % AES_BLOCK_SIZE;
+                if pad != 0 {
+                    keydata.resize(keydata.len() + AES_BLOCK_SIZE - pad, 0);
+                }
+            }
+            _ => (),
+        }
+        let result = op.encrypt(&keydata, output, output_len);
+        keydata.zeroize();
+        result
     }
 
     fn unwrap(
-        _mech: &CK_MECHANISM,
-        _wrapping_key: &Object,
-        _data: &[u8],
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        data: &[u8],
     ) -> KResult<Vec<u8>> {
-        return err_rv!(CKR_DEVICE_ERROR);
+        let mut op = Self::decrypt_new(mech, wrapping_key)?;
+        let mut result = vec![0u8; data.len()];
+        let mut len = result.len() as CK_ULONG;
+        op.decrypt(data, result.as_mut_ptr(), &mut len)?;
+        match mech.mechanism {
+            CKM_AES_CBC | CKM_AES_ECB => {
+                /* non-padding block modes may have 0 padded the data,
+                 * strip trailing zeros or pkcs#8 encoded keys (ie RSA)
+                 * will fail to decode */
+                while len > 0 && result[(len - 1) as usize] == 0 {
+                    len -= 1;
+                }
+                if len == 0 {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+            }
+            _ => (),
+        }
+        unsafe { result.set_len(len as usize) };
+        Ok(result)
     }
 }
 
@@ -512,11 +551,11 @@ impl Encryption for AesOperation {
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if cipher.is_null() {
+            return self.encrypt_update(plain, cipher, cipher_len);
         }
         let clen: CK_ULONG = unsafe { *cipher_len };
         let mut outb: *mut u8 = cipher;
@@ -889,11 +928,11 @@ impl Decryption for AesOperation {
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
     ) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if plain.is_null() {
+            return self.decrypt_update(cipher, plain, plain_len);
         }
         let plen: CK_ULONG = unsafe { *plain_len };
         let mut outb: *mut u8 = plain;
