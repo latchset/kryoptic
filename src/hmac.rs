@@ -10,7 +10,7 @@ use super::object;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
-use object::{Object, ObjectTemplates};
+use object::{Object, ObjectFactories};
 use std::fmt::Debug;
 use zeroize::Zeroize;
 
@@ -117,7 +117,7 @@ impl Mechanism for HMACMechanism {
     }
 }
 
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     let regset = [
         (
             CKM_SHA_1,
@@ -221,21 +221,21 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
             Box::new(object::GenericSecretKeyMechanism::new(rs.4)),
         );
     }
-    ot.add_template(
+    ot.add_factory(
         object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA_1_HMAC),
-        &object::get_generic_secret_template(),
+        &object::get_generic_secret_factory(),
     );
-    ot.add_template(
+    ot.add_factory(
         object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA256_HMAC),
-        &object::get_generic_secret_template(),
+        &object::get_generic_secret_factory(),
     );
-    ot.add_template(
+    ot.add_factory(
         object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA384_HMAC),
-        &object::get_generic_secret_template(),
+        &object::get_generic_secret_factory(),
     );
-    ot.add_template(
+    ot.add_factory(
         object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA512_HMAC),
-        &object::get_generic_secret_template(),
+        &object::get_generic_secret_factory(),
     );
 }
 

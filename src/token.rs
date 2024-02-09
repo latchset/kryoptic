@@ -19,7 +19,7 @@ use super::{err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
 use mechanism::Mechanisms;
-use object::{Object, ObjectTemplates};
+use object::{Object, ObjectFactories};
 
 use std::collections::hash_map::Iter;
 
@@ -240,7 +240,7 @@ impl TokenObjects {
 pub struct Token {
     info: CK_TOKEN_INFO,
     filename: String,
-    object_templates: ObjectTemplates,
+    object_factories: ObjectFactories,
     mechanisms: Mechanisms,
     objects: TokenObjects,
     memory_only: bool,
@@ -273,7 +273,7 @@ impl Token {
                 utcTime: *b"0000000000000000",
             },
             filename: filename,
-            object_templates: ObjectTemplates::new(),
+            object_factories: ObjectFactories::new(),
             mechanisms: Mechanisms::new(),
             objects: TokenObjects::new(),
             so_login: LoginData {
@@ -292,12 +292,12 @@ impl Token {
             dirty: false,
         };
 
-        /* register mechanisms and templates */
-        object::register(&mut token.mechanisms, &mut token.object_templates);
-        aes::register(&mut token.mechanisms, &mut token.object_templates);
-        rsa::register(&mut token.mechanisms, &mut token.object_templates);
-        hash::register(&mut token.mechanisms, &mut token.object_templates);
-        hmac::register(&mut token.mechanisms, &mut token.object_templates);
+        /* register mechanisms and factories */
+        object::register(&mut token.mechanisms, &mut token.object_factories);
+        aes::register(&mut token.mechanisms, &mut token.object_factories);
+        rsa::register(&mut token.mechanisms, &mut token.object_factories);
+        hash::register(&mut token.mechanisms, &mut token.object_factories);
+        hmac::register(&mut token.mechanisms, &mut token.object_factories);
 
         /* when no filename is provided we assume a memory only
          * token that has no backing store */
@@ -656,7 +656,7 @@ impl Token {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
 
-        let object = self.object_templates.create(template)?;
+        let object = self.object_factories.create(template)?;
         self.insert_object(s_handle, object)
     }
 
@@ -682,7 +682,7 @@ impl Token {
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
         match self.get_object_by_handle(handle, true) {
-            Ok(o) => self.object_templates.get_object_attributes(o, template),
+            Ok(o) => self.object_factories.get_object_attributes(o, template),
             Err(e) => match e {
                 KError::RvError(e) => {
                     if e.rv == CKR_USER_NOT_LOGGED_IN {
@@ -705,7 +705,7 @@ impl Token {
             Ok(o) => o,
             Err(e) => return Err(e),
         };
-        self.object_templates.set_object_attributes(obj, template)?;
+        self.object_factories.set_object_attributes(obj, template)?;
         self.dirty = true;
         Ok(())
     }
@@ -746,7 +746,7 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
         let obj = self.objects.get_by_handle(o_handle)?;
-        let newobj = self.object_templates.copy(obj, template)?;
+        let newobj = self.object_factories.copy(obj, template)?;
         self.insert_object(s_handle, newobj)
     }
 
@@ -762,7 +762,7 @@ impl Token {
             }
 
             if o.is_sensitive() {
-                match self.object_templates.check_sensitive(o, template) {
+                match self.object_factories.check_sensitive(o, template) {
                     Err(_) => continue,
                     Ok(()) => (),
                 }
@@ -801,27 +801,27 @@ impl Token {
         self.mechanisms.get(mech_type)
     }
 
-    pub fn get_obj_template(
+    pub fn get_obj_factory(
         &self,
         obj: &Object,
-    ) -> KResult<&Box<dyn object::ObjectTemplate>> {
-        self.object_templates.get_object_template(obj)
+    ) -> KResult<&Box<dyn object::ObjectFactory>> {
+        self.object_factories.get_object_factory(obj)
     }
 
-    pub fn get_obj_template_from_key_template(
+    pub fn get_obj_factory_from_key_template(
         &self,
-        attrs: &[CK_ATTRIBUTE],
-    ) -> KResult<&Box<dyn object::ObjectTemplate>> {
-        let class = match attrs.iter().position(|x| x.type_ == CKA_CLASS) {
-            Some(idx) => attrs[idx].to_ulong()?,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<&Box<dyn object::ObjectFactory>> {
+        let class = match template.iter().position(|x| x.type_ == CKA_CLASS) {
+            Some(idx) => template[idx].to_ulong()?,
             None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
         };
-        let key_type = match attrs.iter().position(|x| x.type_ == CKA_KEY_TYPE)
-        {
-            Some(idx) => attrs[idx].to_ulong()?,
-            None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
-        };
-        self.object_templates
-            .get_template(object::ObjectType::new(class, key_type))
+        let key_type =
+            match template.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
+                Some(idx) => template[idx].to_ulong()?,
+                None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+            };
+        self.object_factories
+            .get_factory(object::ObjectType::new(class, key_type))
     }
 }

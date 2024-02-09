@@ -1576,7 +1576,7 @@ extern "C" fn fn_wrap_key(
     let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
     let token = res_or_ret!(rstate.get_token_from_slot(session.get_slot_id()));
     let kobj = res_or_ret!(token.get_object_by_handle(key, true));
-    let obj_template = res_or_ret!(token.get_obj_template(kobj));
+    let factory = res_or_ret!(token.get_obj_factory(kobj));
     let mech = res_or_ret!(token.get_mech(ck_mech.mechanism));
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return CKR_MECHANISM_INVALID;
@@ -1601,7 +1601,7 @@ extern "C" fn fn_wrap_key(
         kobj,
         wrapped_key,
         pul_wrapped_key_len,
-        obj_template
+        factory,
     ))
 }
 
@@ -1628,8 +1628,7 @@ extern "C" fn fn_unwrap_key(
     let mut token =
         res_or_ret!(rstate.get_token_from_slot_mut(session.get_slot_id()));
     let kobj = res_or_ret!(token.get_object_by_handle(unwrapping_key, true));
-    let obj_template =
-        res_or_ret!(token.get_obj_template_from_key_template(tmpl));
+    let factory = res_or_ret!(token.get_obj_factory_from_key_template(tmpl));
     let data: &[u8] = unsafe {
         std::slice::from_raw_parts(wrapped_key, wrapped_key_len as usize)
     };
@@ -1643,7 +1642,7 @@ extern "C" fn fn_unwrap_key(
         return CKR_WRAPPING_KEY_HANDLE_INVALID;
     }
 
-    let result = mech.unwrap_key(ck_mech, kobj, data, tmpl, obj_template);
+    let result = mech.unwrap_key(ck_mech, kobj, data, tmpl, factory);
     match result {
         Ok(obj) => {
             let kh = res_or_ret!(token.insert_object(s_handle, obj));

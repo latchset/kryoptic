@@ -239,7 +239,7 @@ macro_rules! bytes_attr_not_empty {
     };
 }
 
-pub trait ObjectTemplate: Debug + Send + Sync {
+pub trait ObjectFactory: Debug + Send + Sync {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
@@ -432,13 +432,13 @@ pub trait ObjectTemplate: Debug + Send + Sync {
 
 /* pkcs11-spec-v3.1 4.5 Data Objects */
 #[derive(Debug)]
-struct DataTemplate {
+struct DataFactory {
     attributes: Vec<ObjectAttr>,
 }
 
-impl DataTemplate {
-    fn new() -> DataTemplate {
-        let mut data: DataTemplate = DataTemplate {
+impl DataFactory {
+    fn new() -> DataFactory {
+        let mut data: DataFactory = DataFactory {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -451,7 +451,7 @@ impl DataTemplate {
     }
 }
 
-impl ObjectTemplate for DataTemplate {
+impl ObjectFactory for DataFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         self.default_object_create(template)
     }
@@ -470,7 +470,7 @@ impl ObjectTemplate for DataTemplate {
 }
 
 /* pkcs11-spec-v3.1 4.6 Certificate objects */
-pub trait CertTemplate {
+pub trait CertFactory {
     fn init_common_certificate_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_CERTIFICATE_TYPE; OAFlags::Required; from_ulong; val 0),
@@ -512,13 +512,13 @@ pub trait CertTemplate {
 
 /* pkcs11-spec-v3.1 4.6.3 X.509 public key certificate objects */
 #[derive(Debug)]
-struct X509Template {
+struct X509Factory {
     attributes: Vec<ObjectAttr>,
 }
 
-impl X509Template {
-    fn new() -> X509Template {
-        let mut data: X509Template = X509Template {
+impl X509Factory {
+    fn new() -> X509Factory {
+        let mut data: X509Factory = X509Factory {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -542,13 +542,13 @@ impl X509Template {
     }
 }
 
-impl CertTemplate for X509Template {
+impl CertFactory for X509Factory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
 }
 
-impl ObjectTemplate for X509Template {
+impl ObjectFactory for X509Factory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -607,7 +607,7 @@ impl ObjectTemplate for X509Template {
 }
 
 /* pkcs11-spec-v3.1 4.7 Key objects */
-pub trait CommonKeyTemplate {
+pub trait CommonKeyFactory {
     fn init_common_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_KEY_TYPE; OAFlags::RequiredOnCreate; from_ulong; val CK_UNAVAILABLE_INFORMATION),
@@ -625,7 +625,7 @@ pub trait CommonKeyTemplate {
 }
 
 /* pkcs11-spec-v3.1 4.8 Public key objects */
-pub trait PubKeyTemplate {
+pub trait PubKeyFactory {
     fn init_common_public_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_SUBJECT; OAFlags::Defval; from_bytes; val Vec::new()),
@@ -643,7 +643,7 @@ pub trait PubKeyTemplate {
 }
 
 /* pkcs11-spec-v3.1 4.9 Private key objects */
-pub trait PrivKeyTemplate {
+pub trait PrivKeyFactory {
     fn init_common_private_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_SUBJECT; OAFlags::Defval; from_bytes; val Vec::new()),
@@ -679,7 +679,7 @@ pub trait PrivKeyTemplate {
 }
 
 /* pkcs11-spec-v3.1 4.10 Secre key objects */
-pub trait SecretKeyTemplate {
+pub trait SecretKeyFactory {
     fn init_common_secret_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val true),
@@ -743,13 +743,13 @@ pub trait SecretKeyTemplate {
 
 /* pkcs11-spec-v3.1 6.8 Generic secret key */
 #[derive(Debug)]
-struct GenericSecretKeyTemplate {
+struct GenericSecretKeyFactory {
     attributes: Vec<ObjectAttr>,
 }
 
-impl GenericSecretKeyTemplate {
-    fn new() -> GenericSecretKeyTemplate {
-        let mut data: GenericSecretKeyTemplate = GenericSecretKeyTemplate {
+impl GenericSecretKeyFactory {
+    fn new() -> GenericSecretKeyFactory {
+        let mut data: GenericSecretKeyFactory = GenericSecretKeyFactory {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -776,7 +776,7 @@ impl GenericSecretKeyTemplate {
     }
 }
 
-impl ObjectTemplate for GenericSecretKeyTemplate {
+impl ObjectFactory for GenericSecretKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let obj = self.default_object_create(template)?;
 
@@ -790,13 +790,13 @@ impl ObjectTemplate for GenericSecretKeyTemplate {
     }
 }
 
-impl CommonKeyTemplate for GenericSecretKeyTemplate {
+impl CommonKeyFactory for GenericSecretKeyFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
 }
 
-impl SecretKeyTemplate for GenericSecretKeyTemplate {
+impl SecretKeyFactory for GenericSecretKeyFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
@@ -805,7 +805,7 @@ impl SecretKeyTemplate for GenericSecretKeyTemplate {
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        ObjectTemplate::default_object_unwrap(self, template)
+        ObjectFactory::default_object_unwrap(self, template)
     }
 }
 
@@ -842,7 +842,7 @@ impl Mechanism for GenericSecretKeyMechanism {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         let mut key =
-            GENERIC_SECRET_TEMPLATE.default_object_generate(template)?;
+            GENERIC_SECRET_FACTORY.default_object_generate(template)?;
         if !key.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_SECRET_KEY,
@@ -888,30 +888,30 @@ impl ObjectType {
 }
 
 #[derive(Debug)]
-pub struct ObjectTemplates {
-    templates: HashMap<ObjectType, &'static Box<dyn ObjectTemplate>>,
+pub struct ObjectFactories {
+    factories: HashMap<ObjectType, &'static Box<dyn ObjectFactory>>,
 }
 
-impl ObjectTemplates {
-    pub fn new() -> ObjectTemplates {
-        ObjectTemplates {
-            templates: HashMap::new(),
+impl ObjectFactories {
+    pub fn new() -> ObjectFactories {
+        ObjectFactories {
+            factories: HashMap::new(),
         }
     }
 
-    pub fn add_template(
+    pub fn add_factory(
         &mut self,
         otype: ObjectType,
-        templ: &'static Box<dyn ObjectTemplate>,
+        templ: &'static Box<dyn ObjectFactory>,
     ) {
-        self.templates.insert(otype, templ);
+        self.factories.insert(otype, templ);
     }
 
-    pub fn get_template(
+    pub fn get_factory(
         &self,
         otype: ObjectType,
-    ) -> KResult<&Box<dyn ObjectTemplate>> {
-        match self.templates.get(&otype) {
+    ) -> KResult<&Box<dyn ObjectFactory>> {
+        match self.factories.get(&otype) {
             Some(b) => Ok(b),
             None => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
@@ -956,14 +956,14 @@ impl ObjectTemplates {
              */
             _ => return err_rv!(CKR_DEVICE_ERROR),
         };
-        self.get_template(ObjectType::new(class, type_))?
+        self.get_factory(ObjectType::new(class, type_))?
             .create(template)
     }
 
-    pub fn get_object_template(
+    pub fn get_object_factory(
         &self,
         obj: &Object,
-    ) -> KResult<&Box<dyn ObjectTemplate>> {
+    ) -> KResult<&Box<dyn ObjectFactory>> {
         let class = obj.get_attr_as_ulong(CKA_CLASS)?;
         let type_ = match class {
             CKO_DATA => 0,
@@ -978,7 +978,7 @@ impl ObjectTemplates {
              */
             _ => return err_rv!(CKR_DEVICE_ERROR),
         };
-        self.get_template(ObjectType::new(class, type_))
+        self.get_factory(ObjectType::new(class, type_))
     }
 
     pub fn check_sensitive(
@@ -986,7 +986,7 @@ impl ObjectTemplates {
         obj: &Object,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<()> {
-        let objtype_attrs = self.get_object_template(obj)?.get_attributes();
+        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template {
             match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
@@ -1008,7 +1008,7 @@ impl ObjectTemplates {
         let mut result = CKR_OK;
         let sensitive = obj.is_sensitive() & !obj.is_extractable();
         let obj_attrs = obj.get_attributes();
-        let objtype_attrs = self.get_object_template(obj)?.get_attributes();
+        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template.iter_mut() {
             if sensitive {
                 match objtype_attrs
@@ -1075,7 +1075,7 @@ impl ObjectTemplates {
         }
 
         /* first check that all attributes can be changed */
-        let objtype_attrs = self.get_object_template(obj)?.get_attributes();
+        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template {
             match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
@@ -1127,36 +1127,36 @@ impl ObjectTemplates {
         if !obj.is_copyable() {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
-        self.get_object_template(obj)?.copy(obj, template)
+        self.get_object_factory(obj)?.copy(obj, template)
     }
 }
 
-static DATA_OBJECT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(DataTemplate::new()));
+static DATA_OBJECT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
+    Lazy::new(|| Box::new(DataFactory::new()));
 
-static X509_CERT_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(X509Template::new()));
+static X509_CERT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
+    Lazy::new(|| Box::new(X509Factory::new()));
 
-static GENERIC_SECRET_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(GenericSecretKeyTemplate::new()));
+static GENERIC_SECRET_FACTORY: Lazy<Box<dyn ObjectFactory>> =
+    Lazy::new(|| Box::new(GenericSecretKeyFactory::new()));
 
-pub fn get_generic_secret_template() -> &'static Box<dyn ObjectTemplate> {
-    &GENERIC_SECRET_TEMPLATE
+pub fn get_generic_secret_factory() -> &'static Box<dyn ObjectFactory> {
+    &GENERIC_SECRET_FACTORY
 }
 
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     mechs.add_mechanism(
         CKM_GENERIC_SECRET_KEY_GEN,
         Box::new(GenericSecretKeyMechanism::new(CKK_GENERIC_SECRET)),
     );
 
-    ot.add_template(ObjectType::new(CKO_DATA, 0), &DATA_OBJECT_TEMPLATE);
-    ot.add_template(
+    ot.add_factory(ObjectType::new(CKO_DATA, 0), &DATA_OBJECT_FACTORY);
+    ot.add_factory(
         ObjectType::new(CKO_CERTIFICATE, CKC_X_509),
-        &X509_CERT_TEMPLATE,
+        &X509_CERT_FACTORY,
     );
-    ot.add_template(
+    ot.add_factory(
         ObjectType::new(CKO_SECRET_KEY, CKK_GENERIC_SECRET),
-        &GENERIC_SECRET_TEMPLATE,
+        &GENERIC_SECRET_FACTORY,
     );
 }

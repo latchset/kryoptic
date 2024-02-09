@@ -39,7 +39,7 @@ pub struct HashOperation {
     in_use: bool,
 }
 
-pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectTemplates) {
+pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectFactories) {
     mechs.add_mechanism(
         CKM_SHA_1,
         Box::new(HashMechanism {

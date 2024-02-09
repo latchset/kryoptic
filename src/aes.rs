@@ -11,8 +11,8 @@ use attribute::{from_bool, from_bytes};
 use error::{KError, KResult};
 use interface::*;
 use object::{
-    CommonKeyTemplate, OAFlags, Object, ObjectAttr, ObjectTemplate,
-    ObjectTemplates, ObjectType, SecretKeyTemplate,
+    CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
+    ObjectFactory, ObjectType, SecretKeyFactory,
 };
 
 use super::mechanism;
@@ -49,13 +49,13 @@ fn check_key_object(key: &Object, op: CK_ULONG) -> KResult<()> {
 }
 
 #[derive(Debug)]
-pub struct AesKeyTemplate {
+pub struct AesKeyFactory {
     attributes: Vec<ObjectAttr>,
 }
 
-impl AesKeyTemplate {
-    fn new() -> AesKeyTemplate {
-        let mut data: AesKeyTemplate = AesKeyTemplate {
+impl AesKeyFactory {
+    fn new() -> AesKeyFactory {
+        let mut data: AesKeyFactory = AesKeyFactory {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -82,7 +82,7 @@ impl AesKeyTemplate {
     }
 }
 
-impl ObjectTemplate for AesKeyTemplate {
+impl ObjectFactory for AesKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let obj = self.default_object_create(template)?;
 
@@ -97,13 +97,13 @@ impl ObjectTemplate for AesKeyTemplate {
     }
 }
 
-impl CommonKeyTemplate for AesKeyTemplate {
+impl CommonKeyFactory for AesKeyFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
 }
 
-impl SecretKeyTemplate for AesKeyTemplate {
+impl SecretKeyFactory for AesKeyFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
@@ -112,12 +112,12 @@ impl SecretKeyTemplate for AesKeyTemplate {
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        ObjectTemplate::default_object_unwrap(self, template)
+        ObjectFactory::default_object_unwrap(self, template)
     }
 }
 
-static AES_KEY_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(AesKeyTemplate::new()));
+static AES_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
+    Lazy::new(|| Box::new(AesKeyFactory::new()));
 
 #[derive(Debug)]
 struct AesMechanism {
@@ -167,7 +167,7 @@ impl Mechanism for AesMechanism {
         if mech.mechanism != CKM_AES_KEY_GEN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        let mut key = AES_KEY_TEMPLATE.default_object_generate(template)?;
+        let mut key = AES_KEY_FACTORY.default_object_generate(template)?;
         if !key.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_SECRET_KEY,
@@ -203,7 +203,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
         data: CK_BYTE_PTR,
         data_len: CK_ULONG_PTR,
-        key_template: &Box<dyn ObjectTemplate>,
+        key_template: &Box<dyn ObjectFactory>,
     ) -> KResult<()> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
@@ -224,7 +224,7 @@ impl Mechanism for AesMechanism {
         wrapping_key: &Object,
         data: &[u8],
         template: &[CK_ATTRIBUTE],
-        key_template: &Box<dyn ObjectTemplate>,
+        key_template: &Box<dyn ObjectFactory>,
     ) -> KResult<Object> {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
@@ -234,7 +234,7 @@ impl Mechanism for AesMechanism {
     }
 }
 
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     mechs.add_mechanism(
         CKM_AES_ECB,
         Box::new(AesMechanism {
@@ -361,10 +361,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         }),
     );
 
-    ot.add_template(
-        ObjectType::new(CKO_SECRET_KEY, CKK_AES),
-        &AES_KEY_TEMPLATE,
-    );
+    ot.add_factory(ObjectType::new(CKO_SECRET_KEY, CKK_AES), &AES_KEY_FACTORY);
 }
 
 #[cfg(feature = "fips")]

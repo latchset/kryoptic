@@ -11,8 +11,8 @@ use attribute::{from_bool, from_bytes, from_ulong};
 use error::{KError, KResult};
 use interface::*;
 use object::{
-    CommonKeyTemplate, OAFlags, Object, ObjectAttr, ObjectTemplate,
-    ObjectTemplates, ObjectType, PrivKeyTemplate, PubKeyTemplate,
+    CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
+    ObjectFactory, ObjectType, PrivKeyFactory, PubKeyFactory,
 };
 
 use asn1;
@@ -24,13 +24,13 @@ pub const MAX_RSA_SIZE_BITS: usize = 16536;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
 #[derive(Debug)]
-pub struct RSAPubTemplate {
+pub struct RSAPubFactory {
     attributes: Vec<ObjectAttr>,
 }
 
-impl RSAPubTemplate {
-    pub fn new() -> RSAPubTemplate {
-        let mut data: RSAPubTemplate = RSAPubTemplate {
+impl RSAPubFactory {
+    pub fn new() -> RSAPubFactory {
+        let mut data: RSAPubFactory = RSAPubFactory {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -46,7 +46,7 @@ impl RSAPubTemplate {
     }
 }
 
-impl ObjectTemplate for RSAPubTemplate {
+impl ObjectFactory for RSAPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let obj = self.default_object_create(template)?;
 
@@ -74,13 +74,13 @@ impl ObjectTemplate for RSAPubTemplate {
     }
 }
 
-impl CommonKeyTemplate for RSAPubTemplate {
+impl CommonKeyFactory for RSAPubFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
 }
 
-impl PubKeyTemplate for RSAPubTemplate {
+impl PubKeyFactory for RSAPubFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
@@ -110,13 +110,13 @@ struct RSAPrivateKey<'a> {
 }
 
 #[derive(Debug)]
-pub struct RSAPrivTemplate {
+pub struct RSAPrivFactory {
     attributes: Vec<ObjectAttr>,
 }
 
-impl RSAPrivTemplate {
-    pub fn new() -> RSAPrivTemplate {
-        let mut data: RSAPrivTemplate = RSAPrivTemplate {
+impl RSAPrivFactory {
+    pub fn new() -> RSAPrivFactory {
+        let mut data: RSAPrivFactory = RSAPrivFactory {
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -240,7 +240,7 @@ impl DERMinRsaPkey {
     }
 }
 
-impl ObjectTemplate for RSAPrivTemplate {
+impl ObjectFactory for RSAPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -254,7 +254,7 @@ impl ObjectTemplate for RSAPrivTemplate {
     }
 
     fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
-        PrivKeyTemplate::export_for_wrapping(self, key)
+        PrivKeyFactory::export_for_wrapping(self, key)
     }
 
     fn import_from_wrapped(
@@ -262,17 +262,17 @@ impl ObjectTemplate for RSAPrivTemplate {
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        PrivKeyTemplate::import_from_wrapped(self, data, template)
+        PrivKeyFactory::import_from_wrapped(self, data, template)
     }
 }
 
-impl CommonKeyTemplate for RSAPrivTemplate {
+impl CommonKeyFactory for RSAPrivFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
 }
 
-impl PrivKeyTemplate for RSAPrivTemplate {
+impl PrivKeyFactory for RSAPrivFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
@@ -361,11 +361,11 @@ impl PrivKeyTemplate for RSAPrivTemplate {
     }
 }
 
-static PUBLIC_KEY_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(RSAPubTemplate::new()));
+static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
+    Lazy::new(|| Box::new(RSAPubFactory::new()));
 
-static PRIVATE_KEY_TEMPLATE: Lazy<Box<dyn ObjectTemplate>> =
-    Lazy::new(|| Box::new(RSAPrivTemplate::new()));
+static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
+    Lazy::new(|| Box::new(RSAPrivFactory::new()));
 
 fn check_key_object(key: &Object, public: bool, op: CK_ULONG) -> KResult<()> {
     match key.get_attr_as_ulong(CKA_CLASS)? {
@@ -477,7 +477,7 @@ impl Mechanism for RsaPKCSMechanism {
         prikey_template: &[CK_ATTRIBUTE],
     ) -> KResult<(Object, Object)> {
         let mut pubkey =
-            PUBLIC_KEY_TEMPLATE.default_object_generate(pubkey_template)?;
+            PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
         if !pubkey.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_PUBLIC_KEY,
@@ -506,7 +506,7 @@ impl Mechanism for RsaPKCSMechanism {
         };
 
         let mut privkey =
-            PRIVATE_KEY_TEMPLATE.default_object_generate(prikey_template)?;
+            PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
         if !privkey.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_PRIVATE_KEY,
@@ -530,7 +530,7 @@ impl Mechanism for RsaPKCSMechanism {
     }
 }
 
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     mechs.add_mechanism(
         CKM_RSA_PKCS,
         Box::new(RsaPKCSMechanism {
@@ -596,13 +596,13 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectTemplates) {
         }),
     );
 
-    ot.add_template(
+    ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
-        &PUBLIC_KEY_TEMPLATE,
+        &PUBLIC_KEY_FACTORY,
     );
-    ot.add_template(
+    ot.add_factory(
         ObjectType::new(CKO_PRIVATE_KEY, CKK_RSA),
-        &PRIVATE_KEY_TEMPLATE,
+        &PRIVATE_KEY_FACTORY,
     );
 }
 
