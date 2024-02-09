@@ -97,17 +97,9 @@ impl ObjectFactory for AesKeyFactory {
     }
 }
 
-impl CommonKeyFactory for AesKeyFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-}
+impl CommonKeyFactory for AesKeyFactory {}
 
 impl SecretKeyFactory for AesKeyFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],

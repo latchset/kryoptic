@@ -74,17 +74,9 @@ impl ObjectFactory for RSAPubFactory {
     }
 }
 
-impl CommonKeyFactory for RSAPubFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-}
+impl CommonKeyFactory for RSAPubFactory {}
 
-impl PubKeyFactory for RSAPubFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-}
+impl PubKeyFactory for RSAPubFactory {}
 
 type Version = u64;
 
@@ -266,17 +258,9 @@ impl ObjectFactory for RSAPrivFactory {
     }
 }
 
-impl CommonKeyFactory for RSAPrivFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-}
+impl CommonKeyFactory for RSAPrivFactory {}
 
 impl PrivKeyFactory for RSAPrivFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
         check_key_object(key, false, CKA_EXTRACTABLE)?;
 

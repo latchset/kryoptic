@@ -506,8 +506,6 @@ pub trait CertFactory {
 
         CKR_OK
     }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr>;
 }
 
 /* pkcs11-spec-v3.1 4.6.3 X.509 public key certificate objects */
@@ -539,12 +537,6 @@ impl X509Factory {
         data.attributes.push(attr_element!(CKA_JAVA_MIDP_SECURITY_DOMAIN; OAFlags::Defval; from_ulong; val CK_SECURITY_DOMAIN_UNSPECIFIED));
         data.attributes.push(attr_element!(CKA_NAME_HASH_ALGORITHM; OAFlags::empty(); from_ulong; val CKM_SHA_1));
         data
-    }
-}
-
-impl CertFactory for X509Factory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
     }
 }
 
@@ -606,6 +598,8 @@ impl ObjectFactory for X509Factory {
     }
 }
 
+impl CertFactory for X509Factory {}
+
 /* pkcs11-spec-v3.1 4.7 Key objects */
 pub trait CommonKeyFactory {
     fn init_common_key_attrs(&self) -> Vec<ObjectAttr> {
@@ -620,8 +614,6 @@ pub trait CommonKeyFactory {
             attr_element!(CKA_ALLOWED_MECHANISMS; OAFlags::empty(); from_bytes; val Vec::new()),
         ]
     }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr>;
 }
 
 /* pkcs11-spec-v3.1 4.8 Public key objects */
@@ -638,8 +630,6 @@ pub trait PubKeyFactory {
             attr_element!(CKA_PUBLIC_KEY_INFO; OAFlags::empty(); from_bytes; val Vec::new()),
         ]
     }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr>;
 }
 
 /* pkcs11-spec-v3.1 4.9 Private key objects */
@@ -662,8 +652,6 @@ pub trait PrivKeyFactory {
             attr_element!(CKA_DERIVE_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()),
         ]
     }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr>;
 
     fn export_for_wrapping(&self, _obj: &Object) -> KResult<Vec<u8>> {
         return err_rv!(CKR_GENERAL_ERROR);
@@ -700,8 +688,6 @@ pub trait SecretKeyFactory {
             attr_element!(CKA_DERIVE_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()),
         ]
     }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr>;
 
     fn export_for_wrapping(&self, obj: &Object) -> KResult<Vec<u8>> {
         if !obj.is_extractable() {
@@ -790,17 +776,9 @@ impl ObjectFactory for GenericSecretKeyFactory {
     }
 }
 
-impl CommonKeyFactory for GenericSecretKeyFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-}
+impl CommonKeyFactory for GenericSecretKeyFactory {}
 
 impl SecretKeyFactory for GenericSecretKeyFactory {
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],
