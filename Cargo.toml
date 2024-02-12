@@ -33,5 +33,8 @@ serde_json = "1.0.104"
 uuid = { version = "1.4.1", features = ["v4"] }
 zeroize = "1.6.0"
 
+[patch.crates-io]
+asn1 = { git = "https://github.com/alex/rust-asn1.git" }
+
 [features]
 fips = []

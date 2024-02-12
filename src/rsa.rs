@@ -17,6 +17,7 @@ use object::{
 
 use asn1;
 use once_cell::sync::Lazy;
+use std::borrow::Cow;
 use std::fmt::Debug;
 
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
@@ -80,25 +81,107 @@ impl PubKeyFactory for RSAPubFactory {}
 
 type Version = u64;
 
+struct DerEncBigUint<'a> {
+    data: Cow<'a, [u8]>,
+}
+
+impl<'a> DerEncBigUint<'a> {
+    fn new(data: &'a [u8]) -> KResult<Self> {
+        let mut de = DerEncBigUint {
+            data: Cow::from(data),
+        };
+        if de.data[0] & 0x80 == 0x80 {
+            let mut v = Vec::with_capacity(de.data.len() + 1);
+            v.push(0);
+            v.extend_from_slice(&de.data);
+            de = DerEncBigUint {
+                data: Cow::Owned(v),
+            };
+        }
+        /* check it works */
+        match asn1::BigUint::new(&de.data) {
+            Some(_) => Ok(de),
+            None => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl Drop for DerEncBigUint<'_> {
+    fn drop(&mut self) {
+        match &self.data {
+            Cow::Owned(_) => self.data.to_mut().zeroize(),
+            _ => (),
+        }
+    }
+}
+
+impl<'a> asn1::SimpleAsn1Readable<'a> for DerEncBigUint<'a> {
+    const TAG: asn1::Tag = asn1::BigUint::TAG;
+    fn parse_data(data: &'a [u8]) -> asn1::ParseResult<Self> {
+        match DerEncBigUint::new(data) {
+            Ok(x) => Ok(x),
+            Err(_) => {
+                Err(asn1::ParseError::new(asn1::ParseErrorKind::InvalidValue))
+            }
+        }
+    }
+}
+impl<'a> asn1::SimpleAsn1Writable for DerEncBigUint<'a> {
+    const TAG: asn1::Tag = asn1::Tag::primitive(0x02);
+    fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
+        dest.push_slice(self.as_bytes())
+    }
+}
+
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 struct OtherPrimeInfo<'a> {
-    prime: asn1::BigUint<'a>,
-    exponent: asn1::BigUint<'a>,
-    coefficient: asn1::BigUint<'a>,
+    prime: DerEncBigUint<'a>,
+    exponent: DerEncBigUint<'a>,
+    coefficient: DerEncBigUint<'a>,
 }
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 struct RSAPrivateKey<'a> {
     version: Version,
-    modulus: asn1::BigUint<'a>,
-    public_exponent: asn1::BigUint<'a>,
-    private_exponent: asn1::BigUint<'a>,
-    prime1: asn1::BigUint<'a>,
-    prime2: asn1::BigUint<'a>,
-    exponent1: asn1::BigUint<'a>,
-    exponent2: asn1::BigUint<'a>,
-    coefficient: asn1::BigUint<'a>,
+    modulus: DerEncBigUint<'a>,
+    public_exponent: DerEncBigUint<'a>,
+    private_exponent: DerEncBigUint<'a>,
+    prime1: DerEncBigUint<'a>,
+    prime2: DerEncBigUint<'a>,
+    exponent1: DerEncBigUint<'a>,
+    exponent2: DerEncBigUint<'a>,
+    coefficient: DerEncBigUint<'a>,
     other_prime_infos: Option<asn1::SequenceOf<'a, OtherPrimeInfo<'a>>>,
+}
+
+impl RSAPrivateKey<'_> {
+    pub fn new_owned<'a>(
+        modulus: &'a Vec<u8>,
+        public_exponent: &'a Vec<u8>,
+        private_exponent: &'a Vec<u8>,
+        prime1: &'a Vec<u8>,
+        prime2: &'a Vec<u8>,
+        exponent1: &'a Vec<u8>,
+        exponent2: &'a Vec<u8>,
+        coefficient: &'a Vec<u8>,
+    ) -> KResult<RSAPrivateKey<'a>> {
+        Ok(RSAPrivateKey {
+            version: 0,
+            modulus: DerEncBigUint::new(modulus.as_slice())?,
+            public_exponent: DerEncBigUint::new(public_exponent.as_slice())?,
+            private_exponent: DerEncBigUint::new(private_exponent.as_slice())?,
+            prime1: DerEncBigUint::new(prime1.as_slice())?,
+            prime2: DerEncBigUint::new(prime2.as_slice())?,
+            exponent1: DerEncBigUint::new(exponent1.as_slice())?,
+            exponent2: DerEncBigUint::new(exponent2.as_slice())?,
+            coefficient: DerEncBigUint::new(coefficient.as_slice())?,
+            other_prime_infos: None,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -141,97 +224,6 @@ impl RSAPrivFactory {
     }
 }
 
-macro_rules! val_to_dermin {
-    ($vec:expr) => {{
-        if $vec[0] & 0x80 == 0x80 {
-            let mut v = Vec::with_capacity($vec.len() + 1);
-            v.push(0);
-            v.extend_from_slice($vec.as_slice());
-            v
-        } else {
-            $vec.clone()
-        }
-    }};
-}
-
-macro_rules! biguint_or_err {
-    ($vec:expr) => {{
-        match asn1::BigUint::new($vec.as_slice()) {
-            Some(v) => v,
-            None => {
-                return err_rv!(CKR_GENERAL_ERROR);
-            }
-        }
-    }};
-}
-
-struct DERMinRsaPkey {
-    modulus: Vec<u8>,
-    public_exponent: Vec<u8>,
-    private_exponent: Vec<u8>,
-    prime1: Vec<u8>,
-    prime2: Vec<u8>,
-    exponent1: Vec<u8>,
-    exponent2: Vec<u8>,
-    coefficient: Vec<u8>,
-}
-
-impl Drop for DERMinRsaPkey {
-    fn drop(&mut self) {
-        self.modulus.zeroize();
-        self.public_exponent.zeroize();
-        self.private_exponent.zeroize();
-        self.prime1.zeroize();
-        self.prime2.zeroize();
-        self.exponent1.zeroize();
-        self.exponent2.zeroize();
-        self.coefficient.zeroize();
-    }
-}
-
-impl DERMinRsaPkey {
-    pub fn new(
-        modulus: &Vec<u8>,
-        public_exponent: &Vec<u8>,
-        private_exponent: &Vec<u8>,
-        prime1: &Vec<u8>,
-        prime2: &Vec<u8>,
-        exponent1: &Vec<u8>,
-        exponent2: &Vec<u8>,
-        coefficient: &Vec<u8>,
-    ) -> DERMinRsaPkey {
-        DERMinRsaPkey {
-            modulus: val_to_dermin!(modulus),
-            public_exponent: val_to_dermin!(public_exponent),
-            private_exponent: val_to_dermin!(private_exponent),
-            prime1: val_to_dermin!(prime1),
-            prime2: val_to_dermin!(prime2),
-            exponent1: val_to_dermin!(exponent1),
-            exponent2: val_to_dermin!(exponent2),
-            coefficient: val_to_dermin!(coefficient),
-        }
-    }
-
-    pub fn to_asn1(&self) -> KResult<Vec<u8>> {
-        let pkey = RSAPrivateKey {
-            version: 0,
-            modulus: biguint_or_err!(self.modulus),
-            public_exponent: biguint_or_err!(self.public_exponent),
-            private_exponent: biguint_or_err!(self.private_exponent),
-            prime1: biguint_or_err!(self.prime1),
-            prime2: biguint_or_err!(self.prime2),
-            exponent1: biguint_or_err!(self.exponent1),
-            exponent2: biguint_or_err!(self.exponent2),
-            coefficient: biguint_or_err!(self.coefficient),
-            other_prime_infos: None,
-        };
-        match asn1::write_single(&pkey) {
-            Ok(x) => Ok(x),
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
-        }
-    }
-}
-
 impl ObjectFactory for RSAPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let mut obj = self.default_object_create(template)?;
@@ -264,7 +256,7 @@ impl PrivKeyFactory for RSAPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
         check_key_object(key, false, CKA_EXTRACTABLE)?;
 
-        let pkey = DERMinRsaPkey::new(
+        let pkey = RSAPrivateKey::new_owned(
             key.get_attr_as_bytes(CKA_MODULUS)?,
             key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
             key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
@@ -273,9 +265,12 @@ impl PrivKeyFactory for RSAPrivFactory {
             key.get_attr_as_bytes(CKA_EXPONENT_1)?,
             key.get_attr_as_bytes(CKA_EXPONENT_2)?,
             key.get_attr_as_bytes(CKA_COEFFICIENT)?,
-        );
+        )?;
 
-        pkey.to_asn1()
+        match asn1::write_single(&pkey) {
+            Ok(x) => Ok(x),
+            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+        }
     }
 
     fn import_from_wrapped(
@@ -286,11 +281,17 @@ impl PrivKeyFactory for RSAPrivFactory {
         let mut attrs = template.to_vec();
         let class = CKO_PRIVATE_KEY;
         let key_type = CKK_RSA;
-        let rsapkey = match asn1::parse_single::<RSAPrivateKey>(&data) {
+        let (tlv, extra) = match asn1::strip_tlv(&data) {
+            Ok(x) => x,
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
+        /* Some Key Wrapping algorithms may 0 pad to match block size */
+        if !extra.iter().all(|b| *b == 0) {
+            return err_rv!(CKR_WRAPPED_KEY_INVALID);
+        }
+        let rsapkey = match tlv.parse::<RSAPrivateKey>() {
             Ok(k) => k,
-            Err(_) => {
-                return err_rv!(CKR_WRAPPED_KEY_INVALID);
-            }
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_MODULUS,

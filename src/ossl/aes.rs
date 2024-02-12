@@ -513,20 +513,6 @@ impl AesOperation {
         let mut result = vec![0u8; data.len()];
         let mut len = result.len() as CK_ULONG;
         op.decrypt(data, result.as_mut_ptr(), &mut len)?;
-        match mech.mechanism {
-            CKM_AES_CBC | CKM_AES_ECB => {
-                /* non-padding block modes may have 0 padded the data,
-                 * strip trailing zeros or pkcs#8 encoded keys (ie RSA)
-                 * will fail to decode */
-                while len > 0 && result[(len - 1) as usize] == 0 {
-                    len -= 1;
-                }
-                if len == 0 {
-                    return err_rv!(CKR_DATA_LEN_RANGE);
-                }
-            }
-            _ => (),
-        }
         unsafe { result.set_len(len as usize) };
         Ok(result)
     }
