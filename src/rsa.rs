@@ -513,6 +513,45 @@ impl Mechanism for RsaPKCSMechanism {
 
         Ok((pubkey, privkey))
     }
+
+    fn wrap_key(
+        &self,
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        key: &Object,
+        data: CK_BYTE_PTR,
+        data_len: CK_ULONG_PTR,
+        key_template: &Box<dyn ObjectFactory>,
+    ) -> KResult<()> {
+        if self.info.flags & CKF_WRAP != CKF_WRAP {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+
+        RsaPKCSOperation::wrap(
+            mech,
+            wrapping_key,
+            key_template.export_for_wrapping(key)?,
+            data,
+            data_len,
+            &self.info,
+        )
+    }
+
+    fn unwrap_key(
+        &self,
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        data: &[u8],
+        template: &[CK_ATTRIBUTE],
+        key_template: &Box<dyn ObjectFactory>,
+    ) -> KResult<Object> {
+        if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        let keydata =
+            RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info)?;
+        key_template.import_from_wrapped(keydata, template)
+    }
 }
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
@@ -522,7 +561,12 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
                 ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_SIGN | CKF_VERIFY,
+                flags: CKF_ENCRYPT
+                    | CKF_DECRYPT
+                    | CKF_SIGN
+                    | CKF_VERIFY
+                    | CKF_WRAP
+                    | CKF_UNWRAP,
             },
         }),
     );

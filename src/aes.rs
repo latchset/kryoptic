@@ -95,6 +95,18 @@ impl ObjectFactory for AesKeyFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
+
+    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+        SecretKeyFactory::export_for_wrapping(self, key)
+    }
+
+    fn import_from_wrapped(
+        &self,
+        data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        SecretKeyFactory::import_from_wrapped(self, data, template)
+    }
 }
 
 impl CommonKeyFactory for AesKeyFactory {}

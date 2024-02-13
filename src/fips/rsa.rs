@@ -471,6 +471,41 @@ impl RsaPKCSOperation {
             CKA_COEFFICIENT);
         Ok(())
     }
+
+    fn wrap(
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        mut keydata: Vec<u8>,
+        output: CK_BYTE_PTR,
+        output_len: CK_ULONG_PTR,
+        info: &CK_MECHANISM_INFO,
+    ) -> KResult<()> {
+        let mut op = match Self::encrypt_new(mech, wrapping_key, info) {
+            Ok(o) => o,
+            Err(e) => {
+                keydata.zeroize();
+                return Err(e);
+            }
+        };
+        let result = op.encrypt(&keydata, output, output_len);
+        keydata.zeroize();
+        result
+    }
+
+    fn unwrap(
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        data: &[u8],
+        info: &CK_MECHANISM_INFO,
+    ) -> KResult<Vec<u8>> {
+        let mut op = Self::decrypt_new(mech, wrapping_key, info)?;
+        let mut len: CK_ULONG = 0;
+        op.decrypt(data, std::ptr::null_mut(), &mut len)?;
+        let mut result = vec![0u8; len as usize];
+        op.decrypt(data, result.as_mut_ptr(), &mut len)?;
+        unsafe { result.set_len(len as usize) };
+        Ok(result)
+    }
 }
 
 impl MechOperation for RsaPKCSOperation {
