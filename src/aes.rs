@@ -28,26 +28,6 @@ fn check_key_len(len: usize) -> KResult<()> {
     }
 }
 
-fn check_key_object(key: &Object, op: CK_ULONG) -> KResult<()> {
-    match key.get_attr_as_ulong(CKA_CLASS)? {
-        CKO_SECRET_KEY => match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
-            CKK_AES => (),
-            CKK_GENERIC_SECRET => (),
-            _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
-        },
-        _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
-    }
-    match key.get_attr_as_bool(op) {
-        Ok(avail) => {
-            if !avail {
-                return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
-            }
-        }
-        Err(_) => return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED),
-    }
-    Ok(())
-}
-
 #[derive(Debug)]
 pub struct AesKeyFactory {
     attributes: Vec<ObjectAttr>,
@@ -141,7 +121,7 @@ impl Mechanism for AesMechanism {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(key, CKA_ENCRYPT) {
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_ENCRYPT) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -156,7 +136,7 @@ impl Mechanism for AesMechanism {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(key, CKA_DECRYPT) {
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DECRYPT) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }

@@ -254,7 +254,7 @@ impl CommonKeyFactory for RSAPrivFactory {}
 
 impl PrivKeyFactory for RSAPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
-        check_key_object(key, false, CKA_EXTRACTABLE)?;
+        key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_EXTRACTABLE)?;
 
         let pkey = RSAPrivateKey::new_owned(
             key.get_attr_as_bytes(CKA_MODULUS)?,
@@ -352,35 +352,6 @@ static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(RSAPrivFactory::new()));
 
-fn check_key_object(key: &Object, public: bool, op: CK_ULONG) -> KResult<()> {
-    match key.get_attr_as_ulong(CKA_CLASS)? {
-        CKO_PUBLIC_KEY => {
-            if !public {
-                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
-            }
-        }
-        CKO_PRIVATE_KEY => {
-            if public {
-                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
-            }
-        }
-        _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
-    }
-    match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
-        CKK_RSA => (),
-        _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
-    }
-    match key.get_attr_as_bool(op) {
-        Ok(avail) => {
-            if !avail {
-                return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
-            }
-        }
-        Err(_) => return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED),
-    }
-    Ok(())
-}
-
 #[derive(Debug)]
 struct RsaPKCSMechanism {
     info: CK_MECHANISM_INFO,
@@ -399,7 +370,7 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(key, true, CKA_ENCRYPT) {
+        match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_ENCRYPT) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -416,7 +387,7 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(key, false, CKA_DECRYPT) {
+        match key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_DECRYPT) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -432,7 +403,7 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(key, false, CKA_SIGN) {
+        match key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_SIGN) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -446,7 +417,7 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        match check_key_object(key, true, CKA_VERIFY) {
+        match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_VERIFY) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }

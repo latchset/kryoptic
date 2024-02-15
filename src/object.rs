@@ -164,6 +164,27 @@ impl Object {
         }
         true
     }
+
+    pub fn check_key_ops(
+        &self,
+        class: CK_OBJECT_CLASS,
+        ktype: CK_KEY_TYPE,
+        op: CK_ATTRIBUTE_TYPE,
+    ) -> KResult<()> {
+        if self.get_attr_as_ulong(CKA_CLASS)? != class {
+            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+        }
+        let kt = self.get_attr_as_ulong(CKA_KEY_TYPE)?;
+        if kt != ktype {
+            if class != CKO_SECRET_KEY || kt != CKK_GENERIC_SECRET {
+                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            }
+        }
+        if self.get_attr_as_bool(op).or(Ok(false))? {
+            return Ok(());
+        }
+        return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
+    }
 }
 
 bitflags! {
