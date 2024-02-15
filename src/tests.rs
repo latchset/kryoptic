@@ -1660,19 +1660,124 @@ fn test_aes_operations() {
         let data = "01234567";
         /* enc needs enough space for the tag */
         let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
-        ret = fn_encrypt(
+        let mut enc_len = enc.len() as CK_ULONG;
+        ret = fn_encrypt_update(
             session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            (data.len() - 1) as CK_ULONG,
             enc.as_ptr() as *mut _,
             &mut enc_len,
         );
         assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len() + tag_len);
+        assert_eq!(enc_len as usize, data.len() - 1);
+
+        let mut offset = enc_len as isize;
+        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
+        ret = fn_encrypt_update(
+            session,
+            unsafe { data.as_ptr().offset(offset) } as *mut CK_BYTE,
+            1 as CK_ULONG,
+            unsafe { enc.as_ptr().offset(offset) } as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 1);
+
+        offset += enc_len as isize;
+        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
+        ret = fn_encrypt_final(
+            session,
+            unsafe { enc.as_ptr().offset(offset) } as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, tag_len as CK_ULONG);
 
         ret = fn_decrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
+
+        enc_len = offset as CK_ULONG + tag_len as CK_ULONG;
+
+        let dec: [u8; 16] = [0; 16];
+        let mut dec_len: CK_ULONG = 16;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut _,
+            enc_len,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, data.len());
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+    }
+
+    {
+        /* AES-GCM */
+
+        /* Data Len needs to be known in advance for CCM */
+        let data = "01234567";
+        let tag_len = 4usize;
+
+        let iv = "BA0987654321";
+        let aad = "AUTH ME";
+        let mut param = CK_CCM_PARAMS {
+            ulDataLen: data.len() as CK_ULONG,
+            pNonce: iv.as_ptr() as *mut CK_BYTE,
+            ulNonceLen: iv.len() as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulMACLen: tag_len as CK_ULONG,
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CCM,
+            pParameter: &mut param as *mut CK_CCM_PARAMS as CK_VOID_PTR,
+            ulParameterLen: std::mem::size_of::<CK_CCM_PARAMS>() as CK_ULONG,
+        };
+
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* enc needs enough space for the tag */
+        let enc: [u8; 16] = [0; 16];
+        let mut enc_len = enc.len() as CK_ULONG;
+
+        let data_len = data.len() - 1;
+        ret = fn_encrypt_update(
+            session,
+            data.as_ptr() as *mut CK_BYTE,
+            data_len as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, 0);
+
+        enc_len = enc.len() as CK_ULONG;
+        ret = fn_encrypt_update(
+            session,
+            unsafe { data.as_ptr().offset(data_len as isize) } as *mut CK_BYTE,
+            1 as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        enc_len = (enc.len() - data.len()) as CK_ULONG;
+        ret = fn_encrypt_final(
+            session,
+            unsafe { enc.as_ptr().offset(data.len() as isize) } as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, tag_len as CK_ULONG);
+
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        enc_len = (data.len() + tag_len) as CK_ULONG;
 
         let dec: [u8; 16] = [0; 16];
         let mut dec_len: CK_ULONG = 16;
