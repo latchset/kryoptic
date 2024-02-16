@@ -750,7 +750,8 @@ impl Sign for RsaPKCSOperation {
                     std::ptr::null_mut(),
                 )
             })?;
-            if unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) } != 1 {
+            let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             let params = [
@@ -763,10 +764,10 @@ impl Sign for RsaPKCSOperation {
                 },
                 unsafe { OSSL_PARAM_construct_end() },
             ];
-            if unsafe {
+            let res = unsafe {
                 EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
 
@@ -774,7 +775,7 @@ impl Sign for RsaPKCSOperation {
 
             let mut siglen = 0usize;
             let siglen_ptr: *mut usize = &mut siglen;
-            if unsafe {
+            let res = unsafe {
                 EVP_PKEY_sign(
                     ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
@@ -782,15 +783,15 @@ impl Sign for RsaPKCSOperation {
                     data.as_ptr(),
                     data.len(),
                 )
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             if signature.len() != siglen {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
 
-            if unsafe {
+            let res = unsafe {
                 EVP_PKEY_sign(
                     ctx.as_mut_ptr(),
                     signature.as_mut_ptr(),
@@ -798,8 +799,8 @@ impl Sign for RsaPKCSOperation {
                     data.as_ptr(),
                     data.len(),
                 )
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
 
@@ -829,7 +830,7 @@ impl Sign for RsaPKCSOperation {
                 },
                 unsafe { OSSL_PARAM_construct_end() },
             ];
-            if unsafe {
+            let res = unsafe {
                 EVP_DigestSignInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
@@ -839,20 +840,20 @@ impl Sign for RsaPKCSOperation {
                     self.private_key.as_mut_ptr(),
                     params.as_ptr(),
                 )
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
         }
 
-        if unsafe {
+        let res = unsafe {
             EVP_DigestSignUpdate(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 data.as_ptr() as *const std::os::raw::c_void,
                 data.len(),
             )
-        } != 1
-        {
+        };
+        if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
@@ -871,14 +872,14 @@ impl Sign for RsaPKCSOperation {
         let mut siglen = signature.len();
         let siglen_ptr = &mut siglen;
 
-        if unsafe {
+        let res = unsafe {
             EVP_DigestSignFinal(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 signature.as_mut_ptr(),
                 siglen_ptr,
             )
-        } != 1
-        {
+        };
+        if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
@@ -913,7 +914,8 @@ impl Verify for RsaPKCSOperation {
                     std::ptr::null_mut(),
                 )
             })?;
-            if unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) } != 1 {
+            let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             let params = [
@@ -926,27 +928,23 @@ impl Verify for RsaPKCSOperation {
                 },
                 unsafe { OSSL_PARAM_construct_end() },
             ];
-            if unsafe {
+            let res = unsafe {
                 EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
 
-            self.finalized = true;
-
-            let mut siglen = signature.len();
-            let siglen_ptr: *mut usize = &mut siglen;
-            if unsafe {
-                EVP_PKEY_sign(
+            let res = unsafe {
+                EVP_PKEY_verify(
                     ctx.as_mut_ptr(),
-                    signature.as_ptr() as *mut u8,
-                    siglen_ptr,
+                    signature.as_ptr(),
+                    signature.len(),
                     data.as_ptr(),
                     data.len(),
                 )
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             return Ok(());
@@ -975,7 +973,7 @@ impl Verify for RsaPKCSOperation {
                 },
                 unsafe { OSSL_PARAM_construct_end() },
             ];
-            if unsafe {
+            let res = unsafe {
                 EVP_DigestVerifyInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
@@ -985,20 +983,20 @@ impl Verify for RsaPKCSOperation {
                     self.public_key.as_mut_ptr(),
                     params.as_ptr(),
                 )
-            } != 1
-            {
+            };
+            if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
         }
 
-        if unsafe {
+        let res = unsafe {
             EVP_DigestVerifyUpdate(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 data.as_ptr() as *const std::os::raw::c_void,
                 data.len(),
             )
-        } != 1
-        {
+        };
+        if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
@@ -1014,14 +1012,14 @@ impl Verify for RsaPKCSOperation {
         }
         self.finalized = true;
 
-        if unsafe {
+        let res = unsafe {
             EVP_DigestVerifyFinal(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 signature.as_ptr(),
                 signature.len(),
             )
-        } != 1
-        {
+        };
+        if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
