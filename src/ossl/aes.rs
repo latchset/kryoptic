@@ -203,7 +203,6 @@ fn object_to_raw_key(key: &Object) -> KResult<AesKey> {
 
 #[derive(Debug)]
 struct AesParams {
-    pad: bool,
     iv: Vec<u8>,
     maxblocks: u128,
     ctsmode: u8,
@@ -220,7 +219,6 @@ struct AesOperation {
     finalized: bool,
     in_use: bool,
     ctx: Option<EvpCipherCtx>,
-    blocksize: usize,
     finalbuf: Vec<u8>,
     blockctr: u128,
 }
@@ -233,19 +231,6 @@ impl Drop for AesOperation {
 
 impl AesOperation {
     fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
-        let mut maxblocks = 0u128;
-        let pad = match mech.mechanism {
-            CKM_AES_CCM | CKM_AES_GCM | CKM_AES_CTS | CKM_AES_CTR
-            | CKM_AES_CBC | CKM_AES_ECB => false,
-            CKM_AES_CBC_PAD => true,
-            #[cfg(not(feature = "fips"))]
-            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => false,
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
-        };
-        let mut ctsmode = 0u8;
-        if mech.mechanism == CKM_AES_CTS {
-            ctsmode = 1u8;
-        }
         match mech.mechanism {
             CKM_AES_CCM => {
                 if mech.ulParameterLen as usize
@@ -276,7 +261,6 @@ impl AesOperation {
                     _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
                 }
                 Ok(AesParams {
-                    pad: pad,
                     iv: unsafe {
                         std::slice::from_raw_parts(
                             (*ccm_params).pNonce,
@@ -284,7 +268,7 @@ impl AesOperation {
                         )
                         .to_vec()
                     },
-                    maxblocks: maxblocks,
+                    maxblocks: 0,
                     ctsmode: 0,
                     datalen: datalen,
                     aad: unsafe {
@@ -322,7 +306,6 @@ impl AesOperation {
                     }
                 }
                 Ok(AesParams {
-                    pad: pad,
                     iv: unsafe {
                         std::slice::from_raw_parts(
                             (*gcm_params).pIv,
@@ -330,7 +313,7 @@ impl AesOperation {
                         )
                         .to_vec()
                     },
-                    maxblocks: maxblocks,
+                    maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
                     aad: unsafe {
@@ -357,6 +340,7 @@ impl AesOperation {
                 let ctr_params = mech.pParameter as *const CK_AES_CTR_PARAMS;
                 let iv = unsafe { (*ctr_params).cb.to_vec() };
                 let ctrbits = unsafe { (*ctr_params).ulCounterBits } as usize;
+                let mut maxblocks = 0u128;
                 if ctrbits < (AES_BLOCK_SIZE * 8) {
                     /* FIXME: support arbitrary counterbits wrapping.
                      * OpenSSL CTR mode is built to handle the whole IV
@@ -390,7 +374,6 @@ impl AesOperation {
                 }
 
                 Ok(AesParams {
-                    pad: pad,
                     iv: iv,
                     maxblocks: maxblocks,
                     ctsmode: 0,
@@ -403,8 +386,11 @@ impl AesOperation {
                 if mech.ulParameterLen != 16 {
                     return err_rv!(CKR_ARGUMENTS_BAD);
                 }
+                let mut ctsmode = 0u8;
+                if mech.mechanism == CKM_AES_CTS {
+                    ctsmode = 1u8;
+                }
                 Ok(AesParams {
-                    pad: pad,
                     iv: unsafe {
                         std::slice::from_raw_parts(
                             mech.pParameter as *mut u8,
@@ -412,7 +398,7 @@ impl AesOperation {
                         )
                         .to_vec()
                     },
-                    maxblocks: maxblocks,
+                    maxblocks: 0,
                     ctsmode: ctsmode,
                     datalen: 0,
                     aad: Vec::new(),
@@ -420,9 +406,8 @@ impl AesOperation {
                 })
             }
             CKM_AES_ECB => Ok(AesParams {
-                pad: pad,
                 iv: Vec::with_capacity(0),
-                maxblocks: maxblocks,
+                maxblocks: 0,
                 ctsmode: 0,
                 datalen: 0,
                 aad: Vec::new(),
@@ -434,7 +419,6 @@ impl AesOperation {
                     return err_rv!(CKR_ARGUMENTS_BAD);
                 }
                 Ok(AesParams {
-                    pad: pad,
                     iv: unsafe {
                         std::slice::from_raw_parts(
                             mech.pParameter as *mut u8,
@@ -442,7 +426,7 @@ impl AesOperation {
                         )
                         .to_vec()
                     },
-                    maxblocks: maxblocks,
+                    maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
                     aad: Vec::new(),
@@ -532,6 +516,346 @@ impl AesOperation {
         })
     }
 
+    fn encrypt_initialize(&mut self) -> KResult<()> {
+        let evpcipher = match Self::init_cipher(self.mech, self.key.raw.len()) {
+            Ok(c) => c,
+            Err(e) => {
+                self.finalized = true;
+                return Err(e);
+            }
+        };
+
+        /* Need to initialize the cipher on the ctx first, as some modes
+         * will attempt to set parameters that require it on the contex,
+         * before key and iv can be installed */
+        let res = unsafe {
+            EVP_EncryptInit_ex2(
+                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                evpcipher.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+
+        let mut params: Vec<OSSL_PARAM> = Vec::new();
+        match self.mech {
+            CKM_AES_GCM => {
+                /* The IV size must be 12 in FIPS mode and if we try to
+                 * actively set it to any value (including 12) in FIPS
+                 * mode it will cause a cipher failure due to how
+                 * OpenSSL sets internal states. So avoid setting the IVLEN
+                 * when the ivsize matches the default */
+                if self.params.iv.len() != 12 {
+                    let res = unsafe {
+                        EVP_CIPHER_CTX_ctrl(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            EVP_CTRL_AEAD_SET_IVLEN as c_int,
+                            self.params.iv.len() as c_int,
+                            std::ptr::null_mut(),
+                        )
+                    };
+                    if res != 1 {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                }
+            }
+            CKM_AES_CCM => {
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        EVP_CTRL_AEAD_SET_IVLEN as c_int,
+                        self.params.iv.len() as c_int,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        EVP_CTRL_AEAD_SET_TAG as c_int,
+                        self.params.taglen as c_int,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+            }
+            CKM_AES_CTS => unsafe {
+                params =
+                    vec![
+                        OSSL_PARAM_construct_utf8_string(
+                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
+                                as *const c_char,
+                            match self.params.ctsmode {
+                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
+                                    as *mut c_char,
+                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
+                                    as *mut c_char,
+                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
+                                    as *mut c_char,
+                                _ => {
+                                    self.finalized = true;
+                                    return err_rv!(CKR_GENERAL_ERROR);
+                                }
+                            },
+                            0,
+                        ),
+                        OSSL_PARAM_construct_end(),
+                    ];
+            },
+            _ => (),
+        }
+        let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
+            params.as_ptr()
+        } else {
+            std::ptr::null()
+        };
+
+        /* set key, iv, addtional params */
+        let res = unsafe {
+            EVP_EncryptInit_ex2(
+                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                std::ptr::null(),
+                self.key.raw.as_ptr(),
+                if self.params.iv.len() != 0 {
+                    self.params.iv.as_ptr()
+                } else {
+                    std::ptr::null()
+                },
+                params_ptr,
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let res = unsafe {
+            EVP_CIPHER_CTX_set_padding(
+                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                if self.mech == CKM_AES_CBC_PAD { 1 } else { 0 },
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+
+        if self.mech == CKM_AES_CCM {
+            let mut outl: c_int = 0;
+            let res = unsafe {
+                EVP_EncryptUpdate(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    &mut outl,
+                    std::ptr::null(),
+                    self.params.datalen as c_int,
+                )
+            };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+        }
+
+        if self.params.aad.len() > 0 {
+            let mut outl: c_int = 0;
+            let res = unsafe {
+                EVP_EncryptUpdate(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    &mut outl,
+                    self.params.aad.as_ptr(),
+                    self.params.aad.len() as c_int,
+                )
+            };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn decrypt_initialize(&mut self) -> KResult<()> {
+        let evpcipher = match Self::init_cipher(self.mech, self.key.raw.len()) {
+            Ok(c) => c,
+            Err(e) => {
+                self.finalized = true;
+                return Err(e);
+            }
+        };
+
+        let res = unsafe {
+            EVP_DecryptInit_ex2(
+                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                evpcipher.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let mut params: Vec<OSSL_PARAM> = Vec::new();
+        match self.mech {
+            CKM_AES_GCM => {
+                /* The IV size must be 12 in FIPS mode and if we try to
+                 * actively set it to any value (including 12) in FIPS
+                 * mode it will cause a cipher failure due to how
+                 * OpenSSL sets internal states. So avoid setting the IVLEN
+                 * when the ivsize matches the default */
+                if self.params.iv.len() != 12 {
+                    let res = unsafe {
+                        EVP_CIPHER_CTX_ctrl(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            EVP_CTRL_AEAD_SET_IVLEN as c_int,
+                            self.params.iv.len() as c_int,
+                            std::ptr::null_mut(),
+                        )
+                    };
+                    if res != 1 {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                }
+            }
+            CKM_AES_CCM => {
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        EVP_CTRL_AEAD_SET_IVLEN as c_int,
+                        self.params.iv.len() as c_int,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        EVP_CTRL_AEAD_SET_TAG as c_int,
+                        self.params.taglen as c_int,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+            }
+            CKM_AES_CTS => unsafe {
+                params =
+                    vec![
+                        OSSL_PARAM_construct_utf8_string(
+                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
+                                as *const c_char,
+                            match self.params.ctsmode {
+                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
+                                    as *mut c_char,
+                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
+                                    as *mut c_char,
+                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
+                                    as *mut c_char,
+                                _ => {
+                                    self.finalized = true;
+                                    return err_rv!(CKR_GENERAL_ERROR);
+                                }
+                            },
+                            0,
+                        ),
+                        OSSL_PARAM_construct_end(),
+                    ];
+            },
+            _ => (),
+        }
+        let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
+            params.as_ptr()
+        } else {
+            std::ptr::null()
+        };
+
+        /* set key, iv, addtional params */
+        let res = unsafe {
+            EVP_DecryptInit_ex2(
+                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                std::ptr::null(),
+                self.key.raw.as_ptr(),
+                if self.params.iv.len() != 0 {
+                    self.params.iv.as_ptr()
+                } else {
+                    std::ptr::null()
+                },
+                params_ptr,
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let res = unsafe {
+            EVP_CIPHER_CTX_set_padding(
+                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                if self.mech == CKM_AES_CBC_PAD { 1 } else { 0 },
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+
+        if self.mech == CKM_AES_CCM {
+            let mut outl: c_int = 0;
+            let res = unsafe {
+                EVP_DecryptUpdate(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    &mut outl,
+                    std::ptr::null(),
+                    self.params.datalen as c_int,
+                )
+            };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+        }
+
+        if self.params.aad.len() > 0 {
+            let mut outl: c_int = 0;
+            let res = unsafe {
+                EVP_DecryptUpdate(
+                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    &mut outl,
+                    self.params.aad.as_ptr(),
+                    self.params.aad.len() as c_int,
+                )
+            };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
+        }
+
+        Ok(())
+    }
+
     fn encrypt_new(mech: &CK_MECHANISM, key: &Object) -> KResult<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
@@ -540,7 +864,6 @@ impl AesOperation {
             finalized: false,
             in_use: false,
             ctx: Some(EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?),
-            blocksize: 0,
             finalbuf: Vec::new(),
             blockctr: 0,
         })
@@ -554,7 +877,6 @@ impl AesOperation {
             finalized: false,
             in_use: false,
             ctx: Some(EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?),
-            blocksize: 0,
             finalbuf: Vec::new(),
             blockctr: 0,
         })
@@ -628,7 +950,7 @@ impl Encryption for AesOperation {
         }
         if cipher.is_null() {
             self.encrypt_update(plain, cipher, cipher_len)?;
-            if self.params.taglen > 0 {
+            if self.mech == CKM_AES_GCM {
                 unsafe {
                     let mut len = *cipher_len;
                     len += self.params.taglen as CK_ULONG;
@@ -664,263 +986,90 @@ impl Encryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if self.params.ctsmode != 0 {
-            if plain.len() < AES_BLOCK_SIZE {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
+        let mut outlen = match self.mech {
+            CKM_AES_CCM => self.params.datalen + self.params.taglen,
+            CKM_AES_GCM | CKM_AES_CTR | CKM_AES_CTS => plain.len(),
+            CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
+                ((plain.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE)
+                    * AES_BLOCK_SIZE
             }
-        }
-        if self.params.datalen > 0 {
-            if plain.len() + self.finalbuf.len() > self.params.datalen {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                plain.len()
             }
-        }
-        if self.mech == CKM_AES_CTS {
-            /* some modes are one shot, and we use blockctr to mark that update
-             * has already been called once */
-            if self.blockctr == 0 {
-                self.blockctr = 1;
-            } else {
-                self.finalized = true;
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-            }
-        }
-        if !self.in_use {
-            self.in_use = true;
-
-            let evpcipher =
-                match Self::init_cipher(self.mech, self.key.raw.len()) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        self.finalized = true;
-                        return Err(e);
-                    }
-                };
-
-            /* Need to initialize the cipher on the ctx first, as some modes
-             * will attempt to set parameters that require it on the contex,
-             * before key and iv can be installed */
-            if unsafe {
-                EVP_EncryptInit_ex2(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    evpcipher.as_ptr(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-
-            let mut params: Vec<OSSL_PARAM> = Vec::new();
-            if self.mech == CKM_AES_GCM {
-                /* The IV size must be 12 in FIPS mode and if we try to
-                 * actively set it to any value (including 12) in FIPS
-                 * mode it will cause a cipher failure due to how
-                 * OpenSSL sets internal states. So avoid setting the IVLEN
-                 * when the ivsize matches the default */
-                if self.params.iv.len() != 12 {
-                    if unsafe {
-                        EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
-                            EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                            self.params.iv.len() as c_int,
-                            std::ptr::null_mut(),
-                        )
-                    } != 1
-                    {
-                        self.finalized = true;
-                        return err_rv!(CKR_DEVICE_ERROR);
-                    }
-                }
-            } else if self.mech == CKM_AES_CCM {
-                if unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                        self.params.iv.len() as c_int,
-                        std::ptr::null_mut(),
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-                if unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_TAG as c_int,
-                        self.params.taglen as c_int,
-                        std::ptr::null_mut(),
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-            } else if self.params.ctsmode != 0 {
-                unsafe {
-                    params = vec![
-                        OSSL_PARAM_construct_utf8_string(
-                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
-                                as *const c_char,
-                            match self.params.ctsmode {
-                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
-                                    as *mut c_char,
-                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
-                                    as *mut c_char,
-                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
-                                    as *mut c_char,
-                                _ => {
-                                    self.finalized = true;
-                                    return err_rv!(CKR_GENERAL_ERROR);
-                                }
-                            },
-                            0,
-                        ),
-                        OSSL_PARAM_construct_end(),
-                    ];
-                }
-            }
-            let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
-                params.as_ptr()
-            } else {
-                std::ptr::null()
-            };
-
-            /* set key, iv, addtional params */
-            if unsafe {
-                EVP_EncryptInit_ex2(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    std::ptr::null(),
-                    self.key.raw.as_ptr(),
-                    if self.params.iv.len() != 0 {
-                        self.params.iv.as_ptr()
-                    } else {
-                        std::ptr::null()
-                    },
-                    params_ptr,
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            if unsafe {
-                EVP_CIPHER_CTX_set_padding(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    if self.params.pad { 1 } else { 0 },
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            self.blocksize =
-                unsafe { EVP_CIPHER_get_block_size(evpcipher.as_ptr()) }
-                    as usize;
-            if self.params.ctsmode > 0 {
-                /* although CTS has a blocksize of 16, it allows arbitrary
-                 * sized output, so we force the apparent blocksize to 1
-                 * to make the follwing calculation work out to check
-                 * valid buffer lengths */
-                self.blocksize = 1;
-            }
-
-            if self.params.datalen != 0 {
-                let mut outl: c_int = 0;
-                if unsafe {
-                    EVP_EncryptUpdate(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        &mut outl,
-                        std::ptr::null(),
-                        self.params.datalen as c_int,
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-            }
-
-            if self.params.aad.len() > 0 {
-                let mut outl: c_int = 0;
-                if unsafe {
-                    EVP_EncryptUpdate(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        &mut outl,
-                        self.params.aad.as_ptr(),
-                        self.params.aad.len() as c_int,
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-            }
-        }
-
-        let cipher_ulen = unsafe { *cipher_len } as usize;
-        let outblocks = plain.len() / self.blocksize;
-        let mut outlen = outblocks * self.blocksize;
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
         if cipher.is_null() {
-            if self.params.datalen > 0 {
-                outlen = self.params.datalen - self.finalbuf.len();
-            }
             unsafe {
                 *cipher_len = outlen as CK_ULONG;
             }
             return Ok(());
-        } else {
-            /* This should allow smaller plain length to update piecemeal,
-             * but CCM is one shot in OpenSSL so we have to force a full
-             * update for large datalens (we accumulate on behalf of
-             * OpenSSL up to 1 MiB) */
-            if self.params.datalen > 0 {
+        }
+
+        if !self.in_use {
+            self.in_use = true;
+            self.encrypt_initialize()?;
+        }
+
+        match self.mech {
+            CKM_AES_CTS => {
+                if plain.len() < AES_BLOCK_SIZE {
+                    self.finalized = true;
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                /* some modes are one shot, and we use blockctr to mark that update
+                 * has already been called once */
+                if self.blockctr == 0 {
+                    self.blockctr = 1;
+                } else {
+                    self.finalized = true;
+                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                }
+            }
+            CKM_AES_CCM => {
+                /* This should allow smaller plain length to update
+                 * piecemeal, but CCM is one shot in OpenSSL so we
+                 * have to force a full update for large datalens
+                 * (we accumulate on behalf of OpenSSL up to 1 MiB)
+                 */
                 if self.params.datalen > MAX_CCM_BUF {
                     if plain.len() != self.params.datalen {
                         self.finalized = true;
                         return err_rv!(CKR_DATA_LEN_RANGE);
                     }
-                    outlen = self.params.datalen;
-                } else if self.params.datalen
-                    == plain.len() + self.finalbuf.len()
-                {
-                    outlen = self.params.datalen;
-                } else {
+                }
+                if plain.len() + self.finalbuf.len() > self.params.datalen {
+                    self.finalized = true;
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                if plain.len() + self.finalbuf.len() < self.params.datalen {
                     outlen = 0;
                 }
             }
-
-            if cipher_ulen < outlen {
-                /* This is the only, non-fatal error */
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
+            CKM_AES_CTR => {
+                if self.params.maxblocks != 0 {
+                    let reqblocks = ((plain.len() + AES_BLOCK_SIZE - 1)
+                        / AES_BLOCK_SIZE)
+                        as u128;
+                    if self.blockctr + reqblocks > self.params.maxblocks {
+                        self.finalized = true;
+                        return err_rv!(CKR_DATA_LEN_RANGE);
+                    }
+                    self.blockctr += reqblocks;
+                }
             }
+            _ => (),
         }
-
-        if self.params.maxblocks > 0 {
-            let reqblocks =
-                ((plain.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) as u128;
-            if self.blockctr + reqblocks > self.params.maxblocks {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
-            }
-            self.blockctr += reqblocks;
+        if unsafe { *cipher_len as usize } < outlen {
+            /* This is the only, non-fatal error */
+            unsafe { *cipher_len = outlen as CK_ULONG };
+            return err_rv!(CKR_BUFFER_TOO_SMALL);
         }
 
         let mut plain_buf = plain.as_ptr();
         let mut plain_len = plain.len();
-        if self.params.datalen > 0 {
+        if self.mech == CKM_AES_CCM {
             if plain.len() < self.params.datalen {
-                if self.params.datalen > MAX_CCM_BUF {
-                    self.finalized = true;
-                    return err_rv!(CKR_DATA_LEN_RANGE);
-                }
                 self.finalbuf.extend_from_slice(plain);
                 if self.finalbuf.len() < self.params.datalen {
                     plain_len = 0;
@@ -932,8 +1081,8 @@ impl Encryption for AesOperation {
         }
 
         let mut outl: c_int = 0;
-        if plain_len > 0
-            && unsafe {
+        if plain_len > 0 {
+            let res = unsafe {
                 EVP_EncryptUpdate(
                     self.ctx.as_mut().unwrap().as_mut_ptr(),
                     cipher,
@@ -941,14 +1090,17 @@ impl Encryption for AesOperation {
                     plain_buf,
                     plain_len as c_int,
                 )
-            } != 1
-        {
-            self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+            };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
         }
-        if plain_len > 0 && plain_buf == self.finalbuf.as_ptr() {
-            self.finalbuf.zeroize();
-            self.finalbuf.clear();
+        if self.mech == CKM_AES_CCM {
+            if plain_len > 0 && plain_buf == self.finalbuf.as_ptr() {
+                self.finalbuf.zeroize();
+                self.finalbuf.clear();
+            }
         }
         unsafe {
             *cipher_len = outl as CK_ULONG;
@@ -968,160 +1120,153 @@ impl Encryption for AesOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if cipher.is_null() {
-            if self.params.taglen > 0 {
-                if self.params.datalen > 0 {
+            let mut clen: CK_ULONG = 0;
+            match self.mech {
+                CKM_AES_CCM | CKM_AES_GCM => {
                     if self.finalbuf.len() != 0 {
                         self.finalized = true;
                         return err_rv!(CKR_DATA_LEN_RANGE);
                     }
+                    clen = self.params.taglen as CK_ULONG;
                 }
-                unsafe {
-                    *cipher_len = self.params.taglen as CK_ULONG;
+                CKM_AES_CTR | CKM_AES_CTS | CKM_AES_CBC | CKM_AES_ECB => (),
+                #[cfg(not(feature = "fips"))]
+                CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                    ()
                 }
-                return Ok(());
-            }
-            if !self.params.pad {
-                unsafe {
-                    *cipher_len = 0;
+                CKM_AES_CBC_PAD => {
+                    clen = AES_BLOCK_SIZE as CK_ULONG;
+                    if self.finalbuf.len() > 0 {
+                        clen = self.finalbuf.len() as CK_ULONG;
+                    }
                 }
-                return Ok(());
+                _ => return err_rv!(CKR_GENERAL_ERROR),
             }
-            /* OpenSSL does not let us know if there is remaining data to output, so we always have
-             * to report the max if queried, which is a full blocksize */
-            let mut clen: CK_ULONG = self.blocksize as CK_ULONG;
-            if self.finalbuf.len() > 0 {
-                clen = self.finalbuf.len() as CK_ULONG;
-            }
-
-            unsafe {
-                *cipher_len = clen;
-            }
+            unsafe { *cipher_len = clen };
             return Ok(());
         }
 
-        if self.params.taglen > 0 {
-            let clen = unsafe { *cipher_len } as usize;
-            if clen < self.params.taglen {
-                /* This is the only, non-fatal error */
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
-            }
-            let mut outl: c_int = 0;
-            if unsafe {
-                /* This will normally be a noop (GCM/CCM) */
-                EVP_EncryptFinal_ex(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    cipher,
-                    &mut outl,
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            if outl as usize != 0 {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            if unsafe {
-                EVP_CIPHER_CTX_ctrl(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    EVP_CTRL_AEAD_GET_TAG as c_int,
-                    self.params.taglen as c_int,
-                    cipher as *mut c_void,
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            self.finalized = true;
-            unsafe {
-                *cipher_len = self.params.taglen as CK_ULONG;
-            }
-            return Ok(());
-        }
-
-        if !self.params.pad {
-            self.finalized = true;
-            unsafe {
-                *cipher_len = 0;
-            }
-            return Ok(());
-        }
-
-        if self.params.maxblocks > 0 {
-            if self.blockctr >= self.params.maxblocks {
-                return err_rv!(CKR_DATA_LEN_RANGE);
-            }
-        }
-
-        let mut cipher_buf: *mut u8 = cipher;
-        let cipher_ulen = unsafe { *cipher_len } as usize;
-        /* check if this is a second call where we saved the final buffer */
-        if self.finalbuf.len() > 0 {
-            if cipher_ulen < self.finalbuf.len() {
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
-            }
-            self.finalized = true;
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    self.finalbuf.as_ptr(),
-                    cipher,
-                    self.finalbuf.len(),
-                );
-                *cipher_len = self.finalbuf.len() as CK_ULONG;
-            }
-            return Ok(());
-        }
-
-        if cipher_ulen < self.blocksize {
-            /* if we get less then we need to be prepared to hold the final block size from
-             * openssl, and return it later */
-            self.finalbuf.reserve_exact(self.blocksize);
-            cipher_buf = self.finalbuf.as_mut_ptr();
-        } else {
-            self.finalized = true;
-        }
-
-        let mut outl: c_int = 0;
-        if unsafe {
-            EVP_EncryptFinal_ex(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
-                cipher_buf,
-                &mut outl,
-            )
-        } != 1
-        {
-            self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        if outl == 0 {
-            self.finalized = true;
-        } else if cipher_buf != cipher {
-            if outl as usize > self.blocksize {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            unsafe {
-                self.finalbuf.set_len(outl as usize);
-            }
-            if cipher_ulen >= outl as usize {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        cipher_buf,
+        let mut clen = unsafe { *cipher_len } as usize;
+        match self.mech {
+            CKM_AES_CCM | CKM_AES_GCM => {
+                if clen < self.params.taglen {
+                    /* This is the only, non-fatal error */
+                    unsafe { *cipher_len = self.params.taglen as CK_ULONG };
+                    return err_rv!(CKR_BUFFER_TOO_SMALL);
+                }
+                let mut outl: c_int = 0;
+                let res = unsafe {
+                    /* This will normally be a noop (GCM/CCM) */
+                    EVP_EncryptFinal_ex(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
                         cipher,
-                        outl as usize,
-                    );
+                        &mut outl,
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
                 }
-                self.finalized = true;
-            } else {
-                /* This is the only non-fatal error */
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
+                if outl as usize != 0 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        EVP_CTRL_AEAD_GET_TAG as c_int,
+                        self.params.taglen as c_int,
+                        cipher as *mut c_void,
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                clen = self.params.taglen;
             }
+            CKM_AES_CTR => {
+                if self.params.maxblocks > 0 {
+                    if self.blockctr >= self.params.maxblocks {
+                        return err_rv!(CKR_DATA_LEN_RANGE);
+                    }
+                }
+                clen = 0;
+            }
+            CKM_AES_CTS | CKM_AES_CBC | CKM_AES_ECB => clen = 0,
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                clen = 0
+            }
+            CKM_AES_CBC_PAD => {
+                /* check if this is a second call after
+                 * we saved the final buffer */
+                if self.finalbuf.len() > 0 {
+                    if clen < self.finalbuf.len() {
+                        unsafe {
+                            *cipher_len = self.finalbuf.len() as CK_ULONG
+                        };
+                        return err_rv!(CKR_BUFFER_TOO_SMALL);
+                    }
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            self.finalbuf.as_ptr(),
+                            cipher,
+                            self.finalbuf.len(),
+                        );
+                    }
+                    clen = self.finalbuf.len();
+                } else {
+                    let mut cipher_buf: *mut u8 = cipher;
+                    if clen < AES_BLOCK_SIZE {
+                        /* be prepared to hold the final block
+                         * size from openssl, and use it later */
+                        self.finalbuf.reserve_exact(AES_BLOCK_SIZE);
+                        cipher_buf = self.finalbuf.as_mut_ptr();
+                    }
+
+                    let mut outl: c_int = 0;
+                    let res = unsafe {
+                        EVP_EncryptFinal_ex(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            cipher_buf,
+                            &mut outl,
+                        )
+                    };
+                    if res != 1 {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                    if outl == 0 {
+                        self.finalized = true;
+                    } else if cipher_buf != cipher {
+                        if outl as usize > AES_BLOCK_SIZE {
+                            self.finalized = true;
+                            return err_rv!(CKR_DEVICE_ERROR);
+                        }
+                        if clen >= outl as usize {
+                            unsafe {
+                                std::ptr::copy_nonoverlapping(
+                                    cipher_buf,
+                                    cipher,
+                                    outl as usize,
+                                );
+                            }
+                            self.finalbuf.zeroize();
+                            self.finalbuf.clear();
+                        } else {
+                            /* This is the only non-fatal error */
+                            unsafe { *cipher_len = outl as CK_ULONG };
+                            return err_rv!(CKR_BUFFER_TOO_SMALL);
+                        }
+                    }
+                    clen = outl as usize;
+                }
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
         }
-        unsafe {
-            *cipher_len = outl as CK_ULONG;
-        }
+        self.finalized = true;
+        unsafe { *cipher_len = clen as CK_ULONG };
         Ok(())
     }
 }
@@ -1137,18 +1282,16 @@ impl Decryption for AesOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if plain.is_null() {
-            if self.params.taglen > 0 {
-                if self.params.datalen > 0 {
-                    unsafe { *plain_len = self.params.datalen as CK_ULONG }
-                } else {
-                    unsafe {
-                        *plain_len =
-                            (cipher.len() - self.params.taglen) as CK_ULONG
-                    };
-                }
-                return Ok(());
+            match self.mech {
+                CKM_AES_CCM => unsafe {
+                    *plain_len = self.params.datalen as CK_ULONG
+                },
+                CKM_AES_GCM => unsafe {
+                    *plain_len = (cipher.len() - self.params.taglen) as CK_ULONG
+                },
+                _ => self.decrypt_update(cipher, plain, plain_len)?,
             }
-            return self.decrypt_update(cipher, plain, plain_len);
+            return Ok(());
         }
         let plen: CK_ULONG = unsafe { *plain_len };
         let mut outb: *mut u8 = plain;
@@ -1177,334 +1320,192 @@ impl Decryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        let mut cipher_buf = cipher.as_ptr();
-        if self.params.ctsmode != 0 {
-            if cipher.len() < AES_BLOCK_SIZE {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
+        let outlen = match self.mech {
+            CKM_AES_CCM => self.params.datalen,
+            CKM_AES_GCM | CKM_AES_CTR | CKM_AES_CTS => cipher.len(),
+            CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
+                (cipher.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE
             }
-
-            /* CTS mode is one shot, and we use blockctr to mark that update
-             * has already been called once */
-            if self.blockctr == 0 {
-                self.blockctr = 1;
-            } else {
-                self.finalized = true;
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                cipher.len()
             }
-        }
-        if !self.in_use {
-            self.in_use = true;
-
-            let evpcipher =
-                match Self::init_cipher(self.mech, self.key.raw.len()) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        self.finalized = true;
-                        return Err(e);
-                    }
-                };
-
-            if unsafe {
-                EVP_DecryptInit_ex2(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    evpcipher.as_ptr(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            let mut params: Vec<OSSL_PARAM> = Vec::new();
-            if self.mech == CKM_AES_GCM {
-                /* The IV size must be 12 in FIPS mode and if we try to
-                 * actively set it to any value (including 12) in FIPS
-                 * mode it will cause a cipher failure due to how
-                 * OpenSSL sets internal states. So avoid setting the IVLEN
-                 * when the ivsize matches the default */
-                if self.params.iv.len() != 12 {
-                    if unsafe {
-                        EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
-                            EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                            self.params.iv.len() as c_int,
-                            std::ptr::null_mut(),
-                        )
-                    } != 1
-                    {
-                        self.finalized = true;
-                        return err_rv!(CKR_DEVICE_ERROR);
-                    }
-                }
-            } else if self.mech == CKM_AES_CCM {
-                if unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                        self.params.iv.len() as c_int,
-                        std::ptr::null_mut(),
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-                if unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_TAG as c_int,
-                        self.params.taglen as c_int,
-                        std::ptr::null_mut(),
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-            } else if self.params.ctsmode != 0 {
-                unsafe {
-                    params = vec![
-                        OSSL_PARAM_construct_utf8_string(
-                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
-                                as *const c_char,
-                            match self.params.ctsmode {
-                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
-                                    as *mut c_char,
-                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
-                                    as *mut c_char,
-                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
-                                    as *mut c_char,
-                                _ => {
-                                    self.finalized = true;
-                                    return err_rv!(CKR_GENERAL_ERROR);
-                                }
-                            },
-                            0,
-                        ),
-                        OSSL_PARAM_construct_end(),
-                    ];
-                }
-            }
-            let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
-                params.as_ptr()
-            } else {
-                std::ptr::null()
-            };
-
-            /* set key, iv, addtional params */
-            if unsafe {
-                EVP_DecryptInit_ex2(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    std::ptr::null(),
-                    self.key.raw.as_ptr(),
-                    if self.params.iv.len() != 0 {
-                        self.params.iv.as_ptr()
-                    } else {
-                        std::ptr::null()
-                    },
-                    params_ptr,
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            if unsafe {
-                EVP_CIPHER_CTX_set_padding(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    if self.params.pad { 1 } else { 0 },
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            self.blocksize =
-                unsafe { EVP_CIPHER_get_block_size(evpcipher.as_ptr()) }
-                    as usize;
-            if self.params.ctsmode > 0 {
-                /* although CTS has a blocksize of 16, it allows arbitrary
-                 * sized output, so we force the apparent blocksize to 1
-                 * to make the follwing calculation work out to check
-                 * valid buffer lengths */
-                self.blocksize = 1;
-            }
-
-            if self.params.datalen != 0 {
-                let mut outl: c_int = 0;
-                if unsafe {
-                    EVP_DecryptUpdate(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        &mut outl,
-                        std::ptr::null(),
-                        self.params.datalen as c_int,
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-            }
-
-            if self.params.aad.len() > 0 {
-                let mut outl: c_int = 0;
-                if unsafe {
-                    EVP_DecryptUpdate(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        &mut outl,
-                        self.params.aad.as_ptr(),
-                        self.params.aad.len() as c_int,
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-            }
-        }
-
-        let plain_ulen = unsafe { *plain_len } as usize;
-        let outblocks = cipher.len() / self.blocksize;
-        let mut outlen = outblocks * self.blocksize;
-        if self.params.taglen > 0 {
-            if self.params.datalen > 0 {
-                if outlen > self.params.datalen {
-                    outlen = self.params.datalen;
-                }
-            } else {
-                if outlen > self.params.taglen {
-                    outlen -= self.params.taglen;
-                }
-            }
-        }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
         if plain.is_null() {
-            if self.params.datalen > 0 {
-                outlen = self.params.datalen - self.finalbuf.len();
-            }
             unsafe {
                 *plain_len = outlen as CK_ULONG;
             }
             return Ok(());
-        } else {
-            /* This should allow smaller plain length to update piecemeal,
-             * but CCM is one shot in OpenSSL so we have to force a full
-             * update for large datalens (we accumulate on behalf of
-             * OpenSSL up to 1 MiB) */
-            if self.params.datalen > 0 {
+        }
+        let mut cipher_buf = cipher.as_ptr();
+        match self.mech {
+            CKM_AES_CTS => {
+                if cipher.len() < AES_BLOCK_SIZE {
+                    self.finalized = true;
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+
+                /* CTS mode is one shot, and we use blockctr to mark that update
+                 * has already been called once */
+                if self.blockctr == 0 {
+                    self.blockctr = 1;
+                } else {
+                    self.finalized = true;
+                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                }
+            }
+            CKM_AES_CCM => {
+                if cipher.len() + self.finalbuf.len()
+                    > self.params.datalen + self.params.taglen
+                {
+                    self.finalized = true;
+                    return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                }
+            }
+            _ => (),
+        }
+        if !self.in_use {
+            self.in_use = true;
+            self.decrypt_initialize()?;
+        }
+
+        let plen = unsafe { *plain_len } as usize;
+        let outlen = match self.mech {
+            CKM_AES_CCM => {
+                let needlen = self.params.datalen + self.params.taglen;
+                /* This should allow smaller plain length to update
+                 * piecemeal, but CCM is one shot in OpenSSL so we
+                 * have to force a full update for large datalens
+                 * (we accumulate on behalf of OpenSSL up to 1 MiB)
+                 */
                 if self.params.datalen > MAX_CCM_BUF {
-                    if cipher.len() != self.params.datalen + self.params.taglen
-                    {
+                    if cipher.len() != needlen {
                         self.finalized = true;
                         return err_rv!(CKR_DATA_LEN_RANGE);
                     }
-                    outlen = self.params.datalen;
-                } else if cipher.len() + self.finalbuf.len()
-                    == self.params.datalen + self.params.taglen
-                {
-                    outlen = self.params.datalen;
+                }
+                if cipher.len() + self.finalbuf.len() > needlen {
+                    self.finalized = true;
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                /* always return the amount we know will be
+                 * ultimately needed */
+                self.params.datalen
+            }
+            CKM_AES_CTR => {
+                if self.params.maxblocks != 0 {
+                    let reqblocks = ((cipher.len() + AES_BLOCK_SIZE - 1)
+                        / AES_BLOCK_SIZE)
+                        as u128;
+                    if self.blockctr + reqblocks > self.params.maxblocks {
+                        self.finalized = true;
+                        return err_rv!(CKR_DATA_LEN_RANGE);
+                    }
+                    self.blockctr += reqblocks;
+                }
+                cipher.len()
+            }
+            CKM_AES_GCM => {
+                let tlen = cipher.len() + self.finalbuf.len();
+                if tlen > self.params.taglen {
+                    tlen - self.params.taglen
                 } else {
-                    outlen = 0;
+                    0
                 }
             }
-            if plain_ulen < outlen {
-                /* This is the only, non-fatal error */
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
-            }
-        }
-
-        if self.params.maxblocks > 0 {
-            let reqblocks =
-                ((cipher.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE) as u128;
-            if self.blockctr + reqblocks > self.params.maxblocks {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
-            }
-            self.blockctr += reqblocks;
+            _ => cipher.len(),
+        };
+        if plen < outlen {
+            /* This is the only, non-fatal error */
+            unsafe { *plain_len = outlen as CK_ULONG };
+            return err_rv!(CKR_BUFFER_TOO_SMALL);
         }
 
         let mut plain_buf = plain;
         let mut plen: c_int = 0;
         let mut cipher_len = cipher.len();
-        if self.params.datalen > 0 {
-            if cipher_len < self.params.datalen + self.params.taglen {
-                self.finalbuf.extend_from_slice(cipher);
-                if self.finalbuf.len()
-                    < self.params.datalen + self.params.taglen
-                {
-                    cipher_len = 0;
+        match self.mech {
+            CKM_AES_CCM => {
+                let needlen = self.params.datalen + self.params.taglen;
+                if cipher_len < needlen {
+                    self.finalbuf.extend_from_slice(cipher);
+                    if self.finalbuf.len() < needlen {
+                        cipher_len = 0;
+                    } else {
+                        cipher_buf = self.finalbuf.as_ptr();
+                        cipher_len = self.params.datalen;
+                    }
                 } else {
-                    cipher_buf = self.finalbuf.as_ptr();
                     cipher_len = self.params.datalen;
                 }
-            } else {
-                cipher_len = self.params.datalen;
-            }
-            /* we have the whole buffer, set the tag now,
-             * openssl requires this order of operations for CCM */
-            if cipher_len > 0 {
-                let tag_buf = unsafe { cipher_buf.offset(cipher_len as isize) };
 
-                if unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_TAG as c_int,
-                        self.params.taglen as c_int,
-                        tag_buf as *mut _,
-                    )
-                } != 1
-                {
-                    self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
+                /* if we have the whole buffer, set the tag now,
+                 * openssl requires this order of operations for CCM */
+                if cipher_len > 0 {
+                    let tag_buf =
+                        unsafe { cipher_buf.offset(cipher_len as isize) };
+
+                    let res = unsafe {
+                        EVP_CIPHER_CTX_ctrl(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            EVP_CTRL_AEAD_SET_TAG as c_int,
+                            self.params.taglen as c_int,
+                            tag_buf as *mut _,
+                        )
+                    };
+                    if res != 1 {
+                        self.finalized = true;
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
                 }
             }
-        } else if self.params.taglen > 0 {
-            /* the tag is appended at the end of the ciphertext,
-             * but we do not know how long the ciphertext is */
-            if self.finalbuf.len() > 0 {
-                if cipher_len > self.params.taglen {
-                    /* consume the saved buffer now,
-                     * so we avoid unnecessary data copy */
-                    if unsafe {
-                        EVP_DecryptUpdate(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
-                            plain_buf,
-                            &mut plen,
-                            self.finalbuf.as_ptr(),
-                            self.finalbuf.len() as c_int,
-                        )
-                    } != 1
-                    {
-                        self.finalized = true;
-                        return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
+            CKM_AES_GCM => {
+                /* the tag is appended at the end of the ciphertext,
+                 * but we do not know how long the ciphertext is */
+                if self.finalbuf.len() > 0 {
+                    if cipher_len > self.params.taglen {
+                        /* consume the saved buffer now,
+                         * so we avoid unnecessary data copy */
+                        let res = unsafe {
+                            EVP_DecryptUpdate(
+                                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                                plain_buf,
+                                &mut plen,
+                                self.finalbuf.as_ptr(),
+                                self.finalbuf.len() as c_int,
+                            )
+                        };
+                        if res != 1 {
+                            self.finalized = true;
+                            return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
+                        }
+                        plain_buf = unsafe { plain.offset(plen as isize) };
+                        self.finalbuf.clear();
+                        cipher_len -= self.params.taglen;
+                        self.finalbuf.extend_from_slice(&cipher[cipher_len..]);
+                    } else {
+                        self.finalbuf.extend_from_slice(cipher);
+                        if self.finalbuf.len() > self.params.taglen {
+                            cipher_buf = self.finalbuf.as_ptr();
+                            cipher_len =
+                                self.finalbuf.len() - self.params.taglen;
+                        }
                     }
-                    plain_buf = unsafe { plain.offset(plen as isize) };
-                    self.finalbuf.clear();
+                } else if cipher_len > self.params.taglen {
                     cipher_len -= self.params.taglen;
                     self.finalbuf.extend_from_slice(&cipher[cipher_len..]);
                 } else {
                     self.finalbuf.extend_from_slice(cipher);
-                    if self.finalbuf.len() > self.params.taglen {
-                        cipher_buf = self.finalbuf.as_ptr();
-                        cipher_len = self.finalbuf.len() - self.params.taglen;
-                    }
+                    cipher_len = 0;
                 }
-            } else if cipher_len > self.params.taglen {
-                cipher_len -= self.params.taglen;
-                self.finalbuf.extend_from_slice(&cipher[cipher_len..]);
-            } else {
-                self.finalbuf.extend_from_slice(cipher);
-                cipher_len = 0;
             }
+            _ => (),
         }
 
         let mut outl: c_int = 0;
-        if cipher_len > 0
-            && unsafe {
+        if cipher_len > 0 {
+            let res = unsafe {
                 EVP_DecryptUpdate(
                     self.ctx.as_mut().unwrap().as_mut_ptr(),
                     plain_buf,
@@ -1512,18 +1513,21 @@ impl Decryption for AesOperation {
                     cipher_buf,
                     cipher_len as c_int,
                 )
-            } != 1
-        {
-            self.finalized = true;
-            return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
+            };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
+            }
         }
         /* remove ciphertext if any was stored */
         if cipher_buf == self.finalbuf.as_ptr() {
-            if self.params.datalen > 0 {
-                self.finalbuf.clear();
-            } else if self.params.taglen > 0 {
-                let v = self.finalbuf[cipher_len..].to_vec();
-                self.finalbuf = v;
+            match self.mech {
+                CKM_AES_CCM => self.finalbuf.clear(),
+                CKM_AES_GCM => {
+                    let v = self.finalbuf[cipher_len..].to_vec();
+                    self.finalbuf = v;
+                }
+                _ => (),
             }
         }
         unsafe {
@@ -1544,184 +1548,154 @@ impl Decryption for AesOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if plain.is_null() {
-            if self.params.taglen > 0 {
-                if self.finalbuf.len() > self.params.taglen {
-                    unsafe {
-                        *plain_len = (self.finalbuf.len() - self.params.taglen)
+            let mut plen: CK_ULONG = 0;
+            match self.mech {
+                CKM_AES_GCM => {
+                    if self.finalbuf.len() > self.params.taglen {
+                        plen = (self.finalbuf.len() - self.params.taglen)
                             as CK_ULONG;
                     }
-                    return Ok(());
                 }
-            }
-            if !self.params.pad {
-                unsafe {
-                    *plain_len = 0;
+                CKM_AES_CCM | CKM_AES_CTR | CKM_AES_CTS | CKM_AES_CBC
+                | CKM_AES_ECB => (),
+                #[cfg(not(feature = "fips"))]
+                CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                    ()
                 }
-                return Ok(());
+                CKM_AES_CBC_PAD => {
+                    plen = AES_BLOCK_SIZE as CK_ULONG;
+                    if self.finalbuf.len() > 0 {
+                        plen = self.finalbuf.len() as CK_ULONG;
+                    }
+                }
+                _ => return err_rv!(CKR_GENERAL_ERROR),
             }
-            /* OpenSSL does not let us know if there is remaining data to output, so we always have
-             * to report the max if queried, which is a full blocksize */
-            let mut plen: CK_ULONG = self.blocksize as CK_ULONG;
-            if self.finalbuf.len() > 0 {
-                plen = self.finalbuf.len() as CK_ULONG;
-            }
-
-            unsafe {
-                *plain_len = plen;
-            }
+            unsafe { *plain_len = plen };
             return Ok(());
         }
 
-        if self.params.datalen > 0 {
-            if self.finalbuf.len() > 0 {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
+        let mut plen = unsafe { *plain_len } as usize;
+        match self.mech {
+            CKM_AES_CCM => {
+                if self.finalbuf.len() > 0 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                plen = 0;
             }
-            self.finalized = true;
-            unsafe {
-                *plain_len = 0;
-            }
-            return Ok(());
-        }
-
-        if self.params.taglen > 0 {
-            if self.finalbuf.len() < self.params.taglen {
-                self.finalized = true;
-                return err_rv!(CKR_DATA_LEN_RANGE);
-            }
-            let mut buf = self.finalbuf.as_ptr();
-            let len = self.finalbuf.len() - self.params.taglen;
-            let mut outl: c_int = 0;
-            if len > 0
-                && unsafe {
-                    EVP_DecryptUpdate(
+            CKM_AES_GCM => {
+                if self.finalbuf.len() != self.params.taglen {
+                    self.finalized = true;
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
                         self.ctx.as_mut().unwrap().as_mut_ptr(),
-                        plain,
-                        &mut outl,
-                        buf as *mut u8,
-                        len as c_int,
+                        EVP_CTRL_AEAD_SET_TAG as c_int,
+                        self.params.taglen as c_int,
+                        self.finalbuf.as_ptr() as *mut c_void,
                     )
-                } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            unsafe {
-                *plain_len = outl as CK_ULONG;
-            }
-            buf = unsafe { buf.offset(len as isize) };
-            if unsafe {
-                EVP_CIPHER_CTX_ctrl(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    EVP_CTRL_AEAD_SET_TAG as c_int,
-                    self.params.taglen as c_int,
-                    buf as *mut c_void,
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            outl = 0;
-            if unsafe {
-                EVP_DecryptFinal_ex(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    &mut outl,
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
-            }
-            if outl != 0 {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            self.finalized = true;
-            return Ok(());
-        }
-
-        if !self.params.pad {
-            self.finalized = true;
-            unsafe {
-                *plain_len = 0;
-            }
-            return Ok(());
-        }
-
-        if self.params.maxblocks > 0 {
-            if self.blockctr >= self.params.maxblocks {
-                return err_rv!(CKR_DATA_LEN_RANGE);
-            }
-        }
-        let mut plain_buf: *mut u8 = plain;
-        let plain_ulen = unsafe { *plain_len } as usize;
-        /* check if this is a second call where we saved the final buffer */
-        if self.finalbuf.len() > 0 {
-            if plain_ulen < self.finalbuf.len() {
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
-            }
-            self.finalized = true;
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    self.finalbuf.as_ptr(),
-                    plain,
-                    self.finalbuf.len(),
-                );
-                *plain_len = self.finalbuf.len() as CK_ULONG;
-            }
-            return Ok(());
-        }
-
-        if plain_ulen < self.blocksize {
-            /* if we get less then we need to be prepared to hold the final block size from
-             * openssl, and return it later */
-            self.finalbuf.reserve_exact(self.blocksize);
-            plain_buf = self.finalbuf.as_mut_ptr();
-        } else {
-            self.finalized = true;
-        }
-
-        let mut outl: c_int = 0;
-        if unsafe {
-            EVP_DecryptFinal_ex(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
-                plain_buf,
-                &mut outl,
-            )
-        } != 1
-        {
-            self.finalized = true;
-            return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
-        }
-        if outl == 0 {
-            self.finalized = true;
-        } else if plain_buf != plain {
-            if outl as usize > self.blocksize {
-                self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            unsafe {
-                self.finalbuf.set_len(outl as usize);
-            }
-            if plain_ulen >= outl as usize {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        plain_buf,
-                        plain,
-                        outl as usize,
-                    );
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
                 }
-                self.finalized = true;
-            } else {
-                /* This is the only non-fatal error */
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
+                let mut outl: c_int = 0;
+                let res = unsafe {
+                    EVP_DecryptFinal_ex(
+                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        std::ptr::null_mut(),
+                        &mut outl,
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
+                }
+                if outl != 0 {
+                    self.finalized = true;
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                plen = 0;
             }
+            CKM_AES_CTR => {
+                if self.params.maxblocks > 0 {
+                    if self.blockctr >= self.params.maxblocks {
+                        return err_rv!(CKR_DATA_LEN_RANGE);
+                    }
+                }
+                plen = 0;
+            }
+            CKM_AES_CTS | CKM_AES_CBC | CKM_AES_ECB => plen = 0,
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                plen = 0
+            }
+            CKM_AES_CBC_PAD => {
+                /* check if this is a second call after
+                 * we saved the final buffer */
+                if self.finalbuf.len() > 0 {
+                    if plen < self.finalbuf.len() {
+                        unsafe { *plain_len = self.finalbuf.len() as CK_ULONG };
+                        return err_rv!(CKR_BUFFER_TOO_SMALL);
+                    }
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            self.finalbuf.as_ptr(),
+                            plain,
+                            self.finalbuf.len(),
+                        );
+                    }
+                    plen = self.finalbuf.len();
+                } else {
+                    let mut plain_buf: *mut u8 = plain;
+                    if plen < AES_BLOCK_SIZE {
+                        /* be prepared to hold the final block
+                         * size from openssl, and use it later */
+                        self.finalbuf.reserve_exact(AES_BLOCK_SIZE);
+                        plain_buf = self.finalbuf.as_mut_ptr();
+                    }
+
+                    let mut outl: c_int = 0;
+                    let res = unsafe {
+                        EVP_DecryptFinal_ex(
+                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            plain_buf,
+                            &mut outl,
+                        )
+                    };
+                    if res != 1 {
+                        self.finalized = true;
+                        return err_rv!(CKR_ENCRYPTED_DATA_INVALID);
+                    }
+                    if outl == 0 {
+                        self.finalized = true;
+                    } else if plain_buf != plain {
+                        if outl as usize > AES_BLOCK_SIZE {
+                            self.finalized = true;
+                            return err_rv!(CKR_DEVICE_ERROR);
+                        }
+                        if plen >= outl as usize {
+                            unsafe {
+                                std::ptr::copy_nonoverlapping(
+                                    plain_buf,
+                                    plain,
+                                    outl as usize,
+                                );
+                            }
+                        } else {
+                            /* This is the only non-fatal error */
+                            unsafe { *plain_len = outl as CK_ULONG };
+                            return err_rv!(CKR_BUFFER_TOO_SMALL);
+                        }
+                    }
+                    plen = outl as usize;
+                }
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
         }
-        unsafe {
-            *plain_len = outl as CK_ULONG;
-        }
+        self.finalized = true;
+        unsafe { *plain_len = plen as CK_ULONG };
         Ok(())
     }
 }
