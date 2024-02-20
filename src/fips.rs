@@ -5,7 +5,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 #![allow(non_snake_case)]
-include!("fips/bindings.rs");
+include!("ossl/bindings.rs");
 
 use getrandom;
 use libc;

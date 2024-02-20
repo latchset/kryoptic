@@ -13,176 +13,94 @@ use zeroize::Zeroize;
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 
 const AES_BLOCK_SIZE: usize = 16;
-const AES_128_CCM_NAME: &[u8; 12] = b"AES-128-CCM\0";
-const AES_192_CCM_NAME: &[u8; 12] = b"AES-192-CCM\0";
-const AES_256_CCM_NAME: &[u8; 12] = b"AES-256-CCM\0";
-const AES_128_GCM_NAME: &[u8; 12] = b"AES-128-GCM\0";
-const AES_192_GCM_NAME: &[u8; 12] = b"AES-192-GCM\0";
-const AES_256_GCM_NAME: &[u8; 12] = b"AES-256-GCM\0";
-const AES_128_CTS_NAME: &[u8; 16] = b"AES-128-CBC-CTS\0";
-const AES_192_CTS_NAME: &[u8; 16] = b"AES-192-CBC-CTS\0";
-const AES_256_CTS_NAME: &[u8; 16] = b"AES-256-CBC-CTS\0";
-const AES_128_CTR_NAME: &[u8; 12] = b"AES-128-CTR\0";
-const AES_192_CTR_NAME: &[u8; 12] = b"AES-192-CTR\0";
-const AES_256_CTR_NAME: &[u8; 12] = b"AES-256-CTR\0";
-const AES_128_CBC_NAME: &[u8; 12] = b"AES-128-CBC\0";
-const AES_192_CBC_NAME: &[u8; 12] = b"AES-192-CBC\0";
-const AES_256_CBC_NAME: &[u8; 12] = b"AES-256-CBC\0";
-const AES_128_ECB_NAME: &[u8; 12] = b"AES-128-ECB\0";
-const AES_192_ECB_NAME: &[u8; 12] = b"AES-192-ECB\0";
-const AES_256_ECB_NAME: &[u8; 12] = b"AES-256-ECB\0";
-
-cfg_if::cfg_if! {
-    if #[cfg(not(feature = "fips"))] {
-        const AES_128_CFB8_NAME: &[u8; 13] = b"AES-128-CFB8\0";
-        const AES_192_CFB8_NAME: &[u8; 13] = b"AES-192-CFB8\0";
-        const AES_256_CFB8_NAME: &[u8; 13] = b"AES-256-CFB8\0";
-        const AES_128_CFB1_NAME: &[u8; 13] = b"AES-128-CFB1\0";
-        const AES_192_CFB1_NAME: &[u8; 13] = b"AES-192-CFB1\0";
-        const AES_256_CFB1_NAME: &[u8; 13] = b"AES-256-CFB1\0";
-        const AES_128_CFB_NAME: &[u8; 12] = b"AES-128-CFB\0";
-        const AES_192_CFB_NAME: &[u8; 12] = b"AES-192-CFB\0";
-        const AES_256_CFB_NAME: &[u8; 12] = b"AES-256-CFB\0";
-        const AES_128_OFB_NAME: &[u8; 12] = b"AES-128-OFB\0";
-        const AES_192_OFB_NAME: &[u8; 12] = b"AES-192-OFB\0";
-        const AES_256_OFB_NAME: &[u8; 12] = b"AES-256-OFB\0";
-    }
-}
-
-/* FIXME: change this to be a map, and initialize ciphers on demand
- * via accessors */
-cfg_if::cfg_if! {
-    if #[cfg(feature = "fips")] {
-        struct AesCiphers {
-            aes128ccm: EvpCipher,
-            aes192ccm: EvpCipher,
-            aes256ccm: EvpCipher,
-            aes128gcm: EvpCipher,
-            aes192gcm: EvpCipher,
-            aes256gcm: EvpCipher,
-            aes128cts: EvpCipher,
-            aes192cts: EvpCipher,
-            aes256cts: EvpCipher,
-            aes128ctr: EvpCipher,
-            aes192ctr: EvpCipher,
-            aes256ctr: EvpCipher,
-            aes128cbc: EvpCipher,
-            aes192cbc: EvpCipher,
-            aes256cbc: EvpCipher,
-            aes128ecb: EvpCipher,
-            aes192ecb: EvpCipher,
-            aes256ecb: EvpCipher,
-        }
-    } else {
-        struct AesCiphers {
-            aes128ccm: EvpCipher,
-            aes192ccm: EvpCipher,
-            aes256ccm: EvpCipher,
-            aes128gcm: EvpCipher,
-            aes192gcm: EvpCipher,
-            aes256gcm: EvpCipher,
-            aes128cts: EvpCipher,
-            aes192cts: EvpCipher,
-            aes256cts: EvpCipher,
-            aes128ctr: EvpCipher,
-            aes192ctr: EvpCipher,
-            aes256ctr: EvpCipher,
-            aes128cbc: EvpCipher,
-            aes192cbc: EvpCipher,
-            aes256cbc: EvpCipher,
-            aes128ecb: EvpCipher,
-            aes192ecb: EvpCipher,
-            aes256ecb: EvpCipher,
-            aes128cfb8: EvpCipher,
-            aes192cfb8: EvpCipher,
-            aes256cfb8: EvpCipher,
-            aes128cfb1: EvpCipher,
-            aes192cfb1: EvpCipher,
-            aes256cfb1: EvpCipher,
-            aes128cfb: EvpCipher,
-            aes192cfb: EvpCipher,
-            aes256cfb: EvpCipher,
-            aes128ofb: EvpCipher,
-            aes192ofb: EvpCipher,
-            aes256ofb: EvpCipher,
-        }
-    }
-}
+const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
+const AES_192_CBC_CTS: &[u8; 16] = b"AES-192-CBC-CTS\0";
+const AES_256_CBC_CTS: &[u8; 16] = b"AES-256-CBC-CTS\0";
 
 /* It is safe to share const ciphers as they do not change once they have been
  * created, and reference satic function pointers and other data that is
  * always valid */
-unsafe impl Send for AesCiphers {}
-unsafe impl Sync for AesCiphers {}
-
-fn init_cipher(name: &[u8]) -> EvpCipher {
-    EvpCipher::from_ptr(unsafe {
-        EVP_CIPHER_fetch(
-            get_libctx(),
-            name.as_ptr() as *const i8,
-            std::ptr::null(),
-        )
-    })
-    .unwrap()
+struct AesCipher {
+    cipher: EvpCipher,
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(feature = "fips")] {
-        static AES_CIPHERS: Lazy<AesCiphers> = Lazy::new(|| AesCiphers {
-            aes128ccm: init_cipher(AES_128_CCM_NAME),
-            aes192ccm: init_cipher(AES_192_CCM_NAME),
-            aes256ccm: init_cipher(AES_256_CCM_NAME),
-            aes128gcm: init_cipher(AES_128_GCM_NAME),
-            aes192gcm: init_cipher(AES_192_GCM_NAME),
-            aes256gcm: init_cipher(AES_256_GCM_NAME),
-            aes128cts: init_cipher(AES_128_CTS_NAME),
-            aes192cts: init_cipher(AES_192_CTS_NAME),
-            aes256cts: init_cipher(AES_256_CTS_NAME),
-            aes128ctr: init_cipher(AES_128_CTR_NAME),
-            aes192ctr: init_cipher(AES_192_CTR_NAME),
-            aes256ctr: init_cipher(AES_256_CTR_NAME),
-            aes128cbc: init_cipher(AES_128_CBC_NAME),
-            aes192cbc: init_cipher(AES_192_CBC_NAME),
-            aes256cbc: init_cipher(AES_256_CBC_NAME),
-            aes128ecb: init_cipher(AES_128_ECB_NAME),
-            aes192ecb: init_cipher(AES_192_ECB_NAME),
-            aes256ecb: init_cipher(AES_256_ECB_NAME),
-        });
-    } else {
-        static AES_CIPHERS: Lazy<AesCiphers> = Lazy::new(|| AesCiphers {
-            aes128ccm: init_cipher(AES_128_CCM_NAME),
-            aes192ccm: init_cipher(AES_192_CCM_NAME),
-            aes256ccm: init_cipher(AES_256_CCM_NAME),
-            aes128gcm: init_cipher(AES_128_GCM_NAME),
-            aes192gcm: init_cipher(AES_192_GCM_NAME),
-            aes256gcm: init_cipher(AES_256_GCM_NAME),
-            aes128cts: init_cipher(AES_128_CTS_NAME),
-            aes192cts: init_cipher(AES_192_CTS_NAME),
-            aes256cts: init_cipher(AES_256_CTS_NAME),
-            aes128ctr: init_cipher(AES_128_CTR_NAME),
-            aes192ctr: init_cipher(AES_192_CTR_NAME),
-            aes256ctr: init_cipher(AES_256_CTR_NAME),
-            aes128cbc: init_cipher(AES_128_CBC_NAME),
-            aes192cbc: init_cipher(AES_192_CBC_NAME),
-            aes256cbc: init_cipher(AES_256_CBC_NAME),
-            aes128ecb: init_cipher(AES_128_ECB_NAME),
-            aes192ecb: init_cipher(AES_192_ECB_NAME),
-            aes256ecb: init_cipher(AES_256_ECB_NAME),
-            aes128cfb8: init_cipher(AES_128_CFB8_NAME),
-            aes192cfb8: init_cipher(AES_192_CFB8_NAME),
-            aes256cfb8: init_cipher(AES_256_CFB8_NAME),
-            aes128cfb1: init_cipher(AES_128_CFB1_NAME),
-            aes192cfb1: init_cipher(AES_192_CFB1_NAME),
-            aes256cfb1: init_cipher(AES_256_CFB1_NAME),
-            aes128cfb: init_cipher(AES_128_CFB_NAME),
-            aes192cfb: init_cipher(AES_192_CFB_NAME),
-            aes256cfb: init_cipher(AES_256_CFB_NAME),
-            aes128ofb: init_cipher(AES_128_OFB_NAME),
-            aes192ofb: init_cipher(AES_192_OFB_NAME),
-            aes256ofb: init_cipher(AES_256_OFB_NAME),
-        });
+impl AesCipher {
+    pub fn new(name: *const u8) -> AesCipher {
+        AesCipher {
+            cipher: match EvpCipher::from_ptr(unsafe {
+                EVP_CIPHER_fetch(
+                    get_libctx(),
+                    name as *const c_char,
+                    std::ptr::null(),
+                )
+            }) {
+                Ok(ec) => ec,
+                Err(_) => EvpCipher::empty(),
+            },
+        }
+    }
+
+    pub fn get_cipher(&self) -> KResult<&EvpCipher> {
+        let ec = self.cipher.as_ptr();
+        if ec.is_null() {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        Ok(&self.cipher)
     }
 }
+
+unsafe impl Send for AesCipher {}
+unsafe impl Sync for AesCipher {}
+
+macro_rules! aes_cipher {
+    ($mode:ident; $name:expr) => {
+        static $mode: Lazy<AesCipher> =
+            Lazy::new(|| AesCipher::new($name.as_ptr()));
+    };
+}
+
+aes_cipher!(AES_128_CCM; LN_aes_128_ccm);
+aes_cipher!(AES_192_CCM; LN_aes_192_ccm);
+aes_cipher!(AES_256_CCM; LN_aes_256_ccm);
+aes_cipher!(AES_128_GCM; LN_aes_128_gcm);
+aes_cipher!(AES_192_GCM; LN_aes_192_gcm);
+aes_cipher!(AES_256_GCM; LN_aes_256_gcm);
+aes_cipher!(AES_128_CTS; AES_128_CBC_CTS);
+aes_cipher!(AES_192_CTS; AES_192_CBC_CTS);
+aes_cipher!(AES_256_CTS; AES_256_CBC_CTS);
+aes_cipher!(AES_128_CTR; LN_aes_128_ctr);
+aes_cipher!(AES_192_CTR; LN_aes_192_ctr);
+aes_cipher!(AES_256_CTR; LN_aes_256_ctr);
+aes_cipher!(AES_128_CBC; LN_aes_128_cbc);
+aes_cipher!(AES_192_CBC; LN_aes_192_cbc);
+aes_cipher!(AES_256_CBC; LN_aes_256_cbc);
+aes_cipher!(AES_128_ECB; LN_aes_128_ecb);
+aes_cipher!(AES_192_ECB; LN_aes_192_ecb);
+aes_cipher!(AES_256_ECB; LN_aes_256_ecb);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_128_CFB8; LN_aes_128_cfb8);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_192_CFB8; LN_aes_192_cfb8);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_256_CFB8; LN_aes_256_cfb8);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_128_CFB1; LN_aes_128_cfb1);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_192_CFB1; LN_aes_192_cfb1);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_256_CFB1; LN_aes_256_cfb1);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_128_CFB128; LN_aes_128_cfb128);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_192_CFB128; LN_aes_192_cfb128);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_256_CFB128; LN_aes_256_cfb128);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_128_OFB; LN_aes_128_ofb128);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_192_OFB; LN_aes_192_ofb128);
+#[cfg(not(feature = "fips"))]
+aes_cipher!(AES_256_OFB; LN_aes_256_ofb128);
 
 #[derive(Debug)]
 struct AesKey {
@@ -443,73 +361,73 @@ impl AesOperation {
     ) -> KResult<&'static EvpCipher> {
         Ok(match mech {
             CKM_AES_CCM => match keylen {
-                16 => &AES_CIPHERS.aes128ccm,
-                24 => &AES_CIPHERS.aes192ccm,
-                32 => &AES_CIPHERS.aes256ccm,
+                16 => AES_128_CCM.get_cipher()?,
+                24 => AES_192_CCM.get_cipher()?,
+                32 => AES_256_CCM.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             CKM_AES_GCM => match keylen {
-                16 => &AES_CIPHERS.aes128gcm,
-                24 => &AES_CIPHERS.aes192gcm,
-                32 => &AES_CIPHERS.aes256gcm,
+                16 => AES_128_GCM.get_cipher()?,
+                24 => AES_192_GCM.get_cipher()?,
+                32 => AES_256_GCM.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             CKM_AES_CTS => match keylen {
-                16 => &AES_CIPHERS.aes128cts,
-                24 => &AES_CIPHERS.aes192cts,
-                32 => &AES_CIPHERS.aes256cts,
+                16 => AES_128_CTS.get_cipher()?,
+                24 => AES_192_CTS.get_cipher()?,
+                32 => AES_256_CTS.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             CKM_AES_CTR => match keylen {
-                16 => &AES_CIPHERS.aes128ctr,
-                24 => &AES_CIPHERS.aes192ctr,
-                32 => &AES_CIPHERS.aes256ctr,
+                16 => AES_128_CTR.get_cipher()?,
+                24 => AES_192_CTR.get_cipher()?,
+                32 => AES_256_CTR.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             CKM_AES_CBC => match keylen {
-                16 => &AES_CIPHERS.aes128cbc,
-                24 => &AES_CIPHERS.aes192cbc,
-                32 => &AES_CIPHERS.aes256cbc,
+                16 => AES_128_CBC.get_cipher()?,
+                24 => AES_192_CBC.get_cipher()?,
+                32 => AES_256_CBC.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             CKM_AES_CBC_PAD => match keylen {
-                16 => &AES_CIPHERS.aes128cbc,
-                24 => &AES_CIPHERS.aes192cbc,
-                32 => &AES_CIPHERS.aes256cbc,
+                16 => AES_128_CBC.get_cipher()?,
+                24 => AES_192_CBC.get_cipher()?,
+                32 => AES_256_CBC.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             CKM_AES_ECB => match keylen {
-                16 => &AES_CIPHERS.aes128ecb,
-                24 => &AES_CIPHERS.aes192ecb,
-                32 => &AES_CIPHERS.aes256ecb,
+                16 => AES_128_ECB.get_cipher()?,
+                24 => AES_192_ECB.get_cipher()?,
+                32 => AES_256_ECB.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 => match keylen {
-                16 => &AES_CIPHERS.aes128cfb8,
-                24 => &AES_CIPHERS.aes192cfb8,
-                32 => &AES_CIPHERS.aes256cfb8,
+                16 => AES_128_CFB8.get_cipher()?,
+                24 => AES_192_CFB8.get_cipher()?,
+                32 => AES_256_CFB8.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB1 => match keylen {
-                16 => &AES_CIPHERS.aes128cfb1,
-                24 => &AES_CIPHERS.aes192cfb1,
-                32 => &AES_CIPHERS.aes256cfb1,
+                16 => AES_128_CFB1.get_cipher()?,
+                24 => AES_192_CFB1.get_cipher()?,
+                32 => AES_256_CFB1.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB128 => match keylen {
-                16 => &AES_CIPHERS.aes128cfb,
-                24 => &AES_CIPHERS.aes192cfb,
-                32 => &AES_CIPHERS.aes256cfb,
+                16 => AES_128_CFB128.get_cipher()?,
+                24 => AES_192_CFB128.get_cipher()?,
+                32 => AES_256_CFB128.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_OFB => match keylen {
-                16 => &AES_CIPHERS.aes128ofb,
-                24 => &AES_CIPHERS.aes192ofb,
-                32 => &AES_CIPHERS.aes256ofb,
+                16 => AES_128_OFB.get_cipher()?,
+                24 => AES_192_OFB.get_cipher()?,
+                32 => AES_256_OFB.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             _ => return err_rv!(CKR_MECHANISM_INVALID),
