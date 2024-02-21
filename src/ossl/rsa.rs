@@ -1,14 +1,29 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+#[cfg(feature = "fips")]
+use super::fips;
+
 use super::mechanism;
+
+#[cfg(not(feature = "fips"))]
 use super::ossl;
 
+#[cfg(feature = "fips")]
+use fips::*;
+
 use mechanism::*;
+
+#[cfg(not(feature = "fips"))]
 use ossl::*;
 
 use std::slice;
 use zeroize::Zeroize;
+
+static RSA_NAME: &[u8; 4] = b"RSA\0";
+fn rsa_name_as_char() -> *const std::os::raw::c_char {
+    RSA_NAME.as_ptr() as *const std::os::raw::c_char
+}
 
 pub fn rsa_import(obj: &mut Object) -> KResult<()> {
     let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
@@ -105,7 +120,7 @@ fn new_pkey_ctx() -> KResult<EvpPkeyCtx> {
     Ok(EvpPkeyCtx::from_ptr(unsafe {
         EVP_PKEY_CTX_new_from_name(
             get_libctx(),
-            b"RSA\0".as_ptr() as *const i8,
+            rsa_name_as_char(),
             std::ptr::null(),
         )
     })?)
@@ -245,6 +260,9 @@ struct RsaPKCSOperation {
     private_key: EvpPkey,
     finalized: bool,
     in_use: bool,
+    #[cfg(feature = "fips")]
+    sigctx: Option<ProviderSignatureCtx>,
+    #[cfg(not(feature = "fips"))]
     sigctx: Option<EvpMdCtx>,
     mdname: Vec<std::os::raw::c_char>,
 }
@@ -332,6 +350,9 @@ impl RsaPKCSOperation {
             in_use: false,
             sigctx: match mech.mechanism {
                 CKM_RSA_PKCS => None,
+                #[cfg(feature = "fips")]
+                _ => Some(ProviderSignatureCtx::new(rsa_name_as_char())?),
+                #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
             mdname: get_digest_name(mech.mechanism)?,
@@ -364,6 +385,9 @@ impl RsaPKCSOperation {
             in_use: false,
             sigctx: match mech.mechanism {
                 CKM_RSA_PKCS => None,
+                #[cfg(feature = "fips")]
+                _ => Some(ProviderSignatureCtx::new(rsa_name_as_char())?),
+                #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
             mdname: get_digest_name(mech.mechanism)?,
@@ -830,8 +854,15 @@ impl Sign for RsaPKCSOperation {
                 },
                 unsafe { OSSL_PARAM_construct_end() },
             ];
-            let res = unsafe {
-                EVP_DigestSignInit_ex(
+            #[cfg(feature = "fips")]
+            self.sigctx.as_mut().unwrap().digest_sign_init(
+                self.mdname.as_ptr(),
+                &self.private_key,
+                params.as_ptr(),
+            )?;
+            #[cfg(not(feature = "fips"))]
+            unsafe {
+                let res = EVP_DigestSignInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     self.mdname.as_ptr(),
@@ -839,25 +870,30 @@ impl Sign for RsaPKCSOperation {
                     std::ptr::null(),
                     self.private_key.as_mut_ptr(),
                     params.as_ptr(),
-                )
-            };
-            if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                );
+                if res != 1 {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
             }
         }
 
-        let res = unsafe {
-            EVP_DigestSignUpdate(
+        #[cfg(feature = "fips")]
+        {
+            self.sigctx.as_mut().unwrap().digest_sign_update(data)
+        }
+        #[cfg(not(feature = "fips"))]
+        unsafe {
+            let res = EVP_DigestSignUpdate(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 data.as_ptr() as *const std::os::raw::c_void,
                 data.len(),
-            )
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            );
+            if res != 1 {
+                err_rv!(CKR_DEVICE_ERROR)
+            } else {
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
@@ -869,21 +905,26 @@ impl Sign for RsaPKCSOperation {
         }
         self.finalized = true;
 
-        let mut siglen = signature.len();
-        let siglen_ptr = &mut siglen;
+        #[cfg(feature = "fips")]
+        {
+            self.sigctx.as_mut().unwrap().digest_sign_final(signature)
+        }
+        #[cfg(not(feature = "fips"))]
+        unsafe {
+            let mut siglen = signature.len();
+            let siglen_ptr = &mut siglen;
 
-        let res = unsafe {
-            EVP_DigestSignFinal(
+            let res = EVP_DigestSignFinal(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 signature.as_mut_ptr(),
                 siglen_ptr,
-            )
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            );
+            if res != 1 {
+                err_rv!(CKR_DEVICE_ERROR)
+            } else {
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     fn signature_len(&self) -> KResult<usize> {
@@ -973,8 +1014,15 @@ impl Verify for RsaPKCSOperation {
                 },
                 unsafe { OSSL_PARAM_construct_end() },
             ];
-            let res = unsafe {
-                EVP_DigestVerifyInit_ex(
+            #[cfg(feature = "fips")]
+            self.sigctx.as_mut().unwrap().digest_verify_init(
+                self.mdname.as_ptr(),
+                &self.public_key,
+                params.as_ptr(),
+            )?;
+            #[cfg(not(feature = "fips"))]
+            unsafe {
+                let res = EVP_DigestVerifyInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     self.mdname.as_ptr(),
@@ -982,25 +1030,30 @@ impl Verify for RsaPKCSOperation {
                     std::ptr::null(),
                     self.public_key.as_mut_ptr(),
                     params.as_ptr(),
-                )
-            };
-            if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                );
+                if res != 1 {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
             }
         }
 
-        let res = unsafe {
-            EVP_DigestVerifyUpdate(
+        #[cfg(feature = "fips")]
+        {
+            self.sigctx.as_mut().unwrap().digest_verify_update(data)
+        }
+        #[cfg(not(feature = "fips"))]
+        unsafe {
+            let res = EVP_DigestVerifyUpdate(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 data.as_ptr() as *const std::os::raw::c_void,
                 data.len(),
-            )
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            );
+            if res != 1 {
+                err_rv!(CKR_DEVICE_ERROR)
+            } else {
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
@@ -1012,18 +1065,23 @@ impl Verify for RsaPKCSOperation {
         }
         self.finalized = true;
 
-        let res = unsafe {
-            EVP_DigestVerifyFinal(
+        #[cfg(feature = "fips")]
+        {
+            self.sigctx.as_mut().unwrap().digest_verify_final(signature)
+        }
+        #[cfg(not(feature = "fips"))]
+        unsafe {
+            let res = EVP_DigestVerifyFinal(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
                 signature.as_ptr(),
                 signature.len(),
-            )
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            );
+            if res != 1 {
+                err_rv!(CKR_DEVICE_ERROR)
+            } else {
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     fn signature_len(&self) -> KResult<usize> {

@@ -551,8 +551,4 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     );
 }
 
-#[cfg(feature = "fips")]
-include!("fips/rsa.rs");
-
-#[cfg(not(feature = "fips"))]
 include!("ossl/rsa.rs");
