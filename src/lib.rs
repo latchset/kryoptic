@@ -48,6 +48,9 @@ mod hash;
 mod hmac;
 mod rsa;
 
+/* Helper code */
+mod kasn1;
+
 macro_rules! err_to_rv {
     ($err:expr) => {
         match $err {
