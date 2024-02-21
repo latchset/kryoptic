@@ -359,8 +359,4 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     ot.add_factory(ObjectType::new(CKO_SECRET_KEY, CKK_AES), &AES_KEY_FACTORY);
 }
 
-#[cfg(feature = "fips")]
-include!("ossl/aes.rs");
-
-#[cfg(not(feature = "fips"))]
 include!("ossl/aes.rs");
