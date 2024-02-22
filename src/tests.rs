@@ -3002,6 +3002,39 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_sign_init(session, &mut mechanism, prikey);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "plaintext";
+    let sign: [u8; 256] = [0; 256];
+    let mut sign_len: CK_ULONG = 256;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 256);
+
+    ret = fn_verify_init(session, &mut mechanism, pubkey);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
     /* Wrap RSA key in AES */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_AES_ECB,
