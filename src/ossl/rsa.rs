@@ -145,10 +145,6 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
     EvpPkey::from_ptr(pkey)
 }
 
-fn empty_private_key() -> EvpPkey {
-    EvpPkey::empty()
-}
-
 macro_rules! name_to_vec {
     ($name:expr) => {
         unsafe {

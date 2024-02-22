@@ -21,14 +21,6 @@ pub fn ecc_import(obj: &mut Object) -> KResult<()> {
     Ok(())
 }
 
-fn empty_private_key() -> EvpPkey {
-    EvpPkey::empty()
-}
-
-fn empty_public_key() -> EvpPkey {
-    EvpPkey::empty()
-}
-
 macro_rules! name_to_vec {
     ($name:expr) => {
         unsafe {

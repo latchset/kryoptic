@@ -359,3 +359,11 @@ impl OsslParam {
         Ok(octet)
     }
 }
+
+pub fn empty_private_key() -> EvpPkey {
+    EvpPkey::empty()
+}
+
+pub fn empty_public_key() -> EvpPkey {
+    EvpPkey::empty()
+}
