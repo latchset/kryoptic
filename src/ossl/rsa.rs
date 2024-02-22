@@ -21,9 +21,6 @@ use std::slice;
 use zeroize::Zeroize;
 
 static RSA_NAME: &[u8; 4] = b"RSA\0";
-fn rsa_name_as_char() -> *const std::os::raw::c_char {
-    RSA_NAME.as_ptr() as *const std::os::raw::c_char
-}
 
 pub fn rsa_import(obj: &mut Object) -> KResult<()> {
     let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
@@ -39,101 +36,26 @@ pub fn rsa_import(obj: &mut Object) -> KResult<()> {
     Ok(())
 }
 
-macro_rules! make_bn {
-    ($name:expr; $vin:expr; $vout:expr) => {{
-        let bn = unsafe {
-            BN_bin2bn(
-                $vin.as_ptr() as *mut u8,
-                $vin.len() as i32,
-                std::ptr::null_mut(),
-            )
-        };
-        if bn.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let mut param = unsafe {
-            OSSL_PARAM_construct_BN(
-                $name as *const u8 as *const i8,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        /* calculate needed size */
-        unsafe {
-            OSSL_PARAM_set_BN(&mut param, bn);
-        }
-        $vout.resize(param.return_size, 0);
-        unsafe {
-            param.data = $vout.as_mut_ptr() as *mut std::os::raw::c_void;
-            param.data_size = $vout.len();
-            OSSL_PARAM_set_BN(&mut param, bn);
-        }
-        param
-    }};
-}
-
-macro_rules! make_bn_from_obj {
-    ($obj:expr; $id:expr; $name:expr; $vec:expr) => {{
-        let x = match $obj.get_attr_as_bytes($id) {
-            Ok(b) => b,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-        make_bn!($name; x; $vec)
-    }};
-}
-
-macro_rules! param_bn_to_vec {
-    ($params:expr; $name:expr; $vec:expr) => {{
-        let p = unsafe {
-            OSSL_PARAM_locate($params, $name as *const u8 as *const i8)
-        };
-        if p.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let mut bn: *mut BIGNUM = std::ptr::null_mut();
-        if unsafe { OSSL_PARAM_get_BN(p, &mut bn) } != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let big_num = BigNum::from_ptr(bn)?;
-        $vec.resize(bn_num_bytes(big_num.as_ptr()), 0);
-        if unsafe {
-            BN_bn2bin(
-                big_num.as_ptr(),
-                $vec.as_mut_ptr() as *mut std::os::raw::c_uchar,
-            ) as usize
-        } != $vec.len()
-        {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-    }};
-}
-
-macro_rules! param_bn_to_obj_attr {
-    ($params:expr; $name:expr; $obj:expr; $attr:expr) => {{
-        let mut vec = Vec::<u8>::new();
-        param_bn_to_vec!($params; $name; vec);
-        $obj.set_attr(attribute::from_bytes($attr, vec))?;
-    }};
-}
-
 fn new_pkey_ctx() -> KResult<EvpPkeyCtx> {
     Ok(EvpPkeyCtx::from_ptr(unsafe {
         EVP_PKEY_CTX_new_from_name(
             get_libctx(),
-            rsa_name_as_char(),
+            name_as_char(RSA_NAME),
             std::ptr::null(),
         )
     })?)
 }
 
 fn object_to_rsa_public_key(key: &Object) -> KResult<EvpPkey> {
-    let mut nvec: Vec<u8> = Vec::new();
-    let mut evec: Vec<u8> = Vec::new();
-    let mut params = [
-        make_bn_from_obj!(key; CKA_MODULUS; OSSL_PKEY_PARAM_RSA_N; nvec),
-        make_bn_from_obj!(key; CKA_PUBLIC_EXPONENT; OSSL_PKEY_PARAM_RSA_E; evec),
-        unsafe { OSSL_PARAM_construct_end() },
-    ];
+    let mut params = OsslParam::with_capacity(3)
+        .set_zeroize()
+        .add_bn_from_obj(key, CKA_MODULUS, name_as_char(OSSL_PKEY_PARAM_RSA_N))?
+        .add_bn_from_obj(
+            key,
+            CKA_PUBLIC_EXPONENT,
+            name_as_char(OSSL_PKEY_PARAM_RSA_E),
+        )?
+        .finalize();
 
     let mut ctx = new_pkey_ctx()?;
     if unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) } != 1 {
@@ -151,44 +73,58 @@ fn object_to_rsa_public_key(key: &Object) -> KResult<EvpPkey> {
     {
         return err_rv!(CKR_DEVICE_ERROR);
     }
-    nvec.zeroize();
-    evec.zeroize();
     EvpPkey::from_ptr(pkey)
 }
 
 fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
-    let mut nvec: Vec<u8> = Vec::new();
-    let mut evec: Vec<u8> = Vec::new();
-    let mut dvec: Vec<u8> = Vec::new();
-    let mut pvec: Vec<u8> = Vec::new();
-    let mut qvec: Vec<u8> = Vec::new();
-    let mut avec: Vec<u8> = Vec::new();
-    let mut bvec: Vec<u8> = Vec::new();
-    let mut cvec: Vec<u8> = Vec::new();
-    let mut params = [
-        make_bn_from_obj!(key; CKA_MODULUS; OSSL_PKEY_PARAM_RSA_N; nvec),
-        make_bn_from_obj!(key; CKA_PUBLIC_EXPONENT; OSSL_PKEY_PARAM_RSA_E; evec),
-        make_bn_from_obj!(key; CKA_PRIVATE_EXPONENT; OSSL_PKEY_PARAM_RSA_D; dvec),
-        unsafe { OSSL_PARAM_construct_end() },
-        unsafe { OSSL_PARAM_construct_end() },
-        unsafe { OSSL_PARAM_construct_end() },
-        unsafe { OSSL_PARAM_construct_end() },
-        unsafe { OSSL_PARAM_construct_end() },
-        unsafe { OSSL_PARAM_construct_end() },
-        unsafe { OSSL_PARAM_construct_end() },
-    ];
+    let mut params = OsslParam::with_capacity(9)
+        .set_zeroize()
+        .add_bn_from_obj(key, CKA_MODULUS, name_as_char(OSSL_PKEY_PARAM_RSA_N))?
+        .add_bn_from_obj(
+            key,
+            CKA_PUBLIC_EXPONENT,
+            name_as_char(OSSL_PKEY_PARAM_RSA_E),
+        )?
+        .add_bn_from_obj(
+            key,
+            CKA_PRIVATE_EXPONENT,
+            name_as_char(OSSL_PKEY_PARAM_RSA_D),
+        )?;
+
     if key.get_attr(CKA_PRIME_1).is_some()
         && key.get_attr(CKA_PRIME_2).is_some()
         && key.get_attr(CKA_EXPONENT_1).is_some()
         && key.get_attr(CKA_EXPONENT_2).is_some()
         && key.get_attr(CKA_COEFFICIENT).is_some()
     {
-        params[3] = make_bn_from_obj!(key; CKA_PRIME_1; OSSL_PKEY_PARAM_RSA_FACTOR1; pvec);
-        params[4] = make_bn_from_obj!(key; CKA_PRIME_2; OSSL_PKEY_PARAM_RSA_FACTOR2; qvec);
-        params[5] = make_bn_from_obj!(key; CKA_EXPONENT_1; OSSL_PKEY_PARAM_RSA_EXPONENT1; avec);
-        params[6] = make_bn_from_obj!(key; CKA_EXPONENT_2; OSSL_PKEY_PARAM_RSA_EXPONENT2; bvec);
-        params[7] = make_bn_from_obj!(key; CKA_COEFFICIENT; OSSL_PKEY_PARAM_RSA_COEFFICIENT1; cvec);
+        params = params
+            .add_bn_from_obj(
+                key,
+                CKA_PRIME_1,
+                name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1),
+            )?
+            .add_bn_from_obj(
+                key,
+                CKA_PRIME_2,
+                name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2),
+            )?
+            .add_bn_from_obj(
+                key,
+                CKA_EXPONENT_1,
+                name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1),
+            )?
+            .add_bn_from_obj(
+                key,
+                CKA_EXPONENT_2,
+                name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2),
+            )?
+            .add_bn_from_obj(
+                key,
+                CKA_COEFFICIENT,
+                name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
+            )?;
     }
+    params = params.finalize();
 
     let mut ctx = new_pkey_ctx()?;
     if unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) } != 1 {
@@ -206,14 +142,6 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
     {
         return err_rv!(CKR_DEVICE_ERROR);
     }
-    nvec.zeroize();
-    evec.zeroize();
-    dvec.zeroize();
-    pvec.zeroize();
-    qvec.zeroize();
-    avec.zeroize();
-    bvec.zeroize();
-    cvec.zeroize();
     EvpPkey::from_ptr(pkey)
 }
 
@@ -351,7 +279,7 @@ impl RsaPKCSOperation {
             sigctx: match mech.mechanism {
                 CKM_RSA_PKCS => None,
                 #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(rsa_name_as_char())?),
+                _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
@@ -386,7 +314,7 @@ impl RsaPKCSOperation {
             sigctx: match mech.mechanism {
                 CKM_RSA_PKCS => None,
                 #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(rsa_name_as_char())?),
+                _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
@@ -404,22 +332,14 @@ impl RsaPKCSOperation {
         if unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) } != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        let mut rsa_bits = bits;
-        let rsa_bits_ptr = &mut rsa_bits;
-        let mut evec = Vec::<u8>::new();
-        let params = [
-            make_bn!(OSSL_PKEY_PARAM_RSA_E; exponent; evec),
-            unsafe {
-                OSSL_PARAM_construct_size_t(
-                    OSSL_PKEY_PARAM_BITS as *const u8 as *const i8,
-                    rsa_bits_ptr,
-                )
-            },
-            unsafe { OSSL_PARAM_construct_end() },
-        ];
-        if unsafe { EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr()) }
-            != 1
-        {
+        let params = OsslParam::with_capacity(3)
+            .add_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E), &exponent)?
+            .add_size_t(name_as_char(OSSL_PKEY_PARAM_BITS), bits)?
+            .finalize();
+        let res = unsafe {
+            EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
+        };
+        if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
         let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
@@ -439,55 +359,46 @@ impl RsaPKCSOperation {
         {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        let mut ossl_params = OsslParam::from_ptr(params)?;
+        let params = OsslParam::from_ptr(params)?;
         /* Public Key (has E already set) */
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_N;
-            pubkey;
-            CKA_MODULUS);
+        pubkey.set_attr(attribute::from_bytes(
+            CKA_MODULUS,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_N))?,
+        ))?;
 
         /* Private Key */
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_N;
-            privkey;
-            CKA_MODULUS);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_E;
-            privkey;
-            CKA_PUBLIC_EXPONENT);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_D;
-            privkey;
-            CKA_PRIVATE_EXPONENT);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_FACTOR1;
-            privkey;
-            CKA_PRIME_1);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_FACTOR2;
-            privkey;
-            CKA_PRIME_2);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_EXPONENT1;
-            privkey;
-            CKA_EXPONENT_1);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_EXPONENT2;
-            privkey;
-            CKA_EXPONENT_2);
-        param_bn_to_obj_attr!(
-            ossl_params.as_mut_ptr();
-            OSSL_PKEY_PARAM_RSA_COEFFICIENT1;
-            privkey;
-            CKA_COEFFICIENT);
+        privkey.set_attr(attribute::from_bytes(
+            CKA_MODULUS,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_N))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_PUBLIC_EXPONENT,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_PRIVATE_EXPONENT,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_D))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_PRIME_1,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_PRIME_2,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_EXPONENT_1,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_EXPONENT_2,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2))?,
+        ))?;
+        privkey.set_attr(attribute::from_bytes(
+            CKA_COEFFICIENT,
+            params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1))?,
+        ))?;
         Ok(())
     }
 
