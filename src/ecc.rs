@@ -112,8 +112,7 @@ impl ObjectFactory for ECCPrivFactory {
 
 impl CommonKeyFactory for ECCPrivFactory {}
 
-impl PrivKeyFactory for ECCPrivFactory {
-}
+impl PrivKeyFactory for ECCPrivFactory {}
 
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECCPubFactory::new()));
@@ -158,9 +157,7 @@ impl Mechanism for EccMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EccOperation::verify_new(
-            mech, key, &self.info,
-        )?))
+        Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
     }
 
     fn generate_keypair(
@@ -183,8 +180,8 @@ impl Mechanism for EccMechanism {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let mut privkey = PRIVATE_KEY_FACTORY
-            .default_object_generate(prikey_template)?;
+        let mut privkey =
+            PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
         if !privkey.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_PRIVATE_KEY,
@@ -203,16 +200,14 @@ impl Mechanism for EccMechanism {
                 return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
             }
         };
-        if !privkey
-            .check_or_set_attr(attribute::from_bytes(CKA_EC_PARAMS, ec_params))?
-        {
+        if !privkey.check_or_set_attr(attribute::from_bytes(
+            CKA_EC_PARAMS,
+            ec_params,
+        ))? {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        EccOperation::generate_keypair(
-            &mut pubkey,
-            &mut privkey,
-        )?;
+        EccOperation::generate_keypair(&mut pubkey, &mut privkey)?;
 
         Ok((pubkey, privkey))
     }
@@ -286,11 +281,11 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),
-        &PUBLIC_KEY_FACTORY
+        &PUBLIC_KEY_FACTORY,
     );
     ot.add_factory(
         ObjectType::new(CKO_PRIVATE_KEY, CKK_EC),
-        &PRIVATE_KEY_FACTORY
+        &PRIVATE_KEY_FACTORY,
     );
 }
 

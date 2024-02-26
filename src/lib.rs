@@ -44,10 +44,10 @@ mod ossl;
 
 mod aes;
 mod drbg;
+mod ecc;
 mod hash;
 mod hmac;
 mod rsa;
-mod ecc;
 
 /* Helper code */
 mod kasn1;

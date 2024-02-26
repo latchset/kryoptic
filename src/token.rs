@@ -6,6 +6,7 @@ use std::vec::Vec;
 
 use super::aes;
 use super::attribute;
+use super::ecc;
 use super::error;
 use super::hash;
 use super::hmac;
@@ -14,7 +15,6 @@ use super::mechanism;
 use super::object;
 use super::rsa;
 use super::storage;
-use super::ecc;
 
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};

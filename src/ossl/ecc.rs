@@ -53,14 +53,21 @@ fn get_digest_name(
 }
 
 // ASN.1 encoding of the OID
-const OID_SECP256R1: &[u8] = &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
+const OID_SECP256R1: &[u8] =
+    &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
 const OID_SECP384R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22];
 const OID_SECP521R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x23];
 
 // ASN.1 encoding of the curve name
-const STRING_SECP256R1: &[u8] = &[0x13, 0x0a, 0x70, 0x72, 0x69, 0x6d, 0x65, 0x32, 0x35, 0x36, 0x76, 0x31];
-const STRING_SECP384R1: &[u8] = &[0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x33, 0x38, 0x34, 0x72, 0x31];
-const STRING_SECP521R1: &[u8] = &[0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x35, 0x32, 0x31, 0x72, 0x31];
+const STRING_SECP256R1: &[u8] = &[
+    0x13, 0x0a, 0x70, 0x72, 0x69, 0x6d, 0x65, 0x32, 0x35, 0x36, 0x76, 0x31,
+];
+const STRING_SECP384R1: &[u8] = &[
+    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x33, 0x38, 0x34, 0x72, 0x31,
+];
+const STRING_SECP521R1: &[u8] = &[
+    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x35, 0x32, 0x31, 0x72, 0x31,
+];
 
 const NAME_SECP256R1: &str = "prime256v1";
 const NAME_SECP384R1: &str = "secp384r1";
@@ -70,9 +77,7 @@ const BITS_SECP256R1: usize = 256;
 const BITS_SECP384R1: usize = 384;
 const BITS_SECP521R1: usize = 521;
 
-fn oid_to_curve_name(
-    oid: asn1::ObjectIdentifier,
-) -> KResult<&'static str> {
+fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
     let asn1_oid = match asn1::write_single(&oid) {
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -85,9 +90,7 @@ fn oid_to_curve_name(
     }
 }
 
-fn oid_to_bits(
-    oid: asn1::ObjectIdentifier,
-) -> KResult<usize> {
+fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
     let asn1_oid = match asn1::write_single(&oid) {
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -100,9 +103,7 @@ fn oid_to_bits(
     }
 }
 
-fn curve_name_to_bits(
-    name: asn1::PrintableString,
-) -> KResult<usize> {
+fn curve_name_to_bits(name: asn1::PrintableString) -> KResult<usize> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -187,9 +188,7 @@ fn new_pkey_ctx() -> KResult<EvpPkeyCtx> {
     })?)
 }
 
-fn get_curve_name_from_obj(
-    key: &Object,
-) -> KResult<Vec<u8>,> {
+fn get_curve_name_from_obj(key: &Object) -> KResult<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -208,9 +207,7 @@ fn get_curve_name_from_obj(
     Ok(curve_name)
 }
 
-fn get_ec_point_from_obj(
-    key: &Object,
-) -> KResult<Vec<u8>,> {
+fn get_ec_point_from_obj(key: &Object) -> KResult<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_POINT) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -262,7 +259,11 @@ fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
     let mut params = OsslParam::with_capacity(3)
         .set_zeroize()
         .add_utf8_string(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME), &curve_name)?
-        .add_bn_from_obj(key, CKA_VALUE, name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?
+        .add_bn_from_obj(
+            key,
+            CKA_VALUE,
+            name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+        )?
         .finalize();
 
     let mut ctx = new_pkey_ctx()?;
@@ -300,7 +301,7 @@ struct EcdsaSignature<'a> {
 /// buffer with padding if needed.
 /// Do not care if the first bit is 1 as in PKCS #11 we interpret the number always positive
 fn ossl_to_pkcs11_signature(
-    ossl_sign: & Vec<u8>,
+    ossl_sign: &Vec<u8>,
     signature: &mut [u8],
 ) -> KResult<()> {
     let sig = match asn1::parse_single::<EcdsaSignature>(ossl_sign.as_slice()) {
@@ -411,9 +412,14 @@ impl EccOperation {
         }
         let curve_name = get_curve_name_from_obj(pubkey)?;
         let params = OsslParam::with_capacity(2)
-            .add_utf8_string(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME), &curve_name)?
+            .add_utf8_string(
+                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+                &curve_name,
+            )?
             .finalize();
-        let res = unsafe { EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr()) };
+        let res = unsafe {
+            EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
+        };
         if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
@@ -437,17 +443,13 @@ impl EccOperation {
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
-        let point = params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?;
-        let point_encoded = match asn1::write_single(
-            &point.as_slice(),
-        ) {
+        let point =
+            params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?;
+        let point_encoded = match asn1::write_single(&point.as_slice()) {
             Ok(b) => b,
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         };
-        pubkey.set_attr(attribute::from_bytes(
-            CKA_EC_POINT,
-            point_encoded,
-        ))?;
+        pubkey.set_attr(attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
         /* Private Key */
         privkey.set_attr(attribute::from_bytes(
@@ -559,7 +561,8 @@ impl Sign for EccOperation {
                     self.private_key.as_mut_ptr(),
                     std::ptr::null(),
                 )
-            } != 1 {
+            } != 1
+            {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             #[cfg(feature = "fips")]
@@ -610,14 +613,19 @@ impl Sign for EccOperation {
                     ossl_sign.as_mut_ptr(),
                     siglen_ptr,
                 )
-            } != 1 {
+            } != 1
+            {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
         }
 
         #[cfg(feature = "fips")]
         {
-            siglen = self.sigctx.as_mut().unwrap().digest_sign_final(&mut ossl_sign)?;
+            siglen = self
+                .sigctx
+                .as_mut()
+                .unwrap()
+                .digest_sign_final(&mut ossl_sign)?;
         }
 
         ossl_sign.resize(siglen, 0);
@@ -701,7 +709,8 @@ impl Verify for EccOperation {
                     self.public_key.as_mut_ptr(),
                     std::ptr::null(),
                 )
-            } != 1 {
+            } != 1
+            {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             #[cfg(feature = "fips")]
@@ -757,7 +766,10 @@ impl Verify for EccOperation {
         }
 
         #[cfg(feature = "fips")]
-        self.sigctx.as_mut().unwrap().digest_verify_final(&ossl_sign)?;
+        self.sigctx
+            .as_mut()
+            .unwrap()
+            .digest_verify_final(&ossl_sign)?;
 
         ossl_sign.zeroize();
         Ok(())

@@ -3374,7 +3374,8 @@ fn test_key() {
 
     let mut truebool = CK_TRUE;
     let ec_params_hex = "06052B81040022"; // secp384r1
-    let ec_params = hex::decode(ec_params_hex).expect("Failed to decode hex ec_params");
+    let ec_params =
+        hex::decode(ec_params_hex).expect("Failed to decode hex ec_params");
     let mut ktype = CKK_EC;
     let mut class = CKO_PUBLIC_KEY;
     let mut pub_template = vec![

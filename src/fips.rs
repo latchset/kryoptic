@@ -746,7 +746,10 @@ impl ProviderSignatureCtx {
         }
     }
 
-    pub fn digest_sign_final(&mut self, signature: &mut [u8]) -> KResult<usize> {
+    pub fn digest_sign_final(
+        &mut self,
+        signature: &mut [u8],
+    ) -> KResult<usize> {
         unsafe {
             match (*self.vtable).digest_sign_final {
                 Some(f) => {
@@ -756,7 +759,7 @@ impl ProviderSignatureCtx {
                         self.ctx,
                         signature.as_mut_ptr() as *mut c_uchar,
                         siglen_ptr,
-                        signature.len()
+                        signature.len(),
                     );
                     if res != 1 {
                         return err_rv!(CKR_DEVICE_ERROR);

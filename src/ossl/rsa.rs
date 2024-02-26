@@ -817,11 +817,13 @@ impl Sign for RsaPKCSOperation {
         #[cfg(feature = "fips")]
         {
             match self.sigctx.as_mut().unwrap().digest_sign_final(signature) {
-                Ok(siglen) => if siglen != signature.len() {
+                Ok(siglen) => {
+                    if siglen != signature.len() {
                         err_rv!(CKR_DEVICE_ERROR)
                     } else {
                         Ok(())
-                    },
+                    }
+                }
                 Err(_) => return err_rv!(CKR_DEVICE_ERROR),
             }
         }
