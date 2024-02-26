@@ -7,11 +7,12 @@ use {super::fips, fips::*};
 #[cfg(not(feature = "fips"))]
 use {super::ossl, ossl::*};
 
+use super::kasn1;
 use super::mechanism;
 
+use kasn1::DerEncBigUint;
 use mechanism::*;
 
-use asn1;
 use std::slice;
 use zeroize::Zeroize;
 
@@ -286,8 +287,8 @@ fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 struct EcdsaSignature<'a> {
-    r: asn1::BigUint<'a>,
-    s: asn1::BigUint<'a>,
+    r: DerEncBigUint<'a>,
+    s: DerEncBigUint<'a>,
 }
 
 /// Convert OpenSSL ECDSA signature to PKCS #11 format
@@ -339,26 +340,9 @@ fn ossl_to_pkcs11_signature(
 /// we split here the provided buffer and wrap it with the DER encoding.
 fn pkcs11_to_ossl_signature(signature: &[u8]) -> KResult<Vec<u8>> {
     let bn_len = signature.len() / 2;
-    let r_buf = &signature[..bn_len];
-    let mut r_vec = Vec::with_capacity(bn_len);
-    // if the buffer starts with bit 1, it would be interpreted as negative integer.
-    // Prepend one more null byte.
-    if r_buf[0] & 0x80 != 0 {
-        r_vec.push(0);
-    }
-    r_vec.extend_from_slice(r_buf);
-    let s_buf = &signature[bn_len..];
-    let mut s_vec = Vec::with_capacity(bn_len);
-    // if the buffer starts with bit 1, it would be interpreted as negative integer.
-    // Prepend one more null byte.
-    if s_buf[0] & 0x80 != 0 {
-        s_vec.push(0);
-    }
-    s_vec.extend_from_slice(s_buf);
-    /* FIXME Use the DerEncBigUint from RSA code */
     let sig = EcdsaSignature {
-        r: asn1::BigUint::new(&r_vec.as_slice()).expect("bad r value"),
-        s: asn1::BigUint::new(&s_vec.as_slice()).expect("bad s value"),
+        r: DerEncBigUint::new(&signature[..bn_len])?,
+        s: DerEncBigUint::new(&signature[bn_len..])?,
     };
     let ossl_sign = match asn1::write_single(&sig) {
         Ok(b) => b,
