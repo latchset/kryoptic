@@ -5,9 +5,6 @@ use super::object;
 
 use interface::*;
 
-use std::os::raw::c_char;
-use zeroize::Zeroize;
-
 macro_rules! ptr_wrapper {
     ($name:ident; $ossl:ident; $free:expr) => {
         #[derive(Debug)]
