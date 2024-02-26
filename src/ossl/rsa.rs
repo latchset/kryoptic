@@ -902,7 +902,7 @@ impl Verify for RsaPKCSOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return err_rv!(CKR_SIGNATURE_INVALID);
             }
             return Ok(());
         }
@@ -993,7 +993,7 @@ impl Verify for RsaPKCSOperation {
                 signature.len(),
             );
             if res != 1 {
-                err_rv!(CKR_DEVICE_ERROR)
+                err_rv!(CKR_SIGNATURE_INVALID)
             } else {
                 Ok(())
             }
