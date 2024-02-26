@@ -292,6 +292,30 @@ struct EcdsaSignature<'a> {
     s: DerEncBigUint<'a>,
 }
 
+fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> KResult<()> {
+    let mut len = hin.len();
+    if len > hout.len() {
+        /* check for leading zeros */
+        for i in 0..hin.len() {
+            if hin[i] != 0 {
+                break;
+            }
+            len -= 1;
+        }
+        if len == 0 || len > hout.len() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+    }
+    let ipad = hin.len() - len;
+    let opad = hout.len() - len;
+    if opad > 0 {
+        hout[0..opad].fill(0);
+    }
+    hout[opad..].copy_from_slice(&hin[ipad..]);
+    Ok(())
+}
+
+
 /// Convert OpenSSL ECDSA signature to PKCS #11 format
 ///
 /// The OpenSSL ECDSA signature is DER encoded SEQUENCE of r and s values.
@@ -309,29 +333,8 @@ fn ossl_to_pkcs11_signature(
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
     };
     let bn_len = signature.len() / 2;
-    let mut r_bytes = sig.r.as_bytes();
-    // skip leading zero
-    if r_bytes[0] == 0 {
-        r_bytes = &r_bytes[1..];
-    }
-    signature[..r_bytes.len()].copy_from_slice(r_bytes);
-    if r_bytes.len() < bn_len {
-        /* pad with zeroes */
-        signature[r_bytes.len()..bn_len].fill(0);
-    }
-
-    let mut s_bytes = sig.s.as_bytes();
-    // skip leading zero
-    if s_bytes[0] == 0 {
-        s_bytes = &s_bytes[1..];
-    }
-    signature[bn_len..(bn_len + s_bytes.len())].copy_from_slice(s_bytes);
-    /* pad with zeroes */
-    if s_bytes.len() < bn_len {
-        /* pad with zeroes */
-        signature[(bn_len + s_bytes.len())..].fill(0);
-    }
-    Ok(())
+    slice_to_sig_half(sig.r.as_bytes(), &mut signature[..bn_len])?;
+    slice_to_sig_half(sig.s.as_bytes(), &mut signature[bn_len..])
 }
 
 /// Convert PKCS #11 ECDSA signature to OpenSSL format
@@ -601,8 +604,7 @@ impl Sign for EccOperation {
         self.finalized = true;
 
         let mut siglen = signature.len() + 10;
-        let mut ossl_sign: Vec<u8> = Vec::with_capacity(siglen);
-        ossl_sign.resize(siglen, 0);
+        let mut ossl_sign = vec![0u8; siglen];
 
         #[cfg(not(feature = "fips"))]
         {
@@ -627,8 +629,12 @@ impl Sign for EccOperation {
                 .unwrap()
                 .digest_sign_final(&mut ossl_sign)?;
         }
+        if siglen > ossl_sign.len() {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
 
-        ossl_sign.resize(siglen, 0);
+        /* can only shrink */
+        unsafe { ossl_sign.set_len(siglen); }
 
         let ret = ossl_to_pkcs11_signature(&ossl_sign, signature);
         ossl_sign.zeroize();
