@@ -15,6 +15,9 @@ use super::interface;
 use error::{KError, KResult};
 use interface::CKR_DEVICE_ERROR;
 
+use std::os::raw::c_char;
+use zeroize::Zeroize;
+
 struct OsslContext {
     context: *mut OSSL_LIB_CTX,
 }

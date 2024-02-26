@@ -58,19 +58,20 @@ fn object_to_rsa_public_key(key: &Object) -> KResult<EvpPkey> {
         .finalize();
 
     let mut ctx = new_pkey_ctx()?;
-    if unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) } != 1 {
+    let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
+    if res != 1 {
         return err_rv!(CKR_DEVICE_ERROR);
     }
     let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-    if unsafe {
+    let res = unsafe {
         EVP_PKEY_fromdata(
             ctx.as_mut_ptr(),
             &mut pkey,
             EVP_PKEY_PUBLIC_KEY as i32,
             params.as_mut_ptr(),
         )
-    } != 1
-    {
+    };
+    if res != 1 {
         return err_rv!(CKR_DEVICE_ERROR);
     }
     EvpPkey::from_ptr(pkey)
@@ -127,26 +128,23 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
     params = params.finalize();
 
     let mut ctx = new_pkey_ctx()?;
-    if unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) } != 1 {
+    let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
+    if res != 1 {
         return err_rv!(CKR_DEVICE_ERROR);
     }
     let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-    if unsafe {
+    let res = unsafe {
         EVP_PKEY_fromdata(
             ctx.as_mut_ptr(),
             &mut pkey,
             EVP_PKEY_PRIVATE_KEY as i32,
             params.as_mut_ptr(),
         )
-    } != 1
-    {
+    };
+    if res != 1 {
         return err_rv!(CKR_DEVICE_ERROR);
     }
     EvpPkey::from_ptr(pkey)
-}
-
-fn empty_private_key() -> EvpPkey {
-    EvpPkey::empty()
 }
 
 macro_rules! name_to_vec {
@@ -818,7 +816,14 @@ impl Sign for RsaPKCSOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.sigctx.as_mut().unwrap().digest_sign_final(signature)
+            match self.sigctx.as_mut().unwrap().digest_sign_final(signature) {
+                Ok(siglen) => if siglen != signature.len() {
+                        err_rv!(CKR_DEVICE_ERROR)
+                    } else {
+                        Ok(())
+                    },
+                Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+            }
         }
         #[cfg(not(feature = "fips"))]
         unsafe {
@@ -897,7 +902,7 @@ impl Verify for RsaPKCSOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return err_rv!(CKR_SIGNATURE_INVALID);
             }
             return Ok(());
         }
@@ -988,7 +993,7 @@ impl Verify for RsaPKCSOperation {
                 signature.len(),
             );
             if res != 1 {
-                err_rv!(CKR_DEVICE_ERROR)
+                err_rv!(CKR_SIGNATURE_INVALID)
             } else {
                 Ok(())
             }

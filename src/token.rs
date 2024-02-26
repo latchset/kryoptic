@@ -14,6 +14,7 @@ use super::mechanism;
 use super::object;
 use super::rsa;
 use super::storage;
+use super::ecc;
 
 use super::{err_not_found, err_rv};
 use error::{KError, KResult};
@@ -296,6 +297,7 @@ impl Token {
         object::register(&mut token.mechanisms, &mut token.object_factories);
         aes::register(&mut token.mechanisms, &mut token.object_factories);
         rsa::register(&mut token.mechanisms, &mut token.object_factories);
+        ecc::register(&mut token.mechanisms, &mut token.object_factories);
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         hmac::register(&mut token.mechanisms, &mut token.object_factories);
 

@@ -110,6 +110,38 @@ impl TestData<'_> {
                     "CKA_PRIVATE_EXPONENT": "AQAD",
                     "CKA_TOKEN": true
                 }
+            }, {
+                "attributes": {
+                    "CKA_UNIQUE_ID": "4",
+                    "CKA_CLASS": 2,
+                    "CKA_KEY_TYPE": 3,
+                    "CKA_DESTROYABLE": false,
+                    "CKA_ID": "Ag==",
+                    "CKA_LABEL": "Test EC Key",
+                    "CKA_MODIFIABLE": true,
+                    "CKA_PRIVATE": false,
+                    "CKA_EC_PARAMS": "BggqhkjOPQMBBw==",
+                    "CKA_EC_POINT": "BOaBBjTeoFaH/PYBjY7hCZOJTtdbESgdPzXZwt8YXWA6iAYamlZ0X8I6npsh0OlyTMrvYIo+JccaoUki/cROlEU=",
+                    "CKA_TOKEN": true,
+                    "CKA_VERIFY": true
+                }
+            }, {
+                "attributes": {
+                    "CKA_UNIQUE_ID": "5",
+                    "CKA_CLASS": 3,
+                    "CKA_KEY_TYPE": 3,
+                    "CKA_DESTROYABLE": false,
+                    "CKA_ID": "Ag==",
+                    "CKA_LABEL": "Test EC Key",
+                    "CKA_MODIFIABLE": false,
+                    "CKA_PRIVATE": true,
+                    "CKA_SENSITIVE": true,
+                    "CKA_EXTRACTABLE": false,
+                    "CKA_EC_PARAMS": "BggqhkjOPQMBBw==",
+                    "CKA_VALUE": "mtoobolazGJPX6gecD57oWxvwZl02fKc7BKwixExm5M=",
+                    "CKA_TOKEN": true,
+                    "CKA_SIGN": true
+                }
             }]
         });
         let file = std::fs::File::create(self.filename).unwrap();
@@ -891,6 +923,118 @@ fn test_create_objects() {
     ret = fn_logout(login_session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(login_session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
+}
+
+#[test]
+fn test_create_ec_objects() {
+    let mut testdata = TestData::new("testdata/test_create_ec_objects.json");
+    testdata.setup_db();
+
+    let mut args = testdata.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+
+    let mut class = CKO_PUBLIC_KEY;
+    let mut ktype = CKK_EC;
+    let mut verify: CK_BBOOL = CK_TRUE;
+    let label = "EC Public Signature Key";
+    let point_hex = "041b803bf0586decf25616e879b0399aa3daab60916fc76c9b6c687fc1454cba90d5f15aeb36e7070cffb4966499b71b389453c0075203fa047d4f3e44343edc84fb793bf1b8ca94dd3f293afbe68e3be93f1245be9fb71be3c50f1263bc12d516";
+    let params_hex = "06052b81040022";
+    let point = hex::decode(point_hex).expect("Failed to decode hex point");
+    let params = hex::decode(params_hex).expect("Failed to decode hex params");
+    let mut template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VERIFY, &mut verify as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_LABEL,
+            label.as_ptr() as *mut std::ffi::c_void,
+            label.len()
+        ),
+        make_attribute!(
+            CKA_EC_POINT,
+            point.as_ptr() as *mut std::ffi::c_void,
+            point.len()
+        ),
+        make_attribute!(
+            CKA_EC_PARAMS,
+            params.as_ptr() as *mut std::ffi::c_void,
+            params.len()
+        ),
+    ];
+
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Private EC key */
+    class = CKO_PRIVATE_KEY;
+    let mut ktype = CKK_EC;
+    let mut sign: CK_BBOOL = CK_TRUE;
+    let label = "EC Private Signature Key";
+    let value_hex = "4a77d1245d2c4751ff178040cc9e527b4d6cbb067b8fb01265b854fa581fd62dadc706025cbf515d80fd226f8f552f34";
+    let value = hex::decode(value_hex).expect("Failed to decode value");
+    template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_SIGN, &mut sign as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_LABEL,
+            label.as_ptr() as *mut std::ffi::c_void,
+            label.len()
+        ),
+        make_attribute!(
+            CKA_VALUE,
+            value.as_ptr() as *mut std::ffi::c_void,
+            value.len()
+        ),
+        make_attribute!(
+            CKA_EC_PARAMS,
+            params.as_ptr() as *mut std::ffi::c_void,
+            params.len()
+        ),
+    ];
+
+    ret = fn_create_object(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
@@ -2272,6 +2416,125 @@ fn test_session_objects() {
 }
 
 #[test]
+fn test_ecc_operations() {
+    let mut testdata = TestData::new("testdata/test_ecc_operations.json");
+
+    let mut args = testdata.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* open session */
+    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    ret = fn_open_session(
+        testdata.get_slot(),
+        CKF_SERIAL_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* login */
+    let pin = "12345678";
+    ret = fn_login(
+        session,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* private key */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("5").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* sign init */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_sign_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    /* a second invocation should return an error */
+    ret = fn_sign_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OPERATION_ACTIVE);
+
+    let data = "plaintext";
+    let sign: [u8; 64] = [0; 64];
+    let mut sign_len: CK_ULONG = 64;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 64);
+
+    /* a second invocation should return an error */
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    /* test that signature verification works */
+    template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("4").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_OK);
+
+    testdata.finalize();
+}
+
+#[test]
 fn test_hashes_digest() {
     let mut testdata = TestData::new("testdata/test_hashes.json");
 
@@ -2656,7 +2919,7 @@ fn sig_and_check(
     let mut ret = fn_sign_init(session, mechanism, key);
     assert_eq!(ret, CKR_OK);
 
-    /* get signature lenght */
+    /* get signature length */
     let mut csiglen: CK_ULONG = 0;
     ret = fn_sign(
         session,
@@ -3002,6 +3265,39 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_sign_init(session, &mut mechanism, prikey);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "plaintext";
+    let sign: [u8; 256] = [0; 256];
+    let mut sign_len: CK_ULONG = 256;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 256);
+
+    ret = fn_verify_init(session, &mut mechanism, pubkey);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
     /* Wrap RSA key in AES */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_AES_ECB,
@@ -3063,6 +3359,86 @@ fn test_key() {
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
         &mut handle2,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* EC key pair */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_EC_KEY_PAIR_GEN,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut pubkey = CK_INVALID_HANDLE;
+    let mut prikey = CK_INVALID_HANDLE;
+
+    let mut truebool = CK_TRUE;
+    let ec_params_hex = "06052B81040022"; // secp384r1
+    let ec_params = hex::decode(ec_params_hex).expect("Failed to decode hex ec_params");
+    let mut ktype = CKK_EC;
+    let mut class = CKO_PUBLIC_KEY;
+    let mut pub_template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_EC_PARAMS,
+            ec_params.as_ptr() as *mut std::ffi::c_void,
+            ec_params.len()
+        ),
+    ];
+    let mut class = CKO_PRIVATE_KEY;
+    let mut pri_template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    ret = fn_generate_key_pair(
+        session,
+        &mut mechanism,
+        pub_template.as_mut_ptr(),
+        pub_template.len() as CK_ULONG,
+        pri_template.as_mut_ptr(),
+        pri_template.len() as CK_ULONG,
+        &mut pubkey,
+        &mut prikey,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDSA_SHA256,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_sign_init(session, &mut mechanism, prikey);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "plaintext";
+    let sign: [u8; 96] = [0; 96];
+    let mut sign_len: CK_ULONG = 96;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 96);
+
+    ret = fn_verify_init(session, &mut mechanism, pubkey);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
     );
     assert_eq!(ret, CKR_OK);
 
