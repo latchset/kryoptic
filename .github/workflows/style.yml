@@ -1,0 +1,28 @@
+---
+name: Check Style
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Check Style
+    runs-on: ubuntu-22.04
+    container: fedora:latest
+    steps:
+      - name: Install Dependencies
+        run: |
+          dnf -y install rustfmt
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Setup
+        if: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git config --global --add safe.directory \
+              /__w/kryoptic/kryoptic
+          git fetch origin main ${{ github.event.pull_request.base.sha }}
+      - name: Run rustfmt
+        run: |
+          rustfmt src/*.rs src/*/*.rs
+          git diff
