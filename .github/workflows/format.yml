@@ -19,14 +19,14 @@ jobs:
       - name: Setup
         if: ${{ github.event.pull_request.base.sha }}
         run: |
-          git config --global --add safe.directory \
-              /__w/kryoptic/kryoptic
+          git config --global --add safe.directory /__w/kryoptic/kryoptic
           git fetch origin main ${{ github.event.pull_request.base.sha }}
       - name: Run rustfmt
         run: |
           rustfmt src/*.rs src/*/*.rs
-          @lines=`git diff -U0 --no-color |wc -l`; \
-          if [ "$$lines" != "0" ]; then \
+          git diff -U0 --no-color
+          LINES=`git diff -U0 --no-color |wc -l`; \
+          if [ "$LINES" != "0" ]; then \
                 echo "Rustfmt issues detected"; \
                 exit 1; \
           else \

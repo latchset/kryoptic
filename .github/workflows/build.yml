@@ -17,20 +17,27 @@ jobs:
     steps:
       - name: Install Dependencies
         run: |
-          dnf -y install git cargo gcc
+          dnf -y install git cargo clang-devel openssl-devel \
+            'perl(FindBin)' 'perl(lib)' 'perl(File::Compare)' \
+            'perl(File::Copy)' 'perl(bigint)' 'perl(Time::HiRes)' \
+            'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
+            'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
+            'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
+            zlib-devel sed
       - name: Checkout Repository
         uses: actions/checkout@v3
       - name: Setup
         run: |
+          git config --global --add safe.directory /__w/kryoptic/kryoptic
           git submodule init
           git submodule update
       - name: Build
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo build --features fips
+            cargo build -vv --features fips
           fi
           if [ "${{ matrix.name }}" = "ossl3" ]; then
-            cargo build
+            cargo build -vv
           fi
       - name: Test
         run: |
@@ -40,3 +47,10 @@ jobs:
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo test
           fi
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: Build logs ${{ matrix.name }}
+          path: |
+            target/debug/build/*/output
+
