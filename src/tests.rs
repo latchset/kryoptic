@@ -1666,7 +1666,7 @@ fn test_aes_operations() {
 
         /* Counterbits edge cases */
 
-        /* 9 bit counter, counter value should allow a singe block before
+        /* 9 bit counter, counter value should allow a single block before
          * wrap around */
         let mut param = CK_AES_CTR_PARAMS {
             ulCounterBits: 9,
@@ -1691,7 +1691,7 @@ fn test_aes_operations() {
         let enc: [u8; 16] = [0; 16];
         let mut enc_len: CK_ULONG = 16;
 
-        /* First block should suceed */
+        /* First block should succeed */
         ret = fn_encrypt_update(
             session,
             data.as_mut_ptr(),

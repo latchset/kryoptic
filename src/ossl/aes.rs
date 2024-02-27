@@ -267,7 +267,7 @@ impl AesOperation {
                      * we can do is to set a maximum number of blocks so
                      * that the counter space does *not* wrap (because
                      * openssl won't wrap it but proceed to increment the
-                     * octects part of the IV/Nonce). This means that for
+                     * octets part of the IV/Nonce). This means that for
                      * applications that initialize the counter to a value
                      * like 1 all will be fine, but application that
                      * initialize the counter to a random value and expect
@@ -444,7 +444,7 @@ impl AesOperation {
         };
 
         /* Need to initialize the cipher on the ctx first, as some modes
-         * will attempt to set parameters that require it on the contex,
+         * will attempt to set parameters that require it on the context,
          * before key and iv can be installed */
         let res = unsafe {
             EVP_EncryptInit_ex2(
@@ -540,7 +540,7 @@ impl AesOperation {
             std::ptr::null()
         };
 
-        /* set key, iv, addtional params */
+        /* set key, iv, additional params */
         let res = unsafe {
             EVP_EncryptInit_ex2(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),
@@ -708,7 +708,7 @@ impl AesOperation {
             std::ptr::null()
         };
 
-        /* set key, iv, addtional params */
+        /* set key, iv, additional params */
         let res = unsafe {
             EVP_DecryptInit_ex2(
                 self.ctx.as_mut().unwrap().as_mut_ptr(),

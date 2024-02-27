@@ -80,7 +80,7 @@ unsafe extern "C" fn fips_get_nonce(
     salt: *const ::std::os::raw::c_void,
     salt_len: usize,
 ) -> usize {
-    /* FIXME: OpenSSL returns some tiemr + salt string,
+    /* FIXME: OpenSSL returns some timer + salt string,
      * we return just getrandom data | salt string.
      * Need to check if this is ok */
 
@@ -532,7 +532,7 @@ unsafe extern "C" fn fips_secure_allocated(
     return 0;
 }
 
-/* FIPS Provider wrapping an intialization */
+/* FIPS Provider wrapping an initialization */
 
 struct FipsProvider {
     provider: *mut OSSL_PROVIDER,
