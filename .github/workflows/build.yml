@@ -1,0 +1,42 @@
+---
+name: Build
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [ossl3, fips]
+    container: fedora:latest
+    steps:
+      - name: Install Dependencies
+        run: |
+          dnf -y install git cargo gcc
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      - name: Setup
+        run: |
+          git submodule init
+          git submodule update
+      - name: Build
+        run: |
+          if [ "${{ matrix.name }}" = "fips" ]; then
+            cargo build --features fips
+          fi
+          if [ "${{ matrix.name }}" = "ossl3" ]; then
+            cargo build
+          fi
+      - name: Test
+        run: |
+          if [ "${{ matrix.name }}" = "fips" ]; then
+            cargo test --features fips
+          fi
+          if [ "${{ matrix.name }}" = "ossl3" ]; then
+            cargo test
+          fi
