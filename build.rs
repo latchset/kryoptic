@@ -73,6 +73,8 @@ fn build_ossl() {
             if !std::process::Command::new("./Configure")
                 .current_dir(&openssl_path)
                 .args(bldargs)
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
                 .output()
                 .expect("could not run openssl `Configure`")
                 .status
@@ -84,6 +86,8 @@ fn build_ossl() {
 
             if !std::process::Command::new("make")
                 .current_dir(&openssl_path)
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
                 .output()
                 .expect("could not run openssl `make`")
                 .status
