@@ -315,7 +315,6 @@ fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> KResult<()> {
     Ok(())
 }
 
-
 /// Convert OpenSSL ECDSA signature to PKCS #11 format
 ///
 /// The OpenSSL ECDSA signature is DER encoded SEQUENCE of r and s values.
@@ -634,7 +633,9 @@ impl Sign for EccOperation {
         }
 
         /* can only shrink */
-        unsafe { ossl_sign.set_len(siglen); }
+        unsafe {
+            ossl_sign.set_len(siglen);
+        }
 
         let ret = ossl_to_pkcs11_signature(&ossl_sign, signature);
         ossl_sign.zeroize();
