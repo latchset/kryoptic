@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Install Dependencies
         run: |
-          dnf -y install git rustfmt
+          dnf -y install git rustfmt codespell make
       - name: Checkout Repository
         uses: actions/checkout@v3
       - name: Setup
@@ -23,12 +23,14 @@ jobs:
           git fetch origin main ${{ github.event.pull_request.base.sha }}
       - name: Run rustfmt
         run: |
-          rustfmt src/*.rs src/*/*.rs
-          git diff -U0 --no-color
+          make fix-format
           LINES=`git diff -U0 --no-color |wc -l`; \
           if [ "$LINES" != "0" ]; then \
                 echo "Rustfmt issues detected"; \
+                git diff -U0 --no-color
                 exit 1; \
           else \
                 echo "Rustfmt is happy"; \
           fi
+      - name: Codespell
+        run: make check-spell
