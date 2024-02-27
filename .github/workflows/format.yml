@@ -1,5 +1,5 @@
 ---
-name: Check Style
+name: Check Rust Format
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Install Dependencies
         run: |
-          dnf -y install rustfmt
+          dnf -y install git rustfmt
       - name: Checkout Repository
         uses: actions/checkout@v3
       - name: Setup
@@ -25,4 +25,10 @@ jobs:
       - name: Run rustfmt
         run: |
           rustfmt src/*.rs src/*/*.rs
-          git diff
+          @lines=`git diff -U0 --no-color |wc -l`; \
+          if [ "$$lines" != "0" ]; then \
+                echo "Rustfmt issues detected"; \
+                exit 1; \
+          else \
+                echo "Rustfmt is happy"; \
+          fi
