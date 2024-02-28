@@ -3265,12 +3265,12 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+    let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_SHA256_RSA_PKCS,
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    ret = fn_sign_init(session, &mut mechanism, prikey);
+    ret = fn_sign_init(session, &mut sig_mechanism, prikey);
     assert_eq!(ret, CKR_OK);
 
     let data = "plaintext";
@@ -3286,7 +3286,7 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(sign_len, 256);
 
-    ret = fn_verify_init(session, &mut mechanism, pubkey);
+    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
     assert_eq!(ret, CKR_OK);
 
     ret = fn_verify(
@@ -3328,6 +3328,36 @@ fn test_key() {
         pri_template.as_mut_ptr(),
         pri_template.len() as CK_ULONG,
         &mut prikey2,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Test the unwrapped key can be used */
+    ret = fn_sign_init(session, &mut sig_mechanism, prikey2);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "plaintext";
+    let sign: [u8; 256] = [0; 256];
+    let mut sign_len: CK_ULONG = 256;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 256);
+
+    /* And signature verified by the original public key */
+    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
     );
     assert_eq!(ret, CKR_OK);
 
