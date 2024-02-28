@@ -3426,6 +3426,11 @@ fn test_key() {
         make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_EXTRACTABLE,
+            &mut truebool as *mut _,
+            CK_BBOOL_SIZE
+        ),
     ];
 
     ret = fn_generate_key_pair(
@@ -3440,12 +3445,12 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+    let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDSA_SHA256,
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    ret = fn_sign_init(session, &mut mechanism, prikey);
+    ret = fn_sign_init(session, &mut sig_mechanism, prikey);
     assert_eq!(ret, CKR_OK);
 
     let data = "plaintext";
@@ -3461,7 +3466,70 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(sign_len, 96);
 
-    ret = fn_verify_init(session, &mut mechanism, pubkey);
+    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Wrap EC key in AES */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut wrapped = vec![0u8; 65536];
+    let mut wrapped_len = wrapped.len() as CK_ULONG;
+
+    ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        handle,
+        prikey,
+        wrapped.as_mut_ptr(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut prikey2 = CK_INVALID_HANDLE;
+    ret = fn_unwrap_key(
+        session,
+        &mut mechanism,
+        handle,
+        wrapped.as_mut_ptr(),
+        wrapped_len,
+        pri_template.as_mut_ptr(),
+        pri_template.len() as CK_ULONG,
+        &mut prikey2,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Test the unwrapped key can be used */
+    ret = fn_sign_init(session, &mut sig_mechanism, prikey2);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "plaintext";
+    let sign: [u8; 96] = [0; 96];
+    let mut sign_len: CK_ULONG = 96;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 96);
+
+    /* And signature verified by the original public key */
+    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
     assert_eq!(ret, CKR_OK);
 
     ret = fn_verify(
