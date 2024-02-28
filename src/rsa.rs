@@ -240,35 +240,35 @@ impl PrivKeyFactory for RSAPrivFactory {
         };
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_MODULUS,
-            rsapkey.modulus.as_bytes(),
+            rsapkey.modulus.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_PUBLIC_EXPONENT,
-            rsapkey.public_exponent.as_bytes(),
+            rsapkey.public_exponent.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_PRIVATE_EXPONENT,
-            rsapkey.private_exponent.as_bytes(),
+            rsapkey.private_exponent.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_PRIME_1,
-            rsapkey.prime1.as_bytes(),
+            rsapkey.prime1.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_PRIME_2,
-            rsapkey.prime2.as_bytes(),
+            rsapkey.prime2.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_EXPONENT_1,
-            rsapkey.exponent1.as_bytes(),
+            rsapkey.exponent1.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_EXPONENT_2,
-            rsapkey.exponent2.as_bytes(),
+            rsapkey.exponent2.as_nopad_bytes(),
         ));
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_COEFFICIENT,
-            rsapkey.coefficient.as_bytes(),
+            rsapkey.coefficient.as_nopad_bytes(),
         ));
 
         if match attrs.iter().position(|x| x.type_ == CKA_CLASS) {

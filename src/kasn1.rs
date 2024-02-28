@@ -40,6 +40,18 @@ impl<'a> DerEncBigUint<'a> {
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
     }
+
+    /// Get the BN bytes without possible leading NULL bytes.
+    pub fn as_nopad_bytes(&self) -> &[u8] {
+        let mut skip = 0;
+        for val in self.data.as_ref() {
+            if *val != 0 {
+                break;
+            }
+            skip += 1;
+        }
+        &self.data[skip..]
+    }
 }
 
 impl Drop for DerEncBigUint<'_> {
