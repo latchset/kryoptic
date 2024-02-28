@@ -80,3 +80,46 @@ impl<'a> asn1::SimpleAsn1Writable for DerEncBigUint<'a> {
         dest.push_slice(self.as_bytes())
     }
 }
+
+pub struct DerEncOctetString<'a> {
+    data: Cow<'a, [u8]>,
+}
+
+impl<'a> DerEncOctetString<'a> {
+    pub fn new(data: &'a [u8]) -> KResult<Self> {
+        Ok(DerEncOctetString {
+            data: Cow::from(data),
+        })
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl Drop for DerEncOctetString<'_> {
+    fn drop(&mut self) {
+        match &self.data {
+            Cow::Owned(_) => self.data.to_mut().zeroize(),
+            _ => (),
+        }
+    }
+}
+
+impl<'a> asn1::SimpleAsn1Readable<'a> for DerEncOctetString<'a> {
+    const TAG: asn1::Tag = asn1::Tag::primitive(0x04);
+    fn parse_data(data: &'a [u8]) -> asn1::ParseResult<Self> {
+        match DerEncOctetString::new(data) {
+            Ok(x) => Ok(x),
+            Err(_) => {
+                Err(asn1::ParseError::new(asn1::ParseErrorKind::InvalidValue))
+            }
+        }
+    }
+}
+impl<'a> asn1::SimpleAsn1Writable for DerEncOctetString<'a> {
+    const TAG: asn1::Tag = asn1::Tag::primitive(0x04);
+    fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
+        dest.push_slice(self.as_bytes())
+    }
+}

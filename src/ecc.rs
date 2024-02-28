@@ -4,6 +4,7 @@
 use super::attribute;
 use super::error;
 use super::interface;
+use super::kasn1;
 use super::object;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 
@@ -20,6 +21,89 @@ use std::fmt::Debug;
 
 pub const MIN_EC_SIZE_BITS: usize = 256;
 pub const MAX_EC_SIZE_BITS: usize = 521;
+
+// ASN.1 encoding of the OID
+const OID_SECP256R1: &[u8] =
+    &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
+const OID_SECP384R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22];
+const OID_SECP521R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x23];
+
+// ASN.1 encoding of the curve name
+const STRING_SECP256R1: &[u8] = &[
+    0x13, 0x0a, 0x70, 0x72, 0x69, 0x6d, 0x65, 0x32, 0x35, 0x36, 0x76, 0x31,
+];
+const STRING_SECP384R1: &[u8] = &[
+    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x33, 0x38, 0x34, 0x72, 0x31,
+];
+const STRING_SECP521R1: &[u8] = &[
+    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x35, 0x32, 0x31, 0x72, 0x31,
+];
+
+const NAME_SECP256R1: &str = "prime256v1";
+const NAME_SECP384R1: &str = "secp384r1";
+const NAME_SECP521R1: &str = "secp521r1";
+
+const BITS_SECP256R1: usize = 256;
+const BITS_SECP384R1: usize = 384;
+const BITS_SECP521R1: usize = 521;
+
+fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
+    let asn1_oid = match asn1::write_single(&oid) {
+        Ok(r) => r,
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    match asn1_oid.as_slice() {
+        OID_SECP256R1 => Ok(NAME_SECP256R1),
+        OID_SECP384R1 => Ok(NAME_SECP384R1),
+        OID_SECP521R1 => Ok(NAME_SECP521R1),
+        _ => err_rv!(CKR_GENERAL_ERROR),
+    }
+}
+
+fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
+    let asn1_oid = match asn1::write_single(&oid) {
+        Ok(r) => r,
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    match asn1_oid.as_slice() {
+        OID_SECP256R1 => Ok(BITS_SECP256R1),
+        OID_SECP384R1 => Ok(BITS_SECP384R1),
+        OID_SECP521R1 => Ok(BITS_SECP521R1),
+        _ => err_rv!(CKR_GENERAL_ERROR),
+    }
+}
+
+fn curve_name_to_bits(name: asn1::PrintableString) -> KResult<usize> {
+    let asn1_name = match asn1::write_single(&name) {
+        Ok(r) => r,
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    match asn1_name.as_slice() {
+        STRING_SECP256R1 => Ok(BITS_SECP256R1),
+        STRING_SECP384R1 => Ok(BITS_SECP384R1),
+        STRING_SECP521R1 => Ok(BITS_SECP521R1),
+        _ => err_rv!(CKR_GENERAL_ERROR),
+    }
+}
+
+fn curve_name_to_oid(
+    name: asn1::PrintableString,
+) -> KResult<asn1::ObjectIdentifier> {
+    let asn1_name = match asn1::write_single(&name) {
+        Ok(r) => r,
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    let asn1_oid = match asn1_name.as_slice() {
+        STRING_SECP256R1 => OID_SECP256R1,
+        STRING_SECP384R1 => OID_SECP384R1,
+        STRING_SECP521R1 => OID_SECP521R1,
+        _ => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    match asn1::parse_single::<asn1::ObjectIdentifier>(asn1_oid) {
+        Ok(r) => Ok(r),
+        Err(_) => err_rv!(CKR_GENERAL_ERROR),
+    }
+}
 
 #[derive(Debug)]
 pub struct ECCPubFactory {
@@ -61,6 +145,71 @@ impl ObjectFactory for ECCPubFactory {
 impl CommonKeyFactory for ECCPubFactory {}
 
 impl PubKeyFactory for ECCPubFactory {}
+
+type Version = u64;
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+enum ECParameters<'a> {
+    // ecParametdders   ECParameters,
+    OId(asn1::ObjectIdentifier),
+    ImplicitlyCA(asn1::Null),
+    CurveName(asn1::PrintableString<'a>),
+}
+
+/// Defined in SECG SEC 1, C.4
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct ECPrivateKey<'a> {
+    version: Version,
+    private_key: kasn1::DerEncOctetString<'a>,
+    #[explicit(0)]
+    parameters: Option<ECParameters<'a>>,
+    #[explicit(1)]
+    public_key: Option<asn1::BitString<'a>>,
+}
+
+impl ECPrivateKey<'_> {
+    pub fn new_owned<'a>(
+        private_key: &'a Vec<u8>,
+    ) -> KResult<ECPrivateKey<'a>> {
+        Ok(ECPrivateKey {
+            version: 1,
+            private_key: kasn1::DerEncOctetString::new(private_key.as_slice())?,
+            parameters: None,
+            public_key: None,
+        })
+    }
+}
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct Attribute<'a> {
+    attribute_type: asn1::ObjectIdentifier,
+    attribute_value: asn1::SetOf<'a, asn1::Tlv<'a>>, // ANY
+}
+
+type Attributes<'a> = asn1::SetOf<'a, Attribute<'a>>;
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct PrivateKeyInfo<'a> {
+    version: Version,
+    private_key_algorithm: asn1::ObjectIdentifier,
+    private_key: asn1::OctetStringEncoded<ECPrivateKey<'a>>,
+    #[explicit(1)]
+    attributes: Option<Attributes<'a>>,
+}
+
+impl PrivateKeyInfo<'_> {
+    pub fn new<'a>(
+        ec_private_key: ECPrivateKey<'a>,
+        oid: asn1::ObjectIdentifier,
+    ) -> KResult<PrivateKeyInfo<'a>> {
+        Ok(PrivateKeyInfo {
+            version: 0,
+            private_key_algorithm: oid,
+            private_key: asn1::OctetStringEncoded::new(ec_private_key),
+            attributes: None,
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct ECCPrivFactory {
@@ -108,11 +257,103 @@ impl ObjectFactory for ECCPrivFactory {
     fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
+
+    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+        PrivKeyFactory::export_for_wrapping(self, key)
+    }
+
+    fn import_from_wrapped(
+        &self,
+        data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        PrivKeyFactory::import_from_wrapped(self, data, template)
+    }
+}
+
+fn get_oid_from_obj(key: &Object) -> KResult<asn1::ObjectIdentifier> {
+    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
+        Ok(b) => b,
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    match asn1::parse_single::<ECParameters>(x) {
+        Ok(a) => match a {
+            ECParameters::OId(o) => Ok(o),
+            ECParameters::CurveName(c) => curve_name_to_oid(c),
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        },
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    }
 }
 
 impl CommonKeyFactory for ECCPrivFactory {}
 
-impl PrivKeyFactory for ECCPrivFactory {}
+impl PrivKeyFactory for ECCPrivFactory {
+    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+        key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_EXTRACTABLE)?;
+
+        let pkeyinfo = PrivateKeyInfo::new(
+            ECPrivateKey::new_owned(key.get_attr_as_bytes(CKA_VALUE)?)?,
+            get_oid_from_obj(key)?,
+        )?;
+
+        match asn1::write_single(&pkeyinfo) {
+            Ok(x) => Ok(x),
+            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+        }
+    }
+
+    fn import_from_wrapped(
+        &self,
+        data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let mut attrs = template.to_vec();
+        let class = CKO_PRIVATE_KEY;
+        let key_type = CKK_EC;
+        let (tlv, extra) = match asn1::strip_tlv(&data) {
+            Ok(x) => x,
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
+        /* Some Key Wrapping algorithms may 0 pad to match block size */
+        if !extra.iter().all(|b| *b == 0) {
+            return err_rv!(CKR_WRAPPED_KEY_INVALID);
+        }
+        let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
+            Ok(k) => k,
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
+        let oid_encoded =
+            match asn1::write_single(&pkeyinfo.private_key_algorithm) {
+                Ok(b) => b,
+                Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            };
+        attrs.push(CK_ATTRIBUTE::from_slice(CKA_EC_PARAMS, &oid_encoded));
+
+        attrs.push(CK_ATTRIBUTE::from_slice(
+            CKA_VALUE,
+            pkeyinfo.private_key.into_inner().private_key.as_bytes(),
+        ));
+
+        if match attrs.iter().position(|x| x.type_ == CKA_CLASS) {
+            Some(idx) => attrs[idx].to_ulong()?,
+            None => CK_UNAVAILABLE_INFORMATION,
+        } != class
+        {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+
+        if match attrs.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
+            Some(idx) => attrs[idx].to_ulong()?,
+            None => CK_UNAVAILABLE_INFORMATION,
+        } != key_type
+        {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+
+        self.default_object_unwrap(&attrs)
+    }
+}
 
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECCPubFactory::new()));
