@@ -7,7 +7,6 @@ use {super::fips, fips::*};
 #[cfg(not(feature = "fips"))]
 use {super::ossl, ossl::*};
 
-use super::kasn1;
 use super::mechanism;
 
 use kasn1::DerEncBigUint;
@@ -52,70 +51,6 @@ fn get_digest_name(
     })
 }
 
-// ASN.1 encoding of the OID
-const OID_SECP256R1: &[u8] =
-    &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
-const OID_SECP384R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22];
-const OID_SECP521R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x23];
-
-// ASN.1 encoding of the curve name
-const STRING_SECP256R1: &[u8] = &[
-    0x13, 0x0a, 0x70, 0x72, 0x69, 0x6d, 0x65, 0x32, 0x35, 0x36, 0x76, 0x31,
-];
-const STRING_SECP384R1: &[u8] = &[
-    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x33, 0x38, 0x34, 0x72, 0x31,
-];
-const STRING_SECP521R1: &[u8] = &[
-    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x35, 0x32, 0x31, 0x72, 0x31,
-];
-
-const NAME_SECP256R1: &str = "prime256v1";
-const NAME_SECP384R1: &str = "secp384r1";
-const NAME_SECP521R1: &str = "secp521r1";
-
-const BITS_SECP256R1: usize = 256;
-const BITS_SECP384R1: usize = 384;
-const BITS_SECP521R1: usize = 521;
-
-fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
-    let asn1_oid = match asn1::write_single(&oid) {
-        Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-    };
-    match asn1_oid.as_slice() {
-        OID_SECP256R1 => Ok(NAME_SECP256R1),
-        OID_SECP384R1 => Ok(NAME_SECP384R1),
-        OID_SECP521R1 => Ok(NAME_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
-    }
-}
-
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
-    let asn1_oid = match asn1::write_single(&oid) {
-        Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-    };
-    match asn1_oid.as_slice() {
-        OID_SECP256R1 => Ok(BITS_SECP256R1),
-        OID_SECP384R1 => Ok(BITS_SECP384R1),
-        OID_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
-    }
-}
-
-fn curve_name_to_bits(name: asn1::PrintableString) -> KResult<usize> {
-    let asn1_name = match asn1::write_single(&name) {
-        Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-    };
-    match asn1_name.as_slice() {
-        STRING_SECP256R1 => Ok(BITS_SECP256R1),
-        STRING_SECP384R1 => Ok(BITS_SECP384R1),
-        STRING_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
-    }
-}
-
 /* confusingly enough, this is not EC for FIPS-level operations  */
 #[cfg(feature = "fips")]
 static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
@@ -147,14 +82,6 @@ struct EccOperation {
     mdname: Vec<std::os::raw::c_char>,
 }
 
-#[derive(asn1::Asn1Read)]
-enum ECParameters<'a> {
-    // ecParametdders   ECParameters,
-    OId(asn1::ObjectIdentifier),
-    // implicitlyCA   NULL,
-    CurveName(asn1::PrintableString<'a>),
-}
-
 fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
@@ -164,6 +91,7 @@ fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
         Ok(a) => match a {
             ECParameters::OId(o) => oid_to_bits(o)?,
             ECParameters::CurveName(c) => curve_name_to_bits(c)?,
+            _ => return err_rv!(CKR_GENERAL_ERROR),
         },
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
     };
@@ -197,6 +125,7 @@ fn get_curve_name_from_obj(key: &Object) -> KResult<Vec<u8>> {
         Ok(a) => match a {
             ECParameters::OId(o) => oid_to_curve_name(o)?,
             ECParameters::CurveName(c) => c.as_str(),
+            _ => return err_rv!(CKR_GENERAL_ERROR),
         },
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
     };
