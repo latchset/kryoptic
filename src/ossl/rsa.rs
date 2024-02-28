@@ -17,7 +17,9 @@ use mechanism::*;
 #[cfg(not(feature = "fips"))]
 use ossl::*;
 
-use std::slice;
+use std::mem::size_of;
+use std::os::raw::c_char;
+use std::os::raw::c_int;
 use zeroize::Zeroize;
 
 static RSA_NAME: &[u8; 4] = b"RSA\0";
@@ -147,34 +149,69 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
     EvpPkey::from_ptr(pkey)
 }
 
-macro_rules! name_to_vec {
-    ($name:expr) => {
-        unsafe {
-            slice::from_raw_parts(
-                $name.as_ptr() as *const std::os::raw::c_char,
-                $name.len(),
-            )
-            .to_vec()
-        }
-    };
+fn mgf1_to_digest_name_as_slice(mech: CK_MECHANISM_TYPE) -> &'static [u8] {
+    match mech {
+        CKG_MGF1_SHA1 => OSSL_DIGEST_NAME_SHA1,
+        CKG_MGF1_SHA224 => OSSL_DIGEST_NAME_SHA2_224,
+        CKG_MGF1_SHA256 => OSSL_DIGEST_NAME_SHA2_256,
+        CKG_MGF1_SHA384 => OSSL_DIGEST_NAME_SHA2_384,
+        CKG_MGF1_SHA512 => OSSL_DIGEST_NAME_SHA2_512,
+        CKG_MGF1_SHA3_224 => OSSL_DIGEST_NAME_SHA3_224,
+        CKG_MGF1_SHA3_256 => OSSL_DIGEST_NAME_SHA3_256,
+        CKG_MGF1_SHA3_384 => OSSL_DIGEST_NAME_SHA3_384,
+        CKG_MGF1_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512,
+        _ => &[],
+    }
 }
 
-fn get_digest_name(
-    mech: CK_MECHANISM_TYPE,
-) -> KResult<Vec<std::os::raw::c_char>> {
-    Ok(match mech {
-        CKM_RSA_PKCS => Vec::new(),
-        CKM_SHA1_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA1),
-        CKM_SHA224_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA2_224),
-        CKM_SHA256_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA2_256),
-        CKM_SHA384_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA2_384),
-        CKM_SHA512_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA2_512),
-        CKM_SHA3_224_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA3_224),
-        CKM_SHA3_256_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA3_256),
-        CKM_SHA3_384_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA3_384),
-        CKM_SHA3_512_RSA_PKCS => name_to_vec!(OSSL_DIGEST_NAME_SHA3_512),
-        _ => return err_rv!(CKR_GENERAL_ERROR),
-    })
+#[derive(Debug)]
+struct RsaPssParams {
+    hash: CK_ULONG,
+    mgf: CK_ULONG,
+    saltlen: c_int,
+}
+
+fn no_pss_params() -> RsaPssParams {
+    RsaPssParams {
+        hash: 0,
+        mgf: 0,
+        saltlen: 0,
+    }
+}
+
+fn parse_pss_params(mech: &CK_MECHANISM) -> KResult<RsaPssParams> {
+    match mech.mechanism {
+        CKM_RSA_PKCS_PSS
+        | CKM_SHA1_RSA_PKCS_PSS
+        | CKM_SHA224_RSA_PKCS_PSS
+        | CKM_SHA256_RSA_PKCS_PSS
+        | CKM_SHA384_RSA_PKCS_PSS
+        | CKM_SHA512_RSA_PKCS_PSS
+        | CKM_SHA3_224_RSA_PKCS_PSS
+        | CKM_SHA3_256_RSA_PKCS_PSS
+        | CKM_SHA3_384_RSA_PKCS_PSS
+        | CKM_SHA3_512_RSA_PKCS_PSS => {
+            if mech.ulParameterLen as usize
+                != size_of::<CK_RSA_PKCS_PSS_PARAMS>()
+            {
+                return err_rv!(CKR_ARGUMENTS_BAD);
+            }
+            let pss_params = mech.pParameter as *const CK_RSA_PKCS_PSS_PARAMS;
+            if mech.mechanism != CKM_RSA_PKCS_PSS {
+                let mdname =
+                    mech_type_to_digest_name(unsafe { (*pss_params).hashAlg });
+                if mech_type_to_digest_name(mech.mechanism) != mdname {
+                    return err_rv!(CKR_ARGUMENTS_BAD);
+                }
+            }
+            Ok(RsaPssParams {
+                hash: unsafe { (*pss_params).hashAlg },
+                mgf: unsafe { (*pss_params).mgf },
+                saltlen: unsafe { (*pss_params).sLen } as c_int,
+            })
+        }
+        _ => Ok(no_pss_params()),
+    }
 }
 
 #[derive(Debug)]
@@ -190,7 +227,7 @@ struct RsaPKCSOperation {
     sigctx: Option<ProviderSignatureCtx>,
     #[cfg(not(feature = "fips"))]
     sigctx: Option<EvpMdCtx>,
-    mdname: Vec<std::os::raw::c_char>,
+    pss: RsaPssParams,
 }
 
 impl RsaPKCSOperation {
@@ -210,49 +247,39 @@ impl RsaPKCSOperation {
                 },
             }),
         );
-        mechs.add_mechanism(
+
+        for ckm in &[
             CKM_SHA1_RSA_PKCS,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-
-        mechs.add_mechanism(
+            CKM_SHA224_RSA_PKCS,
             CKM_SHA256_RSA_PKCS,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-
-        mechs.add_mechanism(
             CKM_SHA384_RSA_PKCS,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-
-        mechs.add_mechanism(
             CKM_SHA512_RSA_PKCS,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
+            CKM_SHA3_224_RSA_PKCS,
+            CKM_SHA3_256_RSA_PKCS,
+            CKM_SHA3_384_RSA_PKCS,
+            CKM_SHA3_512_RSA_PKCS,
+            CKM_RSA_PKCS_PSS,
+            CKM_SHA1_RSA_PKCS_PSS,
+            CKM_SHA224_RSA_PKCS_PSS,
+            CKM_SHA256_RSA_PKCS_PSS,
+            CKM_SHA384_RSA_PKCS_PSS,
+            CKM_SHA512_RSA_PKCS_PSS,
+            CKM_SHA3_224_RSA_PKCS_PSS,
+            CKM_SHA3_256_RSA_PKCS_PSS,
+            CKM_SHA3_384_RSA_PKCS_PSS,
+            CKM_SHA3_512_RSA_PKCS_PSS,
+        ] {
+            mechs.add_mechanism(
+                *ckm,
+                Box::new(RsaPKCSMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                        ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                        flags: CKF_SIGN | CKF_VERIFY,
+                    },
+                }),
+            );
+        }
 
         mechs.add_mechanism(
             CKM_RSA_PKCS_KEY_PAIR_GEN,
@@ -290,7 +317,7 @@ impl RsaPKCSOperation {
             finalized: false,
             in_use: false,
             sigctx: None,
-            mdname: Vec::new(),
+            pss: no_pss_params(),
         })
     }
 
@@ -318,7 +345,7 @@ impl RsaPKCSOperation {
             finalized: false,
             in_use: false,
             sigctx: None,
-            mdname: Vec::new(),
+            pss: no_pss_params(),
         })
     }
 
@@ -353,7 +380,7 @@ impl RsaPKCSOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
-            mdname: get_digest_name(mech.mechanism)?,
+            pss: parse_pss_params(mech)?,
         })
     }
 
@@ -388,7 +415,7 @@ impl RsaPKCSOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
-            mdname: get_digest_name(mech.mechanism)?,
+            pss: parse_pss_params(mech)?,
         })
     }
 
@@ -505,6 +532,75 @@ impl RsaPKCSOperation {
         op.decrypt(data, result.as_mut_ptr(), &mut len)?;
         unsafe { result.set_len(len as usize) };
         Ok(result)
+    }
+
+    fn rsa_sig_params(&self) -> Vec<OSSL_PARAM> {
+        let mut params = Vec::<OSSL_PARAM>::new();
+        match self.mech {
+            CKM_RSA_PKCS
+            | CKM_SHA1_RSA_PKCS
+            | CKM_SHA224_RSA_PKCS
+            | CKM_SHA256_RSA_PKCS
+            | CKM_SHA384_RSA_PKCS
+            | CKM_SHA512_RSA_PKCS
+            | CKM_SHA3_224_RSA_PKCS
+            | CKM_SHA3_256_RSA_PKCS
+            | CKM_SHA3_384_RSA_PKCS
+            | CKM_SHA3_512_RSA_PKCS => {
+                params.push(unsafe {
+                    OSSL_PARAM_construct_utf8_string(
+                        OSSL_SIGNATURE_PARAM_PAD_MODE.as_ptr() as *const c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.as_ptr() as *mut c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.len(),
+                    )
+                });
+            }
+            CKM_RSA_PKCS_PSS
+            | CKM_SHA1_RSA_PKCS_PSS
+            | CKM_SHA224_RSA_PKCS_PSS
+            | CKM_SHA256_RSA_PKCS_PSS
+            | CKM_SHA384_RSA_PKCS_PSS
+            | CKM_SHA512_RSA_PKCS_PSS
+            | CKM_SHA3_224_RSA_PKCS_PSS
+            | CKM_SHA3_256_RSA_PKCS_PSS
+            | CKM_SHA3_384_RSA_PKCS_PSS
+            | CKM_SHA3_512_RSA_PKCS_PSS => {
+                params.push(unsafe {
+                    OSSL_PARAM_construct_utf8_string(
+                        OSSL_SIGNATURE_PARAM_PAD_MODE.as_ptr() as *const c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_PSS.as_ptr() as *mut c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_PSS.len(),
+                    )
+                });
+                let hash = mech_type_to_digest_name(self.pss.hash);
+                params.push(unsafe {
+                    OSSL_PARAM_construct_utf8_string(
+                        OSSL_SIGNATURE_PARAM_DIGEST.as_ptr() as *const c_char,
+                        hash as *mut c_char,
+                        0,
+                    )
+                });
+                let mgf1 = mgf1_to_digest_name_as_slice(self.pss.mgf);
+                params.push(unsafe {
+                    OSSL_PARAM_construct_utf8_string(
+                        OSSL_SIGNATURE_PARAM_MGF1_DIGEST.as_ptr()
+                            as *const c_char,
+                        mgf1.as_ptr() as *mut c_char,
+                        mgf1.len() - 1,
+                    )
+                });
+                params.push(unsafe {
+                    OSSL_PARAM_construct_int(
+                        OSSL_SIGNATURE_PARAM_PSS_SALTLEN.as_ptr()
+                            as *const c_char,
+                        &self.pss.saltlen as *const c_int as *mut c_int,
+                    )
+                });
+            }
+            _ => (),
+        }
+        params.push(unsafe { OSSL_PARAM_construct_end() });
+        params
     }
 }
 
@@ -758,79 +854,74 @@ impl Sign for RsaPKCSOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        if self.mech == CKM_RSA_PKCS {
-            self.finalized = true;
-            if data.len() > self.max_input {
-                return err_rv!(CKR_DATA_LEN_RANGE);
-            }
-            if signature.len() != self.output_len {
-                return err_rv!(CKR_GENERAL_ERROR);
-            }
-            let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
-                EVP_PKEY_CTX_new_from_pkey(
-                    get_libctx(),
-                    self.private_key.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                )
-            })?;
-            let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
-            if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            let params = [
-                unsafe {
-                    OSSL_PARAM_construct_utf8_string(
-                        OSSL_PKEY_PARAM_PAD_MODE.as_ptr() as *const i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.as_ptr() as *mut i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.len(),
+        match self.mech {
+            CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                self.finalized = true;
+                if data.len() > self.max_input {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+                if signature.len() != self.output_len {
+                    return err_rv!(CKR_GENERAL_ERROR);
+                }
+                let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
+                    EVP_PKEY_CTX_new_from_pkey(
+                        get_libctx(),
+                        self.private_key.as_mut_ptr(),
+                        std::ptr::null_mut(),
                     )
-                },
-                unsafe { OSSL_PARAM_construct_end() },
-            ];
-            let res = unsafe {
-                EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-            };
-            if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
+                })?;
+                let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
+                if res != 1 {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                let params = self.rsa_sig_params();
+                let res = unsafe {
+                    EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
+                };
+                if res != 1 {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
 
-            self.finalized = true;
+                self.finalized = true;
 
-            let mut siglen = 0usize;
-            let siglen_ptr: *mut usize = &mut siglen;
-            let res = unsafe {
-                EVP_PKEY_sign(
-                    ctx.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    siglen_ptr,
-                    data.as_ptr(),
-                    data.len(),
-                )
-            };
-            if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            if signature.len() != siglen {
-                return err_rv!(CKR_GENERAL_ERROR);
-            }
+                let mut siglen = 0usize;
+                let siglen_ptr: *mut usize = &mut siglen;
+                let res = unsafe {
+                    EVP_PKEY_sign(
+                        ctx.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                        siglen_ptr,
+                        data.as_ptr(),
+                        data.len(),
+                    )
+                };
+                if res != 1 {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                if signature.len() != siglen {
+                    return err_rv!(CKR_GENERAL_ERROR);
+                }
 
-            let res = unsafe {
-                EVP_PKEY_sign(
-                    ctx.as_mut_ptr(),
-                    signature.as_mut_ptr(),
-                    siglen_ptr,
-                    data.as_ptr(),
-                    data.len(),
-                )
-            };
-            if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
+                let res = unsafe {
+                    EVP_PKEY_sign(
+                        ctx.as_mut_ptr(),
+                        signature.as_mut_ptr(),
+                        siglen_ptr,
+                        data.as_ptr(),
+                        data.len(),
+                    )
+                };
+                if res != 1 {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
 
-            return Ok(());
+                Ok(())
+            }
+            _ => {
+                self.sign_update(data)?;
+                self.sign_final(signature)
+            }
         }
-        self.sign_update(data)?;
-        self.sign_final(signature)
     }
 
     fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
@@ -838,24 +929,16 @@ impl Sign for RsaPKCSOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if !self.in_use {
-            if self.mech == CKM_RSA_PKCS {
+            if self.mech == CKM_RSA_PKCS || self.mech == CKM_RSA_PKCS_PSS {
                 return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
             }
             self.in_use = true;
 
-            let params = [
-                unsafe {
-                    OSSL_PARAM_construct_utf8_string(
-                        OSSL_SIGNATURE_PARAM_PAD_MODE.as_ptr() as *const i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.as_ptr() as *mut i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.len(),
-                    )
-                },
-                unsafe { OSSL_PARAM_construct_end() },
-            ];
+            let params = self.rsa_sig_params();
+
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
-                self.mdname.as_ptr(),
+                mech_type_to_digest_name(self.mech),
                 &self.private_key,
                 params.as_ptr(),
             )?;
@@ -864,7 +947,7 @@ impl Sign for RsaPKCSOperation {
                 let res = EVP_DigestSignInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
-                    self.mdname.as_ptr(),
+                    mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
                     self.private_key.as_mut_ptr(),
@@ -967,16 +1050,7 @@ impl Verify for RsaPKCSOperation {
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
-            let params = [
-                unsafe {
-                    OSSL_PARAM_construct_utf8_string(
-                        OSSL_PKEY_PARAM_PAD_MODE.as_ptr() as *const i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.as_ptr() as *mut i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.len(),
-                    )
-                },
-                unsafe { OSSL_PARAM_construct_end() },
-            ];
+            let params = self.rsa_sig_params();
             let res = unsafe {
                 EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
             };
@@ -1012,19 +1086,11 @@ impl Verify for RsaPKCSOperation {
             }
             self.in_use = true;
 
-            let params = [
-                unsafe {
-                    OSSL_PARAM_construct_utf8_string(
-                        OSSL_SIGNATURE_PARAM_PAD_MODE.as_ptr() as *const i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.as_ptr() as *mut i8,
-                        OSSL_PKEY_RSA_PAD_MODE_PKCSV15.len(),
-                    )
-                },
-                unsafe { OSSL_PARAM_construct_end() },
-            ];
+            let params = self.rsa_sig_params();
+
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
-                self.mdname.as_ptr(),
+                mech_type_to_digest_name(self.mech),
                 &self.public_key,
                 params.as_ptr(),
             )?;
@@ -1033,7 +1099,7 @@ impl Verify for RsaPKCSOperation {
                 let res = EVP_DigestVerifyInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
-                    self.mdname.as_ptr(),
+                    mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
                     self.public_key.as_mut_ptr(),
