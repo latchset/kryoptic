@@ -12,43 +12,12 @@ use super::mechanism;
 use kasn1::DerEncBigUint;
 use mechanism::*;
 
-use std::slice;
 use zeroize::Zeroize;
 
 pub fn ecc_import(obj: &mut Object) -> KResult<()> {
     bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
     bytes_attr_not_empty!(obj; CKA_VALUE);
     Ok(())
-}
-
-macro_rules! name_to_vec {
-    ($name:expr) => {
-        unsafe {
-            slice::from_raw_parts(
-                $name.as_ptr() as *const std::os::raw::c_char,
-                $name.len(),
-            )
-            .to_vec()
-        }
-    };
-}
-
-fn get_digest_name(
-    mech: CK_MECHANISM_TYPE,
-) -> KResult<Vec<std::os::raw::c_char>> {
-    Ok(match mech {
-        CKM_ECDSA => Vec::new(),
-        CKM_ECDSA_SHA1 => name_to_vec!(OSSL_DIGEST_NAME_SHA1),
-        CKM_ECDSA_SHA224 => name_to_vec!(OSSL_DIGEST_NAME_SHA2_224),
-        CKM_ECDSA_SHA256 => name_to_vec!(OSSL_DIGEST_NAME_SHA2_256),
-        CKM_ECDSA_SHA384 => name_to_vec!(OSSL_DIGEST_NAME_SHA2_384),
-        CKM_ECDSA_SHA512 => name_to_vec!(OSSL_DIGEST_NAME_SHA2_512),
-        CKM_ECDSA_SHA3_224 => name_to_vec!(OSSL_DIGEST_NAME_SHA3_224),
-        CKM_ECDSA_SHA3_256 => name_to_vec!(OSSL_DIGEST_NAME_SHA3_256),
-        CKM_ECDSA_SHA3_384 => name_to_vec!(OSSL_DIGEST_NAME_SHA3_384),
-        CKM_ECDSA_SHA3_512 => name_to_vec!(OSSL_DIGEST_NAME_SHA3_512),
-        _ => return err_rv!(CKR_GENERAL_ERROR),
-    })
 }
 
 /* confusingly enough, this is not EC for FIPS-level operations  */
@@ -66,7 +35,6 @@ struct EccOperation {
     finalized: bool,
     in_use: bool,
     sigctx: Option<EvpMdCtx>,
-    mdname: Vec<std::os::raw::c_char>,
 }
 
 #[cfg(feature = "fips")]
@@ -79,7 +47,6 @@ struct EccOperation {
     finalized: bool,
     in_use: bool,
     sigctx: Option<ProviderSignatureCtx>,
-    mdname: Vec<std::os::raw::c_char>,
 }
 
 fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
@@ -305,7 +272,6 @@ impl EccOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
-            mdname: get_digest_name(mech.mechanism)?,
         })
     }
 
@@ -328,7 +294,6 @@ impl EccOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
-            mdname: get_digest_name(mech.mechanism)?,
         })
     }
 
@@ -486,7 +451,7 @@ impl Sign for EccOperation {
                 EVP_DigestSignInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
-                    self.mdname.as_ptr(),
+                    mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
                     self.private_key.as_mut_ptr(),
@@ -498,7 +463,7 @@ impl Sign for EccOperation {
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
-                self.mdname.as_ptr(),
+                mech_type_to_digest_name(self.mech),
                 &self.private_key,
                 std::ptr::null(),
             )?;
@@ -639,7 +604,7 @@ impl Verify for EccOperation {
                 EVP_DigestVerifyInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
-                    self.mdname.as_ptr(),
+                    mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
                     self.public_key.as_mut_ptr(),
@@ -651,7 +616,7 @@ impl Verify for EccOperation {
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
-                self.mdname.as_ptr(),
+                mech_type_to_digest_name(self.mech),
                 &self.public_key,
                 std::ptr::null(),
             )?;
