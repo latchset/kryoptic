@@ -24,13 +24,37 @@ jobs:
             'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
             'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
             zlib-devel sed
+
       - name: Checkout Repository
         uses: actions/checkout@v3
+
       - name: Setup
         run: |
           git config --global --add safe.directory /__w/kryoptic/kryoptic
           git submodule init
           git submodule update
+
+      - name: Restore OpenSSL build
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            openssl/
+          key: ${{ runner.os }}-ossl-${{ hashFiles('.git/modules/openssl/HEAD') }}
+
+      - name: Generate lock file
+        run: cargo generate-lockfile
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Build
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
@@ -39,6 +63,7 @@ jobs:
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo build -vv
           fi
+
       - name: Test
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
@@ -47,6 +72,7 @@ jobs:
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo test
           fi
+
       - uses: actions/upload-artifact@v3
         if: failure()
         with:
@@ -54,3 +80,10 @@ jobs:
           path: |
             target/debug/build/*/output
 
+      - if: ${{ matrix.name == 'fips' }}
+        name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            openssl/
+          key: ${{ runner.os }}-ossl-${{ hashFiles('.git/modules/openssl/HEAD') }}
