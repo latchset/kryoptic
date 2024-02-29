@@ -18,6 +18,15 @@ macro_rules! make_attribute {
     };
 }
 
+macro_rules! ret_or_panic {
+    ($ret:expr) => {
+        match $ret {
+            Ok(r) => r,
+            Err(e) => panic!("{e}"),
+        }
+    };
+}
+
 /* note that the following concoction to sync threads is not entirely race free
  * as it assumes all tests initialize before all of the others complete. */
 static FINI: RwLock<u64> = RwLock::new(0);
@@ -1944,7 +1953,12 @@ fn test_aes_operations() {
     {
         /* ECB */
         let testname = "ECBMMT256 DECRYPT 0";
-        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let key_handle =
+            match get_test_key_handle(session, testname, CKO_SECRET_KEY) {
+                Ok(k) => k,
+                Err(e) => panic!("{}", e),
+            };
+
         let mut ciphertext =
             match get_test_data(session, testname, "ciphertext") {
                 Ok(vec) => vec,
@@ -1983,7 +1997,11 @@ fn test_aes_operations() {
         /* CBC */
 
         let testname = "CBCMMT128 ENCRYPT 9";
-        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let key_handle =
+            match get_test_key_handle(session, testname, CKO_SECRET_KEY) {
+                Ok(k) => k,
+                Err(e) => panic!("{}", e),
+            };
         let mut iv = match get_test_data(session, testname, "iv") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
@@ -2025,7 +2043,11 @@ fn test_aes_operations() {
         /* GCM */
 
         let testname = "gcmDecrypt128 96,104,128,128 0";
-        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let key_handle =
+            match get_test_key_handle(session, testname, CKO_SECRET_KEY) {
+                Ok(k) => k,
+                Err(e) => panic!("{}", e),
+            };
         let mut iv = match get_test_data(session, testname, "IV") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
@@ -2084,7 +2106,11 @@ fn test_aes_operations() {
     {
         /* CTR */
         let testname = "aes-192-ctr ENCRYPT 2";
-        let key_handle = get_test_key_handle(session, testname, CKO_SECRET_KEY);
+        let key_handle =
+            match get_test_key_handle(session, testname, CKO_SECRET_KEY) {
+                Ok(k) => k,
+                Err(e) => panic!("{}", e),
+            };
         let iv = match get_test_data(session, testname, "iv") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
@@ -2249,9 +2275,204 @@ fn test_rsa_operations() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
 
-    ret = fn_logout(session);
+    /* RSA PKCS Sig */
+    let pri_key_handle = match get_test_key_handle(
+        session,
+        "SigVer15_186-3.rsp [mod = 2048]",
+        CKO_PRIVATE_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
+    let pub_key_handle = match get_test_key_handle(
+        session,
+        "SigVer15_186-3.rsp [mod = 2048]",
+        CKO_PUBLIC_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
+    let testname = "SigVer15_186-3.rsp SHAAlg = SHA256 1660";
+    let mut msg = match get_test_data(session, testname, "msg") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+    let mut sig = match get_test_data(session, testname, "sig") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let ret =
+        sig_verify(session, pub_key_handle, &mut msg, &mut sig, &mut mechanism);
     assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
+
+    let result = ret_or_panic!(sig_gen(
+        session,
+        pri_key_handle,
+        &mut msg,
+        &mut mechanism
+    ));
+    assert_eq!(sig, result);
+
+    /* RSA PKCS PSS Sig */
+    let pri_key_handle = ret_or_panic!(get_test_key_handle(
+        session,
+        "SigVerPSS_186-3.rsp [mod = 3072]",
+        CKO_PRIVATE_KEY,
+    ));
+    let pub_key_handle = ret_or_panic!(get_test_key_handle(
+        session,
+        "SigVerPSS_186-3.rsp [mod = 3072]",
+        CKO_PUBLIC_KEY,
+    ));
+    let testname = "SigVerPSS_186-3.rsp SHAAlg = SHA384 2514";
+    let msg = match get_test_data(session, testname, "msg") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+    let sig = match get_test_data(session, testname, "sig") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+    let salt = match get_test_data(session, testname, "salt") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+
+    let params = CK_RSA_PKCS_PSS_PARAMS {
+        hashAlg: CKM_SHA384,
+        mgf: CKG_MGF1_SHA384,
+        sLen: salt.len() as CK_ULONG,
+    };
+
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA384_RSA_PKCS_PSS,
+        pParameter: &params as *const _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_RSA_PKCS_PSS_PARAMS>()
+            as CK_ULONG,
+    };
+
+    let ret = sig_verify(session, pub_key_handle, &msg, &sig, &mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    let signed =
+        ret_or_panic!(sig_gen(session, pri_key_handle, &msg, &mechanism));
+    /* PSS is non deterministic because saltlen > 0,
+     * so we can compare the result
+     * assert_eq!(sig, result); */
+    assert_eq!(sig.len(), signed.len());
+    /* but we can verify again to ensure signing produced
+     * something usable */
+    let ret = sig_verify(session, pub_key_handle, &msg, &signed, &mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    /* RSA PKCS Enc */
+    let pri_key_handle = ret_or_panic!(get_test_key_handle(
+        session,
+        "pkcs1v15crypt-vectors.txt - Example 15: A 2048-bit RSA key pair",
+        CKO_PRIVATE_KEY,
+    ));
+    let pub_key_handle = ret_or_panic!(get_test_key_handle(
+        session,
+        "pkcs1v15crypt-vectors.txt - Example 15: A 2048-bit RSA key pair",
+        CKO_PUBLIC_KEY,
+    ));
+    let testname =
+        "pkcs1v15crypt-vectors.txt - PKCS#1 v1.5 Encryption Example 15.20";
+    let msg = match get_test_data(session, testname, "msg") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+    let enc = match get_test_data(session, testname, "enc") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let result =
+        ret_or_panic!(decrypt(session, pri_key_handle, &enc, &mechanism));
+    assert_eq!(msg, result);
+
+    let encrypted =
+        ret_or_panic!(encrypt(session, pub_key_handle, &msg, &mechanism));
+    /* can't really compare the data because padding contains random
+     * octets so each encryption produces a different output */
+    assert_eq!(enc.len(), encrypted.len());
+    /* but we can decrypt again to ensure encryption produced
+     * something usable */
+    let result =
+        ret_or_panic!(decrypt(session, pri_key_handle, &encrypted, &mechanism));
+    assert_eq!(msg, result);
+
+    /* RSA PKCS OAEP Enc */
+    let pri_key_handle = ret_or_panic!(get_test_key_handle(
+        session,
+        "oaep-sha512-sha512.txt - First Key Example",
+        CKO_PRIVATE_KEY,
+    ));
+    let pub_key_handle = ret_or_panic!(get_test_key_handle(
+        session,
+        "oaep-sha512-sha512.txt - First Key Example",
+        CKO_PUBLIC_KEY,
+    ));
+    let testname =
+        "oaep-sha512-sha512.txt - First Key Example - OAEP Example 1 alg=sha512 mgf1=sha512";
+    let msg = match get_test_data(session, testname, "msg") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+    let enc = match get_test_data(session, testname, "enc") {
+        Ok(vec) => vec,
+        Err(ret) => return assert_eq!(ret, CKR_OK),
+    };
+
+    let params = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA512,
+        mgf: CKG_MGF1_SHA512,
+        source: 0,
+        pSourceData: std::ptr::null_mut(),
+        ulSourceDataLen: 0,
+    };
+
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS_OAEP,
+        pParameter: &params as *const _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_RSA_PKCS_OAEP_PARAMS>()
+            as CK_ULONG,
+    };
+
+    let result =
+        ret_or_panic!(decrypt(session, pri_key_handle, &enc, &mechanism));
+    assert_eq!(msg, result);
+
+    let encrypted =
+        ret_or_panic!(encrypt(session, pub_key_handle, &msg, &mechanism));
+    /* can't really compare the data because padding contains random
+     * octets so each encryption produces a different output */
+    assert_eq!(enc.len(), encrypted.len());
+    /* but we can decrypt again to ensure encryption produced
+     * something usable */
+    let result =
+        ret_or_panic!(decrypt(session, pri_key_handle, &encrypted, &mechanism));
+    assert_eq!(msg, result);
+
+    /* RSA PKCS Wrap */
+    /* RSA PKCS OAEP Wrap */
+
+    let ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
@@ -2866,7 +3087,7 @@ fn get_test_key_handle(
     session: CK_SESSION_HANDLE,
     name: &str,
     class: CK_ULONG,
-) -> CK_OBJECT_HANDLE {
+) -> KResult<CK_OBJECT_HANDLE> {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let mut classbuf = class;
     let mut template = vec![
@@ -2877,73 +3098,173 @@ fn get_test_key_handle(
         ),
         make_attribute!(CKA_CLASS, &mut classbuf as *mut _, CK_ULONG_SIZE),
     ];
-    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 2);
-    assert_eq!(ret, CKR_OK);
+    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 2);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
     let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 1);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    if count != 1 {
+        return err_not_found!(format!("count {} != 1", count));
+    }
+    let ret = fn_find_objects_final(session);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
 
-    handle
+    Ok(handle)
 }
 
 fn sig_verify(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
-    data: &mut Vec<u8>,
-    signature: &mut Vec<u8>,
-    mechanism: &mut CK_MECHANISM,
-) {
-    let mut ret = fn_verify_init(session, mechanism, key);
-    assert_eq!(ret, CKR_OK);
+    data: &Vec<u8>,
+    signature: &Vec<u8>,
+    mechanism: &CK_MECHANISM,
+) -> CK_RV {
+    let ret =
+        fn_verify_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
+    if ret != CKR_OK {
+        return ret;
+    }
 
-    ret = fn_verify(
+    fn_verify(
         session,
-        data.as_mut_ptr(),
+        data.as_ptr() as *mut u8,
         data.len() as CK_ULONG,
-        signature.as_mut_ptr(),
+        signature.as_ptr() as *mut u8,
         signature.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    )
 }
 
-fn sig_and_check(
+fn sig_gen(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
-    data: &mut Vec<u8>,
-    signature: &mut Vec<u8>,
-    mechanism: &mut CK_MECHANISM,
-) -> Vec<u8> {
-    let mut ret = fn_sign_init(session, mechanism, key);
-    assert_eq!(ret, CKR_OK);
+    data: &Vec<u8>,
+    mechanism: &CK_MECHANISM,
+) -> KResult<Vec<u8>> {
+    let ret =
+        fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
 
     /* get signature length */
-    let mut csiglen: CK_ULONG = 0;
-    ret = fn_sign(
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign(
         session,
-        data.as_mut_ptr(),
+        data.as_ptr() as *mut u8,
         data.len() as CK_ULONG,
         std::ptr::null_mut(),
-        &mut csiglen,
+        &mut siglen,
     );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(csiglen, signature.len() as CK_ULONG);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
 
-    let mut computed_signature: Vec<u8> = vec![0; csiglen as usize];
-    ret = fn_sign(
+    let mut signature: Vec<u8> = vec![0; siglen as usize];
+    let ret = fn_sign(
         session,
-        data.as_mut_ptr(),
+        data.as_ptr() as *mut u8,
         data.len() as CK_ULONG,
-        computed_signature.as_mut_ptr(),
-        &mut csiglen,
+        signature.as_ptr() as *mut u8,
+        &mut siglen,
     );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(csiglen, signature.len() as CK_ULONG);
-    assert_eq!(signature, &mut computed_signature);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    signature.resize(siglen as usize, 0);
 
-    computed_signature
+    Ok(signature)
+}
+
+fn decrypt(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    ciphertext: &Vec<u8>,
+    mechanism: &CK_MECHANISM,
+) -> KResult<Vec<u8>> {
+    let ret = fn_decrypt_init(
+        session,
+        mechanism as *const _ as CK_MECHANISM_PTR,
+        key,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+
+    let mut dec_len: CK_ULONG = 0;
+    let ret = fn_decrypt(
+        session,
+        ciphertext.as_ptr() as *mut u8,
+        ciphertext.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut dec_len,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+
+    let mut dec = vec![0u8; dec_len as usize];
+    let ret = fn_decrypt(
+        session,
+        ciphertext.as_ptr() as *mut u8,
+        ciphertext.len() as CK_ULONG,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    dec.resize(dec_len as usize, 0);
+
+    Ok(dec)
+}
+
+fn encrypt(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    plaintext: &Vec<u8>,
+    mechanism: &CK_MECHANISM,
+) -> KResult<Vec<u8>> {
+    let ret = fn_encrypt_init(
+        session,
+        mechanism as *const _ as CK_MECHANISM_PTR,
+        key,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+
+    let mut enc_len: CK_ULONG = 0;
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut u8,
+        plaintext.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut enc_len,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+
+    let mut enc = vec![0u8; enc_len as usize];
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut u8,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    enc.resize(enc_len as usize, 0);
+
+    Ok(enc)
 }
 
 #[test]
@@ -2982,9 +3303,15 @@ fn test_signatures() {
     /* get test data */
     let mut testcase = get_test_case_data(session, "CKM_RSA_PKCS");
     let pri_key_handle =
-        get_test_key_handle(session, "Example 15", CKO_PRIVATE_KEY);
+        match get_test_key_handle(session, "Example 15", CKO_PRIVATE_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
     let pub_key_handle =
-        get_test_key_handle(session, "Example 15", CKO_PUBLIC_KEY);
+        match get_test_key_handle(session, "Example 15", CKO_PUBLIC_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
 
     /* verify test vector */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -2992,27 +3319,34 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    sig_verify(
+    let ret = sig_verify(
         session,
         pub_key_handle,
         &mut testcase.value,
         &mut testcase.result,
         &mut mechanism,
     );
+    assert_eq!(ret, CKR_OK);
 
-    let _ = sig_and_check(
+    let result = match sig_gen(
         session,
         pri_key_handle,
         &mut testcase.value,
-        &mut testcase.result,
         &mut mechanism,
-    );
+    ) {
+        Ok(r) => r,
+        Err(e) => panic!("f{e}"),
+    };
+    assert_eq!(testcase.result, result);
 
     /* ### HMACs ### */
 
     /* get test keys */
     let key_handle =
-        get_test_key_handle(session, "HMAC Test Key", CKO_SECRET_KEY);
+        match get_test_key_handle(session, "HMAC Test Key", CKO_SECRET_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
 
     /* ### SHA-1 HMAC */
 
@@ -3025,20 +3359,22 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    sig_verify(
+    let ret = sig_verify(
         session,
         key_handle,
         &mut testcase.value,
         &mut testcase.result,
         &mut mechanism,
     );
-    let _ = sig_and_check(
-        session,
-        key_handle,
-        &mut testcase.value,
-        &mut testcase.result,
-        &mut mechanism,
-    );
+    assert_eq!(ret, CKR_OK);
+
+    let result =
+        match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+    assert_eq!(testcase.result, result);
 
     /* ### SHA256 HMAC */
 
@@ -3051,20 +3387,22 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    sig_verify(
+    let ret = sig_verify(
         session,
         key_handle,
         &mut testcase.value,
         &mut testcase.result,
         &mut mechanism,
     );
-    let _ = sig_and_check(
-        session,
-        key_handle,
-        &mut testcase.value,
-        &mut testcase.result,
-        &mut mechanism,
-    );
+    assert_eq!(ret, CKR_OK);
+
+    let result =
+        match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+    assert_eq!(testcase.result, result);
 
     /* ### SHA384 HMAC */
 
@@ -3077,20 +3415,22 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    sig_verify(
+    let ret = sig_verify(
         session,
         key_handle,
         &mut testcase.value,
         &mut testcase.result,
         &mut mechanism,
     );
-    let _ = sig_and_check(
-        session,
-        key_handle,
-        &mut testcase.value,
-        &mut testcase.result,
-        &mut mechanism,
-    );
+    assert_eq!(ret, CKR_OK);
+
+    let result =
+        match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+    assert_eq!(testcase.result, result);
 
     /* ### SHA512 HMAC */
 
@@ -3103,26 +3443,34 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    sig_verify(
+    let ret = sig_verify(
         session,
         key_handle,
         &mut testcase.value,
         &mut testcase.result,
         &mut mechanism,
     );
-    let _ = sig_and_check(
-        session,
-        key_handle,
-        &mut testcase.value,
-        &mut testcase.result,
-        &mut mechanism,
-    );
+    assert_eq!(ret, CKR_OK);
+
+    let result =
+        match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+    assert_eq!(testcase.result, result);
 
     /* ### SHA3 256 HMAC ### */
 
     /* get test keys */
-    let key_handle =
-        get_test_key_handle(session, "HMAC SHA-3-256 Test Key", CKO_SECRET_KEY);
+    let key_handle = match get_test_key_handle(
+        session,
+        "HMAC SHA-3-256 Test Key",
+        CKO_SECRET_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
 
     /* get test data */
     let mut testcase = get_test_case_data(session, "CKM_SHA3_256_HMAC");
@@ -3133,22 +3481,24 @@ fn test_signatures() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    sig_verify(
+    let ret = sig_verify(
         session,
         key_handle,
         &mut testcase.value,
         &mut testcase.result,
         &mut mechanism,
     );
-    let _ = sig_and_check(
-        session,
-        key_handle,
-        &mut testcase.value,
-        &mut testcase.result,
-        &mut mechanism,
-    );
+    assert_eq!(ret, CKR_OK);
 
-    ret = fn_close_session(session);
+    let result =
+        match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+    assert_eq!(testcase.result, result);
+
+    let ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
     testdata.finalize();

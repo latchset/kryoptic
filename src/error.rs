@@ -22,7 +22,7 @@ impl fmt::Display for CkRvError {
             interface::CKR_ATTRIBUTE_TYPE_INVALID => {
                 write!(f, "CKR_ATTRIBUTE_TYPE_INVALID")
             }
-            _ => write!(f, "unknown error"),
+            _ => write!(f, "{}", self.rv),
         }
     }
 }
