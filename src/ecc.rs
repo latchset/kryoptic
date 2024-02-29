@@ -265,7 +265,46 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
             },
         }),
     );
-    // TODO SHA3 mechs
+    mechs.add_mechanism(
+        CKM_ECDSA_SHA3_224,
+        Box::new(EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_ECDSA_SHA3_256,
+        Box::new(EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_ECDSA_SHA3_384,
+        Box::new(EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+    mechs.add_mechanism(
+        CKM_ECDSA_SHA3_512,
+        Box::new(EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
 
     mechs.add_mechanism(
         CKM_EC_KEY_PAIR_GEN,
