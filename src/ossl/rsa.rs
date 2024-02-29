@@ -194,6 +194,78 @@ struct RsaPKCSOperation {
 }
 
 impl RsaPKCSOperation {
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        mechs.add_mechanism(
+            CKM_RSA_PKCS,
+            Box::new(RsaPKCSMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                    flags: CKF_ENCRYPT
+                        | CKF_DECRYPT
+                        | CKF_SIGN
+                        | CKF_VERIFY
+                        | CKF_WRAP
+                        | CKF_UNWRAP,
+                },
+            }),
+        );
+        mechs.add_mechanism(
+            CKM_SHA1_RSA_PKCS,
+            Box::new(RsaPKCSMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
+
+        mechs.add_mechanism(
+            CKM_SHA256_RSA_PKCS,
+            Box::new(RsaPKCSMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
+
+        mechs.add_mechanism(
+            CKM_SHA384_RSA_PKCS,
+            Box::new(RsaPKCSMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
+
+        mechs.add_mechanism(
+            CKM_SHA512_RSA_PKCS,
+            Box::new(RsaPKCSMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
+
+        mechs.add_mechanism(
+            CKM_RSA_PKCS_KEY_PAIR_GEN,
+            Box::new(RsaPKCSMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                    flags: CKF_GENERATE_KEY_PAIR,
+                },
+            }),
+        );
+    }
+
     fn encrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
