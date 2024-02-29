@@ -63,7 +63,7 @@ impl<'a> asn1::SimpleAsn1Readable<'a> for DerEncBigUint<'a> {
     }
 }
 impl<'a> asn1::SimpleAsn1Writable for DerEncBigUint<'a> {
-    const TAG: asn1::Tag = asn1::Tag::primitive(0x02);
+    const TAG: asn1::Tag = asn1::BigUint::TAG;
     fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
         dest.push_slice(self.as_bytes())
     }
