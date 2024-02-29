@@ -94,11 +94,9 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
             name_as_char(OSSL_PKEY_PARAM_RSA_D),
         )?;
 
+    /* OpenSSL can compute a,b,c with just p,q */
     if key.get_attr(CKA_PRIME_1).is_some()
         && key.get_attr(CKA_PRIME_2).is_some()
-        && key.get_attr(CKA_EXPONENT_1).is_some()
-        && key.get_attr(CKA_EXPONENT_2).is_some()
-        && key.get_attr(CKA_COEFFICIENT).is_some()
     {
         params = params
             .add_bn_from_obj(
@@ -110,7 +108,14 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
                 key,
                 CKA_PRIME_2,
                 name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2),
-            )?
+            )?;
+    }
+
+    if key.get_attr(CKA_EXPONENT_1).is_some()
+        && key.get_attr(CKA_EXPONENT_2).is_some()
+        && key.get_attr(CKA_COEFFICIENT).is_some()
+    {
+        params = params
             .add_bn_from_obj(
                 key,
                 CKA_EXPONENT_1,
