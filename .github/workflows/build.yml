@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips]
+        name: [ossl3, fips, release]
     container: fedora:latest
     steps:
       - name: Install Dependencies
@@ -63,6 +63,9 @@ jobs:
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo build -vv
           fi
+          if [ "${{ matrix.name }}" = "release" ]; then
+            cargo build -vv --release
+          fi
 
       - name: Test
         run: |
@@ -71,6 +74,9 @@ jobs:
           fi
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo test
+          fi
+          if [ "${{ matrix.name }}" = "release" ]; then
+            cargo test --release
           fi
 
       - uses: actions/upload-artifact@v3
