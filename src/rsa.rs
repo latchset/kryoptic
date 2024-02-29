@@ -531,6 +531,50 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     );
 
     mechs.add_mechanism(
+        CKM_SHA3_224_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
+        CKM_SHA3_256_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
+        CKM_SHA3_384_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
+        CKM_SHA3_512_RSA_PKCS,
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    );
+
+    mechs.add_mechanism(
         CKM_RSA_PKCS_KEY_PAIR_GEN,
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
