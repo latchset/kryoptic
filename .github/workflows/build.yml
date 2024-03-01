@@ -51,6 +51,7 @@ jobs:
 
       - name: Restore OpenSSL build
         uses: actions/cache/restore@v4
+        id: cache
         with:
           path: |
             openssl/
@@ -101,7 +102,7 @@ jobs:
           path: |
             target/debug/build/*/output
 
-      - if: ${{ matrix.name == 'fips' }}
+      - if: ${{ matrix.name == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
         name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
         uses: actions/cache/save@v4
         with:
