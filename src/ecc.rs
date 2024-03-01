@@ -23,10 +23,10 @@ pub const MIN_EC_SIZE_BITS: usize = 256;
 pub const MAX_EC_SIZE_BITS: usize = 521;
 
 // ASN.1 encoding of the OID
-const OID_SECP256R1: &[u8] =
-    &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
-const OID_SECP384R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22];
-const OID_SECP521R1: &[u8] = &[0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x23];
+const OID_SECP256R1: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 10045, 3, 1, 7);
+const OID_SECP384R1: asn1::ObjectIdentifier = asn1::oid!(1, 3, 132, 0, 34);
+const OID_SECP521R1: asn1::ObjectIdentifier = asn1::oid!(1, 3, 132, 0, 35);
 
 // ASN.1 encoding of the curve name
 const STRING_SECP256R1: &[u8] = &[
@@ -48,11 +48,7 @@ const BITS_SECP384R1: usize = 384;
 const BITS_SECP521R1: usize = 521;
 
 fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
-    let asn1_oid = match asn1::write_single(&oid) {
-        Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-    };
-    match asn1_oid.as_slice() {
+    match oid {
         OID_SECP256R1 => Ok(NAME_SECP256R1),
         OID_SECP384R1 => Ok(NAME_SECP384R1),
         OID_SECP521R1 => Ok(NAME_SECP521R1),
@@ -61,11 +57,7 @@ fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
 }
 
 fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
-    let asn1_oid = match asn1::write_single(&oid) {
-        Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-    };
-    match asn1_oid.as_slice() {
+    match oid {
         OID_SECP256R1 => Ok(BITS_SECP256R1),
         OID_SECP384R1 => Ok(BITS_SECP384R1),
         OID_SECP521R1 => Ok(BITS_SECP521R1),
@@ -93,16 +85,12 @@ fn curve_name_to_oid(
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
     };
-    let asn1_oid = match asn1_name.as_slice() {
+    Ok(match asn1_name.as_slice() {
         STRING_SECP256R1 => OID_SECP256R1,
         STRING_SECP384R1 => OID_SECP384R1,
         STRING_SECP521R1 => OID_SECP521R1,
         _ => return err_rv!(CKR_GENERAL_ERROR),
-    };
-    match asn1::parse_single::<asn1::ObjectIdentifier>(asn1_oid) {
-        Ok(r) => Ok(r),
-        Err(_) => err_rv!(CKR_GENERAL_ERROR),
-    }
+    })
 }
 
 #[derive(Debug)]
