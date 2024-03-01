@@ -123,3 +123,44 @@ impl<'a> asn1::SimpleAsn1Writable for DerEncOctetString<'a> {
         dest.push_slice(self.as_bytes())
     }
 }
+
+type Version = u64;
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct Attribute<'a> {
+    attribute_type: asn1::ObjectIdentifier,
+    attribute_value: asn1::SetOf<'a, asn1::Tlv<'a>>, // ANY
+}
+
+type Attributes<'a> = asn1::SetOf<'a, Attribute<'a>>;
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+pub struct PrivateKeyInfo<'a> {
+    version: Version,
+    private_key_algorithm: asn1::ObjectIdentifier,
+    private_key: DerEncOctetString<'a>,
+    #[explicit(1)]
+    attributes: Option<Attributes<'a>>,
+}
+
+impl PrivateKeyInfo<'_> {
+    pub fn new<'a>(
+        private_key_asn1: &'a [u8],
+        oid: asn1::ObjectIdentifier,
+    ) -> KResult<PrivateKeyInfo<'a>> {
+        Ok(PrivateKeyInfo {
+            version: 0,
+            private_key_algorithm: oid,
+            private_key: DerEncOctetString::new(private_key_asn1)?,
+            attributes: None,
+        })
+    }
+
+    pub fn get_oid(&self) -> &asn1::ObjectIdentifier {
+        &self.private_key_algorithm
+    }
+
+    pub fn get_private_key(&self) -> &[u8] {
+        &self.private_key.as_bytes()
+    }
+}

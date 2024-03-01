@@ -168,37 +168,6 @@ impl ECPrivateKey<'_> {
     }
 }
 
-#[derive(asn1::Asn1Read, asn1::Asn1Write)]
-struct Attribute<'a> {
-    attribute_type: asn1::ObjectIdentifier,
-    attribute_value: asn1::SetOf<'a, asn1::Tlv<'a>>, // ANY
-}
-
-type Attributes<'a> = asn1::SetOf<'a, Attribute<'a>>;
-
-#[derive(asn1::Asn1Read, asn1::Asn1Write)]
-struct PrivateKeyInfo<'a> {
-    version: Version,
-    private_key_algorithm: asn1::ObjectIdentifier,
-    private_key: asn1::OctetStringEncoded<ECPrivateKey<'a>>,
-    #[explicit(1)]
-    attributes: Option<Attributes<'a>>,
-}
-
-impl PrivateKeyInfo<'_> {
-    pub fn new<'a>(
-        ec_private_key: ECPrivateKey<'a>,
-        oid: asn1::ObjectIdentifier,
-    ) -> KResult<PrivateKeyInfo<'a>> {
-        Ok(PrivateKeyInfo {
-            version: 0,
-            private_key_algorithm: oid,
-            private_key: asn1::OctetStringEncoded::new(ec_private_key),
-            attributes: None,
-        })
-    }
-}
-
 #[derive(Debug)]
 pub struct ECCPrivFactory {
     attributes: Vec<ObjectAttr>,
@@ -280,10 +249,18 @@ impl PrivKeyFactory for ECCPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_EXTRACTABLE)?;
 
-        let pkeyinfo = PrivateKeyInfo::new(
-            ECPrivateKey::new_owned(key.get_attr_as_bytes(CKA_VALUE)?)?,
-            get_oid_from_obj(key)?,
-        )?;
+        let oid = match get_oid_from_obj(key) {
+            Ok(o) => o,
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        let ecpkey_asn1 = match asn1::write_single(&ECPrivateKey::new_owned(
+            key.get_attr_as_bytes(CKA_VALUE)?,
+        )?) {
+            Ok(p) => p,
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        let pkeyinfo =
+            kasn1::PrivateKeyInfo::new(&ecpkey_asn1.as_slice(), oid)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -307,20 +284,25 @@ impl PrivKeyFactory for ECCPrivFactory {
         if !extra.iter().all(|b| *b == 0) {
             return err_rv!(CKR_WRAPPED_KEY_INVALID);
         }
-        let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
+        let pkeyinfo = match tlv.parse::<kasn1::PrivateKeyInfo>() {
             Ok(k) => k,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
-        let oid_encoded =
-            match asn1::write_single(&pkeyinfo.private_key_algorithm) {
-                Ok(b) => b,
-                Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
-            };
+        let oid_encoded = match asn1::write_single(&pkeyinfo.get_oid()) {
+            Ok(b) => b,
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
         attrs.push(CK_ATTRIBUTE::from_slice(CKA_EC_PARAMS, &oid_encoded));
 
+        let ecpkey = match asn1::parse_single::<ECPrivateKey>(
+            pkeyinfo.get_private_key(),
+        ) {
+            Ok(k) => k,
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_VALUE,
-            pkeyinfo.private_key.into_inner().private_key.as_bytes(),
+            ecpkey.private_key.as_bytes(),
         ));
 
         if match attrs.iter().position(|x| x.type_ == CKA_CLASS) {
