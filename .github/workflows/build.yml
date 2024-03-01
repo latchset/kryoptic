@@ -17,6 +17,19 @@ jobs:
         name: [ossl3, fips, release]
     container: fedora:latest
     steps:
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Store DNF cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/dnf
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
       - name: Install Dependencies
         run: |
           dnf -y install git cargo clang-devel openssl-devel \
