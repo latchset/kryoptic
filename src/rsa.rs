@@ -25,6 +25,9 @@ pub const MIN_RSA_SIZE_BITS: usize = 1024;
 pub const MAX_RSA_SIZE_BITS: usize = 16536;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
+pub const OID_RSA_ENCRYPTION: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 1, 1, 1);
+
 #[derive(Debug)]
 pub struct RSAPubFactory {
     attributes: Vec<ObjectAttr>,
@@ -129,40 +132,6 @@ impl RSAPrivateKey<'_> {
     }
 }
 
-const OID_RSA_ENCRYPTION: asn1::ObjectIdentifier =
-    asn1::oid!(1, 2, 840, 113549, 1, 1, 1);
-
-/// TODO this should be shared between different algorithms through templating ?
-#[derive(asn1::Asn1Read, asn1::Asn1Write)]
-struct Attribute<'a> {
-    attribute_type: asn1::ObjectIdentifier,
-    attribute_value: asn1::SetOf<'a, asn1::Tlv<'a>>, // ANY
-}
-
-type Attributes<'a> = asn1::SetOf<'a, Attribute<'a>>;
-
-#[derive(asn1::Asn1Read, asn1::Asn1Write)]
-struct PrivateKeyInfo<'a> {
-    version: Version,
-    private_key_algorithm: asn1::ObjectIdentifier,
-    private_key: asn1::OctetStringEncoded<RSAPrivateKey<'a>>,
-    #[explicit(1)]
-    attributes: Option<Attributes<'a>>,
-}
-
-impl PrivateKeyInfo<'_> {
-    pub fn new<'a>(
-        rsa_private_key: RSAPrivateKey<'a>,
-    ) -> KResult<PrivateKeyInfo<'a>> {
-        Ok(PrivateKeyInfo {
-            version: 0,
-            private_key_algorithm: OID_RSA_ENCRYPTION,
-            private_key: asn1::OctetStringEncoded::new(rsa_private_key),
-            attributes: None,
-        })
-    }
-}
-
 #[derive(Debug)]
 pub struct RSAPrivFactory {
     attributes: Vec<ObjectAttr>,
@@ -235,7 +204,7 @@ impl PrivKeyFactory for RSAPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_EXTRACTABLE)?;
 
-        let pkeyinfo = PrivateKeyInfo::new(RSAPrivateKey::new_owned(
+        let pkey = match asn1::write_single(&RSAPrivateKey::new_owned(
             key.get_attr_as_bytes(CKA_MODULUS)?,
             key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
             key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
@@ -244,7 +213,12 @@ impl PrivKeyFactory for RSAPrivFactory {
             key.get_attr_as_bytes(CKA_EXPONENT_1)?,
             key.get_attr_as_bytes(CKA_EXPONENT_2)?,
             key.get_attr_as_bytes(CKA_COEFFICIENT)?,
-        )?)?;
+        )?) {
+            Ok(p) => p,
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        let pkeyinfo =
+            kasn1::PrivateKeyInfo::new(&pkey.as_slice(), OID_RSA_ENCRYPTION)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -268,11 +242,16 @@ impl PrivKeyFactory for RSAPrivFactory {
         if !extra.iter().all(|b| *b == 0) {
             return err_rv!(CKR_WRAPPED_KEY_INVALID);
         }
-        let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
+        let pkeyinfo = match tlv.parse::<kasn1::PrivateKeyInfo>() {
             Ok(k) => k,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
-        let rsapkey = pkeyinfo.private_key.into_inner();
+        let rsapkey = match asn1::parse_single::<RSAPrivateKey>(
+            pkeyinfo.get_private_key(),
+        ) {
+            Ok(k) => k,
+            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
         attrs.push(CK_ATTRIBUTE::from_slice(
             CKA_MODULUS,
             rsapkey.modulus.as_nopad_bytes(),
