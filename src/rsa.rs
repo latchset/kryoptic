@@ -246,6 +246,9 @@ impl PrivKeyFactory for RSAPrivFactory {
             Ok(k) => k,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
+        if pkeyinfo.get_oid() != &OID_RSA_ENCRYPTION {
+            return err_rv!(CKR_WRAPPED_KEY_INVALID);
+        }
         let rsapkey = match asn1::parse_single::<RSAPrivateKey>(
             pkeyinfo.get_private_key(),
         ) {
