@@ -288,7 +288,14 @@ impl PrivKeyFactory for ECCPrivFactory {
             Ok(k) => k,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
-        let oid_encoded = match asn1::write_single(&pkeyinfo.get_oid()) {
+        /* filter out unknown OIDs */
+        let oid = match pkeyinfo.get_oid() {
+            &OID_SECP521R1 => OID_SECP256R1,
+            &OID_SECP384R1 => OID_SECP384R1,
+            &OID_SECP256R1 => OID_SECP521R1,
+            _ => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+        };
+        let oid_encoded = match asn1::write_single(&oid) {
             Ok(b) => b,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
