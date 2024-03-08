@@ -610,9 +610,22 @@ impl Decryption for RsaPKCSOperation {
             if plain.is_null() {
                 *plain_len = outlen as CK_ULONG;
                 return Ok(());
-            } else {
-                if (*plain_len as usize) < outlen {
+            }
+            let mut plain_ptr = plain;
+            let mut tmp_plain: Option<Vec<u8>> = None;
+            if (*plain_len as usize) < outlen {
+                if (*plain_len as usize) < self.output_len {
                     return err_rv!(CKR_BUFFER_TOO_SMALL);
+                }
+                /* the PKCS#11 documentation allows modules to pass
+                 * in a buffer that is shorter than modulus by the
+                 * amount taken by padding, while openssl requires
+                 * a full modulus long buffer, so we need to use a
+                 * temporary buffer here to bridge this mismatch */
+                tmp_plain = Some(vec![0u8; outlen]);
+                plain_ptr = match tmp_plain.as_mut() {
+                    Some(p) => p.as_mut_ptr(),
+                    None => return err_rv!(CKR_GENERAL_ERROR),
                 }
             }
 
@@ -620,13 +633,18 @@ impl Decryption for RsaPKCSOperation {
 
             if EVP_PKEY_decrypt(
                 ctx.as_mut_ptr(),
-                plain,
+                plain_ptr,
                 outlen_ptr,
                 cipher.as_ptr(),
                 cipher.len(),
             ) != 1
             {
                 return err_rv!(CKR_DEVICE_ERROR);
+            }
+            match tmp_plain {
+                Some(p) => std::slice::from_raw_parts_mut(plain, outlen)
+                    .copy_from_slice(&p[..outlen]),
+                None => (),
             }
             *plain_len = outlen as CK_ULONG;
         }
