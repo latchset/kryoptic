@@ -21,6 +21,7 @@ use std::fmt::Debug;
 use uuid::Uuid;
 
 use once_cell::sync::Lazy;
+use zeroize::Zeroize;
 
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
@@ -733,13 +734,16 @@ pub trait SecretKeyFactory {
                     unsafe { data.set_len(len as usize) };
                 }
                 if (len as usize) > data.len() {
+                    data.zeroize();
                     return err_rv!(CKR_KEY_SIZE_RANGE);
                 }
                 attrs[idx] = CK_ATTRIBUTE::from_slice(CKA_VALUE, &data);
             }
             None => attrs.push(CK_ATTRIBUTE::from_slice(CKA_VALUE, &data)),
         }
-        self.default_object_unwrap(template)
+        let result = self.default_object_unwrap(template);
+        data.zeroize();
+        result
     }
 
     fn default_object_unwrap(
