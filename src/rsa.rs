@@ -21,10 +21,6 @@ use asn1;
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
-pub const MIN_RSA_SIZE_BITS: usize = 1024;
-pub const MAX_RSA_SIZE_BITS: usize = 16536;
-pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
-
 pub const OID_RSA_ENCRYPTION: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 1, 1);
 
@@ -53,23 +49,9 @@ impl RSAPubFactory {
 
 impl ObjectFactory for RSAPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template)?;
+        let mut obj = self.default_object_create(template)?;
 
-        let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
-            Ok(m) => m,
-            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-        };
-        match obj.get_attr_as_ulong(CKA_MODULUS_BITS) {
-            Ok(_) => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-            Err(e) => match e {
-                KError::NotFound(_) => (),
-                _ => return Err(e),
-            },
-        }
-        if modulus.len() < MIN_RSA_SIZE_BYTES {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
-        bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
+        rsa_import(&mut obj)?;
 
         Ok(obj)
     }
@@ -409,9 +391,6 @@ impl Mechanism for RsaPKCSMechanism {
         }
 
         let bits = pubkey.get_attr_as_ulong(CKA_MODULUS_BITS)? as usize;
-        if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-        }
         let exponent: Vec<u8> = match pubkey.get_attr(CKA_PUBLIC_EXPONENT) {
             Some(a) => a.get_value().clone(),
             None => {
