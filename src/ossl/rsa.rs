@@ -22,6 +22,14 @@ use std::os::raw::c_char;
 use std::os::raw::c_int;
 use zeroize::Zeroize;
 
+#[cfg(not(feature = "fips"))]
+pub const MIN_RSA_SIZE_BITS: usize = 1024;
+#[cfg(feature = "fips")]
+pub const MIN_RSA_SIZE_BITS: usize = 2048;
+
+pub const MAX_RSA_SIZE_BITS: usize = 16536;
+pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
+
 static RSA_NAME: &[u8; 4] = b"RSA\0";
 
 pub fn rsa_import(obj: &mut Object) -> KResult<()> {
@@ -29,12 +37,31 @@ pub fn rsa_import(obj: &mut Object) -> KResult<()> {
         Ok(m) => m,
         Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
     };
+    match obj.get_attr_as_ulong(CKA_MODULUS_BITS) {
+        Ok(_) => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        Err(e) => match e {
+            KError::NotFound(_) => (),
+            _ => return Err(e),
+        },
+    }
     if modulus.len() < MIN_RSA_SIZE_BYTES {
         return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
     }
-    bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
-    bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
-    /* The FIPS module can handle missing p,q,a,b,c */
+    match obj.get_attr_as_ulong(CKA_CLASS) {
+        Ok(c) => match c {
+            CKO_PUBLIC_KEY => {
+                bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
+            },
+            CKO_PRIVATE_KEY => {
+                bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
+                bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
+                /* The FIPS module can handle missing p,q,a,b,c */
+            },
+            _ => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        },
+        Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+    }
+
     Ok(())
 }
 
@@ -521,6 +548,9 @@ impl RsaPKCSOperation {
         privkey: &mut Object,
     ) -> KResult<()> {
         let mut ctx = new_pkey_ctx()?;
+        if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
         if unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) } != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }

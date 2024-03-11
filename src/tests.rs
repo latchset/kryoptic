@@ -1265,7 +1265,6 @@ fn test_get_mechs() {
     let mut info: CK_MECHANISM_INFO = Default::default();
     ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
-    assert_eq!(info.ulMinKeySize, 1024);
 
     testdata.finalize();
 }
