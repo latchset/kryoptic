@@ -51,12 +51,12 @@ pub fn rsa_import(obj: &mut Object) -> KResult<()> {
         Ok(c) => match c {
             CKO_PUBLIC_KEY => {
                 bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
-            },
+            }
             CKO_PRIVATE_KEY => {
                 bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
                 bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
                 /* The FIPS module can handle missing p,q,a,b,c */
-            },
+            }
             _ => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         },
         Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
@@ -312,21 +312,27 @@ struct RsaPKCSOperation {
 }
 
 impl RsaPKCSOperation {
+    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                flags: flags,
+            },
+        })
+    }
+
     fn register_mechanisms(mechs: &mut Mechanisms) {
         mechs.add_mechanism(
             CKM_RSA_PKCS,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_ENCRYPT
-                        | CKF_DECRYPT
-                        | CKF_SIGN
-                        | CKF_VERIFY
-                        | CKF_WRAP
-                        | CKF_UNWRAP,
-                },
-            }),
+            Self::new_mechanism(
+                CKF_ENCRYPT
+                    | CKF_DECRYPT
+                    | CKF_SIGN
+                    | CKF_VERIFY
+                    | CKF_WRAP
+                    | CKF_UNWRAP,
+            ),
         );
 
         for ckm in &[
@@ -352,36 +358,20 @@ impl RsaPKCSOperation {
         ] {
             mechs.add_mechanism(
                 *ckm,
-                Box::new(RsaPKCSMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                        ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                        flags: CKF_SIGN | CKF_VERIFY,
-                    },
-                }),
+                Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
             );
         }
 
         mechs.add_mechanism(
             CKM_RSA_PKCS_KEY_PAIR_GEN,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_GENERATE_KEY_PAIR,
-                },
-            }),
+            Self::new_mechanism(CKF_GENERATE_KEY_PAIR),
         );
 
         mechs.add_mechanism(
             CKM_RSA_PKCS_OAEP,
-            Box::new(RsaPKCSMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
-                    flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-                },
-            }),
+            Self::new_mechanism(
+                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            ),
         );
     }
 
