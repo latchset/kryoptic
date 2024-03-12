@@ -166,6 +166,6 @@ impl Slot {
 
     pub fn finalize(&mut self) -> KResult<()> {
         self.drop_all_sessions();
-        self.token.read().unwrap().save()
+        self.token.write().unwrap().save()
     }
 }
