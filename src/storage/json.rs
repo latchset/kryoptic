@@ -7,12 +7,14 @@ use serde_json::{
     from_reader, to_string, to_string_pretty, Map, Number, Value,
 };
 
-use super::attribute;
-use super::err_rv;
-use super::error;
-use super::interface;
-use super::object;
-use super::token;
+use super::super::attribute;
+use super::super::err_rv;
+use super::super::error;
+use super::super::interface;
+use super::super::object;
+
+use super::memory;
+use super::Storage;
 
 use attribute::{AttrType, Attribute};
 use error::{KError, KResult};
@@ -68,7 +70,7 @@ impl JsonObject {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct JsonToken {
+struct JsonToken {
     objects: Vec<JsonObject>,
 }
 
@@ -88,7 +90,7 @@ impl JsonToken {
         }
     }
 
-    pub fn to_objects(&self, to: &mut token::TokenObjects) -> KResult<()> {
+    fn prime_cache(&self, cache: &mut Box<dyn Storage>) -> KResult<()> {
         for jo in &self.objects {
             let mut obj = Object::new();
             let mut uid: Option<String> = None;
@@ -150,19 +152,19 @@ impl JsonToken {
                 }
             }
             match uid {
-                Some(u) => to.insert(u, obj),
+                Some(u) => cache.store(u, obj)?,
                 None => return err_rv!(CKR_DEVICE_ERROR),
             }
         }
         Ok(())
     }
 
-    pub fn from_objects(to: &token::TokenObjects) -> JsonToken {
+    pub fn from_cache(cache: &Box<dyn Storage>) -> JsonToken {
+        let objs = cache.search(&[]);
         let mut jt = JsonToken {
-            objects: Vec::with_capacity(to.len()),
+            objects: Vec::with_capacity(objs.len()),
         };
-
-        for (_, o) in to.iter() {
+        for o in objs {
             if !o.is_token() {
                 continue;
             }
@@ -182,4 +184,52 @@ impl JsonToken {
             Err(e) => Err(KError::FileError(e)),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct JsonStorage {
+    filename: String,
+    cache: Box<dyn Storage>,
+}
+
+impl Storage for JsonStorage {
+    fn open(&mut self, filename: &String) -> KResult<()> {
+        self.filename = filename.clone();
+        let token = JsonToken::load(&self.filename)?;
+        token.prime_cache(&mut self.cache)
+    }
+    fn reinit(&mut self) -> KResult<()> {
+        // TODO
+        Ok(())
+    }
+    fn flush(&self) -> KResult<()> {
+        let token = JsonToken::from_cache(&self.cache);
+        token.save(&self.filename)
+    }
+    fn get_by_unique_id(&self, uid: &String) -> KResult<&Object> {
+        self.cache.get_by_unique_id(uid)
+    }
+    fn get_by_unique_id_mut(&mut self, uid: &String) -> KResult<&mut Object> {
+        self.cache.get_by_unique_id_mut(uid)
+    }
+    fn store(&mut self, uid: String, obj: Object) -> KResult<()> {
+        self.cache.store(uid, obj)
+    }
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> Vec<&Object> {
+        self.cache.search(template)
+    }
+    fn remove_by_unique_id(&mut self, uid: &String) -> KResult<()> {
+        self.cache.remove_by_unique_id(uid)
+    }
+    fn get_rough_size_by_unique_id(&self, uid: &String) -> KResult<usize> {
+        let obj = self.cache.get_by_unique_id(uid)?;
+        JsonObject::from_object(obj).rough_size()
+    }
+}
+
+pub fn json() -> Box<dyn Storage> {
+    Box::new(JsonStorage {
+        filename: String::from(""),
+        cache: memory::memory(),
+    })
 }
