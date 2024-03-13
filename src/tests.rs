@@ -3338,6 +3338,61 @@ fn test_signatures() {
     };
     assert_eq!(testcase.result, result);
 
+    /* ### CKM_ECDSA ### */
+
+    /* get test data */
+    let mut testcase = get_test_case_data(session, "CKM_ECDSA_SHA512");
+    let pri_key_handle = match get_test_key_handle(
+        session,
+        "FIPS_186-3/SigGen: [P-521,SHA-512]",
+        CKO_PRIVATE_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
+    let pub_key_handle = match get_test_key_handle(
+        session,
+        "FIPS_186-3/SigGen: [P-521,SHA-512]",
+        CKO_PUBLIC_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
+
+    /* verify test vector */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDSA_SHA512,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = sig_verify(
+        session,
+        pub_key_handle,
+        &mut testcase.value,
+        &mut testcase.result,
+        &mut mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut result = match sig_gen(
+        session,
+        pri_key_handle,
+        &mut testcase.value,
+        &mut mechanism,
+    ) {
+        Ok(r) => r,
+        Err(e) => panic!("f{e}"),
+    };
+    // the ECDSA is non-deterministic -- we can not just compare the signature, but we can verify
+    let ret = sig_verify(
+        session,
+        pub_key_handle,
+        &mut testcase.value,
+        &mut result,
+        &mut mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
+
     /* ### HMACs ### */
 
     /* get test keys */
