@@ -97,7 +97,6 @@ pub struct Token {
     storage: Box<dyn Storage>,
     handles: HashMap<CK_OBJECT_HANDLE, String>,
     next_handle: CK_OBJECT_HANDLE,
-    dirty: bool,
     so_login: LoginData,
     user_login: LoginData,
 }
@@ -143,7 +142,6 @@ impl Token {
                 attempts: 0,
                 logged_in: false,
             },
-            dirty: false,
         };
 
         /* register mechanisms and factories */
@@ -239,7 +237,6 @@ impl Token {
             }
             Err(_) => return CKR_GENERAL_ERROR,
         }
-        self.dirty = true;
 
         /* add pin to so_object */
         match self.store_pin_object(
@@ -251,7 +248,7 @@ impl Token {
             Err(_) => return CKR_GENERAL_ERROR,
         }
 
-        match self.save() {
+        match self.storage.flush() {
             Ok(_) => {
                 self.info.flags |= CKF_TOKEN_INITIALIZED;
                 CKR_OK
@@ -538,17 +535,13 @@ impl Token {
         /* If we set a PIN it means we switched to require Logins */
         self.info.flags |= CKF_LOGIN_REQUIRED;
 
-        self.dirty = true;
-        match self.save() {
+        match self.storage.flush() {
             Ok(()) => CKR_OK,
             Err(_) => CKR_GENERAL_ERROR,
         }
     }
 
     pub fn save(&mut self) -> KResult<()> {
-        if !self.dirty {
-            return Ok(());
-        }
         self.storage.flush()
     }
 
@@ -566,7 +559,6 @@ impl Token {
             if !self.is_logged_in(KRY_UNSPEC) {
                 return err_rv!(CKR_USER_NOT_LOGGED_IN);
             }
-            self.dirty = true;
         } else {
             obj.set_session(s_handle);
         }
@@ -639,8 +631,7 @@ impl Token {
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
         self.object_factories.set_object_attributes(obj, template)?;
-        self.dirty = true;
-        Ok(())
+        self.storage.flush()
     }
 
     pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
