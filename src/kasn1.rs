@@ -29,6 +29,18 @@ impl<'a> DerEncBigUint<'a> {
             de = DerEncBigUint {
                 data: Cow::Owned(v),
             };
+        } else {
+            // Skip possible leading zeroes that do not affect sign of the resulting integer
+            let mut skip = 0;
+            while de.data[skip] == 0
+                && skip + 1 < de.data.len()
+                && de.data[skip + 1] & 0x80 == 0
+            {
+                skip += 1;
+            }
+            de = DerEncBigUint {
+                data: Cow::from(&data[skip..]),
+            };
         }
         /* check it works */
         match asn1::BigUint::new(&de.data) {
