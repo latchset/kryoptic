@@ -213,13 +213,15 @@ impl Storage for JsonStorage {
         self.cache.get_by_unique_id_mut(uid)
     }
     fn store(&mut self, uid: String, obj: Object) -> KResult<()> {
-        self.cache.store(uid, obj)
+        self.cache.store(uid, obj)?;
+        self.flush()
     }
     fn search(&self, template: &[CK_ATTRIBUTE]) -> Vec<&Object> {
         self.cache.search(template)
     }
     fn remove_by_unique_id(&mut self, uid: &String) -> KResult<()> {
-        self.cache.remove_by_unique_id(uid)
+        self.cache.remove_by_unique_id(uid)?;
+        self.flush()
     }
     fn get_rough_size_by_unique_id(&self, uid: &String) -> KResult<usize> {
         let obj = self.cache.get_by_unique_id(uid)?;
