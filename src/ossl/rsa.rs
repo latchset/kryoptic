@@ -375,6 +375,18 @@ impl RsaPKCSOperation {
         );
     }
 
+    fn hash_len(hash: CK_MECHANISM_TYPE) -> KResult<usize> {
+        let hs = match hash {
+            CKM_SHA_1 => 20,
+            CKM_SHA224 | CKM_SHA3_224 => 28,
+            CKM_SHA256 | CKM_SHA3_256 => 32,
+            CKM_SHA384 | CKM_SHA3_384 => 48,
+            CKM_SHA512 | CKM_SHA3_512 => 64,
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        Ok(hs)
+    }
+
     fn max_message_len(
         modulus: usize,
         mech: CK_MECHANISM_TYPE,
@@ -383,14 +395,7 @@ impl RsaPKCSOperation {
         match mech {
             CKM_RSA_PKCS => Ok(modulus - 11),
             CKM_RSA_PKCS_OAEP => {
-                let hs = match hash {
-                    CKM_SHA_1 => 20,
-                    CKM_SHA224 | CKM_SHA3_224 => 28,
-                    CKM_SHA256 | CKM_SHA3_256 => 32,
-                    CKM_SHA384 | CKM_SHA3_384 => 48,
-                    CKM_SHA512 | CKM_SHA3_512 => 64,
-                    _ => return err_rv!(CKR_MECHANISM_INVALID),
-                };
+                let hs = Self::hash_len(hash)?;
                 Ok(modulus - 2 * hs - 2)
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
@@ -472,10 +477,12 @@ impl RsaPKCSOperation {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
 
+        let pss_params = parse_pss_params(mech)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: match mech.mechanism {
                 CKM_RSA_PKCS => modulus.len() - 11,
+                CKM_RSA_PKCS_PSS => Self::hash_len(pss_params.hash)?,
                 _ => 0,
             },
             output_len: modulus.len(),
@@ -490,7 +497,7 @@ impl RsaPKCSOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
-            pss: parse_pss_params(mech)?,
+            pss: pss_params,
             oaep: no_oaep_params(),
         })
     }
@@ -508,6 +515,7 @@ impl RsaPKCSOperation {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
 
+        let pss_params = parse_pss_params(mech)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: match mech.mechanism {
@@ -526,7 +534,7 @@ impl RsaPKCSOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
             },
-            pss: parse_pss_params(mech)?,
+            pss: pss_params,
             oaep: no_oaep_params(),
         })
     }
@@ -1011,7 +1019,11 @@ impl Sign for RsaPKCSOperation {
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
                 self.finalized = true;
-                if data.len() > self.max_input {
+                if match self.mech {
+                    CKM_RSA_PKCS => data.len() > self.max_input,
+                    CKM_RSA_PKCS_PSS => data.len() != self.max_input,
+                    _ => return err_rv!(CKR_GENERAL_ERROR),
+                } {
                     return err_rv!(CKR_DATA_LEN_RANGE);
                 }
                 if signature.len() != self.output_len {
