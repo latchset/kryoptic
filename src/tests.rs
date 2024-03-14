@@ -3180,6 +3180,50 @@ fn sig_gen(
     Ok(signature)
 }
 
+fn sig_gen_multipart(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    data: &Vec<u8>,
+    mechanism: &CK_MECHANISM,
+) -> KResult<Vec<u8>> {
+    let ret =
+        fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+
+    let half_len = data.len() / 2;
+    // just send data in two chunks
+    let ret =
+        fn_sign_update(session, data.as_ptr() as *mut u8, half_len as CK_ULONG);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    let ret = fn_sign_update(
+        session,
+        data[half_len..].as_ptr() as *mut u8,
+        (data.len() - half_len) as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign_final(session, std::ptr::null_mut(), &mut siglen);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+
+    let mut signature: Vec<u8> = vec![0; siglen as usize];
+    let ret =
+        fn_sign_final(session, signature.as_ptr() as *mut u8, &mut siglen);
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    signature.resize(siglen as usize, 0);
+
+    Ok(signature)
+}
+
 fn decrypt(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
@@ -3328,6 +3372,17 @@ fn test_signatures() {
     assert_eq!(ret, CKR_OK);
 
     let result = match sig_gen(
+        session,
+        pri_key_handle,
+        &mut testcase.value,
+        &mut mechanism,
+    ) {
+        Ok(r) => r,
+        Err(e) => panic!("f{e}"),
+    };
+    assert_eq!(testcase.result, result);
+
+    let result = match sig_gen_multipart(
         session,
         pri_key_handle,
         &mut testcase.value,
