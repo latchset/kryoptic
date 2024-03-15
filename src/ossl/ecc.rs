@@ -409,9 +409,6 @@ impl Sign for EccOperation {
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
-            if signature.len() + 8 != siglen {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
 
             let mut ossl_sign: Vec<u8> = Vec::with_capacity(siglen);
             ossl_sign.resize(siglen, 0);
