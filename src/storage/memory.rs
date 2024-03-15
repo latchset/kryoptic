@@ -28,41 +28,47 @@ impl Storage for MemoryStorage {
         self.objects.clear();
         Ok(())
     }
-    fn flush(&self) -> KResult<()> {
+    fn flush(&mut self) -> KResult<()> {
         Ok(())
     }
-    fn get_by_unique_id(&self, uid: &String) -> KResult<&Object> {
+    fn fetch_by_uid(&mut self, uid: &String) -> KResult<&Object> {
+        self.get_cached_by_uid(uid)
+    }
+    fn get_cached_by_uid(&self, uid: &String) -> KResult<&Object> {
         match self.objects.get(uid) {
             Some(o) => Ok(o),
             None => err_not_found! {uid.clone()},
         }
     }
-    fn get_by_unique_id_mut(&mut self, uid: &String) -> KResult<&mut Object> {
+    fn get_cached_by_uid_mut(&mut self, uid: &String) -> KResult<&mut Object> {
         match self.objects.get_mut(uid) {
             Some(o) => Ok(o),
             None => err_not_found! {uid.clone()},
         }
     }
-    fn store(&mut self, uid: String, obj: Object) -> KResult<()> {
-        self.objects.insert(uid, obj);
+    fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
+        self.objects.insert(uid.clone(), obj);
         Ok(())
     }
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> Vec<&Object> {
+    fn get_all_cached(&self) -> Vec<&Object> {
+        let mut ret = Vec::<&Object>::with_capacity(self.objects.len());
+        for (_, o) in self.objects.iter() {
+            ret.push(o);
+        }
+        ret
+    }
+    fn search(&mut self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<&Object>> {
         let mut ret = Vec::<&Object>::new();
         for (_, o) in self.objects.iter() {
             if o.match_template(template) {
                 ret.push(o);
             }
         }
-        ret
+        Ok(ret)
     }
-    fn remove_by_unique_id(&mut self, uid: &String) -> KResult<()> {
+    fn remove_by_uid(&mut self, uid: &String) -> KResult<()> {
         self.objects.remove(uid);
         Ok(())
-    }
-    fn get_rough_size_by_unique_id(&self, _uid: &String) -> KResult<usize> {
-        // TODO
-        Ok(1000)
     }
 }
 

@@ -3,9 +3,7 @@
 
 use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
-use serde_json::{
-    from_reader, to_string, to_string_pretty, Map, Number, Value,
-};
+use serde_json::{from_reader, to_string_pretty, Map, Number, Value};
 
 use super::super::attribute;
 use super::super::err_rv;
@@ -60,22 +58,15 @@ impl JsonObject {
         }
         jo
     }
-
-    pub fn rough_size(&self) -> KResult<usize> {
-        match to_string(&self) {
-            Ok(js) => Ok(js.len()),
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct JsonToken {
+pub struct JsonToken {
     objects: Vec<JsonObject>,
 }
 
 impl JsonToken {
-    pub fn load(filename: &String) -> KResult<JsonToken> {
+    pub fn load(filename: &str) -> KResult<JsonToken> {
         match std::fs::File::open(filename) {
             Ok(f) => match from_reader::<std::fs::File, JsonToken>(f) {
                 Ok(jt) => Ok(jt),
@@ -90,7 +81,7 @@ impl JsonToken {
         }
     }
 
-    fn prime_cache(&self, cache: &mut Box<dyn Storage>) -> KResult<()> {
+    pub fn prime_cache(&self, cache: &mut Box<dyn Storage>) -> KResult<()> {
         for jo in &self.objects {
             let mut obj = Object::new();
             let mut uid: Option<String> = None;
@@ -152,15 +143,15 @@ impl JsonToken {
                 }
             }
             match uid {
-                Some(u) => cache.store(u, obj)?,
+                Some(u) => cache.store(&u, obj)?,
                 None => return err_rv!(CKR_DEVICE_ERROR),
             }
         }
         Ok(())
     }
 
-    pub fn from_cache(cache: &Box<dyn Storage>) -> JsonToken {
-        let objs = cache.search(&[]);
+    pub fn from_cache(cache: &mut Box<dyn Storage>) -> JsonToken {
+        let objs = cache.search(&[]).unwrap();
         let mut jt = JsonToken {
             objects: Vec::with_capacity(objs.len()),
         };
@@ -174,7 +165,7 @@ impl JsonToken {
         jt
     }
 
-    pub fn save(&self, filename: &String) -> KResult<()> {
+    pub fn save(&self, filename: &str) -> KResult<()> {
         let jstr = match to_string_pretty(&self) {
             Ok(j) => j,
             Err(e) => return Err(KError::JsonError(e)),
@@ -202,30 +193,32 @@ impl Storage for JsonStorage {
         // TODO
         Ok(())
     }
-    fn flush(&self) -> KResult<()> {
-        let token = JsonToken::from_cache(&self.cache);
+    fn flush(&mut self) -> KResult<()> {
+        let token = JsonToken::from_cache(&mut self.cache);
         token.save(&self.filename)
     }
-    fn get_by_unique_id(&self, uid: &String) -> KResult<&Object> {
-        self.cache.get_by_unique_id(uid)
+    fn fetch_by_uid(&mut self, uid: &String) -> KResult<&Object> {
+        self.cache.fetch_by_uid(uid)
     }
-    fn get_by_unique_id_mut(&mut self, uid: &String) -> KResult<&mut Object> {
-        self.cache.get_by_unique_id_mut(uid)
+    fn get_cached_by_uid(&self, uid: &String) -> KResult<&Object> {
+        self.cache.get_cached_by_uid(uid)
     }
-    fn store(&mut self, uid: String, obj: Object) -> KResult<()> {
+    fn get_cached_by_uid_mut(&mut self, uid: &String) -> KResult<&mut Object> {
+        self.cache.get_cached_by_uid_mut(uid)
+    }
+    fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
         self.cache.store(uid, obj)?;
         self.flush()
     }
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> Vec<&Object> {
+    fn get_all_cached(&self) -> Vec<&Object> {
+        self.cache.get_all_cached()
+    }
+    fn search(&mut self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<&Object>> {
         self.cache.search(template)
     }
-    fn remove_by_unique_id(&mut self, uid: &String) -> KResult<()> {
-        self.cache.remove_by_unique_id(uid)?;
+    fn remove_by_uid(&mut self, uid: &String) -> KResult<()> {
+        self.cache.remove_by_uid(uid)?;
         self.flush()
-    }
-    fn get_rough_size_by_unique_id(&self, uid: &String) -> KResult<usize> {
-        let obj = self.cache.get_by_unique_id(uid)?;
-        JsonObject::from_object(obj).rough_size()
     }
 }
 

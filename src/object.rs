@@ -58,6 +58,7 @@ pub struct Object {
     handle: CK_OBJECT_HANDLE,
     session: CK_SESSION_HANDLE,
     attributes: Vec<Attribute>,
+    modified: bool,
 }
 
 impl Object {
@@ -66,6 +67,7 @@ impl Object {
             handle: CK_INVALID_HANDLE,
             session: CK_INVALID_HANDLE,
             attributes: Vec::new(),
+            modified: false,
         }
     }
 
@@ -78,6 +80,7 @@ impl Object {
             let uuid = Uuid::new_v4().to_string();
             self.attributes
                 .push(attribute::from_string(CKA_UNIQUE_ID, uuid));
+            self.modified = true;
         }
     }
 
@@ -88,8 +91,9 @@ impl Object {
             if attr.get_type() == CKA_UNIQUE_ID {
                 continue;
             }
-            obj.attributes.push(attr.clone())
+            obj.attributes.push(attr.clone());
         }
+        obj.modified = true;
         Ok(obj)
     }
 
@@ -99,6 +103,14 @@ impl Object {
 
     pub fn get_handle(&self) -> CK_OBJECT_HANDLE {
         self.handle
+    }
+
+    pub fn reset_modified(&mut self) {
+        self.modified = false;
+    }
+
+    pub fn is_modified(&self) -> bool {
+        self.modified
     }
 
     pub fn set_session(&mut self, s: CK_SESSION_HANDLE) {
@@ -127,6 +139,7 @@ impl Object {
             Some(idx) => self.attributes[idx] = a,
             None => self.attributes.push(a),
         }
+        self.modified = true;
         Ok(())
     }
 
@@ -138,13 +151,17 @@ impl Object {
                     return Ok(false);
                 }
             }
-            None => self.attributes.push(a),
+            None => {
+                self.attributes.push(a);
+                self.modified = true;
+            }
         }
         Ok(true)
     }
 
     pub fn del_attr(&mut self, ck_type: CK_ULONG) {
         self.attributes.retain(|a| a.get_type() != ck_type);
+        self.modified = true;
     }
 
     pub fn get_attributes(&self) -> &Vec<Attribute> {
@@ -185,6 +202,14 @@ impl Object {
             return Ok(());
         }
         return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
+    }
+
+    pub fn rough_size(&self) -> KResult<usize> {
+        let mut size = std::mem::size_of::<Attribute>() * self.attributes.len();
+        for val in &self.attributes {
+            size += val.get_value().len();
+        }
+        Ok(size)
     }
 }
 
@@ -499,9 +524,9 @@ pub trait CertFactory {
             attr_element!(CKA_TRUSTED; OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_CERTIFICATE_CATEGORY; OAFlags::Defval; from_ulong; val CK_CERTIFICATE_CATEGORY_UNSPECIFIED),
             attr_element!(CKA_CHECK_VALUE; OAFlags::Ignored; from_ignore; val None),
-            attr_element!(CKA_START_DATE; OAFlags::Defval; from_date_bytes; val Vec::new()),
-            attr_element!(CKA_END_DATE; OAFlags::Defval; from_date_bytes; val Vec::new()),
-            attr_element!(CKA_PUBLIC_KEY_INFO; OAFlags::Defval; from_bytes; val Vec::new()),
+            attr_element!(CKA_START_DATE; OAFlags::empty(); from_date_bytes; val Vec::new()),
+            attr_element!(CKA_END_DATE; OAFlags::empty(); from_date_bytes; val Vec::new()),
+            attr_element!(CKA_PUBLIC_KEY_INFO; OAFlags::empty(); from_bytes; val Vec::new()),
         ]
     }
 
@@ -628,8 +653,8 @@ pub trait CommonKeyFactory {
         vec![
             attr_element!(CKA_KEY_TYPE; OAFlags::RequiredOnCreate; from_ulong; val CK_UNAVAILABLE_INFORMATION),
             attr_element!(CKA_ID; OAFlags::empty(); from_bytes; val Vec::new()),
-            attr_element!(CKA_START_DATE; OAFlags::Defval; from_date_bytes; val Vec::new()),
-            attr_element!(CKA_END_DATE; OAFlags::Defval; from_date_bytes; val Vec::new()),
+            attr_element!(CKA_START_DATE; OAFlags::empty(); from_date_bytes; val Vec::new()),
+            attr_element!(CKA_END_DATE; OAFlags::empty(); from_date_bytes; val Vec::new()),
             attr_element!(CKA_DERIVE; OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable; from_bool; val false),
             attr_element!(CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable; from_ulong; val CK_UNAVAILABLE_INFORMATION),

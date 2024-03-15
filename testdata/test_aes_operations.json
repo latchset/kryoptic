@@ -43,7 +43,6 @@
         "CKA_TOKEN": true,
         "CKA_VALUE": "HbvrLxmrtEivhJeWJEoZ1w=="
     }
-
 }, {
     "attributes": {
         "CKA_UNIQUE_ID": "1011",
@@ -209,7 +208,6 @@
         "CKA_TOKEN": true,
         "CKA_VALUE": "AAe9/Vy9YCeNzAkSAAAAAQ=="
     }
-
 }, {
     "attributes": {
         "CKA_UNIQUE_ID": "1041",
