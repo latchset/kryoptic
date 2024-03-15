@@ -2746,6 +2746,87 @@ fn test_ecc_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* P-521 private key */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("7").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* sign init */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_sign_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    /* a second invocation should return an error */
+    ret = fn_sign_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OPERATION_ACTIVE);
+
+    let data = "plaintext";
+    let sign: [u8; 132] = [0; 132];
+    let mut sign_len: CK_ULONG = 132;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 132);
+
+    /* a second invocation should return an error */
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    /* test that signature verification works */
+    template = vec![make_attribute!(
+        CKA_UNIQUE_ID,
+        CString::new("6").unwrap().into_raw(),
+        1
+    )];
+    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
