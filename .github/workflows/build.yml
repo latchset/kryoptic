@@ -38,7 +38,7 @@ jobs:
             'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
             'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
             'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
-            zlib-devel sed
+            zlib-devel sed sqlite-devel
 
       - name: Checkout Repository
         uses: actions/checkout@v3

@@ -50,7 +50,6 @@ static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
 struct TestData<'a> {
     slot: CK_SLOT_ID,
     filename: &'a str,
-    created: bool,
     finalize: Option<RwLockWriteGuard<'a, u64>>,
     sync: Option<RwLockReadGuard<'a, u64>>,
 }
@@ -62,108 +61,49 @@ impl TestData<'_> {
         TestData {
             slot: slots.id,
             filename: filename,
-            created: false,
             finalize: test_finalizer(),
             sync: Some(SYNC.read().unwrap()),
         }
     }
 
-    fn setup_db(&mut self) {
-        let test_token = serde_json::json!({
-            "objects": [{
-                "attributes": {
-                    "CKA_UNIQUE_ID": "0",
-                    "CKA_CLASS": 4,
-                    "CKA_KEY_TYPE": 16,
-                    "CKA_LABEL": "SO PIN",
-                    "CKA_VALUE": "MTIzNDU2Nzg=",
-                    "CKA_TOKEN": true
-                }
-            }, {
-                "attributes": {
-                    "CKA_UNIQUE_ID": "1",
-                    "CKA_CLASS": 4,
-                    "CKA_KEY_TYPE": 16,
-                    "CKA_LABEL": "User PIN",
-                    "CKA_VALUE": "MTIzNDU2Nzg=",
-                    "CKA_TOKEN": true
-                }
-            }, {
-                "attributes": {
-                    "CKA_UNIQUE_ID": "2",
-                    "CKA_CLASS": 2,
-                    "CKA_KEY_TYPE": 0,
-                    "CKA_DESTROYABLE": false,
-                    "CKA_ID": "AQ==",
-                    "CKA_LABEL": "Test RSA Key",
-                    "CKA_MODIFIABLE": true,
-                    "CKA_MODULUS": "AQIDBAUGBwg=",
-                    "CKA_PRIVATE": false,
-                    "CKA_PUBLIC_EXPONENT": "AQAB",
-                    "CKA_TOKEN": true
-                }
-            }, {
-                "attributes": {
-                    "CKA_UNIQUE_ID": "3",
-                    "CKA_CLASS": 3,
-                    "CKA_KEY_TYPE": 0,
-                    "CKA_DESTROYABLE": false,
-                    "CKA_ID": "AQ==",
-                    "CKA_LABEL": "Test RSA Key",
-                    "CKA_MODIFIABLE": false,
-                    "CKA_MODULUS": "AQIDBAUGBwg=",
-                    "CKA_PRIVATE": true,
-                    "CKA_SENSITIVE": true,
-                    "CKA_EXTRACTABLE": false,
-                    "CKA_PUBLIC_EXPONENT": "AQAB",
-                    "CKA_PRIVATE_EXPONENT": "AQAD",
-                    "CKA_TOKEN": true
-                }
-            }, {
-                "attributes": {
-                    "CKA_UNIQUE_ID": "4",
-                    "CKA_CLASS": 2,
-                    "CKA_KEY_TYPE": 3,
-                    "CKA_DESTROYABLE": false,
-                    "CKA_ID": "Ag==",
-                    "CKA_LABEL": "Test EC Key",
-                    "CKA_MODIFIABLE": true,
-                    "CKA_PRIVATE": false,
-                    "CKA_EC_PARAMS": "BggqhkjOPQMBBw==",
-                    "CKA_EC_POINT": "BOaBBjTeoFaH/PYBjY7hCZOJTtdbESgdPzXZwt8YXWA6iAYamlZ0X8I6npsh0OlyTMrvYIo+JccaoUki/cROlEU=",
-                    "CKA_TOKEN": true,
-                    "CKA_VERIFY": true
-                }
-            }, {
-                "attributes": {
-                    "CKA_UNIQUE_ID": "5",
-                    "CKA_CLASS": 3,
-                    "CKA_KEY_TYPE": 3,
-                    "CKA_DESTROYABLE": false,
-                    "CKA_ID": "Ag==",
-                    "CKA_LABEL": "Test EC Key",
-                    "CKA_MODIFIABLE": false,
-                    "CKA_PRIVATE": true,
-                    "CKA_SENSITIVE": true,
-                    "CKA_EXTRACTABLE": false,
-                    "CKA_EC_PARAMS": "BggqhkjOPQMBBw==",
-                    "CKA_VALUE": "mtoobolazGJPX6gecD57oWxvwZl02fKc7BKwixExm5M=",
-                    "CKA_TOKEN": true,
-                    "CKA_SIGN": true
-                }
-            }]
-        });
-        let file = std::fs::File::create(self.filename).unwrap();
-        serde_json::to_writer_pretty(file, &test_token).unwrap();
-        self.created = true;
+    fn setup_db<'a>(&mut self, source: Option<&'a str>) {
+        let basic = "testdata/test_basic.json";
+        let filename = match source {
+            Some(s) => s,
+            None => basic,
+        };
+        let test_data = storage::json::JsonToken::load(filename).unwrap();
+        if self.filename.ends_with(".json") {
+            test_data.save(self.filename).unwrap();
+        } else if self.filename.ends_with(".sql") {
+            let mut cache = storage::memory::memory();
+            test_data.prime_cache(&mut cache).unwrap();
+            let mut sql = storage::sqlite::sqlite();
+            match sql.open(&self.filename.to_string()) {
+                Ok(()) => (),
+                Err(err) => match err {
+                    KError::RvError(ref e) => {
+                        if e.rv != CKR_CRYPTOKI_NOT_INITIALIZED {
+                            panic!("Unexpected error: {}", e.rv);
+                        }
+                    }
+                    _ => panic!("Unexpected error: {}", err),
+                },
+            }
+            /* reset db in all cases */
+            sql.reinit().unwrap();
+            let objects = cache.search(&[]).unwrap();
+            for obj in objects {
+                let uid = obj.get_attr_as_string(CKA_UNIQUE_ID).unwrap();
+                sql.store(&uid, obj.clone()).unwrap()
+            }
+        } else {
+            panic!("Unknown file type");
+        }
     }
 
     fn get_slot(&self) -> CK_SLOT_ID {
         self.slot
-    }
-
-    fn mark_file_created(&mut self) {
-        self.created = true;
     }
 
     fn make_init_args(&self) -> CK_C_INITIALIZE_ARGS {
@@ -194,16 +134,13 @@ impl TestData<'_> {
             /* winner finalized and completed the tests */
             self.finalize = None;
         }
-        if self.created {
-            std::fs::remove_file(self.filename).unwrap_or(());
-        }
+        std::fs::remove_file(self.filename).unwrap_or(());
     }
 }
 
-#[test]
-fn test_token() {
-    let mut testdata = TestData::new("testdata/test_token.json");
-    testdata.setup_db();
+fn test_token(name: &str) {
+    let mut testdata = TestData::new(name);
+    testdata.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -226,9 +163,19 @@ fn test_token() {
 }
 
 #[test]
+fn test_token_json() {
+    test_token("test_token.json");
+}
+
+#[test]
+fn test_token_sql() {
+    test_token("test_token.sql");
+}
+
+#[test]
 fn test_random() {
-    let mut testdata = TestData::new("testdata/test_random.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_random.json");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -257,10 +204,9 @@ fn test_random() {
     testdata.finalize();
 }
 
-#[test]
-fn test_login() {
-    let mut testdata = TestData::new("testdata/test_login.json");
-    testdata.setup_db();
+fn test_login(name: &str) {
+    let mut testdata = TestData::new(name);
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -349,9 +295,19 @@ fn test_login() {
 }
 
 #[test]
+fn test_login_json() {
+    test_login("test_login.json");
+}
+
+#[test]
+fn test_login_sql() {
+    test_login("test_login.sql");
+}
+
+#[test]
 fn test_get_attr() {
-    let mut testdata = TestData::new("testdata/test_get_attr.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_get_attr.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -475,8 +431,8 @@ fn test_get_attr() {
 
 #[test]
 fn test_set_attr() {
-    let mut testdata = TestData::new("testdata/test_set_attr.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_set_attr.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -563,8 +519,8 @@ fn test_set_attr() {
 
 #[test]
 fn test_copy_objects() {
-    let mut testdata = TestData::new("testdata/test_copy_objects.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_copy_objects.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -679,8 +635,8 @@ fn test_copy_objects() {
 
 #[test]
 fn test_create_objects() {
-    let mut testdata = TestData::new("testdata/test_create_objects.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_create_objects.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -941,8 +897,8 @@ fn test_create_objects() {
 
 #[test]
 fn test_create_ec_objects() {
-    let mut testdata = TestData::new("testdata/test_create_ec_objects.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_create_ec_objects.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -1053,12 +1009,7 @@ fn test_create_ec_objects() {
 
 #[test]
 fn test_init_token() {
-    let mut testdata = TestData::new("testdata/test_init_token.json");
-    /* skip setup, we are creating an unitiliaized token */
-
-    /* but mark the file as created,
-     * so it will be cleaned up when the test is complete */
-    testdata.mark_file_created();
+    let mut testdata = TestData::new("test_init_token.sql");
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -1240,8 +1191,8 @@ fn test_init_token() {
 
 #[test]
 fn test_get_mechs() {
-    let mut testdata = TestData::new("testdata/test_get_mechs.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_get_mechs.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -1335,7 +1286,8 @@ fn get_test_data(
 
 #[test]
 fn test_aes_operations() {
-    let mut testdata = TestData::new("testdata/test_aes_operations.json");
+    let mut testdata = TestData::new("test_aes_operations.sql");
+    testdata.setup_db(Some("testdata/test_aes_operations.json"));
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -2172,7 +2124,8 @@ fn test_aes_operations() {
 
 #[test]
 fn test_rsa_operations() {
-    let mut testdata = TestData::new("testdata/test_rsa_operations.json");
+    let mut testdata = TestData::new("test_rsa_operations.sql");
+    testdata.setup_db(Some("testdata/test_rsa_operations.json"));
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -2489,8 +2442,8 @@ fn test_rsa_operations() {
 
 #[test]
 fn test_session_objects() {
-    let mut testdata = TestData::new("testdata/test_session_objects.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_session_objects.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -2647,7 +2600,8 @@ fn test_session_objects() {
 
 #[test]
 fn test_ecc_operations() {
-    let mut testdata = TestData::new("testdata/test_ecc_operations.json");
+    let mut testdata = TestData::new("test_ecc_operations.sql");
+    testdata.setup_db(Some("testdata/test_ecc_operations.json"));
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -2847,7 +2801,8 @@ fn test_ecc_operations() {
 
 #[test]
 fn test_hashes_digest() {
-    let mut testdata = TestData::new("testdata/test_hashes.json");
+    let mut testdata = TestData::new("test_hashes.sql");
+    testdata.setup_db(Some("testdata/test_hashes.json"));
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -3404,7 +3359,8 @@ fn encrypt(
 #[test]
 fn test_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
-    let mut testdata = TestData::new("testdata/test_sign_verify.json");
+    let mut testdata = TestData::new("test_sign_verify.sql");
+    testdata.setup_db(Some("testdata/test_sign_verify.json"));
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -3706,8 +3662,8 @@ fn test_signatures() {
 
 #[test]
 fn test_key() {
-    let mut testdata = TestData::new("testdata/test_key.json");
-    testdata.setup_db();
+    let mut testdata = TestData::new("test_key.sql");
+    testdata.setup_db(None);
 
     let mut args = testdata.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;

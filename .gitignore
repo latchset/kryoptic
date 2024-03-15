@@ -2,12 +2,11 @@
 /Cargo.lock
 /src/pkcs11/bindings.rs
 /src/ossl/bindings.rs
-/src/hacl/bindings.rs
 /src/fips/bindings.rs
-/test.json
 *.o
 *.a
 *.d
 *.config
 *.swp
-/hacl/gcc-compatible/config.h
+/*.json
+/*.sql

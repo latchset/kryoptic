@@ -14,14 +14,16 @@ use std::fmt::Debug;
 pub trait Storage: Debug + Send + Sync {
     fn open(&mut self, filename: &String) -> KResult<()>;
     fn reinit(&mut self) -> KResult<()>;
-    fn flush(&self) -> KResult<()>;
-    fn get_by_unique_id(&self, uid: &String) -> KResult<&Object>;
-    fn get_by_unique_id_mut(&mut self, uid: &String) -> KResult<&mut Object>;
-    fn store(&mut self, uid: String, obj: Object) -> KResult<()>;
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> Vec<&Object>;
-    fn remove_by_unique_id(&mut self, uid: &String) -> KResult<()>;
-    fn get_rough_size_by_unique_id(&self, uid: &String) -> KResult<usize>;
+    fn flush(&mut self) -> KResult<()>;
+    fn fetch_by_uid(&mut self, uid: &String) -> KResult<&Object>;
+    fn get_cached_by_uid(&self, uid: &String) -> KResult<&Object>;
+    fn get_cached_by_uid_mut(&mut self, uid: &String) -> KResult<&mut Object>;
+    fn store(&mut self, uid: &String, obj: Object) -> KResult<()>;
+    fn get_all_cached(&self) -> Vec<&Object>;
+    fn search(&mut self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<&Object>>;
+    fn remove_by_uid(&mut self, uid: &String) -> KResult<()>;
 }
 
 pub mod json;
 pub mod memory;
+pub mod sqlite;

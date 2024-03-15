@@ -88,6 +88,43 @@ impl LoginData {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Handles {
+    map: HashMap<CK_OBJECT_HANDLE, String>,
+    next: CK_OBJECT_HANDLE,
+}
+
+impl Handles {
+    pub fn new() -> Handles {
+        Handles {
+            map: HashMap::new(),
+            next: 1,
+        }
+    }
+
+    pub fn insert(
+        &mut self,
+        handle: CK_OBJECT_HANDLE,
+        value: String,
+    ) -> Option<String> {
+        self.map.insert(handle, value)
+    }
+
+    pub fn get(&self, handle: CK_OBJECT_HANDLE) -> Option<&String> {
+        self.map.get(&handle)
+    }
+
+    pub fn remove(&mut self, handle: CK_OBJECT_HANDLE) -> Option<String> {
+        self.map.remove(&handle)
+    }
+
+    fn next(&mut self) -> CK_OBJECT_HANDLE {
+        let next = self.next;
+        self.next += 1;
+        next
+    }
+}
+
 #[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
@@ -95,14 +132,23 @@ pub struct Token {
     object_factories: ObjectFactories,
     mechanisms: Mechanisms,
     storage: Box<dyn Storage>,
-    handles: HashMap<CK_OBJECT_HANDLE, String>,
-    next_handle: CK_OBJECT_HANDLE,
+    handles: Handles,
     so_login: LoginData,
     user_login: LoginData,
 }
 
 impl Token {
     pub fn new(filename: String) -> KResult<Token> {
+        /* when no filename is provided we assume a memory only
+         * token that has no backing store */
+        let store = if filename.ends_with(".json") {
+            storage::json::json()
+        } else if filename.ends_with(".sql") {
+            storage::sqlite::sqlite()
+        } else {
+            storage::memory::memory()
+        };
+
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
                 label: TOKEN_LABEL,
@@ -127,9 +173,8 @@ impl Token {
             filename: filename,
             object_factories: ObjectFactories::new(),
             mechanisms: Mechanisms::new(),
-            storage: storage::memory::memory(),
-            handles: HashMap::new(),
-            next_handle: 1,
+            storage: store,
+            handles: Handles::new(),
             so_login: LoginData {
                 pin: None,
                 max_attempts: 0,
@@ -152,21 +197,18 @@ impl Token {
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         hmac::register(&mut token.mechanisms, &mut token.object_factories);
 
-        /* when no filename is provided we assume a memory only
-         * token that has no backing store */
         if token.filename.len() > 0 {
-            let mut jt = storage::json::json();
-            match jt.open(&token.filename) {
+            match token.storage.open(&token.filename) {
                 Ok(()) => {
-                    token.storage = jt;
                     token.info.flags |= CKF_TOKEN_INITIALIZED;
                 }
                 Err(err) => match err {
                     KError::RvError(ref e) => {
+                        /* empty file is legal but leaves the token uninitialized */
                         if e.rv != CKR_CRYPTOKI_NOT_INITIALIZED {
-                            /* empty file is legal but leaves the token uninitialized */
                             return Err(err);
                         }
+                        token.info.flags &= !CKF_TOKEN_INITIALIZED;
                     }
                     _ => return Err(err),
                 },
@@ -196,9 +238,11 @@ impl Token {
         label: String,
         pin: Vec<u8>,
     ) -> KResult<()> {
-        match self.storage.get_by_unique_id_mut(&uid) {
-            Ok(obj) => {
+        match self.storage.fetch_by_uid(&uid) {
+            Ok(o) => {
+                let mut obj = o.clone();
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
+                self.storage.store(&uid, obj)?;
             }
             Err(_) => {
                 let mut obj = Object::new();
@@ -214,7 +258,7 @@ impl Token {
                 ))?;
                 obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
                 obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
-                self.storage.store(uid, obj)?;
+                self.storage.store(&uid, obj)?;
             }
         }
         return Ok(());
@@ -232,8 +276,7 @@ impl Token {
         self.so_login.logged_in = false;
         match self.storage.reinit() {
             Ok(()) => {
-                self.handles.clear();
-                self.next_handle = 1;
+                self.handles = Handles::new();
             }
             Err(_) => return CKR_GENERAL_ERROR,
         }
@@ -244,11 +287,6 @@ impl Token {
             "SO PIN".to_string(),
             pin.clone(),
         ) {
-            Ok(()) => (),
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-
-        match self.storage.flush() {
             Ok(_) => {
                 self.info.flags |= CKF_TOKEN_INITIALIZED;
                 CKR_OK
@@ -269,99 +307,62 @@ impl Token {
         }
     }
 
-    fn remove_by_handle(
-        &mut self,
-        handle: CK_OBJECT_HANDLE,
-        session_only: bool,
-    ) -> KResult<()> {
-        let uid = match self.handles.get(&handle) {
-            Some(u) => u,
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
-        };
-        let obj = match self.storage.get_by_unique_id(uid) {
-            Ok(o) => o,
-            Err(_) => {
-                self.handles.remove(&handle);
-                return err_rv!(CKR_OBJECT_HANDLE_INVALID);
-            }
-        };
-        if session_only && obj.is_token() {
-            return err_rv!(CKR_ACTION_PROHIBITED);
-        }
-
-        let _ = self.storage.remove_by_unique_id(uid);
-        self.handles.remove(&handle);
-        Ok(())
-    }
-
-    fn next_handle(&mut self) -> CK_OBJECT_HANDLE {
-        let next = self.next_handle;
-        self.next_handle += 1;
-        next
-    }
-
     fn clear_private_session_objects(&mut self) {
         let mut priv_uids = Vec::<String>::new();
-        for obj in &self.storage.search(&[]) {
+        for obj in &self.storage.get_all_cached() {
             if obj.is_private() {
                 let oh = obj.get_handle();
                 if oh != CK_INVALID_HANDLE {
-                    let _ = self.handles.remove(&oh);
+                    let _ = self.handles.remove(oh);
                 }
                 if !obj.is_token() {
                     /* not a token object, therefore we need to destroy it */
-                    let uid = match obj.get_attr_as_string(CKA_UNIQUE_ID) {
-                        Ok(u) => u,
-                        Err(_) => continue,
-                    };
-                    priv_uids.push(uid.clone());
+                    if let Ok(uid) = obj.get_attr_as_string(CKA_UNIQUE_ID) {
+                        priv_uids.push(uid.clone());
+                    }
                 }
             }
         }
 
         /* remove all private session objects */
         for uid in priv_uids {
-            let _ = self.storage.remove_by_unique_id(&uid);
+            let _ = self.storage.remove_by_uid(&uid);
         }
     }
 
     fn clear_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
         let mut handles: Vec<CK_OBJECT_HANDLE> = Vec::new();
-        for obj in &self.storage.search(&[]) {
+        for obj in &self.storage.get_all_cached() {
             if obj.get_session() == handle {
-                handles.push(obj.get_handle());
+                if !obj.is_token() {
+                    handles.push(obj.get_handle());
+                }
             }
         }
 
-        for oh in handles {
-            let _ = self.remove_by_handle(oh, true);
-        }
-    }
-
-    fn object_rough_size(&self, handle: CK_OBJECT_HANDLE) -> KResult<usize> {
-        match self.handles.get(&handle) {
-            Some(s) => self.storage.get_rough_size_by_unique_id(s),
-            None => err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        for h in handles {
+            if let Some(uid) = self.handles.remove(h) {
+                let _ = self.storage.remove_by_uid(&uid);
+            }
         }
     }
 
     pub fn get_object_by_handle(
-        &self,
-        handle: CK_OBJECT_HANDLE,
-        checks: bool,
+        &mut self,
+        o_handle: CK_OBJECT_HANDLE,
     ) -> KResult<&Object> {
-        let obj = match self.handles.get(&handle) {
-            Some(s) => self.storage.get_by_unique_id(s)?,
+        let is_logged_in = self.is_logged_in(KRY_UNSPEC);
+        let obj = match self.handles.get(o_handle) {
+            Some(s) => self.storage.fetch_by_uid(s)?,
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
-        if checks && !self.is_logged_in(KRY_UNSPEC) && obj.is_private() {
+        if !is_logged_in && obj.is_private() {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
         Ok(obj)
     }
 
     fn validate_pin_obj(
-        &self,
         obj: &Object,
         label: String,
     ) -> KResult<(Vec<u8>, CK_ULONG)> {
@@ -385,9 +386,9 @@ impl Token {
 
     fn get_so_login_data(&mut self) -> KResult<()> {
         if self.so_login.pin.is_none() {
-            let obj = self.storage.get_by_unique_id(&"0".to_string())?;
-            let (pin, max) =
-                self.validate_pin_obj(obj, "SO PIN".to_string())?;
+            let uid = "0".to_string();
+            let obj = self.storage.fetch_by_uid(&uid)?;
+            let (pin, max) = Self::validate_pin_obj(obj, "SO PIN".to_string())?;
             self.so_login.pin = Some(pin);
             self.so_login.max_attempts = max;
         }
@@ -396,9 +397,10 @@ impl Token {
 
     fn get_user_login_data(&mut self) -> KResult<()> {
         if self.user_login.pin.is_none() {
-            let obj = self.storage.get_by_unique_id(&"1".to_string())?;
+            let uid = "1".to_string();
+            let obj = self.storage.fetch_by_uid(&uid)?;
             let (pin, max) =
-                self.validate_pin_obj(obj, "User PIN".to_string())?;
+                Self::validate_pin_obj(obj, "User PIN".to_string())?;
             self.user_login.pin = Some(pin);
             self.user_login.max_attempts = max;
         }
@@ -535,10 +537,7 @@ impl Token {
         /* If we set a PIN it means we switched to require Logins */
         self.info.flags |= CKF_LOGIN_REQUIRED;
 
-        match self.storage.flush() {
-            Ok(()) => CKR_OK,
-            Err(_) => CKR_GENERAL_ERROR,
-        }
+        CKR_OK
     }
 
     pub fn save(&mut self) -> KResult<()> {
@@ -562,10 +561,10 @@ impl Token {
         } else {
             obj.set_session(s_handle);
         }
-        let handle = self.next_handle();
+        let handle = self.handles.next();
         obj.set_handle(handle);
         self.handles.insert(handle, uid.clone());
-        self.storage.store(uid.clone(), obj)?;
+        self.storage.store(&uid, obj)?;
         Ok(handle)
     }
 
@@ -586,15 +585,18 @@ impl Token {
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
     ) -> KResult<()> {
-        let obj = match self.handles.get(&o_handle) {
-            Some(s) => self.storage.get_by_unique_id(s)?,
+        let obj = match self.handles.get(o_handle) {
+            Some(s) => self.storage.fetch_by_uid(s)?,
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
         if !obj.is_destroyable() {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
-        self.remove_by_handle(o_handle, false)?;
-        Ok(())
+        if let Some(uid) = self.handles.remove(o_handle) {
+            self.storage.remove_by_uid(&uid)
+        } else {
+            err_rv!(CKR_OBJECT_HANDLE_INVALID)
+        }
     }
 
     pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
@@ -602,36 +604,35 @@ impl Token {
     }
 
     pub fn get_object_attrs(
-        &self,
-        handle: CK_OBJECT_HANDLE,
+        &mut self,
+        o_handle: CK_OBJECT_HANDLE,
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
-        match self.get_object_by_handle(handle, true) {
-            Ok(o) => self.object_factories.get_object_attributes(o, template),
-            Err(e) => match e {
-                KError::RvError(e) => {
-                    if e.rv == CKR_USER_NOT_LOGGED_IN {
-                        err_rv!(CKR_OBJECT_HANDLE_INVALID)
-                    } else {
-                        err_rv!(e.rv)
-                    }
-                }
-                _ => Err(e),
-            },
+        let is_logged = self.is_logged_in(KRY_UNSPEC);
+        let obj = match self.handles.get(o_handle) {
+            Some(s) => self.storage.fetch_by_uid(s)?,
+            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        };
+        if !is_logged && obj.is_private() {
+            /* do not reveal if the object exists or not */
+            return err_rv!(CKR_OBJECT_HANDLE_INVALID);
         }
+        self.object_factories.get_object_attributes(obj, template)
     }
 
     pub fn set_object_attrs(
         &mut self,
-        handle: CK_OBJECT_HANDLE,
+        o_handle: CK_OBJECT_HANDLE,
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
-        let obj = match self.handles.get(&handle) {
-            Some(s) => self.storage.get_by_unique_id_mut(s)?,
+        let uid = match self.handles.get(o_handle) {
+            Some(u) => u,
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
-        self.object_factories.set_object_attributes(obj, template)?;
-        self.storage.flush()
+        let mut obj = self.storage.fetch_by_uid(uid)?.clone();
+        self.object_factories
+            .set_object_attributes(&mut obj, template)?;
+        self.storage.store(uid, obj)
     }
 
     pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
@@ -660,7 +661,11 @@ impl Token {
         &self,
         o_handle: CK_OBJECT_HANDLE,
     ) -> KResult<usize> {
-        self.object_rough_size(o_handle)
+        /* no need to force fetch from storage, this is always just an estimate */
+        match self.handles.get(o_handle) {
+            Some(s) => self.storage.get_cached_by_uid(s)?.rough_size(),
+            None => err_rv!(CKR_OBJECT_HANDLE_INVALID),
+        }
     }
 
     pub fn copy_object(
@@ -669,10 +674,14 @@ impl Token {
         o_handle: CK_OBJECT_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        let obj = match self.handles.get(&o_handle) {
-            Some(s) => self.storage.get_by_unique_id(s)?,
+        let is_logged_in = self.is_logged_in(KRY_UNSPEC);
+        let obj = match self.handles.get(o_handle) {
+            Some(s) => self.storage.fetch_by_uid(s)?,
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
+        if !is_logged_in && obj.is_private() {
+            return err_rv!(CKR_USER_NOT_LOGGED_IN);
+        }
         let newobj = self.object_factories.copy(obj, template)?;
         self.insert_object(s_handle, newobj)
     }
@@ -683,9 +692,10 @@ impl Token {
     ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         let mut needs_handle = Vec::<String>::new();
-        let ret = self.storage.search(template);
+        let is_logged_in = self.is_logged_in(KRY_UNSPEC);
+        let ret = self.storage.search(template)?;
         for o in ret {
-            if !self.is_logged_in(KRY_UNSPEC) && o.is_private() {
+            if !is_logged_in && o.is_private() {
                 continue;
             }
 
@@ -708,8 +718,8 @@ impl Token {
             }
         }
         while let Some(uid) = needs_handle.pop() {
-            let oh = self.next_handle();
-            let obj = match self.storage.get_by_unique_id_mut(&uid) {
+            let oh = self.handles.next();
+            let obj = match self.storage.get_cached_by_uid_mut(&uid) {
                 Ok(o) => o,
                 Err(_) => continue,
             };
