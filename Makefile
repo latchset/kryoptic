@@ -1,3 +1,8 @@
+all:
+	cargo build
+
+fips:
+	cargo build --features fips
 
 check-format:
 	@rustfmt --check --color auto src/*.rs src/*/*.rs
