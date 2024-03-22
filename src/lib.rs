@@ -79,6 +79,20 @@ macro_rules! res_or_ret {
     };
 }
 
+#[macro_export]
+macro_rules! bytes_to_vec {
+    ($ptr:expr, $len:expr) => {{
+        let ptr = $ptr as *const u8;
+        let size = $len as usize;
+        let mut v = Vec::<u8>::with_capacity(size);
+        unsafe {
+            std::ptr::copy_nonoverlapping(ptr, v.as_mut_ptr(), size);
+            v.set_len(size);
+        }
+        v
+    }};
+}
+
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
 struct State {
@@ -435,14 +449,11 @@ extern "C" fn fn_init_token(
     if res_or_ret!(rstate.has_sessions(slot_id)) {
         return CKR_SESSION_EXISTS;
     }
-    let vpin: Vec<u8> =
-        unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
-    let vlabel: Vec<u8> = unsafe {
-        if label.is_null() {
-            vec![0x20 as u8; 32]
-        } else {
-            std::slice::from_raw_parts(label, 32).to_vec()
-        }
+    let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
+    let vlabel: Vec<u8> = if label.is_null() {
+        vec![0x20 as u8; 32]
+    } else {
+        bytes_to_vec!(label, 32)
     };
     let mut token =
         res_or_ret!(rstate.get_token_from_slot_mut_nochecks(slot_id));
@@ -459,8 +470,7 @@ extern "C" fn fn_init_pin(
         return CKR_USER_NOT_LOGGED_IN;
     }
 
-    let vpin: Vec<u8> =
-        unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
+    let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
 
     token.set_pin(CKU_USER, &vpin, None)
 }
@@ -476,12 +486,8 @@ extern "C" fn fn_set_pin(
     if !session.is_writable() {
         return CKR_SESSION_READ_ONLY;
     }
-    let vpin: Vec<u8> = unsafe {
-        std::slice::from_raw_parts(new_pin, new_len as usize).to_vec()
-    };
-    let vold: Vec<u8> = unsafe {
-        std::slice::from_raw_parts(old_pin, old_len as usize).to_vec()
-    };
+    let vpin: Vec<u8> = bytes_to_vec!(new_pin, new_len);
+    let vold: Vec<u8> = bytes_to_vec!(old_pin, old_len);
 
     let mut token =
         res_or_ret!(rstate.get_token_from_slot_mut(session.get_slot_id()));
@@ -572,8 +578,7 @@ extern "C" fn fn_login(
             return CKR_SESSION_READ_ONLY_EXISTS;
         }
     }
-    let vpin: Vec<u8> =
-        unsafe { std::slice::from_raw_parts(pin, pin_len as usize).to_vec() };
+    let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     match token.login(user_type, &vpin) {
         CKR_OK => match rstate.change_session_states(slot_id, user_type) {
