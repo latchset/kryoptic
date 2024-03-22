@@ -164,7 +164,7 @@ pub trait Encryption: MechOperation {
     ) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn encryption_len(&self) -> KResult<usize> {
+    fn encryption_len(&self, _data_len: CK_ULONG) -> KResult<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }

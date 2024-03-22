@@ -855,7 +855,7 @@ extern "C" fn fn_encrypt(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if encrypted_data.is_null() {
-        let encryption_len = res_or_ret!(operation.encryption_len());
+        let encryption_len = res_or_ret!(operation.encryption_len(data_len));
         unsafe {
             *pul_encrypted_data_len = encryption_len as CK_ULONG;
         }
@@ -885,7 +885,7 @@ extern "C" fn fn_encrypt_update(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if encrypted_part.is_null() {
-        let encryption_len = res_or_ret!(operation.encryption_len());
+        let encryption_len = res_or_ret!(operation.encryption_len(part_len));
         unsafe {
             *pul_encrypted_part_len = encryption_len as CK_ULONG;
         }
@@ -917,7 +917,7 @@ extern "C" fn fn_encrypt_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if last_encrypted_part.is_null() {
-        let encryption_len = res_or_ret!(operation.encryption_len());
+        let encryption_len = res_or_ret!(operation.encryption_len(0));
         unsafe {
             *pul_last_encrypted_part_len = encryption_len as CK_ULONG;
         }
