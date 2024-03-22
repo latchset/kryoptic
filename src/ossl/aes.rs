@@ -7,6 +7,8 @@ use {super::fips, fips::*};
 #[cfg(not(feature = "fips"))]
 use {super::ossl, ossl::*};
 
+use super::bytes_to_vec;
+
 use std::ffi::{c_char, c_int, c_void};
 use zeroize::Zeroize;
 
@@ -158,8 +160,10 @@ impl AesOperation {
                 }
                 let ccm_params = mech.pParameter as *const CK_CCM_PARAMS;
                 let datalen = unsafe { (*ccm_params).ulDataLen as usize };
+                let nonce = unsafe { (*ccm_params).pNonce };
                 let noncelen = unsafe { (*ccm_params).ulNonceLen as usize };
                 let maclen = unsafe { (*ccm_params).ulMACLen as usize };
+                let aad = unsafe { (*ccm_params).pAAD };
                 let aadlen = unsafe { (*ccm_params).ulAADLen as usize };
                 if noncelen < 7 || noncelen > 13 {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
@@ -179,26 +183,14 @@ impl AesOperation {
                     _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
                 }
                 Ok(AesParams {
-                    iv: unsafe {
-                        std::slice::from_raw_parts(
-                            (*ccm_params).pNonce,
-                            noncelen,
-                        )
-                        .to_vec()
-                    },
+                    iv: bytes_to_vec!(nonce, noncelen),
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: datalen,
-                    aad: unsafe {
-                        if aadlen > 0 {
-                            std::slice::from_raw_parts(
-                                (*ccm_params).pAAD,
-                                aadlen,
-                            )
-                            .to_vec()
-                        } else {
-                            Vec::new()
-                        }
+                    aad: if aadlen > 0 {
+                        bytes_to_vec!(aad, aadlen)
+                    } else {
+                        Vec::new()
                     },
                     taglen: maclen,
                 })
@@ -223,30 +215,22 @@ impl AesOperation {
                         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                     }
                 }
+                let iv = unsafe { (*gcm_params).pIv };
+                let ivlen = unsafe { (*gcm_params).ulIvLen };
+                let aad = unsafe { (*gcm_params).pAAD };
+                let aadlen = unsafe { (*gcm_params).ulAADLen };
+                let tagbits = unsafe { (*gcm_params).ulTagBits } as usize;
                 Ok(AesParams {
-                    iv: unsafe {
-                        std::slice::from_raw_parts(
-                            (*gcm_params).pIv,
-                            (*gcm_params).ulIvLen as usize,
-                        )
-                        .to_vec()
-                    },
+                    iv: bytes_to_vec!(iv, ivlen),
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
-                    aad: unsafe {
-                        if (*gcm_params).ulAADLen > 0 {
-                            std::slice::from_raw_parts(
-                                (*gcm_params).pAAD,
-                                (*gcm_params).ulAADLen as usize,
-                            )
-                            .to_vec()
-                        } else {
-                            Vec::new()
-                        }
+                    aad: if aadlen > 0 {
+                        bytes_to_vec!(aad, aadlen)
+                    } else {
+                        Vec::new()
                     },
-                    taglen: unsafe { ((*gcm_params).ulTagBits + 7) / 8 }
-                        as usize,
+                    taglen: (tagbits + 7) / 8,
                 })
             }
             CKM_AES_CTR => {
@@ -309,13 +293,7 @@ impl AesOperation {
                     ctsmode = 1u8;
                 }
                 Ok(AesParams {
-                    iv: unsafe {
-                        std::slice::from_raw_parts(
-                            mech.pParameter as *mut u8,
-                            mech.ulParameterLen as usize,
-                        )
-                        .to_vec()
-                    },
+                    iv: bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
                     maxblocks: 0,
                     ctsmode: ctsmode,
                     datalen: 0,
@@ -337,13 +315,7 @@ impl AesOperation {
                     return err_rv!(CKR_ARGUMENTS_BAD);
                 }
                 Ok(AesParams {
-                    iv: unsafe {
-                        std::slice::from_raw_parts(
-                            mech.pParameter as *mut u8,
-                            mech.ulParameterLen as usize,
-                        )
-                        .to_vec()
-                    },
+                    iv: bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,

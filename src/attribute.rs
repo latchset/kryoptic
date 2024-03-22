@@ -4,7 +4,7 @@
 use super::error;
 use super::interface;
 
-use super::{err_not_found, err_rv};
+use super::{bytes_to_vec, err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
 
@@ -406,17 +406,14 @@ impl CK_ATTRIBUTE {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        let val: &[CK_ULONG] =
-            unsafe { std::slice::from_raw_parts(self.pValue as *const _, 1) };
-        Ok(val[0])
+        Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
     }
     pub fn to_bool(self) -> KResult<bool> {
         if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        let val: &[CK_BBOOL] =
-            unsafe { std::slice::from_raw_parts(self.pValue as *const _, 1) };
-        if val[0] == 0 {
+        let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
+        if val == 0 {
             Ok(false)
         } else {
             Ok(true)
@@ -435,25 +432,13 @@ impl CK_ATTRIBUTE {
         }
     }
     pub fn to_buf(self) -> KResult<Vec<u8>> {
-        let buf: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const _,
-                self.ulValueLen as usize,
-            )
-        };
-        Ok(buf.to_vec())
+        Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
     pub fn to_date(self) -> KResult<CK_DATE> {
         if self.ulValueLen != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        let buf: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const _,
-                self.ulValueLen as usize,
-            )
-        };
-        vec_to_date_validate(buf.to_vec())
+        vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
 
     pub fn to_attribute(self) -> KResult<Attribute> {

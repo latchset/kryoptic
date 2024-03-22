@@ -4,6 +4,7 @@
 #[cfg(feature = "fips")]
 use super::fips;
 
+use super::bytes_to_vec;
 use super::mechanism;
 
 #[cfg(not(feature = "fips"))]
@@ -277,13 +278,10 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> KResult<RsaOaepParams> {
             }
             None
         }
-        CKZ_DATA_SPECIFIED => Some(unsafe {
-            std::slice::from_raw_parts(
-                (*oaep_params).pSourceData as *const u8,
-                (*oaep_params).ulSourceDataLen as usize,
-            )
-            .to_vec()
-        }),
+        CKZ_DATA_SPECIFIED => Some(bytes_to_vec!(
+            unsafe { (*oaep_params).pSourceData },
+            unsafe { (*oaep_params).ulSourceDataLen }
+        )),
         _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
     };
 
@@ -972,8 +970,9 @@ impl Decryption for RsaPKCSOperation {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
             match tmp_plain {
-                Some(p) => std::slice::from_raw_parts_mut(plain, outlen)
-                    .copy_from_slice(&p[..outlen]),
+                Some(p) => {
+                    std::ptr::copy_nonoverlapping(p.as_ptr(), plain, outlen)
+                }
                 None => (),
             }
             *plain_len = outlen as CK_ULONG;
