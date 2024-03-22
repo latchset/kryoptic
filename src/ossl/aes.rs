@@ -876,19 +876,7 @@ impl Encryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        let mut outlen = match self.mech {
-            CKM_AES_CCM => self.params.datalen + self.params.taglen,
-            CKM_AES_GCM | CKM_AES_CTR | CKM_AES_CTS => plain.len(),
-            CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
-                ((plain.len() + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE)
-                    * AES_BLOCK_SIZE
-            }
-            #[cfg(not(feature = "fips"))]
-            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
-                plain.len()
-            }
-            _ => return err_rv!(CKR_GENERAL_ERROR),
-        };
+        let mut outlen = self.encryption_len(plain.len() as u64)?;
         if cipher.is_null() {
             unsafe {
                 *cipher_len = outlen as CK_ULONG;
@@ -1158,6 +1146,24 @@ impl Encryption for AesOperation {
         self.finalized = true;
         unsafe { *cipher_len = clen as CK_ULONG };
         Ok(())
+    }
+
+    fn encryption_len(&self, data_len: CK_ULONG) -> KResult<usize> {
+        let len: usize = match self.mech {
+            CKM_AES_CCM => self.params.datalen + self.params.taglen,
+            CKM_AES_GCM => data_len as usize + self.params.taglen,
+            CKM_AES_CTR | CKM_AES_CTS => data_len as usize,
+            CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
+                ((data_len as usize + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE)
+                    * AES_BLOCK_SIZE
+            }
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                data_len as usize
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        Ok(len)
     }
 }
 
