@@ -1409,8 +1409,18 @@ fn test_aes_operations() {
 
         /* Data need to be exactly one block in size */
         let data = "0123456789ABCDEF";
+        let mut enc_len: CK_ULONG = 0;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            std::ptr::null_mut(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 16);
+
         let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
         ret = fn_encrypt(
             session,
             CString::new(data).unwrap().into_raw() as *mut u8,
