@@ -30,6 +30,9 @@ static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
 static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
 static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
 
+const SO_PIN_UID: &str = "0";
+const USER_PIN_UID: &str = "1";
+
 #[derive(Debug, Clone)]
 struct LoginData {
     pin: Option<Vec<u8>>,
@@ -283,7 +286,7 @@ impl Token {
 
         /* add pin to so_object */
         match self.store_pin_object(
-            "0".to_string(),
+            SO_PIN_UID.to_string(),
             "SO PIN".to_string(),
             pin.clone(),
         ) {
@@ -362,10 +365,21 @@ impl Token {
         Ok(obj)
     }
 
-    fn validate_pin_obj(
-        obj: &Object,
-        label: String,
+    fn fetch_pin_data(
+        &mut self,
+        uid: &str,
+        label: &str,
     ) -> KResult<(Vec<u8>, CK_ULONG)> {
+        let obj = match self.storage.fetch_by_uid(&uid.to_string()) {
+            Ok(o) => o,
+            Err(e) => match e {
+                KError::NotFound(_) => {
+                    return err_rv!(CKR_USER_PIN_NOT_INITIALIZED);
+                }
+                KError::RvError(e) => return err_rv!(e.rv),
+                _ => return err_rv!(CKR_GENERAL_ERROR),
+            },
+        };
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -386,9 +400,7 @@ impl Token {
 
     fn get_so_login_data(&mut self) -> KResult<()> {
         if self.so_login.pin.is_none() {
-            let uid = "0".to_string();
-            let obj = self.storage.fetch_by_uid(&uid)?;
-            let (pin, max) = Self::validate_pin_obj(obj, "SO PIN".to_string())?;
+            let (pin, max) = self.fetch_pin_data(SO_PIN_UID, "SO PIN")?;
             self.so_login.pin = Some(pin);
             self.so_login.max_attempts = max;
         }
@@ -397,10 +409,7 @@ impl Token {
 
     fn get_user_login_data(&mut self) -> KResult<()> {
         if self.user_login.pin.is_none() {
-            let uid = "1".to_string();
-            let obj = self.storage.fetch_by_uid(&uid)?;
-            let (pin, max) =
-                Self::validate_pin_obj(obj, "User PIN".to_string())?;
+            let (pin, max) = self.fetch_pin_data(USER_PIN_UID, "User PIN")?;
             self.user_login.pin = Some(pin);
             self.user_login.max_attempts = max;
         }
@@ -504,7 +513,7 @@ impl Token {
                 }
                 /* update pin in storage */
                 match self.store_pin_object(
-                    "1".to_string(),
+                    USER_PIN_UID.to_string(),
                     "User PIN".to_string(),
                     pin.clone(),
                 ) {
@@ -523,7 +532,7 @@ impl Token {
                 }
                 /* update pin in storage */
                 match self.store_pin_object(
-                    "0".to_string(),
+                    SO_PIN_UID.to_string(),
                     "SO PIN".to_string(),
                     pin.clone(),
                 ) {
@@ -718,6 +727,10 @@ impl Token {
             }
         }
         while let Some(uid) = needs_handle.pop() {
+            /* do not return internal PIN objects */
+            if uid == SO_PIN_UID || uid == USER_PIN_UID {
+                continue;
+            }
             let oh = self.handles.next();
             let obj = match self.storage.get_cached_by_uid_mut(&uid) {
                 Ok(o) => o,

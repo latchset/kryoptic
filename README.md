@@ -1,9 +1,10 @@
-This is an experimental pkcs11 token written in rust
+This is a pkcs11 soft token written in rust
 
 # Dependencies
 
  * rustc
  * openssl dependencies
+ * sqlite
 
 # Setup
 
