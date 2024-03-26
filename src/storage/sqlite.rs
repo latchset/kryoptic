@@ -1,10 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use rusqlite::{params, Connection, Rows, ToSql, Transaction};
+use rusqlite::{params, types::Value, Connection, Rows, Transaction};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use super::super::attribute;
 use super::super::error;
 use super::super::interface;
 use super::super::object;
@@ -12,6 +13,7 @@ use super::super::{err_not_found, err_rv};
 
 use super::Storage;
 
+use attribute::AttrType;
 use error::{KError, KResult};
 use interface::*;
 use object::Object;
@@ -91,24 +93,56 @@ impl SqliteStorage {
         while let Some(row) = rows.next().map_err(bad_storage)? {
             let id: i32 = row.get(0).map_err(bad_storage)?;
             let atype: CK_ULONG = row.get(1).map_err(bad_storage)?;
-            let value = row
-                .get_ref(2)
-                .map_err(bad_storage)?
-                .as_blob()
-                .map_err(bad_code)?;
+            let val = row.get_ref(2).map_err(bad_storage)?;
             /* TODO: enc */
             if objid != id {
                 objid = id;
                 objects.push(Object::new());
             }
             if let Some(obj) = objects.last_mut() {
-                let ck_attr = CK_ATTRIBUTE {
-                    type_: atype,
-                    pValue: value.as_ptr() as *mut _,
-                    ulValueLen: value.len() as CK_ULONG,
+                let attrtype = attribute::attr_id_to_attrtype(atype)?;
+                let attr = match attrtype {
+                    AttrType::BoolType => match val
+                        .as_i64_or_null()
+                        .map_err(bad_storage)?
+                    {
+                        Some(b) => attribute::from_bool(atype, b != 0),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                    },
+                    AttrType::NumType => match val
+                        .as_i64_or_null()
+                        .map_err(bad_storage)?
+                    {
+                        Some(n) => attribute::from_ulong(atype, n as CK_ULONG),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                    },
+                    AttrType::StringType => match val
+                        .as_str_or_null()
+                        .map_err(bad_storage)?
+                    {
+                        Some(s) => attribute::from_string(atype, s.to_string()),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                    },
+                    AttrType::BytesType => {
+                        match val.as_blob_or_null().map_err(bad_storage)? {
+                            Some(v) => attribute::from_bytes(atype, v.to_vec()),
+                            None => attribute::from_bytes(atype, Vec::new()),
+                        }
+                    }
+                    AttrType::DateType => match val
+                        .as_str_or_null()
+                        .map_err(bad_storage)?
+                    {
+                        Some(s) => attribute::from_date(
+                            atype,
+                            attribute::string_to_ck_date(s)?,
+                        ),
+                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                    },
+                    AttrType::DenyType | AttrType::IgnoreType => {
+                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID)
+                    }
                 };
-                /* makes a copy of the blob */
-                let attr = ck_attr.to_attribute()?;
                 obj.set_attr(attr)?;
             } else {
                 return err_rv!(CKR_GENERAL_ERROR);
@@ -119,9 +153,7 @@ impl SqliteStorage {
 
     fn search_by_unique_id(conn: &Connection, uid: &String) -> KResult<Object> {
         let mut stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
-        let rows = stmt
-            .query(params![CKA_UNIQUE_ID, uid.as_bytes()])
-            .map_err(bad_code)?;
+        let rows = stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?;
         let mut objects = Self::rows_to_objects(rows)?;
         match objects.len() {
             0 => err_not_found!(uid.clone()),
@@ -136,11 +168,8 @@ impl SqliteStorage {
     ) -> KResult<Vec<Object>> {
         let mut search_query = String::from(SEARCH_ALL);
         let mut subqcount = 0;
-        let mut search_params =
-            Vec::<&dyn ToSql>::with_capacity(template.len() * 2);
-        let mut params_holder =
-            Vec::<(CK_ULONG, &[u8])>::with_capacity(template.len());
-        for attr in template {
+        let mut search_params = Vec::<Value>::with_capacity(template.len() * 2);
+        for a in template {
             /* add subqueries */
             if subqcount == 0 {
                 search_query.push_str(SEARCH_NEST);
@@ -149,23 +178,24 @@ impl SqliteStorage {
             }
             search_query.push_str(SEARCH_OBJ_ID);
             /* add parameters */
-            params_holder.push((attr.type_, unsafe {
-                /* template is guaranteed to stay around
-                 * for the life of the function so it is
-                 * safe enough */
-                std::slice::from_raw_parts(
-                    attr.pValue as *const u8,
-                    attr.ulValueLen as usize,
-                )
-            }));
+            search_params.push(Value::from(a.type_ as u32));
+            search_params.push(
+                match attribute::attr_id_to_attrtype(a.type_)? {
+                    AttrType::BoolType => Value::from(a.to_bool()?),
+                    AttrType::NumType => Value::from(a.to_ulong()? as u32),
+                    AttrType::StringType => Value::from(a.to_string()?),
+                    AttrType::BytesType => Value::from(a.to_buf()?),
+                    AttrType::DateType => {
+                        Value::from(a.to_attribute()?.to_date_string()?)
+                    }
+                    AttrType::DenyType | AttrType::IgnoreType => {
+                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID)
+                    }
+                },
+            );
             subqcount += 1;
         }
         if subqcount > 0 {
-            /* reformat parameters for query */
-            for p in params_holder.iter() {
-                search_params.push(&p.0 as &dyn ToSql);
-                search_params.push(&p.1 as &dyn ToSql);
-            }
             search_query.push_str(SEARCH_CLOSE);
         }
         /* finally make sure results return ordered by id,
@@ -173,7 +203,9 @@ impl SqliteStorage {
         search_query.push_str(SEARCH_ORDER);
 
         let mut stmt = conn.prepare(&search_query).map_err(bad_code)?;
-        let rows = stmt.query(search_params.as_slice()).map_err(bad_code)?;
+        let rows = stmt
+            .query(rusqlite::params_from_iter(search_params))
+            .map_err(bad_code)?;
         Ok(Self::rows_to_objects(rows)?)
     }
 
@@ -197,8 +229,19 @@ impl SqliteStorage {
         };
         let mut stmt = tx.prepare(UPDATE_ATTR).map_err(bad_storage)?;
         for a in obj.get_attributes() {
+            let col_id = Value::from(objid as i32);
+            let col_attr = Value::from(a.get_type() as u32);
+            let col_val = match a.get_attrtype() {
+                AttrType::BoolType => Value::from(a.to_bool()?),
+                AttrType::NumType => Value::from(a.to_ulong()? as u32),
+                AttrType::StringType => Value::from(a.to_string()?),
+                AttrType::BytesType => Value::from(a.to_bytes()?.clone()),
+                AttrType::DateType => Value::from(a.to_date_string()?),
+                AttrType::DenyType | AttrType::IgnoreType => continue,
+            };
+            let col_enc = Value::from(0);
             let _ = stmt
-                .execute(params![objid, a.get_type(), a.get_value(), 0])
+                .execute(params!(col_id, col_attr, col_val, col_enc))
                 .map_err(bad_storage)?;
         }
         Ok(())
@@ -207,7 +250,7 @@ impl SqliteStorage {
     fn delete_object(tx: &mut Transaction, uid: &String) -> KResult<i32> {
         let mut stmt = tx.prepare(SEARCH_OBJ_ID).map_err(bad_storage)?;
         let objid = match stmt
-            .query_row(params![CKA_UNIQUE_ID, uid.as_bytes()], |row| row.get(0))
+            .query_row(params![CKA_UNIQUE_ID, uid], |row| row.get(0))
         {
             Ok(r) => r,
             Err(e) => match e {
