@@ -1690,7 +1690,7 @@ extern "C" fn fn_generate_random(
     random_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    let _ = global_rlock!(STATE).get_session(s_handle);
+    drop(global_rlock!(STATE).get_session(s_handle));
     let data: &mut [u8] = unsafe {
         std::slice::from_raw_parts_mut(random_data, random_len as usize)
     };
@@ -2239,11 +2239,11 @@ pub extern "C" fn C_GetInterface(
 
     if ver.major == 3 && ver.minor == 0 {
         unsafe {
-            *interface = &mut INTERFACE_300 as *mut _ as *mut CK_INTERFACE;
+            *interface = std::ptr::addr_of!(INTERFACE_300) as *mut CK_INTERFACE;
         }
     } else if ver.major == 2 && ver.minor == 40 {
         unsafe {
-            *interface = &mut INTERFACE_240 as *mut _ as *mut CK_INTERFACE;
+            *interface = std::ptr::addr_of!(INTERFACE_240) as *mut CK_INTERFACE;
         }
     } else {
         return CKR_ARGUMENTS_BAD;
