@@ -72,7 +72,9 @@ impl LoginData {
             return CKR_PIN_LEN_RANGE;
         }
         self.pin = Some(pin.clone());
-        self.max_attempts = 10;
+        if self.max_attempts == 0 {
+            self.max_attempts = 10;
+        }
         self.attempts = 0;
         CKR_OK
     }
@@ -220,6 +222,11 @@ impl Token {
             token.info.flags &= !CKF_LOGIN_REQUIRED;
             token.info.flags |= CKF_TOKEN_INITIALIZED;
         }
+
+        if token.is_initialized() {
+            token.update_token_pin_flags();
+        }
+
         Ok(token)
     }
 
@@ -233,6 +240,58 @@ impl Token {
 
     fn is_login_required(&self) -> bool {
         self.info.flags & CKF_LOGIN_REQUIRED == CKF_LOGIN_REQUIRED
+    }
+
+    fn update_token_pin_flags(&mut self) {
+        if self.so_login.pin.is_none() {
+            let _ = self.get_so_login_data();
+        }
+        if self.so_login.pin.is_none() {
+            self.info.flags |= CKF_SO_PIN_TO_BE_CHANGED;
+        } else {
+            self.info.flags &= !CKF_SO_PIN_TO_BE_CHANGED;
+            if self.so_login.attempts >= self.so_login.max_attempts {
+                self.info.flags |= CKF_SO_PIN_LOCKED;
+                self.info.flags &= !CKF_SO_PIN_FINAL_TRY;
+                self.info.flags &= !CKF_SO_PIN_COUNT_LOW;
+            } else {
+                if self.so_login.attempts + 1 == self.so_login.max_attempts {
+                    self.info.flags |= CKF_SO_PIN_FINAL_TRY;
+                } else {
+                    self.info.flags &= !CKF_SO_PIN_FINAL_TRY;
+                }
+                if self.so_login.attempts > 0 {
+                    self.info.flags |= CKF_SO_PIN_COUNT_LOW;
+                } else {
+                    self.info.flags &= !CKF_SO_PIN_COUNT_LOW;
+                }
+            }
+        }
+        if self.user_login.pin.is_none() {
+            let _ = self.get_user_login_data();
+        }
+        if self.user_login.pin.is_none() {
+            self.info.flags |= CKF_USER_PIN_TO_BE_CHANGED;
+        } else {
+            self.info.flags &= !CKF_USER_PIN_TO_BE_CHANGED;
+            if self.user_login.attempts >= self.user_login.max_attempts {
+                self.info.flags |= CKF_USER_PIN_LOCKED;
+                self.info.flags &= !CKF_USER_PIN_FINAL_TRY;
+                self.info.flags &= !CKF_USER_PIN_COUNT_LOW;
+            } else {
+                if self.user_login.attempts + 1 == self.user_login.max_attempts
+                {
+                    self.info.flags |= CKF_USER_PIN_FINAL_TRY;
+                } else {
+                    self.info.flags &= !CKF_USER_PIN_FINAL_TRY;
+                }
+                if self.user_login.attempts > 0 {
+                    self.info.flags |= CKF_USER_PIN_COUNT_LOW;
+                } else {
+                    self.info.flags &= !CKF_USER_PIN_COUNT_LOW;
+                }
+            }
+        }
     }
 
     fn store_pin_object(
@@ -292,6 +351,7 @@ impl Token {
         ) {
             Ok(_) => {
                 self.info.flags |= CKF_TOKEN_INITIALIZED;
+                self.update_token_pin_flags();
                 CKR_OK
             }
             Err(_) => CKR_GENERAL_ERROR,
@@ -420,7 +480,7 @@ impl Token {
         if !self.is_login_required() {
             return CKR_OK;
         }
-        match user_type {
+        let result = match user_type {
             CKU_SO => {
                 if self.so_login.logged_in {
                     return CKR_USER_ALREADY_LOGGED_IN;
@@ -454,7 +514,9 @@ impl Token {
                 self.user_login.check_pin(pin)
             }
             _ => return CKR_USER_TYPE_INVALID,
-        }
+        };
+        self.update_token_pin_flags();
+        result
     }
 
     pub fn logout(&mut self) -> CK_RV {
@@ -545,6 +607,8 @@ impl Token {
 
         /* If we set a PIN it means we switched to require Logins */
         self.info.flags |= CKF_LOGIN_REQUIRED;
+
+        self.update_token_pin_flags();
 
         CKR_OK
     }
