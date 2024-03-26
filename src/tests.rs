@@ -246,6 +246,37 @@ fn test_login(name: &str) {
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RW_PUBLIC_SESSION);
 
+    let pin_flags_mask = CKF_SO_PIN_TO_BE_CHANGED
+        | CKF_SO_PIN_LOCKED
+        | CKF_SO_PIN_FINAL_TRY
+        | CKF_SO_PIN_COUNT_LOW
+        | CKF_USER_PIN_TO_BE_CHANGED
+        | CKF_USER_PIN_LOCKED
+        | CKF_USER_PIN_FINAL_TRY
+        | CKF_USER_PIN_COUNT_LOW;
+
+    /* check pin flags */
+    let mut token_info = CK_TOKEN_INFO::default();
+    ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(token_info.flags & pin_flags_mask, 0);
+
+    /* fail login first */
+    let pin = "87654321";
+    ret = fn_login(
+        handle,
+        CKU_USER,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_ne!(ret, CKR_OK);
+
+    /* check pin flags */
+    let mut token_info = CK_TOKEN_INFO::default();
+    ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(token_info.flags & pin_flags_mask, CKF_USER_PIN_COUNT_LOW);
+
     /* login */
     let pin = "12345678";
     ret = fn_login(
@@ -255,6 +286,12 @@ fn test_login(name: &str) {
         pin.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
+
+    /* check pin flags */
+    let mut token_info = CK_TOKEN_INFO::default();
+    ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(token_info.flags & pin_flags_mask, 0);
 
     ret = fn_get_session_info(handle, &mut info);
     assert_eq!(ret, CKR_OK);
