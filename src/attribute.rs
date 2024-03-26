@@ -401,6 +401,15 @@ pub fn attr_name_to_id_type(s: &String) -> KResult<(CK_ULONG, AttrType)> {
     err_not_found!(s.clone())
 }
 
+pub fn attr_id_to_attrtype(id: CK_ULONG) -> KResult<AttrType> {
+    for a in &ATTRMAP {
+        if a.id == id {
+            return Ok(a.atype);
+        }
+    }
+    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+}
+
 impl CK_ATTRIBUTE {
     pub fn to_ulong(self) -> KResult<CK_ULONG> {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
