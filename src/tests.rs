@@ -3935,6 +3935,17 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* test the unwrapped key works */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    ret = fn_encrypt_init(session, &mut mechanism, handle2);
+    assert_eq!(ret, CKR_OK);
+    /* TODO */
+
     /* EC key pair */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_EC_KEY_PAIR_GEN,
