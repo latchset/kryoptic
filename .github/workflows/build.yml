@@ -41,7 +41,7 @@ jobs:
             zlib-devel sed sqlite-devel
 
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup
         run: |
