@@ -751,24 +751,25 @@ pub trait SecretKeyFactory {
         mut data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        let mut attrs = template.to_vec();
-        match attrs.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
-            Some(idx) => {
-                let len = attrs[idx].to_ulong()?;
-                if (len as usize) < data.len() {
-                    unsafe { data.set_len(len as usize) };
+        let mut obj =
+            match template.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
+                Some(idx) => {
+                    let len = template[idx].to_ulong()?;
+                    if (len as usize) < data.len() {
+                        unsafe { data.set_len(len as usize) };
+                    }
+                    if (len as usize) > data.len() {
+                        data.zeroize();
+                        return err_rv!(CKR_KEY_SIZE_RANGE);
+                    }
+                    let mut tmpl = template.to_vec();
+                    let _ = tmpl.swap_remove(idx);
+                    self.default_object_unwrap(tmpl.as_slice())?
                 }
-                if (len as usize) > data.len() {
-                    data.zeroize();
-                    return err_rv!(CKR_KEY_SIZE_RANGE);
-                }
-                attrs[idx] = CK_ATTRIBUTE::from_slice(CKA_VALUE, &data);
-            }
-            None => attrs.push(CK_ATTRIBUTE::from_slice(CKA_VALUE, &data)),
-        }
-        let result = self.default_object_unwrap(template);
-        data.zeroize();
-        result
+                None => self.default_object_unwrap(template)?,
+            };
+        obj.set_attr(from_bytes(CKA_VALUE, data))?;
+        Ok(obj)
     }
 
     fn default_object_unwrap(

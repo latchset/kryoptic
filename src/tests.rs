@@ -3922,6 +3922,20 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* need to unwrap the key with a template that
+     * will work for an encryption operation */
+    let mut class = CKO_SECRET_KEY;
+    let mut ktype = CKK_AES;
+    let mut len: CK_ULONG = 16;
+    let mut truebool = CK_TRUE;
+    let mut template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
     let mut handle2 = CK_INVALID_HANDLE;
     ret = fn_unwrap_key(
         session,
@@ -3944,7 +3958,11 @@ fn test_key() {
 
     ret = fn_encrypt_init(session, &mut mechanism, handle2);
     assert_eq!(ret, CKR_OK);
-    /* TODO */
+
+    /* init is sufficient to ensure the key is well formed,
+     * terminate current operation */
+    ret = fn_encrypt_init(session, std::ptr::null_mut(), handle2);
+    assert_eq!(ret, CKR_OK);
 
     /* EC key pair */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
