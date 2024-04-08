@@ -137,7 +137,7 @@
     "attributes": {
         "CKA_UNIQUE_ID": "10",
         "CKA_CLASS": 4,
-        "CKA_KEY_TYPE": 16,
+        "CKA_KEY_TYPE": 55,
         "CKA_ID": "SE1BQyBTSEEtMy0yNTYgVGVzdCBLZXk=",
         "CKA_LABEL": "HMAC SHA-3-256 Test Key",
         "CKA_EXTRACTABLE": false,
