@@ -7,7 +7,7 @@ use super::interface;
 use super::object;
 use super::{attr_element, err_rv};
 
-use attribute::{from_bool, from_bytes};
+use attribute::{from_bool, from_bytes, from_ulong};
 use error::{KError, KResult};
 use interface::*;
 use object::{
@@ -21,7 +21,7 @@ use mechanism::*;
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
-fn check_key_len(len: usize) -> KResult<()> {
+fn check_key_len(len: CK_ULONG) -> KResult<()> {
     match len {
         16 | 24 | 32 => Ok(()),
         _ => err_rv!(CKR_KEY_SIZE_RANGE),
@@ -64,10 +64,12 @@ impl AesKeyFactory {
 
 impl ObjectFactory for AesKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template)?;
-
-        let val = obj.get_attr_as_bytes(CKA_VALUE)?;
-        check_key_len(val.len())?;
+        let mut obj = self.default_object_create(template)?;
+        let key_len = Self::get_key_len(&obj)?;
+        check_key_len(key_len)?;
+        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, key_len))? {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
 
         Ok(obj)
     }
@@ -82,9 +84,31 @@ impl ObjectFactory for AesKeyFactory {
 
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        mut data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
+        /* AES keys can only be 16, 24, 32 bytes long,
+         * ensure we allow only these sizes */
+        match template.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
+            Some(idx) => {
+                let len = template[idx].to_ulong()? as usize;
+                if len > data.len() {
+                    data.zeroize();
+                    return err_rv!(CKR_KEY_SIZE_RANGE);
+                }
+                if len < data.len() {
+                    unsafe { data.set_len(len) };
+                }
+            }
+            None => (),
+        }
+        match check_key_len(data.len() as CK_ULONG) {
+            Ok(_) => (),
+            Err(e) => {
+                data.zeroize();
+                return Err(e);
+            }
+        }
         SecretKeyFactory::import_from_wrapped(self, data, template)
     }
 }
@@ -164,11 +188,10 @@ impl Mechanism for AesMechanism {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)?;
         check_key_len(value_len)?;
-        key.del_attr(CKA_VALUE_LEN);
 
-        let mut value: Vec<u8> = vec![0; value_len];
+        let mut value: Vec<u8> = vec![0; value_len as usize];
         match super::CSPRNG
             .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
         {

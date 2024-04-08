@@ -117,7 +117,7 @@ impl Drop for AesKey {
 
 fn object_to_raw_key(key: &Object) -> KResult<AesKey> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
-    check_key_len(val.len())?;
+    check_key_len(val.len() as CK_ULONG)?;
     Ok(AesKey { raw: val.clone() })
 }
 
