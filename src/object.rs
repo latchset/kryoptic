@@ -159,6 +159,7 @@ impl Object {
         Ok(true)
     }
 
+    #[allow(dead_code)]
     pub fn del_attr(&mut self, ck_type: CK_ULONG) {
         self.attributes.retain(|a| a.get_type() != ck_type);
         self.modified = true;
@@ -713,6 +714,18 @@ pub trait PrivKeyFactory {
     }
 }
 
+macro_rules! ok_or_clear {
+    ($clear:expr; $exp:expr) => {
+        match $exp {
+            Ok(x) => x,
+            Err(e) => {
+                $clear.zeroize();
+                return Err(e);
+            }
+        }
+    };
+}
+
 /* pkcs11-spec-v3.1 4.10 Secre key objects */
 pub trait SecretKeyFactory {
     fn init_common_secret_key_attrs(&self) -> Vec<ObjectAttr> {
@@ -752,22 +765,8 @@ pub trait SecretKeyFactory {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         let mut obj =
-            match template.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
-                Some(idx) => {
-                    let len = template[idx].to_ulong()?;
-                    if (len as usize) < data.len() {
-                        unsafe { data.set_len(len as usize) };
-                    }
-                    if (len as usize) > data.len() {
-                        data.zeroize();
-                        return err_rv!(CKR_KEY_SIZE_RANGE);
-                    }
-                    let mut tmpl = template.to_vec();
-                    let _ = tmpl.swap_remove(idx);
-                    self.default_object_unwrap(tmpl.as_slice())?
-                }
-                None => self.default_object_unwrap(template)?,
-            };
+            ok_or_clear!(&mut data; self.default_object_unwrap(template));
+        ok_or_clear!(&mut data; obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, data.len() as CK_ULONG)));
         obj.set_attr(from_bytes(CKA_VALUE, data))?;
         Ok(obj)
     }
@@ -776,6 +775,16 @@ pub trait SecretKeyFactory {
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object>;
+
+    fn get_key_len(obj: &Object) -> KResult<CK_ULONG> {
+        match obj.get_attr_as_bytes(CKA_VALUE) {
+            Ok(k) => Ok(k.len() as CK_ULONG),
+            Err(e) => match e {
+                KError::NotFound(_) => err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                _ => Err(e),
+            },
+        }
+    }
 }
 
 /* pkcs11-spec-v3.1 6.8 Generic secret key */
@@ -815,9 +824,14 @@ impl GenericSecretKeyFactory {
 
 impl ObjectFactory for GenericSecretKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
-        let obj = self.default_object_create(template)?;
-
-        bytes_attr_not_empty!(obj; CKA_VALUE);
+        let mut obj = self.default_object_create(template)?;
+        let key_len = Self::get_key_len(&obj)?;
+        if key_len == 0 {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, key_len))? {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
 
         Ok(obj)
     }
@@ -898,7 +912,6 @@ impl Mechanism for GenericSecretKeyMechanism {
         }
 
         let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
-        key.del_attr(CKA_VALUE_LEN);
 
         let mut value: Vec<u8> = vec![0; value_len];
         match super::CSPRNG
