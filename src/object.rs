@@ -195,9 +195,7 @@ impl Object {
         }
         let kt = self.get_attr_as_ulong(CKA_KEY_TYPE)?;
         if kt != ktype {
-            if class != CKO_SECRET_KEY || kt != CKK_GENERIC_SECRET {
-                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
-            }
+            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
         }
         if self.get_attr_as_bool(op).or(Ok(false))? {
             return Ok(());
