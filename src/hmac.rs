@@ -198,7 +198,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
                     ulMaxKeySize: 0,
                     flags: CKF_SIGN | CKF_VERIFY,
                 },
-                keytype: rs.1,
+                keytype: rs.4,
                 minlen: hashlen,
                 maxlen: hashlen,
             }),
@@ -211,7 +211,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
                     ulMaxKeySize: 0,
                     flags: CKF_SIGN | CKF_VERIFY,
                 },
-                keytype: rs.1,
+                keytype: rs.4,
                 minlen: 1,
                 maxlen: hashlen,
             }),
@@ -220,23 +220,11 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
             rs.3,
             Box::new(object::GenericSecretKeyMechanism::new(rs.4)),
         );
+        ot.add_factory(
+            object::ObjectType::new(CKO_SECRET_KEY, rs.4),
+            &object::get_generic_secret_factory(),
+        );
     }
-    ot.add_factory(
-        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA_1_HMAC),
-        &object::get_generic_secret_factory(),
-    );
-    ot.add_factory(
-        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA256_HMAC),
-        &object::get_generic_secret_factory(),
-    );
-    ot.add_factory(
-        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA384_HMAC),
-        &object::get_generic_secret_factory(),
-    );
-    ot.add_factory(
-        object::ObjectType::new(CKO_SECRET_KEY, CKK_SHA512_HMAC),
-        &object::get_generic_secret_factory(),
-    );
 }
 
 /* HMAC spec From FIPS 198-1 */

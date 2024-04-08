@@ -3691,6 +3691,12 @@ fn test_signatures() {
         };
     assert_eq!(testcase.result, result);
 
+    /* check different HMAC fails due to key being specific to HMAC */
+    mechanism.mechanism = CKM_SHA256_HMAC;
+    let result =
+        sig_gen(session, key_handle, &mut testcase.value, &mut mechanism);
+    assert!(result.is_err());
+
     let ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
