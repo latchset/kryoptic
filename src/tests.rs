@@ -1860,7 +1860,37 @@ fn test_aes_operations() {
         );
         assert_eq!(ret, CKR_OK);
         assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
+
+        /* retry with one-shot encrypt operation */
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let data = "01234567";
+        /* enc2 needs enough space for encrypted data and tag */
+        let enc2: [u8; 12] = [0; 12];
+        let mut enc_len = enc2.len() as CK_ULONG;
+        ret = fn_encrypt(
+            session,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            std::ptr::null_mut(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 12);
+
+        ret = fn_encrypt(
+            session,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc2.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 12);
+
+        assert_eq!(enc[..12], enc2);
     }
 
     {
