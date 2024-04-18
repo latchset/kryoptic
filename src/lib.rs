@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
 use std::ffi::CStr;
 use std::str::FromStr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -335,31 +336,43 @@ macro_rules! global_wlock {
 }
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
-    if _init_args.is_null() {
-        return CKR_ARGUMENTS_BAD;
-    }
-    let args = _init_args as *const CK_C_INITIALIZE_ARGS;
-
     let mut slotnum: CK_SLOT_ID = 0;
-    let mut filename = String::new();
+    let conf: &str;
+    let e: String;
 
-    if unsafe { !(*args).pReserved.is_null() } {
-        let reserved =
-            match unsafe { CStr::from_ptr((*args).pReserved as *const _) }
-                .to_str()
-            {
+    if _init_args.is_null() {
+        e = match env::var("KRYOPTIC_CONF") {
+            Ok(f) => f,
+            Err(_e) => return CKR_ARGUMENTS_BAD,
+        };
+        conf = &e;
+    } else {
+        let args = _init_args as *const CK_C_INITIALIZE_ARGS;
+        if unsafe { (*args).pReserved.is_null() } {
+            e = match env::var("KRYOPTIC_CONF") {
                 Ok(f) => f,
                 Err(_e) => return CKR_ARGUMENTS_BAD,
             };
-        let v: Vec<&str> = reserved.split(':').collect();
-        if v.len() > 1 {
-            slotnum = match CK_SLOT_ID::from_str(v[1]) {
-                Ok(n) => n,
-                Err(_) => return CKR_ARGUMENTS_BAD,
-            };
+            conf = &e;
+        } else {
+            conf =
+                match unsafe { CStr::from_ptr((*args).pReserved as *const _) }
+                    .to_str()
+                {
+                    Ok(f) => f,
+                    Err(_e) => return CKR_ARGUMENTS_BAD,
+                };
         }
-        filename = v[0].to_string();
     }
+
+    let v: Vec<&str> = conf.split(':').collect();
+    if v.len() > 1 {
+        slotnum = match CK_SLOT_ID::from_str(v[1]) {
+            Ok(n) => n,
+            Err(_) => return CKR_ARGUMENTS_BAD,
+        };
+    }
+    let filename = v[0].to_string();
 
     let mut wstate = global_wlock!(noinitcheck STATE);
     if !wstate.is_initialized() {
