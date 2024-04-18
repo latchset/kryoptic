@@ -839,15 +839,7 @@ impl Encryption for AesOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if cipher.is_null() {
-            self.encrypt_update(plain, cipher, cipher_len)?;
-            if self.mech == CKM_AES_GCM {
-                unsafe {
-                    let mut len = *cipher_len;
-                    len += self.params.taglen as CK_ULONG;
-                    *cipher_len = len;
-                }
-            }
-            return Ok(());
+            return self.encrypt_update(plain, cipher, cipher_len);
         }
         let clen: CK_ULONG = unsafe { *cipher_len };
         let mut outb: *mut u8 = cipher;
