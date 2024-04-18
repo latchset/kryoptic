@@ -1864,7 +1864,7 @@ fn test_aes_operations() {
     }
 
     {
-        /* AES-GCM */
+        /* AES-CCM */
 
         /* Data Len needs to be known in advance for CCM */
         let data = "01234567";
