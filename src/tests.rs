@@ -3860,6 +3860,7 @@ fn test_key() {
         make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
         make_attribute!(CKA_WRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(CKA_UNWRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
         make_attribute!(
             CKA_EXTRACTABLE,
             &mut truebool as *mut _,
@@ -4307,6 +4308,132 @@ fn test_key() {
         sign_len,
     );
     assert_eq!(ret, CKR_OK);
+
+    /* Test key derivation */
+    let mut class = CKO_SECRET_KEY;
+    let mut ktype = CKK_AES;
+    let mut len: CK_ULONG = 16;
+    let mut truebool = CK_TRUE;
+    let derive_template = [
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
+        bLittleEndian: 0,
+        ulWidthInBits: 8,
+    };
+
+    let mut data_params = [CK_PRF_DATA_PARAM {
+        type_: CK_SP800_108_ITERATION_VARIABLE,
+        pValue: &mut counter_format as *mut _ as CK_VOID_PTR,
+        ulValueLen: std::mem::size_of::<CK_SP800_108_COUNTER_FORMAT>()
+            as CK_ULONG,
+    }];
+
+    let mut params = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA3_384_HMAC,
+        ulNumberOfDataParams: data_params.len() as CK_ULONG,
+        pDataParams: data_params.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_SP800_108_KDF_PARAMS>()
+            as CK_ULONG,
+    };
+
+    let mut handle3 = CK_INVALID_HANDLE;
+    ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut handle3,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* try again but derive additional keys */
+    let mut handle4 = CK_INVALID_HANDLE;
+    let mut handle5 = CK_UNAVAILABLE_INFORMATION;
+    let mut handle6 = CK_UNAVAILABLE_INFORMATION;
+    let mut addl_keys = [
+        CK_DERIVED_KEY {
+            pTemplate: derive_template.as_ptr() as *mut _,
+            ulAttributeCount: derive_template.len() as CK_ULONG,
+            phKey: &mut handle5,
+        },
+        CK_DERIVED_KEY {
+            pTemplate: derive_template.as_ptr() as *mut _,
+            ulAttributeCount: derive_template.len() as CK_ULONG,
+            phKey: &mut handle6,
+        },
+    ];
+    params.ulAdditionalDerivedKeys = 2;
+    params.pAdditionalDerivedKeys = addl_keys.as_mut_ptr();
+    ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut handle4,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* check each key */
+    let mut val: CK_ULONG = 0;
+    let attrtmpl = [make_attribute!(
+        CKA_VALUE_LEN,
+        &mut val as *mut _,
+        CK_ULONG_SIZE
+    )];
+
+    ret = fn_get_attribute_value(
+        session,
+        handle3,
+        attrtmpl.as_ptr() as *mut _,
+        attrtmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(val, 16);
+
+    val = 0;
+    ret = fn_get_attribute_value(
+        session,
+        handle4,
+        attrtmpl.as_ptr() as *mut _,
+        attrtmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(val, 16);
+
+    val = 0;
+    ret = fn_get_attribute_value(
+        session,
+        handle5,
+        attrtmpl.as_ptr() as *mut _,
+        attrtmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(val, 16);
+
+    val = 0;
+    ret = fn_get_attribute_value(
+        session,
+        handle6,
+        attrtmpl.as_ptr() as *mut _,
+        attrtmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(val, 16);
 
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);

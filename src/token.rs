@@ -11,6 +11,7 @@ use super::error;
 use super::hash;
 use super::hmac;
 use super::interface;
+use super::kdf;
 use super::mechanism;
 use super::object;
 use super::rsa;
@@ -201,6 +202,7 @@ impl Token {
         ecc::register(&mut token.mechanisms, &mut token.object_factories);
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         hmac::register(&mut token.mechanisms, &mut token.object_factories);
+        kdf::register(&mut token.mechanisms, &mut token.object_factories);
 
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {
@@ -807,34 +809,11 @@ impl Token {
         Ok(handles)
     }
 
-    pub fn get_mech(
-        &self,
-        mech_type: CK_MECHANISM_TYPE,
-    ) -> KResult<&Box<dyn mechanism::Mechanism>> {
-        self.mechanisms.get(mech_type)
+    pub fn get_mechanisms(&self) -> &Mechanisms {
+        &self.mechanisms
     }
 
-    pub fn get_obj_factory(
-        &self,
-        obj: &Object,
-    ) -> KResult<&Box<dyn object::ObjectFactory>> {
-        self.object_factories.get_object_factory(obj)
-    }
-
-    pub fn get_obj_factory_from_key_template(
-        &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> KResult<&Box<dyn object::ObjectFactory>> {
-        let class = match template.iter().position(|x| x.type_ == CKA_CLASS) {
-            Some(idx) => template[idx].to_ulong()?,
-            None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
-        };
-        let key_type =
-            match template.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
-                Some(idx) => template[idx].to_ulong()?,
-                None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
-            };
-        self.object_factories
-            .get_factory(object::ObjectType::new(class, key_type))
+    pub fn get_object_factories(&self) -> &ObjectFactories {
+        &self.object_factories
     }
 }

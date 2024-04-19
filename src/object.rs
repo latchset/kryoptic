@@ -377,6 +377,47 @@ pub trait ObjectFactory: Debug + Send + Sync {
         )
     }
 
+    fn default_object_derive(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        origin: &Object,
+    ) -> KResult<Object> {
+        /* FIXME: handle CKA_DERIVE_TEMPLATE */
+
+        let mut obj = self.internal_object_create(
+            template,
+            OAFlags::SettableOnlyOnCreate,
+            OAFlags::AlwaysRequired,
+        )?;
+        /* overrides */
+        obj.set_attr(from_bool(CKA_LOCAL, false))?;
+        match origin.get_attr_as_bool(CKA_ALWAYS_SENSITIVE) {
+            Ok(b) => match b {
+                false => {
+                    obj.set_attr(from_bool(CKA_ALWAYS_SENSITIVE, false))?
+                }
+                true => obj.set_attr(from_bool(
+                    CKA_ALWAYS_SENSITIVE,
+                    obj.is_sensitive(),
+                ))?,
+            },
+            Err(_) => obj.set_attr(from_bool(CKA_ALWAYS_SENSITIVE, false))?,
+        };
+        match origin.get_attr_as_bool(CKA_NEVER_EXTRACTABLE) {
+            Ok(b) => match b {
+                false => {
+                    obj.set_attr(from_bool(CKA_NEVER_EXTRACTABLE, false))?
+                }
+                true => obj.set_attr(from_bool(
+                    CKA_NEVER_EXTRACTABLE,
+                    !obj.is_extractable(),
+                ))?,
+            },
+            Err(_) => obj.set_attr(from_bool(CKA_NEVER_EXTRACTABLE, false))?,
+        };
+        Ok(obj)
+    }
+
     fn internal_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -1215,6 +1256,22 @@ impl ObjectFactories {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
         self.get_object_factory(obj)?.copy(obj, template)
+    }
+
+    pub fn get_obj_factory_from_key_template(
+        &self,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<&Box<dyn ObjectFactory>> {
+        let class = match template.iter().position(|x| x.type_ == CKA_CLASS) {
+            Some(idx) => template[idx].to_ulong()?,
+            None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+        };
+        let key_type =
+            match template.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
+                Some(idx) => template[idx].to_ulong()?,
+                None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+            };
+        self.get_factory(ObjectType::new(class, key_type))
     }
 }
 

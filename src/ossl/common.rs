@@ -5,7 +5,8 @@ use super::object;
 
 use interface::*;
 
-use std::os::raw::c_uint;
+use core::ffi::c_int;
+use core::ffi::c_uint;
 
 macro_rules! ptr_wrapper {
     ($name:ident; $ossl:ident; $free:expr) => {
@@ -57,6 +58,14 @@ ptr_wrapper!(EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_free);
 ptr_wrapper!(BigNum; BIGNUM; BN_free);
 ptr_wrapper!(EvpCipherCtx; EVP_CIPHER_CTX; EVP_CIPHER_CTX_free);
 ptr_wrapper!(EvpCipher; EVP_CIPHER; EVP_CIPHER_free);
+ptr_wrapper!(EvpKdfCtx; EVP_KDF_CTX; EVP_KDF_CTX_free);
+ptr_wrapper!(EvpKdf; EVP_KDF; EVP_KDF_free);
+
+pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
+pub const CIPHER_NAME_AES192: &[u8; 7] = b"AES192\0";
+pub const CIPHER_NAME_AES256: &[u8; 7] = b"AES256\0";
+pub const MAC_NAME_CMAC: &[u8; 5] = b"CMAC\0";
+pub const MAC_NAME_HMAC: &[u8; 5] = b"HMAC\0";
 
 pub fn name_as_char(name: &[u8]) -> *const c_char {
     name.as_ptr() as *const c_char
@@ -224,6 +233,21 @@ impl OsslParam {
         Ok(self)
     }
 
+    pub fn add_const_c_string(
+        mut self,
+        key: *const c_char,
+        val: *const c_char,
+    ) -> KResult<OsslParam> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let param =
+            unsafe { OSSL_PARAM_construct_utf8_string(key, val as *mut i8, 0) };
+        self.p.push(param);
+        Ok(self)
+    }
+
     pub fn add_octet_string(
         mut self,
         key: *const c_char,
@@ -276,6 +300,24 @@ impl OsslParam {
         let container = val.to_ne_bytes().to_vec();
         let param = unsafe {
             OSSL_PARAM_construct_uint(key, container.as_ptr() as *mut c_uint)
+        };
+        self.v.push(container);
+        self.p.push(param);
+        Ok(self)
+    }
+
+    pub fn add_int(
+        mut self,
+        key: *const c_char,
+        val: c_int,
+    ) -> KResult<OsslParam> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let container = val.to_ne_bytes().to_vec();
+        let param = unsafe {
+            OSSL_PARAM_construct_int(key, container.as_ptr() as *mut c_int)
         };
         self.v.push(container);
         self.p.push(param);
@@ -391,38 +433,47 @@ pub fn mech_type_to_digest_name(mech: CK_MECHANISM_TYPE) -> *const c_char {
         CKM_SHA1_RSA_PKCS
         | CKM_ECDSA_SHA1
         | CKM_SHA1_RSA_PKCS_PSS
+        | CKM_SHA_1_HMAC
         | CKM_SHA_1 => OSSL_DIGEST_NAME_SHA1.as_ptr(),
         CKM_SHA224_RSA_PKCS
         | CKM_ECDSA_SHA224
         | CKM_SHA224_RSA_PKCS_PSS
+        | CKM_SHA224_HMAC
         | CKM_SHA224 => OSSL_DIGEST_NAME_SHA2_224.as_ptr(),
         CKM_SHA256_RSA_PKCS
         | CKM_ECDSA_SHA256
         | CKM_SHA256_RSA_PKCS_PSS
+        | CKM_SHA256_HMAC
         | CKM_SHA256 => OSSL_DIGEST_NAME_SHA2_256.as_ptr(),
         CKM_SHA384_RSA_PKCS
         | CKM_ECDSA_SHA384
         | CKM_SHA384_RSA_PKCS_PSS
+        | CKM_SHA384_HMAC
         | CKM_SHA384 => OSSL_DIGEST_NAME_SHA2_384.as_ptr(),
         CKM_SHA512_RSA_PKCS
         | CKM_ECDSA_SHA512
         | CKM_SHA512_RSA_PKCS_PSS
+        | CKM_SHA512_HMAC
         | CKM_SHA512 => OSSL_DIGEST_NAME_SHA2_512.as_ptr(),
         CKM_SHA3_224_RSA_PKCS
         | CKM_ECDSA_SHA3_224
         | CKM_SHA3_224_RSA_PKCS_PSS
+        | CKM_SHA3_224_HMAC
         | CKM_SHA3_224 => OSSL_DIGEST_NAME_SHA3_224.as_ptr(),
         CKM_SHA3_256_RSA_PKCS
         | CKM_ECDSA_SHA3_256
         | CKM_SHA3_256_RSA_PKCS_PSS
+        | CKM_SHA3_256_HMAC
         | CKM_SHA3_256 => OSSL_DIGEST_NAME_SHA3_256.as_ptr(),
         CKM_SHA3_384_RSA_PKCS
         | CKM_ECDSA_SHA3_384
         | CKM_SHA3_384_RSA_PKCS_PSS
+        | CKM_SHA3_384_HMAC
         | CKM_SHA3_384 => OSSL_DIGEST_NAME_SHA3_384.as_ptr(),
         CKM_SHA3_512_RSA_PKCS
         | CKM_ECDSA_SHA3_512
         | CKM_SHA3_512_RSA_PKCS_PSS
+        | CKM_SHA3_512_HMAC
         | CKM_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512.as_ptr(),
         _ => std::ptr::null(),
     }) as *const c_char
