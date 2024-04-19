@@ -9,7 +9,7 @@ use super::interface;
 use super::object;
 use error::{KError, KResult};
 use interface::*;
-use object::{Object, ObjectFactory};
+use object::{Object, ObjectFactories, ObjectFactory};
 
 use std::fmt::Debug;
 
@@ -84,6 +84,10 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &[CK_ATTRIBUTE],
         _: &Box<dyn ObjectFactory>,
     ) -> KResult<Object> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
+
+    fn derive_operation(&self, _: &CK_MECHANISM) -> KResult<Operation> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 }
@@ -249,6 +253,23 @@ pub trait Verify: MechOperation {
     }
 }
 
+pub trait Derive: MechOperation {
+    fn derive(
+        &mut self,
+        _: &object::Object,
+        _: &[CK_ATTRIBUTE],
+        _: &Mechanisms,
+        _: &ObjectFactories,
+    ) -> KResult<(Object, usize)> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn derive_additional_key(
+        &mut self,
+    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
 #[derive(Debug)]
 pub enum Operation {
     Empty,
@@ -258,6 +279,7 @@ pub enum Operation {
     Digest(Box<dyn Digest>),
     Sign(Box<dyn Sign>),
     Verify(Box<dyn Verify>),
+    Derive(Box<dyn Derive>),
 }
 
 impl Operation {
@@ -270,6 +292,7 @@ impl Operation {
             Operation::Digest(op) => op.finalized(),
             Operation::Sign(op) => op.finalized(),
             Operation::Verify(op) => op.finalized(),
+            Operation::Derive(op) => op.finalized(),
         }
     }
 }

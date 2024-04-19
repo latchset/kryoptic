@@ -48,6 +48,7 @@ mod drbg;
 mod ecc;
 mod hash;
 mod hmac;
+mod kdf;
 mod rsa;
 
 /* Helper code */
@@ -837,7 +838,7 @@ extern "C" fn fn_encrypt_init(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
         let operation = res_or_ret!(mech.encryption_new(data, &obj));
         session.set_operation(Operation::Encryption(operation));
@@ -951,7 +952,7 @@ extern "C" fn fn_decrypt_init(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
         let operation = res_or_ret!(mech.decryption_new(data, &obj));
         session.set_operation(Operation::Decryption(operation));
@@ -1058,7 +1059,7 @@ extern "C" fn fn_digest_init(
     check_op_empty_or_fail!(session; Digest; mechanism);
     let data: &CK_MECHANISM = unsafe { &*mechanism };
     let token = res_or_ret!(rstate.get_token_from_slot(session.get_slot_id()));
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
         let operation = res_or_ret!(mech.digest_new(data));
         session.set_operation(Operation::Digest(operation));
@@ -1209,7 +1210,7 @@ extern "C" fn fn_sign_init(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
         let operation = res_or_ret!(mech.sign_new(data, &obj));
         session.set_operation(Operation::Sign(operation));
@@ -1350,7 +1351,7 @@ extern "C" fn fn_verify_init(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
         let operation = res_or_ret!(mech.verify_new(data, &obj));
         session.set_operation(Operation::Verify(operation));
@@ -1507,7 +1508,7 @@ extern "C" fn fn_generate_key(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_GENERATE != CKF_GENERATE {
         return CKR_MECHANISM_INVALID;
     }
@@ -1559,7 +1560,7 @@ extern "C" fn fn_generate_key_pair(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
-    let mech = res_or_ret!(token.get_mech(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_GENERATE_KEY_PAIR != CKF_GENERATE_KEY_PAIR {
         return CKR_MECHANISM_INVALID;
     }
@@ -1602,8 +1603,9 @@ extern "C" fn fn_wrap_key(
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let kobj = res_or_ret!(token.get_object_by_handle(key)).clone();
     let wkobj = res_or_ret!(token.get_object_by_handle(wrapping_key)).clone();
-    let factory = res_or_ret!(token.get_obj_factory(&kobj));
-    let mech = res_or_ret!(token.get_mech(ck_mech.mechanism));
+    let factories = token.get_object_factories();
+    let factory = res_or_ret!(factories.get_object_factory(&kobj));
+    let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return CKR_MECHANISM_INVALID;
     }
@@ -1653,11 +1655,13 @@ extern "C" fn fn_unwrap_key(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let kobj = res_or_ret!(token.get_object_by_handle(unwrapping_key)).clone();
-    let factory = res_or_ret!(token.get_obj_factory_from_key_template(tmpl));
+    let factories = token.get_object_factories();
+    let factory =
+        res_or_ret!(factories.get_obj_factory_from_key_template(tmpl));
     let data: &[u8] = unsafe {
         std::slice::from_raw_parts(wrapped_key, wrapped_key_len as usize)
     };
-    let mech = res_or_ret!(token.get_mech(ck_mech.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return CKR_MECHANISM_INVALID;
     }
@@ -1681,15 +1685,90 @@ extern "C" fn fn_unwrap_key(
 }
 
 extern "C" fn fn_derive_key(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _base_key: CK_OBJECT_HANDLE,
-    _template: CK_ATTRIBUTE_PTR,
-    _attribute_count: CK_ULONG,
-    _ph_key: CK_OBJECT_HANDLE_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    mechanism: CK_MECHANISM_PTR,
+    base_key: CK_OBJECT_HANDLE,
+    template: CK_ATTRIBUTE_PTR,
+    attribute_count: CK_ULONG,
+    key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
+        std::slice::from_raw_parts_mut(template, attribute_count as usize)
+    };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(&*tmpl);
+    }
+    let slot_id = session.get_slot_id();
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let bkey = res_or_ret!(token.get_object_by_handle(base_key)).clone();
+
+    /* key checks */
+    if !res_or_ret!(bkey.get_attr_as_bool(CKA_DERIVE)) {
+        return CKR_KEY_FUNCTION_NOT_PERMITTED;
+    }
+
+    let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
+    if mech.info().flags & CKF_DERIVE != CKF_DERIVE {
+        return CKR_MECHANISM_INVALID;
+    }
+
+    let mut operation = match res_or_ret!(mech.derive_operation(ck_mech)) {
+        Operation::Derive(op) => op,
+        _ => return CKR_MECHANISM_INVALID,
+    };
+
+    let result = operation.derive(
+        &bkey,
+        tmpl,
+        token.get_mechanisms(),
+        token.get_object_factories(),
+    );
+    let (kh, addtl) = match result {
+        Ok((obj, addtl)) => {
+            let h = res_or_ret!(token.insert_object(s_handle, obj));
+            (h, addtl)
+        }
+        Err(e) => return err_to_rv!(e),
+    };
+
+    let mut rv = CKR_OK;
+    if addtl > 0 {
+        let mut o = Vec::<CK_OBJECT_HANDLE>::with_capacity(addtl);
+        for _ in 0..addtl {
+            let r = operation.derive_additional_key();
+            match r {
+                Ok((obj, hptr)) => match token.insert_object(s_handle, obj) {
+                    Ok(h) => {
+                        unsafe { core::ptr::write(hptr as *mut _, h) };
+                        o.push(h);
+                    }
+                    Err(e) => rv = err_to_rv!(e),
+                },
+                Err(_) => rv = CKR_GENERAL_ERROR,
+            }
+            if rv != CKR_OK {
+                break;
+            }
+        }
+        if rv != CKR_OK {
+            for h in o {
+                let _ = token.destroy_object(h);
+            }
+            let _ = token.destroy_object(kh);
+            return rv;
+        }
+    }
+
+    unsafe {
+        core::ptr::write(key_handle as *mut _, kh);
+    }
+    CKR_OK
 }
+
 extern "C" fn fn_seed_random(
     _session: CK_SESSION_HANDLE,
     _seed: CK_BYTE_PTR,
