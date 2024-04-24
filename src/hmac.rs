@@ -100,7 +100,6 @@ impl Mechanism for HMACMechanism {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
         Ok(Box::new(HMACOperation::init(
-            mech.mechanism,
             self.hmac_mech_to_hash_mech(mech.mechanism)?,
             check_and_fetch_key(keyobj, self.keytype, CKA_SIGN)?,
             check_and_fetch_param(mech, self.minlen, self.maxlen)?,
@@ -116,7 +115,6 @@ impl Mechanism for HMACMechanism {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
         Ok(Box::new(HMACOperation::init(
-            mech.mechanism,
             self.hmac_mech_to_hash_mech(mech.mechanism)?,
             check_and_fetch_key(keyobj, self.keytype, CKA_VERIFY)?,
             check_and_fetch_param(mech, self.minlen, self.maxlen)?,
@@ -237,7 +235,6 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 /* HMAC spec From FIPS 198-1 */
 #[derive(Debug)]
 struct HMACOperation {
-    mech: CK_MECHANISM_TYPE,
     hashlen: usize,
     blocklen: usize,
     outputlen: usize,
@@ -259,13 +256,11 @@ impl Drop for HMACOperation {
 
 impl HMACOperation {
     fn init(
-        mech: CK_MECHANISM_TYPE,
         hash: CK_MECHANISM_TYPE,
         key: Vec<u8>,
         outputlen: usize,
     ) -> KResult<HMACOperation> {
         let mut hmac = HMACOperation {
-            mech: mech,
             hashlen: 0usize,
             blocklen: 0usize,
             outputlen: outputlen,
@@ -352,12 +347,6 @@ impl HMACOperation {
 }
 
 impl MechOperation for HMACOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
     fn finalized(&self) -> bool {
         self.finalized
     }

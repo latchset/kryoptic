@@ -32,6 +32,32 @@ unsafe impl Send for HashState {}
 unsafe impl Sync for HashState {}
 
 impl HashOperation {
+    fn new_mechanism() -> Box<dyn Mechanism> {
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        })
+    }
+
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        for ckm in &[
+            CKM_SHA_1,
+            CKM_SHA224,
+            CKM_SHA256,
+            CKM_SHA384,
+            CKM_SHA512,
+            CKM_SHA3_224,
+            CKM_SHA3_256,
+            CKM_SHA3_384,
+            CKM_SHA3_512,
+        ] {
+            mechs.add_mechanism(*ckm, Self::new_mechanism());
+        }
+    }
+
     pub fn new(mech: CK_MECHANISM_TYPE) -> KResult<HashOperation> {
         let alg: &[u8] = match mech {
             CKM_SHA_1 => OSSL_DIGEST_NAME_SHA1,
@@ -46,7 +72,6 @@ impl HashOperation {
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         Ok(HashOperation {
-            mech: mech,
             state: HashState::new(alg)?,
             finalized: false,
             in_use: false,
@@ -73,12 +98,6 @@ impl HashOperation {
 }
 
 impl MechOperation for HashOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
     fn finalized(&self) -> bool {
         self.finalized
     }

@@ -33,87 +33,13 @@ impl Mechanism for HashMechanism {
 
 #[derive(Debug)]
 pub struct HashOperation {
-    mech: CK_MECHANISM_TYPE,
     state: HashState,
     finalized: bool,
     in_use: bool,
 }
 
 pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectFactories) {
-    mechs.add_mechanism(
-        CKM_SHA_1,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA256,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA384,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA512,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_256,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_384,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
-    mechs.add_mechanism(
-        CKM_SHA3_512,
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-    );
+    HashOperation::register_mechanisms(mechs);
 }
 
-#[cfg(feature = "fips")]
-include! {"ossl/hash.rs"}
-
-#[cfg(not(feature = "fips"))]
 include! {"ossl/hash.rs"}

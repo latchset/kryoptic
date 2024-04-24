@@ -782,12 +782,6 @@ impl RsaPKCSOperation {
 }
 
 impl MechOperation for RsaPKCSOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
     fn finalized(&self) -> bool {
         self.finalized
     }

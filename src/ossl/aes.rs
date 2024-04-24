@@ -14,6 +14,8 @@ use zeroize::Zeroize;
 
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 
+const MIN_AES_SIZE_BYTES: usize = 16;
+const MAX_AES_SIZE_BYTES: usize = 32;
 const AES_BLOCK_SIZE: usize = 16;
 const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
 const AES_192_CBC_CTS: &[u8; 16] = b"AES-192-CBC-CTS\0";
@@ -150,6 +152,51 @@ impl Drop for AesOperation {
 }
 
 impl AesOperation {
+    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
+        Box::new(AesMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_AES_SIZE_BYTES as CK_ULONG,
+                ulMaxKeySize: MAX_AES_SIZE_BYTES as CK_ULONG,
+                flags: flags,
+            },
+        })
+    }
+
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        for ckm in &[
+            CKM_AES_ECB,
+            CKM_AES_CBC,
+            CKM_AES_CBC_PAD,
+            CKM_AES_CTR,
+            CKM_AES_CTS,
+            CKM_AES_GCM,
+            CKM_AES_CCM,
+        ] {
+            mechs.add_mechanism(
+                *ckm,
+                Self::new_mechanism(
+                    CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+                ),
+            );
+        }
+
+        #[cfg(not(feature = "fips"))]
+        for ckm in &[
+            CKM_AES_OFB,
+            CKM_AES_CFB128,
+            CKM_AES_CFB1,
+            CKM_AES_CFB8,
+            /* OpenSSL does not implement AES CFB-64 */
+        ] {
+            mechs.add_mechanism(
+                *ckm,
+                Self::new_mechanism(CKF_ENCRYPT | CKF_DECRYPT),
+            );
+        }
+
+        mechs.add_mechanism(CKM_AES_KEY_GEN, Self::new_mechanism(CKF_GENERATE));
+    }
+
     fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
         match mech.mechanism {
             CKM_AES_CCM => {
@@ -824,12 +871,6 @@ impl AesOperation {
 }
 
 impl MechOperation for AesOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
     fn finalized(&self) -> bool {
         self.finalized
     }
