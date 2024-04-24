@@ -132,8 +132,6 @@ impl Mechanisms {
 }
 
 pub trait MechOperation: Debug + Send + Sync {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE;
-    fn in_use(&self) -> bool;
     fn finalized(&self) -> bool;
     fn reset(&mut self) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)

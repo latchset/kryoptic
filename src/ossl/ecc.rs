@@ -251,6 +251,44 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> KResult<Vec<u8>> {
 }
 
 impl EccOperation {
+    fn new_mechanism() -> Box<dyn Mechanism> {
+        Box::new(EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        })
+    }
+
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        for ckm in &[
+            CKM_ECDSA,
+            CKM_ECDSA_SHA1,
+            CKM_ECDSA_SHA224,
+            CKM_ECDSA_SHA256,
+            CKM_ECDSA_SHA384,
+            CKM_ECDSA_SHA512,
+            CKM_ECDSA_SHA3_224,
+            CKM_ECDSA_SHA3_256,
+            CKM_ECDSA_SHA3_384,
+            CKM_ECDSA_SHA3_512,
+        ] {
+            mechs.add_mechanism(*ckm, Self::new_mechanism());
+        }
+
+        mechs.add_mechanism(
+            CKM_EC_KEY_PAIR_GEN,
+            Box::new(EccMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                    ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                    flags: CKF_GENERATE_KEY_PAIR,
+                },
+            }),
+        );
+    }
+
     // todo derive?
 
     fn sign_new(
@@ -357,12 +395,6 @@ impl EccOperation {
 }
 
 impl MechOperation for EccOperation {
-    fn mechanism(&self) -> CK_MECHANISM_TYPE {
-        self.mech
-    }
-    fn in_use(&self) -> bool {
-        self.in_use
-    }
     fn finalized(&self) -> bool {
         self.finalized
     }
