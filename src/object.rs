@@ -1273,6 +1273,15 @@ impl ObjectFactories {
             };
         self.get_factory(ObjectType::new(class, key_type))
     }
+
+    pub fn derive_key_from_template(
+        &self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Object> {
+        let factory = self.get_obj_factory_from_key_template(template)?;
+        factory.default_object_derive(template, key)
+    }
 }
 
 static DATA_OBJECT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
