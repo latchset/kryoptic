@@ -1,26 +1,12 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-#[cfg(feature = "fips")]
 use {super::fips, fips::*};
-
-#[cfg(not(feature = "fips"))]
-use {super::ossl, ossl::*};
 
 use core::ffi::c_int;
 
 const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
 const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";
-
-fn template_to_object(
-    key: &Object,
-    template: &[CK_ATTRIBUTE],
-    objfactories: &ObjectFactories,
-) -> KResult<Object> {
-    let objfactory =
-        objfactories.get_obj_factory_from_key_template(template)?;
-    objfactory.default_object_derive(template, key)
-}
 
 fn prep_counter_kdf(
     sparams: &Vec<Sp800Params>,
@@ -372,17 +358,7 @@ impl Derive for Sp800Operation {
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
 
-        let mut obj = template_to_object(key, template, objfactories)?;
-
-        let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-            Ok(n) => n as usize,
-            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-        };
-        if keysize == 0 || keysize > (u32::MAX as usize) {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
-        }
         let mut segment = 1;
-
         if self.addl_drv_keys.len() > 0 {
             /* need the mechanism to compute the segment size as
              * openssl will just return a linear buffer, that we
@@ -395,7 +371,16 @@ impl Derive for Sp800Operation {
             }
         }
 
-        let mut derive_output = key_to_segment_size(keysize, segment);
+        let mut obj = objfactories.derive_key_from_template(key, template)?;
+        let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
+            Ok(n) => n as usize,
+            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+        };
+        if keysize == 0 || keysize > (u32::MAX as usize) {
+            return err_rv!(CKR_KEY_SIZE_RANGE);
+        }
+
+        let mut slen = key_to_segment_size(keysize, segment);
 
         /* additional keys */
         for ak in &self.addl_drv_keys {
@@ -405,7 +390,7 @@ impl Derive for Sp800Operation {
                     ak.ulAttributeCount as usize,
                 )
             };
-            let obj = match template_to_object(key, tmpl, objfactories) {
+            let obj = match objfactories.derive_key_from_template(key, tmpl) {
                 Ok(o) => o,
                 Err(e) => {
                     /* mark the handle as invalid */
@@ -423,7 +408,7 @@ impl Derive for Sp800Operation {
                 return err_rv!(CKR_KEY_SIZE_RANGE);
             }
             /* increment size in segment steps */
-            derive_output += key_to_segment_size(aksize, segment);
+            slen += key_to_segment_size(aksize, segment);
             self.addl_objects.push(obj);
         }
 
@@ -444,12 +429,12 @@ impl Derive for Sp800Operation {
             Err(_) => return err_rv!(CKR_DEVICE_ERROR),
         };
 
-        let mut derived_keys = vec![0u8; derive_output];
+        let mut dkm = vec![0u8; slen];
         let res = unsafe {
             EVP_KDF_derive(
                 kctx.as_mut_ptr(),
-                derived_keys.as_mut_ptr(),
-                derived_keys.len(),
+                dkm.as_mut_ptr(),
+                dkm.len(),
                 params.as_ptr(),
             )
         };
@@ -457,14 +442,14 @@ impl Derive for Sp800Operation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
-        obj.set_attr(from_bytes(CKA_VALUE, derived_keys[0..keysize].to_vec()))?;
+        obj.set_attr(from_bytes(CKA_VALUE, dkm[0..keysize].to_vec()))?;
 
         let mut cursor = key_to_segment_size(keysize, segment);
         for key in &mut self.addl_objects {
             let aksize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
             key.set_attr(from_bytes(
                 CKA_VALUE,
-                derived_keys[cursor..(cursor + aksize)].to_vec(),
+                dkm[cursor..(cursor + aksize)].to_vec(),
             ))?;
             cursor += key_to_segment_size(aksize, segment);
         }
@@ -475,22 +460,6 @@ impl Derive for Sp800Operation {
     fn derive_additional_key(
         &mut self,
     ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
-        if !self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        /* pops a key at a time from the the vectors, this returns keys
-         * in reverse order from creation, but that doesn't matter as
-         * the pointers in the original structure are what give the order
-         * back to the caller */
-        let obj = match self.addl_objects.pop() {
-            Some(o) => o,
-            None => return err_rv!(CKR_EXCEEDED_MAX_ITERATIONS),
-        };
-        /* len() here now point to the correct handler container because
-         * the lenght is always one more than the last object index and
-         * we just reduced by one the length of the objects array */
-        let hp = self.addl_drv_keys[self.addl_objects.len()].phKey;
-
-        Ok((obj, hp))
+        self.pop_key()
     }
 }

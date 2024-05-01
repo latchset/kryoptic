@@ -5,15 +5,14 @@ use super::attribute;
 use super::err_rv;
 use super::error;
 use super::interface;
+use super::mechanism;
 use super::object;
 
 use attribute::from_bytes;
 use error::{KError, KResult};
 use interface::*;
-use object::{Object, ObjectFactories};
-
-use super::mechanism;
 use mechanism::*;
+use object::{Object, ObjectFactories};
 
 use super::bytes_to_vec;
 
@@ -328,6 +327,26 @@ impl Sp800Operation {
             addl_objects: Vec::with_capacity(addl_drv_keys.len()),
         })
     }
+
+    fn pop_key(&mut self) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
+        if !self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        /* pops a key at a time from the the vectors, this returns keys
+         * in reverse order from creation, but that doesn't matter as
+         * the pointers in the original structure are what give the order
+         * back to the caller */
+        let obj = match self.addl_objects.pop() {
+            Some(o) => o,
+            None => return err_rv!(CKR_EXCEEDED_MAX_ITERATIONS),
+        };
+        /* len() here now point to the correct handler container because
+         * the length is always one more than the last object index and
+         * we just reduced by one the length of the objects array */
+        let hp = self.addl_drv_keys[self.addl_objects.len()].phKey;
+
+        Ok((obj, hp))
+    }
 }
 
 impl MechOperation for Sp800Operation {
@@ -336,4 +355,8 @@ impl MechOperation for Sp800Operation {
     }
 }
 
+#[cfg(feature = "fips")]
 include!("ossl/kdf.rs");
+
+#[cfg(not(feature = "fips"))]
+include!("sp800_108.rs");

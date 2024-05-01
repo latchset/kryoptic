@@ -4435,6 +4435,72 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(val, 16);
 
+    /* Test Sp800 108 feedback key derivation */
+    let mut class = CKO_SECRET_KEY;
+    let mut ktype = CKK_GENERIC_SECRET;
+    let mut len: CK_ULONG = 1234;
+    let mut truebool = CK_TRUE;
+    let derive_template = [
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
+        bLittleEndian: 0,
+        ulWidthInBits: 32,
+    };
+
+    let mut data_params = [
+        CK_PRF_DATA_PARAM {
+            type_: CK_SP800_108_ITERATION_VARIABLE,
+            pValue: std::ptr::null_mut(),
+            ulValueLen: 0,
+        },
+        CK_PRF_DATA_PARAM {
+            type_: CK_SP800_108_COUNTER,
+            pValue: &mut counter_format as *mut _ as CK_VOID_PTR,
+            ulValueLen: std::mem::size_of::<CK_SP800_108_COUNTER_FORMAT>()
+                as CK_ULONG,
+        },
+    ];
+
+    /* openssl requires 32 bit IV here */
+    #[cfg(feature = "fips")]
+    let mut iv = [123u8; 32];
+
+    #[cfg(not(feature = "fips"))]
+    let mut iv = [1u8; 5];
+
+    let mut params = CK_SP800_108_FEEDBACK_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: data_params.len() as CK_ULONG,
+        pDataParams: data_params.as_mut_ptr(),
+        ulIVLen: iv.len() as CK_ULONG,
+        pIV: iv.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SP800_108_FEEDBACK_KDF,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_SP800_108_FEEDBACK_KDF_PARAMS>()
+            as CK_ULONG,
+    };
+
+    let mut handle7 = CK_INVALID_HANDLE;
+    ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut handle7,
+    );
+    assert_eq!(ret, CKR_OK);
+
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
