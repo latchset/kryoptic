@@ -1145,8 +1145,13 @@ impl Encryption for AesOperation {
             CKM_AES_CCM => self.params.datalen + self.params.taglen,
             CKM_AES_GCM => data_len as usize + self.params.taglen,
             CKM_AES_CTR | CKM_AES_CTS => data_len as usize,
-            CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
+            CKM_AES_CBC | CKM_AES_ECB => {
                 ((data_len as usize + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE)
+                    * AES_BLOCK_SIZE
+            }
+            CKM_AES_CBC_PAD => {
+                // The PKCS#7 padding adds always at least 1 byte
+                ((data_len as usize + AES_BLOCK_SIZE) / AES_BLOCK_SIZE)
                     * AES_BLOCK_SIZE
             }
             #[cfg(not(feature = "fips"))]

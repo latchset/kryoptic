@@ -1564,10 +1564,21 @@ fn test_aes_operations() {
         ret = fn_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
-        /* Data of exactly one block in size will cause two blocks output */
+        /* Data of exactly one block in size will cause two block output
+         * The PKCS#11 specs are wrong here! */
         let data = "0123456789ABCDEF";
+        let mut enc_len: CK_ULONG = 0;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            std::ptr::null_mut(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 32);
+
         let enc: [u8; 32] = [0; 32];
-        let mut enc_len: CK_ULONG = 32;
         ret = fn_encrypt(
             session,
             CString::new(data).unwrap().into_raw() as *mut u8,
