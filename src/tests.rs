@@ -4079,6 +4079,86 @@ fn test_key() {
     ret = fn_encrypt_init(session, std::ptr::null_mut(), handle2);
     assert_eq!(ret, CKR_OK);
 
+    /* RSA 4k key pair */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS_KEY_PAIR_GEN,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut pubkey = CK_INVALID_HANDLE;
+    let mut prikey = CK_INVALID_HANDLE;
+
+    let mut len: CK_ULONG = 4096;
+    let mut pub_template = vec![
+        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_MODULUS_BITS, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_WRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+    let mut class = CKO_PRIVATE_KEY;
+    let mut ktype = CKK_RSA;
+    let mut pri_template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_UNWRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
+        make_attribute!(
+            CKA_EXTRACTABLE,
+            &mut truebool as *mut _,
+            CK_BBOOL_SIZE
+        ),
+    ];
+
+    ret = fn_generate_key_pair(
+        session,
+        &mut mechanism,
+        pub_template.as_mut_ptr(),
+        pub_template.len() as CK_ULONG,
+        pri_template.as_mut_ptr(),
+        pri_template.len() as CK_ULONG,
+        &mut pubkey,
+        &mut prikey,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    ret = fn_sign_init(session, &mut sig_mechanism, prikey);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "plaintext";
+    let sign: [u8; 512] = [0; 512];
+    let mut sign_len: CK_ULONG = 512;
+    ret = fn_sign(
+        session,
+        CString::new(data).unwrap().into_raw() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut _,
+        &mut sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sign_len, 512);
+
+    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
+    assert_eq!(ret, CKR_OK);
+
+    ret = fn_verify(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sign.as_ptr() as *mut u8,
+        sign_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
     /* EC key pair */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_EC_KEY_PAIR_GEN,
