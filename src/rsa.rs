@@ -130,14 +130,14 @@ impl RSAPrivFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PRIVATE_EXPONENT; OAFlags::Sensitive | OAFlags::Required | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PRIME_1; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PRIME_2; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_EXPONENT_1; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_EXPONENT_2; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_COEFFICIENT; OAFlags::Sensitive | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PRIVATE_EXPONENT; OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PRIME_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_PRIME_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_EXPONENT_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_EXPONENT_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_COEFFICIENT; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
 
         /* default to private */
         let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
@@ -213,9 +213,20 @@ impl PrivKeyFactory for RSAPrivFactory {
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        let mut attrs = template.to_vec();
-        let class = CKO_PRIVATE_KEY;
-        let key_type = CKK_RSA;
+        let mut key = self.default_object_unwrap(template)?;
+
+        if !key.check_or_set_attr(attribute::from_ulong(
+            CKA_CLASS,
+            CKO_PRIVATE_KEY,
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key
+            .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
+        {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+
         let (tlv, extra) = match asn1::strip_tlv(&data) {
             Ok(x) => x,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
@@ -237,56 +248,57 @@ impl PrivKeyFactory for RSAPrivFactory {
             Ok(k) => k,
             Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
         };
-        attrs.push(CK_ATTRIBUTE::from_slice(
+
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_MODULUS,
-            rsapkey.modulus.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.modulus.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PUBLIC_EXPONENT,
-            rsapkey.public_exponent.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.public_exponent.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PRIVATE_EXPONENT,
-            rsapkey.private_exponent.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.private_exponent.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PRIME_1,
-            rsapkey.prime1.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.prime1.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PRIME_2,
-            rsapkey.prime2.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.prime2.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_EXPONENT_1,
-            rsapkey.exponent1.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.exponent1.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_EXPONENT_2,
-            rsapkey.exponent2.as_nopad_bytes(),
-        ));
-        attrs.push(CK_ATTRIBUTE::from_slice(
+            rsapkey.exponent2.as_nopad_bytes().to_vec(),
+        ))? {
+            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+        }
+        if !key.check_or_set_attr(attribute::from_bytes(
             CKA_COEFFICIENT,
-            rsapkey.coefficient.as_nopad_bytes(),
-        ));
-
-        if match attrs.iter().position(|x| x.type_ == CKA_CLASS) {
-            Some(idx) => attrs[idx].to_ulong()?,
-            None => CK_UNAVAILABLE_INFORMATION,
-        } != class
-        {
+            rsapkey.coefficient.as_nopad_bytes().to_vec(),
+        ))? {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        if match attrs.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
-            Some(idx) => attrs[idx].to_ulong()?,
-            None => CK_UNAVAILABLE_INFORMATION,
-        } != key_type
-        {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
-        }
-
-        self.default_object_unwrap(&attrs)
+        Ok(key)
     }
 }
 

@@ -218,15 +218,11 @@ bitflags! {
         const Ignored              = 0b00000000000001;
         const Sensitive            = 0b00000000000010;
         const Defval               = 0b00000000000100;
-        const Required             = 0b00000000001000;
-        const RequiredOnCreate     = 0b00000000011000;
-        const RequiredOnGenerate   = 0b00000000101000;
-        const AlwaysRequired       = 0b00000000111000;
-        const Unsettable           = 0b00000001000000;
-        const UnsettableOnCreate   = 0b00000011000000;
-        const UnsettableOnGenerate = 0b00000101000000;
-        const UnsettableOnUnwrap   = 0b00001001000000;
-        const NeverSettable        = 0b00001111000000;
+        const RequiredOnCreate     = 0b00000000001000;
+        const RequiredOnGenerate   = 0b00000000010000;
+        const AlwaysRequired       = 0b00000000100000;
+        const SettableOnlyOnCreate = 0b00000010000000;
+        const NeverSettable        = 0b00000100000000;
         const Unchangeable         = 0b00010000000000;
         const ChangeToFalse        = 0b00110000000000;
         const ChangeToTrue         = 0b01010000000000;
@@ -319,7 +315,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     ) -> KResult<Object> {
         self.internal_object_create(
             template,
-            OAFlags::UnsettableOnCreate,
+            OAFlags::NeverSettable,
             OAFlags::RequiredOnCreate,
         )
     }
@@ -330,7 +326,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     ) -> KResult<Object> {
         self.internal_object_create(
             template,
-            OAFlags::UnsettableOnGenerate,
+            OAFlags::SettableOnlyOnCreate,
             OAFlags::RequiredOnGenerate,
         )
     }
@@ -341,15 +337,15 @@ pub trait ObjectFactory: Debug + Send + Sync {
     ) -> KResult<Object> {
         self.internal_object_create(
             template,
-            OAFlags::UnsettableOnUnwrap,
-            OAFlags::RequiredOnCreate,
+            OAFlags::SettableOnlyOnCreate,
+            OAFlags::AlwaysRequired,
         )
     }
 
     fn internal_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
-        unsettable_flags: OAFlags,
+        unacceptable_flags: OAFlags,
         required_flags: OAFlags,
     ) -> KResult<Object> {
         let attributes = self.get_attributes();
@@ -358,7 +354,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
-                    if attr.is(unsettable_flags) {
+                    if attr.is(unacceptable_flags)
+                        || attr.is(OAFlags::NeverSettable)
+                    {
                         return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
                     }
                     /* duplicate? */
@@ -381,7 +379,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
                 None => {
                     if attr.has_default() {
                         obj.attributes.push(attr.attribute.clone());
-                    } else if attr.is(required_flags) {
+                    } else if attr.is(required_flags)
+                        || attr.is(OAFlags::AlwaysRequired)
+                    {
                         return err_rv!(CKR_TEMPLATE_INCOMPLETE);
                     }
                 }
@@ -519,7 +519,7 @@ impl ObjectFactory for DataFactory {
 pub trait CertFactory {
     fn init_common_certificate_attrs(&self) -> Vec<ObjectAttr> {
         vec![
-            attr_element!(CKA_CERTIFICATE_TYPE; OAFlags::Required; from_ulong; val 0),
+            attr_element!(CKA_CERTIFICATE_TYPE; OAFlags::AlwaysRequired; from_ulong; val 0),
             attr_element!(CKA_TRUSTED; OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_CERTIFICATE_CATEGORY; OAFlags::Defval; from_ulong; val CK_CERTIFICATE_CATEGORY_UNSPECIFIED),
             attr_element!(CKA_CHECK_VALUE; OAFlags::Ignored; from_ignore; val None),
@@ -570,13 +570,13 @@ impl X509Factory {
             .append(&mut data.init_common_storage_attrs());
         data.attributes
             .append(&mut data.init_common_certificate_attrs());
-        data.attributes.push(attr_element!(CKA_SUBJECT; OAFlags::Required; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_SUBJECT; OAFlags::AlwaysRequired; from_bytes; val Vec::new()));
         data.attributes.push(
             attr_element!(CKA_ID; OAFlags::Defval; from_bytes; val Vec::new()),
         );
         data.attributes.push(attr_element!(CKA_ISSUER; OAFlags::Defval; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_SERIAL_NUMBER; OAFlags::Defval; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Required; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::AlwaysRequired; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_URL; OAFlags::empty(); from_string; val String::new()));
         data.attributes.push(attr_element!(CKA_HASH_OF_SUBJECT_PUBLIC_KEY; OAFlags::Defval; from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(CKA_HASH_OF_ISSUER_PUBLIC_KEY; OAFlags::Defval; from_bytes; val Vec::new()));
@@ -802,8 +802,8 @@ impl GenericSecretKeyFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_secret_key_attrs());
-        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::UnsettableOnGenerate | OAFlags::UnsettableOnUnwrap; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate | OAFlags::UnsettableOnCreate; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; from_bytes; val Vec::new()));
 
         /* default to private */
         let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
