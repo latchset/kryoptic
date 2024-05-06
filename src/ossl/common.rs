@@ -254,10 +254,11 @@ impl OsslParam {
         }
 
         let container = val.to_ne_bytes().to_vec();
-        unsafe {
-            OSSL_PARAM_construct_size_t(key, container.as_ptr() as *mut usize);
-        }
+        let param = unsafe {
+            OSSL_PARAM_construct_size_t(key, container.as_ptr() as *mut usize)
+        };
         self.v.push(container);
+        self.p.push(param);
         Ok(self)
     }
 
