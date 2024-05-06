@@ -21,6 +21,7 @@ use ossl::*;
 use std::mem::size_of;
 use std::os::raw::c_char;
 use std::os::raw::c_int;
+use std::os::raw::c_uint;
 use zeroize::Zeroize;
 
 #[cfg(not(feature = "fips"))]
@@ -552,7 +553,7 @@ impl RsaPKCSOperation {
         }
         let params = OsslParam::with_capacity(3)
             .add_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E), &exponent)?
-            .add_size_t(name_as_char(OSSL_PKEY_PARAM_BITS), bits)?
+            .add_uint(name_as_char(OSSL_PKEY_PARAM_RSA_BITS), bits as c_uint)?
             .finalize();
         let res = unsafe {
             EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
