@@ -5,6 +5,8 @@ use super::object;
 
 use interface::*;
 
+use std::os::raw::c_uint;
+
 macro_rules! ptr_wrapper {
     ($name:ident; $ossl:ident; $free:expr) => {
         #[derive(Debug)]
@@ -256,6 +258,24 @@ impl OsslParam {
         let container = val.to_ne_bytes().to_vec();
         let param = unsafe {
             OSSL_PARAM_construct_size_t(key, container.as_ptr() as *mut usize)
+        };
+        self.v.push(container);
+        self.p.push(param);
+        Ok(self)
+    }
+
+    pub fn add_uint(
+        mut self,
+        key: *const c_char,
+        val: c_uint,
+    ) -> KResult<OsslParam> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let container = val.to_ne_bytes().to_vec();
+        let param = unsafe {
+            OSSL_PARAM_construct_uint(key, container.as_ptr() as *mut c_uint)
         };
         self.v.push(container);
         self.p.push(param);
