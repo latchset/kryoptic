@@ -795,6 +795,13 @@ impl AesOperation {
                     keydata.resize(keydata.len() + AES_BLOCK_SIZE - pad, 0);
                 }
             }
+            CKM_AES_CCM => {
+                /* Check the data length in CCM matches the provided data -- this is one-shot
+                 * operation only */
+                if op.params.datalen != keydata.len() {
+                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                }
+            }
             _ => (),
         }
         let result = op.encrypt(&keydata, output, output_len);
