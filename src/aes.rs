@@ -21,7 +21,11 @@ use mechanism::*;
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
-fn check_key_len(len: CK_ULONG) -> KResult<()> {
+const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
+const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
+const AES_BLOCK_SIZE: usize = 16;
+
+fn check_key_len(len: usize) -> KResult<()> {
     match len {
         16 | 24 | 32 => Ok(()),
         _ => err_rv!(CKR_KEY_SIZE_RANGE),
@@ -65,9 +69,9 @@ impl AesKeyFactory {
 impl ObjectFactory for AesKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let mut obj = self.default_object_create(template)?;
-        let key_len = Self::get_key_len(&obj)?;
-        check_key_len(key_len)?;
-        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, key_len))? {
+        let len = self.get_key_buffer_len(&obj)?;
+        check_key_len(len)?;
+        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))? {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
 
@@ -102,7 +106,7 @@ impl ObjectFactory for AesKeyFactory {
             }
             None => (),
         }
-        match check_key_len(data.len() as CK_ULONG) {
+        match check_key_len(data.len()) {
             Ok(_) => (),
             Err(e) => {
                 data.zeroize();
@@ -110,6 +114,26 @@ impl ObjectFactory for AesKeyFactory {
             }
         }
         SecretKeyFactory::import_from_wrapped(self, data, template)
+    }
+
+    fn default_object_derive(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        origin: &Object,
+    ) -> KResult<Object> {
+        let obj = self.internal_object_derive(template, origin)?;
+
+        let key_len = self.get_key_len(&obj);
+        if key_len != 0 {
+            if check_key_len(key_len).is_err() {
+                return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            }
+        }
+        Ok(obj)
+    }
+
+    fn as_secret_key_factory(&self) -> KResult<&dyn SecretKeyFactory> {
+        Ok(self)
     }
 }
 
@@ -121,6 +145,14 @@ impl SecretKeyFactory for AesKeyFactory {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         ObjectFactory::default_object_unwrap(self, template)
+    }
+
+    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> KResult<()> {
+        let keylen = key.len();
+        check_key_len(keylen)?;
+        obj.set_attr(from_bytes(CKA_VALUE, key))?;
+        self.set_key_len(obj, keylen)?;
+        Ok(())
     }
 }
 
@@ -188,10 +220,10 @@ impl Mechanism for AesMechanism {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)?;
+        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
         check_key_len(value_len)?;
 
-        let mut value: Vec<u8> = vec![0; value_len as usize];
+        let mut value: Vec<u8> = vec![0; value_len];
         match super::CSPRNG
             .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
         {
@@ -239,10 +271,176 @@ impl Mechanism for AesMechanism {
         let keydata = AesOperation::unwrap(mech, wrapping_key, data)?;
         key_template.import_from_wrapped(keydata, template)
     }
+
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+
+        let kdf = match mech.mechanism {
+            CKM_AES_ECB_ENCRYPT_DATA => {
+                if mech.ulParameterLen as usize
+                    != ::std::mem::size_of::<CK_KEY_DERIVATION_STRING_DATA>()
+                {
+                    return err_rv!(CKR_ARGUMENTS_BAD);
+                }
+                AesKDFOperation::aes_ecb_new(
+                    mech.pParameter as *const CK_KEY_DERIVATION_STRING_DATA,
+                )?
+            }
+            CKM_AES_CBC_ENCRYPT_DATA => {
+                if mech.ulParameterLen as usize
+                    != ::std::mem::size_of::<CK_AES_CBC_ENCRYPT_DATA_PARAMS>()
+                {
+                    return err_rv!(CKR_ARGUMENTS_BAD);
+                }
+                AesKDFOperation::aes_cbc_new(
+                    mech.pParameter as *const CK_AES_CBC_ENCRYPT_DATA_PARAMS,
+                )?
+            }
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        Ok(Operation::Derive(Box::new(kdf)))
+    }
+}
+
+#[derive(Debug)]
+struct AesKDFOperation<'a> {
+    prf: CK_MECHANISM_TYPE,
+    finalized: bool,
+    iv: &'a [u8],
+    data: &'a [u8],
+}
+
+impl AesKDFOperation<'_> {
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        if mechs.get(CKM_AES_ECB).is_ok() {
+            mechs.add_mechanism(
+                CKM_AES_ECB_ENCRYPT_DATA,
+                Box::new(AesMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: MIN_AES_SIZE_BYTES as CK_ULONG,
+                        ulMaxKeySize: MAX_AES_SIZE_BYTES as CK_ULONG,
+                        flags: CKF_DERIVE,
+                    },
+                }),
+            );
+        }
+        if mechs.get(CKM_AES_CBC).is_ok() {
+            mechs.add_mechanism(
+                CKM_AES_CBC_ENCRYPT_DATA,
+                Box::new(AesMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: MIN_AES_SIZE_BYTES as CK_ULONG,
+                        ulMaxKeySize: MAX_AES_SIZE_BYTES as CK_ULONG,
+                        flags: CKF_DERIVE,
+                    },
+                }),
+            );
+        }
+    }
+
+    fn aes_ecb_new<'a>(
+        params: *const CK_KEY_DERIVATION_STRING_DATA,
+    ) -> KResult<AesKDFOperation<'a>> {
+        let p = unsafe { *params };
+        if p.pData == std::ptr::null_mut() || p.ulLen == 0 || p.ulLen % 16 != 0
+        {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+        Ok(AesKDFOperation {
+            prf: CKM_AES_ECB,
+            finalized: false,
+            iv: &[],
+            data: unsafe {
+                std::slice::from_raw_parts(p.pData, p.ulLen as usize)
+            },
+        })
+    }
+
+    fn aes_cbc_new<'a>(
+        params: *const CK_AES_CBC_ENCRYPT_DATA_PARAMS,
+    ) -> KResult<AesKDFOperation<'a>> {
+        let p = unsafe { *params };
+        if p.pData == std::ptr::null_mut()
+            || p.length == 0
+            || p.length % 16 != 0
+        {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+        Ok(AesKDFOperation {
+            prf: CKM_AES_CBC,
+            finalized: false,
+            iv: unsafe {
+                std::slice::from_raw_parts((*params).iv.as_ptr(), 16)
+            },
+            data: unsafe {
+                std::slice::from_raw_parts(p.pData, p.length as usize)
+            },
+        })
+    }
+}
+
+impl MechOperation for AesKDFOperation<'_> {
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+}
+
+impl Derive for AesKDFOperation<'_> {
+    fn derive(
+        &mut self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+        _mechanisms: &Mechanisms,
+        objfactories: &ObjectFactories,
+    ) -> KResult<(Object, usize)> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.finalized = true;
+
+        key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DERIVE)?;
+
+        let factory =
+            objfactories.get_obj_factory_from_key_template(template)?;
+        let mut obj = factory.default_object_derive(template, key)?;
+
+        let mechanism = CK_MECHANISM {
+            mechanism: self.prf,
+            pParameter: if self.iv.len() > 0 {
+                self.iv.as_ptr() as CK_VOID_PTR
+            } else {
+                std::ptr::null_mut()
+            },
+            ulParameterLen: self.iv.len() as CK_ULONG,
+        };
+        let mut op = AesOperation::encrypt_new(&mechanism, key)?;
+
+        let keysize = op.encryption_len(self.data.len() as CK_ULONG)?;
+
+        let mut dkm = vec![0u8; keysize];
+        let mut outsize = keysize as CK_ULONG;
+        op.encrypt(self.data, dkm.as_mut_ptr(), &mut outsize)?;
+        if (outsize as usize) != keysize {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        factory.as_secret_key_factory()?.set_key(&mut obj, dkm)?;
+
+        Ok((obj, 0))
+    }
+
+    fn derive_additional_key(
+        &mut self,
+    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
 }
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     AesOperation::register_mechanisms(mechs);
+    AesKDFOperation::register_mechanisms(mechs);
 
     ot.add_factory(ObjectType::new(CKO_SECRET_KEY, CKK_AES), &AES_KEY_FACTORY);
 }
