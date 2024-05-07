@@ -382,6 +382,14 @@ pub trait ObjectFactory: Debug + Send + Sync {
         template: &[CK_ATTRIBUTE],
         origin: &Object,
     ) -> KResult<Object> {
+        self.internal_object_derive(template, origin)
+    }
+
+    fn internal_object_derive(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        origin: &Object,
+    ) -> KResult<Object> {
         /* FIXME: handle CKA_DERIVE_TEMPLATE */
 
         let mut obj = self.internal_object_create(
@@ -549,6 +557,10 @@ pub trait ObjectFactory: Debug + Send + Sync {
         _template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         return err_rv!(CKR_GENERAL_ERROR);
+    }
+
+    fn as_secret_key_factory(&self) -> KResult<&dyn SecretKeyFactory> {
+        err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
@@ -840,8 +852,7 @@ pub trait SecretKeyFactory {
     ) -> KResult<Object> {
         let mut obj =
             ok_or_clear!(&mut data; self.default_object_unwrap(template));
-        ok_or_clear!(&mut data; obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, data.len() as CK_ULONG)));
-        obj.set_attr(from_bytes(CKA_VALUE, data))?;
+        self.set_key(&mut obj, data)?;
         Ok(obj)
     }
 
@@ -850,14 +861,47 @@ pub trait SecretKeyFactory {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object>;
 
-    fn get_key_len(obj: &Object) -> KResult<CK_ULONG> {
+    fn get_key_buffer_len(&self, obj: &Object) -> KResult<usize> {
         match obj.get_attr_as_bytes(CKA_VALUE) {
-            Ok(k) => Ok(k.len() as CK_ULONG),
+            Ok(k) => Ok(k.len()),
             Err(e) => match e {
                 KError::NotFound(_) => err_rv!(CKR_TEMPLATE_INCOMPLETE),
                 _ => Err(e),
             },
         }
+    }
+
+    fn get_key_len(&self, obj: &Object) -> usize {
+        match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
+            Ok(l) => l as usize,
+            Err(_) => 0,
+        }
+    }
+
+    fn set_key_len(&self, obj: &mut Object, len: usize) -> KResult<()> {
+        match self.get_key_buffer_len(obj) {
+            Ok(blen) => {
+                if len != blen {
+                    return err_rv!(CKR_GENERAL_ERROR);
+                }
+            }
+            Err(_) => (),
+        }
+        if obj
+            .check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))
+            .is_ok()
+        {
+            Ok(())
+        } else {
+            err_rv!(CKR_GENERAL_ERROR)
+        }
+    }
+
+    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> KResult<()> {
+        let keylen = key.len();
+        obj.set_attr(from_bytes(CKA_VALUE, key))?;
+        self.set_key_len(obj, keylen)?;
+        Ok(())
     }
 }
 
@@ -899,11 +943,11 @@ impl GenericSecretKeyFactory {
 impl ObjectFactory for GenericSecretKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
         let mut obj = self.default_object_create(template)?;
-        let key_len = Self::get_key_len(&obj)?;
-        if key_len == 0 {
+        let len = self.get_key_buffer_len(&obj)?;
+        if len == 0 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, key_len))? {
+        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))? {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
 
@@ -924,6 +968,10 @@ impl ObjectFactory for GenericSecretKeyFactory {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         SecretKeyFactory::import_from_wrapped(self, data, template)
+    }
+
+    fn as_secret_key_factory(&self) -> KResult<&dyn SecretKeyFactory> {
+        Ok(self)
     }
 }
 

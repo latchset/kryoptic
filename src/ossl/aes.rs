@@ -14,9 +14,6 @@ use zeroize::Zeroize;
 
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 
-const MIN_AES_SIZE_BYTES: usize = 16;
-const MAX_AES_SIZE_BYTES: usize = 32;
-const AES_BLOCK_SIZE: usize = 16;
 const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
 const AES_192_CBC_CTS: &[u8; 16] = b"AES-192-CBC-CTS\0";
 const AES_256_CBC_CTS: &[u8; 16] = b"AES-256-CBC-CTS\0";
@@ -119,7 +116,7 @@ impl Drop for AesKey {
 
 fn object_to_raw_key(key: &Object) -> KResult<AesKey> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
-    check_key_len(val.len() as CK_ULONG)?;
+    check_key_len(val.len())?;
     Ok(AesKey { raw: val.clone() })
 }
 
