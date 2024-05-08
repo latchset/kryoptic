@@ -11,8 +11,10 @@ use constant_time_eq::constant_time_eq;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
-use object::{Object, ObjectFactories};
+use object::{GenericSecretKeyFactory, Object, ObjectFactories, ObjectFactory};
 use std::fmt::Debug;
+
+use once_cell::sync::Lazy;
 use zeroize::Zeroize;
 
 fn check_and_fetch_key(
@@ -150,73 +152,99 @@ impl Mechanism for HMACMechanism {
     }
 }
 
+static HMAC_MECH_SET: [(
+    CK_MECHANISM_TYPE,
+    CK_MECHANISM_TYPE,
+    CK_MECHANISM_TYPE,
+    CK_MECHANISM_TYPE,
+    CK_KEY_TYPE,
+); 9] = [
+    (
+        CKM_SHA_1,
+        CKM_SHA_1_HMAC,
+        CKM_SHA_1_HMAC_GENERAL,
+        CKM_SHA_1_KEY_GEN,
+        CKK_SHA_1_HMAC,
+    ),
+    (
+        CKM_SHA224,
+        CKM_SHA224_HMAC,
+        CKM_SHA224_HMAC_GENERAL,
+        CKM_SHA224_KEY_GEN,
+        CKK_SHA224_HMAC,
+    ),
+    (
+        CKM_SHA256,
+        CKM_SHA256_HMAC,
+        CKM_SHA256_HMAC_GENERAL,
+        CKM_SHA256_KEY_GEN,
+        CKK_SHA256_HMAC,
+    ),
+    (
+        CKM_SHA384,
+        CKM_SHA384_HMAC,
+        CKM_SHA384_HMAC_GENERAL,
+        CKM_SHA384_KEY_GEN,
+        CKK_SHA384_HMAC,
+    ),
+    (
+        CKM_SHA512,
+        CKM_SHA512_HMAC,
+        CKM_SHA512_HMAC_GENERAL,
+        CKM_SHA512_KEY_GEN,
+        CKK_SHA512_HMAC,
+    ),
+    (
+        CKM_SHA3_224,
+        CKM_SHA3_224_HMAC,
+        CKM_SHA3_224_HMAC_GENERAL,
+        CKM_SHA3_224_KEY_GEN,
+        CKK_SHA3_224_HMAC,
+    ),
+    (
+        CKM_SHA3_256,
+        CKM_SHA3_256_HMAC,
+        CKM_SHA3_256_HMAC_GENERAL,
+        CKM_SHA3_256_KEY_GEN,
+        CKK_SHA3_256_HMAC,
+    ),
+    (
+        CKM_SHA3_384,
+        CKM_SHA3_384_HMAC,
+        CKM_SHA3_384_HMAC_GENERAL,
+        CKM_SHA3_384_KEY_GEN,
+        CKK_SHA3_384_HMAC,
+    ),
+    (
+        CKM_SHA3_512,
+        CKM_SHA3_512_HMAC,
+        CKM_SHA3_512_HMAC_GENERAL,
+        CKM_SHA3_512_KEY_GEN,
+        CKK_SHA3_512_HMAC,
+    ),
+];
+
+static HMAC_SECRET_KEY_FACTORIES: Lazy<
+    Vec<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>,
+> = Lazy::new(|| {
+    let mut v = Vec::<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>::with_capacity(
+        HMAC_MECH_SET.len(),
+    );
+    for hs in &HMAC_MECH_SET {
+        let hashop = match hash::HashOperation::new(hs.0) {
+            Ok(op) => op,
+            Err(_) => continue,
+        };
+        v.push((
+            hs.4,
+            Box::new(GenericSecretKeyFactory::with_key_size(hashop.hashlen())),
+        ));
+    }
+    v
+});
+
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    let regset = [
-        (
-            CKM_SHA_1,
-            CKM_SHA_1_HMAC,
-            CKM_SHA_1_HMAC_GENERAL,
-            CKM_SHA_1_KEY_GEN,
-            CKK_SHA_1_HMAC,
-        ),
-        (
-            CKM_SHA224,
-            CKM_SHA224_HMAC,
-            CKM_SHA224_HMAC_GENERAL,
-            CKM_SHA224_KEY_GEN,
-            CKK_SHA224_HMAC,
-        ),
-        (
-            CKM_SHA256,
-            CKM_SHA256_HMAC,
-            CKM_SHA256_HMAC_GENERAL,
-            CKM_SHA256_KEY_GEN,
-            CKK_SHA256_HMAC,
-        ),
-        (
-            CKM_SHA384,
-            CKM_SHA384_HMAC,
-            CKM_SHA384_HMAC_GENERAL,
-            CKM_SHA384_KEY_GEN,
-            CKK_SHA384_HMAC,
-        ),
-        (
-            CKM_SHA512,
-            CKM_SHA512_HMAC,
-            CKM_SHA512_HMAC_GENERAL,
-            CKM_SHA512_KEY_GEN,
-            CKK_SHA512_HMAC,
-        ),
-        (
-            CKM_SHA3_224,
-            CKM_SHA3_224_HMAC,
-            CKM_SHA3_224_HMAC_GENERAL,
-            CKM_SHA3_224_KEY_GEN,
-            CKK_SHA3_224_HMAC,
-        ),
-        (
-            CKM_SHA3_256,
-            CKM_SHA3_256_HMAC,
-            CKM_SHA3_256_HMAC_GENERAL,
-            CKM_SHA3_256_KEY_GEN,
-            CKK_SHA3_256_HMAC,
-        ),
-        (
-            CKM_SHA3_384,
-            CKM_SHA3_384_HMAC,
-            CKM_SHA3_384_HMAC_GENERAL,
-            CKM_SHA3_384_KEY_GEN,
-            CKK_SHA3_384_HMAC,
-        ),
-        (
-            CKM_SHA3_512,
-            CKM_SHA3_512_HMAC,
-            CKM_SHA3_512_HMAC_GENERAL,
-            CKM_SHA3_512_KEY_GEN,
-            CKK_SHA3_512_HMAC,
-        ),
-    ];
-    for rs in regset {
+    for rs in &HMAC_MECH_SET {
         /* skip HMACs for which we do not have a valid HASHes */
         let hashop = match hash::HashOperation::new(rs.0) {
             Ok(op) => op,
@@ -253,10 +281,10 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
             rs.3,
             Box::new(object::GenericSecretKeyMechanism::new(rs.4)),
         );
-        ot.add_factory(
-            object::ObjectType::new(CKO_SECRET_KEY, rs.4),
-            &object::get_generic_secret_factory(),
-        );
+    }
+
+    for f in Lazy::force(&HMAC_SECRET_KEY_FACTORIES) {
+        ot.add_factory(object::ObjectType::new(CKO_SECRET_KEY, f.0), &f.1);
     }
 }
 

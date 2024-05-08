@@ -43,18 +43,8 @@ impl HashOperation {
     }
 
     fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[
-            CKM_SHA_1,
-            CKM_SHA224,
-            CKM_SHA256,
-            CKM_SHA384,
-            CKM_SHA512,
-            CKM_SHA3_224,
-            CKM_SHA3_256,
-            CKM_SHA3_384,
-            CKM_SHA3_512,
-        ] {
-            mechs.add_mechanism(*ckm, Self::new_mechanism());
+        for ckm in &HASH_MECH_SET {
+            mechs.add_mechanism(ckm.0, Self::new_mechanism());
         }
     }
 
