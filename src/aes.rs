@@ -22,6 +22,7 @@ use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
 const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
+const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
 const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
 const AES_BLOCK_SIZE: usize = 16;
 
@@ -153,6 +154,18 @@ impl SecretKeyFactory for AesKeyFactory {
         obj.set_attr(from_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
+    }
+
+    fn recommend_key_size(&self, max: usize) -> KResult<usize> {
+        if max >= MAX_AES_SIZE_BYTES {
+            Ok(MAX_AES_SIZE_BYTES)
+        } else if max > MID_AES_SIZE_BYTES {
+            Ok(MID_AES_SIZE_BYTES)
+        } else if max > MIN_AES_SIZE_BYTES {
+            Ok(MIN_AES_SIZE_BYTES)
+        } else {
+            err_rv!(CKR_KEY_SIZE_RANGE)
+        }
     }
 }
 

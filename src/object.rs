@@ -193,9 +193,11 @@ impl Object {
         if self.get_attr_as_ulong(CKA_CLASS)? != class {
             return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
         }
-        let kt = self.get_attr_as_ulong(CKA_KEY_TYPE)?;
-        if kt != ktype {
-            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+        if ktype != CK_UNAVAILABLE_INFORMATION {
+            let kt = self.get_attr_as_ulong(CKA_KEY_TYPE)?;
+            if kt != ktype {
+                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            }
         }
         if self.get_attr_as_bool(op).or(Ok(false))? {
             return Ok(());
@@ -903,17 +905,23 @@ pub trait SecretKeyFactory {
         self.set_key_len(obj, keylen)?;
         Ok(())
     }
+
+    fn recommend_key_size(&self, _: usize) -> KResult<usize> {
+        return err_rv!(CKR_GENERAL_ERROR);
+    }
 }
 
 /* pkcs11-spec-v3.1 6.8 Generic secret key */
 #[derive(Debug)]
-struct GenericSecretKeyFactory {
+pub struct GenericSecretKeyFactory {
+    keysize: usize,
     attributes: Vec<ObjectAttr>,
 }
 
 impl GenericSecretKeyFactory {
-    fn new() -> GenericSecretKeyFactory {
+    pub fn new() -> GenericSecretKeyFactory {
         let mut data: GenericSecretKeyFactory = GenericSecretKeyFactory {
+            keysize: 0,
             attributes: Vec::new(),
         };
         data.attributes.append(&mut data.init_common_object_attrs());
@@ -938,6 +946,12 @@ impl GenericSecretKeyFactory {
 
         data
     }
+
+    pub fn with_key_size(size: usize) -> GenericSecretKeyFactory {
+        let mut factory = Self::new();
+        factory.keysize = size;
+        factory
+    }
 }
 
 impl ObjectFactory for GenericSecretKeyFactory {
@@ -945,6 +959,9 @@ impl ObjectFactory for GenericSecretKeyFactory {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
+            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+        if self.keysize != 0 && len != self.keysize {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))? {
@@ -983,6 +1000,14 @@ impl SecretKeyFactory for GenericSecretKeyFactory {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
         ObjectFactory::default_object_unwrap(self, template)
+    }
+
+    fn recommend_key_size(&self, max: usize) -> KResult<usize> {
+        if self.keysize != 0 {
+            Ok(self.keysize)
+        } else {
+            Ok(max)
+        }
     }
 }
 
@@ -1340,10 +1365,6 @@ static X509_CERT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
 
 static GENERIC_SECRET_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(GenericSecretKeyFactory::new()));
-
-pub fn get_generic_secret_factory() -> &'static Box<dyn ObjectFactory> {
-    &GENERIC_SECRET_FACTORY
-}
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     mechs.add_mechanism(
