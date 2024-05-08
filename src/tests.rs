@@ -4501,6 +4501,91 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* Test AES_ECB/AES_CBC Key derivation */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_GEN,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut class = CKO_SECRET_KEY;
+    let mut ktype = CKK_AES;
+    let mut len: CK_ULONG = 32;
+    let mut truebool = CK_TRUE;
+    let mut template = vec![
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    let mut aeskey = CK_INVALID_HANDLE;
+    ret = fn_generate_key(
+        session,
+        &mut mechanism,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut aeskey,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut class = CKO_SECRET_KEY;
+    let mut ktype = CKK_AES;
+    let mut len: CK_ULONG = 16;
+    let mut truebool = CK_TRUE;
+    let derive_template = [
+        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
+        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
+    ];
+
+    let data = "derive keys data";
+    let mut derive_params = CK_KEY_DERIVATION_STRING_DATA {
+        pData: data.as_ptr() as CK_BYTE_PTR,
+        ulLen: data.len() as CK_ULONG,
+    };
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_AES_ECB_ENCRYPT_DATA,
+        pParameter: &mut derive_params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_KEY_DERIVATION_STRING_DATA>()
+            as CK_ULONG,
+    };
+
+    let mut aeskey2 = CK_INVALID_HANDLE;
+    ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        aeskey,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut aeskey2,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut derive_params = CK_AES_CBC_ENCRYPT_DATA_PARAMS {
+        iv: [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        pData: data.as_ptr() as CK_BYTE_PTR,
+        length: data.len() as CK_ULONG,
+    };
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_ENCRYPT_DATA,
+        pParameter: &mut derive_params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_AES_CBC_ENCRYPT_DATA_PARAMS>()
+            as CK_ULONG,
+    };
+
+    let mut aeskey3 = CK_INVALID_HANDLE;
+    ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        aeskey2,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut aeskey3,
+    );
+    assert_eq!(ret, CKR_OK);
+
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
