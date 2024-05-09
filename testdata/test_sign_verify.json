@@ -78,6 +78,8 @@
         "CKA_DESTROYABLE": false,
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
+        "CKA_SIGN": true,
+        "CKA_VERIFY": true,
         "CKA_VALUE": "VEVTVEtFWQ==",
         "CKA_TOKEN": true
     }
@@ -145,6 +147,8 @@
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
         "CKA_VALUE": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "CKA_SIGN": true,
+        "CKA_VERIFY": true,
         "CKA_TOKEN": true
     }
 }, {
