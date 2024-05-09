@@ -32,6 +32,14 @@ pub trait Mechanism: Debug + Send + Sync {
     fn digest_new(&self, _: &CK_MECHANISM) -> KResult<Box<dyn Digest>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
+    fn mac_new(
+        &self,
+        _: &CK_MECHANISM,
+        _: &object::Object,
+        _: CK_FLAGS,
+    ) -> KResult<Box<dyn Mac>> {
+        err_rv!(CKR_MECHANISM_INVALID)
+    }
     fn sign_new(
         &self,
         _: &CK_MECHANISM,
@@ -218,6 +226,21 @@ pub trait Digest: MechOperation {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn digest_len(&self) -> KResult<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+}
+
+pub trait Mac: MechOperation {
+    fn mac(&mut self, _data: &[u8], _digest: &mut [u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn mac_update(&mut self, _data: &[u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn mac_final(&mut self, _digest: &mut [u8]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn mac_len(&self) -> KResult<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
