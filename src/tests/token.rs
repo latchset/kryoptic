@@ -7,8 +7,8 @@ use tests::*;
 use std::env;
 
 fn test_token(name: &str) {
-    let mut testdata = TestData::new(name);
-    testdata.setup_db(None);
+    let mut testtokn = TestToken::new(name);
+    testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -18,7 +18,7 @@ fn test_token(name: &str) {
         let list: CK_FUNCTION_LIST = *plist;
         match list.C_Initialize {
             Some(value) => {
-                let mut args = testdata.make_init_args();
+                let mut args = testtokn.make_init_args();
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -27,12 +27,12 @@ fn test_token(name: &str) {
         }
     }
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 fn test_token_env(name: &str) {
-    let mut testdata = TestData::new(name);
-    testdata.setup_db(None);
+    let mut testtokn = TestToken::new(name);
+    testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -42,9 +42,9 @@ fn test_token_env(name: &str) {
         let list: CK_FUNCTION_LIST = *plist;
         match list.C_Initialize {
             Some(init_fn) => {
-                let mut args = testdata.make_empty_init_args();
+                let mut args = testtokn.make_empty_init_args();
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-                env::set_var("KRYOPTIC_CONF", testdata.make_init_string());
+                env::set_var("KRYOPTIC_CONF", testtokn.make_init_string());
                 let ret = init_fn(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
             }
@@ -52,12 +52,12 @@ fn test_token_env(name: &str) {
         }
     }
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 fn test_token_null_args(name: &str) {
-    let mut testdata = TestData::new(name);
-    testdata.setup_db(None);
+    let mut testtokn = TestToken::new(name);
+    testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -67,7 +67,7 @@ fn test_token_null_args(name: &str) {
         let list: CK_FUNCTION_LIST = *plist;
         match list.C_Initialize {
             Some(init_fn) => {
-                env::set_var("KRYOPTIC_CONF", testdata.make_init_string());
+                env::set_var("KRYOPTIC_CONF", testtokn.make_init_string());
                 let ret = init_fn(std::ptr::null_mut());
                 assert_eq!(ret, CKR_OK)
             }
@@ -75,7 +75,7 @@ fn test_token_null_args(name: &str) {
         }
     }
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
