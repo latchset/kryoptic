@@ -37,6 +37,8 @@ struct TestData<'a> {
     filename: &'a str,
     finalize: Option<RwLockWriteGuard<'a, u64>>,
     sync: Option<RwLockReadGuard<'a, u64>>,
+    session: CK_SESSION_HANDLE,
+    session_rw: bool,
 }
 
 impl TestData<'_> {
@@ -48,6 +50,8 @@ impl TestData<'_> {
             filename: filename,
             finalize: test_finalizer(),
             sync: Some(SYNC.read().unwrap()),
+            session: CK_INVALID_HANDLE,
+            session_rw: false,
         }
     }
 
@@ -121,6 +125,8 @@ impl TestData<'_> {
     }
 
     fn finalize(&mut self) {
+        self.logout();
+        self.close_session();
         if self.finalize.is_none() {
             self.sync = None;
             /* wait until we can read, which means the winner finalized the module */
@@ -136,58 +142,86 @@ impl TestData<'_> {
         }
         std::fs::remove_file(self.filename).unwrap_or(());
     }
+
+    fn initialized<'a>(filename: &'a str, db: Option<&'a str>) -> TestData<'a> {
+        let mut td = Self::new(filename);
+        td.setup_db(db);
+
+        let mut args = td.make_init_args();
+        let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+        let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+        assert_eq!(ret, CKR_OK);
+        td
+    }
+
+    fn get_session(&mut self, rw: bool) -> CK_SESSION_HANDLE {
+        if self.session != CK_INVALID_HANDLE {
+            if rw == self.session_rw {
+                return self.session;
+            }
+            self.close_session();
+        }
+        let mut flags = CKF_SERIAL_SESSION;
+        if rw {
+            flags |= CKF_RW_SESSION;
+        };
+        let ret = fn_open_session(
+            self.get_slot(),
+            flags,
+            std::ptr::null_mut(),
+            None,
+            &mut self.session,
+        );
+        assert_eq!(ret, CKR_OK);
+        self.session
+    }
+
+    fn login(&mut self) {
+        let pin = "12345678";
+        let ret = fn_login(
+            self.session,
+            CKU_USER,
+            pin.as_ptr() as *mut _,
+            pin.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+    }
+
+    fn logout(&self) {
+        if self.session != CK_INVALID_HANDLE {
+            fn_logout(self.session);
+        }
+    }
+
+    fn close_session(&mut self) {
+        if self.session != CK_INVALID_HANDLE {
+            let ret = fn_close_session(self.session);
+            assert_eq!(ret, CKR_OK);
+            self.session = CK_INVALID_HANDLE;
+        }
+    }
 }
 
 #[test]
 fn test_random() {
-    let mut testdata = TestData::new("test_random.json");
-    testdata.setup_db(None);
+    let mut testdata = TestData::initialized("test_random.json", None);
+    let session = testdata.get_session(false);
 
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut handle,
-    );
-    assert_eq!(ret, CKR_OK);
     let data: &[u8] = &mut [0, 0, 0, 0];
-    ret = fn_generate_random(
-        handle,
+    let ret = fn_generate_random(
+        session,
         data.as_ptr() as *mut u8,
         data.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
     assert_ne!(data, &[0, 0, 0, 0]);
-    ret = fn_close_session(handle);
-    assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
 }
 
 fn test_login(name: &str) {
-    let mut testdata = TestData::new(name);
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    let mut handle: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut handle,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata = TestData::initialized(name, None);
+    let session = testdata.get_session(false);
 
     let mut info = CK_SESSION_INFO {
         slotID: CK_UNAVAILABLE_INFORMATION,
@@ -195,20 +229,21 @@ fn test_login(name: &str) {
         flags: 0,
         ulDeviceError: 0,
     };
-    ret = fn_get_session_info(handle, &mut info);
+    let ret = fn_get_session_info(session, &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RO_PUBLIC_SESSION);
 
-    let mut handle2: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
+    let mut session2: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    let ret = fn_open_session(
         testdata.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
-        &mut handle2,
+        &mut session2,
     );
     assert_eq!(ret, CKR_OK);
-    ret = fn_get_session_info(handle2, &mut info);
+
+    let ret = fn_get_session_info(session2, &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RW_PUBLIC_SESSION);
 
@@ -223,14 +258,14 @@ fn test_login(name: &str) {
 
     /* check pin flags */
     let mut token_info = CK_TOKEN_INFO::default();
-    ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    let ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, 0);
 
     /* fail login first */
     let pin = "87654321";
-    ret = fn_login(
-        handle,
+    let ret = fn_login(
+        session,
         CKU_USER,
         pin.as_ptr() as *mut _,
         pin.len() as CK_ULONG,
@@ -239,14 +274,14 @@ fn test_login(name: &str) {
 
     /* check pin flags */
     let mut token_info = CK_TOKEN_INFO::default();
-    ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    let ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, CKF_USER_PIN_COUNT_LOW);
 
     /* login */
     let pin = "12345678";
-    ret = fn_login(
-        handle,
+    let ret = fn_login(
+        session,
         CKU_USER,
         pin.as_ptr() as *mut _,
         pin.len() as CK_ULONG,
@@ -255,43 +290,41 @@ fn test_login(name: &str) {
 
     /* check pin flags */
     let mut token_info = CK_TOKEN_INFO::default();
-    ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    let ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, 0);
 
-    ret = fn_get_session_info(handle, &mut info);
+    let ret = fn_get_session_info(session, &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RO_USER_FUNCTIONS);
 
-    ret = fn_get_session_info(handle2, &mut info);
+    let ret = fn_get_session_info(session2, &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RW_USER_FUNCTIONS);
 
-    ret = fn_login(
-        handle,
+    let ret = fn_login(
+        session,
         CKU_USER,
         pin.as_ptr() as *mut _,
         pin.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_USER_ALREADY_LOGGED_IN);
 
-    ret = fn_logout(handle2);
+    let ret = fn_logout(session2);
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_get_session_info(handle, &mut info);
+    let ret = fn_get_session_info(session, &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RO_PUBLIC_SESSION);
 
-    ret = fn_get_session_info(handle2, &mut info);
+    let ret = fn_get_session_info(session2, &mut info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(info.state, CKS_RW_PUBLIC_SESSION);
 
-    ret = fn_logout(handle);
+    let ret = fn_logout(session);
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
-    ret = fn_close_session(handle);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(handle2);
+    let ret = fn_close_session(session2);
     assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
@@ -309,22 +342,8 @@ fn test_login_sql() {
 
 #[test]
 fn test_get_attr() {
-    let mut testdata = TestData::new("test_get_attr.sql");
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata = TestData::initialized("test_get_attr.sql", None);
+    let session = testdata.get_session(false);
 
     let mut template = Vec::<CK_ATTRIBUTE>::new();
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -335,20 +354,20 @@ fn test_get_attr() {
         CString::new("2").unwrap().into_raw(),
         1
     ));
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
     assert_eq!(ret, CKR_OK);
     assert_eq!(count, 1);
     assert_ne!(handle, CK_INVALID_HANDLE);
-    ret = fn_find_objects_final(session);
+    let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
     template.clear();
     template.push(make_attribute!(CKA_LABEL, std::ptr::null_mut(), 0));
 
-    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     assert_ne!(template[0].ulValueLen, 0);
 
@@ -356,14 +375,14 @@ fn test_get_attr() {
     template[0].pValue = data.as_ptr() as *mut std::ffi::c_void;
     template[0].ulValueLen = 128;
 
-    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let size = template[0].ulValueLen as usize;
     let value = std::str::from_utf8(&data[0..size]).unwrap();
     assert_eq!(value, "Test RSA Key");
 
     template[0].ulValueLen = 1;
-    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
 
     /* private key data */
@@ -375,35 +394,28 @@ fn test_get_attr() {
         1
     ));
     /* first try should not find it */
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
     assert_eq!(ret, CKR_OK);
     assert_eq!(count, 0);
     assert_eq!(handle, CK_INVALID_HANDLE);
-    ret = fn_find_objects_final(session);
+    let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* after login should find it */
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
     assert_eq!(ret, CKR_OK);
     assert_eq!(count, 1);
     assert_ne!(handle, CK_INVALID_HANDLE);
-    ret = fn_find_objects_final(session);
+    let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
     template.clear();
@@ -414,42 +426,23 @@ fn test_get_attr() {
     ));
 
     /* should fail for sensitive attributes */
-    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_ATTRIBUTE_SENSITIVE);
 
     /* and succeed for public ones */
     template[0].type_ = CKA_PUBLIC_EXPONENT;
     template[0].ulValueLen = 128;
-    ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     assert_eq!(template[0].ulValueLen, 3);
-
-    ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
 }
 
 #[test]
 fn test_set_attr() {
-    let mut testdata = TestData::new("test_set_attr.sql");
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata = TestData::initialized("test_set_attr.sql", None);
+    let session = testdata.get_session(false);
 
     let mut template = Vec::<CK_ATTRIBUTE>::new();
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -460,45 +453,31 @@ fn test_set_attr() {
         CString::new("2").unwrap().into_raw(),
         1
     ));
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
     assert_eq!(ret, CKR_OK);
     assert_eq!(count, 1);
     assert_ne!(handle, CK_INVALID_HANDLE);
-    ret = fn_find_objects_final(session);
+    let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
     let label = "new label";
     template.clear();
     template.push(make_attribute!(CKA_LABEL, label.as_ptr(), label.len()));
-    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
-    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let session = testdata.get_session(true);
 
-    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
 
     let unique = "unsettable";
@@ -509,45 +488,19 @@ fn test_set_attr() {
         unique.len()
     ));
 
-    ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_ATTRIBUTE_READ_ONLY);
-
-    ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
 }
 
 #[test]
 fn test_copy_objects() {
-    let mut testdata = TestData::new("test_copy_objects.sql");
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata = TestData::initialized("test_copy_objects.sql", None);
+    let session = testdata.get_session(false);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -556,14 +509,14 @@ fn test_copy_objects() {
         CString::new("2").unwrap().into_raw(),
         1
     )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
     assert_eq!(ret, CKR_OK);
     assert_eq!(count, 1);
     assert_ne!(handle, CK_INVALID_HANDLE);
-    ret = fn_find_objects_final(session);
+    let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
     /* copy token object to session object */
@@ -574,7 +527,7 @@ fn test_copy_objects() {
         make_attribute!(CKA_PRIVATE, &mut private as *mut _, CK_BBOOL_SIZE),
     ];
     let mut handle2: CK_ULONG = CK_INVALID_HANDLE;
-    ret = fn_copy_object(
+    let ret = fn_copy_object(
         session,
         handle,
         template.as_mut_ptr(),
@@ -603,7 +556,7 @@ fn test_copy_objects() {
         ),
     ];
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -619,7 +572,7 @@ fn test_copy_objects() {
         CK_BBOOL_SIZE
     )];
     let mut handle2: CK_ULONG = CK_INVALID_HANDLE;
-    ret = fn_copy_object(
+    let ret = fn_copy_object(
         session,
         handle,
         template.as_mut_ptr(),
@@ -628,32 +581,13 @@ fn test_copy_objects() {
     );
     assert_eq!(ret, CKR_ACTION_PROHIBITED);
 
-    ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-
     testdata.finalize();
 }
 
 #[test]
 fn test_create_objects() {
-    let mut testdata = TestData::new("test_create_objects.sql");
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata = TestData::initialized("test_create_objects.sql", None);
+    let session = testdata.get_session(false);
 
     let mut class = CKO_DATA;
     let application = "test";
@@ -673,7 +607,7 @@ fn test_create_objects() {
     ];
 
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -682,16 +616,9 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -706,7 +633,7 @@ fn test_create_objects() {
         CK_BBOOL_SIZE
     ));
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -714,18 +641,9 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
-    let login_session = session;
+    let session = testdata.get_session(true);
 
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -752,7 +670,7 @@ fn test_create_objects() {
         make_attribute!(CKA_VALUE, bogus.as_ptr(), bogus.len()),
     ];
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -789,7 +707,7 @@ fn test_create_objects() {
         ),
     ];
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -844,7 +762,7 @@ fn test_create_objects() {
         ),
     ];
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -872,7 +790,7 @@ fn test_create_objects() {
         ),
     ];
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -881,18 +799,11 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_OK);
 
     let mut size: CK_ULONG = 0;
-    ret = fn_get_object_size(session, handle, &mut size);
+    let ret = fn_get_object_size(session, handle, &mut size);
     assert_eq!(ret, CKR_OK);
     assert_ne!(size, 0);
 
-    ret = fn_destroy_object(session, handle);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_logout(login_session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(login_session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
+    let ret = fn_destroy_object(session, handle);
     assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
@@ -900,32 +811,12 @@ fn test_create_objects() {
 
 #[test]
 fn test_create_ec_objects() {
-    let mut testdata = TestData::new("test_create_ec_objects.sql");
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata =
+        TestData::initialized("test_create_ec_objects.sql", None);
+    let session = testdata.get_session(true);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
@@ -958,7 +849,7 @@ fn test_create_ec_objects() {
         ),
     ];
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
@@ -994,17 +885,12 @@ fn test_create_ec_objects() {
         ),
     ];
 
-    ret = fn_create_object(
+    let ret = fn_create_object(
         session,
         template.as_mut_ptr(),
         template.len() as CK_ULONG,
         &mut handle,
     );
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
@@ -1194,22 +1080,17 @@ fn test_init_token() {
 
 #[test]
 fn test_get_mechs() {
-    let mut testdata = TestData::new("test_get_mechs.sql");
-    testdata.setup_db(None);
+    let mut testdata = TestData::initialized("test_get_mechs.sql", None);
 
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
-    ret = fn_get_mechanism_list(
+    let ret = fn_get_mechanism_list(
         testdata.get_slot(),
         std::ptr::null_mut(),
         &mut count,
     );
     assert_eq!(ret, CKR_OK);
     let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
-    ret = fn_get_mechanism_list(
+    let ret = fn_get_mechanism_list(
         testdata.get_slot(),
         mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
         &mut count,
@@ -1217,7 +1098,7 @@ fn test_get_mechs() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(true, count > 4);
     let mut info: CK_MECHANISM_INFO = Default::default();
-    ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
+    let ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
@@ -1289,34 +1170,14 @@ fn get_test_data(
 
 #[test]
 fn test_aes_operations() {
-    let mut testdata = TestData::new("test_aes_operations.sql");
-    testdata.setup_db(Some("testdata/test_aes_operations.json"));
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    /* open session */
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
+    let mut testdata = TestData::initialized(
+        "test_aes_operations.sql",
+        Some("testdata/test_aes_operations.json"),
     );
-    assert_eq!(ret, CKR_OK);
+    let session = testdata.get_session(true);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* Generate AES key */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -1340,7 +1201,7 @@ fn test_aes_operations() {
         make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
     ];
 
-    ret = fn_generate_key(
+    let mut ret = fn_generate_key(
         session,
         &mut mechanism,
         template.as_mut_ptr(),
@@ -2160,42 +2021,19 @@ fn test_aes_operations() {
         assert_eq!(&enc, &ciphertext);
     }
 
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-
     testdata.finalize();
 }
 
 #[test]
 fn test_rsa_operations() {
-    let mut testdata = TestData::new("test_rsa_operations.sql");
-    testdata.setup_db(Some("testdata/test_rsa_operations.json"));
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    /* open session */
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
+    let mut testdata = TestData::initialized(
+        "test_rsa_operations.sql",
+        Some("testdata/test_rsa_operations.json"),
     );
-    assert_eq!(ret, CKR_OK);
+    let session = testdata.get_session(true);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -2204,7 +2042,7 @@ fn test_rsa_operations() {
         CString::new("2").unwrap().into_raw(),
         1
     )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -2476,25 +2314,15 @@ fn test_rsa_operations() {
     /* RSA PKCS Wrap */
     /* RSA PKCS OAEP Wrap */
 
-    let ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
-    let ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-
     testdata.finalize();
 }
 
 #[test]
 fn test_session_objects() {
-    let mut testdata = TestData::new("test_session_objects.sql");
-    testdata.setup_db(None);
+    let mut testdata = TestData::initialized("test_session_objects.sql", None);
 
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
     let mut login_session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
+    let mut ret = fn_open_session(
         testdata.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
@@ -2644,34 +2472,14 @@ fn test_session_objects() {
 
 #[test]
 fn test_ecc_operations() {
-    let mut testdata = TestData::new("test_ecc_operations.sql");
-    testdata.setup_db(Some("testdata/test_ecc_operations.json"));
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    /* open session */
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
+    let mut testdata = TestData::initialized(
+        "test_ecc_operations.sql",
+        Some("testdata/test_ecc_operations.json"),
     );
-    assert_eq!(ret, CKR_OK);
+    let session = testdata.get_session(true);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -2680,7 +2488,7 @@ fn test_ecc_operations() {
         CString::new("5").unwrap().into_raw(),
         1
     )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -2835,34 +2643,16 @@ fn test_ecc_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-
     testdata.finalize();
 }
 
 #[test]
 fn test_hashes_digest() {
-    let mut testdata = TestData::new("test_hashes.sql");
-    testdata.setup_db(Some("testdata/test_hashes.json"));
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    /* open session */
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
+    let mut testdata = TestData::initialized(
+        "test_hashes.sql",
+        Some("testdata/test_hashes.json"),
     );
-    assert_eq!(ret, CKR_OK);
+    let session = testdata.get_session(false);
 
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -2871,7 +2661,7 @@ fn test_hashes_digest() {
         CString::new("2").unwrap().into_raw(),
         1
     )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -3110,9 +2900,6 @@ fn test_hashes_digest() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
-
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
 
     testdata.finalize();
 }
@@ -3403,34 +3190,14 @@ fn encrypt(
 #[test]
 fn test_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
-    let mut testdata = TestData::new("test_sign_verify.sql");
-    testdata.setup_db(Some("testdata/test_sign_verify.json"));
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    /* open session */
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
+    let mut testdata = TestData::initialized(
+        "test_sign_verify.sql",
+        Some("testdata/test_sign_verify.json"),
     );
-    assert_eq!(ret, CKR_OK);
+    let session = testdata.get_session(false);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* ### CKM_RSA_PKCS ### */
 
@@ -3704,40 +3471,16 @@ fn test_signatures() {
         sig_gen(session, key_handle, &mut testcase.value, &mut mechanism);
     assert!(result.is_err());
 
-    let ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-
     testdata.finalize();
 }
 
 #[test]
 fn test_key() {
-    let mut testdata = TestData::new("test_key.sql");
-    testdata.setup_db(None);
-
-    let mut args = testdata.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    ret = fn_open_session(
-        testdata.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdata = TestData::initialized("test_key.sql", None);
+    let session = testdata.get_session(true);
 
     /* login */
-    let pin = "12345678";
-    ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdata.login();
 
     /* Generic Secret */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -3766,7 +3509,7 @@ fn test_key() {
         ),
     ];
 
-    ret = fn_generate_key(
+    let mut ret = fn_generate_key(
         session,
         &mut mechanism,
         template.as_mut_ptr(),
@@ -4651,9 +4394,6 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(extract_template[0].ulValueLen, 32);
 
-    ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
-
     testdata.finalize();
 }
 
@@ -5242,37 +4982,13 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
 fn test_kdf_ctr_vector() {
     let test_data = parse_kdf_vector("testdata/KDFCTR_gen.txt");
 
-    let mut testdb = TestData::new("test_kdf_ctr_vector.sql");
-    testdb.setup_db(None);
-
-    let mut args = testdb.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    let ret = fn_open_session(
-        testdb.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdb = TestData::initialized("test_kdf_ctr_vector.sql", None);
+    let session = testdb.get_session(false);
 
     /* login */
-    let pin = "12345678";
-    let ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    testdb.login();
 
     test_kdf_units(session, test_data);
-
-    let ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
 
     testdb.finalize();
 }
@@ -5281,37 +4997,13 @@ fn test_kdf_ctr_vector() {
 fn test_kdf_feedback_vector() {
     let test_data = parse_kdf_vector("testdata/KDFFeedback_gen.txt");
 
-    let mut testdb = TestData::new("test_kdf_feedback_vector.sql");
-    testdb.setup_db(None);
-
-    let mut args = testdb.make_init_args();
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-    let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
-    let ret = fn_open_session(
-        testdb.get_slot(),
-        CKF_SERIAL_SESSION | CKF_RW_SESSION,
-        std::ptr::null_mut(),
-        None,
-        &mut session,
-    );
-    assert_eq!(ret, CKR_OK);
+    let mut testdb =
+        TestData::initialized("test_kdf_feedback_vector.sql", None);
+    let session = testdb.get_session(false);
 
     /* login */
-    let pin = "12345678";
-    let ret = fn_login(
-        session,
-        CKU_USER,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-
+    testdb.login();
     test_kdf_units(session, test_data);
-
-    let ret = fn_close_session(session);
-    assert_eq!(ret, CKR_OK);
 
     testdb.finalize();
 }
