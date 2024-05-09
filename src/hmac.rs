@@ -7,6 +7,7 @@ use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
+use constant_time_eq::constant_time_eq;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
@@ -84,6 +85,38 @@ impl HMACMechanism {
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         })
     }
+
+    fn new_op(
+        &self,
+        mech: &CK_MECHANISM,
+        keyobj: &Object,
+        op_type: CK_FLAGS,
+    ) -> KResult<HMACOperation> {
+        /* the mechanism adveritzes only SIGN/VERIFY to the callers
+         * DERIVE is a mediated operation so it is not advertised
+         * and we do not check it */
+        let op_attr = match op_type {
+            CKF_SIGN => {
+                if self.info.flags & CKF_SIGN != CKF_SIGN {
+                    return err_rv!(CKR_MECHANISM_INVALID);
+                }
+                CKA_SIGN
+            }
+            CKF_VERIFY => {
+                if self.info.flags & CKF_SIGN != CKF_SIGN {
+                    return err_rv!(CKR_MECHANISM_INVALID);
+                }
+                CKA_VERIFY
+            }
+            CKF_DERIVE => CKA_DERIVE,
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        HMACOperation::init(
+            self.hmac_mech_to_hash_mech(mech.mechanism)?,
+            check_and_fetch_key(keyobj, self.keytype, op_attr)?,
+            check_and_fetch_param(mech, self.minlen, self.maxlen)?,
+        )
+    }
 }
 
 impl Mechanism for HMACMechanism {
@@ -91,19 +124,21 @@ impl Mechanism for HMACMechanism {
         &self.info
     }
 
+    fn mac_new(
+        &self,
+        mech: &CK_MECHANISM,
+        keyobj: &Object,
+        op_type: CK_FLAGS,
+    ) -> KResult<Box<dyn Mac>> {
+        Ok(Box::new(self.new_op(mech, keyobj, op_type)?))
+    }
+
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
         keyobj: &Object,
     ) -> KResult<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
-            return err_rv!(CKR_MECHANISM_INVALID);
-        }
-        Ok(Box::new(HMACOperation::init(
-            self.hmac_mech_to_hash_mech(mech.mechanism)?,
-            check_and_fetch_key(keyobj, self.keytype, CKA_SIGN)?,
-            check_and_fetch_param(mech, self.minlen, self.maxlen)?,
-        )?))
+        Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN)?))
     }
 
     fn verify_new(
@@ -111,14 +146,7 @@ impl Mechanism for HMACMechanism {
         mech: &CK_MECHANISM,
         keyobj: &Object,
     ) -> KResult<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
-            return err_rv!(CKR_MECHANISM_INVALID);
-        }
-        Ok(Box::new(HMACOperation::init(
-            self.hmac_mech_to_hash_mech(mech.mechanism)?,
-            check_and_fetch_key(keyobj, self.keytype, CKA_VERIFY)?,
-            check_and_fetch_param(mech, self.minlen, self.maxlen)?,
-        )?))
+        Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY)?))
     }
 }
 
@@ -314,14 +342,43 @@ impl HMACOperation {
         Ok(hmac)
     }
 
+    fn begin(&mut self) -> KResult<()> {
+        if self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        Ok(())
+    }
+
     fn update(&mut self, data: &[u8]) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.in_use = true;
+
         /* H( .. || text ..) */
-        match &mut self.inner {
+        let ret = match &mut self.inner {
             Operation::Digest(op) => op.digest_update(data),
             _ => err_rv!(CKR_GENERAL_ERROR),
+        };
+        if ret.is_err() {
+            self.finalized = true;
         }
+        ret
     }
+
     fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+        if !self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.finalized = true;
+
+        if output.len() != self.outputlen {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
         self.state.resize(self.hashlen, 0);
         /* state = H((K0 ^ ipad) || text) */
         match &mut self.inner {
@@ -352,40 +409,38 @@ impl MechOperation for HMACOperation {
     }
 }
 
+impl Mac for HMACOperation {
+    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> KResult<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.finalize(mac)
+    }
+
+    fn mac_update(&mut self, data: &[u8]) -> KResult<()> {
+        self.update(data)
+    }
+
+    fn mac_final(&mut self, mac: &mut [u8]) -> KResult<()> {
+        self.finalize(mac)
+    }
+
+    fn mac_len(&self) -> KResult<usize> {
+        Ok(self.outputlen)
+    }
+}
+
 impl Sign for HMACOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        match self.sign_update(data) {
-            Err(e) => {
-                self.finalized = true;
-                return Err(e);
-            }
-            Ok(()) => (),
-        }
-        self.sign_final(signature)
+        self.begin()?;
+        self.update(data)?;
+        self.finalize(signature)
     }
 
     fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.in_use = true;
         self.update(data)
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
-        if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.outputlen {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
         self.finalize(signature)
     }
 
@@ -396,41 +451,19 @@ impl Sign for HMACOperation {
 
 impl Verify for HMACOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
-        if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        match self.verify_update(data) {
-            Err(e) => {
-                self.finalized = true;
-                return Err(e);
-            }
-            Ok(()) => (),
-        }
+        self.begin()?;
+        self.update(data)?;
         self.verify_final(signature)
     }
 
     fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.in_use = true;
         self.update(data)
     }
 
     fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
-        if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        self.finalized = true;
-        if signature.len() != self.outputlen {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
         let mut verify: Vec<u8> = vec![0; self.outputlen];
         self.finalize(verify.as_mut_slice())?;
-        if verify != signature {
+        if !constant_time_eq(&verify, signature) {
             return err_rv!(CKR_SIGNATURE_INVALID);
         }
         Ok(())
