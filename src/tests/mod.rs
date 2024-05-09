@@ -32,7 +32,7 @@ struct Slots {
 
 static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
 
-struct TestData<'a> {
+struct TestToken<'a> {
     slot: CK_SLOT_ID,
     filename: &'a str,
     finalize: Option<RwLockWriteGuard<'a, u64>>,
@@ -41,11 +41,11 @@ struct TestData<'a> {
     session_rw: bool,
 }
 
-impl TestData<'_> {
-    fn new<'a>(filename: &'a str) -> TestData {
+impl TestToken<'_> {
+    fn new<'a>(filename: &'a str) -> TestToken {
         let mut slots = SLOTS.write().unwrap();
         slots.id += 1;
-        TestData {
+        TestToken {
             slot: slots.id,
             filename: filename,
             finalize: test_finalizer(),
@@ -143,7 +143,10 @@ impl TestData<'_> {
         std::fs::remove_file(self.filename).unwrap_or(());
     }
 
-    fn initialized<'a>(filename: &'a str, db: Option<&'a str>) -> TestData<'a> {
+    fn initialized<'a>(
+        filename: &'a str,
+        db: Option<&'a str>,
+    ) -> TestToken<'a> {
         let mut td = Self::new(filename);
         td.setup_db(db);
 
@@ -204,8 +207,8 @@ impl TestData<'_> {
 
 #[test]
 fn test_random() {
-    let mut testdata = TestData::initialized("test_random.json", None);
-    let session = testdata.get_session(false);
+    let mut testtokn = TestToken::initialized("test_random.json", None);
+    let session = testtokn.get_session(false);
 
     let data: &[u8] = &mut [0, 0, 0, 0];
     let ret = fn_generate_random(
@@ -216,12 +219,12 @@ fn test_random() {
     assert_eq!(ret, CKR_OK);
     assert_ne!(data, &[0, 0, 0, 0]);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 fn test_login(name: &str) {
-    let mut testdata = TestData::initialized(name, None);
-    let session = testdata.get_session(false);
+    let mut testtokn = TestToken::initialized(name, None);
+    let session = testtokn.get_session(false);
 
     let mut info = CK_SESSION_INFO {
         slotID: CK_UNAVAILABLE_INFORMATION,
@@ -235,7 +238,7 @@ fn test_login(name: &str) {
 
     let mut session2: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -258,7 +261,7 @@ fn test_login(name: &str) {
 
     /* check pin flags */
     let mut token_info = CK_TOKEN_INFO::default();
-    let ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, 0);
 
@@ -274,7 +277,7 @@ fn test_login(name: &str) {
 
     /* check pin flags */
     let mut token_info = CK_TOKEN_INFO::default();
-    let ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, CKF_USER_PIN_COUNT_LOW);
 
@@ -290,7 +293,7 @@ fn test_login(name: &str) {
 
     /* check pin flags */
     let mut token_info = CK_TOKEN_INFO::default();
-    let ret = fn_get_token_info(testdata.get_slot(), &mut token_info);
+    let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, 0);
 
@@ -327,7 +330,7 @@ fn test_login(name: &str) {
     let ret = fn_close_session(session2);
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
@@ -342,8 +345,8 @@ fn test_login_sql() {
 
 #[test]
 fn test_get_attr() {
-    let mut testdata = TestData::initialized("test_get_attr.sql", None);
-    let session = testdata.get_session(false);
+    let mut testtokn = TestToken::initialized("test_get_attr.sql", None);
+    let session = testtokn.get_session(false);
 
     let mut template = Vec::<CK_ATTRIBUTE>::new();
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -405,7 +408,7 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* after login should find it */
     let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
@@ -436,13 +439,13 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(template[0].ulValueLen, 3);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_set_attr() {
-    let mut testdata = TestData::initialized("test_set_attr.sql", None);
-    let session = testdata.get_session(false);
+    let mut testtokn = TestToken::initialized("test_set_attr.sql", None);
+    let session = testtokn.get_session(false);
 
     let mut template = Vec::<CK_ATTRIBUTE>::new();
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -470,12 +473,12 @@ fn test_set_attr() {
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
-    let session = testdata.get_session(true);
+    let session = testtokn.get_session(true);
 
     let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
@@ -491,16 +494,16 @@ fn test_set_attr() {
     let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_ATTRIBUTE_READ_ONLY);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_copy_objects() {
-    let mut testdata = TestData::initialized("test_copy_objects.sql", None);
-    let session = testdata.get_session(false);
+    let mut testtokn = TestToken::initialized("test_copy_objects.sql", None);
+    let session = testtokn.get_session(false);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -581,13 +584,13 @@ fn test_copy_objects() {
     );
     assert_eq!(ret, CKR_ACTION_PROHIBITED);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_create_objects() {
-    let mut testdata = TestData::initialized("test_create_objects.sql", None);
-    let session = testdata.get_session(false);
+    let mut testtokn = TestToken::initialized("test_create_objects.sql", None);
+    let session = testtokn.get_session(false);
 
     let mut class = CKO_DATA;
     let application = "test";
@@ -616,7 +619,7 @@ fn test_create_objects() {
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     let ret = fn_create_object(
         session,
@@ -641,7 +644,7 @@ fn test_create_objects() {
     );
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
-    let session = testdata.get_session(true);
+    let session = testtokn.get_session(true);
 
     let ret = fn_create_object(
         session,
@@ -806,17 +809,17 @@ fn test_create_objects() {
     let ret = fn_destroy_object(session, handle);
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_create_ec_objects() {
-    let mut testdata =
-        TestData::initialized("test_create_ec_objects.sql", None);
-    let session = testdata.get_session(true);
+    let mut testtokn =
+        TestToken::initialized("test_create_ec_objects.sql", None);
+    let session = testtokn.get_session(true);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
@@ -893,14 +896,14 @@ fn test_create_ec_objects() {
     );
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_init_token() {
-    let mut testdata = TestData::new("test_init_token.sql");
+    let mut testtokn = TestToken::new("test_init_token.sql");
 
-    let mut args = testdata.make_init_args();
+    let mut args = testtokn.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -910,7 +913,7 @@ fn test_init_token() {
     /* init once */
     let pin_value = "SO Pin Value";
     ret = fn_init_token(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         std::ptr::null_mut(),
@@ -920,7 +923,7 @@ fn test_init_token() {
     /* verify wrong SO PIN fails */
     let bad_value = "SO Bad Value";
     ret = fn_init_token(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CString::new(bad_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         std::ptr::null_mut(),
@@ -930,7 +933,7 @@ fn test_init_token() {
     /* re-init */
     let pin_value = "SO Pin Value";
     ret = fn_init_token(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
         std::ptr::null_mut(),
@@ -939,7 +942,7 @@ fn test_init_token() {
 
     /* login as so */
     ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -967,7 +970,7 @@ fn test_init_token() {
 
     /* try to open ro_session and fail */
     ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -979,7 +982,7 @@ fn test_init_token() {
     ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
     ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -1075,33 +1078,33 @@ fn test_init_token() {
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_get_mechs() {
-    let mut testdata = TestData::initialized("test_get_mechs.sql", None);
+    let mut testtokn = TestToken::initialized("test_get_mechs.sql", None);
 
     let mut count: CK_ULONG = 0;
     let ret = fn_get_mechanism_list(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         std::ptr::null_mut(),
         &mut count,
     );
     assert_eq!(ret, CKR_OK);
     let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
     let ret = fn_get_mechanism_list(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
         &mut count,
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(true, count > 4);
     let mut info: CK_MECHANISM_INFO = Default::default();
-    let ret = fn_get_mechanism_info(testdata.get_slot(), mechs[0], &mut info);
+    let ret = fn_get_mechanism_info(testtokn.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 fn get_test_data(
@@ -1170,14 +1173,14 @@ fn get_test_data(
 
 #[test]
 fn test_aes_operations() {
-    let mut testdata = TestData::initialized(
+    let mut testtokn = TestToken::initialized(
         "test_aes_operations.sql",
         Some("testdata/test_aes_operations.json"),
     );
-    let session = testdata.get_session(true);
+    let session = testtokn.get_session(true);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* Generate AES key */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -2021,19 +2024,19 @@ fn test_aes_operations() {
         assert_eq!(&enc, &ciphertext);
     }
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_rsa_operations() {
-    let mut testdata = TestData::initialized(
+    let mut testtokn = TestToken::initialized(
         "test_rsa_operations.sql",
         Some("testdata/test_rsa_operations.json"),
     );
-    let session = testdata.get_session(true);
+    let session = testtokn.get_session(true);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -2314,16 +2317,16 @@ fn test_rsa_operations() {
     /* RSA PKCS Wrap */
     /* RSA PKCS OAEP Wrap */
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_session_objects() {
-    let mut testdata = TestData::initialized("test_session_objects.sql", None);
+    let mut testtokn = TestToken::initialized("test_session_objects.sql", None);
 
     let mut login_session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let mut ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION,
         std::ptr::null_mut(),
         None,
@@ -2343,7 +2346,7 @@ fn test_session_objects() {
 
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -2410,7 +2413,7 @@ fn test_session_objects() {
     assert_eq!(ret, CKR_OK);
 
     ret = fn_open_session(
-        testdata.get_slot(),
+        testtokn.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
         std::ptr::null_mut(),
         None,
@@ -2467,19 +2470,19 @@ fn test_session_objects() {
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_ecc_operations() {
-    let mut testdata = TestData::initialized(
+    let mut testtokn = TestToken::initialized(
         "test_ecc_operations.sql",
         Some("testdata/test_ecc_operations.json"),
     );
-    let session = testdata.get_session(true);
+    let session = testtokn.get_session(true);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -2643,16 +2646,16 @@ fn test_ecc_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_hashes_digest() {
-    let mut testdata = TestData::initialized(
+    let mut testtokn = TestToken::initialized(
         "test_hashes.sql",
         Some("testdata/test_hashes.json"),
     );
-    let session = testdata.get_session(false);
+    let session = testtokn.get_session(false);
 
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -2901,7 +2904,7 @@ fn test_hashes_digest() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 struct TestCase {
@@ -3190,14 +3193,14 @@ fn encrypt(
 #[test]
 fn test_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
-    let mut testdata = TestData::initialized(
+    let mut testtokn = TestToken::initialized(
         "test_sign_verify.sql",
         Some("testdata/test_sign_verify.json"),
     );
-    let session = testdata.get_session(false);
+    let session = testtokn.get_session(false);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* ### CKM_RSA_PKCS ### */
 
@@ -3471,16 +3474,16 @@ fn test_signatures() {
         sig_gen(session, key_handle, &mut testcase.value, &mut mechanism);
     assert!(result.is_err());
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_key() {
-    let mut testdata = TestData::initialized("test_key.sql", None);
-    let session = testdata.get_session(true);
+    let mut testtokn = TestToken::initialized("test_key.sql", None);
+    let session = testtokn.get_session(true);
 
     /* login */
-    testdata.login();
+    testtokn.login();
 
     /* Generic Secret */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -4394,7 +4397,7 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(extract_template[0].ulValueLen, 32);
 
-    testdata.finalize();
+    testtokn.finalize();
 }
 
 use std::io;
@@ -4982,28 +4985,28 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
 fn test_kdf_ctr_vector() {
     let test_data = parse_kdf_vector("testdata/KDFCTR_gen.txt");
 
-    let mut testdb = TestData::initialized("test_kdf_ctr_vector.sql", None);
-    let session = testdb.get_session(false);
+    let mut testtokn = TestToken::initialized("test_kdf_ctr_vector.sql", None);
+    let session = testtokn.get_session(false);
 
     /* login */
-    testdb.login();
+    testtokn.login();
 
     test_kdf_units(session, test_data);
 
-    testdb.finalize();
+    testtokn.finalize();
 }
 
 #[test]
 fn test_kdf_feedback_vector() {
     let test_data = parse_kdf_vector("testdata/KDFFeedback_gen.txt");
 
-    let mut testdb =
-        TestData::initialized("test_kdf_feedback_vector.sql", None);
-    let session = testdb.get_session(false);
+    let mut testtokn =
+        TestToken::initialized("test_kdf_feedback_vector.sql", None);
+    let session = testtokn.get_session(false);
 
     /* login */
-    testdb.login();
+    testtokn.login();
     test_kdf_units(session, test_data);
 
-    testdb.finalize();
+    testtokn.finalize();
 }
