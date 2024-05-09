@@ -14,12 +14,19 @@ use object::{Object, ObjectFactories};
 use std::fmt::Debug;
 use zeroize::Zeroize;
 
-fn check_and_fetch_key(key: &Object, keytype: CK_KEY_TYPE) -> KResult<Vec<u8>> {
+fn check_and_fetch_key(
+    key: &Object,
+    keytype: CK_KEY_TYPE,
+    op: CK_ATTRIBUTE_TYPE,
+) -> KResult<Vec<u8>> {
     if key.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
         return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
     }
     let t = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
     if t != CKK_GENERIC_SECRET && t != keytype {
+        return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+    }
+    if !key.get_attr_as_bool(op).or(Ok(false))? {
         return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
     }
 
@@ -95,7 +102,7 @@ impl Mechanism for HMACMechanism {
         Ok(Box::new(HMACOperation::init(
             mech.mechanism,
             self.hmac_mech_to_hash_mech(mech.mechanism)?,
-            check_and_fetch_key(keyobj, self.keytype)?,
+            check_and_fetch_key(keyobj, self.keytype, CKA_SIGN)?,
             check_and_fetch_param(mech, self.minlen, self.maxlen)?,
         )?))
     }
@@ -111,7 +118,7 @@ impl Mechanism for HMACMechanism {
         Ok(Box::new(HMACOperation::init(
             mech.mechanism,
             self.hmac_mech_to_hash_mech(mech.mechanism)?,
-            check_and_fetch_key(keyobj, self.keytype)?,
+            check_and_fetch_key(keyobj, self.keytype, CKA_VERIFY)?,
             check_and_fetch_param(mech, self.minlen, self.maxlen)?,
         )?))
     }
