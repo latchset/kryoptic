@@ -7,26 +7,10 @@ use std::env;
 use std::ffi::CString;
 use std::sync::Once;
 
-const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
-const CK_BBOOL_SIZE: usize = std::mem::size_of::<CK_BBOOL>();
-macro_rules! make_attribute {
-    ($type:expr, $value:expr, $length:expr) => {
-        CK_ATTRIBUTE {
-            type_: $type,
-            pValue: $value as CK_VOID_PTR,
-            ulValueLen: $length as CK_ULONG,
-        }
-    };
-}
+#[macro_use]
+mod util;
 
-macro_rules! ret_or_panic {
-    ($ret:expr) => {
-        match $ret {
-            Ok(r) => r,
-            Err(e) => panic!("{e}"),
-        }
-    };
-}
+use util::*;
 
 /* note that the following concoction to sync threads is not entirely race free
  * as it assumes all tests initialize before all of the others complete. */
