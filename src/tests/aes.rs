@@ -4,6 +4,8 @@
 use super::tests;
 use tests::*;
 
+const AES_BLOCK_SIZE: usize = 16;
+
 #[test]
 fn test_aes_operations() {
     let mut testtokn = TestToken::initialized(
@@ -29,326 +31,225 @@ fn test_aes_operations() {
         ],
     ));
 
-    let mut ret: CK_RV = CKR_GENERAL_ERROR;
     {
         /* AES ECB */
 
-        /* encrypt init */
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_ECB,
-            pParameter: std::ptr::null_mut(),
-            ulParameterLen: 0,
-        };
-
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
         /* Data need to be exactly one block in size */
         let data = "0123456789ABCDEF";
-        let mut enc_len: CK_ULONG = 0;
-        ret = fn_encrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            std::ptr::null_mut(),
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 16);
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_ECB,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        ));
+        assert_eq!(enc.len(), AES_BLOCK_SIZE);
 
-        let enc: [u8; 16] = [0; 16];
-        ret = fn_encrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 16);
-
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
-            session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec);
+            handle,
+            enc.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_ECB,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     {
         /* AES CBC */
 
-        /* encrypt init */
-        let iv = "FEDCBA0987654321";
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_CBC,
-            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
-            ulParameterLen: iv.len() as CK_ULONG,
-        };
-
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
         /* Data need to be exactly one block in size */
         let data = "0123456789ABCDEF";
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
-        ret = fn_encrypt(
+        let iv = "FEDCBA0987654321";
+        let enc = ret_or_panic!(encrypt(
             session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 16);
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CBC,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(enc.len(), 16);
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec);
+            handle,
+            enc.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CBC,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     {
         /* AES CBC and Padding */
 
-        /* encrypt init */
+        let data = "0123456789ABCDEF";
         let iv = "FEDCBA0987654321";
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_CBC_PAD,
-            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
-            ulParameterLen: iv.len() as CK_ULONG,
-        };
-
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
+        let enc = ret_or_panic!(encrypt(
+            session,
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CBC_PAD,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            },
+        ));
 
         /* Data of exactly one block in size will cause two block output
          * The PKCS#11 specs are wrong here! */
-        let data = "0123456789ABCDEF";
-        let mut enc_len: CK_ULONG = 0;
-        ret = fn_encrypt(
-            session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            std::ptr::null_mut(),
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 32);
+        assert_eq!(enc.len(), AES_BLOCK_SIZE * 2);
 
-        let enc: [u8; 32] = [0; 32];
-        ret = fn_encrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 32);
-
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 32] = [0; 32];
-        let mut dec_len: CK_ULONG = 32;
-        ret = fn_decrypt(
-            session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+            handle,
+            enc.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CBC_PAD,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            },
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     #[cfg(not(feature = "fips"))]
     {
         /* AES OFB */
 
-        /* encrypt init */
-        let iv = "FEDCBA0987654321";
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_OFB,
-            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
-            ulParameterLen: iv.len() as CK_ULONG,
-        };
-
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
         /* Stream mode, so arbitrary data size and matching output */
         let data = "01234567";
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
-        ret = fn_encrypt(
-            session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
+        let iv = "FEDCBA0987654321";
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_OFB,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(enc.len(), data.len());
+
+        let dec = ret_or_panic!(decrypt(
+            session,
+            handle,
+            enc.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_OFB,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     #[cfg(not(feature = "fips"))]
     {
         /* AES CFB */
 
-        /* encrypt init */
-        let iv = "FEDCBA0987654321";
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_CFB1,
-            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
-            ulParameterLen: iv.len() as CK_ULONG,
-        };
-
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
         /* Stream mode, so arbitrary data size and matching output */
         let data = "01234567";
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
-        ret = fn_encrypt(
-            session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
+        let iv = "FEDCBA0987654321";
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CFB1,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(enc.len(), data.len());
+
+        let dec = ret_or_panic!(decrypt(
+            session,
+            handle,
+            enc.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CFB1,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     {
         /* AES CTR */
 
-        /* encrypt init */
-        let mut param = CK_AES_CTR_PARAMS {
+        let param = CK_AES_CTR_PARAMS {
             ulCounterBits: 128,
             cb: [
                 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
                 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
             ],
         };
-
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CTR,
-            pParameter: &mut param as *mut CK_AES_CTR_PARAMS as CK_VOID_PTR,
+            pParameter: void_ptr!(&param),
             ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
                 as CK_ULONG,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
         /* Stream mode, so arbitrary data size and matching output */
         let data = "01234567";
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
-        ret = fn_encrypt(
-            session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
+            handle,
+            data.as_bytes(),
+            &mechanism,
+        ));
+        assert_eq!(enc.len(), data.len());
+
+        let dec =
+            ret_or_panic!(
+                decrypt(session, handle, enc.as_slice(), &mechanism,)
+            );
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
 
         /* Counterbits edge cases */
 
         /* 9 bit counter, counter value should allow a single block before
          * wrap around */
-        let mut param = CK_AES_CTR_PARAMS {
+        let param = CK_AES_CTR_PARAMS {
             ulCounterBits: 9,
             cb: [
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x01, 0xFE,
             ],
         };
-
         let mut mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CTR,
-            pParameter: &mut param as *mut CK_AES_CTR_PARAMS as CK_VOID_PTR,
+            pParameter: void_ptr!(&param),
             ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
                 as CK_ULONG,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        let ret = fn_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
         /* Stream mode, so arbitrary data size and matching output */
@@ -357,7 +258,7 @@ fn test_aes_operations() {
         let mut enc_len: CK_ULONG = 16;
 
         /* First block should succeed */
-        ret = fn_encrypt_update(
+        let ret = fn_encrypt_update(
             session,
             data.as_mut_ptr(),
             data.len() as CK_ULONG,
@@ -368,7 +269,7 @@ fn test_aes_operations() {
         assert_eq!(enc_len as usize, data.len());
 
         /* Second should fail */
-        ret = fn_encrypt_update(
+        let ret = fn_encrypt_update(
             session,
             data.as_mut_ptr(),
             data.len() as CK_ULONG,
@@ -381,62 +282,44 @@ fn test_aes_operations() {
     {
         /* AES CTS */
 
-        /* encrypt init */
         let iv = "FEDCBA0987654321";
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        let mechanism = CK_MECHANISM {
             mechanism: CKM_AES_CTS,
-            pParameter: CString::new(iv).unwrap().into_raw() as CK_VOID_PTR,
+            pParameter: void_ptr!(iv.as_bytes()),
             ulParameterLen: iv.len() as CK_ULONG,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
         /* CTS requires at least one block */
         let data = "01234567";
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
-        ret = fn_encrypt(
-            session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_DATA_LEN_RANGE);
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
+        let _ = err_or_panic!(
+            encrypt(session, handle, data.as_bytes(), &mechanism),
+            CKR_DATA_LEN_RANGE
+        );
 
         /* CTS requires at least one block */
         let data = "0123456789ABCDEF1111";
-        let enc: [u8; 32] = [0; 32];
-        let mut enc_len: CK_ULONG = 32;
-        ret = fn_encrypt(
-            session,
-            CString::new(data).unwrap().into_raw() as *mut u8,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let dec: [u8; 32] = [0; 32];
-        let mut dec_len: CK_ULONG = 32;
-        ret = fn_decrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+            handle,
+            data.as_bytes(),
+            &mechanism,
+        ));
+        assert_eq!(enc.len(), data.len());
+
+        let dec = ret_or_panic!(decrypt(
+            session,
+            handle,
+            enc.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CTS,
+                pParameter: void_ptr!(iv.as_bytes()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     {
@@ -447,7 +330,7 @@ fn test_aes_operations() {
         /* IV needs to be of size 12 for the test to work in FIPS mode as well */
         let iv = "BA0987654321";
         let aad = "AUTH ME";
-        let mut param = CK_GCM_PARAMS {
+        let param = CK_GCM_PARAMS {
             pIv: iv.as_ptr() as *mut CK_BYTE,
             ulIvLen: iv.len() as CK_ULONG,
             ulIvBits: (iv.len() * 8) as CK_ULONG,
@@ -458,11 +341,11 @@ fn test_aes_operations() {
 
         let mut mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_GCM,
-            pParameter: &mut param as *mut CK_GCM_PARAMS as CK_VOID_PTR,
+            pParameter: void_ptr!(&param),
             ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>() as CK_ULONG,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        let ret = fn_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
         /* Stream mode, so arbitrary data size and matching output */
@@ -470,7 +353,7 @@ fn test_aes_operations() {
         /* enc needs enough space for the tag */
         let enc: [u8; 16] = [0; 16];
         let mut enc_len = enc.len() as CK_ULONG;
-        ret = fn_encrypt_update(
+        let ret = fn_encrypt_update(
             session,
             data.as_ptr() as *mut CK_BYTE,
             (data.len() - 1) as CK_ULONG,
@@ -482,7 +365,7 @@ fn test_aes_operations() {
 
         let mut offset = enc_len as isize;
         enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        ret = fn_encrypt_update(
+        let ret = fn_encrypt_update(
             session,
             unsafe { data.as_ptr().offset(offset) } as *mut CK_BYTE,
             1 as CK_ULONG,
@@ -494,7 +377,7 @@ fn test_aes_operations() {
 
         offset += enc_len as isize;
         enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        ret = fn_encrypt_final(
+        let ret = fn_encrypt_final(
             session,
             unsafe { enc.as_ptr().offset(offset) } as *mut _,
             &mut enc_len,
@@ -502,53 +385,24 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
         assert_eq!(enc_len, tag_len as CK_ULONG);
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        enc_len = offset as CK_ULONG + tag_len as CK_ULONG;
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
+            handle,
+            &enc[..(offset as usize + tag_len)],
+            &mechanism,
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
 
         /* retry with one-shot encrypt operation */
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        let data = "01234567";
-        /* enc2 needs enough space for encrypted data and tag */
-        let enc2: [u8; 12] = [0; 12];
-        let mut enc_len = enc2.len() as CK_ULONG;
-        ret = fn_encrypt(
+        let enc2 = ret_or_panic!(encrypt(
             session,
-            data.as_ptr() as *mut CK_BYTE,
-            data.len() as CK_ULONG,
-            std::ptr::null_mut(),
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 12);
-
-        ret = fn_encrypt(
-            session,
-            data.as_ptr() as *mut CK_BYTE,
-            data.len() as CK_ULONG,
-            enc2.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 12);
-
-        assert_eq!(enc[..12], enc2);
+            handle,
+            data.as_bytes(),
+            &mechanism,
+        ));
+        assert_eq!(enc2.len(), 12);
+        assert_eq!(&enc[..12], enc2.as_slice());
     }
 
     {
@@ -575,7 +429,7 @@ fn test_aes_operations() {
             ulParameterLen: std::mem::size_of::<CK_CCM_PARAMS>() as CK_ULONG,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        let ret = fn_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
         /* enc needs enough space for the tag */
@@ -583,7 +437,7 @@ fn test_aes_operations() {
         let mut enc_len = enc.len() as CK_ULONG;
 
         let data_len = data.len() - 1;
-        ret = fn_encrypt_update(
+        let ret = fn_encrypt_update(
             session,
             data.as_ptr() as *mut CK_BYTE,
             data_len as CK_ULONG,
@@ -594,7 +448,7 @@ fn test_aes_operations() {
         assert_eq!(enc_len as usize, 0);
 
         enc_len = enc.len() as CK_ULONG;
-        ret = fn_encrypt_update(
+        let ret = fn_encrypt_update(
             session,
             unsafe { data.as_ptr().offset(data_len as isize) } as *mut CK_BYTE,
             1 as CK_ULONG,
@@ -605,7 +459,7 @@ fn test_aes_operations() {
         assert_eq!(enc_len as usize, data.len());
 
         enc_len = (enc.len() - data.len()) as CK_ULONG;
-        ret = fn_encrypt_final(
+        let ret = fn_encrypt_final(
             session,
             unsafe { enc.as_ptr().offset(data.len() as isize) } as *mut _,
             &mut enc_len,
@@ -613,23 +467,14 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
         assert_eq!(enc_len, tag_len as CK_ULONG);
 
-        ret = fn_decrypt_init(session, &mut mechanism, handle);
-        assert_eq!(ret, CKR_OK);
-
-        enc_len = (data.len() + tag_len) as CK_ULONG;
-
-        let dec: [u8; 16] = [0; 16];
-        let mut dec_len: CK_ULONG = 16;
-        ret = fn_decrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            enc.as_ptr() as *mut _,
-            enc_len,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, data.len());
-        assert_eq!(data.as_bytes(), &dec[..dec_len as usize])
+            handle,
+            &enc[..(data.len() + tag_len)],
+            &mechanism,
+        ));
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
     }
 
     /* Some sample test vectors taken from:
@@ -645,37 +490,25 @@ fn test_aes_operations() {
                 Err(e) => panic!("{}", e),
             };
 
-        let mut ciphertext =
-            match get_test_data(session, testname, "ciphertext") {
-                Ok(vec) => vec,
-                Err(ret) => return assert_eq!(ret, CKR_OK),
-            };
+        let ciphertext = match get_test_data(session, testname, "ciphertext") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
         let plaintext = match get_test_data(session, testname, "plaintext") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
 
-        /* encrypt init */
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_ECB,
-            pParameter: std::ptr::null_mut(),
-            ulParameterLen: 0,
-        };
-
-        ret = fn_decrypt_init(session, &mut mechanism, key_handle);
-        assert_eq!(ret, CKR_OK);
-
-        let mut dec = vec![0u8; plaintext.len()];
-        let mut dec_len = dec.len() as CK_ULONG;
-        ret = fn_decrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            ciphertext.as_mut_ptr(),
-            ciphertext.len() as CK_ULONG,
-            dec.as_mut_ptr(),
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len, dec.len() as CK_ULONG);
+            key_handle,
+            ciphertext.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_ECB,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        ));
         assert_eq!(&dec, &plaintext);
     }
 
@@ -688,12 +521,11 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
-        let mut iv = match get_test_data(session, testname, "iv") {
+        let iv = match get_test_data(session, testname, "iv") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
-        let mut plaintext = match get_test_data(session, testname, "plaintext")
-        {
+        let plaintext = match get_test_data(session, testname, "plaintext") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
@@ -702,26 +534,16 @@ fn test_aes_operations() {
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
 
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-            mechanism: CKM_AES_CBC,
-            pParameter: iv.as_mut_ptr() as CK_VOID_PTR,
-            ulParameterLen: iv.len() as CK_ULONG,
-        };
-
-        ret = fn_encrypt_init(session, &mut mechanism, key_handle);
-        assert_eq!(ret, CKR_OK);
-
-        let mut enc = vec![0u8; ciphertext.len()];
-        let mut enc_len = enc.len() as CK_ULONG;
-        ret = fn_encrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            plaintext.as_mut_ptr(),
-            plaintext.len() as CK_ULONG,
-            enc.as_mut_ptr(),
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, enc.len() as CK_ULONG);
+            key_handle,
+            plaintext.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CBC,
+                pParameter: void_ptr!(iv.as_ptr()),
+                ulParameterLen: iv.len() as CK_ULONG,
+            }
+        ));
         assert_eq!(&enc, &ciphertext);
     }
 
@@ -734,11 +556,11 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
-        let mut iv = match get_test_data(session, testname, "IV") {
+        let iv = match get_test_data(session, testname, "IV") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
-        let mut aad = match get_test_data(session, testname, "AAD") {
+        let aad = match get_test_data(session, testname, "AAD") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
@@ -755,37 +577,29 @@ fn test_aes_operations() {
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
 
-        let mut param = CK_GCM_PARAMS {
-            pIv: iv.as_mut_ptr(),
+        let param = CK_GCM_PARAMS {
+            pIv: byte_ptr!(iv.as_ptr()),
             ulIvLen: iv.len() as CK_ULONG,
             ulIvBits: (iv.len() * 8) as CK_ULONG,
-            pAAD: aad.as_mut_ptr(),
+            pAAD: byte_ptr!(aad.as_ptr()),
             ulAADLen: aad.len() as CK_ULONG,
             ulTagBits: (tag.len() * 8) as CK_ULONG,
         };
 
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_GCM,
-            pParameter: &mut param as *mut CK_GCM_PARAMS as CK_VOID_PTR,
+            pParameter: void_ptr!(&param),
             ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>() as CK_ULONG,
         };
 
-        ret = fn_decrypt_init(session, &mut mechanism, key_handle);
-        assert_eq!(ret, CKR_OK);
+        let ciphertext = [&ct[..], &tag[..]].concat();
 
-        let mut ciphertext = [&ct[..], &tag[..]].concat();
-
-        let mut dec = vec![0u8; plaintext.len()];
-        let mut dec_len = dec.len() as CK_ULONG;
-        ret = fn_decrypt(
+        let dec = ret_or_panic!(decrypt(
             session,
-            ciphertext.as_mut_ptr(),
-            ciphertext.len() as CK_ULONG,
-            dec.as_mut_ptr(),
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len, dec.len() as CK_ULONG);
+            key_handle,
+            &ciphertext,
+            &mechanism,
+        ));
         assert_eq!(&dec, &plaintext);
     }
 
@@ -801,8 +615,7 @@ fn test_aes_operations() {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
-        let mut plaintext = match get_test_data(session, testname, "plaintext")
-        {
+        let plaintext = match get_test_data(session, testname, "plaintext") {
             Ok(vec) => vec,
             Err(ret) => return assert_eq!(ret, CKR_OK),
         };
@@ -817,27 +630,19 @@ fn test_aes_operations() {
         };
         param.cb.copy_from_slice(iv.as_slice());
 
-        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CTR,
-            pParameter: &mut param as *mut CK_AES_CTR_PARAMS as CK_VOID_PTR,
+            pParameter: void_ptr!(&param),
             ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
                 as CK_ULONG,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, key_handle);
-        assert_eq!(ret, CKR_OK);
-
-        let mut enc = vec![0u8; ciphertext.len()];
-        let mut enc_len = enc.len() as CK_ULONG;
-        ret = fn_encrypt(
+        let enc = ret_or_panic!(encrypt(
             session,
-            plaintext.as_mut_ptr(),
-            plaintext.len() as CK_ULONG,
-            enc.as_mut_ptr(),
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, enc.len() as CK_ULONG);
+            key_handle,
+            plaintext.as_slice(),
+            &mechanism,
+        ));
         assert_eq!(&enc, &ciphertext);
     }
 

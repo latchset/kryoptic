@@ -40,6 +40,18 @@ macro_rules! err_or_panic {
     };
 }
 
+macro_rules! void_ptr {
+    ($ptr:expr) => {
+        $ptr as *const _ as CK_VOID_PTR
+    };
+}
+
+macro_rules! byte_ptr {
+    ($ptr:expr) => {
+        $ptr as *const _ as CK_BYTE_PTR
+    };
+}
+
 pub fn get_test_data(
     session: CK_SESSION_HANDLE,
     name: &str,
@@ -107,7 +119,7 @@ pub fn get_test_data(
 pub fn decrypt(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
-    ciphertext: &Vec<u8>,
+    ciphertext: &[u8],
     mechanism: &CK_MECHANISM,
 ) -> KResult<Vec<u8>> {
     let ret = fn_decrypt_init(
@@ -150,7 +162,7 @@ pub fn decrypt(
 pub fn encrypt(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
-    plaintext: &Vec<u8>,
+    plaintext: &[u8],
     mechanism: &CK_MECHANISM,
 ) -> KResult<Vec<u8>> {
     let ret = fn_encrypt_init(
