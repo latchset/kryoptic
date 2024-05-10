@@ -981,7 +981,8 @@ extern "C" fn fn_decrypt(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if data.is_null() {
-        let decryption_len = res_or_ret!(operation.decryption_len());
+        let decryption_len =
+            res_or_ret!(operation.decryption_len(encrypted_data_len));
         unsafe {
             *pul_data_len = decryption_len as CK_ULONG;
         }
@@ -1012,7 +1013,8 @@ extern "C" fn fn_decrypt_update(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if part.is_null() {
-        let decryption_len = res_or_ret!(operation.decryption_len());
+        let decryption_len =
+            res_or_ret!(operation.decryption_len(encrypted_part_len));
         unsafe {
             *pul_part_len = decryption_len as CK_ULONG;
         }
@@ -1041,7 +1043,7 @@ extern "C" fn fn_decrypt_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if last_part.is_null() {
-        let decryption_len = res_or_ret!(operation.decryption_len());
+        let decryption_len = res_or_ret!(operation.decryption_len(0));
         unsafe {
             *pul_last_part_len = decryption_len as CK_ULONG;
         }

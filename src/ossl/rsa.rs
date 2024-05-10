@@ -994,7 +994,7 @@ impl Decryption for RsaPKCSOperation {
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn decryption_len(&self) -> KResult<usize> {
+    fn decryption_len(&self, _data_len: CK_ULONG) -> KResult<usize> {
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
             _ => err_rv!(CKR_GENERAL_ERROR),
