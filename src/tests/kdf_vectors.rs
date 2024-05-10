@@ -276,42 +276,6 @@ fn parse_kdf_vector(filename: &str) -> Vec<KdfTestSection> {
     data
 }
 
-fn create_secret_key(
-    session: CK_ULONG,
-    label: &String,
-    key_type: CK_KEY_TYPE,
-    key: &Vec<u8>,
-) -> CK_OBJECT_HANDLE {
-    let class = CKO_SECRET_KEY;
-    let lb = label.as_bytes();
-    let truebool = CK_TRUE;
-    let template = vec![
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &key_type as *const _, CK_ULONG_SIZE),
-        make_attribute!(
-            CKA_LABEL,
-            lb.as_ptr() as CK_VOID_PTR,
-            lb.len() as CK_ULONG
-        ),
-        make_attribute!(
-            CKA_VALUE,
-            key.as_ptr() as CK_VOID_PTR,
-            key.len() as CK_ULONG
-        ),
-        make_attribute!(CKA_DERIVE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
-
-    let mut handle: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;
-    let _ = fn_create_object(
-        session,
-        template.as_ptr() as CK_ATTRIBUTE_PTR,
-        template.len() as CK_ULONG,
-        &mut handle,
-    );
-
-    handle
-}
-
 macro_rules! make_prf_data_param {
     ($type:expr, $value:expr, $a:ty) => {
         CK_PRF_DATA_PARAM {
@@ -361,15 +325,23 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
         for unit in section.units {
             println!("Executing test at line {}", unit.line);
             /* create key */
-            let key_handle = create_secret_key(
+            let key_handle = ret_or_panic!(import_object(
                 session,
-                &format!(
-                    "Key for mech {}, COUNT={}, line {}",
-                    section.prf, unit.count, unit.line
-                ),
-                CKK_GENERIC_SECRET,
-                &unit.ki,
-            );
+                CKO_SECRET_KEY,
+                &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+                &[
+                    (CKA_VALUE, unit.ki.as_slice()),
+                    (
+                        CKA_LABEL,
+                        format!(
+                            "Key for mech {}, COUNT={}, line {}",
+                            section.prf, unit.count, unit.line
+                        )
+                        .as_bytes()
+                    )
+                ],
+                &[(CKA_DERIVE, true)],
+            ));
 
             let class = CKO_SECRET_KEY;
             let ktype = CKK_GENERIC_SECRET;

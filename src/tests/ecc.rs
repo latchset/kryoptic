@@ -13,80 +13,44 @@ fn test_create_ec_objects() {
     /* login */
     testtokn.login();
 
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-
-    let mut class = CKO_PUBLIC_KEY;
-    let mut ktype = CKK_EC;
-    let mut verify: CK_BBOOL = CK_TRUE;
-    let label = "EC Public Signature Key";
-    let point_hex = "041b803bf0586decf25616e879b0399aa3daab60916fc76c9b6c687fc1454cba90d5f15aeb36e7070cffb4966499b71b389453c0075203fa047d4f3e44343edc84fb793bf1b8ca94dd3f293afbe68e3be93f1245be9fb71be3c50f1263bc12d516";
-    let params_hex = "06052b81040022";
-    let point = hex::decode(point_hex).expect("Failed to decode hex point");
-    let params = hex::decode(params_hex).expect("Failed to decode hex params");
-    let mut template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VERIFY, &mut verify as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_LABEL,
-            label.as_ptr() as *mut std::ffi::c_void,
-            label.len()
-        ),
-        make_attribute!(
-            CKA_EC_POINT,
-            point.as_ptr() as *mut std::ffi::c_void,
-            point.len()
-        ),
-        make_attribute!(
-            CKA_EC_PARAMS,
-            params.as_ptr() as *mut std::ffi::c_void,
-            params.len()
-        ),
-    ];
-
-    let ret = fn_create_object(
+    let point = hex::decode(
+        "041B803BF0586DECF25616E879B0399AA3DAAB60916FC76C9B6C687FC1454C\
+         BA90D5F15AEB36E7070CFFB4966499B71B389453C0075203FA047D4F3E4434\
+         3EDC84FB793BF1B8CA94DD3F293AFBE68E3BE93F1245BE9FB71BE3C50F1263\
+         BC12D516",
+    )
+    .expect("Failed to decode hex point");
+    let params =
+        hex::decode("06052B81040022").expect("Failed to decode hex params");
+    let _ = ret_or_panic!(import_object(
         session,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-        &mut handle,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[
+            (CKA_LABEL, "EC Public Signature Key".as_bytes()),
+            (CKA_EC_POINT, point.as_slice()),
+            (CKA_EC_PARAMS, params.as_slice()),
+        ],
+        &[(CKA_VERIFY, true)]
+    ));
 
     /* Private EC key */
-    class = CKO_PRIVATE_KEY;
-    let mut ktype = CKK_EC;
-    let mut sign: CK_BBOOL = CK_TRUE;
-    let label = "EC Private Signature Key";
-    let value_hex = "4a77d1245d2c4751ff178040cc9e527b4d6cbb067b8fb01265b854fa581fd62dadc706025cbf515d80fd226f8f552f34";
-    let value = hex::decode(value_hex).expect("Failed to decode value");
-    template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_SIGN, &mut sign as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_LABEL,
-            label.as_ptr() as *mut std::ffi::c_void,
-            label.len()
-        ),
-        make_attribute!(
-            CKA_VALUE,
-            value.as_ptr() as *mut std::ffi::c_void,
-            value.len()
-        ),
-        make_attribute!(
-            CKA_EC_PARAMS,
-            params.as_ptr() as *mut std::ffi::c_void,
-            params.len()
-        ),
-    ];
-
-    let ret = fn_create_object(
+    let value = hex::decode(
+        "4A77D1245D2C4751FF178040CC9E527B4D6CBB067B8FB01265B854FA581FD6\
+         2DADC706025CBF515D80FD226F8F552F34",
+    )
+    .expect("Failed to decode value");
+    let _ = ret_or_panic!(import_object(
         session,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-        &mut handle,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[
+            (CKA_LABEL, "EC Private Signature Key".as_bytes()),
+            (CKA_VALUE, value.as_slice()),
+            (CKA_EC_PARAMS, params.as_slice()),
+        ],
+        &[(CKA_SIGN, true)]
+    ));
 
     testtokn.finalize();
 }
