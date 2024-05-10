@@ -16,36 +16,20 @@ fn test_aes_operations() {
     testtokn.login();
 
     /* Generate AES key */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_AES_KEY_GEN,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-
-    let mut class = CKO_SECRET_KEY;
-    let mut len: CK_ULONG = 16;
-    let mut truebool = CK_TRUE;
-    let mut falsebool = CK_FALSE;
-    let mut template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &mut falsebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
-
-    let mut ret = fn_generate_key(
+    let handle = ret_or_panic!(generate_key(
         session,
-        &mut mechanism,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-        &mut handle,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKM_AES_KEY_GEN,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, false),
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+        ],
+    ));
 
+    let mut ret: CK_RV = CKR_GENERAL_ERROR;
     {
         /* AES ECB */
 

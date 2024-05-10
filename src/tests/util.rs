@@ -378,3 +378,130 @@ pub fn import_object(
     }
     Ok(handle)
 }
+
+pub fn generate_key(
+    session: CK_ULONG,
+    mech: CK_MECHANISM_TYPE,
+    ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+    bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
+    bools: &[(CK_ATTRIBUTE_TYPE, bool)],
+) -> KResult<CK_OBJECT_HANDLE> {
+    let class = CKO_SECRET_KEY;
+    let mut template = Vec::<CK_ATTRIBUTE>::with_capacity(
+        1 + ulongs.len() + bytes.len() + bools.len(),
+    );
+    template.push(make_attribute!(
+        CKA_CLASS,
+        &class as *const _,
+        CK_ULONG_SIZE
+    ));
+    for u in ulongs {
+        template.push(make_attribute!(u.0, &u.1 as *const _, CK_ULONG_SIZE));
+    }
+    for b in bytes {
+        template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
+    }
+    for b in bools {
+        template.push(make_attribute!(
+            b.0,
+            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
+            CK_BBOOL_SIZE
+        ));
+    }
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: mech,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut handle: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;
+    let ret = fn_generate_key(
+        session,
+        &mut mechanism,
+        template.as_ptr() as CK_ATTRIBUTE_PTR,
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    Ok(handle)
+}
+
+pub fn generate_key_pair(
+    session: CK_ULONG,
+    mech: CK_MECHANISM_TYPE,
+    pub_ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+    pub_bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
+    pub_bools: &[(CK_ATTRIBUTE_TYPE, bool)],
+    pri_ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+    pri_bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
+    pri_bools: &[(CK_ATTRIBUTE_TYPE, bool)],
+) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
+    let mut pub_template = Vec::<CK_ATTRIBUTE>::with_capacity(
+        pub_ulongs.len() + pub_bytes.len() + pub_bools.len(),
+    );
+    for u in pub_ulongs {
+        pub_template.push(make_attribute!(
+            u.0,
+            &u.1 as *const _,
+            CK_ULONG_SIZE
+        ));
+    }
+    for b in pub_bytes {
+        pub_template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
+    }
+    for b in pub_bools {
+        pub_template.push(make_attribute!(
+            b.0,
+            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
+            CK_BBOOL_SIZE
+        ));
+    }
+    let mut pri_template = Vec::<CK_ATTRIBUTE>::with_capacity(
+        pri_ulongs.len() + pri_bytes.len() + pri_bools.len(),
+    );
+    for u in pri_ulongs {
+        pri_template.push(make_attribute!(
+            u.0,
+            &u.1 as *const _,
+            CK_ULONG_SIZE
+        ));
+    }
+    for b in pri_bytes {
+        pri_template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
+    }
+    for b in pri_bools {
+        pri_template.push(make_attribute!(
+            b.0,
+            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
+            CK_BBOOL_SIZE
+        ));
+    }
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: mech,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut pub_key: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;
+    let mut pri_key: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;
+    let ret = fn_generate_key_pair(
+        session,
+        &mut mechanism,
+        pub_template.as_ptr() as CK_ATTRIBUTE_PTR,
+        pub_template.len() as CK_ULONG,
+        pri_template.as_ptr() as CK_ATTRIBUTE_PTR,
+        pri_template.len() as CK_ULONG,
+        &mut pub_key,
+        &mut pri_key,
+    );
+
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    Ok((pub_key, pri_key))
+}

@@ -13,94 +13,45 @@ fn test_key() {
     testtokn.login();
 
     /* Generic Secret */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_GENERIC_SECRET_KEY_GEN,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-
-    let mut class = CKO_SECRET_KEY;
-    let mut ktype = CKK_GENERIC_SECRET;
-    let mut len: CK_ULONG = 16;
-    let mut truebool = CK_TRUE;
-    let mut template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_WRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_UNWRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_EXTRACTABLE,
-            &mut truebool as *mut _,
-            CK_BBOOL_SIZE
-        ),
-    ];
-
-    let mut ret = fn_generate_key(
+    let handle = ret_or_panic!(generate_key(
         session,
-        &mut mechanism,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-        &mut handle,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKM_GENERIC_SECRET_KEY_GEN,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
+        &[],
+        &[
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
 
     /* RSA key pair */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_RSA_PKCS_KEY_PAIR_GEN,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    let mut pubkey = CK_INVALID_HANDLE;
-    let mut prikey = CK_INVALID_HANDLE;
-
-    let mut len: CK_ULONG = 2048;
-    let mut pub_template = vec![
-        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_MODULUS_BITS, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_WRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
-    let mut class = CKO_PRIVATE_KEY;
-    let mut ktype = CKK_RSA;
-    let mut pri_template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_UNWRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_EXTRACTABLE,
-            &mut truebool as *mut _,
-            CK_BBOOL_SIZE
-        ),
-    ];
-
-    ret = fn_generate_key_pair(
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
         session,
-        &mut mechanism,
-        pub_template.as_mut_ptr(),
-        pub_template.len() as CK_ULONG,
-        pri_template.as_mut_ptr(),
-        pri_template.len() as CK_ULONG,
-        &mut pubkey,
-        &mut prikey,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_VERIFY, true), (CKA_WRAP, true),],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
 
     let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_SHA256_RSA_PKCS,
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    ret = fn_sign_init(session, &mut sig_mechanism, prikey);
+    let mut ret = fn_sign_init(session, &mut sig_mechanism, prikey);
     assert_eq!(ret, CKR_OK);
 
     let data = "plaintext";
@@ -147,6 +98,21 @@ fn test_key() {
         &mut wrapped_len,
     );
     assert_eq!(ret, CKR_OK);
+
+    let class: CK_OBJECT_CLASS = CKO_PRIVATE_KEY;
+    let ktype: CK_KEY_TYPE = CKK_RSA;
+    let truebool: CK_BBOOL = CK_TRUE;
+    let mut pri_template = vec![
+        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &ktype as *const _, CK_ULONG_SIZE),
+        make_attribute!(CKA_PRIVATE, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SENSITIVE, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_DECRYPT, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SIGN, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_UNWRAP, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
+    ];
 
     let mut prikey2 = CK_INVALID_HANDLE;
     ret = fn_unwrap_key(
@@ -252,51 +218,24 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
 
     /* RSA 4k key pair */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_RSA_PKCS_KEY_PAIR_GEN,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    let mut pubkey = CK_INVALID_HANDLE;
-    let mut prikey = CK_INVALID_HANDLE;
-
-    let mut len: CK_ULONG = 4096;
-    let mut pub_template = vec![
-        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_MODULUS_BITS, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_WRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
-    let mut class = CKO_PRIVATE_KEY;
-    let mut ktype = CKK_RSA;
-    let mut pri_template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_UNWRAP, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_EXTRACTABLE,
-            &mut truebool as *mut _,
-            CK_BBOOL_SIZE
-        ),
-    ];
-
-    ret = fn_generate_key_pair(
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
         session,
-        &mut mechanism,
-        pub_template.as_mut_ptr(),
-        pub_template.len() as CK_ULONG,
-        pri_template.as_mut_ptr(),
-        pri_template.len() as CK_ULONG,
-        &mut pubkey,
-        &mut prikey,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 4096)],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_VERIFY, true), (CKA_WRAP, true),],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
 
     let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_SHA256_RSA_PKCS,
@@ -332,57 +271,27 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
 
     /* EC key pair */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_EC_KEY_PAIR_GEN,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
+    let ec_params = hex::decode(
+        "06052B81040022", // secp384r1
+    )
+    .expect("Failed to decode hex ec_params");
 
-    let mut pubkey = CK_INVALID_HANDLE;
-    let mut prikey = CK_INVALID_HANDLE;
-
-    let mut truebool = CK_TRUE;
-    let ec_params_hex = "06052B81040022"; // secp384r1
-    let ec_params =
-        hex::decode(ec_params_hex).expect("Failed to decode hex ec_params");
-    let mut ktype = CKK_EC;
-    let mut class = CKO_PUBLIC_KEY;
-    let mut pub_template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VERIFY, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_EC_PARAMS,
-            ec_params.as_ptr() as *mut std::ffi::c_void,
-            ec_params.len()
-        ),
-    ];
-    let mut class = CKO_PRIVATE_KEY;
-    let mut pri_template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_PRIVATE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SENSITIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SIGN, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(
-            CKA_EXTRACTABLE,
-            &mut truebool as *mut _,
-            CK_BBOOL_SIZE
-        ),
-    ];
-
-    ret = fn_generate_key_pair(
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
         session,
-        &mut mechanism,
-        pub_template.as_mut_ptr(),
-        pub_template.len() as CK_ULONG,
-        pri_template.as_mut_ptr(),
-        pri_template.len() as CK_ULONG,
-        &mut pubkey,
-        &mut prikey,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKM_EC_KEY_PAIR_GEN,
+        &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_EC),],
+        &[(CKA_EC_PARAMS, ec_params.as_slice())],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC),],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_SIGN, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
 
     let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDSA_SHA256,
@@ -437,6 +346,18 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    let class: CK_OBJECT_CLASS = CKO_PRIVATE_KEY;
+    let ktype: CK_KEY_TYPE = CKK_EC;
+    let truebool: CK_BBOOL = CK_TRUE;
+    let mut pri_template = vec![
+        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
+        make_attribute!(CKA_KEY_TYPE, &ktype as *const _, CK_ULONG_SIZE),
+        make_attribute!(CKA_PRIVATE, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SENSITIVE, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_TOKEN, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_SIGN, &truebool as *const _, CK_BBOOL_SIZE),
+        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
+    ];
     let mut prikey2 = CK_INVALID_HANDLE;
     ret = fn_unwrap_key(
         session,
@@ -673,32 +594,13 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
 
     /* Test AES_ECB/AES_CBC Key derivation */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_AES_KEY_GEN,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    let mut class = CKO_SECRET_KEY;
-    let mut ktype = CKK_AES;
-    let mut len: CK_ULONG = 32;
-    let mut truebool = CK_TRUE;
-    let mut template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
-
-    let mut aeskey = CK_INVALID_HANDLE;
-    ret = fn_generate_key(
+    let aeskey = ret_or_panic!(generate_key(
         session,
-        &mut mechanism,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-        &mut aeskey,
-    );
-    assert_eq!(ret, CKR_OK);
+        CKM_AES_KEY_GEN,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
 
     let mut class = CKO_SECRET_KEY;
     let mut ktype = CKK_AES;
