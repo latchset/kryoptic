@@ -1636,4 +1636,27 @@ impl Decryption for AesOperation {
         unsafe { *plain_len = plen as CK_ULONG };
         Ok(())
     }
+
+    fn decryption_len(&self, data_len: CK_ULONG) -> KResult<usize> {
+        Ok(match self.mech {
+            CKM_AES_CCM => self.params.datalen,
+            CKM_AES_GCM => {
+                let len = data_len as usize;
+                if len > self.params.taglen {
+                    len - self.params.taglen
+                } else {
+                    0
+                }
+            }
+            CKM_AES_CTR | CKM_AES_CTS => data_len as usize,
+            CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
+                (data_len as usize / AES_BLOCK_SIZE) * AES_BLOCK_SIZE
+            }
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
+                data_len as usize
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        })
+    }
 }
