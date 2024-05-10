@@ -26,6 +26,20 @@ macro_rules! ret_or_panic {
     };
 }
 
+macro_rules! err_or_panic {
+    ($ret:expr, $err:expr) => {
+        if !match $ret {
+            Ok(_) => false,
+            Err(e) => match e {
+                KError::RvError(r) => r.rv == $err,
+                _ => false,
+            },
+        } {
+            panic!("Should have returned error {}", $err);
+        }
+    };
+}
+
 pub fn get_test_data(
     session: CK_SESSION_HANDLE,
     name: &str,
@@ -317,4 +331,50 @@ pub fn sig_gen_multipart(
     signature.resize(siglen as usize, 0);
 
     Ok(signature)
+}
+
+const TRUEBOOL: CK_BBOOL = CK_TRUE;
+const FALSEBOOL: CK_BBOOL = CK_FALSE;
+
+pub fn import_object(
+    session: CK_ULONG,
+    class: CK_OBJECT_CLASS,
+    ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+    bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
+    bools: &[(CK_ATTRIBUTE_TYPE, bool)],
+) -> KResult<CK_OBJECT_HANDLE> {
+    let mut template = Vec::<CK_ATTRIBUTE>::with_capacity(
+        1 + ulongs.len() + bytes.len() + bools.len(),
+    );
+    template.push(make_attribute!(
+        CKA_CLASS,
+        &class as *const _,
+        CK_ULONG_SIZE
+    ));
+    for u in ulongs {
+        template.push(make_attribute!(u.0, &u.1 as *const _, CK_ULONG_SIZE));
+    }
+    for b in bytes {
+        template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
+    }
+    for b in bools {
+        template.push(make_attribute!(
+            b.0,
+            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
+            CK_BBOOL_SIZE
+        ));
+    }
+
+    let mut handle: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;
+    let ret = fn_create_object(
+        session,
+        template.as_ptr() as CK_ATTRIBUTE_PTR,
+        template.len() as CK_ULONG,
+        &mut handle,
+    );
+
+    if ret != CKR_OK {
+        return err_rv!(ret);
+    }
+    Ok(handle)
 }
