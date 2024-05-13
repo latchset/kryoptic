@@ -241,8 +241,8 @@ pub fn get_test_key_handle(
 pub fn sig_verify(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
-    data: &Vec<u8>,
-    signature: &Vec<u8>,
+    data: &[u8],
+    signature: &[u8],
     mechanism: &CK_MECHANISM,
 ) -> CK_RV {
     let ret =
@@ -253,9 +253,9 @@ pub fn sig_verify(
 
     fn_verify(
         session,
-        data.as_ptr() as *mut u8,
+        byte_ptr!(data),
         data.len() as CK_ULONG,
-        signature.as_ptr() as *mut u8,
+        byte_ptr!(signature),
         signature.len() as CK_ULONG,
     )
 }
@@ -263,7 +263,7 @@ pub fn sig_verify(
 pub fn sig_gen(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
-    data: &Vec<u8>,
+    data: &[u8],
     mechanism: &CK_MECHANISM,
 ) -> KResult<Vec<u8>> {
     let ret =
@@ -276,7 +276,7 @@ pub fn sig_gen(
     let mut siglen: CK_ULONG = 0;
     let ret = fn_sign(
         session,
-        data.as_ptr() as *mut u8,
+        byte_ptr!(data),
         data.len() as CK_ULONG,
         std::ptr::null_mut(),
         &mut siglen,
@@ -288,9 +288,9 @@ pub fn sig_gen(
     let mut signature: Vec<u8> = vec![0; siglen as usize];
     let ret = fn_sign(
         session,
-        data.as_ptr() as *mut u8,
+        byte_ptr!(data),
         data.len() as CK_ULONG,
-        signature.as_ptr() as *mut u8,
+        signature.as_mut_ptr(),
         &mut siglen,
     );
     if ret != CKR_OK {

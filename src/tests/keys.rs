@@ -46,38 +46,33 @@ fn test_key() {
         ],
     ));
 
-    let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_SHA256_RSA_PKCS,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    let mut ret = fn_sign_init(session, &mut sig_mechanism, prikey);
-    assert_eq!(ret, CKR_OK);
-
     let data = "plaintext";
-    let sign: [u8; 256] = [0; 256];
-    let mut sign_len: CK_ULONG = 256;
-    ret = fn_sign(
+    let sig = ret_or_panic!(sig_gen(
         session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 256);
+        prikey,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_SHA256_RSA_PKCS,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
+    assert_eq!(sig.len(), 256);
 
-    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
+            session,
+            pubkey,
+            data.as_bytes(),
+            sig.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_SHA256_RSA_PKCS,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        )
     );
-    assert_eq!(ret, CKR_OK);
 
     /* Wrap RSA key in AES */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -89,7 +84,7 @@ fn test_key() {
     let mut wrapped = vec![0u8; 65536];
     let mut wrapped_len = wrapped.len() as CK_ULONG;
 
-    ret = fn_wrap_key(
+    let mut ret = fn_wrap_key(
         session,
         &mut mechanism,
         handle,
@@ -99,20 +94,19 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
-    let class: CK_OBJECT_CLASS = CKO_PRIVATE_KEY;
-    let ktype: CK_KEY_TYPE = CKK_RSA;
-    let truebool: CK_BBOOL = CK_TRUE;
-    let mut pri_template = vec![
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &ktype as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_PRIVATE, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SENSITIVE, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DECRYPT, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SIGN, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_UNWRAP, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
+    let mut pri_template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA)],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
 
     let mut prikey2 = CK_INVALID_HANDLE;
     ret = fn_unwrap_key(
@@ -128,34 +122,34 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
 
     /* Test the unwrapped key can be used */
-    ret = fn_sign_init(session, &mut sig_mechanism, prikey2);
-    assert_eq!(ret, CKR_OK);
-
     let data = "plaintext";
-    let sign: [u8; 256] = [0; 256];
-    let mut sign_len: CK_ULONG = 256;
-    ret = fn_sign(
+    let sig = ret_or_panic!(sig_gen(
         session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 256);
+        prikey2,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_SHA256_RSA_PKCS,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
+    assert_eq!(sig.len(), 256);
 
     /* And signature verified by the original public key */
-    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
+            session,
+            pubkey,
+            data.as_bytes(),
+            sig.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_SHA256_RSA_PKCS,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        )
     );
-    assert_eq!(ret, CKR_OK);
 
     /* Wrap AES Key in RSA PKCS */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -177,17 +171,15 @@ fn test_key() {
 
     /* need to unwrap the key with a template that
      * will work for an encryption operation */
-    let mut class = CKO_SECRET_KEY;
-    let mut ktype = CKK_AES;
-    let mut len: CK_ULONG = 16;
-    let mut truebool = CK_TRUE;
-    let mut template = vec![
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
+    let mut template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    );
 
     let mut handle2 = CK_INVALID_HANDLE;
     ret = fn_unwrap_key(
@@ -237,38 +229,33 @@ fn test_key() {
         ],
     ));
 
-    let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_SHA256_RSA_PKCS,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    ret = fn_sign_init(session, &mut sig_mechanism, prikey);
-    assert_eq!(ret, CKR_OK);
-
     let data = "plaintext";
-    let sign: [u8; 512] = [0; 512];
-    let mut sign_len: CK_ULONG = 512;
-    ret = fn_sign(
+    let sig = ret_or_panic!(sig_gen(
         session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 512);
+        prikey,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_SHA256_RSA_PKCS,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
+    assert_eq!(sig.len(), 512);
 
-    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
+            session,
+            pubkey,
+            data.as_bytes(),
+            sig.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_SHA256_RSA_PKCS,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        )
     );
-    assert_eq!(ret, CKR_OK);
 
     /* EC key pair */
     let ec_params = hex::decode(
@@ -293,38 +280,33 @@ fn test_key() {
         ],
     ));
 
-    let mut sig_mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_ECDSA_SHA256,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    ret = fn_sign_init(session, &mut sig_mechanism, prikey);
-    assert_eq!(ret, CKR_OK);
-
     let data = "plaintext";
-    let sign: [u8; 96] = [0; 96];
-    let mut sign_len: CK_ULONG = 96;
-    ret = fn_sign(
+    let sig = ret_or_panic!(sig_gen(
         session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 96);
+        prikey,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_ECDSA_SHA256,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
+    assert_eq!(sig.len(), 96);
 
-    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
+            session,
+            pubkey,
+            data.as_bytes(),
+            sig.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_ECDSA_SHA256,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        )
     );
-    assert_eq!(ret, CKR_OK);
 
     /* Wrap EC key in AES */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -346,18 +328,19 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
-    let class: CK_OBJECT_CLASS = CKO_PRIVATE_KEY;
-    let ktype: CK_KEY_TYPE = CKK_EC;
-    let truebool: CK_BBOOL = CK_TRUE;
-    let mut pri_template = vec![
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &ktype as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_PRIVATE, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SENSITIVE, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_TOKEN, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_SIGN, &truebool as *const _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
+    let mut pri_template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
+
     let mut prikey2 = CK_INVALID_HANDLE;
     ret = fn_unwrap_key(
         session,
@@ -372,47 +355,45 @@ fn test_key() {
     assert_eq!(ret, CKR_OK);
 
     /* Test the unwrapped key can be used */
-    ret = fn_sign_init(session, &mut sig_mechanism, prikey2);
-    assert_eq!(ret, CKR_OK);
-
     let data = "plaintext";
-    let sign: [u8; 96] = [0; 96];
-    let mut sign_len: CK_ULONG = 96;
-    ret = fn_sign(
+    let sig = ret_or_panic!(sig_gen(
         session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 96);
+        prikey2,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_ECDSA_SHA256,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
+    assert_eq!(sig.len(), 96);
 
     /* And signature verified by the original public key */
-    ret = fn_verify_init(session, &mut sig_mechanism, pubkey);
-    assert_eq!(ret, CKR_OK);
-
-    ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
+            session,
+            pubkey,
+            data.as_bytes(),
+            sig.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_ECDSA_SHA256,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        )
     );
-    assert_eq!(ret, CKR_OK);
 
     /* Test key derivation */
-    let mut class = CKO_SECRET_KEY;
-    let mut ktype = CKK_AES;
-    let mut len: CK_ULONG = 16;
-    let mut truebool = CK_TRUE;
-    let derive_template = [
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_ENCRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_DECRYPT, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    );
 
     let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
         bLittleEndian: 0,
@@ -528,16 +509,15 @@ fn test_key() {
     assert_eq!(val, 16);
 
     /* Test Sp800 108 feedback key derivation */
-    let mut class = CKO_SECRET_KEY;
-    let mut ktype = CKK_GENERIC_SECRET;
-    let mut len: CK_ULONG = 1234;
-    let mut truebool = CK_TRUE;
-    let derive_template = [
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 1234),
+        ],
+        &[],
+        &[(CKA_DERIVE, true)],
+    );
 
     let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
         bLittleEndian: 0,
@@ -602,16 +582,15 @@ fn test_key() {
         &[(CKA_DERIVE, true)],
     ));
 
-    let mut class = CKO_SECRET_KEY;
-    let mut ktype = CKK_AES;
-    let mut len: CK_ULONG = 16;
-    let mut truebool = CK_TRUE;
-    let derive_template = [
-        make_attribute!(CKA_CLASS, &mut class as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &mut ktype as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &mut len as *mut _, CK_ULONG_SIZE),
-        make_attribute!(CKA_DERIVE, &mut truebool as *mut _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_DERIVE, true)],
+    );
 
     let data = "derive keys data";
     let mut derive_params = CK_KEY_DERIVATION_STRING_DATA {
@@ -662,12 +641,11 @@ fn test_key() {
     /* Test Hash based derivation */
 
     /* No length or type */
-    let class = CKO_SECRET_KEY;
-    let truebool = CK_TRUE;
-    let derive_template = [
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY)],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
 
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_SHA256_KEY_DERIVATION,
@@ -702,33 +680,35 @@ fn test_key() {
     assert_eq!(extract_template[0].ulValueLen, 32);
 
     /* Key len too big */
-    let mut keylen: CK_ULONG = 42;
-    let mut derive_template = [
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &keylen as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, 42)],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
 
     let mut hashkey2 = CK_INVALID_HANDLE;
     ret = fn_derive_key(
         session,
         &mut derive_mech,
         aeskey,
-        derive_template.as_mut_ptr(),
+        derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey2,
     );
     assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
 
     /* Valid Key len defined */
-    keylen = 22;
-    derive_template[1].pValue = &keylen as *const _ as CK_VOID_PTR;
+    let derive_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, 22)],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
     let mut hashkey2 = CK_INVALID_HANDLE;
     ret = fn_derive_key(
         session,
         &mut derive_mech,
         aeskey,
-        derive_template.as_mut_ptr(),
+        derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey2,
     );
@@ -746,12 +726,11 @@ fn test_key() {
     assert_eq!(extract_template[0].ulValueLen, 22);
 
     /* No length but key type defined */
-    let ktype = CKK_AES;
-    let derive_template = [
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &ktype as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
 
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_SHA512_KEY_DERIVATION,
@@ -782,34 +761,43 @@ fn test_key() {
     assert_eq!(extract_template[0].ulValueLen, 32);
 
     /* Key type define and incompatible length */
-    keylen = 42;
-    let mut derive_template = [
-        make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_KEY_TYPE, &ktype as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_VALUE_LEN, &keylen as *const _, CK_ULONG_SIZE),
-        make_attribute!(CKA_EXTRACTABLE, &truebool as *const _, CK_BBOOL_SIZE),
-    ];
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 42),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
 
     let mut hashkey4 = CK_INVALID_HANDLE;
     ret = fn_derive_key(
         session,
         &mut derive_mech,
         aeskey,
-        derive_template.as_mut_ptr(),
+        derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey4,
     );
     assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
 
     /* Key type and length defined */
-    keylen = 32;
-    derive_template[2].pValue = &keylen as *const _ as CK_VOID_PTR;
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
     let mut hashkey4 = CK_INVALID_HANDLE;
     ret = fn_derive_key(
         session,
         &mut derive_mech,
         aeskey,
-        derive_template.as_mut_ptr(),
+        derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey4,
     );
