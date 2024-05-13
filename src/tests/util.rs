@@ -348,23 +348,45 @@ pub fn sig_gen_multipart(
 const TRUEBOOL: CK_BBOOL = CK_TRUE;
 const FALSEBOOL: CK_BBOOL = CK_FALSE;
 
-pub fn import_object(
-    session: CK_ULONG,
-    class: CK_OBJECT_CLASS,
+pub struct TestTemplate {
+    longs: Vec<CK_ULONG>,
+    vec: Vec<CK_ATTRIBUTE>,
+}
+
+impl TestTemplate {
+    pub fn as_ptr(&self) -> *const CK_ATTRIBUTE {
+        self.vec.as_ptr()
+    }
+
+    pub fn as_mut_ptr(&mut self) -> CK_ATTRIBUTE_PTR {
+        self.vec.as_mut_ptr()
+    }
+
+    pub fn push(&mut self, attr: CK_ATTRIBUTE) {
+        self.vec.push(attr)
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+}
+
+pub fn make_attr_template(
     ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
     bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
     bools: &[(CK_ATTRIBUTE_TYPE, bool)],
-) -> KResult<CK_OBJECT_HANDLE> {
-    let mut template = Vec::<CK_ATTRIBUTE>::with_capacity(
-        1 + ulongs.len() + bytes.len() + bools.len(),
-    );
-    template.push(make_attribute!(
-        CKA_CLASS,
-        &class as *const _,
-        CK_ULONG_SIZE
-    ));
+) -> TestTemplate {
+    /* Add one more, often code adds a class attribute later */
+    let capacity = ulongs.len() + bytes.len() + bools.len() + 1;
+    let mut template = TestTemplate {
+        longs: Vec::with_capacity(ulongs.len()),
+        vec: Vec::<CK_ATTRIBUTE>::with_capacity(capacity),
+    };
     for u in ulongs {
-        template.push(make_attribute!(u.0, &u.1 as *const _, CK_ULONG_SIZE));
+        template.longs.push(u.1);
+        if let Some(ptr) = template.longs.last() {
+            template.push(make_attribute!(u.0, ptr as *const _, CK_ULONG_SIZE));
+        }
     }
     for b in bytes {
         template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
@@ -376,6 +398,22 @@ pub fn import_object(
             CK_BBOOL_SIZE
         ));
     }
+    template
+}
+
+pub fn import_object(
+    session: CK_ULONG,
+    class: CK_OBJECT_CLASS,
+    ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+    bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
+    bools: &[(CK_ATTRIBUTE_TYPE, bool)],
+) -> KResult<CK_OBJECT_HANDLE> {
+    let mut template = make_attr_template(ulongs, bytes, bools);
+    template.push(make_attribute!(
+        CKA_CLASS,
+        &class as *const _,
+        CK_ULONG_SIZE
+    ));
 
     let mut handle: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;
     let ret = fn_create_object(
@@ -399,27 +437,12 @@ pub fn generate_key(
     bools: &[(CK_ATTRIBUTE_TYPE, bool)],
 ) -> KResult<CK_OBJECT_HANDLE> {
     let class = CKO_SECRET_KEY;
-    let mut template = Vec::<CK_ATTRIBUTE>::with_capacity(
-        1 + ulongs.len() + bytes.len() + bools.len(),
-    );
+    let mut template = make_attr_template(ulongs, bytes, bools);
     template.push(make_attribute!(
         CKA_CLASS,
         &class as *const _,
         CK_ULONG_SIZE
     ));
-    for u in ulongs {
-        template.push(make_attribute!(u.0, &u.1 as *const _, CK_ULONG_SIZE));
-    }
-    for b in bytes {
-        template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
-    }
-    for b in bools {
-        template.push(make_attribute!(
-            b.0,
-            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
-            CK_BBOOL_SIZE
-        ));
-    }
 
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: mech,
@@ -452,46 +475,8 @@ pub fn generate_key_pair(
     pri_bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
     pri_bools: &[(CK_ATTRIBUTE_TYPE, bool)],
 ) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
-    let mut pub_template = Vec::<CK_ATTRIBUTE>::with_capacity(
-        pub_ulongs.len() + pub_bytes.len() + pub_bools.len(),
-    );
-    for u in pub_ulongs {
-        pub_template.push(make_attribute!(
-            u.0,
-            &u.1 as *const _,
-            CK_ULONG_SIZE
-        ));
-    }
-    for b in pub_bytes {
-        pub_template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
-    }
-    for b in pub_bools {
-        pub_template.push(make_attribute!(
-            b.0,
-            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
-            CK_BBOOL_SIZE
-        ));
-    }
-    let mut pri_template = Vec::<CK_ATTRIBUTE>::with_capacity(
-        pri_ulongs.len() + pri_bytes.len() + pri_bools.len(),
-    );
-    for u in pri_ulongs {
-        pri_template.push(make_attribute!(
-            u.0,
-            &u.1 as *const _,
-            CK_ULONG_SIZE
-        ));
-    }
-    for b in pri_bytes {
-        pri_template.push(make_attribute!(b.0, b.1.as_ptr(), b.1.len()));
-    }
-    for b in pri_bools {
-        pri_template.push(make_attribute!(
-            b.0,
-            if b.1 { &TRUEBOOL } else { &FALSEBOOL } as *const _,
-            CK_BBOOL_SIZE
-        ));
-    }
+    let pub_template = make_attr_template(pub_ulongs, pub_bytes, pub_bools);
+    let pri_template = make_attr_template(pri_ulongs, pri_bytes, pri_bools);
 
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: mech,
