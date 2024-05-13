@@ -14,12 +14,9 @@ fn test_copy_objects() {
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("2").unwrap().into_raw(),
-        1
-    )];
-    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "2".as_bytes())], &[]);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -30,17 +27,16 @@ fn test_copy_objects() {
     assert_eq!(ret, CKR_OK);
 
     /* copy token object to session object */
-    let mut intoken: CK_BBOOL = CK_FALSE;
-    let mut private: CK_BBOOL = CK_TRUE;
-    let mut template = vec![
-        make_attribute!(CKA_TOKEN, &mut intoken as *mut _, CK_BBOOL_SIZE),
-        make_attribute!(CKA_PRIVATE, &mut private as *mut _, CK_BBOOL_SIZE),
-    ];
+    let template = make_attr_template(
+        &[],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_PRIVATE, true)],
+    );
     let mut handle2: CK_ULONG = CK_INVALID_HANDLE;
     let ret = fn_copy_object(
         session,
         handle,
-        template.as_mut_ptr(),
+        template.as_ptr() as *mut _,
         template.len() as CK_ULONG,
         &mut handle2,
     );
@@ -59,17 +55,12 @@ fn test_copy_objects() {
     ));
 
     /* copy token object to session object */
-    let mut intoken: CK_BBOOL = CK_FALSE;
-    let mut template = vec![make_attribute!(
-        CKA_TOKEN,
-        &mut intoken as *mut _,
-        CK_BBOOL_SIZE
-    )];
+    let template = make_attr_template(&[], &[], &[(CKA_TOKEN, false)]);
     let mut handle2: CK_ULONG = CK_INVALID_HANDLE;
     let ret = fn_copy_object(
         session,
         handle,
-        template.as_mut_ptr(),
+        template.as_ptr() as *mut _,
         template.len() as CK_ULONG,
         &mut handle2,
     );

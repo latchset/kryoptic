@@ -68,12 +68,9 @@ fn test_ecc_operations() {
 
     /* private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("5").unwrap().into_raw(),
-        1
-    )];
-    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "5".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -120,12 +117,9 @@ fn test_ecc_operations() {
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* test that signature verification works */
-    template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("4").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "4".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -149,12 +143,9 @@ fn test_ecc_operations() {
 
     /* P-521 private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("7").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "7".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -201,12 +192,9 @@ fn test_ecc_operations() {
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* test that signature verification works */
-    template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("6").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "6".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);

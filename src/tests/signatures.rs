@@ -17,12 +17,9 @@ struct TestCase {
 
 fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_APPLICATION,
-        CString::new(name).unwrap().into_raw(),
-        name.len()
-    )];
-    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_APPLICATION, name.as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -31,9 +28,10 @@ fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
     assert_eq!(ret, CKR_OK);
 
     /* get values */
-    template.clear();
-    template.push(make_attribute!(CKA_VALUE, std::ptr::null_mut(), 0));
-    template.push(make_attribute!(CKA_OBJECT_ID, std::ptr::null_mut(), 0));
+    let mut template = make_ptrs_template(&[
+        (CKA_VALUE, std::ptr::null_mut(), 0),
+        (CKA_OBJECT_ID, std::ptr::null_mut(), 0),
+    ]);
     ret = fn_get_attribute_value(
         session,
         handle,
@@ -45,8 +43,8 @@ fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
         value: vec![0; template[0].ulValueLen as usize],
         result: vec![0; template[1].ulValueLen as usize],
     };
-    template[0].pValue = tc.value.as_mut_ptr() as CK_VOID_PTR;
-    template[1].pValue = tc.result.as_mut_ptr() as CK_VOID_PTR;
+    template[0].pValue = void_ptr!(tc.value.as_mut_ptr());
+    template[1].pValue = void_ptr!(tc.result.as_mut_ptr());
     ret = fn_get_attribute_value(
         session,
         handle,

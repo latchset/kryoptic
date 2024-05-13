@@ -463,11 +463,11 @@ fn test_key() {
 
     /* check each key */
     let mut val: CK_ULONG = 0;
-    let attrtmpl = [make_attribute!(
+    let attrtmpl = make_ptrs_template(&[(
         CKA_VALUE_LEN,
-        &mut val as *mut _,
-        CK_ULONG_SIZE
-    )];
+        void_ptr!(&mut val),
+        CK_ULONG_SIZE,
+    )]);
 
     ret = fn_get_attribute_value(
         session,

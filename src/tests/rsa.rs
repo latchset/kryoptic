@@ -17,12 +17,9 @@ fn test_rsa_operations() {
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("2").unwrap().into_raw(),
-        1
-    )];
-    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "2".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -69,12 +66,9 @@ fn test_rsa_operations() {
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* test that decryption returns the same data back */
-    template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("3").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "3".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);

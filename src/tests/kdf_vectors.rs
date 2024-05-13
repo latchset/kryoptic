@@ -343,28 +343,15 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                 &[(CKA_DERIVE, true)],
             ));
 
-            let class = CKO_SECRET_KEY;
-            let ktype = CKK_GENERIC_SECRET;
-            let klen = unit.ko.len() as CK_ULONG;
-            let truebool = CK_TRUE;
-            let derive_template = [
-                make_attribute!(CKA_CLASS, &class as *const _, CK_ULONG_SIZE),
-                make_attribute!(
-                    CKA_KEY_TYPE,
-                    &ktype as *const _,
-                    CK_ULONG_SIZE
-                ),
-                make_attribute!(
-                    CKA_VALUE_LEN,
-                    &klen as *const _,
-                    CK_ULONG_SIZE
-                ),
-                make_attribute!(
-                    CKA_EXTRACTABLE,
-                    &truebool as *const _,
-                    CK_BBOOL_SIZE
-                ),
-            ];
+            let derive_template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                    (CKA_VALUE_LEN, unit.ko.len() as CK_ULONG),
+                ],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
 
             let mut dk_handle = CK_INVALID_HANDLE;
 
@@ -539,8 +526,11 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
             };
 
             let mut value = vec![0u8; unit.ko.len()];
-            let mut extract_template =
-                [make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len())];
+            let mut extract_template = make_ptrs_template(&[(
+                CKA_VALUE,
+                void_ptr!(value.as_mut_ptr()),
+                value.len(),
+            )]);
 
             let ret = fn_get_attribute_value(
                 session,

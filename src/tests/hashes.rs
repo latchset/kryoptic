@@ -14,12 +14,9 @@ fn test_hashes_digest() {
 
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("2").unwrap().into_raw(),
-        1
-    )];
-    let mut ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "2".as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -30,13 +27,10 @@ fn test_hashes_digest() {
     /* get values */
     let mut hash: [u8; 32] = [0; 32];
     let mut value: [u8; 32] = [0; 32];
-    template.clear();
-    template.push(make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len()));
-    template.push(make_attribute!(
-        CKA_OBJECT_ID,
-        hash.as_mut_ptr(),
-        hash.len()
-    ));
+    let mut template = make_ptrs_template(&[
+        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
+        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
+    ]);
     ret = fn_get_attribute_value(
         session,
         handle,
@@ -89,12 +83,9 @@ fn test_hashes_digest() {
 
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("3").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "3".as_bytes())], &[]);
+    ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -105,13 +96,10 @@ fn test_hashes_digest() {
     /* get values */
     let mut hash: [u8; 48] = [0; 48];
     let mut value: [u8; 48] = [0; 48];
-    template.clear();
-    template.push(make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len()));
-    template.push(make_attribute!(
-        CKA_OBJECT_ID,
-        hash.as_mut_ptr(),
-        hash.len()
-    ));
+    let mut template = make_ptrs_template(&[
+        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
+        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
+    ]);
     ret = fn_get_attribute_value(
         session,
         handle,
@@ -147,12 +135,9 @@ fn test_hashes_digest() {
 
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("4").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "4".as_bytes())], &[]);
+    ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -163,13 +148,10 @@ fn test_hashes_digest() {
     /* get values */
     let mut hash: [u8; 64] = [0; 64];
     let mut value: [u8; 64] = [0; 64];
-    template.clear();
-    template.push(make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len()));
-    template.push(make_attribute!(
-        CKA_OBJECT_ID,
-        hash.as_mut_ptr(),
-        hash.len()
-    ));
+    let mut template = make_ptrs_template(&[
+        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
+        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
+    ]);
     ret = fn_get_attribute_value(
         session,
         handle,
@@ -205,12 +187,9 @@ fn test_hashes_digest() {
 
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = vec![make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("5").unwrap().into_raw(),
-        1
-    )];
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "5".as_bytes())], &[]);
+    ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -221,13 +200,10 @@ fn test_hashes_digest() {
     /* get values */
     let mut hash: [u8; 20] = [0; 20];
     let mut value: [u8; 20] = [0; 20];
-    template.clear();
-    template.push(make_attribute!(CKA_VALUE, value.as_mut_ptr(), value.len()));
-    template.push(make_attribute!(
-        CKA_OBJECT_ID,
-        hash.as_mut_ptr(),
-        hash.len()
-    ));
+    let mut template = make_ptrs_template(&[
+        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
+        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
+    ]);
     ret = fn_get_attribute_value(
         session,
         handle,

@@ -77,19 +77,16 @@ fn test_session_objects() {
     assert_eq!(ret, CKR_OK);
 
     /* check that the session object handle invalid now */
-    let mut template = [make_attribute!(CKA_VALUE, std::ptr::null_mut(), 0)];
+    let mut template =
+        make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
 
     ret = fn_get_attribute_value(session, handle1, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OBJECT_HANDLE_INVALID);
 
     /* check that the session object is gone */
-    let mut template = [make_attribute!(
-        CKA_APPLICATION,
-        app1.as_bytes().as_ptr(),
-        app1.as_bytes().len()
-    )];
-
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_APPLICATION, app1.as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut handle1 = CK_INVALID_HANDLE;
     let mut count: CK_ULONG = 0;
@@ -100,13 +97,9 @@ fn test_session_objects() {
     assert_eq!(ret, CKR_OK);
 
     /* check that the token object is there */
-    let mut template = [make_attribute!(
-        CKA_APPLICATION,
-        app2.as_bytes().as_ptr(),
-        app2.as_bytes().len()
-    )];
-
-    ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_APPLICATION, app2.as_bytes())], &[]);
+    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut handle2 = CK_INVALID_HANDLE;
     let mut count: CK_ULONG = 0;
