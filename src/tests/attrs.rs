@@ -9,16 +9,12 @@ fn test_get_attr() {
     let mut testtokn = TestToken::initialized("test_get_attr.sql", None);
     let session = testtokn.get_session(false);
 
-    let mut template = Vec::<CK_ATTRIBUTE>::new();
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
     /* public key data */
-    template.push(make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("2").unwrap().into_raw(),
-        1
-    ));
-    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "2".as_bytes())], &[]);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -28,16 +24,15 @@ fn test_get_attr() {
     let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
-    template.clear();
-    template.push(make_attribute!(CKA_LABEL, std::ptr::null_mut(), 0));
-
+    let mut template =
+        make_ptrs_template(&[(CKA_LABEL, std::ptr::null_mut(), 0)]);
     let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     assert_ne!(template[0].ulValueLen, 0);
 
     let data: &mut [u8] = &mut [0; 128];
-    template[0].pValue = data.as_ptr() as *mut std::ffi::c_void;
-    template[0].ulValueLen = 128;
+    let mut template =
+        make_ptrs_template(&[(CKA_LABEL, void_ptr!(data.as_mut_ptr()), 128)]);
 
     let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
@@ -50,15 +45,11 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
 
     /* private key data */
-    template.clear();
     handle = CK_INVALID_HANDLE;
-    template.push(make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("3").unwrap().into_raw(),
-        1
-    ));
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "3".as_bytes())], &[]);
     /* first try should not find it */
-    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -72,7 +63,7 @@ fn test_get_attr() {
     testtokn.login();
 
     /* after login should find it */
-    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -82,20 +73,23 @@ fn test_get_attr() {
     let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
-    template.clear();
-    template.push(make_attribute!(
+    let mut e = [0u8; 128];
+    let mut template = make_ptrs_template(&[(
         CKA_PRIVATE_EXPONENT,
-        (&mut [0; 128]).as_ptr(),
-        128
-    ));
+        void_ptr!(e.as_mut_ptr()),
+        e.len(),
+    )]);
 
     /* should fail for sensitive attributes */
     let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_ATTRIBUTE_SENSITIVE);
 
     /* and succeed for public ones */
-    template[0].type_ = CKA_PUBLIC_EXPONENT;
-    template[0].ulValueLen = 128;
+    let mut template = make_ptrs_template(&[(
+        CKA_PUBLIC_EXPONENT,
+        void_ptr!(e.as_mut_ptr()),
+        e.len(),
+    )]);
     let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
     assert_eq!(ret, CKR_OK);
     assert_eq!(template[0].ulValueLen, 3);
@@ -108,16 +102,12 @@ fn test_set_attr() {
     let mut testtokn = TestToken::initialized("test_set_attr.sql", None);
     let session = testtokn.get_session(false);
 
-    let mut template = Vec::<CK_ATTRIBUTE>::new();
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
     /* public key data */
-    template.push(make_attribute!(
-        CKA_UNIQUE_ID,
-        CString::new("2").unwrap().into_raw(),
-        1
-    ));
-    let ret = fn_find_objects_init(session, template.as_mut_ptr(), 1);
+    let template =
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "2".as_bytes())], &[]);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -128,31 +118,37 @@ fn test_set_attr() {
     assert_eq!(ret, CKR_OK);
 
     let label = "new label";
-    template.clear();
-    template.push(make_attribute!(CKA_LABEL, label.as_ptr(), label.len()));
-    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let template = make_ptrs_template(&[(
+        CKA_LABEL,
+        void_ptr!(label.as_ptr()),
+        label.as_bytes().len(),
+    )]);
+    let ret =
+        fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
     /* login */
     testtokn.login();
 
-    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret =
+        fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
     let session = testtokn.get_session(true);
 
-    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret =
+        fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
 
     let unique = "unsettable";
-    template.clear();
-    template.push(make_attribute!(
+    let template = make_ptrs_template(&[(
         CKA_UNIQUE_ID,
-        unique.as_ptr(),
-        unique.len()
-    ));
+        void_ptr!(unique.as_ptr()),
+        unique.as_bytes().len(),
+    )]);
 
-    let ret = fn_set_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    let ret =
+        fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_ATTRIBUTE_READ_ONLY);
 
     testtokn.finalize();

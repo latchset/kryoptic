@@ -401,6 +401,16 @@ pub fn make_attr_template(
     template
 }
 
+pub fn make_ptrs_template(
+    ptrs: &[(CK_ATTRIBUTE_TYPE, CK_VOID_PTR, usize)],
+) -> Vec<CK_ATTRIBUTE> {
+    let mut template = Vec::<CK_ATTRIBUTE>::with_capacity(ptrs.len());
+    for p in ptrs {
+        template.push(make_attribute!(p.0, p.1, p.2 as CK_ULONG));
+    }
+    template
+}
+
 pub fn import_object(
     session: CK_ULONG,
     class: CK_OBJECT_CLASS,
