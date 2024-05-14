@@ -59,6 +59,17 @@ pub struct Object {
     session: CK_SESSION_HANDLE,
     attributes: Vec<Attribute>,
     modified: bool,
+    zeroize: bool,
+}
+
+impl Drop for Object {
+    fn drop(&mut self) {
+        if self.zeroize {
+            for a in self.attributes.iter_mut() {
+                a.zeroize()
+            }
+        }
+    }
 }
 
 impl Object {
@@ -68,7 +79,12 @@ impl Object {
             session: CK_INVALID_HANDLE,
             attributes: Vec::new(),
             modified: false,
+            zeroize: false,
         }
+    }
+
+    pub fn set_zeroize(&mut self) {
+        self.zeroize = true;
     }
 
     pub fn generate_unique(&mut self) {
