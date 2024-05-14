@@ -148,6 +148,13 @@ pub trait MechOperation: Debug + Send + Sync {
     fn reset(&mut self) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
+    fn requires_objects(&self) -> KResult<&[CK_OBJECT_HANDLE]> {
+        /* nothing needed by default */
+        err_rv!(CKR_OK)
+    }
+    fn receives_objects(&mut self, _: &[&Object]) -> KResult<()> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
 }
 
 pub trait Encryption: MechOperation {

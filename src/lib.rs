@@ -1706,7 +1706,8 @@ extern "C" fn fn_derive_key(
     }
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let bkey = res_or_ret!(token.get_object_by_handle(base_key)).clone();
+    let mut bkey = res_or_ret!(token.get_object_by_handle(base_key)).clone();
+    bkey.set_zeroize();
 
     /* key checks */
     if !res_or_ret!(bkey.get_attr_as_bool(CKA_DERIVE)) {
@@ -1722,6 +1723,29 @@ extern "C" fn fn_derive_key(
         Operation::Derive(op) => op,
         _ => return CKR_MECHANISM_INVALID,
     };
+
+    /* some derive operation requires additional keys */
+    match operation.requires_objects() {
+        Ok(handles) => {
+            let mut objs = Vec::<object::Object>::with_capacity(handles.len());
+            for h in handles {
+                let mut kobj =
+                    res_or_ret!(token.get_object_by_handle(*h)).clone();
+                kobj.set_zeroize();
+                objs.push(kobj);
+            }
+            /* shenanigans to deal with borrow checkr on token */
+            let mut send = Vec::<&object::Object>::with_capacity(objs.len());
+            for o in &objs {
+                send.push(o);
+            }
+            res_or_ret!(operation.receives_objects(send.as_slice()));
+        }
+        Err(e) => match err_to_rv!(e) {
+            CKR_OK => (),
+            err => return err,
+        },
+    }
 
     let result = operation.derive(
         &bkey,
