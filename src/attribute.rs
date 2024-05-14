@@ -8,6 +8,8 @@ use super::{bytes_to_vec, err_not_found, err_rv};
 use error::{KError, KResult};
 use interface::*;
 
+use zeroize::Zeroize;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttrType {
     BoolType,
@@ -255,6 +257,10 @@ impl Attribute {
             char::from(self.value[7]),
         ];
         Ok(chars.iter().collect())
+    }
+
+    pub fn zeroize(&mut self) {
+        self.value.zeroize();
     }
 }
 
