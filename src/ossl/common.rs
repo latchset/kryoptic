@@ -242,6 +242,10 @@ impl OsslParam {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
+        if key == std::ptr::null() || val == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
         let param =
             unsafe { OSSL_PARAM_construct_utf8_string(key, val as *mut i8, 0) };
         self.p.push(param);
@@ -254,6 +258,10 @@ impl OsslParam {
         v: &Vec<u8>,
     ) -> KResult<OsslParam> {
         if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        if key == std::ptr::null() || v.len() == 0 {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 

@@ -1,10 +1,6 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use {super::fips, fips::*};
-
-use core::ffi::c_int;
-
 const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
 const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";
 
