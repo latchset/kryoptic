@@ -5,8 +5,8 @@ use super::tests;
 use tests::*;
 
 #[test]
-fn test_kdfs() {
-    let mut testtokn = TestToken::initialized("test_kdfs.sql", None);
+fn test_sp800_kdf() {
+    let mut testtokn = TestToken::initialized("test_sp800_kdf.sql", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -21,7 +21,6 @@ fn test_kdfs() {
         &[(CKA_DERIVE, true),],
     ));
 
-    /* Test key derivation */
     let derive_template = make_attr_template(
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
@@ -209,8 +208,16 @@ fn test_kdfs() {
         &mut handle7,
     );
     assert_eq!(ret, CKR_OK);
+}
 
-    /* Test AES_ECB/AES_CBC Key derivation */
+#[test]
+fn test_aes_enc_kdf() {
+    let mut testtokn = TestToken::initialized("test_aes_enc_kdf.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
     let aeskey = ret_or_panic!(generate_key(
         session,
         CKM_AES_KEY_GEN,
@@ -274,6 +281,24 @@ fn test_kdfs() {
         &mut aeskey3,
     );
     assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+fn test_hash_kdf() {
+    let mut testtokn = TestToken::initialized("test_hash_kdf.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* Generic Secret */
+    let key_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_DERIVE, true),],
+    ));
 
     /* Test Hash based derivation */
 
@@ -294,7 +319,7 @@ fn test_kdfs() {
     let ret = fn_derive_key(
         session,
         &mut derive_mech,
-        aeskey,
+        key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey1,
@@ -327,7 +352,7 @@ fn test_kdfs() {
     let ret = fn_derive_key(
         session,
         &mut derive_mech,
-        aeskey,
+        key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey2,
@@ -344,7 +369,7 @@ fn test_kdfs() {
     let ret = fn_derive_key(
         session,
         &mut derive_mech,
-        aeskey,
+        key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey2,
@@ -379,7 +404,7 @@ fn test_kdfs() {
     let ret = fn_derive_key(
         session,
         &mut derive_mech,
-        aeskey,
+        key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey3,
@@ -412,7 +437,7 @@ fn test_kdfs() {
     let ret = fn_derive_key(
         session,
         &mut derive_mech,
-        aeskey,
+        key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey4,
@@ -430,10 +455,10 @@ fn test_kdfs() {
         &[(CKA_EXTRACTABLE, true)],
     );
     let mut hashkey4 = CK_INVALID_HANDLE;
-    let res = fn_derive_key(
+    let ret = fn_derive_key(
         session,
         &mut derive_mech,
-        aeskey,
+        key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut hashkey4,
