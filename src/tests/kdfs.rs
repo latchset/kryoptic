@@ -291,190 +291,213 @@ fn test_hash_kdf() {
     /* login */
     testtokn.login();
 
-    /* Generic Secret */
-    let key_handle = ret_or_panic!(generate_key(
-        session,
-        CKM_GENERIC_SECRET_KEY_GEN,
-        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
-        &[],
-        &[(CKA_DERIVE, true),],
-    ));
+    /* run tests with multiple keys */
+    for kopt in [
+        (CKM_GENERIC_SECRET_KEY_GEN, CKK_GENERIC_SECRET, 16),
+        (CKM_AES_KEY_GEN, CKK_AES, 32),
+    ] {
+        /* New Key */
+        let key_handle = ret_or_panic!(generate_key(
+            session,
+            kopt.0,
+            &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
+            &[],
+            &[(CKA_DERIVE, true),],
+        ));
 
-    /* Test Hash based derivation */
+        /* Test Hash based derivation iwith multiple hashes */
+        for hopt in [
+            (CKM_SHA1_KEY_DERIVATION, 20),
+            (CKM_SHA224_KEY_DERIVATION, 28),
+            (CKM_SHA256_KEY_DERIVATION, 32),
+            (CKM_SHA384_KEY_DERIVATION, 48),
+            (CKM_SHA512_KEY_DERIVATION, 64),
+            (CKM_SHA3_224_KEY_DERIVATION, 28),
+            (CKM_SHA3_256_KEY_DERIVATION, 32),
+            (CKM_SHA3_384_KEY_DERIVATION, 48),
+            (CKM_SHA3_512_KEY_DERIVATION, 64),
+        ] {
+            /* No length or type */
+            let derive_template = make_attr_template(
+                &[(CKA_CLASS, CKO_SECRET_KEY)],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
 
-    /* No length or type */
-    let derive_template = make_attr_template(
-        &[(CKA_CLASS, CKO_SECRET_KEY)],
-        &[],
-        &[(CKA_EXTRACTABLE, true)],
-    );
+            let mut derive_mech = CK_MECHANISM {
+                mechanism: hopt.0,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            };
 
-    let mut derive_mech = CK_MECHANISM {
-        mechanism: CKM_SHA256_KEY_DERIVATION,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
+            let mut hashkey1 = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &mut derive_mech,
+                key_handle,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                &mut hashkey1,
+            );
+            assert_eq!(ret, CKR_OK);
 
-    let mut hashkey1 = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &mut derive_mech,
-        key_handle,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut hashkey1,
-    );
-    assert_eq!(ret, CKR_OK);
+            let mut extract_template = [CK_ATTRIBUTE {
+                type_: CKA_VALUE,
+                pValue: std::ptr::null_mut(),
+                ulValueLen: 0,
+            }];
 
-    let mut extract_template = [CK_ATTRIBUTE {
-        type_: CKA_VALUE,
-        pValue: std::ptr::null_mut(),
-        ulValueLen: 0,
-    }];
+            let ret = fn_get_attribute_value(
+                session,
+                hashkey1,
+                extract_template.as_mut_ptr(),
+                extract_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(extract_template[0].ulValueLen, hopt.1);
 
-    let ret = fn_get_attribute_value(
-        session,
-        hashkey1,
-        extract_template.as_mut_ptr(),
-        extract_template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(extract_template[0].ulValueLen, 32);
+            /* Key len too big */
+            let derive_template = make_attr_template(
+                &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, hopt.1 + 10)],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
 
-    /* Key len too big */
-    let derive_template = make_attr_template(
-        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, 42)],
-        &[],
-        &[(CKA_EXTRACTABLE, true)],
-    );
+            let mut hashkey2 = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &mut derive_mech,
+                key_handle,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                &mut hashkey2,
+            );
+            assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
 
-    let mut hashkey2 = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &mut derive_mech,
-        key_handle,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut hashkey2,
-    );
-    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+            /* Valid Key len defined */
+            let derive_template = make_attr_template(
+                &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, hopt.1 - 10)],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
+            let mut hashkey2 = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &mut derive_mech,
+                key_handle,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                &mut hashkey2,
+            );
+            assert_eq!(ret, CKR_OK);
 
-    /* Valid Key len defined */
-    let derive_template = make_attr_template(
-        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, 22)],
-        &[],
-        &[(CKA_EXTRACTABLE, true)],
-    );
-    let mut hashkey2 = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &mut derive_mech,
-        key_handle,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut hashkey2,
-    );
-    assert_eq!(ret, CKR_OK);
+            extract_template[0].ulValueLen = 0;
 
-    extract_template[0].ulValueLen = 0;
+            let ret = fn_get_attribute_value(
+                session,
+                hashkey2,
+                extract_template.as_mut_ptr(),
+                extract_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(extract_template[0].ulValueLen, hopt.1 - 10);
 
-    let ret = fn_get_attribute_value(
-        session,
-        hashkey2,
-        extract_template.as_mut_ptr(),
-        extract_template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(extract_template[0].ulValueLen, 22);
+            /* No length but key type defined */
+            let derive_template = make_attr_template(
+                &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
+            let mut hashkey3 = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &mut derive_mech,
+                key_handle,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                &mut hashkey3,
+            );
+            assert_eq!(ret, CKR_OK);
 
-    /* No length but key type defined */
-    let derive_template = make_attr_template(
-        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
-        &[],
-        &[(CKA_EXTRACTABLE, true)],
-    );
+            extract_template[0].ulValueLen = 0;
 
-    let mut derive_mech = CK_MECHANISM {
-        mechanism: CKM_SHA512_KEY_DERIVATION,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
+            let len = match hopt.0 {
+                CKM_SHA1_KEY_DERIVATION => 16,
+                CKM_SHA224_KEY_DERIVATION | CKM_SHA3_224_KEY_DERIVATION => 24,
+                _ => 32,
+            };
 
-    let mut hashkey3 = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &mut derive_mech,
-        key_handle,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut hashkey3,
-    );
-    assert_eq!(ret, CKR_OK);
+            let ret = fn_get_attribute_value(
+                session,
+                hashkey3,
+                extract_template.as_mut_ptr(),
+                extract_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(extract_template[0].ulValueLen, len);
+        }
 
-    extract_template[0].ulValueLen = 0;
+        /* Key type define and incompatible length */
+        let mut derive_mech = CK_MECHANISM {
+            mechanism: CKM_SHA256_KEY_DERIVATION,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
 
-    let ret = fn_get_attribute_value(
-        session,
-        hashkey3,
-        extract_template.as_mut_ptr(),
-        extract_template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(extract_template[0].ulValueLen, 32);
+        let derive_template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 42),
+            ],
+            &[],
+            &[(CKA_EXTRACTABLE, true)],
+        );
 
-    /* Key type define and incompatible length */
-    let derive_template = make_attr_template(
-        &[
-            (CKA_CLASS, CKO_SECRET_KEY),
-            (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 42),
-        ],
-        &[],
-        &[(CKA_EXTRACTABLE, true)],
-    );
+        let mut hashkey4 = CK_INVALID_HANDLE;
+        let ret = fn_derive_key(
+            session,
+            &mut derive_mech,
+            key_handle,
+            derive_template.as_ptr() as *mut _,
+            derive_template.len() as CK_ULONG,
+            &mut hashkey4,
+        );
+        assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
 
-    let mut hashkey4 = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &mut derive_mech,
-        key_handle,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut hashkey4,
-    );
-    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+        /* Key type and length defined */
+        let derive_template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 32),
+            ],
+            &[],
+            &[(CKA_EXTRACTABLE, true)],
+        );
+        let mut hashkey4 = CK_INVALID_HANDLE;
+        let ret = fn_derive_key(
+            session,
+            &mut derive_mech,
+            key_handle,
+            derive_template.as_ptr() as *mut _,
+            derive_template.len() as CK_ULONG,
+            &mut hashkey4,
+        );
+        assert_eq!(ret, CKR_OK);
 
-    /* Key type and length defined */
-    let derive_template = make_attr_template(
-        &[
-            (CKA_CLASS, CKO_SECRET_KEY),
-            (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 32),
-        ],
-        &[],
-        &[(CKA_EXTRACTABLE, true)],
-    );
-    let mut hashkey4 = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &mut derive_mech,
-        key_handle,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut hashkey4,
-    );
-    assert_eq!(ret, CKR_OK);
+        let mut extract_template =
+            make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
 
-    extract_template[0].ulValueLen = 0;
-
-    let res = fn_get_attribute_value(
-        session,
-        hashkey4,
-        extract_template.as_mut_ptr(),
-        extract_template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(extract_template[0].ulValueLen, 32);
+        let ret = fn_get_attribute_value(
+            session,
+            hashkey4,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(extract_template[0].ulValueLen, 32);
+    }
 
     testtokn.finalize();
 }
