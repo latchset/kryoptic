@@ -5,6 +5,7 @@
 use super::fips;
 
 use super::bytes_to_vec;
+use super::hash;
 use super::mechanism;
 
 #[cfg(not(feature = "fips"))]
@@ -13,6 +14,7 @@ use super::ossl;
 #[cfg(feature = "fips")]
 use fips::*;
 
+use hash::{hash_size, INVALID_HASH_SIZE};
 use mechanism::*;
 
 #[cfg(not(feature = "fips"))]
@@ -375,15 +377,10 @@ impl RsaPKCSOperation {
     }
 
     fn hash_len(hash: CK_MECHANISM_TYPE) -> KResult<usize> {
-        let hs = match hash {
-            CKM_SHA_1 => 20,
-            CKM_SHA224 | CKM_SHA3_224 => 28,
-            CKM_SHA256 | CKM_SHA3_256 => 32,
-            CKM_SHA384 | CKM_SHA3_384 => 48,
-            CKM_SHA512 | CKM_SHA3_512 => 64,
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
-        };
-        Ok(hs)
+        match hash_size(hash) {
+            INVALID_HASH_SIZE => err_rv!(CKR_MECHANISM_INVALID),
+            x => Ok(x),
+        }
     }
 
     fn max_message_len(
