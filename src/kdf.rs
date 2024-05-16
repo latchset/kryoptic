@@ -4,12 +4,14 @@
 use super::attribute;
 use super::err_rv;
 use super::error;
+use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
 
 use attribute::from_bytes;
 use error::{KError, KResult};
+use hash::{hash_size, INVALID_HASH_SIZE};
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories, ObjectType};
@@ -499,13 +501,9 @@ impl HKDFOperation {
         {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
-        let hashlen = match params.prfHashMechanism {
-            CKM_SHA_1 => 20,
-            CKM_SHA224 | CKM_SHA3_224 => 28,
-            CKM_SHA256 | CKM_SHA3_256 => 32,
-            CKM_SHA384 | CKM_SHA3_384 => 48,
-            CKM_SHA512 | CKM_SHA3_512 => 64,
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        let hashlen = match hash_size(params.prfHashMechanism) {
+            INVALID_HASH_SIZE => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            x => x,
         };
         let salt = match params.ulSaltType {
             CKF_HKDF_SALT_NULL => {
