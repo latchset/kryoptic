@@ -60,6 +60,8 @@ ptr_wrapper!(EvpCipherCtx; EVP_CIPHER_CTX; EVP_CIPHER_CTX_free);
 ptr_wrapper!(EvpCipher; EVP_CIPHER; EVP_CIPHER_free);
 ptr_wrapper!(EvpKdfCtx; EVP_KDF_CTX; EVP_KDF_CTX_free);
 ptr_wrapper!(EvpKdf; EVP_KDF; EVP_KDF_free);
+ptr_wrapper!(EvpMacCtx; EVP_MAC_CTX; EVP_MAC_CTX_free);
+ptr_wrapper!(EvpMac; EVP_MAC; EVP_MAC_free);
 
 pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
 pub const CIPHER_NAME_AES192: &[u8; 7] = b"AES192\0";
