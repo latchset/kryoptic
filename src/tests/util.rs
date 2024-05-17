@@ -40,6 +40,15 @@ macro_rules! err_or_panic {
     };
 }
 
+macro_rules! parse_or_panic {
+    ($e:expr; $line:expr; $ln:expr) => {
+        match $e {
+            Ok(r) => r,
+            Err(_) => panic!("Malformed line '{}' (line {})", $line, $ln),
+        }
+    };
+}
+
 pub fn get_test_data(
     session: CK_SESSION_HANDLE,
     name: &str,
