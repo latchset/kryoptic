@@ -53,6 +53,7 @@ mod rsa;
 
 /* Helper code */
 mod kasn1;
+mod misc;
 
 macro_rules! err_to_rv {
     ($err:expr) => {
@@ -79,20 +80,6 @@ macro_rules! res_or_ret {
             Err(e) => return err_to_rv!(e),
         }
     };
-}
-
-#[macro_export]
-macro_rules! bytes_to_vec {
-    ($ptr:expr, $len:expr) => {{
-        let ptr = $ptr as *const u8;
-        let size = $len as usize;
-        let mut v = Vec::<u8>::with_capacity(size);
-        unsafe {
-            std::ptr::copy_nonoverlapping(ptr, v.as_mut_ptr(), size);
-            v.set_len(size);
-        }
-        v
-    }};
 }
 
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
