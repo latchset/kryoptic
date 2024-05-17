@@ -645,6 +645,179 @@ fn test_aes_operations() {
         ));
         assert_eq!(&enc, &ciphertext);
     }
+}
 
+#[test]
+fn test_aes_macs() {
+    let mut testtokn = TestToken::initialized("test_aes_macs.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* Generate AES key */
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_SIGN, true), (CKA_VERIFY, true),],
+    ));
+
+    #[cfg(not(feature = "fips"))]
+    {
+        /* AES MAC */
+
+        let data = "01234567";
+
+        let mac = ret_or_panic!(sig_gen(
+            session,
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_MAC,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            }
+        ));
+        assert_eq!(mac.len(), AES_BLOCK_SIZE / 2);
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_MAC,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            )
+        );
+
+        /* too long */
+        let size: CK_ULONG = (AES_BLOCK_SIZE + 1) as CK_ULONG;
+        err_or_panic!(
+            sig_gen(
+                session,
+                handle,
+                data.as_bytes(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_MAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            ),
+            CKR_MECHANISM_PARAM_INVALID
+        );
+
+        let size: CK_ULONG = (AES_BLOCK_SIZE - 1) as CK_ULONG;
+        let mac = ret_or_panic!(sig_gen(
+            session,
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_MAC_GENERAL,
+                pParameter: void_ptr!(&size),
+                ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+            }
+        ));
+        assert_eq!(mac.len(), size as usize);
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_MAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            )
+        );
+    }
+
+    {
+        /* AES CMAC */
+
+        let data = "01234567";
+
+        let mac = ret_or_panic!(sig_gen(
+            session,
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CMAC,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            }
+        ));
+        assert_eq!(mac.len(), AES_BLOCK_SIZE);
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CMAC,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            )
+        );
+
+        /* too long */
+        let size: CK_ULONG = (AES_BLOCK_SIZE + 1) as CK_ULONG;
+        err_or_panic!(
+            sig_gen(
+                session,
+                handle,
+                data.as_bytes(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CMAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            ),
+            CKR_MECHANISM_PARAM_INVALID
+        );
+
+        let size: CK_ULONG = (AES_BLOCK_SIZE - 1) as CK_ULONG;
+
+        let mac = ret_or_panic!(sig_gen(
+            session,
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CMAC_GENERAL,
+                pParameter: void_ptr!(&size),
+                ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+            }
+        ));
+        assert_eq!(mac.len(), size as usize);
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CMAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            )
+        );
+    }
     testtokn.finalize();
 }

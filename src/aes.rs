@@ -315,6 +315,54 @@ impl Mechanism for AesMechanism {
         };
         Ok(Operation::Derive(Box::new(kdf)))
     }
+
+    fn sign_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> KResult<Box<dyn Sign>> {
+        if self.info.flags & CKF_SIGN != CKF_SIGN {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_SIGN) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        match mech.mechanism {
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_MAC | CKM_AES_MAC_GENERAL => {
+                Ok(Box::new(AesMacOperation::init(mech, key)?))
+            }
+            CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
+                Ok(Box::new(AesCmacOperation::init(mech, key)?))
+            }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
+        }
+    }
+
+    fn verify_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> KResult<Box<dyn Verify>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_VERIFY) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        match mech.mechanism {
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_MAC | CKM_AES_MAC_GENERAL => {
+                Ok(Box::new(AesMacOperation::init(mech, key)?))
+            }
+            CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
+                Ok(Box::new(AesCmacOperation::init(mech, key)?))
+            }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -454,6 +502,9 @@ impl Derive for AesKDFOperation<'_> {
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     AesOperation::register_mechanisms(mechs);
     AesKDFOperation::register_mechanisms(mechs);
+    #[cfg(not(feature = "fips"))]
+    AesMacOperation::register_mechanisms(mechs);
+    AesCmacOperation::register_mechanisms(mechs);
 
     ot.add_factory(ObjectType::new(CKO_SECRET_KEY, CKK_AES), &AES_KEY_FACTORY);
 }
