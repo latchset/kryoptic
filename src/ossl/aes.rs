@@ -148,7 +148,7 @@ struct AesOperation {
     params: AesParams,
     finalized: bool,
     in_use: bool,
-    ctx: Option<EvpCipherCtx>,
+    ctx: EvpCipherCtx,
     finalbuf: Vec<u8>,
     blockctr: u128,
 }
@@ -462,7 +462,7 @@ impl AesOperation {
          * before key and iv can be installed */
         let res = unsafe {
             EVP_EncryptInit_ex2(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                self.ctx.as_mut_ptr(),
                 evpcipher.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
@@ -485,7 +485,7 @@ impl AesOperation {
                 if self.params.iv.len() != 12 {
                     let res = unsafe {
                         EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            self.ctx.as_mut_ptr(),
                             EVP_CTRL_AEAD_SET_IVLEN as c_int,
                             self.params.iv.len() as c_int,
                             std::ptr::null_mut(),
@@ -500,7 +500,7 @@ impl AesOperation {
             CKM_AES_CCM => {
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         EVP_CTRL_AEAD_SET_IVLEN as c_int,
                         self.params.iv.len() as c_int,
                         std::ptr::null_mut(),
@@ -512,7 +512,7 @@ impl AesOperation {
                 }
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         EVP_CTRL_AEAD_SET_TAG as c_int,
                         self.params.taglen as c_int,
                         std::ptr::null_mut(),
@@ -557,7 +557,7 @@ impl AesOperation {
         /* set key, iv, additional params */
         let res = unsafe {
             EVP_EncryptInit_ex2(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                self.ctx.as_mut_ptr(),
                 std::ptr::null(),
                 self.key.raw.as_ptr(),
                 if self.params.iv.len() != 0 {
@@ -574,7 +574,7 @@ impl AesOperation {
         }
         let res = unsafe {
             EVP_CIPHER_CTX_set_padding(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                self.ctx.as_mut_ptr(),
                 if self.mech == CKM_AES_CBC_PAD { 1 } else { 0 },
             )
         };
@@ -587,7 +587,7 @@ impl AesOperation {
             let mut outl: c_int = 0;
             let res = unsafe {
                 EVP_EncryptUpdate(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    self.ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
                     &mut outl,
                     std::ptr::null(),
@@ -604,7 +604,7 @@ impl AesOperation {
             let mut outl: c_int = 0;
             let res = unsafe {
                 EVP_EncryptUpdate(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    self.ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
                     &mut outl,
                     self.params.aad.as_ptr(),
@@ -631,7 +631,7 @@ impl AesOperation {
 
         let res = unsafe {
             EVP_DecryptInit_ex2(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                self.ctx.as_mut_ptr(),
                 evpcipher.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
@@ -653,7 +653,7 @@ impl AesOperation {
                 if self.params.iv.len() != 12 {
                     let res = unsafe {
                         EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            self.ctx.as_mut_ptr(),
                             EVP_CTRL_AEAD_SET_IVLEN as c_int,
                             self.params.iv.len() as c_int,
                             std::ptr::null_mut(),
@@ -668,7 +668,7 @@ impl AesOperation {
             CKM_AES_CCM => {
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         EVP_CTRL_AEAD_SET_IVLEN as c_int,
                         self.params.iv.len() as c_int,
                         std::ptr::null_mut(),
@@ -680,7 +680,7 @@ impl AesOperation {
                 }
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         EVP_CTRL_AEAD_SET_TAG as c_int,
                         self.params.taglen as c_int,
                         std::ptr::null_mut(),
@@ -725,7 +725,7 @@ impl AesOperation {
         /* set key, iv, additional params */
         let res = unsafe {
             EVP_DecryptInit_ex2(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                self.ctx.as_mut_ptr(),
                 std::ptr::null(),
                 self.key.raw.as_ptr(),
                 if self.params.iv.len() != 0 {
@@ -742,7 +742,7 @@ impl AesOperation {
         }
         let res = unsafe {
             EVP_CIPHER_CTX_set_padding(
-                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                self.ctx.as_mut_ptr(),
                 if self.mech == CKM_AES_CBC_PAD { 1 } else { 0 },
             )
         };
@@ -755,7 +755,7 @@ impl AesOperation {
             let mut outl: c_int = 0;
             let res = unsafe {
                 EVP_DecryptUpdate(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    self.ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
                     &mut outl,
                     std::ptr::null(),
@@ -772,7 +772,7 @@ impl AesOperation {
             let mut outl: c_int = 0;
             let res = unsafe {
                 EVP_DecryptUpdate(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    self.ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
                     &mut outl,
                     self.params.aad.as_ptr(),
@@ -795,7 +795,7 @@ impl AesOperation {
             params: Self::init_params(mech)?,
             finalized: false,
             in_use: false,
-            ctx: Some(EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?),
+            ctx: EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?,
             finalbuf: Vec::new(),
             blockctr: 0,
         })
@@ -808,7 +808,7 @@ impl AesOperation {
             params: Self::init_params(mech)?,
             finalized: false,
             in_use: false,
-            ctx: Some(EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?),
+            ctx: EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?,
             finalbuf: Vec::new(),
             blockctr: 0,
         })
@@ -997,7 +997,7 @@ impl Encryption for AesOperation {
         if plain_len > 0 {
             let res = unsafe {
                 EVP_EncryptUpdate(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    self.ctx.as_mut_ptr(),
                     cipher,
                     &mut outl,
                     plain_buf,
@@ -1071,7 +1071,7 @@ impl Encryption for AesOperation {
                 let res = unsafe {
                     /* This will normally be a noop (GCM/CCM) */
                     EVP_EncryptFinal_ex(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         cipher,
                         &mut outl,
                     )
@@ -1086,7 +1086,7 @@ impl Encryption for AesOperation {
                 }
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         EVP_CTRL_AEAD_GET_TAG as c_int,
                         self.params.taglen as c_int,
                         cipher as *mut c_void,
@@ -1141,7 +1141,7 @@ impl Encryption for AesOperation {
                     let mut outl: c_int = 0;
                     let res = unsafe {
                         EVP_EncryptFinal_ex(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            self.ctx.as_mut_ptr(),
                             cipher_buf,
                             &mut outl,
                         )
@@ -1384,7 +1384,7 @@ impl Decryption for AesOperation {
 
                     let res = unsafe {
                         EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            self.ctx.as_mut_ptr(),
                             EVP_CTRL_AEAD_SET_TAG as c_int,
                             self.params.taglen as c_int,
                             tag_buf as *mut _,
@@ -1405,7 +1405,7 @@ impl Decryption for AesOperation {
                          * so we avoid unnecessary data copy */
                         let res = unsafe {
                             EVP_DecryptUpdate(
-                                self.ctx.as_mut().unwrap().as_mut_ptr(),
+                                self.ctx.as_mut_ptr(),
                                 plain_buf,
                                 &mut plen,
                                 self.finalbuf.as_ptr(),
@@ -1443,7 +1443,7 @@ impl Decryption for AesOperation {
         if cipher_len > 0 {
             let res = unsafe {
                 EVP_DecryptUpdate(
-                    self.ctx.as_mut().unwrap().as_mut_ptr(),
+                    self.ctx.as_mut_ptr(),
                     plain_buf,
                     &mut outl,
                     cipher_buf,
@@ -1526,7 +1526,7 @@ impl Decryption for AesOperation {
                 }
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         EVP_CTRL_AEAD_SET_TAG as c_int,
                         self.params.taglen as c_int,
                         self.finalbuf.as_ptr() as *mut c_void,
@@ -1539,7 +1539,7 @@ impl Decryption for AesOperation {
                 let mut outl: c_int = 0;
                 let res = unsafe {
                     EVP_DecryptFinal_ex(
-                        self.ctx.as_mut().unwrap().as_mut_ptr(),
+                        self.ctx.as_mut_ptr(),
                         std::ptr::null_mut(),
                         &mut outl,
                     )
@@ -1595,7 +1595,7 @@ impl Decryption for AesOperation {
                     let mut outl: c_int = 0;
                     let res = unsafe {
                         EVP_DecryptFinal_ex(
-                            self.ctx.as_mut().unwrap().as_mut_ptr(),
+                            self.ctx.as_mut_ptr(),
                             plain_buf,
                             &mut outl,
                         )
