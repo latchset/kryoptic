@@ -292,10 +292,10 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
     );
 
     for section in test_data {
-        if section.prf == CKM_AES_CMAC {
-            /* unsupported currently */
-            continue;
-        }
+        let key_type = match section.prf {
+            CKM_AES_CMAC => CKK_AES,
+            _ => CKK_GENERIC_SECRET,
+        };
 
         /* Currently we use the OpenSSL KBKDF backend for FIPS mode and
          * it supports only if the counter is before any fixed data and
@@ -319,7 +319,7 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
             let key_handle = ret_or_panic!(import_object(
                 session,
                 CKO_SECRET_KEY,
-                &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+                &[(CKA_KEY_TYPE, key_type)],
                 &[
                     (CKA_VALUE, unit.ki.as_slice()),
                     (

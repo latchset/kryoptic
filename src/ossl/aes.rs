@@ -1814,6 +1814,28 @@ impl MechOperation for AesCmacOperation {
     }
 }
 
+impl Mac for AesCmacOperation {
+    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> KResult<()> {
+        self.begin()?;
+        if data.len() > 0 {
+            self.update(data)?;
+        }
+        self.finalize(mac)
+    }
+
+    fn mac_update(&mut self, data: &[u8]) -> KResult<()> {
+        self.update(data)
+    }
+
+    fn mac_final(&mut self, mac: &mut [u8]) -> KResult<()> {
+        self.finalize(mac)
+    }
+
+    fn mac_len(&self) -> KResult<usize> {
+        Ok(self.maclen)
+    }
+}
+
 impl Sign for AesCmacOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
         self.begin()?;

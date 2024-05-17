@@ -316,6 +316,26 @@ impl Mechanism for AesMechanism {
         Ok(Operation::Derive(Box::new(kdf)))
     }
 
+    fn mac_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+        op_type: CK_FLAGS,
+    ) -> KResult<Box<dyn Mac>> {
+        /* the mechanism adveritzes only SIGN/VERIFY to the callers
+         * DERIVE is a mediated operation so it is not advertised
+         * and we do not check it against self.info nor the key */
+        if op_type != CKF_DERIVE {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match mech.mechanism {
+            CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
+                Ok(Box::new(AesCmacOperation::init(mech, key)?))
+            }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
+        }
+    }
+
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
