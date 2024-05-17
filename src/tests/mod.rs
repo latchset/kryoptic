@@ -234,3 +234,5 @@ mod keys;
 mod kdf_vectors;
 
 mod kdfs;
+
+mod aes_cmac_vectors;

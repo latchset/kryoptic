@@ -41,15 +41,6 @@ struct KdfTestSection {
     units: Vec<KdfTestUnit>,
 }
 
-macro_rules! parse_or_panic {
-    ($e:expr; $line:expr; $ln:expr) => {
-        match $e {
-            Ok(r) => r,
-            Err(_) => panic!("Malformed line '{}' (line {})", $line, $ln),
-        }
-    };
-}
-
 fn parse_kdf_vector(filename: &str) -> Vec<KdfTestSection> {
     let file = ret_or_panic!(std::fs::File::open(filename));
 
