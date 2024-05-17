@@ -40,18 +40,6 @@ macro_rules! err_or_panic {
     };
 }
 
-macro_rules! void_ptr {
-    ($ptr:expr) => {
-        $ptr as *const _ as CK_VOID_PTR
-    };
-}
-
-macro_rules! byte_ptr {
-    ($ptr:expr) => {
-        $ptr as *const _ as CK_BYTE_PTR
-    };
-}
-
 pub fn get_test_data(
     session: CK_SESSION_HANDLE,
     name: &str,
