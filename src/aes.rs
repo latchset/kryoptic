@@ -322,7 +322,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
         op_type: CK_FLAGS,
     ) -> KResult<Box<dyn Mac>> {
-        /* the mechanism adveritzes only SIGN/VERIFY to the callers
+        /* the mechanism advertises only SIGN/VERIFY to the callers
          * DERIVE is a mediated operation so it is not advertised
          * and we do not check it against self.info nor the key */
         if op_type != CKF_DERIVE {
