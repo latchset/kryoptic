@@ -17,4 +17,4 @@ fix-format:
 	@rustfmt src/*.rs src/*/*.rs
 
 check-spell:
-	codespell --ignore-words-list="sorce,clen,adin,ciph,tolen,ot,siz" src
+	codespell --ignore-words-list="sorce,clen,ot" --skip **/bindings.rs src
