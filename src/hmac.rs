@@ -1,292 +1,8 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::err_rv;
-use super::error;
-use super::hash;
-use super::interface;
-use super::mechanism;
-use super::object;
 use constant_time_eq::constant_time_eq;
-use error::{KError, KResult};
-use interface::*;
-use mechanism::*;
-use object::{GenericSecretKeyFactory, Object, ObjectFactories, ObjectFactory};
-use std::fmt::Debug;
-
-use once_cell::sync::Lazy;
 use zeroize::Zeroize;
-
-fn check_and_fetch_key(
-    key: &Object,
-    keytype: CK_KEY_TYPE,
-    op: CK_ATTRIBUTE_TYPE,
-) -> KResult<Vec<u8>> {
-    if key.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
-        return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
-    }
-    let t = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
-    if t != CKK_GENERIC_SECRET && t != keytype {
-        return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
-    }
-    if !key.get_attr_as_bool(op).or(Ok(false))? {
-        return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
-    }
-
-    Ok(key.get_attr_as_bytes(CKA_VALUE)?.clone())
-}
-
-fn check_and_fetch_param(
-    mech: &CK_MECHANISM,
-    min: usize,
-    max: usize,
-) -> KResult<usize> {
-    if min == max {
-        if mech.ulParameterLen != 0 {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-        }
-        return Ok(max);
-    }
-    if mech.ulParameterLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
-        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-    }
-    let genlen = unsafe {
-        let val: &[CK_ULONG] =
-            std::slice::from_raw_parts(mech.pParameter as *const _, 1);
-        val[0] as usize
-    };
-    if genlen < min || genlen > max {
-        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-    }
-    Ok(genlen)
-}
-
-#[derive(Debug)]
-struct HMACMechanism {
-    info: CK_MECHANISM_INFO,
-    keytype: CK_KEY_TYPE,
-    minlen: usize,
-    maxlen: usize,
-}
-
-impl HMACMechanism {
-    fn hmac_mech_to_hash_mech(
-        &self,
-        hmac: CK_MECHANISM_TYPE,
-    ) -> KResult<CK_MECHANISM_TYPE> {
-        Ok(match hmac {
-            CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => CKM_SHA_1,
-            CKM_SHA224_HMAC | CKM_SHA224_HMAC_GENERAL => CKM_SHA224,
-            CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => CKM_SHA256,
-            CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => CKM_SHA384,
-            CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => CKM_SHA512,
-            CKM_SHA3_224_HMAC | CKM_SHA3_224_HMAC_GENERAL => CKM_SHA3_224,
-            CKM_SHA3_256_HMAC | CKM_SHA3_256_HMAC_GENERAL => CKM_SHA3_256,
-            CKM_SHA3_384_HMAC | CKM_SHA3_384_HMAC_GENERAL => CKM_SHA3_384,
-            CKM_SHA3_512_HMAC | CKM_SHA3_512_HMAC_GENERAL => CKM_SHA3_512,
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
-        })
-    }
-
-    fn new_op(
-        &self,
-        mech: &CK_MECHANISM,
-        keyobj: &Object,
-        op_type: CK_FLAGS,
-    ) -> KResult<HMACOperation> {
-        /* the mechanism advertises only SIGN/VERIFY to the callers
-         * DERIVE is a mediated operation so it is not advertised
-         * and we do not check it */
-        let op_attr = match op_type {
-            CKF_SIGN => {
-                if self.info.flags & CKF_SIGN != CKF_SIGN {
-                    return err_rv!(CKR_MECHANISM_INVALID);
-                }
-                CKA_SIGN
-            }
-            CKF_VERIFY => {
-                if self.info.flags & CKF_SIGN != CKF_SIGN {
-                    return err_rv!(CKR_MECHANISM_INVALID);
-                }
-                CKA_VERIFY
-            }
-            CKF_DERIVE => CKA_DERIVE,
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
-        };
-        HMACOperation::init(
-            self.hmac_mech_to_hash_mech(mech.mechanism)?,
-            check_and_fetch_key(keyobj, self.keytype, op_attr)?,
-            check_and_fetch_param(mech, self.minlen, self.maxlen)?,
-        )
-    }
-}
-
-impl Mechanism for HMACMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
-    }
-
-    fn mac_new(
-        &self,
-        mech: &CK_MECHANISM,
-        keyobj: &Object,
-        op_type: CK_FLAGS,
-    ) -> KResult<Box<dyn Mac>> {
-        Ok(Box::new(self.new_op(mech, keyobj, op_type)?))
-    }
-
-    fn sign_new(
-        &self,
-        mech: &CK_MECHANISM,
-        keyobj: &Object,
-    ) -> KResult<Box<dyn Sign>> {
-        Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN)?))
-    }
-
-    fn verify_new(
-        &self,
-        mech: &CK_MECHANISM,
-        keyobj: &Object,
-    ) -> KResult<Box<dyn Verify>> {
-        Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY)?))
-    }
-}
-
-static HMAC_MECH_SET: [(
-    CK_MECHANISM_TYPE,
-    CK_MECHANISM_TYPE,
-    CK_MECHANISM_TYPE,
-    CK_MECHANISM_TYPE,
-    CK_KEY_TYPE,
-); 9] = [
-    (
-        CKM_SHA_1,
-        CKM_SHA_1_HMAC,
-        CKM_SHA_1_HMAC_GENERAL,
-        CKM_SHA_1_KEY_GEN,
-        CKK_SHA_1_HMAC,
-    ),
-    (
-        CKM_SHA224,
-        CKM_SHA224_HMAC,
-        CKM_SHA224_HMAC_GENERAL,
-        CKM_SHA224_KEY_GEN,
-        CKK_SHA224_HMAC,
-    ),
-    (
-        CKM_SHA256,
-        CKM_SHA256_HMAC,
-        CKM_SHA256_HMAC_GENERAL,
-        CKM_SHA256_KEY_GEN,
-        CKK_SHA256_HMAC,
-    ),
-    (
-        CKM_SHA384,
-        CKM_SHA384_HMAC,
-        CKM_SHA384_HMAC_GENERAL,
-        CKM_SHA384_KEY_GEN,
-        CKK_SHA384_HMAC,
-    ),
-    (
-        CKM_SHA512,
-        CKM_SHA512_HMAC,
-        CKM_SHA512_HMAC_GENERAL,
-        CKM_SHA512_KEY_GEN,
-        CKK_SHA512_HMAC,
-    ),
-    (
-        CKM_SHA3_224,
-        CKM_SHA3_224_HMAC,
-        CKM_SHA3_224_HMAC_GENERAL,
-        CKM_SHA3_224_KEY_GEN,
-        CKK_SHA3_224_HMAC,
-    ),
-    (
-        CKM_SHA3_256,
-        CKM_SHA3_256_HMAC,
-        CKM_SHA3_256_HMAC_GENERAL,
-        CKM_SHA3_256_KEY_GEN,
-        CKK_SHA3_256_HMAC,
-    ),
-    (
-        CKM_SHA3_384,
-        CKM_SHA3_384_HMAC,
-        CKM_SHA3_384_HMAC_GENERAL,
-        CKM_SHA3_384_KEY_GEN,
-        CKK_SHA3_384_HMAC,
-    ),
-    (
-        CKM_SHA3_512,
-        CKM_SHA3_512_HMAC,
-        CKM_SHA3_512_HMAC_GENERAL,
-        CKM_SHA3_512_KEY_GEN,
-        CKK_SHA3_512_HMAC,
-    ),
-];
-
-static HMAC_SECRET_KEY_FACTORIES: Lazy<
-    Vec<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>,
-> = Lazy::new(|| {
-    let mut v = Vec::<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>::with_capacity(
-        HMAC_MECH_SET.len(),
-    );
-    for hs in &HMAC_MECH_SET {
-        let hashop = match hash::HashOperation::new(hs.0) {
-            Ok(op) => op,
-            Err(_) => continue,
-        };
-        v.push((
-            hs.4,
-            Box::new(GenericSecretKeyFactory::with_key_size(hashop.hashlen())),
-        ));
-    }
-    v
-});
-
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    for rs in &HMAC_MECH_SET {
-        /* skip HMACs for which we do not have a valid HASHes */
-        let hashop = match hash::HashOperation::new(rs.0) {
-            Ok(op) => op,
-            Err(_) => continue,
-        };
-        let hashlen = hashop.hashlen();
-        mechs.add_mechanism(
-            rs.1,
-            Box::new(HMACMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: 0,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-                keytype: rs.4,
-                minlen: hashlen,
-                maxlen: hashlen,
-            }),
-        );
-        mechs.add_mechanism(
-            rs.2,
-            Box::new(HMACMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: 0,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-                keytype: rs.4,
-                minlen: 1,
-                maxlen: hashlen,
-            }),
-        );
-        mechs.add_mechanism(
-            rs.3,
-            Box::new(object::GenericSecretKeyMechanism::new(rs.4)),
-        );
-    }
-
-    for f in Lazy::force(&HMAC_SECRET_KEY_FACTORIES) {
-        ot.add_factory(object::ObjectType::new(CKO_SECRET_KEY, f.0), &f.1);
-    }
-}
 
 /* HMAC spec From FIPS 198-1 */
 #[derive(Debug)]
@@ -313,7 +29,7 @@ impl Drop for HMACOperation {
 impl HMACOperation {
     fn init(
         hash: CK_MECHANISM_TYPE,
-        key: Vec<u8>,
+        key: HashKey,
         outputlen: usize,
     ) -> KResult<HMACOperation> {
         let mut hmac = HMACOperation {
@@ -329,19 +45,19 @@ impl HMACOperation {
         };
         /* The hash mechanism is unimportant here,
          * what matters is the psecdef algorithm */
-        let hashop = hash::HashOperation::new(hash)?;
+        let hashop = HashOperation::new(hash)?;
         hmac.hashlen = hashop.hashlen();
         hmac.blocklen = hashop.blocklen();
         hmac.inner = Operation::Digest(Box::new(hashop));
 
         /* K0 */
-        if key.len() <= hmac.blocklen {
-            hmac.state.extend_from_slice(key.as_slice());
+        if key.raw.len() <= hmac.blocklen {
+            hmac.state.extend_from_slice(key.raw.as_slice());
         } else {
             hmac.state.resize(hmac.hashlen, 0);
             match &mut hmac.inner {
                 Operation::Digest(op) => {
-                    op.digest(key.as_slice(), hmac.state.as_mut_slice())?
+                    op.digest(key.raw.as_slice(), hmac.state.as_mut_slice())?
                 }
                 _ => return err_rv!(CKR_GENERAL_ERROR),
             }
@@ -395,12 +111,11 @@ impl HMACOperation {
     }
 
     fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
-        if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
+        /* It is valid to finalize without any update */
+        self.in_use = true;
         self.finalized = true;
 
         if output.len() != self.outputlen {
@@ -428,6 +143,42 @@ impl HMACOperation {
         /* state -> output */
         output.copy_from_slice(&self.state[..output.len()]);
         Ok(())
+    }
+
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
+        for hs in &HASH_MECH_SET {
+            /* skip HMACs for which we do not have valid Hashes */
+            let hashop = match HashOperation::new(hs.hash) {
+                Ok(op) => op,
+                Err(_) => continue,
+            };
+            mechs.add_mechanism(
+                hs.mac,
+                Box::new(HMACMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: 0,
+                        ulMaxKeySize: 0,
+                        flags: CKF_SIGN | CKF_VERIFY,
+                    },
+                    keytype: hs.key_type,
+                    minlen: hs.hash_size,
+                    maxlen: hs.hash_size,
+                }),
+            );
+            mechs.add_mechanism(
+                hs.mac_general,
+                Box::new(HMACMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: 0,
+                        ulMaxKeySize: 0,
+                        flags: CKF_SIGN | CKF_VERIFY,
+                    },
+                    keytype: hs.key_type,
+                    minlen: 1,
+                    maxlen: hs.hash_size,
+                }),
+            );
+        }
     }
 }
 
