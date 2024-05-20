@@ -18,6 +18,12 @@ const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
 const AES_192_CBC_CTS: &[u8; 16] = b"AES-192-CBC-CTS\0";
 const AES_256_CBC_CTS: &[u8; 16] = b"AES-256-CBC-CTS\0";
+const AES_128_WRAP_NAME: &[u8; 13] = b"AES-128-WRAP\0";
+const AES_192_WRAP_NAME: &[u8; 13] = b"AES-192-WRAP\0";
+const AES_256_WRAP_NAME: &[u8; 13] = b"AES-256-WRAP\0";
+const AES_128_WRAP_PAD_NAME: &[u8; 17] = b"AES-128-WRAP-PAD\0";
+const AES_192_WRAP_PAD_NAME: &[u8; 17] = b"AES-192-WRAP-PAD\0";
+const AES_256_WRAP_PAD_NAME: &[u8; 17] = b"AES-256-WRAP-PAD\0";
 
 /* It is safe to share const ciphers as they do not change once they have been
  * created, and reference satic function pointers and other data that is
@@ -103,6 +109,12 @@ aes_cipher!(AES_128_OFB; LN_aes_128_ofb128);
 aes_cipher!(AES_192_OFB; LN_aes_192_ofb128);
 #[cfg(not(feature = "fips"))]
 aes_cipher!(AES_256_OFB; LN_aes_256_ofb128);
+aes_cipher!(AES_128_WRAP; AES_128_WRAP_NAME);
+aes_cipher!(AES_192_WRAP; AES_192_WRAP_NAME);
+aes_cipher!(AES_256_WRAP; AES_256_WRAP_NAME);
+aes_cipher!(AES_128_WRAP_PAD; AES_128_WRAP_PAD_NAME);
+aes_cipher!(AES_192_WRAP_PAD; AES_192_WRAP_PAD_NAME);
+aes_cipher!(AES_256_WRAP_PAD; AES_256_WRAP_PAD_NAME);
 
 #[derive(Debug)]
 struct AesKey {
@@ -169,6 +181,8 @@ impl AesOperation {
             CKM_AES_CTS,
             CKM_AES_GCM,
             CKM_AES_CCM,
+            CKM_AES_KEY_WRAP,
+            CKM_AES_KEY_WRAP_KWP,
         ] {
             mechs.add_mechanism(
                 *ckm,
@@ -365,6 +379,36 @@ impl AesOperation {
                     taglen: 0,
                 })
             }
+            CKM_AES_KEY_WRAP => {
+                let iv = match mech.ulParameterLen {
+                    0 => Vec::new(),
+                    8 => bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
+                    _ => return err_rv!(CKR_ARGUMENTS_BAD),
+                };
+                Ok(AesParams {
+                    iv: iv,
+                    maxblocks: 0,
+                    ctsmode: 0,
+                    datalen: 0,
+                    aad: Vec::new(),
+                    taglen: 0,
+                })
+            }
+            CKM_AES_KEY_WRAP_KWP => {
+                let iv = match mech.ulParameterLen {
+                    0 => Vec::new(),
+                    4 => bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
+                    _ => return err_rv!(CKR_ARGUMENTS_BAD),
+                };
+                Ok(AesParams {
+                    iv: iv,
+                    maxblocks: 0,
+                    ctsmode: 0,
+                    datalen: 0,
+                    aad: Vec::new(),
+                    taglen: 0,
+                })
+            }
             _ => err_rv!(CKR_MECHANISM_INVALID),
         }
     }
@@ -442,6 +486,18 @@ impl AesOperation {
                 16 => AES_128_OFB.get_cipher()?,
                 24 => AES_192_OFB.get_cipher()?,
                 32 => AES_256_OFB.get_cipher()?,
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
+            CKM_AES_KEY_WRAP => match keylen {
+                16 => AES_128_WRAP.get_cipher()?,
+                24 => AES_192_WRAP.get_cipher()?,
+                32 => AES_256_WRAP.get_cipher()?,
+                _ => return err_rv!(CKR_MECHANISM_INVALID),
+            },
+            CKM_AES_KEY_WRAP_KWP => match keylen {
+                16 => AES_128_WRAP_PAD.get_cipher()?,
+                24 => AES_192_WRAP_PAD.get_cipher()?,
+                32 => AES_256_WRAP_PAD.get_cipher()?,
                 _ => return err_rv!(CKR_MECHANISM_INVALID),
             },
             _ => return err_rv!(CKR_MECHANISM_INVALID),
@@ -572,15 +628,13 @@ impl AesOperation {
             self.finalized = true;
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        let res = unsafe {
-            EVP_CIPHER_CTX_set_padding(
-                self.ctx.as_mut_ptr(),
-                if self.mech == CKM_AES_CBC_PAD { 1 } else { 0 },
-            )
-        };
-        if res != 1 {
-            self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+        if self.mech == CKM_AES_CBC_PAD {
+            let res =
+                unsafe { EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1) };
+            if res != 1 {
+                self.finalized = true;
+                return err_rv!(CKR_DEVICE_ERROR);
+            }
         }
 
         if self.mech == CKM_AES_CCM {
@@ -971,6 +1025,11 @@ impl Encryption for AesOperation {
                     self.blockctr += reqblocks;
                 }
             }
+            CKM_AES_KEY_WRAP => {
+                if plain.len() % 8 != 0 {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                }
+            }
             _ => (),
         }
         if unsafe { *cipher_len as usize } < outlen {
@@ -1053,6 +1112,7 @@ impl Encryption for AesOperation {
                         clen = self.finalbuf.len() as CK_ULONG;
                     }
                 }
+                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
                 _ => return err_rv!(CKR_GENERAL_ERROR),
             }
             unsafe { *cipher_len = clen };
@@ -1176,6 +1236,7 @@ impl Encryption for AesOperation {
                     clen = outl as usize;
                 }
             }
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => clen = 0,
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         self.finalized = true;
@@ -1201,6 +1262,14 @@ impl Encryption for AesOperation {
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                 data_len as usize
             }
+            CKM_AES_KEY_WRAP => {
+                if data_len as usize % 8 != 0 {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                } else {
+                    data_len as usize + 8
+                }
+            }
+            CKM_AES_KEY_WRAP_KWP => ((data_len as usize + 15) / 8) * 8,
             _ => return err_rv!(CKR_GENERAL_ERROR),
         };
         Ok(len)
@@ -1266,6 +1335,13 @@ impl Decryption for AesOperation {
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                 cipher.len()
             }
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
+                if cipher.len() % 8 != 0 {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                } else {
+                    ((cipher.len() / 8) * 8) - 8
+                }
+            }
             _ => return err_rv!(CKR_GENERAL_ERROR),
         };
         if plain.is_null() {
@@ -1297,6 +1373,11 @@ impl Decryption for AesOperation {
                 {
                     self.finalized = true;
                     return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                }
+            }
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
+                if cipher.len() % 8 != 0 {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
                 }
             }
             _ => (),
@@ -1350,6 +1431,7 @@ impl Decryption for AesOperation {
                     0
                 }
             }
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => cipher.len() - 8,
             _ => cipher.len(),
         };
         if plen < outlen {
@@ -1504,6 +1586,7 @@ impl Decryption for AesOperation {
                         plen = self.finalbuf.len() as CK_ULONG;
                     }
                 }
+                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
                 _ => return err_rv!(CKR_GENERAL_ERROR),
             }
             unsafe { *plain_len = plen };
@@ -1628,6 +1711,7 @@ impl Decryption for AesOperation {
                     plen = outl as usize;
                 }
             }
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => plen = 0,
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
         self.finalized = true;
@@ -1653,6 +1737,13 @@ impl Decryption for AesOperation {
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                 data_len as usize
+            }
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
+                if data_len % 8 != 0 {
+                    return err_rv!(CKR_DATA_LEN_RANGE);
+                } else {
+                    ((data_len as usize / 8) * 8) - 8
+                }
             }
             _ => return err_rv!(CKR_GENERAL_ERROR),
         })

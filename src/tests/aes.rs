@@ -28,6 +28,8 @@ fn test_aes_operations() {
             (CKA_TOKEN, false),
             (CKA_ENCRYPT, true),
             (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
         ],
     ));
 
@@ -645,6 +647,99 @@ fn test_aes_operations() {
         ));
         assert_eq!(&enc, &ciphertext);
     }
+
+    for mech in [CKM_AES_KEY_WRAP, CKM_AES_KEY_WRAP_KWP] {
+        /* AES KEY WRAP */
+
+        /* encryption and key wrapping operations should give the same
+         * result, so we try both and compare */
+
+        let data = [0x55u8; AES_BLOCK_SIZE];
+        let iv = [0xCCu8; 8];
+        let iv_len = match mech {
+            CKM_AES_KEY_WRAP => 8,
+            CKM_AES_KEY_WRAP_KWP => 4,
+            _ => panic!("uh?"),
+        };
+
+        let mut wrapped = [0u8; AES_BLOCK_SIZE * 2];
+        let mut wraplen = wrapped.len() as CK_ULONG;
+        let mut mechanism = CK_MECHANISM {
+            mechanism: mech,
+            pParameter: void_ptr!(&iv),
+            ulParameterLen: iv_len,
+        };
+
+        /* key to be wrapped */
+        let wp_handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_AES)],
+            &[(CKA_VALUE, &data)],
+            &[(CKA_EXTRACTABLE, true)],
+        ));
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            handle,
+            wp_handle,
+            wrapped.as_mut_ptr(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let dec = ret_or_panic!(decrypt(
+            session,
+            handle,
+            &wrapped[..(wraplen as usize)],
+            &mechanism,
+        ));
+        assert_eq!(data, dec.as_slice());
+
+        let mut enc =
+            ret_or_panic!(encrypt(session, handle, &data, &mechanism,));
+
+        let mut template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 16),
+            ],
+            &[],
+            &[(CKA_EXTRACTABLE, true)],
+        );
+
+        let mut wp_handle2 = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mut mechanism,
+            handle,
+            enc.as_mut_ptr(),
+            enc.len() as CK_ULONG,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+            &mut wp_handle2,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let mut value = [0u8; AES_BLOCK_SIZE];
+        let mut extract_template = make_ptrs_template(&[(
+            CKA_VALUE,
+            void_ptr!(value.as_mut_ptr()),
+            value.len(),
+        )]);
+
+        let ret = fn_get_attribute_value(
+            session,
+            wp_handle2,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(value, data);
+    }
+
+    testtokn.finalize();
 }
 
 #[test]
@@ -819,5 +914,6 @@ fn test_aes_macs() {
             )
         );
     }
+
     testtokn.finalize();
 }
