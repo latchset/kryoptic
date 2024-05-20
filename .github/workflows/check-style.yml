@@ -1,5 +1,5 @@
 ---
-name: Check Rust Format
+name: Check Style
 
 on:
   pull_request:
