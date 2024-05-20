@@ -94,7 +94,7 @@ impl HMACMechanism {
         keyobj: &Object,
         op_type: CK_FLAGS,
     ) -> KResult<HMACOperation> {
-        /* the mechanism adveritzes only SIGN/VERIFY to the callers
+        /* the mechanism advertises only SIGN/VERIFY to the callers
          * DERIVE is a mediated operation so it is not advertised
          * and we do not check it */
         let op_attr = match op_type {
