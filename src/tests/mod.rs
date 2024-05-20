@@ -236,3 +236,5 @@ mod kdf_vectors;
 mod kdfs;
 
 mod mac_vectors;
+
+mod aes_kw_vectors;
