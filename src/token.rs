@@ -9,7 +9,6 @@ use super::attribute;
 use super::ecc;
 use super::error;
 use super::hash;
-use super::hmac;
 use super::interface;
 use super::kdf;
 use super::mechanism;
@@ -201,7 +200,6 @@ impl Token {
         rsa::register(&mut token.mechanisms, &mut token.object_factories);
         ecc::register(&mut token.mechanisms, &mut token.object_factories);
         hash::register(&mut token.mechanisms, &mut token.object_factories);
-        hmac::register(&mut token.mechanisms, &mut token.object_factories);
         kdf::register(&mut token.mechanisms, &mut token.object_factories);
 
         if token.filename.len() > 0 {

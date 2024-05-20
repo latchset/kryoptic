@@ -44,7 +44,7 @@ impl HashOperation {
 
     fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &HASH_MECH_SET {
-            mechs.add_mechanism(ckm.0, Self::new_mechanism());
+            mechs.add_mechanism(ckm.hash, Self::new_mechanism());
         }
     }
 
