@@ -1496,12 +1496,14 @@ extern "C" fn fn_generate_key(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let mechanisms = token.get_mechanisms();
+    let factories = token.get_object_factories();
+    let mech = res_or_ret!(mechanisms.get(data.mechanism));
     if mech.info().flags & CKF_GENERATE != CKF_GENERATE {
         return CKR_MECHANISM_INVALID;
     }
 
-    let result = mech.generate_key(data, tmpl);
+    let result = mech.generate_key(data, tmpl, mechanisms, factories);
     match result {
         Ok(obj) => {
             let kh = res_or_ret!(token.insert_object(s_handle, obj));

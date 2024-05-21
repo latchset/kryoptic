@@ -439,6 +439,8 @@ pub fn import_object(
 pub fn generate_key(
     session: CK_ULONG,
     mech: CK_MECHANISM_TYPE,
+    mechdata: CK_VOID_PTR,
+    mechdlen: CK_ULONG,
     ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
     bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
     bools: &[(CK_ATTRIBUTE_TYPE, bool)],
@@ -453,8 +455,8 @@ pub fn generate_key(
 
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: mech,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
+        pParameter: mechdata,
+        ulParameterLen: mechdlen,
     };
 
     let mut handle: CK_OBJECT_HANDLE = CK_INVALID_HANDLE;

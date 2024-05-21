@@ -1058,6 +1058,8 @@ impl Mechanism for GenericSecretKeyMechanism {
         &self,
         _mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
+        _: &Mechanisms,
+        _: &ObjectFactories,
     ) -> KResult<Object> {
         let mut key =
             GENERIC_SECRET_FACTORY.default_object_generate(template)?;

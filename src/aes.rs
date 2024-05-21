@@ -216,6 +216,8 @@ impl Mechanism for AesMechanism {
         &self,
         mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
+        _: &Mechanisms,
+        _: &ObjectFactories,
     ) -> KResult<Object> {
         if mech.mechanism != CKM_AES_KEY_GEN {
             return err_rv!(CKR_MECHANISM_INVALID);

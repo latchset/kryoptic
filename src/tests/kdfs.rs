@@ -17,6 +17,8 @@ fn test_sp800_kdf() {
     let handle = ret_or_panic!(generate_key(
         session,
         CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
         &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
         &[],
         &[(CKA_DERIVE, true),],
@@ -222,6 +224,8 @@ fn test_aes_enc_kdf() {
     let aeskey = ret_or_panic!(generate_key(
         session,
         CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
         &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 32),],
         &[],
         &[(CKA_DERIVE, true)],
@@ -301,6 +305,8 @@ fn test_hash_kdf() {
         let key_handle = ret_or_panic!(generate_key(
             session,
             kopt.0,
+            std::ptr::null_mut(),
+            0,
             &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
             &[],
             &[(CKA_DERIVE, true),],
@@ -521,6 +527,8 @@ fn test_hkdf() {
         let key_handle = ret_or_panic!(generate_key(
             session,
             kopt.0,
+            std::ptr::null_mut(),
+            0,
             &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
             &[],
             &[(CKA_DERIVE, true),],
@@ -530,6 +538,8 @@ fn test_hkdf() {
         let salt_handle = ret_or_panic!(generate_key(
             session,
             kopt.0,
+            std::ptr::null_mut(),
+            0,
             &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
             &[],
             &[(CKA_DERIVE, true),],
@@ -755,6 +765,112 @@ fn test_hkdf() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(extract_template[0].ulValueLen, len);
     assert_eq!(result, okm);
+
+    testtokn.finalize();
+}
+
+#[test]
+fn test_pbkdf2() {
+    let mut testtokn = TestToken::initialized("test_pbkdf2.sql", None);
+    let session = testtokn.get_session(false);
+
+    testtokn.login();
+
+    /* RFC 6070 Test Vectors */
+    for test in [
+        #[cfg(not(feature = "fips"))]
+        #[cfg(feature = "slow")]
+        (
+            "password",
+            "salt",
+            1,
+            hex::decode("0c60c80f961f0e71f3a9b524af6012062fe037a6").unwrap(),
+        ),
+        #[cfg(not(feature = "fips"))]
+        #[cfg(feature = "slow")]
+        (
+            "password",
+            "salt",
+            2,
+            hex::decode("ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957").unwrap(),
+        ),
+        #[cfg(not(feature = "fips"))]
+        #[cfg(feature = "slow")]
+        (
+            "password",
+            "salt",
+            4096,
+            hex::decode("4b007901b765489abead49d926f721d065a429c1").unwrap(),
+        ),
+        #[cfg(feature = "slow")]
+        (
+            "password",
+            "salt",
+            16777216,
+            hex::decode("eefe3d61cd4da4e4e9945b3d6ba2158c2634e984").unwrap(),
+        ),
+        /* the only vector that passes all FIPS size requirements for salt
+         * and iteration count */
+        (
+            "passwordPASSWORDpassword",
+            "saltSALTsaltSALTsaltSALTsaltSALTsalt",
+            4096,
+            hex::decode("3d2eec4fe41c849b80c8d83662c0e44a8b291a964cf2f07038")
+                .unwrap(),
+        ),
+        #[cfg(not(feature = "fips"))]
+        (
+            "pass\0word",
+            "sa\0lt",
+            4096,
+            hex::decode("56fa6aa75548099dcc37d7f03425e0c3").unwrap(),
+        ),
+    ] {
+        let params = CK_PKCS5_PBKD2_PARAMS2 {
+            saltSource: CKZ_DATA_SPECIFIED,
+            pSaltSourceData: void_ptr!(test.1.as_ptr()),
+            ulSaltSourceDataLen: test.1.len() as CK_ULONG,
+            iterations: test.2,
+            prf: CKP_PKCS5_PBKD2_HMAC_SHA1,
+            pPrfData: std::ptr::null_mut(),
+            ulPrfDataLen: 0,
+            pPassword: test.0.as_ptr() as *const _ as *mut _,
+            ulPasswordLen: test.0.len() as CK_ULONG,
+        };
+
+        let handle = ret_or_panic!(generate_key(
+            session,
+            CKM_PKCS5_PBKD2,
+            void_ptr!(&params),
+            std::mem::size_of::<CK_PKCS5_PBKD2_PARAMS2>() as CK_ULONG,
+            &[
+                (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                (CKA_VALUE_LEN, test.3.len() as CK_ULONG),
+            ],
+            &[],
+            &[
+                (CKA_WRAP, true),
+                (CKA_UNWRAP, true),
+                (CKA_EXTRACTABLE, true),
+            ],
+        ));
+
+        let mut result = vec![0u8; test.3.len()];
+        let mut extract_template = make_ptrs_template(&[(
+            CKA_VALUE,
+            void_ptr!(result.as_mut_ptr()),
+            result.len(),
+        )]);
+
+        let ret = fn_get_attribute_value(
+            session,
+            handle,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(result, test.3);
+    }
 
     testtokn.finalize();
 }
