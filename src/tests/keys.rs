@@ -16,6 +16,8 @@ fn test_key() {
     let handle = ret_or_panic!(generate_key(
         session,
         CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
         &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
         &[],
         &[

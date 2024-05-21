@@ -133,6 +133,15 @@ pub fn hash_size(hash: CK_MECHANISM_TYPE) -> usize {
     INVALID_HASH_SIZE
 }
 
+pub fn hmac_size(hmac: CK_MECHANISM_TYPE) -> usize {
+    for hs in &HASH_MECH_SET {
+        if hs.mac == hmac || hs.mac_general == hmac {
+            return hs.hash_size;
+        }
+    }
+    INVALID_HASH_SIZE
+}
+
 #[derive(Debug)]
 struct HashMechanism {
     info: CK_MECHANISM_INFO,

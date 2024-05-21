@@ -148,7 +148,7 @@ impl HMACOperation {
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for hs in &HASH_MECH_SET {
             /* skip HMACs for which we do not have valid Hashes */
-            let hashop = match HashOperation::new(hs.hash) {
+            let _ = match HashOperation::new(hs.hash) {
                 Ok(op) => op,
                 Err(_) => continue,
             };

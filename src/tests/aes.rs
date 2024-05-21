@@ -21,6 +21,8 @@ fn test_aes_operations() {
     let handle = ret_or_panic!(generate_key(
         session,
         CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
         &[(CKA_VALUE_LEN, 16),],
         &[],
         &[
@@ -754,6 +756,8 @@ fn test_aes_macs() {
     let handle = ret_or_panic!(generate_key(
         session,
         CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
         &[(CKA_VALUE_LEN, 16),],
         &[],
         &[(CKA_SIGN, true), (CKA_VERIFY, true),],

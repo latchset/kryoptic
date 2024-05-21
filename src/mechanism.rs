@@ -59,6 +59,8 @@ pub trait Mechanism: Debug + Send + Sync {
         &self,
         _: &CK_MECHANISM,
         _: &[CK_ATTRIBUTE],
+        _: &Mechanisms,
+        _: &ObjectFactories,
     ) -> KResult<Object> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
