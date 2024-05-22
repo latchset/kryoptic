@@ -18,6 +18,7 @@ pub const KRY_VENDOR_OFFSET: CK_ULONG = CKA_VENDOR_DEFINED + 485259;
 
 /* Object types */
 pub const KRO_TOKEN_DATA: CK_OBJECT_CLASS = KRY_VENDOR_OFFSET + 1;
+/* + 10 taken by pkcs11/validation_draft.rs */
 
 /* Attributes */
 pub const KRA_MAX_LOGIN_ATTEMPTS: CK_ATTRIBUTE_TYPE = KRY_VENDOR_OFFSET + 1;
@@ -26,8 +27,11 @@ pub const KRA_FLAGS: CK_ATTRIBUTE_TYPE = KRY_VENDOR_OFFSET + 3;
 pub const KRA_MANUFACTURER_ID: CK_ATTRIBUTE_TYPE = KRY_VENDOR_OFFSET + 4;
 pub const KRA_MODEL: CK_ATTRIBUTE_TYPE = KRY_VENDOR_OFFSET + 5;
 pub const KRA_SERIAL_NUMBER: CK_ATTRIBUTE_TYPE = KRY_VENDOR_OFFSET + 6;
+/* + 10 taken by pkcs11/validation_draft.rs */
 
 /* Errors */
 pub const KRR_TOKEN_NOT_INITIALIZED: CK_ULONG = KRY_VENDOR_OFFSET + 1;
 
 pub const KRY_UNSPEC: CK_ULONG = CK_UNAVAILABLE_INFORMATION;
+
+include!("validation_draft.rs");

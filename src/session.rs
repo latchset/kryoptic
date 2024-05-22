@@ -14,6 +14,9 @@ use interface::*;
 use mechanism::{Operation, SearchOperation};
 use token::Token;
 
+#[cfg(feature = "fips")]
+use super::fips;
+
 #[derive(Debug)]
 pub struct SessionSearch {
     handles: Vec<CK_OBJECT_HANDLE>,
@@ -52,6 +55,7 @@ pub struct Session {
     //notify: CK_NOTIFY,
     operation: Operation,
     login_status: OpLoginStatus,
+    fips_indicator: Option<bool>,
 }
 
 impl Session {
@@ -99,11 +103,25 @@ impl Session {
             //notify: unsafe { std::ptr::null_mut() },
             operation: Operation::Empty,
             login_status: OpLoginStatus::NotInitialized,
+            fips_indicator: None,
         })
     }
 
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
         &self.info
+    }
+
+    pub fn set_fips_indicator(&mut self, flag: bool) {
+        self.fips_indicator = Some(flag)
+    }
+
+    pub fn get_last_validation_flags(&self) -> CK_FLAGS {
+        #[cfg(feature = "fips")]
+        if self.fips_indicator == Some(true) {
+            return fips::indicators::KRF_FIPS;
+        }
+
+        0
     }
 
     pub fn get_slot_id(&self) -> CK_SLOT_ID {
@@ -187,6 +205,7 @@ impl Session {
             in_use: true,
         }));
         self.login_status = OpLoginStatus::NotRequired;
+        self.fips_indicator = None;
         Ok(())
     }
 
@@ -213,6 +232,7 @@ impl Session {
     }
 
     pub fn set_operation(&mut self, op: Operation, needs_login: bool) {
+        self.fips_indicator = None;
         self.operation = op;
         self.login_status = if needs_login {
             OpLoginStatus::Required

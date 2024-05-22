@@ -2385,6 +2385,23 @@ extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
+extern "C" fn fn_get_session_validation_flags(
+    s_handle: CK_SESSION_HANDLE,
+    flags_type: CK_SESSION_VALIDATION_FLAGS_TYPE,
+    pflags: CK_FLAGS_PTR,
+) -> CK_RV {
+    let flags: CK_FLAGS = if flags_type != CKS_LAST_VALIDATION_OK {
+        0
+    } else {
+        let rstate = global_rlock!(STATE);
+        let session = res_or_ret!(rstate.get_session(s_handle));
+
+        session.get_last_validation_flags()
+    };
+    unsafe { *pflags = flags };
+    CKR_OK
+}
+
 pub static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     version: CK_VERSION { major: 3, minor: 0 },
     C_Initialize: Some(fn_initialize),
