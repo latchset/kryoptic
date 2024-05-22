@@ -752,6 +752,8 @@ pub trait CommonKeyFactory {
             attr_element!(CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable; from_bool; val false),
             attr_element!(CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable; from_ulong; val CK_UNAVAILABLE_INFORMATION),
             attr_element!(CKA_ALLOWED_MECHANISMS; OAFlags::empty(); from_bytes; val Vec::new()),
+            #[cfg(feature = "fips")]
+            attr_element!(CKA_VALIDATION_FLAGS; OAFlags::NeverSettable; from_ulong; val 0),
         ]
     }
 }
@@ -1187,17 +1189,11 @@ impl ObjectFactories {
     ) -> KResult<&Box<dyn ObjectFactory>> {
         let class = obj.get_attr_as_ulong(CKA_CLASS)?;
         let type_ = match class {
-            CKO_DATA => 0,
             CKO_CERTIFICATE => obj.get_attr_as_ulong(CKA_CERTIFICATE_TYPE)?,
             CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
                 obj.get_attr_as_ulong(CKA_KEY_TYPE)?
             }
-            /* TODO:
-             *  CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
-             *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
-             *  CKO_VENDOR_DEFINED
-             */
-            _ => return err_rv!(CKR_DEVICE_ERROR),
+            _ => 0,
         };
         self.get_factory(ObjectType::new(class, type_))
     }

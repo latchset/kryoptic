@@ -6,6 +6,9 @@ use tests::*;
 
 use serial_test::{parallel, serial};
 
+#[cfg(feature = "fips")]
+use crate::fips::indicators::KRF_FIPS;
+
 #[test]
 #[parallel]
 fn test_init_token() {
@@ -65,6 +68,56 @@ fn test_init_token() {
         None,
         &mut session,
     );
+
+    #[cfg(feature = "fips")]
+    {
+        let mut handle: [CK_ULONG; 1] = [CK_INVALID_HANDLE];
+        let template =
+            make_attr_template(&[(CKA_CLASS, CKO_VALIDATION)], &[], &[]);
+        let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+        assert_eq!(ret, CKR_OK);
+        let mut count: CK_ULONG = 0;
+        let ret = fn_find_objects(session, handle.as_mut_ptr(), 1, &mut count);
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(count, 1);
+        assert_ne!(handle[0], CK_INVALID_HANDLE);
+        let ret = fn_find_objects_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        let mut vtype: CK_ULONG = 0;
+        let mut vversion: Vec<u8> = vec![0u8; 2];
+        let mut vlevel: CK_ULONG = 0;
+        let mut vflag: CK_ULONG = 0;
+        let mut vauth: CK_ULONG = 0;
+        let mut extract_template = make_ptrs_template(&[
+            (CKA_VALIDATION_TYPE, void_ptr!(&mut vtype), CK_ULONG_SIZE),
+            (
+                CKA_VALIDATION_VERSION,
+                void_ptr!(vversion.as_mut_ptr()),
+                vversion.len(),
+            ),
+            (CKA_VALIDATION_LEVEL, void_ptr!(&mut vlevel), CK_ULONG_SIZE),
+            (CKA_VALIDATION_FLAG, void_ptr!(&mut vflag), CK_ULONG_SIZE),
+            (
+                CKA_VALIDATION_AUTHORITY_TYPE,
+                void_ptr!(&mut vauth),
+                CK_ULONG_SIZE,
+            ),
+        ]);
+        let ret = fn_get_attribute_value(
+            session,
+            handle[0],
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(vtype, CKV_TYPE_SOFTWARE);
+        assert_eq!(vversion, vec![3u8, 0u8]);
+        assert_eq!(vlevel, 1);
+        assert_eq!(vflag, KRF_FIPS);
+        assert_eq!(vauth, CKV_AUTHORITY_TYPE_NIST_CMVP);
+    }
+
     assert_eq!(ret, CKR_OK);
     ret = fn_login(
         session,

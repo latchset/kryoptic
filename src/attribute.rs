@@ -38,7 +38,7 @@ macro_rules! attrmap_element {
     };
 }
 
-static ATTRMAP: [Attrmap<'_>; 135] = [
+static ATTRMAP: [Attrmap<'_>; 147] = [
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -174,6 +174,18 @@ static ATTRMAP: [Attrmap<'_>; 135] = [
     attrmap_element!(KRA_MANUFACTURER_ID; as StringType),
     attrmap_element!(KRA_MODEL; as StringType),
     attrmap_element!(KRA_SERIAL_NUMBER; as StringType),
+    attrmap_element!(CKA_VALIDATION_TYPE; as NumType),
+    attrmap_element!(CKA_VALIDATION_VERSION; as BytesType),
+    attrmap_element!(CKA_VALIDATION_LEVEL; as NumType),
+    attrmap_element!(CKA_VALIDATION_MODULE_ID; as StringType),
+    attrmap_element!(CKA_VALIDATION_FLAG; as NumType),
+    attrmap_element!(CKA_VALIDATION_AUTHORITY_TYPE; as NumType),
+    attrmap_element!(CKA_VALIDATION_COUNTRY; as StringType),
+    attrmap_element!(CKA_VALIDATION_CERTIFICATE_IDENTIFIER; as StringType),
+    attrmap_element!(CKA_VALIDATION_CERTIFICATE_URI; as StringType),
+    attrmap_element!(CKA_VALIDATION_VENDOR_URI; as StringType),
+    attrmap_element!(CKA_VALIDATION_PROFILE; as StringType),
+    attrmap_element!(CKA_VALIDATION_FLAGS; as NumType),
 ];
 
 #[derive(Debug, Clone)]

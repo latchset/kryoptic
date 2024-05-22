@@ -31,6 +31,9 @@ use storage::Storage;
 use hex;
 
 #[cfg(feature = "fips")]
+use super::fips;
+
+#[cfg(feature = "fips")]
 const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
 #[cfg(not(feature = "fips"))]
 const TOKEN_LABEL: &str = "Kryoptic Soft Token";
@@ -204,6 +207,9 @@ impl Token {
         sp800_108::register(&mut token.mechanisms, &mut token.object_factories);
         tlskdf::register(&mut token.mechanisms, &mut token.object_factories);
 
+        #[cfg(feature = "fips")]
+        fips::register(&mut token.mechanisms, &mut token.object_factories);
+
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {
                 Ok(()) => {
@@ -234,6 +240,9 @@ impl Token {
         if token.info.flags & CKF_TOKEN_INITIALIZED != 0 {
             token.init_pin_flags()?;
         }
+
+        #[cfg(feature = "fips")]
+        fips::token_init(&mut token)?;
 
         Ok(token)
     }
@@ -722,7 +731,13 @@ impl Token {
 
         self.init_pin_flags()?;
 
+        #[cfg(feature = "fips")]
+        if fips::token_init(self).is_err() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
         self.info.flags |= CKF_TOKEN_INITIALIZED;
+
         Ok(())
     }
 
@@ -929,6 +944,9 @@ impl Token {
     }
 
     fn clear_session_objects(&mut self, session: CK_SESSION_HANDLE) {
+        /* intentionally matches only valid handles, as we use invalid
+         * handles in some places to preserve special internal objects
+         * like validation objects in FIPS mode */
         let mut handles: Vec<CK_OBJECT_HANDLE> = Vec::new();
         for (_, obj) in self.session_objects.iter() {
             if obj.get_session() == session {
