@@ -38,7 +38,7 @@ macro_rules! attrmap_element {
     };
 }
 
-static ATTRMAP: [Attrmap<'_>; 130] = [
+static ATTRMAP: [Attrmap<'_>; 131] = [
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -168,7 +168,8 @@ static ATTRMAP: [Attrmap<'_>; 130] = [
     attrmap_element!(CKA_HSS_LMS_TYPES; as BytesType),
     attrmap_element!(CKA_HSS_LMOTS_TYPES; as BytesType),
     attrmap_element!(CKA_HSS_KEYS_REMAINING; as NumType),
-    attrmap_element!(KRYATTR_MAX_LOGIN_ATTEMPTS; as NumType),
+    attrmap_element!(KRA_MAX_LOGIN_ATTEMPTS; as NumType),
+    attrmap_element!(KRA_FLAGS; as NumType),
 ];
 
 #[derive(Debug, Clone)]

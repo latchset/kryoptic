@@ -69,7 +69,7 @@ fn test_ecc_operations() {
     /* private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "5".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "11".as_bytes())], &[]);
     let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -118,7 +118,7 @@ fn test_ecc_operations() {
 
     /* test that signature verification works */
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "4".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "10".as_bytes())], &[]);
     let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -144,7 +144,7 @@ fn test_ecc_operations() {
     /* P-521 private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "7".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "13".as_bytes())], &[]);
     let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -193,7 +193,7 @@ fn test_ecc_operations() {
 
     /* test that signature verification works */
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "6".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "12".as_bytes())], &[]);
     let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;

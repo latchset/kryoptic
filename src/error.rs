@@ -72,3 +72,10 @@ macro_rules! err_not_found {
         Err(KError::NotFound(error::AttributeNotFound { s: $err_str }))
     };
 }
+
+#[macro_export]
+macro_rules! to_rv {
+    ($ck_err:expr) => {
+        KError::RvError(error::CkRvError { rv: $ck_err })
+    };
+}

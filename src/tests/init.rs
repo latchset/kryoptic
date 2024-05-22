@@ -14,6 +14,9 @@ fn test_init_token() {
     assert_eq!(ret, CKR_OK);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let mut ro_session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
+    let label = "Init Test";
+    let mut label32 = [0x20u8; 32];
+    label32[..label.len()].copy_from_slice(label.as_bytes());
 
     /* init once */
     let pin_value = "SO Pin Value";
@@ -41,9 +44,15 @@ fn test_init_token() {
         testtokn.get_slot(),
         CString::new(pin_value).unwrap().into_raw() as *mut u8,
         pin_value.len() as CK_ULONG,
-        std::ptr::null_mut(),
+        label32.as_mut_ptr(),
     );
     assert_eq!(ret, CKR_OK);
+
+    /* Check label */
+    let mut token_info = CK_TOKEN_INFO::default();
+    ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(token_info.label, label32);
 
     /* login as so */
     ret = fn_open_session(

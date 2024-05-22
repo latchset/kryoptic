@@ -22,7 +22,7 @@
     },
     {
       "attributes": {
-          "CKA_UNIQUE_ID": "2",
+          "CKA_UNIQUE_ID": "10",
           "CKA_CLASS": 2,
           "CKA_KEY_TYPE": 0,
           "CKA_DESTROYABLE": false,
@@ -37,7 +37,7 @@
     },
     {
       "attributes": {
-          "CKA_UNIQUE_ID": "3",
+          "CKA_UNIQUE_ID": "11",
           "CKA_CLASS": 3,
           "CKA_KEY_TYPE": 0,
           "CKA_DESTROYABLE": false,
@@ -55,7 +55,7 @@
     },
     {
       "attributes": {
-          "CKA_UNIQUE_ID": "4",
+          "CKA_UNIQUE_ID": "12",
           "CKA_CLASS": 2,
           "CKA_KEY_TYPE": 3,
           "CKA_DESTROYABLE": false,
@@ -71,7 +71,7 @@
     },
     {
       "attributes": {
-          "CKA_UNIQUE_ID": "5",
+          "CKA_UNIQUE_ID": "13",
           "CKA_CLASS": 3,
           "CKA_KEY_TYPE": 3,
           "CKA_DESTROYABLE": false,

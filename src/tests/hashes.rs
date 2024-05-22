@@ -15,7 +15,7 @@ fn test_hashes_digest() {
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "2".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "10".as_bytes())], &[]);
     let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -84,7 +84,7 @@ fn test_hashes_digest() {
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "3".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "11".as_bytes())], &[]);
     ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -136,7 +136,7 @@ fn test_hashes_digest() {
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "4".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "12".as_bytes())], &[]);
     ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
@@ -188,7 +188,7 @@ fn test_hashes_digest() {
     /* get test data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "5".as_bytes())], &[]);
+        make_attr_template(&[], &[(CKA_UNIQUE_ID, "13".as_bytes())], &[]);
     ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
