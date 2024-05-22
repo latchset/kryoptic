@@ -16,22 +16,37 @@ use super::object;
 use super::rsa;
 use super::storage;
 
-use super::err_rv;
+use super::{err_rv, to_rv};
 use error::{KError, KResult};
 use interface::*;
 use mechanism::Mechanisms;
 use object::{Object, ObjectFactories};
 use storage::Storage;
 
-static TOKEN_LABEL: [CK_UTF8CHAR; 32usize] =
-    *b"Kryoptic FIPS Token             ";
-static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
-    *b"Kryoptic                        ";
-static TOKEN_MODEL: [CK_UTF8CHAR; 16usize] = *b"FIPS-140-3 v1   ";
-static TOKEN_SERIAL: [CK_UTF8CHAR; 16usize] = *b"0000000000000000";
+#[cfg(feature = "fips")]
+const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
+#[cfg(not(feature = "fips"))]
+const TOKEN_LABEL: &str = "Kryoptic Soft Token";
+
+const MANUFACTURER_ID: &str = "Kryoptic Project";
+
+#[cfg(feature = "fips")]
+const TOKEN_MODEL: &str = "FIPS-140-3 v1";
+#[cfg(not(feature = "fips"))]
+const TOKEN_MODEL: &str = "v1";
 
 const SO_PIN_UID: &str = "0";
 const USER_PIN_UID: &str = "1";
+const TOKEN_INFO_UID: &str = "2";
+
+fn copy_sized_string(s: &[u8], d: &mut [u8]) {
+    if s.len() >= d.len() {
+        d.copy_from_slice(&s[..d.len()]);
+    } else {
+        d[..s.len()].copy_from_slice(s);
+        d[s.len()..].fill(0x20); /* space in ASCII/UTF8 */
+    }
+}
 
 #[derive(Debug, Clone)]
 struct LoginData {
@@ -156,10 +171,10 @@ impl Token {
 
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
-                label: TOKEN_LABEL,
-                manufacturerID: MANUFACTURER_ID,
-                model: TOKEN_MODEL,
-                serialNumber: TOKEN_SERIAL,
+                label: [0u8; 32],
+                manufacturerID: [0u8; 32],
+                model: [0u8; 16],
+                serialNumber: [0u8; 16],
                 flags: CKF_RNG | CKF_LOGIN_REQUIRED,
                 ulMaxSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulSessionCount: 0,
@@ -194,6 +209,14 @@ impl Token {
             },
         };
 
+        /* default strings */
+        copy_sized_string(TOKEN_LABEL.as_bytes(), &mut token.info.label);
+        copy_sized_string(
+            MANUFACTURER_ID.as_bytes(),
+            &mut token.info.manufacturerID,
+        );
+        copy_sized_string(TOKEN_MODEL.as_bytes(), &mut token.info.model);
+
         /* register mechanisms and factories */
         object::register(&mut token.mechanisms, &mut token.object_factories);
         aes::register(&mut token.mechanisms, &mut token.object_factories);
@@ -205,6 +228,7 @@ impl Token {
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {
                 Ok(()) => {
+                    token.load_token_info()?;
                     token.info.flags |= CKF_TOKEN_INITIALIZED;
                 }
                 Err(err) => match err {
@@ -326,7 +350,84 @@ impl Token {
         return Ok(());
     }
 
-    pub fn initialize(&mut self, pin: &Vec<u8>, _label: &Vec<u8>) -> CK_RV {
+    fn load_token_info(&mut self) -> KResult<()> {
+        let uid = TOKEN_INFO_UID.to_string();
+        let obj = match self.storage.fetch_by_uid(&uid) {
+            Ok(o) => o,
+            Err(e) => match e {
+                KError::NotFound(_) => {
+                    /* it is ok if not token data is stored yet,
+                     * we'll use defaults */
+                    return Ok(());
+                }
+                KError::RvError(e) => return err_rv!(e.rv),
+                _ => return err_rv!(CKR_GENERAL_ERROR),
+            },
+        };
+        if obj.get_attr_as_ulong(CKA_CLASS)? != KRO_TOKEN_DATA {
+            return err_rv!(CKR_TOKEN_NOT_RECOGNIZED);
+        }
+        let label = obj
+            .get_attr_as_string(CKA_LABEL)
+            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+        copy_sized_string(label.as_bytes(), &mut self.info.label);
+        let issuer = obj
+            .get_attr_as_string(CKA_ISSUER)
+            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+        copy_sized_string(issuer.as_bytes(), &mut self.info.manufacturerID);
+        let model = obj
+            .get_attr_as_string(CKA_OBJECT_ID)
+            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+        copy_sized_string(model.as_bytes(), &mut self.info.model);
+        let serial = obj
+            .get_attr_as_bytes(CKA_SERIAL_NUMBER)
+            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+        if serial.len() != self.info.serialNumber.len() {
+            return err_rv!(CKR_TOKEN_NOT_RECOGNIZED);
+        }
+        self.info.serialNumber.copy_from_slice(serial.as_slice());
+        self.info.flags = obj
+            .get_attr_as_ulong(KRA_FLAGS)
+            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+
+        Ok(())
+    }
+
+    fn store_token_info(&mut self) -> KResult<()> {
+        let uid = TOKEN_INFO_UID.to_string();
+        let mut obj = match self.storage.fetch_by_uid(&uid) {
+            Ok(o) => o.clone(),
+            Err(_) => {
+                let mut o = Object::new();
+                o.set_attr(attribute::from_string(CKA_UNIQUE_ID, uid.clone()))?;
+                o.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
+                o.set_attr(attribute::from_ulong(CKA_CLASS, KRO_TOKEN_DATA))?;
+                o
+            }
+        };
+        obj.set_attr(attribute::from_bytes(
+            CKA_LABEL,
+            self.info.label.to_vec(),
+        ))?;
+        obj.set_attr(attribute::from_bytes(
+            CKA_ISSUER,
+            self.info.manufacturerID.to_vec(),
+        ))?;
+        obj.set_attr(attribute::from_bytes(
+            CKA_OBJECT_ID,
+            self.info.model.to_vec(),
+        ))?;
+        obj.set_attr(attribute::from_bytes(
+            CKA_SERIAL_NUMBER,
+            self.info.serialNumber.to_vec(),
+        ))?;
+        obj.set_attr(attribute::from_ulong(KRA_FLAGS, self.info.flags))?;
+
+        self.storage.store(&uid, obj)?;
+        return Ok(());
+    }
+
+    pub fn initialize(&mut self, pin: &Vec<u8>, label: &Vec<u8>) -> CK_RV {
         let ret = if self.is_initialized() {
             self.login(CKU_SO, pin)
         } else {
@@ -344,18 +445,24 @@ impl Token {
         }
 
         /* add pin to so_object */
-        match self.store_pin_object(
-            SO_PIN_UID.to_string(),
-            "SO PIN".to_string(),
-            pin.clone(),
-        ) {
-            Ok(_) => {
-                self.info.flags |= CKF_TOKEN_INITIALIZED;
-                self.update_token_pin_flags();
-                CKR_OK
-            }
-            Err(_) => CKR_GENERAL_ERROR,
+        if self
+            .store_pin_object(
+                SO_PIN_UID.to_string(),
+                "SO PIN".to_string(),
+                pin.clone(),
+            )
+            .is_err()
+        {
+            return CKR_GENERAL_ERROR;
         }
+
+        copy_sized_string(label.as_slice(), &mut self.info.label);
+        if self.store_token_info().is_err() {
+            return CKR_GENERAL_ERROR;
+        }
+        self.info.flags |= CKF_TOKEN_INITIALIZED;
+        self.update_token_pin_flags();
+        CKR_OK
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
@@ -450,7 +557,7 @@ impl Token {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         let value = obj.get_attr_as_bytes(CKA_VALUE)?;
-        let max = match obj.get_attr_as_ulong(KRYATTR_MAX_LOGIN_ATTEMPTS) {
+        let max = match obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS) {
             Ok(n) => n,
             Err(_) => 10,
         };
@@ -791,9 +898,11 @@ impl Token {
             }
         }
         while let Some(uid) = needs_handle.pop() {
-            /* do not return internal PIN objects */
-            if uid == SO_PIN_UID || uid == USER_PIN_UID {
-                continue;
+            /* do not return internal objects */
+            if let Ok(numuid) = uid.parse::<usize>() {
+                if numuid < 10 {
+                    continue;
+                }
             }
             let oh = self.handles.next();
             let obj = match self.storage.get_cached_by_uid_mut(&uid) {

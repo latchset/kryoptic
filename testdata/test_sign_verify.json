@@ -18,7 +18,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "2",
+        "CKA_UNIQUE_ID": "10",
         "CKA_CLASS": 2,
         "CKA_KEY_TYPE": 0,
         "CKA_DESTROYABLE": false,
@@ -33,7 +33,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "3",
+        "CKA_UNIQUE_ID": "11",
         "CKA_CLASS": 3,
         "CKA_KEY_TYPE": 0,
         "CKA_DESTROYABLE": false,
@@ -56,7 +56,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "4",
+        "CKA_UNIQUE_ID": "12",
         "CKA_APPLICATION": "CKM_RSA_PKCS",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,
@@ -69,7 +69,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "5",
+        "CKA_UNIQUE_ID": "13",
         "CKA_CLASS": 4,
         "CKA_KEY_TYPE": 16,
         "CKA_ID": "SE1BQyBUZXN0IEtleQ==",
@@ -85,7 +85,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "6",
+        "CKA_UNIQUE_ID": "14",
         "CKA_APPLICATION": "CKM_SHA_1_HMAC",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,
@@ -98,7 +98,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "7",
+        "CKA_UNIQUE_ID": "15",
         "CKA_APPLICATION": "CKM_SHA256_HMAC",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,
@@ -111,7 +111,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "8",
+        "CKA_UNIQUE_ID": "16",
         "CKA_APPLICATION": "CKM_SHA384_HMAC",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,
@@ -124,7 +124,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "9",
+        "CKA_UNIQUE_ID": "17",
         "CKA_APPLICATION": "CKM_SHA512_HMAC",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,
@@ -137,7 +137,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "10",
+        "CKA_UNIQUE_ID": "18",
         "CKA_CLASS": 4,
         "CKA_KEY_TYPE": 55,
         "CKA_ID": "SE1BQyBTSEEtMy0yNTYgVGVzdCBLZXk=",
@@ -153,7 +153,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "11",
+        "CKA_UNIQUE_ID": "19",
         "CKA_APPLICATION": "CKM_SHA3_256_HMAC",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,
@@ -166,7 +166,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "12",
+        "CKA_UNIQUE_ID": "20",
         "CKA_CLASS": 2,
         "CKA_KEY_TYPE": 3,
         "CKA_DESTROYABLE": false,
@@ -181,7 +181,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "13",
+        "CKA_UNIQUE_ID": "21",
         "CKA_CLASS": 3,
         "CKA_KEY_TYPE": 3,
         "CKA_DESTROYABLE": false,
@@ -198,7 +198,7 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "14",
+        "CKA_UNIQUE_ID": "22",
         "CKA_APPLICATION": "CKM_ECDSA_SHA512",
         "CKA_CLASS": 0,
         "CKA_DESTROYABLE": false,

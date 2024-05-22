@@ -57,7 +57,7 @@ impl Slot {
                 } else {
                     /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
                      * available error, we should rreturn that instead */
-                    err_rv!(KRYERR_TOKEN_NOT_INITIALIZED)
+                    err_rv!(KRR_TOKEN_NOT_INITIALIZED)
                 }
             }
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
@@ -77,7 +77,7 @@ impl Slot {
                 } else {
                     /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
                      * available error, we should rreturn that instead */
-                    err_rv!(KRYERR_TOKEN_NOT_INITIALIZED)
+                    err_rv!(KRR_TOKEN_NOT_INITIALIZED)
                 }
             }
             Err(_) => err_rv!(CKR_GENERAL_ERROR),
