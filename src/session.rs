@@ -14,6 +14,9 @@ use interface::*;
 use mechanism::{Operation, SearchOperation};
 use token::Token;
 
+#[cfg(feature = "fips")]
+use super::fips;
+
 #[derive(Debug)]
 pub struct SessionSearch {
     handles: Vec<CK_OBJECT_HANDLE>,
@@ -43,6 +46,7 @@ pub struct Session {
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
     operation: Operation,
+    fips_indicator: Option<bool>,
 }
 
 impl Session {
@@ -89,11 +93,25 @@ impl Session {
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
             operation: Operation::Empty,
+            fips_indicator: None,
         })
     }
 
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
         &self.info
+    }
+
+    pub fn set_fips_indicator(&mut self, flag: bool) {
+        self.fips_indicator = Some(flag)
+    }
+
+    pub fn get_last_validation_flags(&self) -> CK_FLAGS {
+        #[cfg(feature = "fips")]
+        if self.fips_indicator == Some(true) {
+            return fips::indicators::KRF_FIPS;
+        }
+
+        0
     }
 
     pub fn get_slot_id(&self) -> CK_SLOT_ID {
@@ -176,6 +194,7 @@ impl Session {
             handles: token.search_objects(template)?,
             in_use: true,
         }));
+        self.fips_indicator = None;
         Ok(())
     }
 
@@ -188,6 +207,7 @@ impl Session {
     }
 
     pub fn set_operation(&mut self, op: Operation) {
+        self.fips_indicator = None;
         self.operation = op;
     }
 }
