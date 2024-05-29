@@ -115,6 +115,21 @@ fn curve_name_to_oid(
     })
 }
 
+pub fn ec_key_curve_size(key: &Object) -> KResult<usize> {
+    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
+        Ok(b) => b,
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    };
+    match asn1::parse_single::<ECParameters>(x) {
+        Ok(a) => match a {
+            ECParameters::OId(o) => oid_to_bits(o),
+            ECParameters::CurveName(c) => curve_name_to_bits(c),
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        },
+        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+    }
+}
+
 #[derive(Debug)]
 pub struct ECCPubFactory {
     attributes: Vec<ObjectAttr>,
