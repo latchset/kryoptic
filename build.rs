@@ -51,7 +51,15 @@ fn build_ossl() {
         (
             format!("{}/libfips.a", providers_path.to_str().unwrap())
                 .to_string(),
-            ["--debug", "enable-fips"],
+            [
+                "--debug",
+                "enable-fips",
+                "no-mdc2",
+                "no-ec2m",
+                "no-sm2",
+                "no-sm4",
+                "-DREDHAT_FIPS_VERSION=\\\"0.0.1-test\\\"",
+            ],
         )
     };
 

@@ -166,63 +166,66 @@ fn test_key() {
         )
     );
 
-    /* Wrap AES Key in RSA PKCS */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_RSA_PKCS,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    let mut wrapped_len = wrapped.len() as CK_ULONG;
+    #[cfg(not(feature = "fips"))]
+    {
+        /* Wrap AES Key in RSA PKCS */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_RSA_PKCS,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let mut wrapped_len = wrapped.len() as CK_ULONG;
 
-    ret = fn_wrap_key(
-        session,
-        &mut mechanism,
-        pubkey,
-        handle,
-        wrapped.as_mut_ptr(),
-        &mut wrapped_len,
-    );
-    assert_eq!(ret, CKR_OK);
+        ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            pubkey,
+            handle,
+            wrapped.as_mut_ptr(),
+            &mut wrapped_len,
+        );
+        assert_eq!(ret, CKR_OK);
 
-    /* need to unwrap the key with a template that
-     * will work for an encryption operation */
-    let mut template = make_attr_template(
-        &[
-            (CKA_CLASS, CKO_SECRET_KEY),
-            (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
-        ],
-        &[],
-        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
-    );
+        /* need to unwrap the key with a template that
+         * will work for an encryption operation */
+        let mut template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 16),
+            ],
+            &[],
+            &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+        );
 
-    let mut handle2 = CK_INVALID_HANDLE;
-    ret = fn_unwrap_key(
-        session,
-        &mut mechanism,
-        prikey,
-        wrapped.as_mut_ptr(),
-        wrapped_len,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-        &mut handle2,
-    );
-    assert_eq!(ret, CKR_OK);
+        let mut handle2 = CK_INVALID_HANDLE;
+        ret = fn_unwrap_key(
+            session,
+            &mut mechanism,
+            prikey,
+            wrapped.as_mut_ptr(),
+            wrapped_len,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+            &mut handle2,
+        );
+        assert_eq!(ret, CKR_OK);
 
-    /* test the unwrapped key works */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_AES_ECB,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
+        /* test the unwrapped key works */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_ECB,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
 
-    ret = fn_encrypt_init(session, &mut mechanism, handle2);
-    assert_eq!(ret, CKR_OK);
+        ret = fn_encrypt_init(session, &mut mechanism, handle2);
+        assert_eq!(ret, CKR_OK);
 
-    /* init is sufficient to ensure the key is well formed,
-     * terminate current operation */
-    ret = fn_encrypt_init(session, std::ptr::null_mut(), handle2);
-    assert_eq!(ret, CKR_OK);
+        /* init is sufficient to ensure the key is well formed,
+         * terminate current operation */
+        ret = fn_encrypt_init(session, std::ptr::null_mut(), handle2);
+        assert_eq!(ret, CKR_OK);
+    }
 
     /* RSA 4k key pair */
     let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
