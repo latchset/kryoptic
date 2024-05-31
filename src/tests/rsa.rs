@@ -32,69 +32,73 @@ fn test_rsa_operations() {
     ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
-    /* encrypt init */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_RSA_PKCS,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    ret = fn_encrypt_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OK);
+    #[cfg(not(feature = "fips"))]
+    {
+        /* encrypt init */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_RSA_PKCS,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
 
-    /* a second invocation should return an error */
-    ret = fn_encrypt_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OPERATION_ACTIVE);
+        /* a second invocation should return an error */
+        ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OPERATION_ACTIVE);
 
-    let data = "plaintext";
-    let enc: [u8; 512] = [0; 512];
-    let mut enc_len: CK_ULONG = 512;
-    ret = fn_encrypt(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        enc.as_ptr() as *mut _,
-        &mut enc_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(enc_len, 256);
+        let data = "plaintext";
+        let enc: [u8; 512] = [0; 512];
+        let mut enc_len: CK_ULONG = 512;
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 256);
 
-    /* a second invocation should return an error */
-    ret = fn_encrypt(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        enc.as_ptr() as *mut _,
-        &mut enc_len,
-    );
-    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+        /* a second invocation should return an error */
+        ret = fn_encrypt(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
-    /* test that decryption returns the same data back */
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "11".as_bytes())], &[]);
-    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 1);
-    assert_ne!(handle, CK_INVALID_HANDLE);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
+        /* test that decryption returns the same data back */
+        let template =
+            make_attr_template(&[], &[(CKA_UNIQUE_ID, "11".as_bytes())], &[]);
+        let mut ret =
+            fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+        assert_eq!(ret, CKR_OK);
+        let mut count: CK_ULONG = 0;
+        ret = fn_find_objects(session, &mut handle, 1, &mut count);
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(count, 1);
+        assert_ne!(handle, CK_INVALID_HANDLE);
+        ret = fn_find_objects_final(session);
+        assert_eq!(ret, CKR_OK);
 
-    ret = fn_decrypt_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OK);
+        ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
 
-    let dec: [u8; 512] = [0; 512];
-    let mut dec_len: CK_ULONG = 512;
-    ret = fn_decrypt(
-        session,
-        enc.as_ptr() as *mut u8,
-        enc_len,
-        dec.as_ptr() as *mut u8,
-        &mut dec_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
+        let dec: [u8; 512] = [0; 512];
+        let mut dec_len: CK_ULONG = 512;
+        ret = fn_decrypt(
+            session,
+            enc.as_ptr() as *mut u8,
+            enc_len,
+            dec.as_ptr() as *mut u8,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(data.as_bytes(), &dec[..dec_len as usize]);
+    }
 
     /* RSA PKCS Sig */
     let pri_key_handle = match get_test_key_handle(
@@ -192,48 +196,55 @@ fn test_rsa_operations() {
     let ret = sig_verify(session, pub_key_handle, &msg, &signed, &mechanism);
     assert_eq!(ret, CKR_OK);
 
-    /* RSA PKCS Enc */
-    let pri_key_handle = ret_or_panic!(get_test_key_handle(
-        session,
-        "pkcs1v15crypt-vectors.txt - Example 15: A 2048-bit RSA key pair",
-        CKO_PRIVATE_KEY,
-    ));
-    let pub_key_handle = ret_or_panic!(get_test_key_handle(
-        session,
-        "pkcs1v15crypt-vectors.txt - Example 15: A 2048-bit RSA key pair",
-        CKO_PUBLIC_KEY,
-    ));
-    let testname =
-        "pkcs1v15crypt-vectors.txt - PKCS#1 v1.5 Encryption Example 15.20";
-    let msg = match get_test_data(session, testname, "msg") {
-        Ok(vec) => vec,
-        Err(ret) => return assert_eq!(ret, CKR_OK),
-    };
-    let enc = match get_test_data(session, testname, "enc") {
-        Ok(vec) => vec,
-        Err(ret) => return assert_eq!(ret, CKR_OK),
-    };
+    #[cfg(not(feature = "fips"))]
+    {
+        /* RSA PKCS Enc */
+        let pri_key_handle = ret_or_panic!(get_test_key_handle(
+            session,
+            "pkcs1v15crypt-vectors.txt - Example 15: A 2048-bit RSA key pair",
+            CKO_PRIVATE_KEY,
+        ));
+        let pub_key_handle = ret_or_panic!(get_test_key_handle(
+            session,
+            "pkcs1v15crypt-vectors.txt - Example 15: A 2048-bit RSA key pair",
+            CKO_PUBLIC_KEY,
+        ));
+        let testname =
+            "pkcs1v15crypt-vectors.txt - PKCS#1 v1.5 Encryption Example 15.20";
+        let msg = match get_test_data(session, testname, "msg") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let enc = match get_test_data(session, testname, "enc") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
 
-    let mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_RSA_PKCS,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_RSA_PKCS,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
 
-    let result =
-        ret_or_panic!(decrypt(session, pri_key_handle, &enc, &mechanism));
-    assert_eq!(msg, result);
+        let result =
+            ret_or_panic!(decrypt(session, pri_key_handle, &enc, &mechanism));
+        assert_eq!(msg, result);
 
-    let encrypted =
-        ret_or_panic!(encrypt(session, pub_key_handle, &msg, &mechanism));
-    /* can't really compare the data because padding contains random
-     * octets so each encryption produces a different output */
-    assert_eq!(enc.len(), encrypted.len());
-    /* but we can decrypt again to ensure encryption produced
-     * something usable */
-    let result =
-        ret_or_panic!(decrypt(session, pri_key_handle, &encrypted, &mechanism));
-    assert_eq!(msg, result);
+        let encrypted =
+            ret_or_panic!(encrypt(session, pub_key_handle, &msg, &mechanism));
+        /* can't really compare the data because padding contains random
+         * octets so each encryption produces a different output */
+        assert_eq!(enc.len(), encrypted.len());
+        /* but we can decrypt again to ensure encryption produced
+         * something usable */
+        let result = ret_or_panic!(decrypt(
+            session,
+            pri_key_handle,
+            &encrypted,
+            &mechanism
+        ));
+        assert_eq!(msg, result);
+    }
 
     /* RSA PKCS OAEP Enc */
     let pri_key_handle = ret_or_panic!(get_test_key_handle(
