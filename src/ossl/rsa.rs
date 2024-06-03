@@ -262,6 +262,8 @@ struct RsaPKCSOperation {
     sigctx: Option<EvpMdCtx>,
     pss: RsaPssParams,
     oaep: RsaOaepParams,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl RsaPKCSOperation {
@@ -378,6 +380,8 @@ impl RsaPKCSOperation {
             sigctx: None,
             pss: no_pss_params(),
             oaep: oaep_params,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -409,6 +413,8 @@ impl RsaPKCSOperation {
             sigctx: None,
             pss: no_pss_params(),
             oaep: oaep_params,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -447,6 +453,8 @@ impl RsaPKCSOperation {
             },
             pss: pss_params,
             oaep: no_oaep_params(),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -484,6 +492,8 @@ impl RsaPKCSOperation {
             },
             pss: pss_params,
             oaep: no_oaep_params(),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -724,6 +734,10 @@ impl RsaPKCSOperation {
 impl MechOperation for RsaPKCSOperation {
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
     }
 }
 

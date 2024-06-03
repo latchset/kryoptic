@@ -428,6 +428,9 @@ impl Derive for Sp800Operation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
+        self.fips_approved =
+            fips::indicators::check_kdf_fips_indicators(&mut kctx)?;
+
         let mut cursor = 0;
         for key in &mut keys {
             let keysize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;

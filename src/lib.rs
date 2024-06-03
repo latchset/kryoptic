@@ -1891,6 +1891,33 @@ extern "C" fn fn_derive_key(
         return CKR_GENERAL_ERROR;
     }
 
+    #[cfg(feature = "fips")]
+    {
+        /* must drop here or we deadlock trying to re-acquire for writing */
+        drop(session);
+
+        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* op approval, may still change later */
+        let mut approval = match operation.fips_approved() {
+            Some(s) => s,
+            None => true,
+        };
+        if approval {
+            for rkey in &mut result {
+                let approved = fips::indicators::is_approved(
+                    mechanism,
+                    CKF_DERIVE,
+                    Some(&key),
+                    Some(rkey),
+                );
+                if !approved {
+                    approval = false;
+                }
+            }
+        }
+        session.set_fips_indicator(approval);
+    }
+
     match mechanism.mechanism {
         CKM_SP800_108_COUNTER_KDF
         | CKM_SP800_108_FEEDBACK_KDF

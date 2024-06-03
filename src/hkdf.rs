@@ -68,6 +68,8 @@ struct HKDFOperation {
     salt: Vec<u8>,
     info: Vec<u8>,
     emit_data_obj: bool,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl HKDFOperation {
@@ -205,6 +207,8 @@ impl HKDFOperation {
             salt: salt,
             info: bytes_to_slice!(params.pInfo, params.ulInfoLen, u8).to_vec(),
             emit_data_obj: mech.mechanism == CKM_HKDF_DATA,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -264,7 +268,10 @@ impl MechOperation for HKDFOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
-
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
+    }
     fn requires_objects(&self) -> KResult<&[CK_OBJECT_HANDLE]> {
         if self.salt_type == CKF_HKDF_SALT_KEY {
             return Ok(&self.salt_key);
