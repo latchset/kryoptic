@@ -303,7 +303,7 @@ impl OsslParam {
     pub fn with_capacity(capacity: usize) -> OsslParam {
         OsslParam {
             v: Vec::new(),
-            p: Vec::with_capacity(capacity),
+            p: Vec::with_capacity(capacity + 1),
             finalized: false,
             imported: false,
             zeroize: false,
