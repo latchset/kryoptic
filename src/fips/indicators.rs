@@ -1087,3 +1087,24 @@ pub fn is_approved(
 
     false
 }
+
+pub fn check_kdf_fips_indicators(
+    kctx: &mut EvpKdfCtx,
+) -> KResult<Option<bool>> {
+    let mut indicator: c_int =
+        EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED as c_int;
+    let mut params = OsslParam::with_capacity(1)
+        .get_int(
+            name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR),
+            &mut indicator,
+        )?
+        .finalize();
+    unsafe { EVP_KDF_CTX_get_params(kctx.as_mut_ptr(), params.as_mut_ptr()) };
+    /* in case of error it will remain undetermined */
+    Ok(match indicator as c_uint {
+        EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED => None,
+        EVP_KDF_REDHAT_FIPS_INDICATOR_APPROVED => Some(true),
+        EVP_KDF_REDHAT_FIPS_INDICATOR_NOT_APPROVED => Some(false),
+        _ => return err_rv!(CKR_DEVICE_ERROR),
+    })
+}

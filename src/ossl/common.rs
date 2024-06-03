@@ -530,6 +530,16 @@ impl OsslParam {
         Ok(self)
     }
 
+    pub fn get_int<'a>(
+        mut self,
+        key: *const c_char,
+        val: &'a mut c_int,
+    ) -> KResult<OsslParam> {
+        let param = unsafe { OSSL_PARAM_construct_int(key, val as *mut c_int) };
+        self.p.push(param);
+        Ok(self)
+    }
+
     pub fn finalize(mut self) -> OsslParam {
         if self.finalized {
             return self;

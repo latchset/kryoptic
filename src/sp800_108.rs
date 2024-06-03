@@ -96,6 +96,8 @@ struct Sp800Operation {
     params: Vec<Sp800Params>,
     iv: Vec<u8>,
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 unsafe impl Send for Sp800Operation {}
@@ -272,6 +274,8 @@ impl Sp800Operation {
             params: Self::parse_data_params(&data_params)?,
             iv: Vec::new(),
             addl_drv_keys: addl_drv_keys.to_vec(),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -302,6 +306,8 @@ impl Sp800Operation {
             params: Self::parse_data_params(&data_params)?,
             iv: iv,
             addl_drv_keys: addl_drv_keys.to_vec(),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
