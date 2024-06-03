@@ -1741,13 +1741,35 @@ extern "C" fn fn_derive_key(
         token.get_mechanisms(),
         token.get_object_factories(),
     );
-    let (kh, addtl) = match result {
-        Ok((obj, addtl)) => {
-            let h = res_or_ret!(token.insert_object(s_handle, obj));
-            (h, addtl)
-        }
+
+    let (mut obj, addtl) = match result {
+        Ok((o, a)) => (o, a),
         Err(e) => return err_to_rv!(e),
     };
+
+    #[cfg(feature = "fips")]
+    {
+        /* must drop here or we deadlock trying to re-acquire for writing */
+        drop(session);
+
+        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* op approval, my still change later */
+        let mut approval = match operation.fips_approved() {
+            Some(s) => s,
+            None => true,
+        };
+        if approval {
+            approval = fips::indicators::is_approved(
+                ck_mech,
+                CKF_DERIVE,
+                Some(&bkey),
+                Some(&mut obj),
+            );
+        }
+        session.set_fips_indicator(approval);
+    }
+
+    let kh = res_or_ret!(token.insert_object(s_handle, obj));
 
     let mut rv = CKR_OK;
     if addtl > 0 {

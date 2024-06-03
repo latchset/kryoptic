@@ -106,6 +106,11 @@ impl Derive for HKDFOperation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
+        }
+
         obj.set_attr(from_bytes(CKA_VALUE, dkm))?;
 
         Ok((obj, 0))
