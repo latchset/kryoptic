@@ -43,35 +43,37 @@ fn build_ossl() {
             .canonicalize()
             .expect("OpenSSL providers path unavailable");
 
+        let libfips = format!("{}/libfips.a", providers_path.to_string_lossy());
+        let buildargs = [
+            "--debug",
+            "enable-fips",
+            "no-mdc2",
+            "no-ec2m",
+            "no-sm2",
+            "no-sm4",
+            "-DREDHAT_FIPS_VERSION=\\\"0.0.1-test\\\"",
+        ];
+
         println!(
             "cargo:rustc-link-search={}",
-            providers_path.to_str().unwrap()
+            providers_path.to_string_lossy()
         );
         println!("cargo:rustc-link-lib=static=fips");
-        (
-            format!("{}/libfips.a", providers_path.to_str().unwrap())
-                .to_string(),
-            [
-                "--debug",
-                "enable-fips",
-                "no-mdc2",
-                "no-ec2m",
-                "no-sm2",
-                "no-sm4",
-                "-DREDHAT_FIPS_VERSION=\\\"0.0.1-test\\\"",
-            ],
-        )
+        println!("cargo::rerun-if-changed={}", libfips);
+
+        (libfips, buildargs)
     };
 
     #[cfg(not(feature = "fips"))]
     let (libpath, bldargs) = {
+        let libcrypto =
+            format!("{}/libcrypto.a", openssl_path.to_string_lossy());
+
         println!("cargo:rustc-link-search={}", openssl_path.to_str().unwrap());
         println!("cargo:rustc-link-lib=static=crypto");
-        (
-            format!("{}/libcrypto.a", openssl_path.to_str().unwrap())
-                .to_string(),
-            ["--debug"],
-        )
+        println!("cargo::rerun-if-changed={}", libcrypto);
+
+        (libcrypto, ["--debug"])
     };
 
     match std::path::Path::new(&libpath).try_exists() {
@@ -136,8 +138,10 @@ fn build_ossl() {
 
 fn main() {
     /* PKCS11 Headers */
+    let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
+    println!("cargo::rerun-if-changed={}", pkcs11_header);
     bindgen::Builder::default()
-        .header("pkcs11_headers/3.1/pkcs11.h")
+        .header(pkcs11_header)
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
         .blocklist_type("CK_FUNCTION_LIST_PTR")
@@ -150,5 +154,6 @@ fn main() {
         .expect("Couldn't write bindings!");
 
     /* OpenSSL Cryptography */
+    println!("cargo::rerun-if-changed={}", ".git/modules/openssl/HEAD");
     build_ossl();
 }
