@@ -18,7 +18,7 @@ test = false
 bindgen = "0.68"
 
 [dependencies]
-asn1 = "0.16.0"
+asn1 = "0.16.2"
 bitflags = "2.4.1"
 cfg-if = "1.0.0"
 constant_time_eq = "0.3.0"
@@ -36,9 +36,6 @@ serde = { version = "1.0.180", features = ["derive"] }
 serde_json = "1.0.104"
 uuid = { version = "1.4.1", features = ["v4"] }
 zeroize = "1.6.0"
-
-[patch.crates-io]
-asn1 = { git = "https://github.com/alex/rust-asn1.git" }
 
 [features]
 fips = []
