@@ -518,8 +518,8 @@ fn test_hkdf() {
     testtokn.login();
 
     let derive_hash = CKM_SHA256;
-    /* length of input keys must match hash size */
     for kopt in [
+        (CKM_GENERIC_SECRET_KEY_GEN, CKK_GENERIC_SECRET, 12),
         (CKM_GENERIC_SECRET_KEY_GEN, CKK_GENERIC_SECRET, 32),
         (CKM_HKDF_KEY_GEN, CKK_HKDF, 32),
     ] {
@@ -651,6 +651,23 @@ fn test_hkdf() {
             assert_eq!(ret, CKR_OK);
             assert_eq!(class, obj_class);
             assert_eq!(extract_template[1].ulValueLen, 32);
+
+            /* test that we can get correct indicators based on inputs */
+            #[cfg(feature = "fips")]
+            {
+                let mut flags: CK_FLAGS = 0;
+                let ret = fn_get_session_validation_flags(
+                    session,
+                    CKS_LAST_VALIDATION_OK,
+                    &mut flags,
+                );
+                assert_eq!(ret, CKR_OK);
+                if kopt.2 < 14 {
+                    assert_eq!(flags, 0);
+                } else {
+                    assert_eq!(flags, crate::fips::indicators::KRF_FIPS);
+                }
+            }
         }
     }
 
