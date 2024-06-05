@@ -11,7 +11,7 @@ use super::mechanism;
 use super::misc;
 use super::object;
 
-use attribute::from_bytes;
+use attribute::{from_bytes, from_ulong};
 use error::{KError, KResult};
 use hash::INVALID_HASH_SIZE;
 use hmac::hmac_size;
@@ -244,11 +244,17 @@ impl HKDFOperation {
             template,
             &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
         );
-        let obj =
+        let mut obj =
             objfactories.derive_key_from_template(key, tmpl.as_slice())?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
-            Err(_) => self.prflen,
+            Err(_) => {
+                obj.set_attr(from_ulong(
+                    CKA_VALUE_LEN,
+                    self.prflen as CK_ULONG,
+                ))?;
+                self.prflen
+            }
         };
         Ok((obj, keysize))
     }
