@@ -626,10 +626,16 @@ impl HKDFOperation {
             Some(ref o) => o.as_slice(),
             None => template,
         };
-        let obj = objfactories.derive_key_from_template(key, tmpl)?;
+        let mut obj = objfactories.derive_key_from_template(key, tmpl)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
-            Err(_) => self.prflen,
+            Err(_) => {
+                obj.set_attr(from_ulong(
+                    CKA_VALUE_LEN,
+                    self.prflen as CK_ULONG,
+                ))?;
+                self.prflen
+            }
         };
         Ok((obj, keysize))
     }
