@@ -6,7 +6,7 @@ use super::error;
 use super::interface;
 use super::kasn1;
 use super::object;
-use super::{attr_element, bytes_attr_not_empty, err_rv};
+use super::{attr_element, bytes_attr_not_empty, bytes_to_vec, err_rv};
 
 use attribute::{from_bool, from_bytes};
 use error::{KError, KResult};
@@ -352,7 +352,6 @@ impl Mechanism for EccMechanism {
         &self.info
     }
 
-    // TODO wrap/derive
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
@@ -380,6 +379,27 @@ impl Mechanism for EccMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
+    }
+
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        let kdf = match mech.mechanism {
+            CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => {
+                if mech.ulParameterLen as usize
+                    != ::std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
+                {
+                    return err_rv!(CKR_ARGUMENTS_BAD);
+                }
+                ECDHOperation::derive_new(
+                    mech.mechanism,
+                    mech.pParameter as *const CK_ECDH1_DERIVE_PARAMS,
+                )?
+            }
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        };
+        Ok(Operation::Derive(Box::new(kdf)))
     }
 
     fn generate_keypair(
@@ -437,8 +457,65 @@ impl Mechanism for EccMechanism {
     }
 }
 
+#[derive(Debug)]
+struct ECDHOperation {
+    mech: CK_MECHANISM_TYPE,
+    kdf: CK_EC_KDF_TYPE,
+    public: Vec<u8>,
+    shared: Vec<u8>,
+    finalized: bool,
+}
+
+impl ECDHOperation {
+    fn new_mechanism() -> Box<dyn Mechanism> {
+        Box::new(EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                flags: CKF_DERIVE,
+            },
+        })
+    }
+
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        for ckm in &[CKM_ECDH1_DERIVE, CKM_ECDH1_COFACTOR_DERIVE] {
+            mechs.add_mechanism(*ckm, Self::new_mechanism());
+        }
+    }
+
+    fn derive_new<'a>(
+        mechanism: CK_MECHANISM_TYPE,
+        params: *const CK_ECDH1_DERIVE_PARAMS,
+    ) -> KResult<ECDHOperation> {
+        let p = unsafe { *params };
+        if p.kdf == CKD_NULL {
+            if p.pSharedData != std::ptr::null_mut() || p.ulSharedDataLen != 0 {
+                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            }
+        }
+        if p.pPublicData == std::ptr::null_mut() || p.ulPublicDataLen == 0 {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        Ok(ECDHOperation {
+            finalized: false,
+            mech: mechanism,
+            kdf: p.kdf,
+            shared: bytes_to_vec!(p.pSharedData, p.ulSharedDataLen),
+            public: bytes_to_vec!(p.pPublicData, p.ulPublicDataLen),
+        })
+    }
+}
+
+impl MechOperation for ECDHOperation {
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+}
+
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     EccOperation::register_mechanisms(mechs);
+    ECDHOperation::register_mechanisms(mechs);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),

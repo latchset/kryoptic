@@ -29,7 +29,8 @@
         "CKA_EC_POINT": "BEEE0g4fWTPx/xNrMFT+92QpycYFCDG8tU3Soay7IX5rYwUiTmCaRbAb0BbmyZyo5ohLpyxRtKA2OY/ZHiUwk1WqxA==",
         "CKA_PRIVATE": false,
         "CKA_TOKEN": true,
-        "CKA_VERIFY": true
+        "CKA_VERIFY": true,
+        "CKA_DERIVE": true
     }
 }, {
     "attributes": {
@@ -46,7 +47,8 @@
         "CKA_VALUE": "sxii++7MgHifnragD24cTowDcXzJnYbj1a8TskCybBw=",
         "CKA_EC_PARAMS": "BggqhkjOPQMBBw==",
         "CKA_TOKEN": true,
-        "CKA_SIGN": true
+        "CKA_SIGN": true,
+        "CKA_DERIVE": true
     }
 }, {
     "attributes": {
@@ -61,7 +63,8 @@
         "CKA_EC_POINT": "BIGFBABhOH/WuVkU6IX5Eu37tfsnRlUCfyFsQJHKg+GTNnQP2Brt/gR/UbQr32gWESEBPg1VsRehTkMD+SbI3rt3p/2q0QDn0MdcOGJuiVyiFSa5+f34Tc7Lk/KyMzkFUNKxRjt+4/WN9zRkNf8ENBmVg8l8ZlqX8S9wbyNX2ktAKI3viI5Z5g==",
         "CKA_PRIVATE": false,
         "CKA_TOKEN": true,
-        "CKA_VERIFY": true
+        "CKA_VERIFY": true,
+        "CKA_DERIVE": true
     }
 }, {
     "attributes": {
@@ -78,6 +81,7 @@
         "CKA_EC_PARAMS": "BgUrgQQAIw==",
         "CKA_VALUE": "90nTJwS8UzyoLO8KzxA9j0+6Z/CNJnjlFe19uIYmf/rwL6sAgNyiNZty9XTMwpoPIYyGVcDMz5/ubF5WeqFMuSY=",
         "CKA_TOKEN": true,
-        "CKA_SIGN": true
+        "CKA_SIGN": true,
+        "CKA_DERIVE": true
     }
 }]}

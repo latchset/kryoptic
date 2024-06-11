@@ -225,6 +225,8 @@ mod session;
 
 mod ecc;
 
+mod ecdh;
+
 mod hashes;
 
 mod signatures;
