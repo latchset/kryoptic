@@ -372,20 +372,17 @@ impl Token {
             .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
         copy_sized_string(label.as_bytes(), &mut self.info.label);
         let issuer = obj
-            .get_attr_as_string(CKA_ISSUER)
+            .get_attr_as_string(KRA_MANUFACTURER_ID)
             .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
         copy_sized_string(issuer.as_bytes(), &mut self.info.manufacturerID);
         let model = obj
-            .get_attr_as_string(CKA_OBJECT_ID)
+            .get_attr_as_string(KRA_MODEL)
             .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
         copy_sized_string(model.as_bytes(), &mut self.info.model);
         let serial = obj
-            .get_attr_as_bytes(CKA_SERIAL_NUMBER)
+            .get_attr_as_string(KRA_SERIAL_NUMBER)
             .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
-        if serial.len() != self.info.serialNumber.len() {
-            return err_rv!(CKR_TOKEN_NOT_RECOGNIZED);
-        }
-        self.info.serialNumber.copy_from_slice(serial.as_slice());
+        copy_sized_string(serial.as_bytes(), &mut self.info.serialNumber);
         self.info.flags = obj
             .get_attr_as_ulong(KRA_FLAGS)
             .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
@@ -405,21 +402,21 @@ impl Token {
                 o
             }
         };
-        obj.set_attr(attribute::from_bytes(
+        obj.set_attr(attribute::string_from_sized(
             CKA_LABEL,
-            self.info.label.to_vec(),
+            &self.info.label,
         ))?;
-        obj.set_attr(attribute::from_bytes(
-            CKA_ISSUER,
-            self.info.manufacturerID.to_vec(),
+        obj.set_attr(attribute::string_from_sized(
+            KRA_MANUFACTURER_ID,
+            &self.info.manufacturerID,
         ))?;
-        obj.set_attr(attribute::from_bytes(
-            CKA_OBJECT_ID,
-            self.info.model.to_vec(),
+        obj.set_attr(attribute::string_from_sized(
+            KRA_MODEL,
+            &self.info.model,
         ))?;
-        obj.set_attr(attribute::from_bytes(
-            CKA_SERIAL_NUMBER,
-            self.info.serialNumber.to_vec(),
+        obj.set_attr(attribute::string_from_sized(
+            KRA_SERIAL_NUMBER,
+            &self.info.serialNumber,
         ))?;
         obj.set_attr(attribute::from_ulong(KRA_FLAGS, self.info.flags))?;
 

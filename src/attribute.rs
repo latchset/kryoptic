@@ -38,7 +38,7 @@ macro_rules! attrmap_element {
     };
 }
 
-static ATTRMAP: [Attrmap<'_>; 131] = [
+static ATTRMAP: [Attrmap<'_>; 134] = [
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -170,6 +170,9 @@ static ATTRMAP: [Attrmap<'_>; 131] = [
     attrmap_element!(CKA_HSS_KEYS_REMAINING; as NumType),
     attrmap_element!(KRA_MAX_LOGIN_ATTEMPTS; as NumType),
     attrmap_element!(KRA_FLAGS; as NumType),
+    attrmap_element!(KRA_MANUFACTURER_ID; as StringType),
+    attrmap_element!(KRA_MODEL; as StringType),
+    attrmap_element!(KRA_SERIAL_NUMBER; as StringType),
 ];
 
 #[derive(Debug, Clone)]
@@ -323,6 +326,25 @@ fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
     val
 }
 conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
+
+pub fn string_from_sized(t: CK_ULONG, val: &[u8]) -> Attribute {
+    let mut value = Vec::from(val);
+    let mut len = value.len();
+    for i in (0..len).rev() {
+        if value[i] != 0x20 {
+            break;
+        }
+        len -= 1;
+    }
+    value.resize(len, 0);
+    /* trailing null byte of a string */
+    value.push(0);
+    Attribute {
+        ck_type: t,
+        attrtype: AttrType::StringType,
+        value: value,
+    }
+}
 
 fn date_to_vec(val: CK_DATE) -> Vec<u8> {
     let mut v = Vec::with_capacity(8);
