@@ -4,6 +4,7 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
 use std::io;
 use std::io::BufRead;
 
@@ -539,6 +540,7 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
 }
 
 #[test]
+#[parallel]
 fn test_kdf_ctr_vector() {
     let test_data = parse_kdf_vector("testdata/KDFCTR_gen.txt");
 
@@ -554,6 +556,7 @@ fn test_kdf_ctr_vector() {
 }
 
 #[test]
+#[parallel]
 fn test_kdf_feedback_vector() {
     let test_data = parse_kdf_vector("testdata/KDFFeedback_gen.txt");
 

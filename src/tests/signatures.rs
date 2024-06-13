@@ -4,6 +4,8 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 struct TestCase {
     value: Vec<u8>,
     result: Vec<u8>,
@@ -57,6 +59,7 @@ fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
 }
 
 #[test]
+#[parallel]
 fn test_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
     let mut testtokn = TestToken::initialized(

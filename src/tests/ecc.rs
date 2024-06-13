@@ -4,7 +4,10 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 #[test]
+#[parallel]
 fn test_create_ec_objects() {
     let mut testtokn =
         TestToken::initialized("test_create_ec_objects.sql", None);
@@ -56,6 +59,7 @@ fn test_create_ec_objects() {
 }
 
 #[test]
+#[parallel]
 fn test_ecc_operations() {
     let mut testtokn = TestToken::initialized(
         "test_ecc_operations.sql",

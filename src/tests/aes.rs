@@ -4,9 +4,12 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 const AES_BLOCK_SIZE: usize = 16;
 
 #[test]
+#[parallel]
 fn test_aes_operations() {
     let mut testtokn = TestToken::initialized(
         "test_aes_operations.sql",
@@ -745,6 +748,7 @@ fn test_aes_operations() {
 }
 
 #[test]
+#[parallel]
 fn test_aes_macs() {
     let mut testtokn = TestToken::initialized("test_aes_macs.sql", None);
     let session = testtokn.get_session(true);

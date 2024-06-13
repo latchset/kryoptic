@@ -4,6 +4,8 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 fn test_login(name: &str) {
     let mut testtokn = TestToken::initialized(name, None);
     let session = testtokn.get_session(false);
@@ -116,11 +118,13 @@ fn test_login(name: &str) {
 }
 
 #[test]
+#[parallel]
 fn test_login_json() {
     test_login("test_login.json");
 }
 
 #[test]
+#[parallel]
 fn test_login_sql() {
     test_login("test_login.sql");
 }

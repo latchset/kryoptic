@@ -4,7 +4,10 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 #[test]
+#[parallel]
 fn test_get_attr() {
     let mut testtokn = TestToken::initialized("test_get_attr.sql", None);
     let session = testtokn.get_session(false);
@@ -98,6 +101,7 @@ fn test_get_attr() {
 }
 
 #[test]
+#[parallel]
 fn test_set_attr() {
     let mut testtokn = TestToken::initialized("test_set_attr.sql", None);
     let session = testtokn.get_session(false);

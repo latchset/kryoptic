@@ -4,7 +4,10 @@
 use super::tests;
 use tests::*;
 
+use serial_test::{parallel, serial};
+
 #[test]
+#[parallel]
 fn test_init_token() {
     let mut testtokn = TestToken::new("test_init_token.sql");
 
@@ -193,4 +196,43 @@ fn test_init_token() {
     assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
+}
+
+fn test_re_init_token_common(db: &str) {
+    let mut testtokn = TestToken::new(db);
+
+    let mut args = testtokn.make_init_args();
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* init once */
+    let pin_value = "SO Pin Value";
+    ret = fn_init_token(
+        testtokn.get_slot(),
+        CString::new(pin_value).unwrap().into_raw() as *mut u8,
+        pin_value.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_finalize(std::ptr::null_mut() as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[serial]
+fn test_re_init_token_json() {
+    test_re_init_token_common("test_reinit_token.json")
+}
+
+#[test]
+#[serial]
+fn test_re_init_token_sql() {
+    test_re_init_token_common("test_reinit_token.sql")
 }

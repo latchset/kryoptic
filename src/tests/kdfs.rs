@@ -5,7 +5,10 @@ use super::tests;
 use itertools::Itertools;
 use tests::*;
 
+use serial_test::parallel;
+
 #[test]
+#[parallel]
 fn test_sp800_kdf() {
     let mut testtokn = TestToken::initialized("test_sp800_kdf.sql", None);
     let session = testtokn.get_session(true);
@@ -214,6 +217,7 @@ fn test_sp800_kdf() {
 }
 
 #[test]
+#[parallel]
 fn test_aes_enc_kdf() {
     let mut testtokn = TestToken::initialized("test_aes_enc_kdf.sql", None);
     let session = testtokn.get_session(true);
@@ -289,6 +293,7 @@ fn test_aes_enc_kdf() {
 }
 
 #[test]
+#[parallel]
 fn test_hash_kdf() {
     let mut testtokn = TestToken::initialized("test_hash_kdf.sql", None);
     let session = testtokn.get_session(true);
@@ -510,6 +515,7 @@ fn test_hash_kdf() {
 }
 
 #[test]
+#[parallel]
 fn test_hkdf() {
     let mut testtokn = TestToken::initialized("test_hkdf.sql", None);
     let session = testtokn.get_session(true);
@@ -770,6 +776,7 @@ fn test_hkdf() {
 }
 
 #[test]
+#[parallel]
 fn test_pbkdf2() {
     let mut testtokn = TestToken::initialized("test_pbkdf2.sql", None);
     let session = testtokn.get_session(false);

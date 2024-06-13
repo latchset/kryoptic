@@ -4,7 +4,10 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 #[test]
+#[parallel]
 fn test_rsa_operations() {
     let mut testtokn = TestToken::initialized(
         "test_rsa_operations.sql",
