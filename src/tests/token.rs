@@ -4,6 +4,7 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
 use std::env;
 
 fn test_token(name: &str) {
@@ -79,6 +80,7 @@ fn test_token_null_args(name: &str) {
 }
 
 #[test]
+#[parallel]
 fn test_token_json() {
     test_token("test_token.json");
     test_token_env("test_token.json");
@@ -86,6 +88,7 @@ fn test_token_json() {
 }
 
 #[test]
+#[parallel]
 fn test_token_sql() {
     test_token("test_token.sql");
     test_token_env("test_token.sql");

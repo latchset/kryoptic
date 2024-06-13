@@ -4,6 +4,7 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
 use std::io;
 use std::io::BufRead;
 
@@ -209,6 +210,7 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
 }
 
 #[test]
+#[parallel]
 fn test_cmac_aes_128_vector() {
     let test_data = parse_mac_vector("testdata/CMACGenAES128.rsp");
 
@@ -225,6 +227,7 @@ fn test_cmac_aes_128_vector() {
 }
 
 #[test]
+#[parallel]
 fn test_cmac_aes_192_vector() {
     let test_data = parse_mac_vector("testdata/CMACGenAES192.rsp");
 
@@ -241,6 +244,7 @@ fn test_cmac_aes_192_vector() {
 }
 
 #[test]
+#[parallel]
 fn test_cmac_aes_256_vector() {
     let test_data = parse_mac_vector("testdata/CMACGenAES256.rsp");
 
@@ -257,6 +261,7 @@ fn test_cmac_aes_256_vector() {
 }
 
 #[test]
+#[parallel]
 fn test_hmac_vector() {
     let test_data = parse_mac_vector("testdata/HMAC.rsp");
     let mut testtokn = TestToken::initialized("test_hmac_vector.sql", None);

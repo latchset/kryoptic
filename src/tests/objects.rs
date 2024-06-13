@@ -4,7 +4,10 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 #[test]
+#[parallel]
 fn test_copy_objects() {
     let mut testtokn = TestToken::initialized("test_copy_objects.sql", None);
     let session = testtokn.get_session(false);
@@ -70,6 +73,7 @@ fn test_copy_objects() {
 }
 
 #[test]
+#[parallel]
 fn test_create_objects() {
     let mut testtokn = TestToken::initialized("test_create_objects.sql", None);
     let session = testtokn.get_session(false);

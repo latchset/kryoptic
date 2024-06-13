@@ -4,7 +4,10 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
+
 #[test]
+#[parallel]
 fn test_get_mechs() {
     let mut testtokn = TestToken::initialized("test_get_mechs.sql", None);
 

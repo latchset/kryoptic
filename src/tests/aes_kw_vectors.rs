@@ -4,6 +4,7 @@
 use super::tests;
 use tests::*;
 
+use serial_test::parallel;
 use std::io;
 use std::io::BufRead;
 
@@ -214,61 +215,73 @@ fn test_kw_vector(mech: &str, op: &str, size: &str) {
 }
 
 #[test]
+#[parallel]
 fn test_kw_ae_128_vector() {
     test_kw_vector("KW", "AE", "128")
 }
 
 #[test]
+#[parallel]
 fn test_kw_ae_192_vector() {
     test_kw_vector("KW", "AE", "192")
 }
 
 #[test]
+#[parallel]
 fn test_kw_ae_256_vector() {
     test_kw_vector("KW", "AE", "256")
 }
 
 #[test]
+#[parallel]
 fn test_kw_ad_128_vector() {
     test_kw_vector("KW", "AD", "128")
 }
 
 #[test]
+#[parallel]
 fn test_kw_ad_192_vector() {
     test_kw_vector("KW", "AD", "192")
 }
 
 #[test]
+#[parallel]
 fn test_kw_ad_256_vector() {
     test_kw_vector("KW", "AD", "256")
 }
 
 #[test]
+#[parallel]
 fn test_kwp_ae_128_vector() {
     test_kw_vector("KWP", "AE", "128")
 }
 
 #[test]
+#[parallel]
 fn test_kwp_ae_192_vector() {
     test_kw_vector("KWP", "AE", "192")
 }
 
 #[test]
+#[parallel]
 fn test_kwp_ae_256_vector() {
     test_kw_vector("KWP", "AE", "256")
 }
 
 #[test]
+#[parallel]
 fn test_kwp_ad_128_vector() {
     test_kw_vector("KWP", "AD", "128")
 }
 
 #[test]
+#[parallel]
 fn test_kwp_ad_192_vector() {
     test_kw_vector("KWP", "AD", "192")
 }
 
 #[test]
+#[parallel]
 fn test_kwp_ad_256_vector() {
     test_kw_vector("KWP", "AD", "256")
 }
