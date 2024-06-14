@@ -384,7 +384,7 @@ impl Mechanism for EccMechanism {
 
     fn generate_keypair(
         &self,
-        _mech: &CK_MECHANISM,
+        mech: &CK_MECHANISM,
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> KResult<(Object, Object)> {
@@ -430,6 +430,8 @@ impl Mechanism for EccMechanism {
         }
 
         EccOperation::generate_keypair(&mut pubkey, &mut privkey)?;
+        object::default_key_attributes(&mut privkey, mech)?;
+        object::default_key_attributes(&mut pubkey, mech)?;
 
         Ok((pubkey, privkey))
     }
