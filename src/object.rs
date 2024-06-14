@@ -1049,6 +1049,29 @@ impl GenericSecretKeyMechanism {
     }
 }
 
+pub fn default_secret_key_generate(key: &mut Object) -> KResult<()> {
+    let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+
+    let mut value: Vec<u8> = vec![0; value_len];
+    match super::CSPRNG
+        .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
+    {
+        Ok(()) => (),
+        Err(e) => return Err(e),
+    }
+    key.set_attr(from_bytes(CKA_VALUE, value))?;
+    Ok(())
+}
+
+pub fn default_key_attributes(
+    key: &mut Object,
+    mech: &CK_MECHANISM,
+) -> KResult<()> {
+    key.set_attr(from_bool(CKA_LOCAL, true))?;
+    key.set_attr(from_ulong(CKA_KEY_GEN_MECHANISM, mech.mechanism))?;
+    Ok(())
+}
+
 impl Mechanism for GenericSecretKeyMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
@@ -1056,7 +1079,7 @@ impl Mechanism for GenericSecretKeyMechanism {
 
     fn generate_key(
         &self,
-        _mech: &CK_MECHANISM,
+        mech: &CK_MECHANISM,
         template: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,
@@ -1076,17 +1099,8 @@ impl Mechanism for GenericSecretKeyMechanism {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
-
-        let mut value: Vec<u8> = vec![0; value_len];
-        match super::CSPRNG
-            .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
-        {
-            Ok(()) => (),
-            Err(e) => return Err(e),
-        }
-        key.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
-
+        default_secret_key_generate(&mut key)?;
+        default_key_attributes(&mut key, mech)?;
         Ok(key)
     }
 }

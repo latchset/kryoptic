@@ -235,18 +235,8 @@ impl Mechanism for AesMechanism {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
-        check_key_len(value_len)?;
-
-        let mut value: Vec<u8> = vec![0; value_len];
-        match super::CSPRNG
-            .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
-        {
-            Ok(()) => (),
-            Err(e) => return Err(e),
-        }
-        key.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
-
+        object::default_secret_key_generate(&mut key)?;
+        object::default_key_attributes(&mut key, mech)?;
         Ok(key)
     }
 
