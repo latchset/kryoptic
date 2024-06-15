@@ -27,6 +27,17 @@ fn test_key() {
         ],
     ));
 
+    /* check some attributes */
+    if let Some(err) = check_attributes(
+        session,
+        handle,
+        &[(CKA_KEY_GEN_MECHANISM, CKM_GENERIC_SECRET_KEY_GEN)],
+        &[],
+        &[(CKA_LOCAL, true)],
+    ) {
+        panic!("{}", err);
+    }
+
     /* RSA key pair */
     let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
         session,

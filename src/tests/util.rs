@@ -511,3 +511,106 @@ pub fn generate_key_pair(
     }
     Ok((pub_key, pri_key))
 }
+
+struct CheckTemplate<'a> {
+    ulongs: Vec<(CK_ATTRIBUTE_TYPE, CK_ULONG, CK_ULONG)>,
+    bytes: Vec<(CK_ATTRIBUTE_TYPE, Vec<u8>, &'a [u8])>,
+    bools: Vec<(CK_ATTRIBUTE_TYPE, CK_BBOOL, CK_BBOOL)>,
+    tmpl: Vec<CK_ATTRIBUTE>,
+}
+
+pub fn check_attributes(
+    session: CK_SESSION_HANDLE,
+    handle: CK_OBJECT_HANDLE,
+    ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+    bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
+    bools: &[(CK_ATTRIBUTE_TYPE, bool)],
+) -> Option<String> {
+    let capacity = ulongs.len() + bytes.len() + bools.len();
+    let mut template = CheckTemplate {
+        ulongs: Vec::with_capacity(ulongs.len()),
+        bytes: Vec::with_capacity(bytes.len()),
+        bools: Vec::with_capacity(bools.len()),
+        tmpl: Vec::<CK_ATTRIBUTE>::with_capacity(capacity),
+    };
+    for u in ulongs {
+        template.ulongs.push((u.0, 0, u.1));
+        if let Some(t) = template.ulongs.last() {
+            template.tmpl.push(make_attribute!(
+                t.0,
+                std::ptr::addr_of!(t.1),
+                CK_ULONG_SIZE
+            ));
+        }
+    }
+    for b in bytes {
+        template.bytes.push((b.0, vec![0; b.1.len()], b.1));
+        if let Some(t) = template.bytes.last() {
+            template.tmpl.push(make_attribute!(
+                t.0,
+                t.1.as_ptr() as *const _,
+                t.1.len()
+            ));
+        }
+    }
+    for b in bools {
+        template
+            .bools
+            .push((b.0, 0, if b.1 { CK_TRUE } else { CK_FALSE }));
+        if let Some(t) = template.bools.last() {
+            template.tmpl.push(make_attribute!(
+                t.0,
+                std::ptr::addr_of!(t.1),
+                CK_BBOOL_SIZE
+            ));
+        }
+    }
+
+    let ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.tmpl.as_mut_ptr(),
+        template.tmpl.len() as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return Some(format!(
+            "fn_get_attribute_value failed with error {}",
+            ret
+        ));
+    }
+
+    for u in template.ulongs {
+        if u.1 != u.2 {
+            return Some(format!(
+                "Attribute {}: got {}, expected {}",
+                u.0, u.1, u.2
+            ));
+        }
+    }
+
+    for b in template.bytes {
+        if b.1.len() != b.2.len() {
+            return Some(format!(
+                "Attribute {}: buffers lengths differ, got {}, expected {}",
+                b.0,
+                b.1.len(),
+                b.2.len()
+            ));
+        }
+        if b.1.as_slice() != b.2 {
+            return Some(format!("Attribute {}: buffer contents differ!", b.0));
+        }
+    }
+
+    for b in template.bools {
+        if b.1 != b.2 {
+            return Some(format!(
+                "Attribute {}: got {}, expected {}",
+                b.0, b.1, b.2
+            ));
+        }
+    }
+
+    /* all good */
+    None
+}
