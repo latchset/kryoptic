@@ -182,7 +182,7 @@ impl Sp800Operation {
     }
 
     fn parse_byte_array(p: &CK_PRF_DATA_PARAM) -> KResult<Vec<u8>> {
-        if p.ulValueLen == 0 {
+        if p.ulValueLen == 0 || p.pValue == std::ptr::null_mut() {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         Ok(bytes_to_vec!(p.pValue, p.ulValueLen))
