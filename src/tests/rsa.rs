@@ -258,7 +258,7 @@ fn test_rsa_operations() {
     let params = CK_RSA_PKCS_OAEP_PARAMS {
         hashAlg: CKM_SHA512,
         mgf: CKG_MGF1_SHA512,
-        source: 0,
+        source: CKZ_DATA_SPECIFIED,
         pSourceData: std::ptr::null_mut(),
         ulSourceDataLen: 0,
     };

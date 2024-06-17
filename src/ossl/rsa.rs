@@ -281,10 +281,13 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> KResult<RsaOaepParams> {
             }
             None
         }
-        CKZ_DATA_SPECIFIED => Some(bytes_to_vec!(
-            unsafe { (*oaep_params).pSourceData },
-            unsafe { (*oaep_params).ulSourceDataLen }
-        )),
+        CKZ_DATA_SPECIFIED => match unsafe { (*oaep_params).ulSourceDataLen } {
+            0 => None,
+            _ => Some(bytes_to_vec!(
+                unsafe { (*oaep_params).pSourceData },
+                unsafe { (*oaep_params).ulSourceDataLen }
+            )),
+        },
         _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
     };
 
