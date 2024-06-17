@@ -107,7 +107,7 @@ impl OsslParam {
     pub fn with_capacity(capacity: usize) -> OsslParam {
         OsslParam {
             v: Vec::new(),
-            p: Vec::with_capacity(capacity),
+            p: Vec::with_capacity(capacity + 1),
             finalized: false,
             imported: false,
             zeroize: false,
@@ -330,6 +330,16 @@ impl OsslParam {
             OSSL_PARAM_construct_int(key, container.as_ptr() as *mut c_int)
         };
         self.v.push(container);
+        self.p.push(param);
+        Ok(self)
+    }
+
+    pub fn get_int<'a>(
+        mut self,
+        key: *const c_char,
+        val: &'a mut c_int,
+    ) -> KResult<OsslParam> {
+        let param = unsafe { OSSL_PARAM_construct_int(key, val as *mut c_int) };
         self.p.push(param);
         Ok(self)
     }

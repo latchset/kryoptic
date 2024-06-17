@@ -5,7 +5,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 #![allow(non_snake_case)]
-include!("ossl/bindings.rs");
+include!("../ossl/bindings.rs");
 
 use getrandom;
 use libc;
@@ -23,11 +23,18 @@ use std::path::Path;
 use std::slice;
 use zeroize::Zeroize;
 
+use super::attr_element;
+use super::attribute;
 use super::err_rv;
 use super::error;
 use super::interface;
+use super::mechanism;
+use super::token;
 use error::{KError, KResult};
 use interface::CKR_DEVICE_ERROR;
+use mechanism::Mechanisms;
+use object::{ObjectFactories, ObjectType};
+use token::Token;
 
 /* Entropy Stuff */
 
@@ -665,6 +672,17 @@ pub fn init() {
     assert!(FIPS_PROVIDER.provider != std::ptr::null_mut());
 }
 
+pub fn token_init(token: &mut Token) -> KResult<()> {
+    indicators::insert_fips_validation(token)
+}
+
+pub fn register(_: &mut Mechanisms, ot: &mut ObjectFactories) {
+    ot.add_factory(
+        ObjectType::new(CKO_VALIDATION, 0),
+        &indicators::VALIDATION_FACTORY,
+    );
+}
+
 pub fn get_libctx() -> *mut OSSL_LIB_CTX {
     unsafe { ossl_prov_ctx_get0_libctx(FIPS_PROVIDER.provider) }
 }
@@ -820,4 +838,6 @@ impl ProviderSignatureCtx {
 unsafe impl Send for ProviderSignatureCtx {}
 unsafe impl Sync for ProviderSignatureCtx {}
 
-include! {"ossl/common.rs"}
+include! {"../ossl/common.rs"}
+
+pub(crate) mod indicators;

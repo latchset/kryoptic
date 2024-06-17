@@ -157,6 +157,10 @@ pub trait MechOperation: Debug + Send + Sync {
     fn receives_objects(&mut self, _: &[&Object]) -> KResult<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        None
+    }
 }
 
 pub trait Encryption: MechOperation {

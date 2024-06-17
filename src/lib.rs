@@ -1503,17 +1503,29 @@ extern "C" fn fn_generate_key(
         return CKR_MECHANISM_INVALID;
     }
 
-    let result = mech.generate_key(data, tmpl, mechanisms, factories);
-    match result {
-        Ok(obj) => {
-            let kh = res_or_ret!(token.insert_object(s_handle, obj));
-            unsafe {
-                core::ptr::write(key_handle as *mut _, kh);
-            }
-            CKR_OK
-        }
-        Err(e) => err_to_rv!(e),
+    let mut obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
+        Ok(o) => o,
+        Err(e) => return err_to_rv!(e),
+    };
+    #[cfg(feature = "fips")]
+    {
+        /* must drop here or we deadlock trying to re-acquire for writing */
+        drop(session);
+
+        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        session.set_fips_indicator(fips::indicators::is_approved(
+            data,
+            CKF_GENERATE,
+            None,
+            Some(&mut obj),
+        ));
     }
+
+    let kh = res_or_ret!(token.insert_object(s_handle, obj));
+    unsafe {
+        core::ptr::write(key_handle as *mut _, kh);
+    }
+    CKR_OK
 }
 
 extern "C" fn fn_generate_key_pair(
@@ -1741,13 +1753,35 @@ extern "C" fn fn_derive_key(
         token.get_mechanisms(),
         token.get_object_factories(),
     );
-    let (kh, addtl) = match result {
-        Ok((obj, addtl)) => {
-            let h = res_or_ret!(token.insert_object(s_handle, obj));
-            (h, addtl)
-        }
+
+    let (mut obj, addtl) = match result {
+        Ok((o, a)) => (o, a),
         Err(e) => return err_to_rv!(e),
     };
+
+    #[cfg(feature = "fips")]
+    {
+        /* must drop here or we deadlock trying to re-acquire for writing */
+        drop(session);
+
+        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* op approval, my still change later */
+        let mut approval = match operation.fips_approved() {
+            Some(s) => s,
+            None => true,
+        };
+        if approval {
+            approval = fips::indicators::is_approved(
+                ck_mech,
+                CKF_DERIVE,
+                Some(&bkey),
+                Some(&mut obj),
+            );
+        }
+        session.set_fips_indicator(approval);
+    }
+
+    let kh = res_or_ret!(token.insert_object(s_handle, obj));
 
     let mut rv = CKR_OK;
     if addtl > 0 {
@@ -2267,20 +2301,57 @@ pub static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     C_MessageVerifyFinal: Some(fn_message_verify_final),
 };
 
-static INTERFACE_NAME_STD: &str = "PKCS 11";
 static INTERFACE_NAME_STD_NUL: &str = "PKCS 11\0";
 
-static mut INTERFACE_240: CK_INTERFACE = CK_INTERFACE {
+static INTERFACE_240: CK_INTERFACE = CK_INTERFACE {
     pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
     pFunctionList: &FNLIST_240 as *const _ as *const ::std::os::raw::c_void,
     flags: 0,
 };
 
-static mut INTERFACE_300: CK_INTERFACE = CK_INTERFACE {
+static INTERFACE_300: CK_INTERFACE = CK_INTERFACE {
     pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
     pFunctionList: &FNLIST_300 as *const _ as *const ::std::os::raw::c_void,
     flags: 0,
 };
+
+#[cfg(feature = "fips")]
+include!("fips/interface.rs");
+
+#[derive(Debug, Copy, Clone)]
+struct InterfaceData {
+    interface: *const CK_INTERFACE,
+    version: CK_VERSION,
+}
+unsafe impl Sync for CK_INTERFACE {}
+unsafe impl Sync for InterfaceData {}
+
+#[cfg(feature = "fips")]
+static INTERFACE_SET: [InterfaceData; 3] = [
+    InterfaceData {
+        interface: std::ptr::addr_of!(INTERFACE_300),
+        version: FNLIST_300.version,
+    },
+    InterfaceData {
+        interface: std::ptr::addr_of!(INTERFACE_240),
+        version: FNLIST_240.version,
+    },
+    InterfaceData {
+        interface: std::ptr::addr_of!(INTERFACE_VAL),
+        version: FNLIST_VAL.version,
+    },
+];
+#[cfg(not(feature = "fips"))]
+static INTERFACE_SET: [InterfaceData; 2] = [
+    InterfaceData {
+        interface: std::ptr::addr_of!(INTERFACE_300),
+        version: FNLIST_300.version,
+    },
+    InterfaceData {
+        interface: std::ptr::addr_of!(INTERFACE_240),
+        version: FNLIST_240.version,
+    },
+];
 
 #[no_mangle]
 pub extern "C" fn C_GetInterfaceList(
@@ -2292,20 +2363,26 @@ pub extern "C" fn C_GetInterfaceList(
     }
     if interfaces_list.is_null() {
         unsafe {
-            *count = 2;
+            *count = INTERFACE_SET.len() as CK_ULONG;
         }
         return CKR_OK;
     }
     unsafe {
-        let num: CK_ULONG = *count;
-        if num < 2 {
+        let num = *count as usize;
+        if num < INTERFACE_SET.len() {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
+    for i in 0..INTERFACE_SET.len() {
+        unsafe {
+            core::ptr::write(
+                interfaces_list.offset(i as isize) as *mut CK_INTERFACE,
+                *(INTERFACE_SET[i].interface),
+            );
+        }
+    }
     unsafe {
-        core::ptr::write(interfaces_list.offset(0) as *mut _, INTERFACE_300);
-        core::ptr::write(interfaces_list.offset(1) as *mut _, INTERFACE_240);
-        *count = 2;
+        *count = INTERFACE_SET.len() as CK_ULONG;
     }
     CKR_OK
 }
@@ -2317,45 +2394,37 @@ pub extern "C" fn C_GetInterface(
     interface: CK_INTERFACE_PTR_PTR,
     flags: CK_FLAGS,
 ) -> CK_RV {
-    // default to 3.0
-    let mut ver: CK_VERSION = CK_VERSION { major: 3, minor: 0 };
-
     if interface.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    if !interface_name.is_null() {
-        let name: &str = unsafe {
-            std::ffi::CStr::from_ptr(interface_name as *const i8)
-                .to_str()
-                .unwrap()
-        };
-        if name != INTERFACE_NAME_STD {
-            return CKR_ARGUMENTS_BAD;
-        }
+    if version.is_null() {
+        return CKR_ARGUMENTS_BAD;
     }
-    if !version.is_null() {
-        unsafe {
-            ver.major = (*version).major;
-            ver.minor = (*version).minor;
-        }
-    }
+    /* currently flags is always 0 */
     if flags != 0 {
         return CKR_ARGUMENTS_BAD;
     }
 
-    if ver.major == 3 && ver.minor == 0 {
-        unsafe {
-            *interface = std::ptr::addr_of!(INTERFACE_300) as *mut CK_INTERFACE;
+    for intf in &INTERFACE_SET {
+        let found: bool = unsafe {
+            let name = (*intf.interface).pInterfaceName as *const i8;
+            libc::strcmp(interface_name as *const i8, name) == 0
+        };
+
+        if found {
+            let ver: CK_VERSION = unsafe { *version };
+            if ver.major != intf.version.major {
+                continue;
+            }
+            if ver.minor != intf.version.minor {
+                continue;
+            }
+            unsafe { *interface = intf.interface as *mut _ }
+            return CKR_OK;
         }
-    } else if ver.major == 2 && ver.minor == 40 {
-        unsafe {
-            *interface = std::ptr::addr_of!(INTERFACE_240) as *mut CK_INTERFACE;
-        }
-    } else {
-        return CKR_ARGUMENTS_BAD;
     }
 
-    CKR_OK
+    CKR_ARGUMENTS_BAD
 }
 
 #[cfg(feature = "fips")]

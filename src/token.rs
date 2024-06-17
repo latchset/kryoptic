@@ -24,6 +24,9 @@ use object::{Object, ObjectFactories};
 use storage::Storage;
 
 #[cfg(feature = "fips")]
+use super::fips;
+
+#[cfg(feature = "fips")]
 const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
 #[cfg(not(feature = "fips"))]
 const TOKEN_LABEL: &str = "Kryoptic Soft Token";
@@ -225,6 +228,9 @@ impl Token {
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         kdf::register(&mut token.mechanisms, &mut token.object_factories);
 
+        #[cfg(feature = "fips")]
+        fips::register(&mut token.mechanisms, &mut token.object_factories);
+
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {
                 Ok(()) => {
@@ -250,6 +256,9 @@ impl Token {
         if token.is_initialized() {
             token.update_token_pin_flags();
         }
+
+        #[cfg(feature = "fips")]
+        fips::token_init(&mut token)?;
 
         Ok(token)
     }
@@ -462,6 +471,12 @@ impl Token {
         }
         self.info.flags |= CKF_TOKEN_INITIALIZED;
         self.update_token_pin_flags();
+
+        #[cfg(feature = "fips")]
+        if fips::token_init(self).is_err() {
+            return CKR_GENERAL_ERROR;
+        }
+
         CKR_OK
     }
 

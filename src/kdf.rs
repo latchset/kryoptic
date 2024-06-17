@@ -122,6 +122,8 @@ struct Sp800Operation {
     iv: Vec<u8>,
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
     addl_objects: Vec<Object>,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 unsafe impl Send for Sp800Operation {}
@@ -303,6 +305,8 @@ impl Sp800Operation {
             iv: Vec::new(),
             addl_drv_keys: addl_drv_keys.to_vec(),
             addl_objects: Vec::with_capacity(addl_drv_keys.len()),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -334,6 +338,8 @@ impl Sp800Operation {
             iv: iv,
             addl_drv_keys: addl_drv_keys.to_vec(),
             addl_objects: Vec::with_capacity(addl_drv_keys.len()),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -400,6 +406,8 @@ struct HKDFOperation {
     salt: Vec<u8>,
     info: Vec<u8>,
     emit_data_obj: bool,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl HKDFOperation {
@@ -543,6 +551,8 @@ impl HKDFOperation {
             salt: salt,
             info: bytes_to_slice!(params.pInfo, params.ulInfoLen, u8).to_vec(),
             emit_data_obj: mech.mechanism == CKM_HKDF_DATA,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -626,10 +636,16 @@ impl HKDFOperation {
             Some(ref o) => o.as_slice(),
             None => template,
         };
-        let obj = objfactories.derive_key_from_template(key, tmpl)?;
+        let mut obj = objfactories.derive_key_from_template(key, tmpl)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
-            Err(_) => self.prflen,
+            Err(_) => {
+                obj.set_attr(from_ulong(
+                    CKA_VALUE_LEN,
+                    self.prflen as CK_ULONG,
+                ))?;
+                self.prflen
+            }
         };
         Ok((obj, keysize))
     }
@@ -638,6 +654,10 @@ impl HKDFOperation {
 impl MechOperation for HKDFOperation {
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
     }
 
     fn requires_objects(&self) -> KResult<&[CK_OBJECT_HANDLE]> {
