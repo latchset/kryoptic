@@ -273,6 +273,9 @@ impl AesOperation {
                 }
                 let iv = unsafe { (*gcm_params).pIv };
                 let ivlen = unsafe { (*gcm_params).ulIvLen };
+                if ivlen < 1 || iv == std::ptr::null_mut() {
+                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                }
                 let aad = unsafe { (*gcm_params).pAAD };
                 let aadlen = unsafe { (*gcm_params).ulAADLen };
                 let tagbits = unsafe { (*gcm_params).ulTagBits } as usize;
