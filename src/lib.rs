@@ -823,7 +823,7 @@ extern "C" fn fn_encrypt_init(
     let data: &CK_MECHANISM = unsafe { &*mechanism };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
+    let obj = res_or_ret!(token.get_object_by_handle(key));
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
         let operation = res_or_ret!(mech.encryption_new(data, &obj));
@@ -937,7 +937,7 @@ extern "C" fn fn_decrypt_init(
     let data: &CK_MECHANISM = unsafe { &*mechanism };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
+    let obj = res_or_ret!(token.get_object_by_handle(key));
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
         let operation = res_or_ret!(mech.decryption_new(data, &obj));
@@ -1197,7 +1197,7 @@ extern "C" fn fn_sign_init(
     let data: &CK_MECHANISM = unsafe { &*mechanism };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
+    let obj = res_or_ret!(token.get_object_by_handle(key));
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
         let operation = res_or_ret!(mech.sign_new(data, &obj));
@@ -1338,7 +1338,7 @@ extern "C" fn fn_verify_init(
     let data: &CK_MECHANISM = unsafe { &*mechanism };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key)).clone();
+    let obj = res_or_ret!(token.get_object_by_handle(key));
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
         let operation = res_or_ret!(mech.verify_new(data, &obj));
@@ -1591,8 +1591,8 @@ extern "C" fn fn_wrap_key(
     let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let kobj = res_or_ret!(token.get_object_by_handle(key)).clone();
-    let wkobj = res_or_ret!(token.get_object_by_handle(wrapping_key)).clone();
+    let kobj = res_or_ret!(token.get_object_by_handle(key));
+    let wkobj = res_or_ret!(token.get_object_by_handle(wrapping_key));
     let factories = token.get_object_factories();
     let factory = res_or_ret!(factories.get_object_factory(&kobj));
     let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
@@ -1644,7 +1644,7 @@ extern "C" fn fn_unwrap_key(
     }
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let kobj = res_or_ret!(token.get_object_by_handle(unwrapping_key)).clone();
+    let kobj = res_or_ret!(token.get_object_by_handle(unwrapping_key));
     let factories = token.get_object_factories();
     let factory =
         res_or_ret!(factories.get_obj_factory_from_key_template(tmpl));
@@ -1694,8 +1694,7 @@ extern "C" fn fn_derive_key(
     }
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let mut bkey = res_or_ret!(token.get_object_by_handle(base_key)).clone();
-    bkey.set_zeroize();
+    let bkey = res_or_ret!(token.get_object_by_handle(base_key));
 
     /* key checks */
     if !res_or_ret!(bkey.get_attr_as_bool(CKA_DERIVE)) {
@@ -1717,10 +1716,7 @@ extern "C" fn fn_derive_key(
         Ok(handles) => {
             let mut objs = Vec::<object::Object>::with_capacity(handles.len());
             for h in handles {
-                let mut kobj =
-                    res_or_ret!(token.get_object_by_handle(*h)).clone();
-                kobj.set_zeroize();
-                objs.push(kobj);
+                objs.push(res_or_ret!(token.get_object_by_handle(*h)));
             }
             /* shenanigans to deal with borrow checkr on token */
             let mut send = Vec::<&object::Object>::with_capacity(objs.len());

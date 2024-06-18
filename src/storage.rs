@@ -15,12 +15,9 @@ pub trait Storage: Debug + Send + Sync {
     fn open(&mut self, filename: &String) -> KResult<()>;
     fn reinit(&mut self) -> KResult<()>;
     fn flush(&mut self) -> KResult<()>;
-    fn fetch_by_uid(&mut self, uid: &String) -> KResult<&Object>;
-    fn get_cached_by_uid(&self, uid: &String) -> KResult<&Object>;
-    fn get_cached_by_uid_mut(&mut self, uid: &String) -> KResult<&mut Object>;
+    fn fetch_by_uid(&self, uid: &String) -> KResult<Object>;
     fn store(&mut self, uid: &String, obj: Object) -> KResult<()>;
-    fn get_all_cached(&self) -> Vec<&Object>;
-    fn search(&mut self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<&Object>>;
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<Object>>;
     fn remove_by_uid(&mut self, uid: &String) -> KResult<()>;
 }
 
