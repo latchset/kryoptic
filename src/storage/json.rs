@@ -159,7 +159,7 @@ impl JsonToken {
             if !o.is_token() {
                 continue;
             }
-            jt.objects.push(JsonObject::from_object(o));
+            jt.objects.push(JsonObject::from_object(&o));
         }
 
         jt
@@ -197,23 +197,14 @@ impl Storage for JsonStorage {
         let token = JsonToken::from_cache(&mut self.cache);
         token.save(&self.filename)
     }
-    fn fetch_by_uid(&mut self, uid: &String) -> KResult<&Object> {
+    fn fetch_by_uid(&self, uid: &String) -> KResult<Object> {
         self.cache.fetch_by_uid(uid)
-    }
-    fn get_cached_by_uid(&self, uid: &String) -> KResult<&Object> {
-        self.cache.get_cached_by_uid(uid)
-    }
-    fn get_cached_by_uid_mut(&mut self, uid: &String) -> KResult<&mut Object> {
-        self.cache.get_cached_by_uid_mut(uid)
     }
     fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
         self.cache.store(uid, obj)?;
         self.flush()
     }
-    fn get_all_cached(&self) -> Vec<&Object> {
-        self.cache.get_all_cached()
-    }
-    fn search(&mut self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<&Object>> {
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<Object>> {
         self.cache.search(template)
     }
     fn remove_by_uid(&mut self, uid: &String) -> KResult<()> {

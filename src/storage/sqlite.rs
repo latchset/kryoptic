@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use rusqlite::{params, types::Value, Connection, Rows, Transaction};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use super::super::attribute;
@@ -60,7 +59,6 @@ const MAX_ID: &str = "SELECT IFNULL(MAX(id), 0) FROM objects";
 pub struct SqliteStorage {
     filename: String,
     conn: Arc<Mutex<Connection>>,
-    cache: HashMap<String, Object>,
 }
 
 impl SqliteStorage {
@@ -265,20 +263,6 @@ impl SqliteStorage {
         }
         Ok(objid)
     }
-
-    fn cache_obj(&mut self, uid: &String, mut obj: Object) {
-        /* when inserting in cache we must clear the modified flag */
-        obj.reset_modified();
-        /* maintain handle/session when replacing */
-        if let Some((uid_, old)) = self.cache.remove_entry(uid) {
-            /* FIXME: bug on old.is_modified() ? */
-            obj.set_handle(old.get_handle());
-            obj.set_session(old.get_session());
-            self.cache.insert(uid_, obj);
-        } else {
-            self.cache.insert(uid.clone(), obj);
-        }
-    }
 }
 
 impl Storage for SqliteStorage {
@@ -288,109 +272,43 @@ impl Storage for SqliteStorage {
             Ok(c) => Arc::new(Mutex::from(c)),
             Err(_) => return err_rv!(CKR_TOKEN_NOT_PRESENT),
         };
-        self.cache.clear();
         self.is_initialized()
     }
     fn reinit(&mut self) -> KResult<()> {
         self.db_reset()
     }
     fn flush(&mut self) -> KResult<()> {
+        Ok(())
+    }
+    fn fetch_by_uid(&self, uid: &String) -> KResult<Object> {
+        let conn = self.conn.lock().unwrap();
+        Self::search_by_unique_id(&conn, uid)
+    }
+    fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
         let mut conn = self.conn.lock().unwrap();
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-        for (uid, obj) in &mut self.cache {
-            if obj.is_modified() {
-                obj.reset_modified();
-                if obj.is_token() {
-                    Self::store_object(&mut tx, uid, obj)?;
-                }
-            }
-        }
+        Self::store_object(&mut tx, uid, &obj)?;
         tx.commit().map_err(bad_storage)
     }
-    fn fetch_by_uid(&mut self, uid: &String) -> KResult<&Object> {
-        let is_token = match self.get_cached_by_uid(uid) {
-            Ok(obj) => obj.is_token(),
-            _ => true,
-        };
-        if is_token {
-            let conn = self.conn.lock().unwrap();
-            let obj = Self::search_by_unique_id(&conn, uid)?;
-            drop(conn);
-            self.cache_obj(uid, obj);
-        }
-        self.get_cached_by_uid(uid)
-    }
-    fn get_cached_by_uid(&self, uid: &String) -> KResult<&Object> {
-        if let Some(o) = self.cache.get(uid) {
-            return Ok(o);
-        }
-        err_not_found!(uid.clone())
-    }
-    fn get_cached_by_uid_mut(&mut self, uid: &String) -> KResult<&mut Object> {
-        if !self.cache.contains_key(uid) {
-            let conn = self.conn.lock().unwrap();
-            let obj = Self::search_by_unique_id(&conn, uid)?;
-            drop(conn);
-            self.cache_obj(uid, obj);
-        }
-        if let Some(o) = self.cache.get_mut(uid) {
-            return Ok(o);
-        }
-        err_not_found!(uid.clone())
-    }
-    fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
-        if obj.is_token() {
-            let mut conn = self.conn.lock().unwrap();
-            let mut tx = conn.transaction().map_err(bad_storage)?;
-            tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-            Self::store_object(&mut tx, uid, &obj)?;
-            tx.commit().map_err(bad_storage)?;
-        }
-        self.cache_obj(uid, obj);
-        Ok(())
-    }
-    fn get_all_cached(&self) -> Vec<&Object> {
-        let mut result = Vec::<&Object>::with_capacity(self.cache.len());
-        for (_, o) in self.cache.iter() {
-            result.push(o);
-        }
-        result
-    }
-    fn search(&mut self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<&Object>> {
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<Object>> {
         let conn = self.conn.lock().unwrap();
         let mut objects = Self::search_with_filter(&conn, template)?;
         drop(conn);
+        let mut result = Vec::<Object>::new();
         for obj in objects.drain(..) {
-            /* if uid is not available we can only skip */
-            let uid = match obj.get_attr_as_string(CKA_UNIQUE_ID) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-            self.cache_obj(&uid, obj);
-        }
-        let mut result = Vec::<&Object>::new();
-        for (_, o) in self.cache.iter() {
-            if o.match_template(template) {
-                result.push(o);
+            if obj.match_template(template) {
+                result.push(obj);
             }
         }
         Ok(result)
     }
     fn remove_by_uid(&mut self, uid: &String) -> KResult<()> {
-        let is_token = match self.get_cached_by_uid(uid) {
-            Ok(obj) => obj.is_token(),
-            _ => true,
-        };
-        self.cache.remove(uid);
-        if is_token {
-            let mut conn = self.conn.lock().unwrap();
-            let mut tx = conn.transaction().map_err(bad_storage)?;
-            tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-            Self::delete_object(&mut tx, &uid)?;
-            tx.commit().map_err(bad_storage)?;
-        }
-        Ok(())
+        let mut conn = self.conn.lock().unwrap();
+        let mut tx = conn.transaction().map_err(bad_storage)?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+        Self::delete_object(&mut tx, &uid)?;
+        tx.commit().map_err(bad_storage)
     }
 }
 
@@ -398,6 +316,5 @@ pub fn sqlite() -> Box<dyn Storage> {
     Box::new(SqliteStorage {
         filename: String::from(""),
         conn: Arc::new(Mutex::from(Connection::open_in_memory().unwrap())),
-        cache: HashMap::new(),
     })
 }
