@@ -12,6 +12,10 @@ use util::*;
 
 mod token;
 
+const SO_PIN: &str = "12345678";
+const USER_PIN: &str = "12345678";
+const TOKEN_LABEL: &str = "INTERNAL TEST TOKEN";
+
 /* note that the following concoction to sync threads is not entirely race free
  * as it assumes all tests initialize before all of the others complete. */
 static FINI: RwLock<u64> = RwLock::new(0);
@@ -61,33 +65,27 @@ impl TestToken<'_> {
             Some(s) => s,
             None => basic,
         };
+        /* remove the target filename if any */
+        std::fs::remove_file(self.filename).unwrap_or(());
+
+        let so_pin = SO_PIN.as_bytes().to_vec();
+        let user_pin = USER_PIN.as_bytes().to_vec();
+        let mut label = TOKEN_LABEL.as_bytes().to_vec();
+        label.resize(32, 0x20);
+        /* Init a brand new token */
+        let mut token = Token::new(self.filename.to_string()).unwrap();
+        token.initialize(&so_pin, &label).unwrap();
+        token.set_pin(CKU_USER, &user_pin, &vec![0u8; 0]).unwrap();
+        token.login(CKU_USER, &user_pin);
+
         let test_data = storage::json::JsonToken::load(filename).unwrap();
-        if self.filename.ends_with(".json") {
-            test_data.save(self.filename).unwrap();
-        } else if self.filename.ends_with(".sql") {
-            let mut cache = storage::memory::memory();
-            test_data.prime_cache(&mut cache).unwrap();
-            let mut sql = storage::sqlite::sqlite();
-            match sql.open(&self.filename.to_string()) {
-                Ok(()) => (),
-                Err(err) => match err {
-                    KError::RvError(ref e) => {
-                        if e.rv != CKR_CRYPTOKI_NOT_INITIALIZED {
-                            panic!("Unexpected error: {}", e.rv);
-                        }
-                    }
-                    _ => panic!("Unexpected error: {}", err),
-                },
-            }
-            /* reset db in all cases */
-            sql.reinit().unwrap();
-            let objects = cache.search(&[]).unwrap();
-            for obj in objects {
-                let uid = obj.get_attr_as_string(CKA_UNIQUE_ID).unwrap();
-                sql.store(&uid, obj.clone()).unwrap()
-            }
-        } else {
-            panic!("Unknown file type");
+        let mut cache = storage::memory::memory();
+        test_data.prime_cache(&mut cache).unwrap();
+
+        let objects = cache.search(&[]).unwrap();
+        for obj in objects {
+            let uid = obj.get_attr_as_string(CKA_UNIQUE_ID).unwrap();
+            token.insert_object(CK_INVALID_HANDLE, obj.clone()).unwrap();
         }
     }
 

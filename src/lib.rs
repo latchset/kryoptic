@@ -83,6 +83,10 @@ macro_rules! res_or_ret {
 
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
+pub fn get_random_data(data: &mut [u8]) -> KResult<()> {
+    CSPRNG.with(|rng| rng.borrow_mut().generate_random(data))
+}
+
 struct State {
     slots: HashMap<CK_SLOT_ID, Slot>,
     sessionmap: HashMap<CK_SESSION_HANDLE, CK_SLOT_ID>,
@@ -457,7 +461,14 @@ extern "C" fn fn_init_token(
     };
     let mut token =
         res_or_ret!(rstate.get_token_from_slot_mut_nochecks(slot_id));
-    token.initialize(&vpin, &vlabel)
+    match ret_to_rv!(token.initialize(&vpin, &vlabel)) {
+        CKR_OK => CKR_OK,
+        CKR_PIN_LOCKED => CKR_PIN_LOCKED,
+        CKR_PIN_INCORRECT => CKR_PIN_INCORRECT,
+        CKR_PIN_INVALID => CKR_PIN_INVALID,
+        CKR_PIN_EXPIRED => CKR_PIN_EXPIRED,
+        _ => CKR_GENERAL_ERROR,
+    }
 }
 extern "C" fn fn_init_pin(
     s_handle: CK_SESSION_HANDLE,
@@ -472,7 +483,7 @@ extern "C" fn fn_init_pin(
 
     let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
 
-    token.set_pin(CKU_USER, &vpin, None)
+    ret_to_rv!(token.set_pin(CKU_USER, &vpin, &vec![0u8; 0]))
 }
 extern "C" fn fn_set_pin(
     s_handle: CK_SESSION_HANDLE,
@@ -491,7 +502,7 @@ extern "C" fn fn_set_pin(
 
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, Some(&vold))
+    ret_to_rv!(token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, &vold))
 }
 extern "C" fn fn_open_session(
     slot_id: CK_SLOT_ID,
@@ -1796,7 +1807,7 @@ extern "C" fn fn_generate_random(
     let data: &mut [u8] = unsafe {
         std::slice::from_raw_parts_mut(random_data, random_len as usize)
     };
-    CSPRNG.with(|rng| ret_to_rv!(rng.borrow_mut().generate_random(data)))
+    ret_to_rv!(get_random_data(data))
 }
 extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
