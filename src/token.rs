@@ -17,12 +17,14 @@ use super::object;
 use super::rsa;
 use super::storage;
 
-use super::{err_rv, to_rv};
+use super::{err_rv, get_random_data, to_rv};
 use error::{KError, KResult};
 use interface::*;
 use mechanism::Mechanisms;
 use object::{Object, ObjectFactories};
 use storage::Storage;
+
+use hex;
 
 #[cfg(feature = "fips")]
 const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
@@ -40,72 +42,19 @@ const SO_PIN_UID: &str = "0";
 const USER_PIN_UID: &str = "1";
 const TOKEN_INFO_UID: &str = "2";
 
+const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
+
+const USER_PIN_IV: &str = "USRPIN IV UNWRAP";
+const USER_PIN_AAD: &str = "USRPIN AUTH_DATA";
+const DEFPIN_SALT: &str = "DEFAULT SALT";
+const DEFPIN_ITER: usize = 10000;
+
 fn copy_sized_string(s: &[u8], d: &mut [u8]) {
     if s.len() >= d.len() {
         d.copy_from_slice(&s[..d.len()]);
     } else {
         d[..s.len()].copy_from_slice(s);
         d[s.len()..].fill(0x20); /* space in ASCII/UTF8 */
-    }
-}
-
-#[derive(Debug, Clone)]
-struct LoginData {
-    pin: Option<Vec<u8>>,
-    max_attempts: CK_ULONG,
-    attempts: CK_ULONG,
-    logged_in: bool,
-}
-
-impl LoginData {
-    fn check_pin(&mut self, pin: &Vec<u8>) -> CK_RV {
-        if self.attempts >= self.max_attempts {
-            return CKR_PIN_LOCKED;
-        }
-        match &self.pin {
-            Some(p) => {
-                if p == pin {
-                    self.logged_in = true;
-                    self.attempts = 0;
-                    CKR_OK
-                } else {
-                    self.attempts += 1;
-                    CKR_PIN_INCORRECT
-                }
-            }
-            None => CKR_USER_PIN_NOT_INITIALIZED,
-        }
-    }
-
-    fn set_pin(&mut self, info: &CK_TOKEN_INFO, pin: &Vec<u8>) -> CK_RV {
-        let pin_len = pin.len() as CK_ULONG;
-        if info.ulMaxPinLen != CK_EFFECTIVELY_INFINITE {
-            if pin_len > info.ulMaxPinLen {
-                return CKR_PIN_LEN_RANGE;
-            }
-        }
-        if pin_len < info.ulMinPinLen {
-            return CKR_PIN_LEN_RANGE;
-        }
-        self.pin = Some(pin.clone());
-        if self.max_attempts == 0 {
-            self.max_attempts = 10;
-        }
-        self.attempts = 0;
-        CKR_OK
-    }
-
-    fn change_pin(
-        &mut self,
-        info: &CK_TOKEN_INFO,
-        pin: &Vec<u8>,
-        old: &Vec<u8>,
-    ) -> CK_RV {
-        let ret = self.check_pin(old);
-        if ret != CKR_OK {
-            return ret;
-        }
-        self.set_pin(info, pin)
     }
 }
 
@@ -170,8 +119,8 @@ pub struct Token {
     storage: Box<dyn Storage>,
     session_objects: HashMap<CK_OBJECT_HANDLE, Object>,
     handles: Handles,
-    so_login: LoginData,
-    user_login: LoginData,
+    kek: Option<Object>,
+    so_logged_in: bool,
 }
 
 impl Token {
@@ -213,18 +162,8 @@ impl Token {
             storage: store,
             session_objects: HashMap::new(),
             handles: Handles::new(),
-            so_login: LoginData {
-                pin: None,
-                max_attempts: 0,
-                attempts: 0,
-                logged_in: false,
-            },
-            user_login: LoginData {
-                pin: None,
-                max_attempts: 0,
-                attempts: 0,
-                logged_in: false,
-            },
+            kek: None,
+            so_logged_in: false,
         };
 
         /* default strings */
@@ -265,8 +204,8 @@ impl Token {
             token.info.flags |= CKF_TOKEN_INITIALIZED;
         }
 
-        if token.is_initialized() {
-            token.update_token_pin_flags();
+        if token.info.flags & CKF_TOKEN_INITIALIZED != 0 {
+            token.init_pin_flags()?;
         }
 
         Ok(token)
@@ -282,90 +221,6 @@ impl Token {
 
     fn is_login_required(&self) -> bool {
         self.info.flags & CKF_LOGIN_REQUIRED == CKF_LOGIN_REQUIRED
-    }
-
-    fn update_token_pin_flags(&mut self) {
-        if self.so_login.pin.is_none() {
-            let _ = self.get_so_login_data();
-        }
-        if self.so_login.pin.is_none() {
-            self.info.flags |= CKF_SO_PIN_TO_BE_CHANGED;
-        } else {
-            self.info.flags &= !CKF_SO_PIN_TO_BE_CHANGED;
-            if self.so_login.attempts >= self.so_login.max_attempts {
-                self.info.flags |= CKF_SO_PIN_LOCKED;
-                self.info.flags &= !CKF_SO_PIN_FINAL_TRY;
-                self.info.flags &= !CKF_SO_PIN_COUNT_LOW;
-            } else {
-                if self.so_login.attempts + 1 == self.so_login.max_attempts {
-                    self.info.flags |= CKF_SO_PIN_FINAL_TRY;
-                } else {
-                    self.info.flags &= !CKF_SO_PIN_FINAL_TRY;
-                }
-                if self.so_login.attempts > 0 {
-                    self.info.flags |= CKF_SO_PIN_COUNT_LOW;
-                } else {
-                    self.info.flags &= !CKF_SO_PIN_COUNT_LOW;
-                }
-            }
-        }
-        if self.user_login.pin.is_none() {
-            let _ = self.get_user_login_data();
-        }
-        if self.user_login.pin.is_none() {
-            self.info.flags |= CKF_USER_PIN_TO_BE_CHANGED;
-        } else {
-            self.info.flags &= !CKF_USER_PIN_TO_BE_CHANGED;
-            if self.user_login.attempts >= self.user_login.max_attempts {
-                self.info.flags |= CKF_USER_PIN_LOCKED;
-                self.info.flags &= !CKF_USER_PIN_FINAL_TRY;
-                self.info.flags &= !CKF_USER_PIN_COUNT_LOW;
-            } else {
-                if self.user_login.attempts + 1 == self.user_login.max_attempts
-                {
-                    self.info.flags |= CKF_USER_PIN_FINAL_TRY;
-                } else {
-                    self.info.flags &= !CKF_USER_PIN_FINAL_TRY;
-                }
-                if self.user_login.attempts > 0 {
-                    self.info.flags |= CKF_USER_PIN_COUNT_LOW;
-                } else {
-                    self.info.flags &= !CKF_USER_PIN_COUNT_LOW;
-                }
-            }
-        }
-    }
-
-    fn store_pin_object(
-        &mut self,
-        uid: String,
-        label: String,
-        pin: Vec<u8>,
-    ) -> KResult<()> {
-        match self.storage.fetch_by_uid(&uid) {
-            Ok(o) => {
-                let mut obj = o.clone();
-                obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
-                self.storage.store(&uid, obj)?;
-            }
-            Err(_) => {
-                let mut obj = Object::new();
-                obj.set_attr(attribute::from_string(
-                    CKA_UNIQUE_ID,
-                    uid.clone(),
-                ))?;
-                obj.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
-                obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
-                obj.set_attr(attribute::from_ulong(
-                    CKA_KEY_TYPE,
-                    CKK_GENERIC_SECRET,
-                ))?;
-                obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
-                obj.set_attr(attribute::from_bytes(CKA_VALUE, pin))?;
-                self.storage.store(&uid, obj)?;
-            }
-        }
-        return Ok(());
     }
 
     fn load_token_info(&mut self) -> KResult<()> {
@@ -442,43 +297,488 @@ impl Token {
         return Ok(());
     }
 
-    pub fn initialize(&mut self, pin: &Vec<u8>, label: &Vec<u8>) -> CK_RV {
-        let ret = if self.is_initialized() {
-            self.login(CKU_SO, pin)
-        } else {
-            self.so_login.set_pin(&self.info, pin)
+    fn fetch_pin_object(&mut self, uid: &str) -> KResult<Object> {
+        let obj = match self.storage.fetch_by_uid(&uid.to_string()) {
+            Ok(o) => o,
+            Err(e) => match e {
+                KError::NotFound(_) => {
+                    return err_rv!(CKR_USER_PIN_NOT_INITIALIZED);
+                }
+                KError::RvError(e) => return err_rv!(e.rv),
+                _ => return err_rv!(CKR_GENERAL_ERROR),
+            },
         };
-        if ret != CKR_OK {
-            return ret;
+        if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
-        self.so_login.logged_in = false;
-        match self.storage.reinit() {
-            Ok(()) => {
-                self.handles = Handles::new();
-            }
-            Err(_) => return CKR_GENERAL_ERROR,
+        if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
-        self.session_objects.clear();
+        Ok(obj)
+    }
 
-        /* add pin to so_object */
-        if self
-            .store_pin_object(
-                SO_PIN_UID.to_string(),
-                "SO PIN".to_string(),
-                pin.clone(),
-            )
-            .is_err()
-        {
-            return CKR_GENERAL_ERROR;
+    fn store_pin_object(
+        &mut self,
+        uid: String,
+        label: String,
+        wrapped: Vec<u8>,
+    ) -> KResult<()> {
+        match self.storage.fetch_by_uid(&uid) {
+            Ok(o) => {
+                let mut obj = o.clone();
+                obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
+                obj.set_attr(attribute::from_bytes(CKA_VALUE, wrapped))?;
+                obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
+                self.storage.store(&uid, obj)?;
+            }
+            Err(_) => {
+                let mut obj = Object::new();
+                obj.set_attr(attribute::from_string(
+                    CKA_UNIQUE_ID,
+                    uid.clone(),
+                ))?;
+                obj.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
+                obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
+                obj.set_attr(attribute::from_ulong(
+                    CKA_KEY_TYPE,
+                    CKK_GENERIC_SECRET,
+                ))?;
+                obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
+                obj.set_attr(attribute::from_bytes(CKA_VALUE, wrapped))?;
+                obj.set_attr(attribute::from_ulong(
+                    KRA_MAX_LOGIN_ATTEMPTS,
+                    MAX_LOGIN_ATTEMPTS,
+                ))?;
+                obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
+
+                self.storage.store(&uid, obj)?;
+            }
         }
+        return Ok(());
+    }
+
+    fn parse_pin_label(&self, label: &str) -> KResult<(String, usize)> {
+        let parts: Vec<_> = label.split(":").collect();
+        if parts.len() != 2 {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        Ok((
+            parts[0].to_string(),
+            match parts[1].parse() {
+                Ok(u) => u,
+                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+            },
+        ))
+    }
+
+    fn pin_to_key(
+        &mut self,
+        pin: &Vec<u8>,
+        salt: &str,
+        iterations: usize,
+    ) -> KResult<Object> {
+        let params = CK_PKCS5_PBKD2_PARAMS2 {
+            saltSource: CKZ_DATA_SPECIFIED,
+            pSaltSourceData: salt.as_ptr() as *const _ as *mut _,
+            ulSaltSourceDataLen: salt.len() as CK_ULONG,
+            iterations: iterations as CK_ULONG,
+            prf: CKP_PKCS5_PBKD2_HMAC_SHA512,
+            pPrfData: std::ptr::null_mut(),
+            ulPrfDataLen: 0,
+            pPassword: pin.as_ptr() as *const _ as *mut _,
+            ulPasswordLen: pin.len() as CK_ULONG,
+        };
+        let class = CKO_SECRET_KEY;
+        let keytyp = CKK_AES;
+        let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
+        let truebool: CK_BBOOL = CK_TRUE;
+        let template: [CK_ATTRIBUTE; 5] = [
+            CK_ATTRIBUTE::from_ulong(CKA_CLASS, &class),
+            CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &keytyp),
+            CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keylen),
+            CK_ATTRIBUTE::from_bool(CKA_WRAP, &truebool),
+            CK_ATTRIBUTE::from_bool(CKA_UNWRAP, &truebool),
+        ];
+        let pbkdf2 = self.mechanisms.get(CKM_PKCS5_PBKD2)?;
+        pbkdf2.generate_key(
+            &CK_MECHANISM {
+                mechanism: CKM_PKCS5_PBKD2,
+                pParameter: &params as *const _ as *mut _,
+                ulParameterLen: std::mem::size_of::<CK_PKCS5_PBKD2_PARAMS2>()
+                    as CK_ULONG,
+            },
+            &template,
+            &self.mechanisms,
+            &self.object_factories,
+        )
+    }
+
+    fn wrapping_params(&self) -> CK_GCM_PARAMS {
+        CK_GCM_PARAMS {
+            pIv: USER_PIN_IV.as_ptr() as *mut CK_BYTE,
+            ulIvLen: USER_PIN_IV.len() as CK_ULONG,
+            ulIvBits: (USER_PIN_IV.len() * 8) as CK_ULONG,
+            pAAD: USER_PIN_AAD.as_ptr() as *mut CK_BYTE,
+            ulAADLen: USER_PIN_AAD.len() as CK_ULONG,
+            ulTagBits: 64 as CK_ULONG,
+        }
+    }
+
+    fn wrap_kek(
+        &mut self,
+        wrapper: &Object,
+        mut kek: Object,
+    ) -> KResult<Vec<u8>> {
+        let vlen = kek.get_attr_as_ulong(CKA_VALUE_LEN)?;
+        let bs = aes::AES_BLOCK_SIZE;
+        let mut buf = vec![0u8; (((vlen as usize + bs) / bs) + 1) * bs];
+        let mut blen = buf.len() as CK_ULONG;
+        let aes = self.mechanisms.get(CKM_AES_GCM)?;
+        let factory = self.object_factories.get_object_factory(&kek)?;
+        /* need to do this or wrap_key will fail */
+        kek.set_attr(attribute::from_bool(CKA_EXTRACTABLE, true))?;
+        aes.wrap_key(
+            &CK_MECHANISM {
+                mechanism: CKM_AES_GCM,
+                pParameter: &self.wrapping_params() as *const _ as *mut _,
+                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
+                    as CK_ULONG,
+            },
+            wrapper,
+            &kek,
+            buf.as_mut_ptr() as *mut u8,
+            &mut blen,
+            factory,
+        )?;
+        unsafe { buf.set_len(blen as usize) };
+        Ok(buf)
+    }
+
+    fn unwrap_kek(&self, wrapper: &Object, wrapped: &[u8]) -> KResult<Object> {
+        let class = CKO_SECRET_KEY;
+        let keytyp = CKK_AES;
+        let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
+        let truebool: CK_BBOOL = CK_TRUE;
+        let template: [CK_ATTRIBUTE; 5] = [
+            CK_ATTRIBUTE::from_ulong(CKA_CLASS, &class),
+            CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &keytyp),
+            CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keylen),
+            CK_ATTRIBUTE::from_bool(CKA_ENCRYPT, &truebool),
+            CK_ATTRIBUTE::from_bool(CKA_DECRYPT, &truebool),
+        ];
+        let aes = self.mechanisms.get(CKM_AES_GCM)?;
+        Ok(aes.unwrap_key(
+            &CK_MECHANISM {
+                mechanism: CKM_AES_GCM,
+                pParameter: &self.wrapping_params() as *const _ as *mut _,
+                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
+                    as CK_ULONG,
+            },
+            wrapper,
+            wrapped,
+            &template,
+            self.object_factories
+                .get_obj_factory_from_key_template(&template)?,
+        )?)
+    }
+
+    fn update_pin_flags(&mut self, obj: &Object) -> KResult<()> {
+        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+        let is_so = match uid.as_str() {
+            SO_PIN_UID => true,
+            USER_PIN_UID => false,
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
+        let attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
+        match max - attempts {
+            0 => {
+                if is_so {
+                    self.info.flags |= CKF_SO_PIN_LOCKED;
+                } else {
+                    self.info.flags |= CKF_USER_PIN_LOCKED;
+                }
+            }
+            1 => {
+                if is_so {
+                    self.info.flags |= CKF_SO_PIN_FINAL_TRY;
+                } else {
+                    self.info.flags |= CKF_USER_PIN_FINAL_TRY;
+                }
+            }
+            2 | 3 => {
+                if is_so {
+                    self.info.flags |= CKF_SO_PIN_COUNT_LOW;
+                } else {
+                    self.info.flags |= CKF_USER_PIN_COUNT_LOW;
+                }
+            }
+            _ => {
+                if attempts == 0 {
+                    self.info.flags &= if is_so {
+                        !(CKF_SO_PIN_FINAL_TRY | CKF_SO_PIN_COUNT_LOW)
+                    } else {
+                        !(CKF_USER_PIN_FINAL_TRY | CKF_USER_PIN_COUNT_LOW)
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn init_pin_flags(&mut self) -> KResult<()> {
+        let so = self.fetch_pin_object(SO_PIN_UID)?;
+        self.update_pin_flags(&so)?;
+        let so_label = so.get_attr_as_string(CKA_LABEL)?;
+        if self.parse_pin_label(so_label.as_str())?.0 == DEFPIN_SALT {
+            self.info.flags |= CKF_SO_PIN_TO_BE_CHANGED;
+        }
+        let user = self.fetch_pin_object(USER_PIN_UID)?;
+        self.update_pin_flags(&user)?;
+        let user_label = user.get_attr_as_string(CKA_LABEL)?;
+        if self.parse_pin_label(user_label.as_str())?.0 == DEFPIN_SALT {
+            self.info.flags |= CKF_USER_PIN_TO_BE_CHANGED;
+        } else {
+            self.info.flags |= CKF_USER_PIN_INITIALIZED;
+        }
+        Ok(())
+    }
+
+    fn reset_user_pin(&mut self) -> KResult<()> {
+        let class = CKO_SECRET_KEY;
+        let keytyp = CKK_AES;
+        let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
+        let template: [CK_ATTRIBUTE; 3] = [
+            CK_ATTRIBUTE::from_ulong(CKA_CLASS, &class),
+            CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &keytyp),
+            CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keylen),
+        ];
+        let aes = self.mechanisms.get(CKM_AES_KEY_GEN)?;
+        let kek = aes.generate_key(
+            &CK_MECHANISM {
+                mechanism: CKM_AES_KEY_GEN,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+            &template,
+            &self.mechanisms,
+            &self.object_factories,
+        )?;
+        /* the default pin is the null pin */
+        let key = self.pin_to_key(&vec![0u8; 0], DEFPIN_SALT, DEFPIN_ITER)?;
+        let wrapped = self.wrap_kek(&key, kek)?;
+        self.store_pin_object(
+            USER_PIN_UID.to_string(),
+            format!("{}:{}", DEFPIN_SALT, DEFPIN_ITER),
+            wrapped,
+        )
+    }
+
+    fn random_pin_salt(&self) -> KResult<String> {
+        let mut data = [0u8; 8];
+        get_random_data(&mut data)?;
+        Ok(hex::encode(data))
+    }
+
+    pub fn set_pin(
+        &mut self,
+        user_type: CK_USER_TYPE,
+        pin: &Vec<u8>,
+        old: &Vec<u8>,
+    ) -> KResult<()> {
+        let utype = match user_type {
+            CK_UNAVAILABLE_INFORMATION => {
+                if self.so_logged_in {
+                    CKU_SO
+                } else {
+                    CKU_USER
+                }
+            }
+            CKU_USER => CKU_USER,
+            CKU_SO => CKU_SO,
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        };
+
+        match utype {
+            CKU_USER => {
+                if self.so_logged_in && old.len() == 0 {
+                    /* this is a forced change,
+                     * which will make all existing secrets unreadable */
+                    self.reset_user_pin()?;
+                }
+                let kek = self.check_user_login(old)?;
+                let salt = self.random_pin_salt()?;
+                let key = self.pin_to_key(pin, salt.as_str(), DEFPIN_ITER)?;
+                let wrapped = self.wrap_kek(&key, kek)?;
+                self.store_pin_object(
+                    USER_PIN_UID.to_string(),
+                    format!("{}:{}", salt, DEFPIN_ITER),
+                    wrapped,
+                )?;
+
+                if old.len() != 0 {
+                    self.info.flags |= CKF_USER_PIN_INITIALIZED;
+                }
+            }
+            CKU_SO => {
+                if self.is_initialized() {
+                    /* When the token is not yet initialized, the set_pin
+                     * operation is used to set the initial SO PIN, so we
+                     * can't check the old one in that case as we'd fail.
+                     */
+                    self.check_so_login(old)?;
+                }
+                let salt = if pin.len() != 0 {
+                    self.random_pin_salt()?
+                } else {
+                    DEFPIN_SALT.to_string()
+                };
+                let derived =
+                    self.pin_to_key(pin, salt.as_str(), DEFPIN_ITER)?;
+                let value = derived.get_attr_as_bytes(CKA_VALUE)?;
+                /* TODO: should we store a copy of the kek with
+                 * the so token for recovery reasons ? */
+                self.store_pin_object(
+                    SO_PIN_UID.to_string(),
+                    format!("{}:{}", salt, DEFPIN_ITER),
+                    value.clone(),
+                )?;
+            }
+            _ => return err_rv!(CKR_GENERAL_ERROR),
+        }
+        Ok(())
+    }
+
+    pub fn initialize(
+        &mut self,
+        pin: &Vec<u8>,
+        label: &Vec<u8>,
+    ) -> KResult<()> {
+        if self.is_initialized() {
+            self.check_so_login(pin)?;
+        };
+
+        /* this inits from scratch or deletes and reinits an existing db */
+        self.storage.reinit()?;
+
+        self.handles = Handles::new();
+        self.session_objects.clear();
+        self.so_logged_in = false;
+        self.kek = None;
+
+        /* mark uninitialized otherwise set_pin() will fail trying to verify
+         * the SO PIN from storage (which has just been obliterated) */
+        self.info.flags &= !CKF_TOKEN_INITIALIZED;
+
+        /* Add SO PIN */
+        self.set_pin(CKU_SO, pin, &vec![0u8; 0])?;
+        /* Generate KEK and store with empty User PIN */
+        self.reset_user_pin()?;
 
         copy_sized_string(label.as_slice(), &mut self.info.label);
-        if self.store_token_info().is_err() {
-            return CKR_GENERAL_ERROR;
-        }
+        self.store_token_info()?;
+
+        self.init_pin_flags()?;
+
         self.info.flags |= CKF_TOKEN_INITIALIZED;
-        self.update_token_pin_flags();
-        CKR_OK
+        Ok(())
+    }
+
+    fn update_pin_attempts(
+        &mut self,
+        uid: String,
+        attempts: CK_ULONG,
+    ) -> KResult<()> {
+        let mut obj = self.storage.fetch_by_uid(&uid)?.clone();
+        obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
+        self.storage.store(&uid, obj)
+    }
+
+    fn check_so_login(&mut self, pin: &Vec<u8>) -> KResult<()> {
+        let mut obj = self.fetch_pin_object(SO_PIN_UID)?;
+
+        let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
+        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
+        if stored_attempts >= max {
+            return err_rv!(CKR_PIN_LOCKED);
+        }
+
+        let label = obj.get_attr_as_string(CKA_LABEL)?;
+        let (salt, iterations) = self.parse_pin_label(label.as_str())?;
+        let key = self.pin_to_key(pin, salt.as_str(), iterations)?;
+
+        let stored_value = obj.get_attr_as_bytes(CKA_VALUE)?;
+        let value = key.get_attr_as_bytes(CKA_VALUE)?;
+
+        let mut attempts = stored_attempts;
+        if value == stored_value {
+            attempts = 0;
+        } else {
+            attempts += 1;
+        }
+
+        /* Store attempts back to token */
+        if stored_attempts != attempts {
+            let _ = self.update_pin_attempts(SO_PIN_UID.to_string(), attempts);
+
+            /* set token info */
+            obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
+            self.update_pin_flags(&obj)?;
+        }
+
+        if attempts == 0 {
+            return Ok(());
+        }
+        if self.info.flags & CKF_SO_PIN_LOCKED != 0 {
+            return err_rv!(CKR_PIN_LOCKED);
+        }
+        return err_rv!(CKR_PIN_INCORRECT);
+    }
+
+    fn check_user_login(&mut self, pin: &Vec<u8>) -> KResult<Object> {
+        let mut obj = self.fetch_pin_object(USER_PIN_UID)?;
+
+        let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
+        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
+        if stored_attempts >= max {
+            return err_rv!(CKR_PIN_LOCKED);
+        }
+
+        let label = obj.get_attr_as_string(CKA_LABEL)?;
+        let (salt, iterations) = self.parse_pin_label(label.as_str())?;
+        let key = self.pin_to_key(pin, salt.as_str(), iterations)?;
+
+        let mut attempts = stored_attempts;
+        let kek = match self
+            .unwrap_kek(&key, obj.get_attr_as_bytes(CKA_VALUE)?.as_slice())
+        {
+            Ok(k) => {
+                attempts = 0;
+                Some(k)
+            }
+            Err(_) => {
+                attempts += 1;
+                None
+            }
+        };
+
+        /* Store attempts back to token */
+        if stored_attempts != attempts {
+            let _ =
+                self.update_pin_attempts(USER_PIN_UID.to_string(), attempts);
+
+            /* set token info */
+            obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
+            self.update_pin_flags(&obj)?;
+        }
+
+        if attempts == 0 {
+            return Ok(kek.unwrap());
+        }
+        if self.info.flags & CKF_USER_PIN_LOCKED != 0 {
+            return err_rv!(CKR_PIN_LOCKED);
+        }
+        return err_rv!(CKR_PIN_INCORRECT);
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
@@ -486,11 +786,82 @@ impl Token {
             return true;
         }
         match user_type {
-            KRY_UNSPEC => self.so_login.logged_in || self.user_login.logged_in,
-            CKU_SO => self.so_login.logged_in,
-            CKU_USER => self.user_login.logged_in,
+            KRY_UNSPEC => self.so_logged_in || self.kek.is_some(),
+            CKU_SO => self.so_logged_in,
+            CKU_USER => self.kek.is_some(),
             _ => false,
         }
+    }
+
+    pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
+        if !self.is_login_required() {
+            return CKR_OK;
+        }
+        match user_type {
+            CKU_SO => {
+                if self.so_logged_in {
+                    return CKR_USER_ALREADY_LOGGED_IN;
+                }
+                if self.kek.is_some() {
+                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+                }
+                match self.check_so_login(pin) {
+                    Ok(()) => {
+                        self.so_logged_in = true;
+                        CKR_OK
+                    }
+                    Err(e) => match e {
+                        KError::RvError(e) => e.rv,
+                        _ => CKR_GENERAL_ERROR,
+                    },
+                }
+            }
+            CKU_USER => {
+                if self.kek.is_some() {
+                    return CKR_USER_ALREADY_LOGGED_IN;
+                }
+                if self.so_logged_in {
+                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+                }
+                match self.check_user_login(pin) {
+                    Ok(kek) => {
+                        self.kek = Some(kek);
+                        CKR_OK
+                    }
+                    Err(e) => match e {
+                        KError::RvError(e) => e.rv,
+                        _ => CKR_GENERAL_ERROR,
+                    },
+                }
+            }
+            _ => CKR_USER_TYPE_INVALID,
+        }
+    }
+
+    pub fn logout(&mut self) -> CK_RV {
+        let mut ret = CKR_USER_NOT_LOGGED_IN;
+        if !self.is_login_required() {
+            ret = CKR_OK;
+        }
+        if self.kek.is_some() {
+            self.kek = None;
+            ret = CKR_OK;
+        }
+        if self.so_logged_in {
+            self.so_logged_in = false;
+            ret = CKR_OK;
+        }
+        if ret != CKR_OK {
+            return ret;
+        }
+
+        self.clear_private_session_objects();
+
+        CKR_OK
+    }
+
+    pub fn save(&mut self) -> KResult<()> {
+        self.storage.flush()
     }
 
     fn clear_private_session_objects(&mut self) {
@@ -544,198 +915,6 @@ impl Token {
             obj.set_zeroize()
         }
         Ok(obj)
-    }
-
-    fn fetch_pin_data(
-        &mut self,
-        uid: &str,
-        label: &str,
-    ) -> KResult<(Vec<u8>, CK_ULONG)> {
-        let obj = match self.storage.fetch_by_uid(&uid.to_string()) {
-            Ok(o) => o,
-            Err(e) => match e {
-                KError::NotFound(_) => {
-                    return err_rv!(CKR_USER_PIN_NOT_INITIALIZED);
-                }
-                KError::RvError(e) => return err_rv!(e.rv),
-                _ => return err_rv!(CKR_GENERAL_ERROR),
-            },
-        };
-        if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        if obj.get_attr_as_string(CKA_LABEL)? != label {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-        let value = obj.get_attr_as_bytes(CKA_VALUE)?;
-        let max = match obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS) {
-            Ok(n) => n,
-            Err(_) => 10,
-        };
-
-        Ok((value.clone(), max as CK_ULONG))
-    }
-
-    fn get_so_login_data(&mut self) -> KResult<()> {
-        if self.so_login.pin.is_none() {
-            let (pin, max) = self.fetch_pin_data(SO_PIN_UID, "SO PIN")?;
-            self.so_login.pin = Some(pin);
-            self.so_login.max_attempts = max;
-        }
-        Ok(())
-    }
-
-    fn get_user_login_data(&mut self) -> KResult<()> {
-        if self.user_login.pin.is_none() {
-            let (pin, max) = self.fetch_pin_data(USER_PIN_UID, "User PIN")?;
-            self.user_login.pin = Some(pin);
-            self.user_login.max_attempts = max;
-        }
-        Ok(())
-    }
-
-    pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
-        if !self.is_login_required() {
-            return CKR_OK;
-        }
-        let result = match user_type {
-            CKU_SO => {
-                if self.so_login.logged_in {
-                    return CKR_USER_ALREADY_LOGGED_IN;
-                }
-                if self.user_login.logged_in {
-                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
-                }
-                match self.get_so_login_data() {
-                    Ok(_) => (),
-                    Err(e) => match e {
-                        KError::RvError(e) => return e.rv,
-                        _ => return CKR_GENERAL_ERROR,
-                    },
-                }
-                self.so_login.check_pin(pin)
-            }
-            CKU_USER => {
-                if self.user_login.logged_in {
-                    return CKR_USER_ALREADY_LOGGED_IN;
-                }
-                if self.so_login.logged_in {
-                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
-                }
-                match self.get_user_login_data() {
-                    Ok(_) => (),
-                    Err(e) => match e {
-                        KError::RvError(e) => return e.rv,
-                        _ => return CKR_GENERAL_ERROR,
-                    },
-                }
-                self.user_login.check_pin(pin)
-            }
-            _ => return CKR_USER_TYPE_INVALID,
-        };
-        self.update_token_pin_flags();
-        result
-    }
-
-    pub fn logout(&mut self) -> CK_RV {
-        let mut ret = CKR_USER_NOT_LOGGED_IN;
-        if !self.is_login_required() {
-            ret = CKR_OK;
-        }
-        if self.user_login.logged_in {
-            self.user_login.logged_in = false;
-            ret = CKR_OK;
-        }
-        if self.so_login.logged_in {
-            self.so_login.logged_in = false;
-            ret = CKR_OK;
-        }
-        if ret != CKR_OK {
-            return ret;
-        }
-
-        self.clear_private_session_objects();
-
-        CKR_OK
-    }
-
-    pub fn set_pin(
-        &mut self,
-        user_type: CK_USER_TYPE,
-        pin: &Vec<u8>,
-        old: Option<&Vec<u8>>,
-    ) -> CK_RV {
-        let utype = match user_type {
-            CK_UNAVAILABLE_INFORMATION => {
-                if self.so_login.logged_in {
-                    CKU_SO
-                } else {
-                    CKU_USER
-                }
-            }
-            CKU_USER => CKU_USER,
-            CKU_SO => CKU_SO,
-            _ => return CKR_GENERAL_ERROR,
-        };
-
-        match utype {
-            CKU_USER => {
-                let ret = if self.so_login.logged_in {
-                    self.user_login.set_pin(&self.info, pin)
-                } else {
-                    if old.is_none() {
-                        return CKR_PIN_INCORRECT;
-                    }
-                    self.user_login.change_pin(&self.info, pin, old.unwrap())
-                };
-                if ret != CKR_OK {
-                    return ret;
-                }
-                /* update pin in storage */
-                match self.store_pin_object(
-                    USER_PIN_UID.to_string(),
-                    "User PIN".to_string(),
-                    pin.clone(),
-                ) {
-                    Ok(()) => (),
-                    Err(_) => return CKR_GENERAL_ERROR,
-                }
-            }
-            CKU_SO => {
-                if old.is_none() {
-                    return CKR_PIN_INCORRECT;
-                }
-                let ret =
-                    self.so_login.change_pin(&self.info, pin, old.unwrap());
-                if ret != CKR_OK {
-                    return ret;
-                }
-                /* update pin in storage */
-                match self.store_pin_object(
-                    SO_PIN_UID.to_string(),
-                    "SO PIN".to_string(),
-                    pin.clone(),
-                ) {
-                    Ok(()) => (),
-                    Err(_) => return CKR_GENERAL_ERROR,
-                }
-            }
-            _ => return CKR_GENERAL_ERROR,
-        }
-
-        /* If we set a PIN it means we switched to require Logins */
-        self.info.flags |= CKF_LOGIN_REQUIRED;
-
-        self.update_token_pin_flags();
-
-        CKR_OK
-    }
-
-    pub fn save(&mut self) -> KResult<()> {
-        self.storage.flush()
     }
 
     pub fn insert_object(
