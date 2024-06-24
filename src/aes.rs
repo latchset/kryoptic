@@ -21,10 +21,10 @@ use mechanism::*;
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
-const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
-const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
-const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
-const AES_BLOCK_SIZE: usize = 16;
+pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
+pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
+pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
+pub const AES_BLOCK_SIZE: usize = 16;
 
 fn check_key_len(len: usize) -> KResult<()> {
     match len {
