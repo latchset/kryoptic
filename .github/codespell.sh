@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CODESPELL="codespell --ignore-words-list=gost,sorce,clen,ot"
+CODESPELL="codespell --ignore-words-list=gost,sorce,clen,ot,crate"
 
 result=0
 echo "Running codespell on source code..."
