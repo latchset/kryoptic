@@ -227,6 +227,8 @@ mod ecc;
 
 mod ecdh;
 
+mod ecdh_vectors;
+
 mod hashes;
 
 mod signatures;

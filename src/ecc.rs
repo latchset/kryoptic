@@ -39,9 +39,9 @@ const STRING_SECP521R1: &[u8] = &[
     0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x35, 0x32, 0x31, 0x72, 0x31,
 ];
 
-const NAME_SECP256R1: &str = "prime256v1";
-const NAME_SECP384R1: &str = "secp384r1";
-const NAME_SECP521R1: &str = "secp521r1";
+pub const NAME_SECP256R1: &str = "prime256v1";
+pub const NAME_SECP384R1: &str = "secp384r1";
+pub const NAME_SECP521R1: &str = "secp521r1";
 
 const BITS_SECP256R1: usize = 256;
 const BITS_SECP384R1: usize = 384;
@@ -52,6 +52,24 @@ fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
         OID_SECP256R1 => Ok(NAME_SECP256R1),
         OID_SECP384R1 => Ok(NAME_SECP384R1),
         OID_SECP521R1 => Ok(NAME_SECP521R1),
+        _ => err_rv!(CKR_GENERAL_ERROR),
+    }
+}
+
+pub fn curve_name_to_ec_params(name: &'static str) -> KResult<&'static [u8]> {
+    match name {
+        NAME_SECP256R1 => Ok(STRING_SECP256R1),
+        NAME_SECP384R1 => Ok(STRING_SECP384R1),
+        NAME_SECP521R1 => Ok(STRING_SECP521R1),
+        _ => err_rv!(CKR_GENERAL_ERROR),
+    }
+}
+
+pub fn name_to_bits(name: &'static str) -> KResult<usize> {
+    match name {
+        NAME_SECP256R1 => Ok(BITS_SECP256R1),
+        NAME_SECP384R1 => Ok(BITS_SECP384R1),
+        NAME_SECP521R1 => Ok(BITS_SECP521R1),
         _ => err_rv!(CKR_GENERAL_ERROR),
     }
 }
