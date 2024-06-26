@@ -362,11 +362,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        self.internal_object_create(
+        let mut key = self.internal_object_create(
             template,
             OAFlags::SettableOnlyOnCreate,
             OAFlags::RequiredOnGenerate,
-        )
+        )?;
+        key.set_zeroize();
+        Ok(key)
     }
 
     fn default_object_unwrap(
