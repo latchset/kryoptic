@@ -517,8 +517,19 @@ impl CK_ATTRIBUTE {
     ) -> CK_ATTRIBUTE {
         CK_ATTRIBUTE {
             type_: type_,
-            pValue: value as *const u64 as *mut std::ffi::c_void,
+            pValue: value as *const CK_ULONG as *mut std::ffi::c_void,
             ulValueLen: std::mem::size_of::<CK_ULONG>() as CK_ULONG,
+        }
+    }
+
+    pub fn from_bool<'a>(
+        type_: CK_ATTRIBUTE_TYPE,
+        value: &'a CK_BBOOL,
+    ) -> CK_ATTRIBUTE {
+        CK_ATTRIBUTE {
+            type_: type_,
+            pValue: value as *const CK_BBOOL as *mut std::ffi::c_void,
+            ulValueLen: std::mem::size_of::<CK_BBOOL>() as CK_ULONG,
         }
     }
 }
