@@ -784,6 +784,7 @@ fn test_pbkdf2() {
     testtokn.login();
 
     /* RFC 6070 Test Vectors */
+    /* plus test that an empty password also works */
     for test in [
         #[cfg(not(feature = "fips"))]
         #[cfg(feature = "slow")]
@@ -831,6 +832,13 @@ fn test_pbkdf2() {
             "sa\0lt",
             4096,
             hex::decode("56fa6aa75548099dcc37d7f03425e0c3").unwrap(),
+        ),
+        #[cfg(not(feature = "fips"))]
+        (
+            "",
+            "salt",
+            1024,
+            hex::decode("372bd05001b6ca2a4668e7f4f219204b").unwrap(),
         ),
     ] {
         let params = CK_PKCS5_PBKD2_PARAMS2 {
