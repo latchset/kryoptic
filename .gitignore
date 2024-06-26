@@ -10,3 +10,5 @@
 *.swp
 /*.json
 /*.sql
+cscope.*
+tags
