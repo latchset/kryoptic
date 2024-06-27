@@ -46,8 +46,18 @@ const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 
 const USER_PIN_IV: &str = "USRPIN IV UNWRAP";
 const USER_PIN_AAD: &str = "USRPIN AUTH_DATA";
-const DEFPIN_SALT: &str = "DEFAULT SALT";
+const DEFPIN_SALT: &str = "DEFAULT SALT DATA"; /* at least 16 bytes for FIPS */
 const DEFPIN_ITER: usize = 10000;
+
+#[cfg(feature = "fips")]
+fn default_password() -> Vec<u8> {
+    const DEFPIN_PASS: &str = "DEFAULT PASSWORD";
+    DEFPIN_PASS.as_bytes().to_vec()
+}
+#[cfg(not(feature = "fips"))]
+fn default_password() -> Vec<u8> {
+    vec![0u8; 0]
+}
 
 fn copy_sized_string(s: &[u8], d: &mut [u8]) {
     if s.len() >= d.len() {
@@ -564,8 +574,10 @@ impl Token {
             &self.mechanisms,
             &self.object_factories,
         )?;
-        /* the default pin is the null pin */
-        let key = self.pin_to_key(&vec![0u8; 0], DEFPIN_SALT, DEFPIN_ITER)?;
+        /* the default pin is the null pin
+         * Except in FIPS mode where OpenSSL refuses empty passwords */
+        let key =
+            self.pin_to_key(&default_password(), DEFPIN_SALT, DEFPIN_ITER)?;
         let wrapped = self.wrap_kek(&key, kek)?;
         self.store_pin_object(
             USER_PIN_UID.to_string(),
@@ -606,7 +618,14 @@ impl Token {
                      * which will make all existing secrets unreadable */
                     self.reset_user_pin()?;
                 }
-                let kek = self.check_user_login(old)?;
+                let kek = if old.len() == 0 {
+                    /* In FIPS mode OpenSSL's PBKDF2 does not accept empty
+                     * passwords, so we replace it for a default password
+                     * during initialization */
+                    self.check_user_login(&default_password())?
+                } else {
+                    self.check_user_login(old)?
+                };
                 let salt = self.random_pin_salt()?;
                 let key = self.pin_to_key(pin, salt.as_str(), DEFPIN_ITER)?;
                 let wrapped = self.wrap_kek(&key, kek)?;
