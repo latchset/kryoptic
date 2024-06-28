@@ -1220,6 +1220,28 @@ impl ObjectFactories {
         Ok(())
     }
 
+    pub fn get_sensitive_attrs(
+        &self,
+        obj: &Object,
+    ) -> KResult<Vec<CK_ATTRIBUTE_TYPE>> {
+        let mut v = Vec::<CK_ATTRIBUTE_TYPE>::new();
+        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
+        for attr in &obj.attributes {
+            match objtype_attrs
+                .iter()
+                .find(|a| a.get_type() == attr.get_type())
+            {
+                None => (),
+                Some(a) => {
+                    if a.is(OAFlags::Sensitive) {
+                        v.push(a.get_type());
+                    }
+                }
+            }
+        }
+        Ok(v)
+    }
+
     pub fn get_object_attributes(
         &self,
         obj: &Object,
