@@ -1065,10 +1065,10 @@ pub fn default_secret_key_generate(key: &mut Object) -> KResult<()> {
 
 pub fn default_key_attributes(
     key: &mut Object,
-    mech: &CK_MECHANISM,
+    mech: CK_MECHANISM_TYPE,
 ) -> KResult<()> {
     key.set_attr(from_bool(CKA_LOCAL, true))?;
-    key.set_attr(from_ulong(CKA_KEY_GEN_MECHANISM, mech.mechanism))?;
+    key.set_attr(from_ulong(CKA_KEY_GEN_MECHANISM, mech))?;
     Ok(())
 }
 
@@ -1100,7 +1100,7 @@ impl Mechanism for GenericSecretKeyMechanism {
         }
 
         default_secret_key_generate(&mut key)?;
-        default_key_attributes(&mut key, mech)?;
+        default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
     }
 }

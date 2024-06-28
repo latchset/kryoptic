@@ -795,7 +795,7 @@ impl Mechanism for PBKDF2Mechanism {
         tmpl.push(CK_ATTRIBUTE::from_slice(CKA_VALUE, dkm.as_slice()));
 
         let mut key = factory.create(tmpl.as_slice())?;
-        object::default_key_attributes(&mut key, mech)?;
+        object::default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
     }
 }

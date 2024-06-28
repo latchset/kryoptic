@@ -434,8 +434,8 @@ impl Mechanism for RsaPKCSMechanism {
             &mut pubkey,
             &mut privkey,
         )?;
-        object::default_key_attributes(&mut privkey, mech)?;
-        object::default_key_attributes(&mut pubkey, mech)?;
+        object::default_key_attributes(&mut privkey, mech.mechanism)?;
+        object::default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         Ok((pubkey, privkey))
     }

@@ -236,7 +236,7 @@ impl Mechanism for AesMechanism {
         }
 
         object::default_secret_key_generate(&mut key)?;
-        object::default_key_attributes(&mut key, mech)?;
+        object::default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
     }
 
