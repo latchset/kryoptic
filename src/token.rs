@@ -48,6 +48,7 @@ const USER_PIN_IV: &str = "USRPIN IV UNWRAP";
 const USER_PIN_AAD: &str = "USRPIN AUTH_DATA";
 const DEFPIN_SALT: &str = "DEFAULT SALT DATA"; /* at least 16 bytes for FIPS */
 const DEFPIN_ITER: usize = 10000;
+const DEFAULT_IV_SIZE: usize = 12; /* 96 bits as required by FIPS for AES GCM */
 
 #[cfg(feature = "fips")]
 fn default_password() -> Vec<u8> {
@@ -912,6 +913,126 @@ impl Token {
         }
     }
 
+    /* We should probably have lifetimes to ensure iv and aad are around for
+     * the lifetime of the returned structure, but this will require substantial
+     * reworking of the bindings, so for now we just get this comment.
+     * ENSURE the arguments stay in scope until CK_GCM_PARAMS is needed
+     * */
+    fn encryption_params(&self, iv: &[u8], aad: &[u8]) -> CK_GCM_PARAMS {
+        CK_GCM_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvBits: (iv.len() * 8) as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulTagBits: 64 as CK_ULONG,
+        }
+    }
+
+    fn encrypt_value(&self, uid: &String, val: &Vec<u8>) -> KResult<Vec<u8>> {
+        if let Some(ref kek) = self.kek {
+            let mut iv = [0u8; DEFAULT_IV_SIZE];
+            get_random_data(&mut iv)?;
+            let mut params = self.encryption_params(&iv, uid.as_bytes());
+            let mech: CK_MECHANISM = CK_MECHANISM {
+                mechanism: CKM_AES_GCM,
+                pParameter: &mut params as *mut interface::CK_GCM_PARAMS
+                    as *mut _,
+                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
+                    as CK_ULONG,
+            };
+            let aes = self.mechanisms.get(CKM_AES_GCM)?;
+            let mut op = aes.encryption_new(&mech, &kek)?;
+            let mut clen: CK_ULONG =
+                (op.encryption_len(val.len() as CK_ULONG)? + DEFAULT_IV_SIZE)
+                    as CK_ULONG;
+            let mut cipher = Vec::<u8>::with_capacity(clen as usize);
+            cipher.extend_from_slice(&iv);
+            cipher.resize(clen as usize, 0);
+            clen -= iv.len() as CK_ULONG;
+            op.encrypt(
+                val.as_slice(),
+                cipher.as_mut_slice()[DEFAULT_IV_SIZE..].as_mut_ptr(),
+                &mut clen,
+            )?;
+
+            unsafe { cipher.set_len(clen as usize + DEFAULT_IV_SIZE) };
+            return Ok(cipher);
+        } else {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+    }
+
+    fn object_to_storage(
+        &mut self,
+        mut obj: Object,
+        encrypt: bool,
+    ) -> KResult<()> {
+        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+        if encrypt {
+            let ats = self.object_factories.get_sensitive_attrs(&obj)?;
+            for typ in ats {
+                let plain = obj.get_attr_as_bytes(typ)?;
+                let encval = self.encrypt_value(&uid, plain)?;
+
+                /* now replace the clear text val with the encrypted one */
+                obj.set_attr(attribute::from_bytes(typ, encval))?;
+            }
+        }
+        self.storage.store(&uid, obj)
+    }
+
+    fn decrypt_value(&self, uid: &String, val: &Vec<u8>) -> KResult<Vec<u8>> {
+        if let Some(ref kek) = self.kek {
+            let mut params = self.encryption_params(
+                &val.as_slice()[..DEFAULT_IV_SIZE],
+                uid.as_bytes(),
+            );
+            let mech: CK_MECHANISM = CK_MECHANISM {
+                mechanism: CKM_AES_GCM,
+                pParameter: &mut params as *mut interface::CK_GCM_PARAMS
+                    as *mut _,
+                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
+                    as CK_ULONG,
+            };
+            let aes = self.mechanisms.get(CKM_AES_GCM)?;
+            let mut op = aes.decryption_new(&mech, &kek)?;
+            let mut plen: CK_ULONG = op
+                .decryption_len((val.len() - DEFAULT_IV_SIZE) as CK_ULONG)?
+                as CK_ULONG;
+            let mut plain = Vec::<u8>::with_capacity(plen as usize);
+            op.decrypt(
+                &val.as_slice()[DEFAULT_IV_SIZE..],
+                plain.as_mut_ptr(),
+                &mut plen,
+            )?;
+
+            unsafe { plain.set_len(plen as usize) };
+            return Ok(plain);
+        } else {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+    }
+
+    fn object_from_storage(
+        &self,
+        uid: &String,
+        decrypt: bool,
+    ) -> KResult<Object> {
+        let mut obj = self.storage.fetch_by_uid(uid)?;
+        if decrypt {
+            let ats = self.object_factories.get_sensitive_attrs(&obj)?;
+            for typ in ats {
+                let encval = obj.get_attr_as_bytes(typ)?;
+                let plain = self.decrypt_value(uid, encval)?;
+
+                /* now replace the encrypted val with the clear text one */
+                obj.set_attr(attribute::from_bytes(typ, plain))?;
+            }
+        }
+        Ok(obj)
+    }
+
     pub fn get_object_by_handle(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
@@ -922,7 +1043,7 @@ impl Token {
                 if let Some(o) = self.session_objects.get(&o_handle) {
                     o.clone()
                 } else {
-                    self.storage.fetch_by_uid(s)?
+                    self.object_from_storage(s, true)?
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
@@ -954,7 +1075,7 @@ impl Token {
         obj.set_handle(handle);
         self.handles.insert(handle, uid.clone());
         if obj.is_token() {
-            self.storage.store(&uid, obj)?;
+            self.object_to_storage(obj, true)?;
         } else {
             self.session_objects.insert(handle, obj);
         }
@@ -990,7 +1111,7 @@ impl Token {
                     Some(u) => u,
                     None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
                 };
-                let obj = self.storage.fetch_by_uid(uid)?;
+                let obj = self.object_from_storage(uid, false)?;
                 if !obj.is_destroyable() {
                     return err_rv!(CKR_ACTION_PROHIBITED);
                 }
@@ -1016,7 +1137,7 @@ impl Token {
                 if let Some(o) = self.session_objects.get(&o_handle) {
                     Cow::Borrowed(o)
                 } else {
-                    Cow::Owned(self.storage.fetch_by_uid(uid)?)
+                    Cow::Owned(self.object_from_storage(uid, false)?)
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
@@ -1041,11 +1162,14 @@ impl Token {
             return self
                 .object_factories
                 .set_object_attributes(&mut obj, template);
+        } else {
+            /* no need to decrypt because Sensitive attributes
+             * cannot be changed via this function */
+            let mut obj = self.object_from_storage(uid, false)?;
+            self.object_factories
+                .set_object_attributes(&mut obj, template)?;
+            self.object_to_storage(obj, false)
         }
-        let mut obj = self.storage.fetch_by_uid(uid)?;
-        self.object_factories
-            .set_object_attributes(&mut obj, template)?;
-        self.storage.store(uid, obj)
     }
 
     pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
@@ -1079,7 +1203,7 @@ impl Token {
                 if let Some(o) = self.session_objects.get(&o_handle) {
                     o.rough_size()
                 } else {
-                    self.storage.fetch_by_uid(s)?.rough_size()
+                    self.object_from_storage(s, false)?.rough_size()
                 }
             }
             None => err_rv!(CKR_OBJECT_HANDLE_INVALID),
@@ -1098,7 +1222,7 @@ impl Token {
                 if let Some(o) = self.session_objects.get_mut(&o_handle) {
                     Cow::Borrowed(o)
                 } else {
-                    Cow::Owned(self.storage.fetch_by_uid(uid)?)
+                    Cow::Owned(self.object_from_storage(uid, true)?)
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
