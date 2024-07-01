@@ -274,26 +274,24 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> KResult<RsaOaepParams> {
         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
     }
     let oaep_params = mech.pParameter as *const CK_RSA_PKCS_OAEP_PARAMS;
-    let source = match unsafe { (*oaep_params).source } {
+    let p = unsafe { *oaep_params };
+    let source = match p.source {
         0 => {
-            if unsafe { (*oaep_params).ulSourceDataLen } != 0 {
+            if p.ulSourceDataLen != 0 {
                 return err_rv!(CKR_MECHANISM_PARAM_INVALID);
             }
             None
         }
-        CKZ_DATA_SPECIFIED => match unsafe { (*oaep_params).ulSourceDataLen } {
+        CKZ_DATA_SPECIFIED => match p.ulSourceDataLen {
             0 => None,
-            _ => Some(bytes_to_vec!(
-                unsafe { (*oaep_params).pSourceData },
-                unsafe { (*oaep_params).ulSourceDataLen }
-            )),
+            _ => Some(bytes_to_vec!(p.pSourceData, p.ulSourceDataLen)),
         },
         _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
     };
 
     Ok(RsaOaepParams {
-        hash: unsafe { (*oaep_params).hashAlg },
-        mgf: unsafe { (*oaep_params).mgf },
+        hash: p.hashAlg,
+        mgf: p.mgf,
         source: source,
     })
 }
