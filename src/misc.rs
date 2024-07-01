@@ -8,12 +8,16 @@ macro_rules! bytes_to_vec {
     ($ptr:expr, $len:expr) => {{
         let ptr = $ptr as *const u8;
         let size = $len as usize;
-        let mut v = Vec::<u8>::with_capacity(size);
-        unsafe {
-            std::ptr::copy_nonoverlapping(ptr, v.as_mut_ptr(), size);
-            v.set_len(size);
+        if ptr == std::ptr::null_mut() || size == 0 {
+            Vec::new()
+        } else {
+            let mut v = Vec::<u8>::with_capacity(size);
+            unsafe {
+                std::ptr::copy_nonoverlapping(ptr, v.as_mut_ptr(), size);
+                v.set_len(size);
+            }
+            v
         }
-        v
     }};
 }
 
