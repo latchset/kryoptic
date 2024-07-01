@@ -40,7 +40,7 @@ fn bad_storage<T>(_error: T) -> KError {
 const IS_DB_INITIALIZED: &str =
     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='objects'";
 const DROP_DB_TABLE: &str = "DROP TABLE objects";
-const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, enc int, UNIQUE (id, attr))";
+const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr))";
 
 /* search by filter constants */
 const SEARCH_ALL: &str = "SELECT * FROM objects";
@@ -51,7 +51,7 @@ const SEARCH_CLOSE: &str = " )";
 const SEARCH_ORDER: &str = " ORDER by id";
 
 const SEARCH_BY_SINGLE_ATTR: &str = "SELECT * FROM objects WHERE id IN (SELECT id FROM objects WHERE attr = ? AND val = ?)";
-const UPDATE_ATTR: &str = "INSERT OR REPLACE INTO objects VALUES (?, ?, ?, ?)";
+const UPDATE_ATTR: &str = "INSERT OR REPLACE INTO objects VALUES (?, ?, ?)";
 const DELETE_OBJ: &str = "DELETE FROM objects WHERE id = ?";
 const MAX_ID: &str = "SELECT IFNULL(MAX(id), 0) FROM objects";
 
@@ -92,7 +92,6 @@ impl SqliteStorage {
             let id: i32 = row.get(0).map_err(bad_storage)?;
             let atype: CK_ULONG = row.get(1).map_err(bad_storage)?;
             let val = row.get_ref(2).map_err(bad_storage)?;
-            /* TODO: enc */
             if objid != id {
                 objid = id;
                 objects.push(Object::new());
@@ -237,9 +236,8 @@ impl SqliteStorage {
                 AttrType::DateType => Value::from(a.to_date_string()?),
                 AttrType::DenyType | AttrType::IgnoreType => continue,
             };
-            let col_enc = Value::from(0);
             let _ = stmt
-                .execute(params!(col_id, col_attr, col_val, col_enc))
+                .execute(params!(col_id, col_attr, col_val))
                 .map_err(bad_storage)?;
         }
         Ok(())
