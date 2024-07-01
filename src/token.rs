@@ -1,6 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -812,17 +813,12 @@ impl Token {
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
         let is_logged = self.is_logged_in(KRY_UNSPEC);
-        let mut t: Option<Object> = None;
-        let obj: &mut Object = match self.handles.get(o_handle) {
+        let obj = match self.handles.get(o_handle) {
             Some(uid) => {
-                if let Some(o) = self.session_objects.get_mut(&o_handle) {
-                    o
+                if let Some(o) = self.session_objects.get(&o_handle) {
+                    Cow::Borrowed(o)
                 } else {
-                    t = Some(self.storage.fetch_by_uid(uid)?);
-                    match t {
-                        Some(ref mut tr) => tr,
-                        None => return err_rv!(CKR_GENERAL_ERROR),
-                    }
+                    Cow::Owned(self.storage.fetch_by_uid(uid)?)
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
@@ -899,17 +895,12 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
-        let mut t: Option<Object> = None;
-        let obj: &mut Object = match self.handles.get(o_handle) {
-            Some(s) => {
+        let obj: Cow<'_, Object> = match self.handles.get(o_handle) {
+            Some(uid) => {
                 if let Some(o) = self.session_objects.get_mut(&o_handle) {
-                    o
+                    Cow::Borrowed(o)
                 } else {
-                    t = Some(self.storage.fetch_by_uid(s)?);
-                    match t {
-                        Some(ref mut tr) => tr,
-                        None => return err_rv!(CKR_GENERAL_ERROR),
-                    }
+                    Cow::Owned(self.storage.fetch_by_uid(uid)?)
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
