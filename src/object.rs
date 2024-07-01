@@ -58,7 +58,6 @@ pub struct Object {
     handle: CK_OBJECT_HANDLE,
     session: CK_SESSION_HANDLE,
     attributes: Vec<Attribute>,
-    modified: bool,
     zeroize: bool,
 }
 
@@ -78,7 +77,6 @@ impl Object {
             handle: CK_INVALID_HANDLE,
             session: CK_INVALID_HANDLE,
             attributes: Vec::new(),
-            modified: false,
             zeroize: false,
         }
     }
@@ -96,7 +94,6 @@ impl Object {
             let uuid = Uuid::new_v4().to_string();
             self.attributes
                 .push(attribute::from_string(CKA_UNIQUE_ID, uuid));
-            self.modified = true;
         }
     }
 
@@ -109,7 +106,6 @@ impl Object {
             }
             obj.attributes.push(attr.clone());
         }
-        obj.modified = true;
         Ok(obj)
     }
 
@@ -119,14 +115,6 @@ impl Object {
 
     pub fn get_handle(&self) -> CK_OBJECT_HANDLE {
         self.handle
-    }
-
-    pub fn reset_modified(&mut self) {
-        self.modified = false;
-    }
-
-    pub fn is_modified(&self) -> bool {
-        self.modified
     }
 
     pub fn set_session(&mut self, s: CK_SESSION_HANDLE) {
@@ -155,7 +143,6 @@ impl Object {
             Some(idx) => self.attributes[idx] = a,
             None => self.attributes.push(a),
         }
-        self.modified = true;
         Ok(())
     }
 
@@ -169,7 +156,6 @@ impl Object {
             }
             None => {
                 self.attributes.push(a);
-                self.modified = true;
             }
         }
         Ok(true)
@@ -178,7 +164,6 @@ impl Object {
     #[allow(dead_code)]
     pub fn del_attr(&mut self, ck_type: CK_ULONG) {
         self.attributes.retain(|a| a.get_type() != ck_type);
-        self.modified = true;
     }
 
     pub fn get_attributes(&self) -> &Vec<Attribute> {
