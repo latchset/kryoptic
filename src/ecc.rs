@@ -56,6 +56,7 @@ fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
     }
 }
 
+#[cfg(test)]
 pub fn curve_name_to_ec_params(name: &'static str) -> KResult<&'static [u8]> {
     match name {
         NAME_SECP256R1 => Ok(STRING_SECP256R1),
@@ -65,6 +66,7 @@ pub fn curve_name_to_ec_params(name: &'static str) -> KResult<&'static [u8]> {
     }
 }
 
+#[cfg(test)]
 pub fn name_to_bits(name: &'static str) -> KResult<usize> {
     match name {
         NAME_SECP256R1 => Ok(BITS_SECP256R1),

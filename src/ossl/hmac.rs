@@ -11,7 +11,6 @@ struct HMACOperation {
     outputlen: usize,
     maclen: usize,
     _key: HashKey,
-    _mac: EvpMac,
     ctx: EvpMacCtx,
 }
 
@@ -21,22 +20,7 @@ impl HMACOperation {
         key: HashKey,
         outputlen: usize,
     ) -> KResult<HMACOperation> {
-        let mut mac = match EvpMac::from_ptr(unsafe {
-            EVP_MAC_fetch(
-                get_libctx(),
-                name_as_char(OSSL_MAC_NAME_HMAC),
-                std::ptr::null(),
-            )
-        }) {
-            Ok(em) => em,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-        let mut ctx = match EvpMacCtx::from_ptr(unsafe {
-            EVP_MAC_CTX_new(mac.as_mut_ptr())
-        }) {
-            Ok(emc) => emc,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
+        let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
         let params = OsslParam::new()
             .add_const_c_string(
                 name_as_char(OSSL_MAC_PARAM_DIGEST),
@@ -61,7 +45,6 @@ impl HMACOperation {
             outputlen: outputlen,
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
             _key: key,
-            _mac: mac,
             ctx: ctx,
         })
     }

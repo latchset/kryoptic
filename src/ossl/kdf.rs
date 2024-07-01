@@ -408,23 +408,7 @@ impl Derive for Sp800Operation {
             self.addl_objects.push(obj);
         }
 
-        let mut kdf = match EvpKdf::from_ptr(unsafe {
-            EVP_KDF_fetch(
-                get_libctx(),
-                name_as_char(OSSL_KDF_NAME_KBKDF),
-                std::ptr::null(),
-            )
-        }) {
-            Ok(ek) => ek,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-        let mut kctx = match EvpKdfCtx::from_ptr(unsafe {
-            EVP_KDF_CTX_new(kdf.as_mut_ptr())
-        }) {
-            Ok(ekc) => ekc,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-
+        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_KBKDF))?;
         let mut dkm = vec![0u8; slen];
         let res = unsafe {
             EVP_KDF_derive(

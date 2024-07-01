@@ -160,6 +160,38 @@ impl Handles {
     }
 }
 
+/* Sow = Silly Object Wrapper */
+struct Sow<'a, T> {
+    ro: Option<&'a T>,
+    vo: Option<T>,
+}
+
+impl<T> Sow<'_, T> {
+    pub fn from_ref<'a>(ro: &'a T) -> Sow<'a, T> {
+        Sow {
+            ro: Some(ro),
+            vo: None,
+        }
+    }
+
+    pub fn from_val(vo: T) -> Sow<'static, T> {
+        Sow {
+            ro: None,
+            vo: Some(vo),
+        }
+    }
+
+    pub fn get_ref(&self) -> &T {
+        if let Some(o) = self.ro {
+            o
+        } else if let Some(ref o) = self.vo {
+            o
+        } else {
+            panic!()
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
@@ -812,21 +844,17 @@ impl Token {
         template: &mut [CK_ATTRIBUTE],
     ) -> KResult<()> {
         let is_logged = self.is_logged_in(KRY_UNSPEC);
-        let mut t: Option<Object> = None;
-        let obj: &mut Object = match self.handles.get(o_handle) {
+        let sow = match self.handles.get(o_handle) {
             Some(uid) => {
-                if let Some(o) = self.session_objects.get_mut(&o_handle) {
-                    o
+                if let Some(o) = self.session_objects.get(&o_handle) {
+                    Sow::from_ref(o)
                 } else {
-                    t = Some(self.storage.fetch_by_uid(uid)?);
-                    match t {
-                        Some(ref mut tr) => tr,
-                        None => return err_rv!(CKR_GENERAL_ERROR),
-                    }
+                    Sow::from_val(self.storage.fetch_by_uid(uid)?)
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
+        let obj = sow.get_ref();
         if !is_logged && obj.is_private() {
             /* do not reveal if the object exists or not */
             return err_rv!(CKR_OBJECT_HANDLE_INVALID);
@@ -899,21 +927,17 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
-        let mut t: Option<Object> = None;
-        let obj: &mut Object = match self.handles.get(o_handle) {
-            Some(s) => {
+        let sow = match self.handles.get(o_handle) {
+            Some(uid) => {
                 if let Some(o) = self.session_objects.get_mut(&o_handle) {
-                    o
+                    Sow::from_ref(o)
                 } else {
-                    t = Some(self.storage.fetch_by_uid(s)?);
-                    match t {
-                        Some(ref mut tr) => tr,
-                        None => return err_rv!(CKR_GENERAL_ERROR),
-                    }
+                    Sow::from_val(self.storage.fetch_by_uid(uid)?)
                 }
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
+        let obj = sow.get_ref();
         if !is_logged_in && obj.is_private() {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
@@ -926,7 +950,6 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
-        let mut needs_handle = Vec::<String>::new();
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
 
         /* First add internal session objects */
