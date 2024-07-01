@@ -926,7 +926,6 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
-        let mut needs_handle = Vec::<String>::new();
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
 
         /* First add internal session objects */
