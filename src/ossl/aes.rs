@@ -243,11 +243,7 @@ impl AesOperation {
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: datalen,
-                    aad: if aadlen > 0 {
-                        bytes_to_vec!(aad, aadlen)
-                    } else {
-                        Vec::new()
-                    },
+                    aad: bytes_to_vec!(aad, aadlen),
                     taglen: maclen,
                 })
             }
@@ -284,11 +280,7 @@ impl AesOperation {
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
-                    aad: if aadlen > 0 {
-                        bytes_to_vec!(aad, aadlen)
-                    } else {
-                        Vec::new()
-                    },
+                    aad: bytes_to_vec!(aad, aadlen),
                     taglen: (tagbits + 7) / 8,
                 })
             }
