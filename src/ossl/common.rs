@@ -263,7 +263,7 @@ impl OsslParam {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
-        if key == std::ptr::null() || v.len() == 0 {
+        if key == std::ptr::null() {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 

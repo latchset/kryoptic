@@ -377,11 +377,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Object> {
-        self.internal_object_create(
+        let mut key = self.internal_object_create(
             template,
             OAFlags::SettableOnlyOnCreate,
             OAFlags::RequiredOnGenerate,
-        )
+        )?;
+        key.set_zeroize();
+        Ok(key)
     }
 
     fn default_object_unwrap(
@@ -1231,6 +1233,28 @@ impl ObjectFactories {
             }
         }
         Ok(())
+    }
+
+    pub fn get_sensitive_attrs(
+        &self,
+        obj: &Object,
+    ) -> KResult<Vec<CK_ATTRIBUTE_TYPE>> {
+        let mut v = Vec::<CK_ATTRIBUTE_TYPE>::new();
+        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
+        for attr in &obj.attributes {
+            match objtype_attrs
+                .iter()
+                .find(|a| a.get_type() == attr.get_type())
+            {
+                None => (),
+                Some(a) => {
+                    if a.is(OAFlags::Sensitive) {
+                        v.push(a.get_type());
+                    }
+                }
+            }
+        }
+        Ok(v)
     }
 
     pub fn get_object_attributes(

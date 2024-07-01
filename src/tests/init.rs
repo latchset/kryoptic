@@ -190,8 +190,6 @@ fn test_init_token() {
     );
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_logout(session);
-    assert_eq!(ret, CKR_OK);
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 

@@ -40,7 +40,7 @@ fn bad_storage<T>(_error: T) -> KError {
 const IS_DB_INITIALIZED: &str =
     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='objects'";
 const DROP_DB_TABLE: &str = "DROP TABLE objects";
-const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, enc int, UNIQUE (id, attr))";
+const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr))";
 
 /* search by filter constants */
 const SEARCH_ALL: &str = "SELECT * FROM objects";
@@ -92,7 +92,6 @@ impl SqliteStorage {
             let id: i32 = row.get(0).map_err(bad_storage)?;
             let atype: CK_ULONG = row.get(1).map_err(bad_storage)?;
             let val = row.get_ref(2).map_err(bad_storage)?;
-            /* TODO: enc */
             if objid != id {
                 objid = id;
                 objects.push(Object::new());

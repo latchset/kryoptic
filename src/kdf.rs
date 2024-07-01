@@ -743,17 +743,10 @@ impl Mechanism for PBKDF2Mechanism {
                 CKP_PKCS5_PBKD2_HMAC_SHA512 => CKM_SHA512_HMAC,
                 _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             },
-            pass: {
-                if params.pPassword == std::ptr::null_mut()
-                    || params.ulPasswordLen == 0
-                {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-                }
-                self.mock_password_object(bytes_to_vec!(
-                    params.pPassword,
-                    params.ulPasswordLen
-                ))?
-            },
+            pass: self.mock_password_object(bytes_to_vec!(
+                params.pPassword,
+                params.ulPasswordLen
+            ))?,
             salt: match params.saltSource {
                 CKZ_SALT_SPECIFIED => {
                     if params.pSaltSourceData == std::ptr::null_mut()

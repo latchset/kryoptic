@@ -38,7 +38,7 @@ macro_rules! attrmap_element {
     };
 }
 
-static ATTRMAP: [Attrmap<'_>; 134] = [
+static ATTRMAP: [Attrmap<'_>; 135] = [
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -169,6 +169,7 @@ static ATTRMAP: [Attrmap<'_>; 134] = [
     attrmap_element!(CKA_HSS_LMOTS_TYPES; as BytesType),
     attrmap_element!(CKA_HSS_KEYS_REMAINING; as NumType),
     attrmap_element!(KRA_MAX_LOGIN_ATTEMPTS; as NumType),
+    attrmap_element!(KRA_LOGIN_ATTEMPTS; as NumType),
     attrmap_element!(KRA_FLAGS; as NumType),
     attrmap_element!(KRA_MANUFACTURER_ID; as StringType),
     attrmap_element!(KRA_MODEL; as StringType),
@@ -517,8 +518,19 @@ impl CK_ATTRIBUTE {
     ) -> CK_ATTRIBUTE {
         CK_ATTRIBUTE {
             type_: type_,
-            pValue: value as *const u64 as *mut std::ffi::c_void,
+            pValue: value as *const CK_ULONG as *mut std::ffi::c_void,
             ulValueLen: std::mem::size_of::<CK_ULONG>() as CK_ULONG,
+        }
+    }
+
+    pub fn from_bool<'a>(
+        type_: CK_ATTRIBUTE_TYPE,
+        value: &'a CK_BBOOL,
+    ) -> CK_ATTRIBUTE {
+        CK_ATTRIBUTE {
+            type_: type_,
+            pValue: value as *const CK_BBOOL as *mut std::ffi::c_void,
+            ulValueLen: std::mem::size_of::<CK_BBOOL>() as CK_ULONG,
         }
     }
 }

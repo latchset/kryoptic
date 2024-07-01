@@ -63,6 +63,24 @@ fn test_login(name: &str) {
     let mut token_info = CK_TOKEN_INFO::default();
     let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
     assert_eq!(ret, CKR_OK);
+    assert_eq!(token_info.flags & pin_flags_mask, 0);
+
+    /* fail a few more time to brig the count to low */
+    for _ in 1..7 {
+        let pin = "87654321";
+        let ret = fn_login(
+            session,
+            CKU_USER,
+            pin.as_ptr() as *mut _,
+            pin.len() as CK_ULONG,
+        );
+        assert_ne!(ret, CKR_OK);
+    }
+
+    /* check pin flags */
+    let mut token_info = CK_TOKEN_INFO::default();
+    let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
+    assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, CKF_USER_PIN_COUNT_LOW);
 
     /* login */
