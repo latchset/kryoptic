@@ -75,16 +75,6 @@ fn make_output_length_from_obj(key: &Object) -> KResult<usize> {
     Ok(2 * ((bits + 7) / 8))
 }
 
-fn new_pkey_ctx() -> KResult<EvpPkeyCtx> {
-    Ok(EvpPkeyCtx::from_ptr(unsafe {
-        EVP_PKEY_CTX_new_from_name(
-            get_libctx(),
-            name_as_char(EC_NAME),
-            std::ptr::null(),
-        )
-    })?)
-}
-
 fn get_curve_name_from_obj(key: &Object) -> KResult<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
@@ -123,30 +113,18 @@ fn make_ecc_public_key(
     curve_name: &Vec<u8>,
     ec_point: &Vec<u8>,
 ) -> KResult<EvpPkey> {
-    let mut params = OsslParam::with_capacity(3)
-        .set_zeroize()
-        .add_utf8_string(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME), curve_name)?
-        .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?
-        .finalize();
-
-    let mut ctx = new_pkey_ctx()?;
-    let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-    let res = unsafe {
-        EVP_PKEY_fromdata(
-            ctx.as_mut_ptr(),
-            &mut pkey,
-            EVP_PKEY_PUBLIC_KEY as i32,
-            params.as_mut_ptr(),
-        )
-    };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    EvpPkey::from_ptr(pkey)
+    EvpPkey::fromdata(
+        name_as_char(EC_NAME),
+        EVP_PKEY_PUBLIC_KEY,
+        &OsslParam::with_capacity(3)
+            .set_zeroize()
+            .add_utf8_string(
+                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+                curve_name,
+            )?
+            .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?
+            .finalize(),
+    )
 }
 
 /// Convert the PKCS #11 public key object to OpenSSL EVP_PKEY
@@ -159,35 +137,22 @@ fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
 
 /// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
 fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
-    let curve_name = get_curve_name_from_obj(key)?;
-    let mut params = OsslParam::with_capacity(3)
-        .set_zeroize()
-        .add_utf8_string(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME), &curve_name)?
-        .add_bn_from_obj(
-            key,
-            CKA_VALUE,
-            name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
-        )?
-        .finalize();
-
-    let mut ctx = new_pkey_ctx()?;
-    let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-    let res = unsafe {
-        EVP_PKEY_fromdata(
-            ctx.as_mut_ptr(),
-            &mut pkey,
-            EVP_PKEY_PRIVATE_KEY as i32,
-            params.as_mut_ptr(),
-        )
-    };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    EvpPkey::from_ptr(pkey)
+    EvpPkey::fromdata(
+        name_as_char(EC_NAME),
+        EVP_PKEY_PRIVATE_KEY,
+        &OsslParam::with_capacity(3)
+            .set_zeroize()
+            .add_utf8_string(
+                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+                &get_curve_name_from_obj(key)?,
+            )?
+            .add_bn_from_obj(
+                key,
+                CKA_VALUE,
+                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+            )?
+            .finalize(),
+    )
 }
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
@@ -314,7 +279,7 @@ impl EccOperation {
                 #[cfg(feature = "fips")]
                 _ => Some(ProviderSignatureCtx::new(name_as_char(ECDSA_NAME))?),
                 #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
+                _ => Some(EvpMdCtx::new()?),
             },
         })
     }
@@ -336,7 +301,7 @@ impl EccOperation {
                 #[cfg(feature = "fips")]
                 _ => Some(ProviderSignatureCtx::new(name_as_char(ECDSA_NAME))?),
                 #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
+                _ => Some(EvpMdCtx::new()?),
             },
         })
     }
@@ -345,32 +310,17 @@ impl EccOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> KResult<()> {
-        let mut ctx = new_pkey_ctx()?;
-        let res = unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let curve_name = get_curve_name_from_obj(pubkey)?;
-        let params = OsslParam::with_capacity(2)
-            .add_utf8_string(
-                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-                &curve_name,
-            )?
-            .finalize();
-        let res = unsafe {
-            EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-        let res = unsafe { EVP_PKEY_generate(ctx.as_mut_ptr(), &mut pkey) };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let evp_pkey = EvpPkey::from_ptr(pkey)?;
-        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
+        let evp_pkey = EvpPkey::generate(
+            name_as_char(EC_NAME),
+            &OsslParam::with_capacity(2)
+                .add_utf8_string(
+                    name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+                    &get_curve_name_from_obj(pubkey)?,
+                )?
+                .finalize(),
+        )?;
 
+        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
         let res = unsafe {
             EVP_PKEY_todata(
                 evp_pkey.as_ptr(),
@@ -419,13 +369,7 @@ impl Sign for EccOperation {
             if signature.len() != self.output_len {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
-            let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
-                EVP_PKEY_CTX_new_from_pkey(
-                    get_libctx(),
-                    self.private_key.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                )
-            })?;
+            let mut ctx = self.private_key.new_ctx()?;
             let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
@@ -588,13 +532,7 @@ impl Verify for EccOperation {
             if signature.len() != self.output_len {
                 return err_rv!(CKR_GENERAL_ERROR); // already checked in fn_verify
             }
-            let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
-                EVP_PKEY_CTX_new_from_pkey(
-                    get_libctx(),
-                    self.public_key.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                )
-            })?;
+            let mut ctx = self.public_key.new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
@@ -716,16 +654,6 @@ impl Verify for EccOperation {
     }
 }
 
-fn new_pkey_ctx_from_obj(pkey: &mut EvpPkey) -> KResult<EvpPkeyCtx> {
-    Ok(EvpPkeyCtx::from_ptr(unsafe {
-        EVP_PKEY_CTX_new_from_pkey(
-            get_libctx(),
-            pkey.as_mut_ptr(),
-            std::ptr::null(),
-        )
-    })?)
-}
-
 fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> KResult<CK_MECHANISM_TYPE> {
     match mech {
         CKD_SHA1_KDF => Ok(CKM_SHA_1),
@@ -764,8 +692,6 @@ impl Derive for ECDHOperation {
         )?;
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
-
-        let curve_name = get_curve_name_from_obj(key)?;
 
         /* the raw ECDH results have length of bit field length */
         let raw_max = make_output_length_from_obj(key)?;
@@ -825,7 +751,7 @@ impl Derive for ECDHOperation {
         params = params.finalize();
 
         let mut pkey = object_to_ecc_private_key(key)?;
-        let mut ctx = new_pkey_ctx_from_obj(&mut pkey)?;
+        let mut ctx = pkey.new_ctx()?;
         let res = unsafe {
             EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
         };
@@ -834,7 +760,8 @@ impl Derive for ECDHOperation {
         }
 
         /* Import peer key */
-        let mut peer = make_ecc_public_key(&curve_name, &self.public)?;
+        let mut peer =
+            make_ecc_public_key(&get_curve_name_from_obj(key)?, &self.public)?;
 
         let res = unsafe {
             EVP_PKEY_derive_set_peer(ctx.as_mut_ptr(), peer.as_mut_ptr())

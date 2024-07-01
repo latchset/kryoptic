@@ -14,17 +14,10 @@ pub struct HashState {
 
 impl HashState {
     pub fn new(alg: &[u8]) -> KResult<HashState> {
-        unsafe {
-            let libctx = get_libctx();
-            Ok(HashState {
-                md: EvpMd::from_ptr(EVP_MD_fetch(
-                    libctx,
-                    alg.as_ptr() as *const c_char,
-                    std::ptr::null_mut(),
-                ))?,
-                ctx: EvpMdCtx::from_ptr(EVP_MD_CTX_new())?,
-            })
-        }
+        Ok(HashState {
+            md: EvpMd::new(alg.as_ptr() as *const c_char)?,
+            ctx: EvpMdCtx::new()?,
+        })
     }
 }
 

@@ -8,36 +8,29 @@ use interface::*;
 use core::ffi::c_int;
 use core::ffi::c_uint;
 
-macro_rules! ptr_wrapper {
-    ($name:ident; $ossl:ident; $free:expr) => {
+macro_rules! ptr_wrapper_struct {
+    ($name:ident; $ossl:ident) => {
         #[derive(Debug)]
         pub struct $name {
             ptr: *mut $ossl,
         }
+    };
+}
 
-        impl $name {
-            pub fn from_ptr(ptr: *mut $ossl) -> KResult<$name> {
-                if ptr.is_null() {
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-                Ok($name { ptr: ptr })
-            }
-
-            pub fn empty() -> $name {
-                $name {
-                    ptr: std::ptr::null_mut(),
-                }
-            }
-
-            pub fn as_ptr(&self) -> *const $ossl {
-                self.ptr
-            }
-
-            pub fn as_mut_ptr(&mut self) -> *mut $ossl {
-                self.ptr
-            }
+macro_rules! ptr_wrapper_returns {
+    ($ossl:ident) => {
+        pub unsafe fn as_ptr(&self) -> *const $ossl {
+            self.ptr
         }
 
+        pub unsafe fn as_mut_ptr(&mut self) -> *mut $ossl {
+            self.ptr
+        }
+    };
+}
+
+macro_rules! ptr_wrapper_tail {
+    ($name:ident; $free:expr) => {
         impl Drop for $name {
             fn drop(&mut self) {
                 unsafe {
@@ -51,17 +44,234 @@ macro_rules! ptr_wrapper {
     };
 }
 
-ptr_wrapper!(EvpMd; EVP_MD; EVP_MD_free);
-ptr_wrapper!(EvpPkey; EVP_PKEY; EVP_PKEY_free);
-ptr_wrapper!(EvpPkeyCtx; EVP_PKEY_CTX; EVP_PKEY_CTX_free);
-ptr_wrapper!(EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_free);
-ptr_wrapper!(BigNum; BIGNUM; BN_free);
-ptr_wrapper!(EvpCipherCtx; EVP_CIPHER_CTX; EVP_CIPHER_CTX_free);
-ptr_wrapper!(EvpCipher; EVP_CIPHER; EVP_CIPHER_free);
-ptr_wrapper!(EvpKdfCtx; EVP_KDF_CTX; EVP_KDF_CTX_free);
-ptr_wrapper!(EvpKdf; EVP_KDF; EVP_KDF_free);
-ptr_wrapper!(EvpMacCtx; EVP_MAC_CTX; EVP_MAC_CTX_free);
-ptr_wrapper!(EvpMac; EVP_MAC; EVP_MAC_free);
+macro_rules! ptr_wrapper {
+    (ctx; $name:ident; $ossl:ident; $newctx:ident; $free:expr) => {
+        ptr_wrapper_struct!($name; $ossl);
+
+        impl $name {
+            pub fn new() -> KResult<$name> {
+                let ptr = unsafe {
+                    $newctx()
+                };
+                if ptr.is_null() {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                Ok($name { ptr: ptr })
+            }
+
+            ptr_wrapper_returns!($ossl);
+        }
+
+        ptr_wrapper_tail!($name; $free);
+    };
+
+    (ctx_from_name; $name:ident; $ossl:ident; $newctx:ident; $free:expr; $in_ossl:ident; $in_fetch:ident; $in_free:ident) => {
+        ptr_wrapper_struct!($name; $ossl);
+
+        impl $name {
+            pub fn new(name: *const c_char) -> KResult<$name> {
+                let arg = unsafe {
+                    $in_fetch(get_libctx(), name, std::ptr::null_mut())
+                };
+                if arg.is_null() {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                let ptr = unsafe {
+                    /* This is safe and requires no lifetimes because all _CTX_new()
+                     * functions in OpenSSL take a reference on the argument */
+                    $newctx(arg)
+                };
+                unsafe {
+                    $in_free(arg);
+                }
+                if ptr.is_null() {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                Ok($name { ptr: ptr })
+            }
+
+            ptr_wrapper_returns!($ossl);
+        }
+
+        ptr_wrapper_tail!($name; $free);
+    };
+
+    (fetch; $name:ident; $ossl:ident; $fetch:ident; $free:expr) => {
+        ptr_wrapper_struct!($name; $ossl);
+
+        impl $name {
+            pub fn new(name: *const c_char) -> KResult<$name> {
+                let ptr = unsafe {
+                    $fetch(get_libctx(), name, std::ptr::null_mut())
+                };
+                if ptr.is_null() {
+                    return err_rv!(CKR_DEVICE_ERROR);
+                }
+                Ok($name { ptr: ptr })
+            }
+
+            ptr_wrapper_returns!($ossl);
+        }
+
+        ptr_wrapper_tail!($name; $free);
+    }
+}
+
+ptr_wrapper!(ctx; EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_new; EVP_MD_CTX_free);
+ptr_wrapper!(ctx; EvpCipherCtx; EVP_CIPHER_CTX; EVP_CIPHER_CTX_new; EVP_CIPHER_CTX_free);
+
+ptr_wrapper!(ctx_from_name; EvpKdfCtx; EVP_KDF_CTX; EVP_KDF_CTX_new; EVP_KDF_CTX_free; EvpKdf; EVP_KDF_fetch; EVP_KDF_free);
+ptr_wrapper!(ctx_from_name; EvpMacCtx; EVP_MAC_CTX; EVP_MAC_CTX_new; EVP_MAC_CTX_free; EvpMac; EVP_MAC_fetch; EVP_MAC_free);
+
+ptr_wrapper!(fetch; EvpMd; EVP_MD; EVP_MD_fetch; EVP_MD_free);
+ptr_wrapper!(fetch; EvpCipher; EVP_CIPHER; EVP_CIPHER_fetch; EVP_CIPHER_free);
+
+#[derive(Debug)]
+pub struct EvpPkeyCtx {
+    ptr: *mut EVP_PKEY_CTX,
+}
+
+impl EvpPkeyCtx {
+    pub fn new(name: *const c_char) -> KResult<EvpPkeyCtx> {
+        let ptr = unsafe {
+            EVP_PKEY_CTX_new_from_name(get_libctx(), name, std::ptr::null())
+        };
+        if ptr.is_null() {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        Ok(EvpPkeyCtx { ptr: ptr })
+    }
+
+    pub unsafe fn from_ptr(ptr: *mut EVP_PKEY_CTX) -> KResult<EvpPkeyCtx> {
+        if ptr.is_null() {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        Ok(EvpPkeyCtx { ptr: ptr })
+    }
+
+    /*
+    pub fn empty() -> EvpPkeyCtx {
+        EvpPkeyCtx {
+            ptr: std::ptr::null_mut(),
+        }
+    }
+    */
+
+    pub fn as_ptr(&self) -> *const EVP_PKEY_CTX {
+        self.ptr
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut EVP_PKEY_CTX {
+        self.ptr
+    }
+}
+
+impl Drop for EvpPkeyCtx {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_PKEY_CTX_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpPkeyCtx {}
+unsafe impl Sync for EvpPkeyCtx {}
+
+#[derive(Debug)]
+pub struct EvpPkey {
+    ptr: *mut EVP_PKEY,
+}
+
+impl EvpPkey {
+    pub fn fromdata(
+        pkey_name: *const c_char,
+        pkey_type: u32,
+        params: &OsslParam,
+    ) -> KResult<EvpPkey> {
+        let mut ctx = EvpPkeyCtx::new(pkey_name)?;
+        let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
+        let res = unsafe {
+            EVP_PKEY_fromdata(
+                ctx.as_mut_ptr(),
+                &mut pkey,
+                pkey_type as i32,
+                params.as_ptr() as *mut OSSL_PARAM,
+            )
+        };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        Ok(EvpPkey { ptr: pkey })
+    }
+
+    pub fn generate(
+        pkey_name: *const c_char,
+        params: &OsslParam,
+    ) -> KResult<EvpPkey> {
+        let mut ctx = EvpPkeyCtx::new(pkey_name)?;
+        let res = unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let res = unsafe {
+            EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
+        };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
+        let res = unsafe { EVP_PKEY_generate(ctx.as_mut_ptr(), &mut pkey) };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        Ok(EvpPkey { ptr: pkey })
+    }
+
+    pub fn empty() -> EvpPkey {
+        EvpPkey {
+            ptr: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn new_ctx(&mut self) -> KResult<EvpPkeyCtx> {
+        /* this function takes care of checking for NULL */
+        unsafe {
+            EvpPkeyCtx::from_ptr(
+                /* this function will use refcounting to keep EVP_PKEY
+                 * alive for the lifetime of the context, so it is ok
+                 * to not use rust lifetimes here */
+                EVP_PKEY_CTX_new_from_pkey(
+                    get_libctx(),
+                    self.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                ),
+            )
+        }
+    }
+
+    pub fn as_ptr(&self) -> *const EVP_PKEY {
+        self.ptr
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut EVP_PKEY {
+        self.ptr
+    }
+}
+
+impl Drop for EvpPkey {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_PKEY_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpPkey {}
+unsafe impl Sync for EvpPkey {}
 
 pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
 pub const CIPHER_NAME_AES192: &[u8; 7] = b"AES192\0";
@@ -371,12 +581,11 @@ impl OsslParam {
         if unsafe { OSSL_PARAM_get_BN(p, &mut bn) } != 1 {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        let big_num = BigNum::from_ptr(bn)?;
-        let len = bn_num_bytes(big_num.as_ptr());
+        let len = bn_num_bytes(bn as *const BIGNUM);
         let mut vec = Vec::<u8>::with_capacity(len);
         if unsafe {
             BN_bn2bin(
-                big_num.as_ptr(),
+                bn as *const BIGNUM,
                 vec.as_mut_ptr() as *mut std::os::raw::c_uchar,
             ) as usize
         } != len
