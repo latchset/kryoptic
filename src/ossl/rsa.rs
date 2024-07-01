@@ -69,45 +69,24 @@ pub fn rsa_import(obj: &mut Object) -> KResult<()> {
     Ok(())
 }
 
-fn new_pkey_ctx() -> KResult<EvpPkeyCtx> {
-    Ok(EvpPkeyCtx::from_ptr(unsafe {
-        EVP_PKEY_CTX_new_from_name(
-            get_libctx(),
-            name_as_char(RSA_NAME),
-            std::ptr::null(),
-        )
-    })?)
-}
-
 fn object_to_rsa_public_key(key: &Object) -> KResult<EvpPkey> {
-    let mut params = OsslParam::with_capacity(3)
-        .set_zeroize()
-        .add_bn_from_obj(key, CKA_MODULUS, name_as_char(OSSL_PKEY_PARAM_RSA_N))?
-        .add_bn_from_obj(
-            key,
-            CKA_PUBLIC_EXPONENT,
-            name_as_char(OSSL_PKEY_PARAM_RSA_E),
-        )?
-        .finalize();
-
-    let mut ctx = new_pkey_ctx()?;
-    let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-    let res = unsafe {
-        EVP_PKEY_fromdata(
-            ctx.as_mut_ptr(),
-            &mut pkey,
-            EVP_PKEY_PUBLIC_KEY as i32,
-            params.as_mut_ptr(),
-        )
-    };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    EvpPkey::from_ptr(pkey)
+    EvpPkey::fromdata(
+        name_as_char(RSA_NAME),
+        EVP_PKEY_PUBLIC_KEY,
+        &OsslParam::with_capacity(3)
+            .set_zeroize()
+            .add_bn_from_obj(
+                key,
+                CKA_MODULUS,
+                name_as_char(OSSL_PKEY_PARAM_RSA_N),
+            )?
+            .add_bn_from_obj(
+                key,
+                CKA_PUBLIC_EXPONENT,
+                name_as_char(OSSL_PKEY_PARAM_RSA_E),
+            )?
+            .finalize(),
+    )
 }
 
 fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
@@ -164,25 +143,7 @@ fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
             )?;
     }
     params = params.finalize();
-
-    let mut ctx = new_pkey_ctx()?;
-    let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-    let res = unsafe {
-        EVP_PKEY_fromdata(
-            ctx.as_mut_ptr(),
-            &mut pkey,
-            EVP_PKEY_PRIVATE_KEY as i32,
-            params.as_mut_ptr(),
-        )
-    };
-    if res != 1 {
-        return err_rv!(CKR_DEVICE_ERROR);
-    }
-    EvpPkey::from_ptr(pkey)
+    EvpPkey::fromdata(name_as_char(RSA_NAME), EVP_PKEY_PRIVATE_KEY, &params)
 }
 
 fn mgf1_to_digest_name_as_slice(mech: CK_MECHANISM_TYPE) -> &'static [u8] {
@@ -492,7 +453,7 @@ impl RsaPKCSOperation {
                 #[cfg(feature = "fips")]
                 _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
                 #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
+                _ => Some(EvpMdCtx::new()?),
             },
             pss: pss_params,
             oaep: no_oaep_params(),
@@ -529,7 +490,7 @@ impl RsaPKCSOperation {
                 #[cfg(feature = "fips")]
                 _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
                 #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::from_ptr(unsafe { EVP_MD_CTX_new() })?),
+                _ => Some(EvpMdCtx::new()?),
             },
             pss: pss_params,
             oaep: no_oaep_params(),
@@ -542,38 +503,29 @@ impl RsaPKCSOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> KResult<()> {
-        let mut ctx = new_pkey_ctx()?;
         if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        if unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) } != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let params = OsslParam::with_capacity(3)
-            .add_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E), &exponent)?
-            .add_uint(name_as_char(OSSL_PKEY_PARAM_RSA_BITS), bits as c_uint)?
-            .finalize();
-        let res = unsafe {
-            EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
-        if unsafe { EVP_PKEY_generate(ctx.as_mut_ptr(), &mut pkey) } != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        let evp_pkey = EvpPkey::from_ptr(pkey)?;
-        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
+        let evp_pkey = EvpPkey::generate(
+            name_as_char(RSA_NAME),
+            &OsslParam::with_capacity(3)
+                .add_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E), &exponent)?
+                .add_uint(
+                    name_as_char(OSSL_PKEY_PARAM_RSA_BITS),
+                    bits as c_uint,
+                )?
+                .finalize(),
+        )?;
 
-        if unsafe {
+        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
+        let res = unsafe {
             EVP_PKEY_todata(
                 evp_pkey.as_ptr(),
                 EVP_PKEY_KEYPAIR as std::os::raw::c_int,
                 &mut params,
             )
-        } != 1
-        {
+        };
+        if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
         let params = OsslParam::from_ptr(params)?;
@@ -798,13 +750,7 @@ impl Encryption for RsaPKCSOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
-            EVP_PKEY_CTX_new_from_pkey(
-                get_libctx(),
-                self.public_key.as_mut_ptr(),
-                std::ptr::null_mut(),
-            )
-        })?;
+        let mut ctx = self.public_key.new_ctx()?;
         if unsafe { EVP_PKEY_encrypt_init(ctx.as_mut_ptr()) } != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
@@ -903,11 +849,7 @@ impl Decryption for RsaPKCSOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         unsafe {
-            let mut ctx = EvpPkeyCtx::from_ptr(EVP_PKEY_CTX_new_from_pkey(
-                get_libctx(),
-                self.private_key.as_mut_ptr(),
-                std::ptr::null_mut(),
-            ))?;
+            let mut ctx = self.private_key.new_ctx()?;
             if EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
@@ -1021,13 +963,7 @@ impl Sign for RsaPKCSOperation {
                 if signature.len() != self.output_len {
                     return err_rv!(CKR_GENERAL_ERROR);
                 }
-                let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
-                    EVP_PKEY_CTX_new_from_pkey(
-                        get_libctx(),
-                        self.private_key.as_mut_ptr(),
-                        std::ptr::null_mut(),
-                    )
-                })?;
+                let mut ctx = self.private_key.new_ctx()?;
                 let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
                 if res != 1 {
                     return err_rv!(CKR_DEVICE_ERROR);
@@ -1197,13 +1133,7 @@ impl Verify for RsaPKCSOperation {
             if signature.len() != self.output_len {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
-            let mut ctx = EvpPkeyCtx::from_ptr(unsafe {
-                EVP_PKEY_CTX_new_from_pkey(
-                    get_libctx(),
-                    self.public_key.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                )
-            })?;
+            let mut ctx = self.public_key.new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);

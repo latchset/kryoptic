@@ -26,34 +26,28 @@ const AES_192_WRAP_PAD_NAME: &[u8; 17] = b"AES-192-WRAP-PAD\0";
 const AES_256_WRAP_PAD_NAME: &[u8; 17] = b"AES-256-WRAP-PAD\0";
 
 /* It is safe to share const ciphers as they do not change once they have been
- * created, and reference satic function pointers and other data that is
+ * created, and reference static function pointers and other data that is
  * always valid */
 struct AesCipher {
-    cipher: EvpCipher,
+    cipher: Option<EvpCipher>,
 }
 
 impl AesCipher {
     pub fn new(name: *const u8) -> AesCipher {
         AesCipher {
-            cipher: match EvpCipher::from_ptr(unsafe {
-                EVP_CIPHER_fetch(
-                    get_libctx(),
-                    name as *const c_char,
-                    std::ptr::null(),
-                )
-            }) {
-                Ok(ec) => ec,
-                Err(_) => EvpCipher::empty(),
+            cipher: match EvpCipher::new(name as *const c_char) {
+                Ok(ec) => Some(ec),
+                Err(_) => None,
             },
         }
     }
 
     pub fn get_cipher(&self) -> KResult<&EvpCipher> {
-        let ec = self.cipher.as_ptr();
-        if ec.is_null() {
+        if let Some(ref ec) = self.cipher {
+            Ok(ec)
+        } else {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
-        Ok(&self.cipher)
     }
 }
 
@@ -844,7 +838,7 @@ impl AesOperation {
             params: Self::init_params(mech)?,
             finalized: false,
             in_use: false,
-            ctx: EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?,
+            ctx: EvpCipherCtx::new()?,
             finalbuf: Vec::new(),
             blockctr: 0,
         })
@@ -857,7 +851,7 @@ impl AesOperation {
             params: Self::init_params(mech)?,
             finalized: false,
             in_use: false,
-            ctx: EvpCipherCtx::from_ptr(unsafe { EVP_CIPHER_CTX_new() })?,
+            ctx: EvpCipherCtx::new()?,
             finalbuf: Vec::new(),
             blockctr: 0,
         })
@@ -1754,7 +1748,6 @@ struct AesCmacOperation {
     finalized: bool,
     in_use: bool,
     _key: AesKey,
-    _mac: EvpMac,
     ctx: EvpMacCtx,
     maclen: usize,
 }
@@ -1791,22 +1784,7 @@ impl AesCmacOperation {
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         let mackey = object_to_raw_key(key)?;
-        let mut mac = match EvpMac::from_ptr(unsafe {
-            EVP_MAC_fetch(
-                get_libctx(),
-                name_as_char(OSSL_MAC_NAME_CMAC),
-                std::ptr::null(),
-            )
-        }) {
-            Ok(em) => em,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-        let mut ctx = match EvpMacCtx::from_ptr(unsafe {
-            EVP_MAC_CTX_new(mac.as_mut_ptr())
-        }) {
-            Ok(emc) => emc,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
+        let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_CMAC))?;
         let params = OsslParam::new()
             .add_const_c_string(
                 name_as_char(OSSL_MAC_PARAM_CIPHER),
@@ -1834,7 +1812,6 @@ impl AesCmacOperation {
             finalized: false,
             in_use: false,
             _key: mackey,
-            _mac: mac,
             ctx: ctx,
             maclen: maclen,
         })
