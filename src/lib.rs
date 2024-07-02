@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::ffi::CStr;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -344,6 +345,8 @@ pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
     }
 }
 
+pub const DEFAULT_CONF_NAME: &str = "token.sql";
+
 fn find_conf() -> KResult<String> {
     /* First check for our own env var,
      * this has the highest precedence */
@@ -372,31 +375,22 @@ fn find_conf() -> KResult<String> {
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut slotnum: CK_SLOT_ID = 0;
-    let conf: &str;
-    let e: String;
+    let conf: String;
 
     if _init_args.is_null() {
-        e = match env::var("KRYOPTIC_CONF") {
-            Ok(f) => f,
-            Err(_e) => return CKR_ARGUMENTS_BAD,
-        };
-        conf = &e;
+        conf = res_or_ret!(find_conf());
     } else {
         let args = _init_args as *const CK_C_INITIALIZE_ARGS;
         if unsafe { (*args).pReserved.is_null() } {
-            e = match env::var("KRYOPTIC_CONF") {
-                Ok(f) => f,
-                Err(_e) => return CKR_ARGUMENTS_BAD,
-            };
-            conf = &e;
+            conf = res_or_ret!(find_conf());
         } else {
-            conf =
-                match unsafe { CStr::from_ptr((*args).pReserved as *const _) }
-                    .to_str()
-                {
-                    Ok(f) => f,
-                    Err(_e) => return CKR_ARGUMENTS_BAD,
-                };
+            let c_str =
+                unsafe { CStr::from_ptr((*args).pReserved as *const _) };
+            if let Ok(s) = c_str.to_str() {
+                conf = s.to_string();
+            } else {
+                return CKR_ARGUMENTS_BAD;
+            }
         }
     }
 
