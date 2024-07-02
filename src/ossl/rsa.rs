@@ -4,9 +4,9 @@
 #[cfg(feature = "fips")]
 use super::fips;
 
-use super::bytes_to_vec;
 use super::hash;
 use super::mechanism;
+use super::{bytes_to_vec, some_or_err};
 
 #[cfg(not(feature = "fips"))]
 use super::ossl;
@@ -262,8 +262,8 @@ struct RsaPKCSOperation {
     mech: CK_MECHANISM_TYPE,
     max_input: usize,
     output_len: usize,
-    public_key: EvpPkey,
-    private_key: EvpPkey,
+    public_key: Option<EvpPkey>,
+    private_key: Option<EvpPkey>,
     finalized: bool,
     in_use: bool,
     #[cfg(feature = "fips")]
@@ -381,8 +381,8 @@ impl RsaPKCSOperation {
                 oaep_params.hash,
             )?,
             output_len: modulus.len(),
-            public_key: object_to_rsa_public_key(key)?,
-            private_key: empty_private_key(),
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: None,
             finalized: false,
             in_use: false,
             sigctx: None,
@@ -412,8 +412,8 @@ impl RsaPKCSOperation {
                 mech.mechanism,
                 oaep_params.hash,
             )?,
-            public_key: object_to_rsa_public_key(key)?,
-            private_key: object_to_rsa_private_key(key)?,
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: Some(object_to_rsa_private_key(key)?),
             finalized: false,
             in_use: false,
             sigctx: None,
@@ -444,8 +444,8 @@ impl RsaPKCSOperation {
                 _ => 0,
             },
             output_len: modulus.len(),
-            public_key: object_to_rsa_public_key(key)?,
-            private_key: object_to_rsa_private_key(key)?,
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: Some(object_to_rsa_private_key(key)?),
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -481,8 +481,8 @@ impl RsaPKCSOperation {
                 _ => 0,
             },
             output_len: modulus.len(),
-            public_key: object_to_rsa_public_key(key)?,
-            private_key: empty_private_key(),
+            public_key: Some(object_to_rsa_public_key(key)?),
+            private_key: None,
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -750,7 +750,7 @@ impl Encryption for RsaPKCSOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        let mut ctx = self.public_key.new_ctx()?;
+        let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
         if unsafe { EVP_PKEY_encrypt_init(ctx.as_mut_ptr()) } != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
@@ -849,7 +849,7 @@ impl Decryption for RsaPKCSOperation {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         unsafe {
-            let mut ctx = self.private_key.new_ctx()?;
+            let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
             if EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
@@ -963,7 +963,7 @@ impl Sign for RsaPKCSOperation {
                 if signature.len() != self.output_len {
                     return err_rv!(CKR_GENERAL_ERROR);
                 }
-                let mut ctx = self.private_key.new_ctx()?;
+                let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
                 let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
                 if res != 1 {
                     return err_rv!(CKR_DEVICE_ERROR);
@@ -1033,7 +1033,7 @@ impl Sign for RsaPKCSOperation {
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
                 mech_type_to_digest_name(self.mech),
-                &self.private_key,
+                some_or_err!(self.private_key),
                 params.as_ptr(),
             )?;
             #[cfg(not(feature = "fips"))]
@@ -1044,7 +1044,7 @@ impl Sign for RsaPKCSOperation {
                     mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
-                    self.private_key.as_mut_ptr(),
+                    some_or_err!(mut self.private_key).as_mut_ptr(),
                     params.as_ptr(),
                 );
                 if res != 1 {
@@ -1133,7 +1133,7 @@ impl Verify for RsaPKCSOperation {
             if signature.len() != self.output_len {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
-            let mut ctx = self.public_key.new_ctx()?;
+            let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
@@ -1179,7 +1179,7 @@ impl Verify for RsaPKCSOperation {
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
                 mech_type_to_digest_name(self.mech),
-                &self.public_key,
+                some_or_err!(self.public_key),
                 params.as_ptr(),
             )?;
             #[cfg(not(feature = "fips"))]
@@ -1190,7 +1190,7 @@ impl Verify for RsaPKCSOperation {
                     mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
-                    self.public_key.as_mut_ptr(),
+                    some_or_err!(mut self.public_key).as_mut_ptr(),
                     params.as_ptr(),
                 );
                 if res != 1 {

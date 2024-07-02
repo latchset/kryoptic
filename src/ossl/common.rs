@@ -149,14 +149,6 @@ impl EvpPkeyCtx {
         Ok(EvpPkeyCtx { ptr: ptr })
     }
 
-    /*
-    pub fn empty() -> EvpPkeyCtx {
-        EvpPkeyCtx {
-            ptr: std::ptr::null_mut(),
-        }
-    }
-    */
-
     pub fn as_ptr(&self) -> *const EVP_PKEY_CTX {
         self.ptr
     }
@@ -229,12 +221,6 @@ impl EvpPkey {
             return err_rv!(CKR_DEVICE_ERROR);
         }
         Ok(EvpPkey { ptr: pkey })
-    }
-
-    pub fn empty() -> EvpPkey {
-        EvpPkey {
-            ptr: std::ptr::null_mut(),
-        }
     }
 
     pub fn new_ctx(&mut self) -> KResult<EvpPkeyCtx> {
@@ -637,14 +623,6 @@ impl OsslParam {
         }
         Ok(octet)
     }
-}
-
-pub fn empty_private_key() -> EvpPkey {
-    EvpPkey::empty()
-}
-
-pub fn empty_public_key() -> EvpPkey {
-    EvpPkey::empty()
 }
 
 pub fn mech_type_to_digest_name(mech: CK_MECHANISM_TYPE) -> *const c_char {
