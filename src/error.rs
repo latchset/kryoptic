@@ -60,6 +60,28 @@ impl fmt::Display for KError {
 }
 
 #[macro_export]
+macro_rules! some_or_err {
+    ($action:expr) => {
+        if let Some(ref x) = $action {
+            x
+        } else {
+            return Err(KError::RvError(error::CkRvError {
+                rv: interface::CKR_GENERAL_ERROR,
+            }));
+        }
+    };
+    (mut $action:expr) => {
+        if let Some(ref mut x) = $action {
+            x
+        } else {
+            return Err(KError::RvError(error::CkRvError {
+                rv: interface::CKR_GENERAL_ERROR,
+            }));
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! err_rv {
     ($ck_err:expr) => {
         Err(KError::RvError(error::CkRvError { rv: $ck_err }))

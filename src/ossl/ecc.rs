@@ -8,6 +8,7 @@ use {super::fips, fips::*};
 use {super::ossl, ossl::*};
 
 use super::mechanism;
+use super::some_or_err;
 
 use kasn1::DerEncBigUint;
 use mechanism::*;
@@ -32,8 +33,8 @@ static EC_NAME: &[u8; 3] = b"EC\0";
 struct EccOperation {
     mech: CK_MECHANISM_TYPE,
     output_len: usize,
-    public_key: EvpPkey,
-    private_key: EvpPkey,
+    public_key: Option<EvpPkey>,
+    private_key: Option<EvpPkey>,
     finalized: bool,
     in_use: bool,
     sigctx: Option<EvpMdCtx>,
@@ -44,8 +45,8 @@ struct EccOperation {
 struct EccOperation {
     mech: CK_MECHANISM_TYPE,
     output_len: usize,
-    public_key: EvpPkey,
-    private_key: EvpPkey,
+    public_key: Option<EvpPkey>,
+    private_key: Option<EvpPkey>,
     finalized: bool,
     in_use: bool,
     sigctx: Option<ProviderSignatureCtx>,
@@ -270,8 +271,8 @@ impl EccOperation {
         Ok(EccOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
-            public_key: empty_public_key(),
-            private_key: object_to_ecc_private_key(key)?,
+            public_key: None,
+            private_key: Some(object_to_ecc_private_key(key)?),
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -292,8 +293,8 @@ impl EccOperation {
         Ok(EccOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
-            public_key: object_to_ecc_public_key(key)?,
-            private_key: empty_private_key(),
+            public_key: Some(object_to_ecc_public_key(key)?),
+            private_key: None,
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -369,7 +370,7 @@ impl Sign for EccOperation {
             if signature.len() != self.output_len {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
-            let mut ctx = self.private_key.new_ctx()?;
+            let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
@@ -433,7 +434,7 @@ impl Sign for EccOperation {
                     mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
-                    self.private_key.as_mut_ptr(),
+                    some_or_err!(mut self.private_key).as_mut_ptr(),
                     std::ptr::null(),
                 )
             } != 1
@@ -443,7 +444,7 @@ impl Sign for EccOperation {
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
                 mech_type_to_digest_name(self.mech),
-                &self.private_key,
+                some_or_err!(self.private_key),
                 std::ptr::null(),
             )?;
         }
@@ -532,7 +533,7 @@ impl Verify for EccOperation {
             if signature.len() != self.output_len {
                 return err_rv!(CKR_GENERAL_ERROR); // already checked in fn_verify
             }
-            let mut ctx = self.public_key.new_ctx()?;
+            let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
@@ -580,7 +581,7 @@ impl Verify for EccOperation {
                     mech_type_to_digest_name(self.mech),
                     get_libctx(),
                     std::ptr::null(),
-                    self.public_key.as_mut_ptr(),
+                    some_or_err!(mut self.public_key).as_mut_ptr(),
                     std::ptr::null(),
                 )
             } != 1
@@ -590,7 +591,7 @@ impl Verify for EccOperation {
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
                 mech_type_to_digest_name(self.mech),
-                &self.public_key,
+                some_or_err!(self.public_key),
                 std::ptr::null(),
             )?;
         }
