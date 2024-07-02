@@ -50,6 +50,10 @@ impl TestToken<'_> {
     fn new<'a>(filename: &'a str, encrypted: bool) -> TestToken {
         let mut slots = SLOTS.write().unwrap();
         slots.id += 1;
+        while check_test_slot_busy(slots.id) {
+            slots.id += 1;
+        }
+
         TestToken {
             slot: slots.id,
             filename: filename,

@@ -326,6 +326,50 @@ macro_rules! global_wlock {
     }};
 }
 
+#[cfg(test)]
+pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
+    let state = match STATE.read() {
+        Ok(r) => {
+            if !r.is_initialized() {
+                return false;
+            }
+            r
+        }
+        Err(_) => return false,
+    };
+
+    match state.get_slot(slot) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+fn find_conf() -> KResult<String> {
+    /* First check for our own env var,
+     * this has the highest precedence */
+    match env::var("KRYOPTIC_CONF") {
+        Ok(var) => return Ok(var),
+        Err(_) => (),
+    }
+    /* Freedesktop specification for data dirs first
+     * then fallback to use $HOME/.local/share, if that is also not
+     * available see if we have access to a system store */
+    let datafile = match env::var("XDG_DATA_HOME") {
+        Ok(xdg) => format!("{}/kryoptic/{}", xdg, DEFAULT_CONF_NAME),
+        Err(_) => match env::var("HOME") {
+            Ok(home) => {
+                format!("{}/.local/share/kryoptic/{}", home, DEFAULT_CONF_NAME)
+            }
+            Err(_) => format!("/var/kryoptic/public/{}", DEFAULT_CONF_NAME),
+        },
+    };
+    if Path::new(&datafile).is_file() {
+        Ok(datafile)
+    } else {
+        err_rv!(CKR_ARGUMENTS_BAD)
+    }
+}
+
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut slotnum: CK_SLOT_ID = 0;
     let conf: &str;
@@ -368,6 +412,28 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut wstate = global_wlock!(noinitcheck STATE);
     if !wstate.is_initialized() {
         wstate.initialize();
+    }
+
+    /* if a slot num was not specified, pick the first free one,
+     * but ensure that the same file is not already open on an
+     * existing slot */
+    if v.len() == 1 {
+        let mut slot_high: i64 = -1;
+        let slots = wstate.get_slots_ids();
+        for s in &slots {
+            if (*s) as i64 > slot_high {
+                slot_high = (*s) as i64;
+            }
+            match wstate.get_token_from_slot(*s) {
+                Ok(t) => {
+                    if filename.eq(t.get_filename()) {
+                        return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+                    }
+                }
+                Err(_) => return CKR_GENERAL_ERROR,
+            }
+        }
+        slotnum = (slot_high + 1) as u64;
     }
 
     /* check that this slot was not already initialized with a different db */
