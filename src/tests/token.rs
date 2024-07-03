@@ -8,7 +8,7 @@ use serial_test::parallel;
 use std::env;
 
 fn test_token(name: &str) {
-    let mut testtokn = TestToken::new(name);
+    let mut testtokn = TestToken::new(name, true);
     testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
@@ -32,7 +32,7 @@ fn test_token(name: &str) {
 }
 
 fn test_token_env(name: &str) {
-    let mut testtokn = TestToken::new(name);
+    let mut testtokn = TestToken::new(name, true);
     testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
@@ -57,7 +57,7 @@ fn test_token_env(name: &str) {
 }
 
 fn test_token_null_args(name: &str) {
-    let mut testtokn = TestToken::new(name);
+    let mut testtokn = TestToken::new(name, true);
     testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();

@@ -9,7 +9,7 @@ use serial_test::{parallel, serial};
 #[test]
 #[parallel]
 fn test_init_token() {
-    let mut testtokn = TestToken::new("test_init_token.sql");
+    let mut testtokn = TestToken::new("test_init_token.sql", true);
 
     let mut args = testtokn.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -197,7 +197,7 @@ fn test_init_token() {
 }
 
 fn test_re_init_token_common(db: &str) {
-    let mut testtokn = TestToken::new(db);
+    let mut testtokn = TestToken::new(db, true);
 
     let mut args = testtokn.make_init_args();
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
