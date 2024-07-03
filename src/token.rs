@@ -198,6 +198,10 @@ impl Token {
                 Ok(()) => {
                     token.load_token_info()?;
                     token.info.flags |= CKF_TOKEN_INITIALIZED;
+                    #[cfg(not(test))]
+                    {
+                        token.info.flags &= !CKF_RESTORE_KEY_NOT_NEEDED;
+                    }
                 }
                 Err(err) => match err {
                     KError::RvError(ref e) => {
@@ -213,6 +217,7 @@ impl Token {
         } else {
             token.info.flags &= !CKF_LOGIN_REQUIRED;
             token.info.flags |= CKF_TOKEN_INITIALIZED;
+            token.info.flags |= CKF_RESTORE_KEY_NOT_NEEDED;
         }
 
         if token.info.flags & CKF_TOKEN_INITIALIZED != 0 {
@@ -220,6 +225,15 @@ impl Token {
         }
 
         Ok(token)
+    }
+
+    #[cfg(test)]
+    pub fn use_encryption(&mut self, enc: bool) {
+        if enc {
+            self.info.flags |= CKF_RESTORE_KEY_NOT_NEEDED;
+        } else {
+            self.info.flags &= !CKF_RESTORE_KEY_NOT_NEEDED;
+        }
     }
 
     pub fn get_filename(&self) -> &String {
@@ -240,7 +254,7 @@ impl Token {
             Ok(o) => o,
             Err(e) => match e {
                 KError::NotFound(_) => {
-                    /* it is ok if not token data is stored yet,
+                    /* it is ok if no token data is stored yet,
                      * we'll use defaults */
                     return Ok(());
                 }
@@ -969,7 +983,7 @@ impl Token {
         encrypt: bool,
     ) -> KResult<()> {
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
-        if encrypt {
+        if encrypt && self.info.flags & CKF_RESTORE_KEY_NOT_NEEDED != 0 {
             let ats = self.object_factories.get_sensitive_attrs(&obj)?;
             for typ in ats {
                 let plain = obj.get_attr_as_bytes(typ)?;
@@ -1020,7 +1034,7 @@ impl Token {
         decrypt: bool,
     ) -> KResult<Object> {
         let mut obj = self.storage.fetch_by_uid(uid)?;
-        if decrypt {
+        if decrypt && self.info.flags & CKF_RESTORE_KEY_NOT_NEEDED != 0 {
             let ats = self.object_factories.get_sensitive_attrs(&obj)?;
             for typ in ats {
                 let encval = obj.get_attr_as_bytes(typ)?;

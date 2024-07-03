@@ -43,10 +43,11 @@ struct TestToken<'a> {
     sync: Option<RwLockReadGuard<'a, u64>>,
     session: CK_SESSION_HANDLE,
     session_rw: bool,
+    encrypted: bool,
 }
 
 impl TestToken<'_> {
-    fn new<'a>(filename: &'a str) -> TestToken {
+    fn new<'a>(filename: &'a str, encrypted: bool) -> TestToken {
         let mut slots = SLOTS.write().unwrap();
         slots.id += 1;
         TestToken {
@@ -56,6 +57,7 @@ impl TestToken<'_> {
             sync: Some(SYNC.read().unwrap()),
             session: CK_INVALID_HANDLE,
             session_rw: false,
+            encrypted: encrypted,
         }
     }
 
@@ -74,6 +76,7 @@ impl TestToken<'_> {
         label.resize(32, 0x20);
         /* Init a brand new token */
         let mut token = Token::new(self.filename.to_string()).unwrap();
+        token.use_encryption(self.encrypted);
         token.initialize(&so_pin, &label).unwrap();
         token.set_pin(CKU_USER, &user_pin, &vec![0u8; 0]).unwrap();
         token.login(CKU_USER, &user_pin);
@@ -84,7 +87,6 @@ impl TestToken<'_> {
 
         let objects = cache.search(&[]).unwrap();
         for obj in objects {
-            let uid = obj.get_attr_as_string(CKA_UNIQUE_ID).unwrap();
             token.insert_object(CK_INVALID_HANDLE, obj.clone()).unwrap();
         }
     }
@@ -145,7 +147,7 @@ impl TestToken<'_> {
         filename: &'a str,
         db: Option<&'a str>,
     ) -> TestToken<'a> {
-        let mut td = Self::new(filename);
+        let mut td = Self::new(filename, false);
         td.setup_db(db);
 
         let mut args = td.make_init_args();
