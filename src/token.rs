@@ -47,6 +47,9 @@ const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 const USER_PIN_IV: &str = "USRPIN IV UNWRAP";
 const USER_PIN_AAD: &str = "USRPIN AUTH_DATA";
 const DEFPIN_SALT: &str = "DEFAULT SALT DATA"; /* at least 16 bytes for FIPS */
+#[cfg(test)]
+const DEFPIN_ITER: usize = 1000;
+#[cfg(not(test))]
 const DEFPIN_ITER: usize = 10000;
 const DEFAULT_IV_SIZE: usize = 12; /* 96 bits as required by FIPS for AES GCM */
 
