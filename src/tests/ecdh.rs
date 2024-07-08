@@ -240,6 +240,44 @@ fn test_ecc_derive_plain() {
     );
     assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
 
+    /* A DER encoded public point should still work */
+    let der_octet =
+        kasn1::DerEncOctetString::new(peer_point.as_slice()).unwrap();
+    let mut der_point = asn1::write_single(&der_octet).unwrap();
+
+    let mut params = CK_ECDH1_DERIVE_PARAMS {
+        kdf: CKD_NULL,
+        ulSharedDataLen: 0,
+        pSharedData: std::ptr::null_mut(),
+        ulPublicDataLen: der_point.len() as CK_ULONG,
+        pPublicData: der_point.as_mut_ptr(),
+    };
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
+            as CK_ULONG,
+    };
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
+    let mut s_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut s_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
     testtokn.finalize();
 }
 
