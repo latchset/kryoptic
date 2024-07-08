@@ -14,7 +14,7 @@ use kasn1::DerEncBigUint;
 use mechanism::*;
 
 use core::ffi::c_char;
-
+use std::borrow::Cow;
 use zeroize::Zeroize;
 
 pub fn ecc_import(obj: &mut Object) -> KResult<()> {
@@ -760,9 +760,22 @@ impl Derive for ECDHOperation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
+        let ec_point = {
+            let ec_point_size = make_output_length_from_obj(key)? + 1;
+            if self.public.len() > ec_point_size {
+                /* try to see if it is a DER encoded point */
+                match asn1::parse_single::<&[u8]>(self.public.as_slice()) {
+                    Ok(pt) => Cow::Owned(pt.to_vec()),
+                    Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                }
+            } else {
+                Cow::Borrowed(&self.public)
+            }
+        };
+
         /* Import peer key */
         let mut peer =
-            make_ecc_public_key(&get_curve_name_from_obj(key)?, &self.public)?;
+            make_ecc_public_key(&get_curve_name_from_obj(key)?, &ec_point)?;
 
         let res = unsafe {
             EVP_PKEY_derive_set_peer(ctx.as_mut_ptr(), peer.as_mut_ptr())
