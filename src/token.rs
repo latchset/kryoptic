@@ -1104,10 +1104,6 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<CK_OBJECT_HANDLE> {
-        if !self.is_logged_in(KRY_UNSPEC) {
-            return err_rv!(CKR_USER_NOT_LOGGED_IN);
-        }
-
         let object = self.object_factories.create(template)?;
         self.insert_object(s_handle, object)
     }

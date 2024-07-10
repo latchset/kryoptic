@@ -82,14 +82,14 @@ fn test_create_objects() {
         (CKA_APPLICATION, "test".as_bytes()),
         (CKA_VALUE, "payload".as_bytes()),
     ];
+    let bool_values = [(CKA_TOKEN, true)];
 
     err_or_panic!(
-        import_object(session, CKO_DATA, &[], &byte_values, &[],),
-        CKR_USER_NOT_LOGGED_IN
+        import_object(session, CKO_DATA, &[], &byte_values, &bool_values,),
+        CKR_SESSION_READ_ONLY
     );
 
-    /* login */
-    testtokn.login();
+    let session = testtokn.get_session(true);
 
     let _ =
         ret_or_panic!(
@@ -97,24 +97,19 @@ fn test_create_objects() {
         );
 
     err_or_panic!(
-        import_object(
-            session,
-            CKO_DATA,
-            &[],
-            &byte_values,
-            &[(CKA_TOKEN, true)],
-        ),
-        CKR_SESSION_READ_ONLY
+        import_object(session, CKO_DATA, &[], &byte_values, &bool_values,),
+        CKR_USER_NOT_LOGGED_IN
     );
 
-    let session = testtokn.get_session(true);
+    /* login */
+    testtokn.login();
 
     let _ = ret_or_panic!(import_object(
         session,
         CKO_DATA,
         &[],
         &byte_values,
-        &[(CKA_TOKEN, true)],
+        &bool_values,
     ));
 
     let _ = ret_or_panic!(import_object(
