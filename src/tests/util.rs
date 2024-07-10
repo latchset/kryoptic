@@ -31,11 +31,22 @@ macro_rules! err_or_panic {
         if !match $ret {
             Ok(_) => false,
             Err(e) => match e {
-                KError::RvError(r) => r.rv == $err,
+                KError::RvError(r) => {
+                    if r.rv != $err {
+                        panic!(
+                            "Should have returned error {}, but got {}",
+                            $err, r.rv
+                        );
+                    }
+                    true
+                }
                 _ => false,
             },
         } {
-            panic!("Should have returned error {}", $err);
+            panic!(
+                "Should have returned error {}, but got other error kind",
+                $err
+            );
         }
     };
 }
