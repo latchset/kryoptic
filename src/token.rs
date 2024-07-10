@@ -1065,7 +1065,7 @@ impl Token {
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
-        if !is_logged_in && obj.is_private() {
+        if !is_logged_in && obj.is_token() && obj.is_private() {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
         if obj.is_sensitive() {
@@ -1155,7 +1155,7 @@ impl Token {
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
-        if !is_logged && obj.is_private() {
+        if !is_logged && obj.is_token() && obj.is_private() {
             /* do not reveal if the object exists or not */
             return err_rv!(CKR_OBJECT_HANDLE_INVALID);
         }
@@ -1240,7 +1240,7 @@ impl Token {
             }
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
         };
-        if !is_logged_in && obj.is_private() {
+        if !is_logged_in && obj.is_token() && obj.is_private() {
             return err_rv!(CKR_USER_NOT_LOGGED_IN);
         }
         let newobj = self.object_factories.copy(&obj, template)?;
@@ -1256,10 +1256,6 @@ impl Token {
 
         /* First add internal session objects */
         for (_, o) in &self.session_objects {
-            if !is_logged_in && o.is_private() {
-                continue;
-            }
-
             if o.is_sensitive() {
                 match self.object_factories.check_sensitive(o, template) {
                     Err(_) => continue,
