@@ -132,6 +132,7 @@ impl Object {
     create_bool_checker! {make is_modifiable; from CKA_MODIFIABLE; def true}
     create_bool_checker! {make is_destroyable; from CKA_DESTROYABLE; def false}
     create_bool_checker! {make is_extractable; from CKA_EXTRACTABLE; def false}
+    create_bool_checker! {make always_auth; from CKA_ALWAYS_AUTHENTICATE; def false}
 
     pub fn get_attr(&self, ck_type: CK_ULONG) -> Option<&Attribute> {
         self.attributes.iter().find(|r| r.get_type() == ck_type)

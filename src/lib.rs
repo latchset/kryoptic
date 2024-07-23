@@ -651,16 +651,44 @@ extern "C" fn fn_login(
     }
     let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    match token.login(user_type, &vpin) {
-        CKR_OK => match rstate.change_session_states(slot_id, user_type) {
-            Ok(()) => CKR_OK,
-            Err(e) => {
+    if user_type == CKU_CONTEXT_SPECIFIC {
+        let session = res_or_ret!(rstate.get_session_mut(s_handle));
+        match session.get_operation() {
+            Err(e) => match err_to_rv!(e) {
+                CKR_USER_NOT_LOGGED_IN => (),
+                _ => return CKR_OPERATION_NOT_INITIALIZED,
+            },
+            Ok(_) => return CKR_OPERATION_NOT_INITIALIZED,
+        }
+    }
+
+    let result = token.login(user_type, &vpin);
+
+    if user_type == CKU_CONTEXT_SPECIFIC {
+        match result {
+            CKR_OK => {
+                let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+                session.set_login_ok();
+            }
+            CKR_PIN_LOCKED => {
                 token.logout();
                 let _ = rstate.invalidate_session_states(slot_id);
-                err_to_rv!(e)
             }
-        },
-        err => err,
+            _ => (),
+        }
+        result
+    } else {
+        match result {
+            CKR_OK => match rstate.change_session_states(slot_id, user_type) {
+                Ok(()) => CKR_OK,
+                Err(e) => {
+                    token.logout();
+                    let _ = rstate.invalidate_session_states(slot_id);
+                    err_to_rv!(e)
+                }
+            },
+            err => err,
+        }
     }
 }
 extern "C" fn fn_logout(s_handle: CK_SESSION_HANDLE) -> CK_RV {
@@ -832,7 +860,7 @@ extern "C" fn fn_find_objects(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Search(op) => op,
         Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
         _ => return CKR_OPERATION_ACTIVE,
@@ -856,23 +884,23 @@ extern "C" fn fn_find_objects(
 extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    match session.get_operation_mut() {
+    match res_or_ret!(session.get_operation_mut()) {
         Operation::Search(_) => (),
         Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
         _ => return CKR_OPERATION_ACTIVE,
     };
-    session.set_operation(Operation::Empty);
+    session.set_operation(Operation::Empty, false);
     CKR_OK
 }
 
 macro_rules! check_op_empty_or_fail {
     ($sess:expr; $optype:ident; $ptr:expr) => {
-        let op = $sess.get_operation();
+        let op = $sess.get_operation_nocheck();
         if !op.finalized() {
             if $ptr.is_null() {
                 match op {
                     Operation::$optype(_) => {
-                        $sess.set_operation(Operation::Empty);
+                        $sess.set_operation(Operation::Empty, false);
                         return CKR_OK;
                     }
                     _ => (),
@@ -898,7 +926,7 @@ extern "C" fn fn_encrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
         let operation = res_or_ret!(mech.encryption_new(data, &obj));
-        session.set_operation(Operation::Encryption(operation));
+        session.set_operation(Operation::Encryption(operation), false);
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -917,7 +945,7 @@ extern "C" fn fn_encrypt(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Encryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -947,7 +975,7 @@ extern "C" fn fn_encrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Encryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -979,7 +1007,7 @@ extern "C" fn fn_encrypt_final(
         return CKR_ARGUMENTS_BAD;
     }
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Encryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1012,7 +1040,8 @@ extern "C" fn fn_decrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
         let operation = res_or_ret!(mech.decryption_new(data, &obj));
-        session.set_operation(Operation::Decryption(operation));
+        session
+            .set_operation(Operation::Decryption(operation), obj.always_auth());
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1030,7 +1059,7 @@ extern "C" fn fn_decrypt(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Decryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1062,7 +1091,7 @@ extern "C" fn fn_decrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Decryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1092,7 +1121,7 @@ extern "C" fn fn_decrypt_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Decryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1121,7 +1150,7 @@ extern "C" fn fn_digest_init(
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
         let operation = res_or_ret!(mech.digest_new(data));
-        session.set_operation(Operation::Digest(operation));
+        session.set_operation(Operation::Digest(operation), false);
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1140,7 +1169,7 @@ extern "C" fn fn_digest(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Digest(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1181,7 +1210,7 @@ extern "C" fn fn_digest_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Digest(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1199,7 +1228,7 @@ extern "C" fn fn_digest_key(
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Digest(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1227,7 +1256,7 @@ extern "C" fn fn_digest_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Digest(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1272,7 +1301,7 @@ extern "C" fn fn_sign_init(
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
         let operation = res_or_ret!(mech.sign_new(data, &obj));
-        session.set_operation(Operation::Sign(operation));
+        session.set_operation(Operation::Sign(operation), obj.always_auth());
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1290,7 +1319,7 @@ extern "C" fn fn_sign(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Sign(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1332,7 +1361,7 @@ extern "C" fn fn_sign_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Sign(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1353,7 +1382,7 @@ extern "C" fn fn_sign_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Sign(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1413,7 +1442,7 @@ extern "C" fn fn_verify_init(
     let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
         let operation = res_or_ret!(mech.verify_new(data, &obj));
-        session.set_operation(Operation::Verify(operation));
+        session.set_operation(Operation::Verify(operation), false);
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1431,7 +1460,7 @@ extern "C" fn fn_verify(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Verify(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1458,7 +1487,7 @@ extern "C" fn fn_verify_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Verify(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -1479,7 +1508,7 @@ extern "C" fn fn_verify_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match session.get_operation_mut() {
+    let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::Verify(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
     };
