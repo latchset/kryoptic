@@ -38,11 +38,20 @@ impl SearchOperation for SessionSearch {
 }
 
 #[derive(Debug)]
+pub enum OpLoginStatus {
+    NotInitialized,
+    NotRequired,
+    Required,
+    LoginOk,
+}
+
+#[derive(Debug)]
 pub struct Session {
     info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
     operation: Operation,
+    login_status: OpLoginStatus,
 }
 
 impl Session {
@@ -89,6 +98,7 @@ impl Session {
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
             operation: Operation::Empty,
+            login_status: OpLoginStatus::NotInitialized,
         })
     }
 
@@ -176,18 +186,42 @@ impl Session {
             handles: token.search_objects(template)?,
             in_use: true,
         }));
+        self.login_status = OpLoginStatus::NotRequired;
         Ok(())
     }
 
-    pub fn get_operation(&self) -> &Operation {
+    pub fn get_operation_nocheck(&self) -> &Operation {
         &self.operation
     }
 
-    pub fn get_operation_mut(&mut self) -> &mut Operation {
-        &mut self.operation
+    pub fn get_operation(&self) -> KResult<&Operation> {
+        match self.login_status {
+            OpLoginStatus::NotInitialized => err_rv!(CKR_GENERAL_ERROR),
+            OpLoginStatus::NotRequired => Ok(&self.operation),
+            OpLoginStatus::Required => err_rv!(CKR_USER_NOT_LOGGED_IN),
+            OpLoginStatus::LoginOk => Ok(&self.operation),
+        }
     }
 
-    pub fn set_operation(&mut self, op: Operation) {
+    pub fn get_operation_mut(&mut self) -> KResult<&mut Operation> {
+        match self.login_status {
+            OpLoginStatus::NotInitialized => err_rv!(CKR_GENERAL_ERROR),
+            OpLoginStatus::NotRequired => Ok(&mut self.operation),
+            OpLoginStatus::Required => err_rv!(CKR_USER_NOT_LOGGED_IN),
+            OpLoginStatus::LoginOk => Ok(&mut self.operation),
+        }
+    }
+
+    pub fn set_operation(&mut self, op: Operation, needs_login: bool) {
         self.operation = op;
+        self.login_status = if needs_login {
+            OpLoginStatus::Required
+        } else {
+            OpLoginStatus::NotRequired
+        };
+    }
+
+    pub fn set_login_ok(&mut self) {
+        self.login_status = OpLoginStatus::LoginOk;
     }
 }

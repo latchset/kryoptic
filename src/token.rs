@@ -871,6 +871,13 @@ impl Token {
                     },
                 }
             }
+            CKU_CONTEXT_SPECIFIC => match self.check_user_login(pin) {
+                Ok(_) => CKR_OK,
+                Err(e) => match e {
+                    KError::RvError(e) => e.rv,
+                    _ => CKR_GENERAL_ERROR,
+                },
+            },
             _ => CKR_USER_TYPE_INVALID,
         }
     }

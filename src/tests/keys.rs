@@ -398,4 +398,116 @@ fn test_key() {
             },
         )
     );
+
+    /* Test CKA_ALWAYS_AUTHENTICATE */
+
+    let ec_params = hex::decode(
+        "06052B81040022", // secp384r1
+    )
+    .expect("Failed to decode hex ec_params");
+
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_EC_KEY_PAIR_GEN,
+        &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_EC),],
+        &[(CKA_EC_PARAMS, ec_params.as_slice())],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC),],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_SIGN, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_ALWAYS_AUTHENTICATE, true),
+        ],
+    ));
+
+    let data = "plaintext";
+
+    /* attempt context specific login w/o op should fail */
+    let pin = "12345678";
+    let ret = fn_login(
+        session,
+        CKU_CONTEXT_SPECIFIC,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    /* first initialize a private key operation */
+    let ret = fn_sign_init(
+        session,
+        &CK_MECHANISM {
+            mechanism: CKM_ECDSA_SHA256,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        } as *const _ as CK_MECHANISM_PTR,
+        prikey,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* any other op w/o authentication should fail */
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign(
+        session,
+        byte_ptr!(data),
+        data.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut siglen,
+    );
+    assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+
+    /* attempt context specific login (wrong pin) */
+    let pin = "AAAAAAAA";
+    let ret = fn_login(
+        session,
+        CKU_CONTEXT_SPECIFIC,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_PIN_INCORRECT);
+
+    /* retry op w/o authentication should still fail */
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign(
+        session,
+        byte_ptr!(data),
+        data.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut siglen,
+    );
+    assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+
+    /* attempt context specific login (right pin) */
+    let pin = "12345678";
+    let ret = fn_login(
+        session,
+        CKU_CONTEXT_SPECIFIC,
+        pin.as_ptr() as *mut _,
+        pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* retry op with authentication should succeed */
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign(
+        session,
+        byte_ptr!(data),
+        data.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut siglen,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut signature: Vec<u8> = vec![0; siglen as usize];
+    let ret = fn_sign(
+        session,
+        byte_ptr!(data),
+        data.len() as CK_ULONG,
+        signature.as_mut_ptr(),
+        &mut siglen,
+    );
+    assert_eq!(ret, CKR_OK);
 }
