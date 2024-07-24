@@ -510,4 +510,46 @@ fn test_key() {
         &mut siglen,
     );
     assert_eq!(ret, CKR_OK);
+
+    /* Test CKA_ALLOWED_MECHANISMS */
+
+    let allowed = CKM_AES_ECB.to_ne_bytes();
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16),],
+        &[(CKA_ALLOWED_MECHANISMS, &allowed)],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    /* Test disallowed mech fails */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CBC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_MECHANISM_INVALID);
+
+    /* Now check that init with allowed mech succeeds */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let data = "0123456789ABCDEF";
+    let _ = ret_or_panic!(encrypt(
+        session,
+        handle,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_AES_ECB,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
 }
