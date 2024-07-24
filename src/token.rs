@@ -10,9 +10,9 @@ use super::attribute;
 use super::ecc;
 use super::error;
 use super::hash;
+use super::hkdf;
 use super::hmac;
 use super::interface;
-use super::kdf;
 use super::mechanism;
 use super::object;
 use super::pbkdf2;
@@ -198,7 +198,7 @@ impl Token {
         ecc::register(&mut token.mechanisms, &mut token.object_factories);
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         hmac::register(&mut token.mechanisms, &mut token.object_factories);
-        kdf::register(&mut token.mechanisms, &mut token.object_factories);
+        hkdf::register(&mut token.mechanisms, &mut token.object_factories);
         pbkdf2::register(&mut token.mechanisms, &mut token.object_factories);
         sp800_108::register(&mut token.mechanisms, &mut token.object_factories);
 
