@@ -52,6 +52,7 @@ mod hmac;
 mod kdf;
 mod pbkdf2;
 mod rsa;
+mod sp800_108;
 
 /* Helper code */
 mod kasn1;
