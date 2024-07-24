@@ -82,6 +82,15 @@ macro_rules! res_or_ret {
     };
 }
 
+macro_rules! ok_or_ret {
+    ($ret:expr) => {
+        match $ret {
+            CKR_OK => (),
+            err => return err,
+        }
+    };
+}
+
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
 pub fn get_random_data(data: &mut [u8]) -> KResult<()> {
@@ -911,21 +920,52 @@ macro_rules! check_op_empty_or_fail {
     };
 }
 
+fn check_allowed_mechs(mech: &CK_MECHANISM, key: &object::Object) -> CK_RV {
+    let allowed = match key.get_attr(CKA_ALLOWED_MECHANISMS) {
+        Some(attr) => attr,
+        None => return CKR_OK,
+    };
+
+    let mechsvec = allowed.get_value();
+    if mechsvec.len() % misc::CK_ULONG_SIZE != 0 {
+        /* not a multiple of CK_MECHANISM_TYPE values,
+         * bail out, this should never happen, malformed key */
+        return CKR_GENERAL_ERROR;
+    }
+    let mechsnum = mechsvec.len() / misc::CK_ULONG_SIZE;
+    for n in 0..mechsnum {
+        let cursor = n * misc::CK_ULONG_SIZE;
+        let mut mslice = [0u8; misc::CK_ULONG_SIZE];
+        mslice
+            .copy_from_slice(&mechsvec[cursor..(cursor + misc::CK_ULONG_SIZE)]);
+        let m = unsafe {
+            std::mem::transmute::<[u8; misc::CK_ULONG_SIZE], CK_MECHANISM_TYPE>(
+                mslice,
+            )
+        };
+        if mech.mechanism == m {
+            return CKR_OK;
+        }
+    }
+    return CKR_MECHANISM_INVALID;
+}
+
 extern "C" fn fn_encrypt_init(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    check_op_empty_or_fail!(session; Encryption; mechanism);
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    check_op_empty_or_fail!(session; Encryption; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key));
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
-        let operation = res_or_ret!(mech.encryption_new(data, &obj));
+        let operation = res_or_ret!(mech.encryption_new(mechanism, &key));
         session.set_operation(Operation::Encryption(operation), false);
         CKR_OK
     } else {
@@ -1027,21 +1067,22 @@ extern "C" fn fn_encrypt_final(
 
 extern "C" fn fn_decrypt_init(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    check_op_empty_or_fail!(session; Decryption; mechanism);
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    check_op_empty_or_fail!(session; Decryption; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key));
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
-        let operation = res_or_ret!(mech.decryption_new(data, &obj));
+        let operation = res_or_ret!(mech.decryption_new(mechanism, &key));
         session
-            .set_operation(Operation::Decryption(operation), obj.always_auth());
+            .set_operation(Operation::Decryption(operation), key.always_auth());
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1288,20 +1329,21 @@ extern "C" fn fn_digest_final(
 
 extern "C" fn fn_sign_init(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    check_op_empty_or_fail!(session; Sign; mechanism);
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    check_op_empty_or_fail!(session; Sign; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key));
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
-        let operation = res_or_ret!(mech.sign_new(data, &obj));
-        session.set_operation(Operation::Sign(operation), obj.always_auth());
+        let operation = res_or_ret!(mech.sign_new(mechanism, &key));
+        session.set_operation(Operation::Sign(operation), key.always_auth());
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1429,19 +1471,20 @@ extern "C" fn fn_sign_recover(
 }
 extern "C" fn fn_verify_init(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    check_op_empty_or_fail!(session; Verify; mechanism);
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    check_op_empty_or_fail!(session; Verify; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key));
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
-        let operation = res_or_ret!(mech.verify_new(data, &obj));
+        let operation = res_or_ret!(mech.verify_new(mechanism, &key));
         session.set_operation(Operation::Verify(operation), false);
         CKR_OK
     } else {
@@ -1679,43 +1722,44 @@ extern "C" fn fn_generate_key_pair(
 
 extern "C" fn fn_wrap_key(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    wrapping_key: CK_OBJECT_HANDLE,
-    key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    wrapping_key_handle: CK_OBJECT_HANDLE,
+    key_handle: CK_OBJECT_HANDLE,
     wrapped_key: CK_BYTE_PTR,
     pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
 
-    let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let kobj = res_or_ret!(token.get_object_by_handle(key));
-    let wkobj = res_or_ret!(token.get_object_by_handle(wrapping_key));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    let wkey = res_or_ret!(token.get_object_by_handle(wrapping_key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &wkey));
     let factories = token.get_object_factories();
-    let factory = res_or_ret!(factories.get_object_factory(&kobj));
-    let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
+    let factory = res_or_ret!(factories.get_object_factory(&key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return CKR_MECHANISM_INVALID;
     }
 
     /* key checks */
-    if !res_or_ret!(wkobj.get_attr_as_bool(CKA_WRAP)) {
+    if !res_or_ret!(wkey.get_attr_as_bool(CKA_WRAP)) {
         return CKR_WRAPPING_KEY_HANDLE_INVALID;
     }
     let require_trusted =
-        res_or_ret!(kobj.get_attr_as_bool(CKA_WRAP_WITH_TRUSTED));
+        res_or_ret!(key.get_attr_as_bool(CKA_WRAP_WITH_TRUSTED));
     if require_trusted {
-        if !res_or_ret!(wkobj.get_attr_as_bool(CKA_TRUSTED)) {
+        if !res_or_ret!(wkey.get_attr_as_bool(CKA_TRUSTED)) {
             return CKR_WRAPPING_KEY_HANDLE_INVALID;
         }
     }
 
     ret_to_rv!(mech.wrap_key(
-        ck_mech,
-        &wkobj,
-        &kobj,
+        mechanism,
+        &wkey,
+        &key,
         wrapped_key,
         pul_wrapped_key_len,
         factory,
@@ -1724,8 +1768,8 @@ extern "C" fn fn_wrap_key(
 
 extern "C" fn fn_unwrap_key(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    unwrapping_key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    unwrapping_key_handle: CK_OBJECT_HANDLE,
     wrapped_key: CK_BYTE_PTR,
     wrapped_key_len: CK_ULONG,
     template: CK_ATTRIBUTE_PTR,
@@ -1735,7 +1779,7 @@ extern "C" fn fn_unwrap_key(
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
 
-    let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts_mut(template, attribute_count as usize)
     };
@@ -1744,24 +1788,25 @@ extern "C" fn fn_unwrap_key(
     }
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let kobj = res_or_ret!(token.get_object_by_handle(unwrapping_key));
+    let key = res_or_ret!(token.get_object_by_handle(unwrapping_key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
     let factories = token.get_object_factories();
     let factory =
         res_or_ret!(factories.get_obj_factory_from_key_template(tmpl));
     let data: &[u8] = unsafe {
         std::slice::from_raw_parts(wrapped_key, wrapped_key_len as usize)
     };
-    let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return CKR_MECHANISM_INVALID;
     }
 
     /* key checks */
-    if !res_or_ret!(kobj.get_attr_as_bool(CKA_UNWRAP)) {
+    if !res_or_ret!(key.get_attr_as_bool(CKA_UNWRAP)) {
         return CKR_WRAPPING_KEY_HANDLE_INVALID;
     }
 
-    let result = mech.unwrap_key(ck_mech, &kobj, data, tmpl, factory);
+    let result = mech.unwrap_key(mechanism, &key, data, tmpl, factory);
     match result {
         Ok(obj) => {
             let kh = res_or_ret!(token.insert_object(s_handle, obj));
@@ -1776,8 +1821,8 @@ extern "C" fn fn_unwrap_key(
 
 extern "C" fn fn_derive_key(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
-    base_key: CK_OBJECT_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    base_key_handle: CK_OBJECT_HANDLE,
     template: CK_ATTRIBUTE_PTR,
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
@@ -1785,7 +1830,7 @@ extern "C" fn fn_derive_key(
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
 
-    let ck_mech: &CK_MECHANISM = unsafe { &*mechanism };
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
         std::slice::from_raw_parts_mut(template, attribute_count as usize)
     };
@@ -1794,19 +1839,20 @@ extern "C" fn fn_derive_key(
     }
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let bkey = res_or_ret!(token.get_object_by_handle(base_key));
+    let key = res_or_ret!(token.get_object_by_handle(base_key_handle));
 
     /* key checks */
-    if !res_or_ret!(bkey.get_attr_as_bool(CKA_DERIVE)) {
+    if !res_or_ret!(key.get_attr_as_bool(CKA_DERIVE)) {
         return CKR_KEY_FUNCTION_NOT_PERMITTED;
     }
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
 
-    let mech = res_or_ret!(token.get_mechanisms().get(ck_mech.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_DERIVE != CKF_DERIVE {
         return CKR_MECHANISM_INVALID;
     }
 
-    let mut operation = match res_or_ret!(mech.derive_operation(ck_mech)) {
+    let mut operation = match res_or_ret!(mech.derive_operation(mechanism)) {
         Operation::Derive(op) => op,
         _ => return CKR_MECHANISM_INVALID,
     };
@@ -1832,7 +1878,7 @@ extern "C" fn fn_derive_key(
     }
 
     let result = operation.derive(
-        &bkey,
+        &key,
         tmpl,
         token.get_mechanisms(),
         token.get_object_factories(),

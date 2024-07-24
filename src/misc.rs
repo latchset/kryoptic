@@ -2,6 +2,9 @@
 // See LICENSE.txt file for terms
 
 /* misc utilities that do not really belong in any module */
+use super::interface;
+
+pub const CK_ULONG_SIZE: usize = std::mem::size_of::<interface::CK_ULONG>();
 
 #[macro_export]
 macro_rules! bytes_to_vec {
