@@ -1,7 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use super::fips;
 use core::ffi::c_uint;
+use fips::*;
 
 impl PBKDF2 {
     fn derive(&self, _: &Mechanisms, len: usize) -> KResult<Vec<u8>> {

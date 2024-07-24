@@ -15,6 +15,7 @@ use super::interface;
 use super::kdf;
 use super::mechanism;
 use super::object;
+use super::pbkdf2;
 use super::rsa;
 use super::storage;
 
@@ -197,6 +198,7 @@ impl Token {
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         hmac::register(&mut token.mechanisms, &mut token.object_factories);
         kdf::register(&mut token.mechanisms, &mut token.object_factories);
+        pbkdf2::register(&mut token.mechanisms, &mut token.object_factories);
 
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {

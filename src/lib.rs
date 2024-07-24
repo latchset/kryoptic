@@ -50,6 +50,7 @@ mod ecc;
 mod hash;
 mod hmac;
 mod kdf;
+mod pbkdf2;
 mod rsa;
 
 /* Helper code */

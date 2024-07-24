@@ -1,9 +1,175 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use super::attribute;
+use super::err_rv;
+use super::error;
+use super::hmac;
+use super::interface;
+use super::mechanism;
+use super::object;
+
+use attribute::{from_bool, from_bytes, from_ulong};
+use error::{KError, KResult};
+use interface::*;
+use mechanism::*;
+use object::{Object, ObjectFactories};
+
+use super::bytes_to_vec;
+
+use std::fmt::Debug;
+
+#[cfg(not(feature = "fips"))]
 use std::mem::swap;
 
+pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
+    PBKDF2Mechanism::register_mechanisms(mechs);
+}
+
+#[derive(Debug)]
+struct PBKDF2Mechanism {
+    info: CK_MECHANISM_INFO,
+}
+
+impl PBKDF2Mechanism {
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        mechs.add_mechanism(
+            CKM_PKCS5_PBKD2,
+            Box::new(PBKDF2Mechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: std::u32::MAX as CK_ULONG,
+                    flags: CKF_GENERATE,
+                },
+            }),
+        );
+    }
+
+    fn mock_password_object(&self, key: Vec<u8>) -> KResult<Object> {
+        let mut obj = Object::new();
+        obj.set_zeroize();
+        obj.set_attr(from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
+        obj.set_attr(from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
+        obj.set_attr(from_ulong(CKA_VALUE_LEN, key.len() as CK_ULONG))?;
+        obj.set_attr(from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(from_bool(CKA_DERIVE, true))?;
+        Ok(obj)
+    }
+}
+
+impl Mechanism for PBKDF2Mechanism {
+    fn info(&self) -> &CK_MECHANISM_INFO {
+        &self.info
+    }
+
+    fn generate_key(
+        &self,
+        mech: &CK_MECHANISM,
+        template: &[CK_ATTRIBUTE],
+        mechanisms: &Mechanisms,
+        objfactories: &ObjectFactories,
+    ) -> KResult<Object> {
+        if self.info.flags & CKF_GENERATE != CKF_GENERATE {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        if mech.mechanism != CKM_PKCS5_PBKD2 {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+
+        if mech.ulParameterLen as usize
+            != ::std::mem::size_of::<CK_PKCS5_PBKD2_PARAMS2>()
+        {
+            return err_rv!(CKR_ARGUMENTS_BAD);
+        }
+        let params =
+            unsafe { *(mech.pParameter as *const CK_PKCS5_PBKD2_PARAMS2) };
+
+        /* all the mechanism we support require this,
+         * if we ever add GOST support we'll have to add data */
+        if params.pPrfData != std::ptr::null_mut() || params.ulPrfDataLen != 0 {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        let pbkdf2 = PBKDF2 {
+            prf: match params.prf {
+                CKP_PKCS5_PBKD2_HMAC_SHA1 => CKM_SHA_1_HMAC,
+                CKP_PKCS5_PBKD2_HMAC_SHA224 => CKM_SHA224_HMAC,
+                CKP_PKCS5_PBKD2_HMAC_SHA256 => CKM_SHA256_HMAC,
+                CKP_PKCS5_PBKD2_HMAC_SHA384 => CKM_SHA384_HMAC,
+                CKP_PKCS5_PBKD2_HMAC_SHA512 => CKM_SHA512_HMAC,
+                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            },
+            pass: self.mock_password_object(bytes_to_vec!(
+                params.pPassword,
+                params.ulPasswordLen
+            ))?,
+            salt: match params.saltSource {
+                CKZ_SALT_SPECIFIED => {
+                    if params.pSaltSourceData == std::ptr::null_mut()
+                        || params.ulSaltSourceDataLen == 0
+                    {
+                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    }
+                    bytes_to_vec!(
+                        params.pSaltSourceData,
+                        params.ulSaltSourceDataLen
+                    )
+                }
+                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            },
+            iter: params.iterations as usize,
+        };
+
+        /* check early that we have key class and type defined */
+        let factory =
+            objfactories.get_obj_factory_from_key_template(template)?;
+
+        let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
+            Some(a) => a.to_ulong()? as usize,
+            None => {
+                let max = hmac::hmac_size(pbkdf2.prf);
+                if max == CK_UNAVAILABLE_INFORMATION as usize {
+                    return err_rv!(CKR_MECHANISM_INVALID);
+                }
+                match factory.as_secret_key_factory()?.recommend_key_size(max) {
+                    Ok(len) => len,
+                    Err(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                }
+            }
+        };
+
+        let dkm = pbkdf2.derive(mechanisms, keylen)?;
+
+        let mut tmpl = template.to_vec();
+        tmpl.push(CK_ATTRIBUTE::from_slice(CKA_VALUE, dkm.as_slice()));
+
+        let mut key = factory.create(tmpl.as_slice())?;
+        object::default_key_attributes(&mut key, mech.mechanism)?;
+        Ok(key)
+    }
+}
+
+/* PKCS#11 in their infinite wisdom decided to implement this
+ * derivation as a mechanism key gen operation.
+ * Key Gen in Kryoptic does not go through an Operation trait,
+ * but we still want to be able to do both openssl and native
+ * backends, so we encapsulate the derivation function in a
+ * small structure and make implementations of the object in
+ * the relevant files for FIPS/non-FIPS */
+
+#[derive(Debug)]
+struct PBKDF2 {
+    prf: CK_MECHANISM_TYPE,
+    pass: Object,
+    salt: Vec<u8>,
+    iter: usize,
+}
+
+#[cfg(feature = "fips")]
+include!("ossl/pbkdf2.rs");
+
 /* https://www.rfc-editor.org/rfc/rfc8018#section-5.2 */
+#[cfg(not(feature = "fips"))]
 impl PBKDF2 {
     fn prf_fn(
         &self,
