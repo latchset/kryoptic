@@ -57,6 +57,23 @@ pub fn hmac_mech_to_hash_mech(
     })
 }
 
+pub fn hash_to_hmac_mech(
+    mech: CK_MECHANISM_TYPE,
+) -> KResult<CK_MECHANISM_TYPE> {
+    Ok(match mech {
+        CKM_SHA_1 => CKM_SHA_1_HMAC,
+        CKM_SHA224 => CKM_SHA224_HMAC,
+        CKM_SHA256 => CKM_SHA256_HMAC,
+        CKM_SHA384 => CKM_SHA384_HMAC,
+        CKM_SHA512 => CKM_SHA512_HMAC,
+        CKM_SHA3_224 => CKM_SHA3_224_HMAC,
+        CKM_SHA3_256 => CKM_SHA3_256_HMAC,
+        CKM_SHA3_384 => CKM_SHA3_384_HMAC,
+        CKM_SHA3_512 => CKM_SHA3_512_HMAC,
+        _ => return err_rv!(CKR_MECHANISM_INVALID),
+    })
+}
+
 #[derive(Debug)]
 struct HMACMechanism {
     info: CK_MECHANISM_INFO,
@@ -449,4 +466,23 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut object::ObjectFactories) {
     for f in Lazy::force(&HMAC_SECRET_KEY_FACTORIES) {
         ot.add_factory(object::ObjectType::new(CKO_SECRET_KEY, f.0), &f.1);
     }
+}
+
+#[cfg(test)]
+pub fn test_get_hmac(mech: CK_MECHANISM_TYPE) -> Box<dyn Mechanism> {
+    for hs in &hash::HASH_MECH_SET {
+        if hs.mac == mech {
+            return Box::new(HMACMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: 0,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+                keytype: hs.key_type,
+                minlen: hs.hash_size,
+                maxlen: hs.hash_size,
+            });
+        }
+    }
+    panic!("Invalid mech {}", mech);
 }

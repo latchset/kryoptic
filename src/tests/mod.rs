@@ -246,3 +246,5 @@ mod kdfs;
 mod mac_vectors;
 
 mod aes_kw_vectors;
+
+mod tls;

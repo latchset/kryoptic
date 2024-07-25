@@ -37,3 +37,19 @@ macro_rules! byte_ptr {
         $ptr as *const _ as CK_BYTE_PTR
     };
 }
+
+pub fn fixup_template(
+    template: &[interface::CK_ATTRIBUTE],
+    attributes: &[interface::CK_ATTRIBUTE],
+) -> Vec<interface::CK_ATTRIBUTE> {
+    let mut vec = template.to_vec();
+    for attr in attributes {
+        match template.iter().find(|a| a.type_ == attr.type_) {
+            Some(_) => (),
+            None => {
+                vec.push(attr.clone());
+            }
+        }
+    }
+    vec
+}
