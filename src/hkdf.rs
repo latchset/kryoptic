@@ -8,6 +8,7 @@ use super::hash;
 use super::hmac;
 use super::interface;
 use super::mechanism;
+use super::misc;
 use super::object;
 
 use attribute::from_bytes;
@@ -223,66 +224,26 @@ impl HKDFOperation {
         })
     }
 
-    fn fixup_template(
-        template: &[CK_ATTRIBUTE],
-        attributes: &[CK_ATTRIBUTE],
-    ) -> Option<Vec<CK_ATTRIBUTE>> {
-        /* this function only adds missing defaults, it ain't validation */
-        let mut vec: Option<Vec<CK_ATTRIBUTE>> = None;
-        for attr in attributes {
-            match template.iter().find(|a| a.type_ == attr.type_) {
-                Some(_) => (),
-                None => {
-                    if let Some(ref mut v) = vec {
-                        v.push(attr.clone());
-                    } else {
-                        let mut v = template.to_vec();
-                        v.push(attr.clone());
-                        vec = Some(v);
-                    }
-                }
-            }
-        }
-        vec
-    }
-
     fn data_object_and_secret_size(
         &self,
         template: &[CK_ATTRIBUTE],
         objfactories: &ObjectFactories,
     ) -> KResult<(Object, usize)> {
         let default_class = CKO_DATA;
-        let mut otmpl = Self::fixup_template(
+        let mut tmpl = misc::fixup_template(
             template,
             &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
         );
-        let keysize = match template.iter().find(|a| a.type_ == CKA_VALUE_LEN) {
-            Some(cka) => {
-                let ks = cka.to_ulong()? as usize;
-                /* we must remove CKA_VALUE_LEN from the template as it is not a valid
-                 * attribute for a CKO_DATA object */
-                let mut vec =
-                    Vec::<CK_ATTRIBUTE>::with_capacity(template.len() - 1);
-                let tmpl = match otmpl {
-                    Some(ref o) => o.as_slice(),
-                    None => template,
-                };
-                for a in tmpl {
-                    if a.type_ != CKA_VALUE_LEN {
-                        vec.push(a.clone());
-                    }
-                }
-                otmpl = Some(vec);
-                ks
+        let keysize = match tmpl.iter().position(|a| a.type_ == CKA_VALUE_LEN) {
+            Some(idx) => {
+                /* we must remove CKA_VALUE_LEN from the template as it is not
+                 * a valid attribute for a CKO_DATA object */
+                tmpl.swap_remove(idx).to_ulong()? as usize
             }
             None => self.prflen,
         };
-        let tmpl = match otmpl {
-            Some(ref o) => o.as_slice(),
-            None => template,
-        };
         let obj = match objfactories.get_factory(ObjectType::new(CKO_DATA, 0)) {
-            Ok(f) => f.create(tmpl)?,
+            Ok(f) => f.create(tmpl.as_slice())?,
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         };
         Ok((obj, keysize))
@@ -295,15 +256,12 @@ impl HKDFOperation {
         objfactories: &ObjectFactories,
     ) -> KResult<(Object, usize)> {
         let default_class = CKO_SECRET_KEY;
-        let otmpl = Self::fixup_template(
+        let tmpl = misc::fixup_template(
             template,
             &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
         );
-        let tmpl = match otmpl {
-            Some(ref o) => o.as_slice(),
-            None => template,
-        };
-        let obj = objfactories.derive_key_from_template(key, tmpl)?;
+        let obj =
+            objfactories.derive_key_from_template(key, tmpl.as_slice())?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
             Err(_) => self.prflen,

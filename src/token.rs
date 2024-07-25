@@ -19,6 +19,7 @@ use super::pbkdf2;
 use super::rsa;
 use super::sp800_108;
 use super::storage;
+use super::tlskdf;
 
 use super::{err_rv, get_random_data, to_rv};
 use error::{KError, KResult};
@@ -201,6 +202,7 @@ impl Token {
         hkdf::register(&mut token.mechanisms, &mut token.object_factories);
         pbkdf2::register(&mut token.mechanisms, &mut token.object_factories);
         sp800_108::register(&mut token.mechanisms, &mut token.object_factories);
+        tlskdf::register(&mut token.mechanisms, &mut token.object_factories);
 
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {

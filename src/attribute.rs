@@ -441,7 +441,7 @@ pub fn attr_id_to_attrtype(id: CK_ULONG) -> KResult<AttrType> {
 }
 
 impl CK_ATTRIBUTE {
-    pub fn to_ulong(self) -> KResult<CK_ULONG> {
+    pub fn to_ulong(&self) -> KResult<CK_ULONG> {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
@@ -458,7 +458,7 @@ impl CK_ATTRIBUTE {
             Ok(true)
         }
     }
-    pub fn to_string(self) -> KResult<String> {
+    pub fn to_string(&self) -> KResult<String> {
         let buf: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const _,
@@ -470,17 +470,25 @@ impl CK_ATTRIBUTE {
             Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
-    pub fn to_buf(self) -> KResult<Vec<u8>> {
+    pub fn to_slice(&self) -> KResult<&[u8]> {
+        Ok(unsafe {
+            std::slice::from_raw_parts(
+                self.pValue as *const u8,
+                self.ulValueLen as usize,
+            )
+        })
+    }
+    pub fn to_buf(&self) -> KResult<Vec<u8>> {
         Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
-    pub fn to_date(self) -> KResult<CK_DATE> {
+    pub fn to_date(&self) -> KResult<CK_DATE> {
         if self.ulValueLen != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
 
-    pub fn to_attribute(self) -> KResult<Attribute> {
+    pub fn to_attribute(&self) -> KResult<Attribute> {
         let mut atype = AttrType::DenyType;
         for amap in &ATTRMAP {
             if amap.id == self.type_ {
