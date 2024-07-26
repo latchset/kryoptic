@@ -406,7 +406,7 @@ fn test_key() {
     )
     .expect("Failed to decode hex ec_params");
 
-    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
+    let (_pubkey, prikey) = ret_or_panic!(generate_key_pair(
         session,
         CKM_EC_KEY_PAIR_GEN,
         &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_EC),],
@@ -535,12 +535,6 @@ fn test_key() {
     assert_eq!(ret, CKR_MECHANISM_INVALID);
 
     /* Now check that init with allowed mech succeeds */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_AES_ECB,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
     let data = "0123456789ABCDEF";
     let _ = ret_or_panic!(encrypt(
         session,

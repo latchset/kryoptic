@@ -157,7 +157,8 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
 
             if enc != unit.wp {
                 panic!(
-                    "Failed unit test at line {} - values differ  [{} != {}]",
+                    "Failed unit test {} at line {} - values differ  [{} != {}]",
+                    unit.count,
                     unit.line,
                     hex::encode(enc),
                     hex::encode(unit.wp)
