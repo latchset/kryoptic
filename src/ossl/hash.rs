@@ -25,22 +25,6 @@ unsafe impl Send for HashState {}
 unsafe impl Sync for HashState {}
 
 impl HashOperation {
-    fn new_mechanism() -> Box<dyn Mechanism> {
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        })
-    }
-
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &HASH_MECH_SET {
-            mechs.add_mechanism(ckm.hash, Self::new_mechanism());
-        }
-    }
-
     pub fn new(mech: CK_MECHANISM_TYPE) -> KResult<HashOperation> {
         let alg: &[u8] = match mech {
             CKM_SHA_1 => OSSL_DIGEST_NAME_SHA1,
@@ -60,13 +44,6 @@ impl HashOperation {
             in_use: false,
         })
     }
-    pub fn hashlen(&self) -> usize {
-        unsafe { EVP_MD_get_size(self.state.md.as_ptr()) as usize }
-    }
-    pub fn blocklen(&self) -> usize {
-        unsafe { EVP_MD_get_block_size(self.state.md.as_ptr()) as usize }
-    }
-
     fn digest_init(&mut self) -> KResult<()> {
         unsafe {
             match EVP_DigestInit(
@@ -168,6 +145,6 @@ impl Digest for HashOperation {
     }
 
     fn digest_len(&self) -> KResult<usize> {
-        Ok(self.hashlen())
+        Ok(unsafe { EVP_MD_get_size(self.state.md.as_ptr()) as usize })
     }
 }

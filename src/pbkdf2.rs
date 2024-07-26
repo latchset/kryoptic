@@ -28,7 +28,7 @@ impl PBKDF2 {
         mechanisms: &Mechanisms,
         dklen: usize,
     ) -> KResult<Vec<u8>> {
-        let hlen = hash::hmac_size(self.prf);
+        let hlen = hmac::hmac_size(self.prf);
         if hlen == CK_UNAVAILABLE_INFORMATION as usize {
             return err_rv!(CKR_MECHANISM_INVALID);
         }

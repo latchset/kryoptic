@@ -48,6 +48,7 @@ mod aes;
 mod drbg;
 mod ecc;
 mod hash;
+mod hmac;
 mod kdf;
 mod rsa;
 
