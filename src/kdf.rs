@@ -5,13 +5,15 @@ use super::attribute;
 use super::err_rv;
 use super::error;
 use super::hash;
+use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
 
 use attribute::{from_bool, from_bytes, from_ulong};
 use error::{KError, KResult};
-use hash::{hash_size, INVALID_HASH_SIZE};
+use hash::INVALID_HASH_SIZE;
+use hmac::hmac_size;
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories, ObjectType};
@@ -502,7 +504,7 @@ impl HKDFOperation {
         {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
-        let hashlen = match hash_size(params.prfHashMechanism) {
+        let hmaclen = match hmac_size(params.prfHashMechanism) {
             INVALID_HASH_SIZE => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             x => x,
         };
@@ -512,7 +514,7 @@ impl HKDFOperation {
                 {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 } else {
-                    vec![0u8; hashlen]
+                    vec![0u8; hmaclen]
                 }
             }
             CKF_HKDF_SALT_DATA => {
@@ -537,7 +539,7 @@ impl HKDFOperation {
             extract: params.bExtract != CK_FALSE,
             expand: params.bExpand != CK_FALSE,
             prf: params.prfHashMechanism,
-            prflen: hashlen,
+            prflen: hmaclen,
             salt_type: params.ulSaltType,
             salt_key: [params.hSaltKey],
             salt: salt,
@@ -771,7 +773,7 @@ impl Mechanism for PBKDF2Mechanism {
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => a.to_ulong()? as usize,
             None => {
-                let max = hash::hmac_size(pbkdf2.prf);
+                let max = hmac_size(pbkdf2.prf);
                 if max == CK_UNAVAILABLE_INFORMATION as usize {
                     return err_rv!(CKR_MECHANISM_INVALID);
                 }

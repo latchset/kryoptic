@@ -1,8 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use constant_time_eq::constant_time_eq;
-use zeroize::Zeroize;
+use {super::fips, fips::*};
 
 #[derive(Debug)]
 struct HMACOperation {
@@ -10,14 +9,14 @@ struct HMACOperation {
     in_use: bool,
     outputlen: usize,
     maclen: usize,
-    _key: HashKey,
+    _key: HmacKey,
     ctx: EvpMacCtx,
 }
 
 impl HMACOperation {
     fn init(
         hash: CK_MECHANISM_TYPE,
-        key: HashKey,
+        key: HmacKey,
         outputlen: usize,
     ) -> KResult<HMACOperation> {
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
@@ -46,22 +45,6 @@ impl HMACOperation {
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
             _key: key,
             ctx: ctx,
-        })
-    }
-
-    pub fn new_mechanism(
-        hs: &HashBasedOp,
-        minlen: usize,
-    ) -> Box<dyn Mechanism> {
-        Box::new(HMACMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-            keytype: hs.key_type,
-            minlen: minlen,
-            maxlen: hs.hash_size,
         })
     }
 
@@ -121,82 +104,5 @@ impl HMACOperation {
         output.copy_from_slice(&buf[..output.len()]);
         buf.zeroize();
         Ok(())
-    }
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for hs in &HASH_MECH_SET {
-            mechs.add_mechanism(hs.mac, Self::new_mechanism(hs, hs.hash_size));
-            mechs.add_mechanism(hs.mac_general, Self::new_mechanism(hs, 1));
-        }
-    }
-}
-
-impl MechOperation for HMACOperation {
-    fn finalized(&self) -> bool {
-        self.finalized
-    }
-}
-
-impl Mac for HMACOperation {
-    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> KResult<()> {
-        self.begin()?;
-        self.update(data)?;
-        self.finalize(mac)
-    }
-
-    fn mac_update(&mut self, data: &[u8]) -> KResult<()> {
-        self.update(data)
-    }
-
-    fn mac_final(&mut self, mac: &mut [u8]) -> KResult<()> {
-        self.finalize(mac)
-    }
-
-    fn mac_len(&self) -> KResult<usize> {
-        Ok(self.outputlen)
-    }
-}
-
-impl Sign for HMACOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
-        self.begin()?;
-        self.update(data)?;
-        self.finalize(signature)
-    }
-
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
-        self.update(data)
-    }
-
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
-        self.finalize(signature)
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.outputlen)
-    }
-}
-
-impl Verify for HMACOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
-        self.begin()?;
-        self.update(data)?;
-        self.verify_final(signature)
-    }
-
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
-        self.update(data)
-    }
-
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
-        let mut verify: Vec<u8> = vec![0; self.outputlen];
-        self.finalize(verify.as_mut_slice())?;
-        if !constant_time_eq(&verify, signature) {
-            return err_rv!(CKR_SIGNATURE_INVALID);
-        }
-        Ok(())
-    }
-
-    fn signature_len(&self) -> KResult<usize> {
-        Ok(self.outputlen)
     }
 }
