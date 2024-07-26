@@ -200,7 +200,8 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
         ));
         if mac != unit.mac {
             panic!(
-                "Failed unit test at line {} - values differ  [{} != {}]",
+                "Failed unit test {} at line {} - values differ  [{} != {}]",
+                unit.count,
                 unit.line,
                 hex::encode(mac),
                 hex::encode(unit.mac)
