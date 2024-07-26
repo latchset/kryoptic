@@ -9,6 +9,8 @@ use super::tlskdf;
 use tests::*;
 
 use serial_test::parallel;
+use std::io;
+use std::io::BufRead;
 
 #[test]
 #[parallel]
@@ -117,4 +119,255 @@ fn test_tlsprf_vectors() {
             panic!("Failed tls prf vector named {}", name);
         }
     }
+}
+
+#[derive(Debug)]
+struct TlsKdfTestUnit {
+    line: usize,
+    count: usize,
+    pms: Vec<u8>,
+    srv_hlo_rnd: Vec<u8>,
+    cli_hlo_rnd: Vec<u8>,
+    srv_rnd: Vec<u8>,
+    cli_rnd: Vec<u8>,
+    ms: Vec<u8>,
+    kb: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct TlsKdfTestSection {
+    kdf: CK_MECHANISM_TYPE,
+    prf: CK_MECHANISM_TYPE,
+    units: Vec<TlsKdfTestUnit>,
+}
+
+fn parse_kdf_vector(filename: &str) -> Vec<TlsKdfTestSection> {
+    let file = ret_or_panic!(std::fs::File::open(filename));
+
+    let mut kdf: CK_MECHANISM_TYPE;
+    let mut data = Vec::<TlsKdfTestSection>::new();
+    let mut pms_len = 0usize;
+    let mut kb_len = 0usize;
+
+    for (l, line) in io::BufReader::new(file).lines().flatten().enumerate() {
+        let ln = l + 1;
+        if line.starts_with("#") {
+            continue;
+        }
+
+        if line.len() == 0 {
+            continue;
+        }
+
+        if line.starts_with("[TLS ") {
+            /* we ignore tests for algorithms we do not care to support like Triple DES,
+             * for those we still need to parse the section, but we'll mark it as
+             * unknown and skip all units */
+            let mut prf = CKM_SHA_1;
+            match &line[5..] {
+                "1.0/1.1]" => kdf = CKM_TLS_MASTER_KEY_DERIVE,
+                "1.2, SHA-256]" => {
+                    prf = CKM_SHA256;
+                    kdf = CKM_TLS12_MASTER_KEY_DERIVE;
+                }
+                _ => kdf = CK_UNAVAILABLE_INFORMATION,
+            }
+
+            let section = TlsKdfTestSection {
+                kdf: kdf,
+                prf: prf,
+                units: Vec::with_capacity(100),
+            };
+            data.push(section);
+            continue;
+        }
+        let section = match data.last_mut() {
+            Some(s) => s,
+            None => continue,
+        };
+        if section.prf == CK_UNAVAILABLE_INFORMATION {
+            continue;
+        }
+        if line.starts_with("[pre-master secret length = ") {
+            pms_len =
+                (&line[28..(line.len() - 1)]).parse::<usize>().unwrap() / 8;
+            continue;
+        }
+        if line.starts_with("[key block length = ") {
+            kb_len =
+                (&line[20..(line.len() - 1)]).parse::<usize>().unwrap() / 8;
+            continue;
+        }
+
+        /* units */
+        if line.starts_with("COUNT = ") {
+            let unit = TlsKdfTestUnit {
+                line: ln,
+                count: (&line[8..]).parse().unwrap(),
+                pms: vec![0u8; pms_len],
+                srv_hlo_rnd: vec![0u8; 32],
+                cli_hlo_rnd: vec![0u8; 32],
+                srv_rnd: vec![0u8; 32],
+                cli_rnd: vec![0u8; 32],
+                ms: vec![0u8; pms_len],
+                kb: vec![0u8; kb_len],
+            };
+            section.units.push(unit);
+            continue;
+        }
+
+        let unit = match section.units.last_mut() {
+            Some(u) => u,
+            None => panic!("No unit defined in section (line {})", ln),
+        };
+
+        if line.starts_with("pre_master_secret = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[20..], unit.pms.as_mut_slice()); line; ln);
+            continue;
+        }
+        if line.starts_with("serverHello_random = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[21..], unit.srv_hlo_rnd.as_mut_slice()); line; ln);
+            continue;
+        }
+        if line.starts_with("clientHello_random = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[21..], unit.cli_hlo_rnd.as_mut_slice()); line; ln);
+            continue;
+        }
+        if line.starts_with("server_random = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[16..], unit.srv_rnd.as_mut_slice()); line; ln);
+            continue;
+        }
+        if line.starts_with("client_random = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[16..], unit.cli_rnd.as_mut_slice()); line; ln);
+            continue;
+        }
+        if line.starts_with("master_secret = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[16..], unit.ms.as_mut_slice()); line; ln);
+            continue;
+        }
+        if line.starts_with("key_block = ") {
+            parse_or_panic!(hex::decode_to_slice(&line[12..], unit.kb.as_mut_slice()); line; ln);
+            continue;
+        }
+    }
+
+    data
+}
+
+fn test_tlskdf_units(
+    session: CK_SESSION_HANDLE,
+    test_data: Vec<TlsKdfTestSection>,
+) {
+    for section in test_data {
+        /* until we support all the KDFs */
+        if section.kdf != CKM_TLS12_MASTER_KEY_DERIVE {
+            continue;
+        }
+
+        for unit in section.units {
+            println!("Executing test at line {}", unit.line);
+            /* create key */
+            let key_handle = ret_or_panic!(import_object(
+                session,
+                CKO_SECRET_KEY,
+                &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+                &[
+                    (CKA_VALUE, unit.pms.as_slice()),
+                    (
+                        CKA_LABEL,
+                        format!(
+                            "Key for mech {}, COUNT={}, line {}",
+                            section.kdf, unit.count, unit.line
+                        )
+                        .as_bytes()
+                    )
+                ],
+                &[(CKA_DERIVE, true)],
+            ));
+
+            let derive_template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                    (CKA_VALUE_LEN, unit.ms.len() as CK_ULONG),
+                ],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
+
+            let (params, paramslen) = match section.kdf {
+                CKM_TLS12_MASTER_KEY_DERIVE => (
+                    CK_TLS12_MASTER_KEY_DERIVE_PARAMS {
+                        RandomInfo: CK_SSL3_RANDOM_DATA {
+                            pClientRandom: byte_ptr!(unit.cli_hlo_rnd.as_ptr()),
+                            ulClientRandomLen: unit.cli_hlo_rnd.len()
+                                as CK_ULONG,
+                            pServerRandom: byte_ptr!(unit.srv_hlo_rnd.as_ptr()),
+                            ulServerRandomLen: unit.srv_hlo_rnd.len()
+                                as CK_ULONG,
+                        },
+                        pVersion: std::ptr::null_mut(),
+                        prfHashMechanism: section.prf,
+                    },
+                    std::mem::size_of::<CK_TLS12_MASTER_KEY_DERIVE_PARAMS>()
+                        as CK_ULONG,
+                ),
+                _ => panic!("Invalid mechanism"),
+            };
+            let derive_mech = CK_MECHANISM {
+                mechanism: section.kdf,
+                pParameter: void_ptr!(&params),
+                ulParameterLen: paramslen,
+            };
+
+            let mut dk_handle = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &derive_mech as *const _ as CK_MECHANISM_PTR,
+                key_handle,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                &mut dk_handle,
+            );
+            if ret != CKR_OK {
+                panic!("Failed ({}) unit test at line {}", ret, unit.line);
+            }
+
+            let mut value = vec![0u8; unit.ms.len()];
+            let mut extract_template = make_ptrs_template(&[(
+                CKA_VALUE,
+                void_ptr!(value.as_mut_ptr()),
+                value.len(),
+            )]);
+
+            let ret = fn_get_attribute_value(
+                session,
+                dk_handle,
+                extract_template.as_mut_ptr(),
+                extract_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            if value != unit.ms {
+                panic!("Failed ({}) unit test at line {} - values differ [{} != {}]", ret, unit.line, hex::encode(value), hex::encode(unit.ms));
+            }
+        }
+    }
+}
+
+#[test]
+#[parallel]
+fn test_tls_master_secret_vectors() {
+    let test_data = parse_kdf_vector("testdata/tlsprf_vectors.txt");
+
+    let mut testtokn =
+        TestToken::initialized("tls_master_secret_vectors.sql", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    test_tlskdf_units(session, test_data);
+
+    testtokn.finalize();
 }
