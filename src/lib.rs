@@ -1950,6 +1950,39 @@ extern "C" fn fn_derive_key(
             }
             CKR_OK
         }
+        CKM_TLS12_KEY_AND_MAC_DERIVE => {
+            /* TODO: check that key_handle is NULL ? */
+            let params =
+                cast_params!(raw_err mechanism, CK_TLS12_KEY_MAT_PARAMS);
+            let mat_out = params.pReturnedKeyMaterial;
+            match result.len() {
+                2 | 4 => (),
+                _ => return CKR_GENERAL_ERROR,
+            }
+            let mut ah = Vec::<CK_OBJECT_HANDLE>::with_capacity(result.len());
+            while result.len() > 0 {
+                match token.insert_object(s_handle, result.remove(0)) {
+                    Ok(h) => ah.push(h),
+                    Err(e) => {
+                        for h in ah {
+                            let _ = token.destroy_object(h);
+                        }
+                        return err_to_rv!(e);
+                    }
+                }
+            }
+            if ah.len() == 4 {
+                unsafe {
+                    (*mat_out).hClientMacSecret = ah.remove(0);
+                    (*mat_out).hServerMacSecret = ah.remove(0);
+                }
+            }
+            unsafe {
+                (*mat_out).hClientKey = ah.remove(0);
+                (*mat_out).hServerKey = ah.remove(0);
+            }
+            CKR_OK
+        }
         _ => {
             if result.len() != 1 {
                 return CKR_GENERAL_ERROR;
