@@ -36,15 +36,7 @@ macro_rules! bytes_to_slice {
 macro_rules! maxsize {
     ($size: expr) => {
         match $size {
-            8 => u8::MAX as usize,
-            16 => u16::MAX as usize,
-            24 => (u8::MAX as usize) * (u16::MAX as usize),
-            32 => u32::MAX as usize,
-            40 => (u8::MAX as usize) * (u32::MAX as usize),
-            48 => (u16::MAX as usize) * (u32::MAX as usize),
-            56 => {
-                (u8::MAX as usize) * (u16::MAX as usize) * (u32::MAX as usize)
-            }
+            8 | 16 | 24 | 32 | 40 | 48 | 56 => (1 << $size) - 1,
             64 => u64::MAX as usize,
             _ => panic!("Invalid size"),
         }
