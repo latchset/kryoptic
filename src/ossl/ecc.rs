@@ -677,7 +677,7 @@ impl Derive for ECDHOperation {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
+    ) -> KResult<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -819,6 +819,6 @@ impl Derive for ECDHOperation {
         let mut obj = factory.create(tmpl.as_slice())?;
 
         object::default_key_attributes(&mut obj, self.mech)?;
-        Ok((obj, 0))
+        Ok(vec![obj])
     }
 }

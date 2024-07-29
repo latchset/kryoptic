@@ -267,7 +267,7 @@ impl Derive for Sp800Operation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
+    ) -> KResult<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -369,7 +369,7 @@ impl Derive for Sp800Operation {
             }
         }
 
-        let mut obj = objfactories.derive_key_from_template(key, template)?;
+        let obj = objfactories.derive_key_from_template(key, template)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
             Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
@@ -377,6 +377,10 @@ impl Derive for Sp800Operation {
         if keysize == 0 || keysize > (u32::MAX as usize) {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
+
+        let mut keys =
+            Vec::<Object>::with_capacity(1 + self.addl_drv_keys.len());
+        keys.push(obj);
 
         let mut slen = key_to_segment_size(keysize, segment);
 
@@ -407,7 +411,7 @@ impl Derive for Sp800Operation {
             }
             /* increment size in segment steps */
             slen += key_to_segment_size(aksize, segment);
-            self.addl_objects.push(obj);
+            keys.push(obj);
         }
 
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_KBKDF))?;
@@ -424,24 +428,15 @@ impl Derive for Sp800Operation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
-        obj.set_attr(from_bytes(CKA_VALUE, dkm[0..keysize].to_vec()))?;
-
-        let mut cursor = key_to_segment_size(keysize, segment);
-        for key in &mut self.addl_objects {
-            let aksize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+        let mut cursor = 0;
+        for key in &mut keys {
+            let keysize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
             key.set_attr(from_bytes(
                 CKA_VALUE,
-                dkm[cursor..(cursor + aksize)].to_vec(),
+                dkm[cursor..(cursor + keysize)].to_vec(),
             ))?;
-            cursor += key_to_segment_size(aksize, segment);
+            cursor += key_to_segment_size(keysize, segment);
         }
-
-        Ok((obj, self.addl_objects.len()))
-    }
-
-    fn derive_additional_key(
-        &mut self,
-    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
-        self.pop_key()
+        Ok(keys)
     }
 }

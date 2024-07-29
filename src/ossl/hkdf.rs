@@ -11,7 +11,7 @@ impl Derive for HKDFOperation {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
+    ) -> KResult<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -92,12 +92,6 @@ impl Derive for HKDFOperation {
 
         obj.set_attr(from_bytes(CKA_VALUE, dkm))?;
 
-        Ok((obj, 0))
-    }
-
-    fn derive_additional_key(
-        &mut self,
-    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
-        err_rv!(CKR_GENERAL_ERROR)
+        Ok(vec![obj])
     }
 }

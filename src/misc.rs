@@ -53,3 +53,33 @@ pub fn fixup_template(
     }
     vec
 }
+
+#[macro_export]
+macro_rules! cast_params {
+    ($mech:expr, $params:ty) => {{
+        if $mech.ulParameterLen as usize != std::mem::size_of::<$params>() {
+            return err_rv!(CKR_ARGUMENTS_BAD);
+        }
+        unsafe { *($mech.pParameter as *const $params) }
+    }};
+
+    (raw_err $mech:expr, $params:ty) => {{
+        if $mech.ulParameterLen as usize != std::mem::size_of::<$params>() {
+            return CKR_ARGUMENTS_BAD;
+        }
+        unsafe { *($mech.pParameter as *const $params) }
+    }};
+}
+
+#[macro_export]
+macro_rules! bytes_to_slice {
+    ($ptr: expr, $len:expr, $typ:ty) => {
+        if $len > 0 {
+            unsafe {
+                std::slice::from_raw_parts($ptr as *const $typ, $len as usize)
+            }
+        } else {
+            &[]
+        }
+    };
+}

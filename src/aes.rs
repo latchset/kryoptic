@@ -467,7 +467,7 @@ impl Derive for AesKDFOperation<'_> {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
+    ) -> KResult<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -501,13 +501,7 @@ impl Derive for AesKDFOperation<'_> {
 
         factory.as_secret_key_factory()?.set_key(&mut obj, dkm)?;
 
-        Ok((obj, 0))
-    }
-
-    fn derive_additional_key(
-        &mut self,
-    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        Ok(vec![obj])
     }
 }
 
