@@ -14,9 +14,41 @@ use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
 
-use super::bytes_to_vec;
+use super::{bytes_to_vec, cast_params};
 
 use std::fmt::Debug;
+
+macro_rules! as_ck_bbool {
+    ($key:expr, $attr:expr) => {
+        match $key.get_attr_as_bool($attr) {
+            Ok(v) => {
+                if v {
+                    CK_TRUE
+                } else {
+                    CK_FALSE
+                }
+            }
+            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        }
+    };
+}
+
+macro_rules! check_as_ck_bbool {
+    ($attr:expr, $value:expr) => {
+        match $attr.to_bool()? {
+            true => {
+                if $value != CK_TRUE {
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+            false => {
+                if $value != CK_FALSE {
+                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                }
+            }
+        }
+    };
+}
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     TLSKDFMechanism::register_mechanisms(mechs);
@@ -31,6 +63,7 @@ const TLS_MASTER_SECRET_ALLOWED_MECHS: [CK_ULONG; 4] = [
     CKM_TLS12_MAC,
 ];
 const TLS_MASTER_SECRET_LABEL: &[u8; 13] = b"master secret";
+const TLS_KEY_EXPANSION_LABEL: &[u8; 13] = b"key expansion";
 
 fn tlsprf(
     key: &Object,
@@ -103,6 +136,16 @@ impl TLSKDFMechanism {
                 },
             }),
         );
+        mechs.add_mechanism(
+            CKM_TLS12_KEY_AND_MAC_DERIVE,
+            Box::new(TLSKDFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: u32::MAX as CK_ULONG,
+                    flags: CKF_DERIVE,
+                },
+            }),
+        );
     }
 }
 
@@ -117,7 +160,7 @@ impl Mechanism for TLSKDFMechanism {
         }
 
         match mech.mechanism {
-            CKM_TLS12_MASTER_KEY_DERIVE => {
+            CKM_TLS12_MASTER_KEY_DERIVE | CKM_TLS12_KEY_AND_MAC_DERIVE => {
                 Ok(Operation::Derive(Box::new(TLSKDFOperation::new(mech)?)))
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
@@ -128,10 +171,15 @@ impl Mechanism for TLSKDFMechanism {
 #[derive(Debug)]
 struct TLSKDFOperation {
     finalized: bool,
+    mech: CK_MECHANISM_TYPE,
     client_random: Vec<u8>,
     server_random: Vec<u8>,
-    version: *mut CK_VERSION,
+    version: Option<*mut CK_VERSION>,
     prf: CK_MECHANISM_TYPE,
+    maclen: CK_ULONG,
+    keylen: CK_ULONG,
+    ivlen: CK_ULONG,
+    mat_out: Option<*mut CK_SSL3_KEY_MAT_OUT>,
 }
 
 unsafe impl Send for TLSKDFOperation {}
@@ -139,17 +187,15 @@ unsafe impl Sync for TLSKDFOperation {}
 
 impl TLSKDFOperation {
     fn new(mech: &CK_MECHANISM) -> KResult<TLSKDFOperation> {
-        if mech.mechanism != CKM_TLS12_MASTER_KEY_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+        match mech.mechanism {
+            CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
+            CKM_TLS12_KEY_AND_MAC_DERIVE => Self::new_tls12_keymac_derive(mech),
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
         }
-        if mech.ulParameterLen as usize
-            != ::std::mem::size_of::<CK_TLS12_MASTER_KEY_DERIVE_PARAMS>()
-        {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        }
-        let params = unsafe {
-            *(mech.pParameter as *const CK_TLS12_MASTER_KEY_DERIVE_PARAMS)
-        };
+    }
+
+    fn new_tls12_mk_derive(mech: &CK_MECHANISM) -> KResult<TLSKDFOperation> {
+        let params = cast_params!(mech, CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
 
         let clirand = bytes_to_vec!(
             params.RandomInfo.pClientRandom,
@@ -171,16 +217,82 @@ impl TLSKDFOperation {
             Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
         };
 
+        let version = if params.pVersion.is_null() {
+            None
+        } else {
+            Some(params.pVersion)
+        };
+
         Ok(TLSKDFOperation {
             finalized: false,
+            mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
-            version: params.pVersion,
+            version: version,
             prf: prf,
+            maclen: 0,
+            keylen: 0,
+            ivlen: 0,
+            mat_out: None,
         })
     }
 
-    fn verify_key(key: &Object) -> KResult<()> {
+    fn new_tls12_keymac_derive(
+        mech: &CK_MECHANISM,
+    ) -> KResult<TLSKDFOperation> {
+        let params = cast_params!(mech, CK_TLS12_KEY_MAT_PARAMS);
+
+        let maclen = params.ulMacSizeInBits / 8;
+        let keylen = params.ulKeySizeInBits / 8;
+        let ivlen = params.ulIVSizeInBits / 8;
+
+        if params.bIsExport != CK_FALSE {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        let clirand = bytes_to_vec!(
+            params.RandomInfo.pClientRandom,
+            params.RandomInfo.ulClientRandomLen
+        );
+        let srvrand = bytes_to_vec!(
+            params.RandomInfo.pServerRandom,
+            params.RandomInfo.ulServerRandomLen
+        );
+
+        if clirand.len() != TLS_RANDOM_SEED_SIZE
+            || srvrand.len() != TLS_RANDOM_SEED_SIZE
+        {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
+            Ok(h) => h,
+            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        };
+
+        if params.pReturnedKeyMaterial.is_null() {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        Ok(TLSKDFOperation {
+            finalized: false,
+            mech: mech.mechanism,
+            client_random: clirand,
+            server_random: srvrand,
+            version: None,
+            prf: prf,
+            maclen: maclen,
+            keylen: if keylen > 0 {
+                keylen
+            } else {
+                TLS_MASTER_SECRET_SIZE
+            },
+            ivlen: ivlen,
+            mat_out: Some(params.pReturnedKeyMaterial),
+        })
+    }
+
+    fn verify_key(&self, key: &Object) -> KResult<()> {
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
         match key.get_attr(CKA_VALUE_LEN) {
             Some(a) => match a.to_ulong() {
@@ -196,7 +308,8 @@ impl TLSKDFOperation {
         }
     }
 
-    fn verify_template(
+    fn verify_mk_template(
+        &self,
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Vec<interface::CK_ATTRIBUTE>> {
         /* augment template, then check that it has all the right values */
@@ -215,6 +328,9 @@ impl TLSKDFOperation {
                     &TLS_MASTER_SECRET_SIZE,
                 ),
                 CK_ATTRIBUTE::from_slice(CKA_ALLOWED_MECHANISMS, allowed),
+                CK_ATTRIBUTE::from_bool(CKA_SIGN, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_VERIFY, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_DERIVE, &CK_TRUE),
             ],
         );
         for attr in &tmpl {
@@ -260,6 +376,188 @@ impl TLSKDFOperation {
         seed.extend_from_slice(self.server_random.as_slice());
         seed
     }
+
+    fn derive_master_key(
+        &mut self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+        mechanisms: &Mechanisms,
+        objfactories: &ObjectFactories,
+    ) -> KResult<Vec<Object>> {
+        self.verify_key(key)?;
+        let tmpl = self.verify_mk_template(template)?;
+        let factory =
+            objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
+        let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
+
+        let mech = mechanisms.get(self.prf)?;
+        let seed = self.tls_master_secret_seed();
+        let dkmlen = TLS_MASTER_SECRET_SIZE as usize;
+        let dkm = tlsprf(key, mech, self.prf, &seed, dkmlen)?;
+
+        factory.as_secret_key_factory()?.set_key(&mut dkey, dkm)?;
+
+        /* fill in the version if all went well */
+        if let Some(version) = self.version {
+            let mut maj: CK_BYTE = 0xff;
+            let mut min: CK_BYTE = 0xff;
+            /* do not leak bytes for long term keys, openssl really only
+             * uses ephemeral session keys, so there is no business in
+             * returning bytes from a long term stored token key */
+            if !key.is_token() {
+                let secret = match key.get_attr(CKA_VALUE) {
+                    None => return err_rv!(CKR_GENERAL_ERROR),
+                    Some(val) => val.to_bytes()?,
+                };
+                maj = secret[0];
+                min = secret[1];
+            }
+            unsafe {
+                (*version).major = maj;
+                (*version).minor = min;
+            }
+        }
+
+        Ok(vec![dkey])
+    }
+
+    fn verify_key_expansion_template(
+        &self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> KResult<Vec<interface::CK_ATTRIBUTE>> {
+        /* augment template, then check that it has all the right values */
+        let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE);
+        let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE);
+        let tmpl = misc::fixup_template(
+            template,
+            &[
+                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
+                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
+                CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &self.keylen),
+                CK_ATTRIBUTE::from_bool(CKA_ENCRYPT, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_DECRYPT, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_DERIVE, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_SENSITIVE, &is_sensitive),
+                CK_ATTRIBUTE::from_bool(CKA_EXTRACTABLE, &is_extractable),
+            ],
+        );
+        for attr in &tmpl {
+            match attr.type_ {
+                CKA_VALUE_LEN => {
+                    let val = attr.to_ulong()?;
+                    if val != self.keylen {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
+                CKA_SENSITIVE => check_as_ck_bbool!(attr, is_sensitive),
+                CKA_EXTRACTABLE => check_as_ck_bbool!(attr, is_extractable),
+                _ => (),
+            }
+        }
+        Ok(tmpl)
+    }
+
+    fn tls_key_expansion_seed(&self) -> Vec<u8> {
+        let mut seed = Vec::<u8>::with_capacity(
+            TLS_KEY_EXPANSION_LABEL.len()
+                + self.client_random.len()
+                + self.server_random.len(),
+        );
+        seed.extend_from_slice(TLS_KEY_EXPANSION_LABEL);
+        seed.extend_from_slice(self.server_random.as_slice());
+        seed.extend_from_slice(self.client_random.as_slice());
+        seed
+    }
+
+    fn derive_mac_key(
+        &mut self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+        mechanisms: &Mechanisms,
+        objfactories: &ObjectFactories,
+    ) -> KResult<Vec<Object>> {
+        self.verify_key(key)?;
+        let key_tmpl = self.verify_key_expansion_template(key, template)?;
+
+        let mech = mechanisms.get(self.prf)?;
+        let seed = self.tls_key_expansion_seed();
+        let dkmlen = (2 * (self.maclen + self.keylen + self.ivlen)) as usize;
+        let dkm = tlsprf(key, mech, self.prf, &seed, dkmlen)?;
+
+        let mut keys = Vec::<Object>::with_capacity(4);
+        let mut i = 0;
+
+        if self.maclen > 0 {
+            let maclen = self.maclen as usize;
+            let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE);
+            let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE);
+            let mac_tmpl = [
+                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
+                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
+                CK_ATTRIBUTE::from_bool(CKA_SIGN, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_VERIFY, &CK_TRUE),
+                CK_ATTRIBUTE::from_bool(CKA_SENSITIVE, &is_sensitive),
+                CK_ATTRIBUTE::from_bool(CKA_EXTRACTABLE, &is_extractable),
+            ];
+
+            let factory =
+                objfactories.get_obj_factory_from_key_template(&mac_tmpl)?;
+            let mut climac = factory.default_object_derive(&mac_tmpl, key)?;
+            factory
+                .as_secret_key_factory()?
+                .set_key(&mut climac, dkm[i..(i + maclen)].to_vec())?;
+
+            i += maclen;
+            keys.push(climac);
+            let mut srvmac = factory.default_object_derive(&mac_tmpl, key)?;
+            factory
+                .as_secret_key_factory()?
+                .set_key(&mut srvmac, dkm[i..(i + maclen)].to_vec())?;
+            i += maclen;
+            keys.push(srvmac);
+        }
+
+        if self.keylen > 0 {
+            let keylen = self.keylen as usize;
+            let factory = objfactories
+                .get_obj_factory_from_key_template(key_tmpl.as_slice())?;
+            let mut clikey =
+                factory.default_object_derive(key_tmpl.as_slice(), key)?;
+            factory
+                .as_secret_key_factory()?
+                .set_key(&mut clikey, dkm[i..(i + keylen)].to_vec())?;
+
+            i += keylen;
+            keys.push(clikey);
+            let mut srvkey =
+                factory.default_object_derive(key_tmpl.as_slice(), key)?;
+            factory
+                .as_secret_key_factory()?
+                .set_key(&mut srvkey, dkm[i..(i + keylen)].to_vec())?;
+            i += keylen;
+            keys.push(srvkey);
+        }
+
+        if self.ivlen > 0 {
+            let ivlen = self.ivlen as usize;
+            let mat_out = match self.mat_out {
+                Some(mo) => mo,
+                None => return err_rv!(CKR_GENERAL_ERROR),
+            };
+            let cliiv = unsafe {
+                core::slice::from_raw_parts_mut((*mat_out).pIVClient, ivlen)
+            };
+            cliiv.copy_from_slice(&dkm[i..(i + ivlen)]);
+            i += ivlen;
+            let srviv = unsafe {
+                core::slice::from_raw_parts_mut((*mat_out).pIVServer, ivlen)
+            };
+            srviv.copy_from_slice(&dkm[i..(i + ivlen)]);
+        }
+
+        Ok(keys)
+    }
 }
 
 impl MechOperation for TLSKDFOperation {
@@ -281,40 +579,14 @@ impl Derive for TLSKDFOperation {
         }
         self.finalized = true;
 
-        Self::verify_key(key)?;
-        let tmpl = Self::verify_template(template)?;
-        let factory =
-            objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
-
-        let mech = mechanisms.get(self.prf)?;
-        let seed = self.tls_master_secret_seed();
-        let dkmlen = TLS_MASTER_SECRET_SIZE as usize;
-        let dkm = tlsprf(key, mech, self.prf, &seed, dkmlen)?;
-
-        factory.as_secret_key_factory()?.set_key(&mut dkey, dkm)?;
-
-        /* fill in the version if all went well */
-        if !self.version.is_null() {
-            let mut maj: CK_BYTE = 0xff;
-            let mut min: CK_BYTE = 0xff;
-            /* not not leak bytes for long term keys, openssl really only
-             * uses ephemeral session keys, so there is no business in
-             * returning bytes from a long term stored token key */
-            if !key.is_token() {
-                let secret = match key.get_attr(CKA_VALUE) {
-                    None => return err_rv!(CKR_GENERAL_ERROR),
-                    Some(val) => val.to_bytes()?,
-                };
-                maj = secret[0];
-                min = secret[1];
+        match self.mech {
+            CKM_TLS12_MASTER_KEY_DERIVE => {
+                self.derive_master_key(key, template, mechanisms, objfactories)
             }
-            unsafe {
-                (*self.version).major = maj;
-                (*self.version).minor = min;
+            CKM_TLS12_KEY_AND_MAC_DERIVE => {
+                self.derive_mac_key(key, template, mechanisms, objfactories)
             }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
         }
-
-        Ok(vec![dkey])
     }
 }
