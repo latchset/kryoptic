@@ -19,24 +19,14 @@ use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories, ObjectType};
 
+use super::bytes_to_slice;
+
 use std::fmt::Debug;
 
 #[cfg(feature = "fips")]
 use {super::fips, fips::*};
 
 use core::ffi::c_int;
-
-macro_rules! bytes_to_slice {
-    ($ptr: expr, $len:expr, $typ:ty) => {
-        if $len > 0 {
-            unsafe {
-                std::slice::from_raw_parts($ptr as *const $typ, $len as usize)
-            }
-        } else {
-            &[]
-        }
-    };
-}
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     HKDFOperation::register_mechanisms(mechs);

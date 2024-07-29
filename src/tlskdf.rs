@@ -275,7 +275,7 @@ impl Derive for TLSKDFOperation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
+    ) -> KResult<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -315,6 +315,6 @@ impl Derive for TLSKDFOperation {
             }
         }
 
-        Ok((dkey, 0))
+        Ok(vec![dkey])
     }
 }

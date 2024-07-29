@@ -14,24 +14,13 @@ use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
 
-use super::bytes_to_vec;
+use super::{bytes_to_slice, bytes_to_vec, cast_params};
 
 use std::fmt::Debug;
 
 #[cfg(feature = "fips")]
 use {super::fips, fips::*};
 
-macro_rules! bytes_to_slice {
-    ($ptr: expr, $len:expr, $typ:ty) => {
-        if $len > 0 {
-            unsafe {
-                std::slice::from_raw_parts($ptr as *const $typ, $len as usize)
-            }
-        } else {
-            &[]
-        }
-    };
-}
 #[cfg(not(feature = "fips"))]
 macro_rules! maxsize {
     ($size: expr) => {
@@ -60,26 +49,12 @@ impl Mechanism for Sp800KDFMechanism {
 
         let kdf = match mech.mechanism {
             CKM_SP800_108_COUNTER_KDF => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_SP800_108_KDF_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let kdf_params = unsafe {
-                    *(mech.pParameter as *const CK_SP800_108_KDF_PARAMS)
-                };
+                let kdf_params = cast_params!(mech, CK_SP800_108_KDF_PARAMS);
                 Sp800Operation::counter_kdf_new(kdf_params)?
             }
             CKM_SP800_108_FEEDBACK_KDF => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_SP800_108_FEEDBACK_KDF_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let kdf_params = unsafe {
-                    *(mech.pParameter
-                        as *const CK_SP800_108_FEEDBACK_KDF_PARAMS)
-                };
+                let kdf_params =
+                    cast_params!(mech, CK_SP800_108_FEEDBACK_KDF_PARAMS);
                 Sp800Operation::feedback_kdf_new(kdf_params)?
             }
             CKM_SP800_108_DOUBLE_PIPELINE_KDF => {
@@ -121,7 +96,6 @@ struct Sp800Operation {
     params: Vec<Sp800Params>,
     iv: Vec<u8>,
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
-    addl_objects: Vec<Object>,
 }
 
 unsafe impl Send for Sp800Operation {}
@@ -302,7 +276,6 @@ impl Sp800Operation {
             params: Self::parse_data_params(&data_params)?,
             iv: Vec::new(),
             addl_drv_keys: addl_drv_keys.to_vec(),
-            addl_objects: Vec::with_capacity(addl_drv_keys.len()),
         })
     }
 
@@ -333,28 +306,7 @@ impl Sp800Operation {
             params: Self::parse_data_params(&data_params)?,
             iv: iv,
             addl_drv_keys: addl_drv_keys.to_vec(),
-            addl_objects: Vec::with_capacity(addl_drv_keys.len()),
         })
-    }
-
-    fn pop_key(&mut self) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
-        if !self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
-        }
-        /* pops a key at a time from the the vectors, this returns keys
-         * in reverse order from creation, but that doesn't matter as
-         * the pointers in the original structure are what give the order
-         * back to the caller */
-        let obj = match self.addl_objects.pop() {
-            Some(o) => o,
-            None => return err_rv!(CKR_EXCEEDED_MAX_ITERATIONS),
-        };
-        /* len() here now point to the correct handler container because
-         * the length is always one more than the last object index and
-         * we just reduced by one the length of the objects array */
-        let hp = self.addl_drv_keys[self.addl_objects.len()].phKey;
-
-        Ok((obj, hp))
     }
 
     #[cfg(not(feature = "fips"))]
@@ -608,7 +560,7 @@ impl Derive for Sp800Operation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
+    ) -> KResult<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -633,7 +585,7 @@ impl Derive for Sp800Operation {
         let mut op = mech.mac_new(&mechanism, key, CKF_DERIVE)?;
         let segment = op.mac_len()?;
 
-        let mut obj = objfactories.derive_key_from_template(key, template)?;
+        let obj = objfactories.derive_key_from_template(key, template)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
             Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
@@ -641,6 +593,10 @@ impl Derive for Sp800Operation {
         if keysize == 0 || keysize > (u32::MAX as usize) {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
+
+        let mut keys =
+            Vec::<Object>::with_capacity(1 + self.addl_drv_keys.len());
+        keys.push(obj);
 
         let mut klen = keysize;
         let mut slen = Self::key_to_segment_size(keysize, segment);
@@ -672,7 +628,7 @@ impl Derive for Sp800Operation {
             }
             klen += aksize;
             slen += Self::key_to_segment_size(aksize, segment);
-            self.addl_objects.push(obj);
+            keys.push(obj);
         }
 
         let mut dkm = vec![0u8; slen];
@@ -714,26 +670,16 @@ impl Derive for Sp800Operation {
             cursor += segment;
         }
 
-        /* main key first */
-        obj.set_attr(from_bytes(CKA_VALUE, dkm[0..keysize].to_vec()))?;
-
-        let mut cursor = Self::key_to_segment_size(keysize, segment);
-        for key in &mut self.addl_objects {
-            let aksize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+        let mut cursor = 0;
+        for key in &mut keys {
+            let keysize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
             key.set_attr(from_bytes(
                 CKA_VALUE,
-                dkm[cursor..(cursor + aksize)].to_vec(),
+                dkm[cursor..(cursor + keysize)].to_vec(),
             ))?;
-            cursor += Self::key_to_segment_size(aksize, segment);
+            cursor += Self::key_to_segment_size(keysize, segment);
         }
-
-        Ok((obj, self.addl_objects.len()))
-    }
-
-    fn derive_additional_key(
-        &mut self,
-    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
-        self.pop_key()
+        Ok(keys)
     }
 }
 

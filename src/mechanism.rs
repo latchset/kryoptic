@@ -292,12 +292,7 @@ pub trait Derive: MechOperation {
         _: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn derive_additional_key(
-        &mut self,
-    ) -> KResult<(Object, CK_OBJECT_HANDLE_PTR)> {
+    ) -> KResult<Vec<Object>> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }

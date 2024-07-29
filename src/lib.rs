@@ -1881,52 +1881,87 @@ extern "C" fn fn_derive_key(
         },
     }
 
-    let result = operation.derive(
+    let mut result = res_or_ret!(operation.derive(
         &key,
         tmpl,
         token.get_mechanisms(),
         token.get_object_factories(),
-    );
-    let (kh, addtl) = match result {
-        Ok((obj, addtl)) => {
-            let h = res_or_ret!(token.insert_object(s_handle, obj));
-            (h, addtl)
-        }
-        Err(e) => return err_to_rv!(e),
-    };
+    ));
+    if result.len() == 0 {
+        return CKR_GENERAL_ERROR;
+    }
 
-    let mut rv = CKR_OK;
-    if addtl > 0 {
-        let mut o = Vec::<CK_OBJECT_HANDLE>::with_capacity(addtl);
-        for _ in 0..addtl {
-            let r = operation.derive_additional_key();
-            match r {
-                Ok((obj, hptr)) => match token.insert_object(s_handle, obj) {
-                    Ok(h) => {
-                        unsafe { core::ptr::write(hptr as *mut _, h) };
-                        o.push(h);
+    match mechanism.mechanism {
+        CKM_SP800_108_COUNTER_KDF
+        | CKM_SP800_108_FEEDBACK_KDF
+        | CKM_SP800_108_DOUBLE_PIPELINE_KDF => {
+            let kh =
+                res_or_ret!(token.insert_object(s_handle, result.remove(0)));
+            if result.len() > 0 {
+                let adk = match mechanism.mechanism {
+                    CKM_SP800_108_COUNTER_KDF => {
+                        let params = cast_params!(raw_err mechanism, CK_SP800_108_KDF_PARAMS);
+                        bytes_to_slice!(
+                            params.pAdditionalDerivedKeys,
+                            params.ulAdditionalDerivedKeys,
+                            CK_DERIVED_KEY
+                        )
                     }
-                    Err(e) => rv = err_to_rv!(e),
-                },
-                Err(_) => rv = CKR_GENERAL_ERROR,
+                    CKM_SP800_108_FEEDBACK_KDF => {
+                        let params = cast_params!(raw_err mechanism, CK_SP800_108_FEEDBACK_KDF_PARAMS);
+                        bytes_to_slice!(
+                            params.pAdditionalDerivedKeys,
+                            params.ulAdditionalDerivedKeys,
+                            CK_DERIVED_KEY
+                        )
+                    }
+                    _ => return CKR_MECHANISM_INVALID,
+                };
+                if adk.len() != result.len() {
+                    return CKR_GENERAL_ERROR;
+                }
+                let mut rv = CKR_OK;
+                let mut ah = Vec::<CK_OBJECT_HANDLE>::with_capacity(adk.len());
+                while result.len() > 0 {
+                    match token.insert_object(s_handle, result.remove(0)) {
+                        Ok(h) => ah.push(h),
+                        Err(e) => rv = err_to_rv!(e),
+                    }
+                    if rv != CKR_OK {
+                        break;
+                    }
+                }
+                if rv != CKR_OK {
+                    for h in ah {
+                        let _ = token.destroy_object(h);
+                    }
+                    let _ = token.destroy_object(kh);
+                    return rv;
+                }
+                for i in 0..adk.len() {
+                    unsafe {
+                        core::ptr::write(adk[i].phKey, ah[i]);
+                    }
+                }
             }
-            if rv != CKR_OK {
-                break;
-            }
-        }
-        if rv != CKR_OK {
-            for h in o {
-                let _ = token.destroy_object(h);
-            }
-            let _ = token.destroy_object(kh);
-            return rv;
-        }
-    }
 
-    unsafe {
-        core::ptr::write(key_handle as *mut _, kh);
+            unsafe {
+                core::ptr::write(key_handle, kh);
+            }
+            CKR_OK
+        }
+        _ => {
+            if result.len() != 1 {
+                return CKR_GENERAL_ERROR;
+            }
+            let kh =
+                res_or_ret!(token.insert_object(s_handle, result.remove(0)));
+            unsafe {
+                core::ptr::write(key_handle, kh);
+            }
+            CKR_OK
+        }
     }
-    CKR_OK
 }
 
 extern "C" fn fn_seed_random(
