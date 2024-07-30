@@ -18,6 +18,9 @@ use super::{bytes_to_vec, cast_params};
 
 use std::fmt::Debug;
 
+use constant_time_eq::constant_time_eq;
+use once_cell::sync::Lazy;
+
 macro_rules! as_ck_bbool {
     ($key:expr, $attr:expr) => {
         match $key.get_attr_as_bool($attr) {
@@ -51,7 +54,7 @@ macro_rules! check_as_ck_bbool {
 }
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    TLSKDFMechanism::register_mechanisms(mechs);
+    TLSPRFMechanism::register_mechanisms(mechs);
 }
 
 const TLS_MASTER_SECRET_SIZE: CK_ULONG = 48;
@@ -64,48 +67,63 @@ const TLS_MASTER_SECRET_ALLOWED_MECHS: [CK_ULONG; 4] = [
 ];
 const TLS_MASTER_SECRET_LABEL: &[u8; 13] = b"master secret";
 const TLS_KEY_EXPANSION_LABEL: &[u8; 13] = b"key expansion";
+const TLS_SERVER_FINISHED: &[u8; 15] = b"server finished";
+const TLS_CLIENT_FINISHED: &[u8; 15] = b"client finished";
 
-fn tlsprf(
-    key: &Object,
-    mech: &Box<dyn Mechanism>,
-    prf: CK_MECHANISM_TYPE,
-    seed: &Vec<u8>,
-    reqlen: usize,
-) -> KResult<Vec<u8>> {
-    let mechanism = CK_MECHANISM {
-        mechanism: prf,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    let mut op = mech.mac_new(&mechanism, key, CKF_DERIVE)?;
-    let maclen = op.mac_len()?;
+#[derive(Debug)]
+struct TLSPRF {
+    op: Box<dyn Mac>,
+}
 
-    let mut ax = vec![0u8; maclen];
-    op.mac_update(seed.as_slice())?;
-    op.mac_final(ax.as_mut_slice())?;
-    /* ax = A(1) */
-
-    /* use a buffer length that is a multiple of maclen,
-     * then truncate to actual reqlen before returning */
-    let mut out = vec![0u8; ((reqlen + maclen - 1) / maclen) * maclen];
-    let mut outlen = 0;
-    while outlen < reqlen {
-        let mut op = mech.mac_new(&mechanism, key, CKF_DERIVE)?;
-        op.mac_update(ax.as_slice())?;
-        op.mac_update(seed.as_slice())?;
-        op.mac_final(&mut out[outlen..(outlen + maclen)])?;
-
-        outlen += maclen;
-
-        if outlen < reqlen {
-            /* ax = A(x + 1) */
-            let mut op = mech.mac_new(&mechanism, key, CKF_DERIVE)?;
-            op.mac_update(ax.as_slice())?;
-            op.mac_final(ax.as_mut_slice())?;
-        }
+impl TLSPRF {
+    fn init(
+        key: &Object,
+        mech: &Box<dyn Mechanism>,
+        prf: CK_MECHANISM_TYPE,
+    ) -> KResult<TLSPRF> {
+        Ok(TLSPRF {
+            op: mech.mac_new(
+                &CK_MECHANISM {
+                    mechanism: prf,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                },
+                key,
+                CKF_DERIVE,
+            )?,
+        })
     }
-    out.resize(reqlen, 0);
-    Ok(out)
+
+    fn finish(&mut self, seed: &Vec<u8>, reqlen: usize) -> KResult<Vec<u8>> {
+        let maclen = self.op.mac_len()?;
+
+        let mut ax = vec![0u8; maclen];
+        self.op.mac_update(seed.as_slice())?;
+        self.op.mac_final(ax.as_mut_slice())?;
+        /* ax = A(1) */
+
+        /* use a buffer length that is a multiple of maclen,
+         * then truncate to actual reqlen before returning */
+        let mut out = vec![0u8; ((reqlen + maclen - 1) / maclen) * maclen];
+        let mut outlen = 0;
+        while outlen < reqlen {
+            self.op.reset()?;
+            self.op.mac_update(ax.as_slice())?;
+            self.op.mac_update(seed.as_slice())?;
+            self.op.mac_final(&mut out[outlen..(outlen + maclen)])?;
+
+            outlen += maclen;
+
+            if outlen < reqlen {
+                /* ax = A(x + 1) */
+                self.op.reset()?;
+                self.op.mac_update(ax.as_slice())?;
+                self.op.mac_final(ax.as_mut_slice())?;
+            }
+        }
+        out.resize(reqlen, 0);
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -116,19 +134,20 @@ pub fn test_tlsprf(
     seed: &Vec<u8>,
     reqlen: usize,
 ) -> KResult<Vec<u8>> {
-    tlsprf(key, mech, prf, seed, reqlen)
+    let mut tlsprf = TLSPRF::init(key, mech, prf)?;
+    tlsprf.finish(seed, reqlen)
 }
 
 #[derive(Debug)]
-struct TLSKDFMechanism {
+struct TLSPRFMechanism {
     info: CK_MECHANISM_INFO,
 }
 
-impl TLSKDFMechanism {
+impl TLSPRFMechanism {
     fn register_mechanisms(mechs: &mut Mechanisms) {
         mechs.add_mechanism(
             CKM_TLS12_MASTER_KEY_DERIVE,
-            Box::new(TLSKDFMechanism {
+            Box::new(TLSPRFMechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: TLS_MASTER_SECRET_SIZE,
                     ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
@@ -138,7 +157,7 @@ impl TLSKDFMechanism {
         );
         mechs.add_mechanism(
             CKM_TLS12_KEY_AND_MAC_DERIVE,
-            Box::new(TLSKDFMechanism {
+            Box::new(TLSPRFMechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: 0,
                     ulMaxKeySize: u32::MAX as CK_ULONG,
@@ -146,10 +165,30 @@ impl TLSKDFMechanism {
                 },
             }),
         );
+        mechs.add_mechanism(
+            CKM_TLS_MAC,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: u32::MAX as CK_ULONG,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
+        mechs.add_mechanism(
+            CKM_TLS12_MAC,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: u32::MAX as CK_ULONG,
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
     }
 }
 
-impl Mechanism for TLSKDFMechanism {
+impl Mechanism for TLSPRFMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
     }
@@ -162,6 +201,36 @@ impl Mechanism for TLSKDFMechanism {
         match mech.mechanism {
             CKM_TLS12_MASTER_KEY_DERIVE | CKM_TLS12_KEY_AND_MAC_DERIVE => {
                 Ok(Operation::Derive(Box::new(TLSKDFOperation::new(mech)?)))
+            }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
+        }
+    }
+    fn sign_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &object::Object,
+    ) -> KResult<Box<dyn Sign>> {
+        if self.info.flags & CKF_SIGN != CKF_SIGN {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match mech.mechanism {
+            CKM_TLS_MAC | CKM_TLS12_MAC => {
+                Ok(Box::new(TLSMACOperation::new(mech, key)?))
+            }
+            _ => err_rv!(CKR_MECHANISM_INVALID),
+        }
+    }
+    fn verify_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &object::Object,
+    ) -> KResult<Box<dyn Verify>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return err_rv!(CKR_MECHANISM_INVALID);
+        }
+        match mech.mechanism {
+            CKM_TLS_MAC | CKM_TLS12_MAC => {
+                Ok(Box::new(TLSMACOperation::new(mech, key)?))
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
         }
@@ -393,7 +462,8 @@ impl TLSKDFOperation {
         let mech = mechanisms.get(self.prf)?;
         let seed = self.tls_master_secret_seed();
         let dkmlen = TLS_MASTER_SECRET_SIZE as usize;
-        let dkm = tlsprf(key, mech, self.prf, &seed, dkmlen)?;
+        let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
+        let dkm = tlsprf.finish(&seed, dkmlen)?;
 
         factory.as_secret_key_factory()?.set_key(&mut dkey, dkm)?;
 
@@ -483,7 +553,8 @@ impl TLSKDFOperation {
         let mech = mechanisms.get(self.prf)?;
         let seed = self.tls_key_expansion_seed();
         let dkmlen = (2 * (self.maclen + self.keylen + self.ivlen)) as usize;
-        let dkm = tlsprf(key, mech, self.prf, &seed, dkmlen)?;
+        let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
+        let dkm = tlsprf.finish(&seed, dkmlen)?;
 
         let mut keys = Vec::<Object>::with_capacity(4);
         let mut i = 0;
@@ -588,5 +659,132 @@ impl Derive for TLSKDFOperation {
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
         }
+    }
+}
+
+static MAC_MECHANISMS: Lazy<Mechanisms> = Lazy::new(|| {
+    let mut mechanisms = mechanism::Mechanisms::new();
+    hmac::register_mechs_only(&mut mechanisms);
+    mechanisms
+});
+
+#[derive(Debug)]
+struct TLSMACOperation {
+    finalized: bool,
+    in_use: bool,
+    outputlen: usize,
+    seed: Vec<u8>,
+    tlsprf: TLSPRF,
+}
+
+impl TLSMACOperation {
+    fn new(mech: &CK_MECHANISM, key: &Object) -> KResult<TLSMACOperation> {
+        match mech.mechanism {
+            CKM_TLS_MAC | CKM_TLS12_MAC => (),
+            _ => return err_rv!(CKR_MECHANISM_INVALID),
+        }
+        let params = cast_params!(mech, CK_TLS_MAC_PARAMS);
+        let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
+            Ok(h) => h,
+            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        };
+        let maclen = params.ulMacLength as usize;
+        let label = match params.ulServerOrClient {
+            1 => TLS_SERVER_FINISHED,
+            2 => TLS_CLIENT_FINISHED,
+            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        };
+
+        let mac = MAC_MECHANISMS.get(prf)?;
+
+        Ok(TLSMACOperation {
+            finalized: false,
+            in_use: false,
+            outputlen: maclen,
+            seed: label.to_vec(),
+            tlsprf: TLSPRF::init(key, mac, prf)?,
+        })
+    }
+
+    fn begin(&mut self) -> KResult<()> {
+        if self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        Ok(())
+    }
+    fn update(&mut self, data: &[u8]) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.in_use = true;
+        self.seed.extend_from_slice(data);
+        Ok(())
+    }
+    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if !self.in_use {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        self.finalized = true;
+        if output.len() != self.outputlen {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let out = self.tlsprf.finish(&self.seed, self.outputlen)?;
+        output.copy_from_slice(out.as_slice());
+        Ok(())
+    }
+}
+
+impl MechOperation for TLSMACOperation {
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+}
+
+impl Sign for TLSMACOperation {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.finalize(signature)
+    }
+
+    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+        self.update(data)
+    }
+
+    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+        self.finalize(signature)
+    }
+
+    fn signature_len(&self) -> KResult<usize> {
+        Ok(self.outputlen)
+    }
+}
+
+impl Verify for TLSMACOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.verify_final(signature)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+        self.update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+        let mut verify: Vec<u8> = vec![0; self.outputlen];
+        self.finalize(verify.as_mut_slice())?;
+        if !constant_time_eq(&verify, signature) {
+            return err_rv!(CKR_SIGNATURE_INVALID);
+        }
+        Ok(())
+    }
+
+    fn signature_len(&self) -> KResult<usize> {
+        Ok(self.outputlen)
     }
 }

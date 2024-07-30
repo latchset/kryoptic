@@ -454,3 +454,67 @@ fn test_tls_master_secret_vectors() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_tls_mechanisms() {
+    let mut testtokn = TestToken::initialized("tls_mechanisms.sql", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    /* test CKM_TLS_MAC */
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 48),],
+        &[],
+        &[
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, false),
+            (CKA_SIGN, true),
+            (CKA_VERIFY, true),
+            (CKA_DERIVE, true),
+        ],
+    ));
+
+    let params = CK_TLS_MAC_PARAMS {
+        prfHashMechanism: CKM_SHA256,
+        ulMacLength: 64,
+        ulServerOrClient: 1,
+    };
+
+    let data = "Very Fake Hash Result";
+
+    let mac = ret_or_panic!(sig_gen(
+        session,
+        handle,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_TLS_MAC,
+            pParameter: void_ptr!(&params),
+            ulParameterLen: sizeof!(CK_TLS_MAC_PARAMS),
+        }
+    ));
+    assert_eq!(mac.len(), 64);
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
+            session,
+            handle,
+            data.as_bytes(),
+            mac.as_slice(),
+            &CK_MECHANISM {
+                mechanism: CKM_TLS_MAC,
+                pParameter: void_ptr!(&params),
+                ulParameterLen: sizeof!(CK_TLS_MAC_PARAMS),
+            }
+        )
+    );
+
+    /* The End */
+    testtokn.finalize();
+}

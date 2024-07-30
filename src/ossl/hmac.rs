@@ -9,12 +9,12 @@ struct HMACOperation {
     in_use: bool,
     outputlen: usize,
     maclen: usize,
-    _key: HmacKey,
+    key: HmacKey,
     ctx: EvpMacCtx,
 }
 
 impl HMACOperation {
-    fn init(
+    fn new(
         hash: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
@@ -43,7 +43,7 @@ impl HMACOperation {
             in_use: false,
             outputlen: outputlen,
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
-            _key: key,
+            key: key,
             ctx: ctx,
         })
     }
@@ -103,6 +103,23 @@ impl HMACOperation {
 
         output.copy_from_slice(&buf[..output.len()]);
         buf.zeroize();
+        Ok(())
+    }
+
+    fn reinit(&mut self) -> KResult<()> {
+        if unsafe {
+            EVP_MAC_init(
+                self.ctx.as_mut_ptr(),
+                self.key.raw.as_ptr(),
+                self.key.raw.len(),
+                std::ptr::null_mut(),
+            )
+        } != 1
+        {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        self.finalized = false;
+        self.in_use = false;
         Ok(())
     }
 }
