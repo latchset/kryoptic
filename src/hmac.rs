@@ -180,7 +180,7 @@ impl HMACMechanism {
             CKF_DERIVE => CKA_DERIVE,
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
-        HMACOperation::init(
+        HMACOperation::new(
             hmac_mech_to_hash_mech(mech.mechanism)?,
             self.check_and_fetch_key(keyobj, op_attr)?,
             self.check_and_fetch_param(mech)?,
@@ -222,6 +222,8 @@ impl Mechanism for HMACMechanism {
 #[cfg(not(feature = "fips"))]
 #[derive(Debug)]
 struct HMACOperation {
+    key: HmacKey,
+    hash: CK_MECHANISM_TYPE,
     hashlen: usize,
     blocklen: usize,
     outputlen: usize,
@@ -245,12 +247,14 @@ impl Drop for HMACOperation {
 /* HMAC spec From FIPS 198-1 */
 #[cfg(not(feature = "fips"))]
 impl HMACOperation {
-    fn init(
+    fn new(
         hash: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
     ) -> KResult<HMACOperation> {
         let mut hmac = HMACOperation {
+            key: key,
+            hash: hash,
             hashlen: 0usize,
             blocklen: 0usize,
             outputlen: outputlen,
@@ -261,47 +265,53 @@ impl HMACOperation {
             finalized: false,
             in_use: false,
         };
+        hmac.init()?;
+        Ok(hmac)
+    }
+
+    fn init(&mut self) -> KResult<()> {
         /* The hash mechanism is unimportant here,
          * what matters is the psecdef algorithm */
-        let hashop = hash::internal_hash_op(hash)?;
-        hmac.hashlen = hash::hash_size(hash);
-        hmac.blocklen = hash::block_size(hash);
-        hmac.inner = Operation::Digest(hashop);
+        let hashop = hash::internal_hash_op(self.hash)?;
+        self.hashlen = hash::hash_size(self.hash);
+        self.blocklen = hash::block_size(self.hash);
+        self.inner = Operation::Digest(hashop);
 
         /* K0 */
-        if key.raw.len() <= hmac.blocklen {
-            hmac.state.extend_from_slice(key.raw.as_slice());
+        if self.key.raw.len() <= self.blocklen {
+            self.state.extend_from_slice(self.key.raw.as_slice());
         } else {
-            hmac.state.resize(hmac.hashlen, 0);
-            match &mut hmac.inner {
-                Operation::Digest(op) => {
-                    op.digest(key.raw.as_slice(), hmac.state.as_mut_slice())?
-                }
+            self.state.resize(self.hashlen, 0);
+            match &mut self.inner {
+                Operation::Digest(op) => op.digest(
+                    self.key.raw.as_slice(),
+                    self.state.as_mut_slice(),
+                )?,
                 _ => return err_rv!(CKR_GENERAL_ERROR),
             }
         }
-        hmac.state.resize(hmac.blocklen, 0);
+        self.state.resize(self.blocklen, 0);
         /* K0 ^ ipad */
-        hmac.ipad.resize(hmac.blocklen, 0x36);
-        hmac.ipad
+        self.ipad.resize(self.blocklen, 0x36);
+        self.ipad
             .iter_mut()
-            .zip(hmac.state.iter())
+            .zip(self.state.iter())
             .for_each(|(i1, i2)| *i1 ^= *i2);
         /* K0 ^ opad */
-        hmac.opad.resize(hmac.blocklen, 0x5c);
-        hmac.opad
+        self.opad.resize(self.blocklen, 0x5c);
+        self.opad
             .iter_mut()
-            .zip(hmac.state.iter())
+            .zip(self.state.iter())
             .for_each(|(i1, i2)| *i1 ^= *i2);
         /* H((K0 ^ ipad) || .. ) */
-        match &mut hmac.inner {
+        match &mut self.inner {
             Operation::Digest(op) => {
                 op.reset()?;
-                op.digest_update(hmac.ipad.as_slice())?;
+                op.digest_update(self.ipad.as_slice())?;
             }
             _ => return err_rv!(CKR_GENERAL_ERROR),
         }
-        Ok(hmac)
+        Ok(())
     }
 
     fn begin(&mut self) -> KResult<()> {
@@ -362,6 +372,18 @@ impl HMACOperation {
         output.copy_from_slice(&self.state[..output.len()]);
         Ok(())
     }
+
+    fn reinit(&mut self) -> KResult<()> {
+        self.hashlen = 0;
+        self.blocklen = 0;
+        self.state = Vec::new();
+        self.ipad = Vec::new();
+        self.opad = Vec::new();
+        self.inner = Operation::Empty;
+        self.finalized = false;
+        self.in_use = false;
+        self.init()
+    }
 }
 
 #[cfg(feature = "fips")]
@@ -370,6 +392,9 @@ include!("ossl/hmac.rs");
 impl MechOperation for HMACOperation {
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn reset(&mut self) -> KResult<()> {
+        self.reinit()
     }
 }
 
@@ -452,6 +477,10 @@ static HMAC_SECRET_KEY_FACTORIES: Lazy<
     }
     v
 });
+
+pub fn register_mechs_only(mechs: &mut Mechanisms) {
+    HMACMechanism::register_mechanisms(mechs);
+}
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut object::ObjectFactories) {
     HMACMechanism::register_mechanisms(mechs);
