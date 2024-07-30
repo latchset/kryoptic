@@ -285,6 +285,8 @@ fn test_tlskdf_units(
                 &[(CKA_DERIVE, true)],
             ));
 
+            /* Master key Derivation */
+
             let derive_template = make_attr_template(
                 &[
                     (CKA_CLASS, CKO_SECRET_KEY),
@@ -332,23 +334,105 @@ fn test_tlskdf_units(
                 panic!("Failed ({}) unit test at line {}", ret, unit.line);
             }
 
-            let mut value = vec![0u8; unit.ms.len()];
-            let mut extract_template = make_ptrs_template(&[(
-                CKA_VALUE,
-                void_ptr!(value.as_mut_ptr()),
-                value.len(),
-            )]);
-
-            let ret = fn_get_attribute_value(
+            let value = ret_or_panic!(extract_key_value(
                 session,
                 dk_handle,
-                extract_template.as_mut_ptr(),
-                extract_template.len() as CK_ULONG,
-            );
-            assert_eq!(ret, CKR_OK);
-
+                unit.ms.len()
+            ));
             if value != unit.ms {
-                panic!("Failed ({}) unit test at line {} - values differ [{} != {}]", ret, unit.line, hex::encode(value), hex::encode(unit.ms));
+                panic!("Failed ({}) unit test {} at line {} - values differ [{} != {}]",
+                       ret, unit.count, unit.line, hex::encode(value), hex::encode(unit.ms));
+            }
+
+            /* Key Expansion */
+
+            /* mac keys can't be extracted, so assume keys of 48 bytes and
+             * put the rest as ivs which are returned */
+
+            let half = unit.kb.len() / 2;
+            let keylen = if half < 48 { half } else { 48 };
+            let ivlen = half - keylen;
+
+            let derive_template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                    (CKA_VALUE_LEN, keylen as CK_ULONG),
+                ],
+                &[],
+                &[(CKA_EXTRACTABLE, true)],
+            );
+
+            let mut cliiv = vec![0u8; ivlen];
+            let mut srviv = vec![0u8; ivlen];
+            let mut mat_out = CK_SSL3_KEY_MAT_OUT {
+                hClientMacSecret: CK_INVALID_HANDLE,
+                hServerMacSecret: CK_INVALID_HANDLE,
+                hClientKey: CK_INVALID_HANDLE,
+                hServerKey: CK_INVALID_HANDLE,
+                pIVClient: cliiv.as_mut_ptr(),
+                pIVServer: srviv.as_mut_ptr(),
+            };
+
+            let (kdf, params, paramslen) = match section.kdf {
+                CKM_TLS12_MASTER_KEY_DERIVE => (
+                    CKM_TLS12_KEY_AND_MAC_DERIVE,
+                    CK_TLS12_KEY_MAT_PARAMS {
+                        ulMacSizeInBits: 0,
+                        ulKeySizeInBits: (keylen as CK_ULONG) * 8,
+                        ulIVSizeInBits: (ivlen as CK_ULONG) * 8,
+                        bIsExport: CK_FALSE,
+                        RandomInfo: CK_SSL3_RANDOM_DATA {
+                            pClientRandom: byte_ptr!(unit.cli_rnd.as_ptr()),
+                            ulClientRandomLen: unit.cli_rnd.len() as CK_ULONG,
+                            pServerRandom: byte_ptr!(unit.srv_rnd.as_ptr()),
+                            ulServerRandomLen: unit.srv_rnd.len() as CK_ULONG,
+                        },
+                        pReturnedKeyMaterial: &mut mat_out,
+                        prfHashMechanism: section.prf,
+                    },
+                    sizeof!(CK_TLS12_KEY_MAT_PARAMS),
+                ),
+                _ => panic!("Invalid mechanism"),
+            };
+            let derive_mech = CK_MECHANISM {
+                mechanism: kdf,
+                pParameter: void_ptr!(&params),
+                ulParameterLen: paramslen,
+            };
+
+            let ret = fn_derive_key(
+                session,
+                &derive_mech as *const _ as CK_MECHANISM_PTR,
+                dk_handle,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                std::ptr::null_mut(),
+            );
+            if ret != CKR_OK {
+                panic!("Failed ({}) unit test at line {}", ret, unit.line);
+            }
+
+            let clikeyval = ret_or_panic!(extract_key_value(
+                session,
+                mat_out.hClientKey,
+                keylen
+            ));
+            let srvkeyval = ret_or_panic!(extract_key_value(
+                session,
+                mat_out.hServerKey,
+                keylen
+            ));
+
+            let mut value = Vec::<u8>::with_capacity(unit.kb.len());
+            value.extend_from_slice(clikeyval.as_slice());
+            value.extend_from_slice(srvkeyval.as_slice());
+            value.extend_from_slice(cliiv.as_slice());
+            value.extend_from_slice(srviv.as_slice());
+
+            if value != unit.kb {
+                panic!("Failed ({}) unit test {} at line {} - values differ [{} != {}]",
+                       ret, unit.count, unit.line, hex::encode(value), hex::encode(unit.kb));
             }
         }
     }
