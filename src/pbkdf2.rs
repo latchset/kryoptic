@@ -2,12 +2,12 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::{cast_params, err_rv};
 
 use attribute::{from_bool, from_bytes, from_ulong};
 use error::{KError, KResult};
@@ -76,13 +76,7 @@ impl Mechanism for PBKDF2Mechanism {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
 
-        if mech.ulParameterLen as usize
-            != ::std::mem::size_of::<CK_PKCS5_PBKD2_PARAMS2>()
-        {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        }
-        let params =
-            unsafe { *(mech.pParameter as *const CK_PKCS5_PBKD2_PARAMS2) };
+        let params = cast_params!(mech, CK_PKCS5_PBKD2_PARAMS2);
 
         /* all the mechanism we support require this,
          * if we ever add GOST support we'll have to add data */

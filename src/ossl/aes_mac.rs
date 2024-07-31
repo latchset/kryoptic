@@ -31,14 +31,8 @@ impl AesMacOperation {
     fn init(mech: &CK_MECHANISM, key: &Object) -> KResult<AesMacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_MAC_GENERAL => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_MAC_GENERAL_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let val: usize =
-                    unsafe { *(mech.pParameter as CK_MAC_GENERAL_PARAMS_PTR) }
-                        as usize;
+                let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
+                let val = params as usize;
                 if val > AES_BLOCK_SIZE {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }

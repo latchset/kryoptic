@@ -203,90 +203,61 @@ impl AesOperation {
     fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
         match mech.mechanism {
             CKM_AES_CCM => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_CCM_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let ccm_params = mech.pParameter as *const CK_CCM_PARAMS;
-                let datalen = unsafe { (*ccm_params).ulDataLen as usize };
-                let nonce = unsafe { (*ccm_params).pNonce };
-                let noncelen = unsafe { (*ccm_params).ulNonceLen as usize };
-                let maclen = unsafe { (*ccm_params).ulMACLen as usize };
-                let aad = unsafe { (*ccm_params).pAAD };
-                let aadlen = unsafe { (*ccm_params).ulAADLen as usize };
-                if noncelen < 7 || noncelen > 13 {
+                let params = cast_params!(mech, CK_CCM_PARAMS);
+                if params.ulNonceLen < 7 || params.ulNonceLen > 13 {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
-                let l = 15 - noncelen;
-                if datalen == 0
-                    || datalen > (1 << (8 * l))
-                    || datalen > (u64::MAX as usize) - maclen
+                let l = 15 - params.ulNonceLen;
+                if params.ulDataLen == 0
+                    || params.ulDataLen > (1 << (8 * l))
+                    || (params.ulDataLen + params.ulMACLen)
+                        > u64::MAX as CK_ULONG
                 {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
-                if aadlen > (u32::MAX as usize) - 1 {
+                if params.ulAADLen > (u32::MAX - 1) as CK_ULONG {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
-                match maclen {
+                match params.ulMACLen {
                     4 | 6 | 8 | 10 | 12 | 14 | 16 => (),
                     _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
                 }
                 Ok(AesParams {
-                    iv: bytes_to_vec!(nonce, noncelen),
+                    iv: bytes_to_vec!(params.pNonce, params.ulNonceLen),
                     maxblocks: 0,
                     ctsmode: 0,
-                    datalen: datalen,
-                    aad: bytes_to_vec!(aad, aadlen),
-                    taglen: maclen,
+                    datalen: params.ulDataLen as usize,
+                    aad: bytes_to_vec!(params.pAAD, params.ulAADLen),
+                    taglen: params.ulMACLen as usize,
                 })
             }
             CKM_AES_GCM => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_GCM_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let gcm_params = mech.pParameter as *const CK_GCM_PARAMS;
-                unsafe {
-                    if (*gcm_params).ulIvLen == 0
-                        || (*gcm_params).ulIvLen > (1 << 32) - 1
-                    {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-                    }
-                    if (*gcm_params).ulAADLen > (1 << 32) - 1 {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-                    }
-                    if (*gcm_params).ulTagBits > 128 {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-                    }
-                }
-                let iv = unsafe { (*gcm_params).pIv };
-                let ivlen = unsafe { (*gcm_params).ulIvLen };
-                if ivlen < 1 || iv == std::ptr::null_mut() {
+                let params = cast_params!(mech, CK_GCM_PARAMS);
+                if params.ulIvLen == 0 || params.ulIvLen > (1 << 32) - 1 {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
-                let aad = unsafe { (*gcm_params).pAAD };
-                let aadlen = unsafe { (*gcm_params).ulAADLen };
-                let tagbits = unsafe { (*gcm_params).ulTagBits } as usize;
+                if params.ulAADLen > (1 << 32) - 1 {
+                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                }
+                if params.ulTagBits > 128 {
+                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                }
+                if params.ulIvLen < 1 || params.pIv == std::ptr::null_mut() {
+                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                }
                 Ok(AesParams {
-                    iv: bytes_to_vec!(iv, ivlen),
+                    iv: bytes_to_vec!(params.pIv, params.ulIvLen),
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
-                    aad: bytes_to_vec!(aad, aadlen),
-                    taglen: (tagbits + 7) / 8,
+                    aad: bytes_to_vec!(params.pAAD, params.ulAADLen),
+                    taglen: (params.ulTagBits as usize + 7) / 8,
                 })
             }
             CKM_AES_CTR => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_AES_CTR_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let ctr_params = mech.pParameter as *const CK_AES_CTR_PARAMS;
-                let iv = unsafe { (*ctr_params).cb.to_vec() };
-                let ctrbits = unsafe { (*ctr_params).ulCounterBits } as usize;
+                let params = cast_params!(mech, CK_AES_CTR_PARAMS);
+                let iv = params.cb.to_vec();
+                let ctrbits = params.ulCounterBits as usize;
                 let mut maxblocks = 0u128;
                 if ctrbits < (AES_BLOCK_SIZE * 8) {
                     /* FIXME: support arbitrary counterbits wrapping.
@@ -1762,14 +1733,8 @@ impl AesCmacOperation {
     fn init(mech: &CK_MECHANISM, key: &Object) -> KResult<AesCmacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_CMAC_GENERAL => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_MAC_GENERAL_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                let val: usize =
-                    unsafe { *(mech.pParameter as CK_MAC_GENERAL_PARAMS_PTR) }
-                        as usize;
+                let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
+                let val = params as usize;
                 if val > AES_BLOCK_SIZE {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }

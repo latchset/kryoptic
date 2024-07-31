@@ -19,7 +19,7 @@ use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories, ObjectType};
 
-use super::bytes_to_slice;
+use super::{bytes_to_slice, cast_params};
 
 use std::fmt::Debug;
 
@@ -148,13 +148,7 @@ impl HKDFOperation {
     }
 
     fn new(mech: &CK_MECHANISM) -> KResult<HKDFOperation> {
-        if mech.ulParameterLen as usize
-            != ::std::mem::size_of::<CK_HKDF_PARAMS>()
-        {
-            return err_rv!(CKR_ARGUMENTS_BAD);
-        }
-        let params = unsafe { *(mech.pParameter as *const CK_HKDF_PARAMS) };
-
+        let params = cast_params!(mech, CK_HKDF_PARAMS);
         if params.bExtract == CK_FALSE && params.bExpand == CK_FALSE {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
