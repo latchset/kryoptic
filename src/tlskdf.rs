@@ -22,18 +22,23 @@ use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
 
 macro_rules! as_ck_bbool {
-    ($key:expr, $attr:expr) => {
-        match $key.get_attr_as_bool($attr) {
-            Ok(v) => {
-                if v {
-                    CK_TRUE
+    ($key:expr, $attr:expr, $def:expr) => {{
+        let b = match $key.get_attr_as_bool($attr) {
+            Ok(v) => v,
+            Err(_) => {
+                if let Some(b) = $def {
+                    b
                 } else {
-                    CK_FALSE
+                    return err_rv!(CKR_GENERAL_ERROR);
                 }
             }
-            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        };
+        if b {
+            CK_TRUE
+        } else {
+            CK_FALSE
         }
-    };
+    }};
 }
 
 macro_rules! check_as_ck_bbool {
@@ -166,6 +171,16 @@ impl TLSPRFMechanism {
             }),
         );
         mechs.add_mechanism(
+            CKM_TLS12_KEY_SAFE_DERIVE,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: 0,
+                    ulMaxKeySize: u32::MAX as CK_ULONG,
+                    flags: CKF_DERIVE,
+                },
+            }),
+        );
+        mechs.add_mechanism(
             CKM_TLS_MAC,
             Box::new(TLSPRFMechanism {
                 info: CK_MECHANISM_INFO {
@@ -199,7 +214,9 @@ impl Mechanism for TLSPRFMechanism {
         }
 
         match mech.mechanism {
-            CKM_TLS12_MASTER_KEY_DERIVE | CKM_TLS12_KEY_AND_MAC_DERIVE => {
+            CKM_TLS12_MASTER_KEY_DERIVE
+            | CKM_TLS12_KEY_AND_MAC_DERIVE
+            | CKM_TLS12_KEY_SAFE_DERIVE => {
                 Ok(Operation::Derive(Box::new(TLSKDFOperation::new(mech)?)))
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
@@ -259,6 +276,7 @@ impl TLSKDFOperation {
         match mech.mechanism {
             CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
             CKM_TLS12_KEY_AND_MAC_DERIVE => Self::new_tls12_keymac_derive(mech),
+            CKM_TLS12_KEY_SAFE_DERIVE => Self::new_tls12_keymac_derive(mech),
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         }
     }
@@ -313,7 +331,11 @@ impl TLSKDFOperation {
 
         let maclen = params.ulMacSizeInBits / 8;
         let keylen = params.ulKeySizeInBits / 8;
-        let ivlen = params.ulIVSizeInBits / 8;
+        let ivlen = if mech.mechanism == CKM_TLS12_KEY_SAFE_DERIVE {
+            0
+        } else {
+            params.ulIVSizeInBits / 8
+        };
 
         if params.bIsExport != CK_FALSE {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
@@ -497,8 +519,8 @@ impl TLSKDFOperation {
         template: &[CK_ATTRIBUTE],
     ) -> KResult<Vec<interface::CK_ATTRIBUTE>> {
         /* augment template, then check that it has all the right values */
-        let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE);
-        let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE);
+        let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE, Some(true));
+        let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE, Some(false));
         let tmpl = misc::fixup_template(
             template,
             &[
@@ -561,8 +583,9 @@ impl TLSKDFOperation {
 
         if self.maclen > 0 {
             let maclen = self.maclen as usize;
-            let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE);
-            let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE);
+            let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE, Some(true));
+            let is_extractable =
+                as_ck_bbool!(key, CKA_EXTRACTABLE, Some(false));
             let mac_tmpl = [
                 CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
                 CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
@@ -655,6 +678,9 @@ impl Derive for TLSKDFOperation {
                 self.derive_master_key(key, template, mechanisms, objfactories)
             }
             CKM_TLS12_KEY_AND_MAC_DERIVE => {
+                self.derive_mac_key(key, template, mechanisms, objfactories)
+            }
+            CKM_TLS12_KEY_SAFE_DERIVE => {
                 self.derive_mac_key(key, template, mechanisms, objfactories)
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),

@@ -515,6 +515,65 @@ fn test_tls_mechanisms() {
         )
     );
 
+    /* Test CKM_TLS12_KEY_SAFE_DERIVE */
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 48),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, false)],
+    );
+
+    let clirnd = [0u8; 32];
+    let srvrnd = [0u8; 32];
+    let mut cliiv = [0u8; 10];
+    let mut srviv = [0u8; 10];
+    let mut mat_out = CK_SSL3_KEY_MAT_OUT {
+        hClientMacSecret: CK_INVALID_HANDLE,
+        hServerMacSecret: CK_INVALID_HANDLE,
+        hClientKey: CK_INVALID_HANDLE,
+        hServerKey: CK_INVALID_HANDLE,
+        pIVClient: cliiv.as_mut_ptr(),
+        pIVServer: srviv.as_mut_ptr(),
+    };
+
+    let params = CK_TLS12_KEY_MAT_PARAMS {
+        ulMacSizeInBits: 0,
+        ulKeySizeInBits: 48 * 8,
+        ulIVSizeInBits: 10 * 8,
+        bIsExport: CK_FALSE,
+        RandomInfo: CK_SSL3_RANDOM_DATA {
+            pClientRandom: byte_ptr!(clirnd.as_ptr()),
+            ulClientRandomLen: clirnd.len() as CK_ULONG,
+            pServerRandom: byte_ptr!(srvrnd.as_ptr()),
+            ulServerRandomLen: srvrnd.len() as CK_ULONG,
+        },
+        pReturnedKeyMaterial: &mut mat_out,
+        prfHashMechanism: CKM_SHA256,
+    };
+    let paramslen = sizeof!(CK_TLS12_KEY_MAT_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_KEY_SAFE_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* ensure IVs were ignored */
+    assert_eq!(cliiv.as_slice(), &[0u8; 10]);
+    assert_eq!(srviv.as_slice(), &[0u8; 10]);
+
     /* The End */
     testtokn.finalize();
 }

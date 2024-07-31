@@ -1950,7 +1950,7 @@ extern "C" fn fn_derive_key(
             }
             CKR_OK
         }
-        CKM_TLS12_KEY_AND_MAC_DERIVE => {
+        CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
             /* TODO: check that key_handle is NULL ? */
             let params =
                 cast_params!(raw_err mechanism, CK_TLS12_KEY_MAT_PARAMS);
