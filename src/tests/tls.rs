@@ -574,6 +574,42 @@ fn test_tls_mechanisms() {
     assert_eq!(cliiv.as_slice(), &[0u8; 10]);
     assert_eq!(srviv.as_slice(), &[0u8; 10]);
 
+    /* Smoke test CKM_TLS12_KDF */
+    let clirnd = [0u8; 32];
+    let srvrnd = [0u8; 32];
+    let label = "EXPERIMENTAL tls derive";
+    let context = "This is a context";
+    let params = CK_TLS_KDF_PARAMS {
+        prfMechanism: CKM_SHA256,
+        pLabel: byte_ptr!(label),
+        ulLabelLength: label.len() as CK_ULONG,
+        RandomInfo: CK_SSL3_RANDOM_DATA {
+            pClientRandom: byte_ptr!(clirnd.as_ptr()),
+            ulClientRandomLen: clirnd.len() as CK_ULONG,
+            pServerRandom: byte_ptr!(srvrnd.as_ptr()),
+            ulServerRandomLen: srvrnd.len() as CK_ULONG,
+        },
+        pContextData: byte_ptr!(context),
+        ulContextDataLength: context.len() as CK_ULONG,
+    };
+    let paramslen = sizeof!(CK_TLS_KDF_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_KDF,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
     /* The End */
     testtokn.finalize();
 }
