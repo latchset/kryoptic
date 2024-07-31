@@ -1,12 +1,12 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::err_rv;
 use super::error;
 use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::{err_rv, sizeof};
 
 use error::{KError, KResult};
 use interface::*;
@@ -141,7 +141,7 @@ impl HMACMechanism {
             }
             return Ok(self.maxlen);
         }
-        if mech.ulParameterLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
+        if mech.ulParameterLen != sizeof!(CK_ULONG) {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         let genlen = unsafe {

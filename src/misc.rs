@@ -72,6 +72,13 @@ macro_rules! cast_params {
 }
 
 #[macro_export]
+macro_rules! sizeof {
+    ($type:ty) => {
+        std::mem::size_of::<$type>() as CK_ULONG
+    };
+}
+
+#[macro_export]
 macro_rules! bytes_to_slice {
     ($ptr: expr, $len:expr, $typ:ty) => {
         if $len > 0 {

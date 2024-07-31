@@ -175,8 +175,7 @@ fn test_rsa_operations() {
     let mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_SHA384_RSA_PKCS_PSS,
         pParameter: &params as *const _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_RSA_PKCS_PSS_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_RSA_PKCS_PSS_PARAMS),
     };
 
     let ret = sig_verify(session, pub_key_handle, &msg, &sig, &mechanism);
@@ -269,8 +268,7 @@ fn test_rsa_operations() {
     let mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_RSA_PKCS_OAEP,
         pParameter: &params as *const _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_RSA_PKCS_OAEP_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_RSA_PKCS_OAEP_PARAMS),
     };
 
     let result =

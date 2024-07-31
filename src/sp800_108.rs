@@ -2,11 +2,11 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
+use super::{err_rv, sizeof};
 
 use attribute::from_bytes;
 use error::{KError, KResult};
@@ -135,9 +135,7 @@ impl Sp800Operation {
                 bits: 16,
             });
         }
-        if p.ulValueLen as usize
-            != ::std::mem::size_of::<CK_SP800_108_COUNTER_FORMAT>()
-        {
+        if p.ulValueLen != sizeof!(CK_SP800_108_COUNTER_FORMAT) {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         let cf = unsafe { *(p.pValue as *const CK_SP800_108_COUNTER_FORMAT) };
@@ -165,9 +163,7 @@ impl Sp800Operation {
     fn parse_dkm_length(
         p: &CK_PRF_DATA_PARAM,
     ) -> KResult<Sp800DKMLengthFormat> {
-        if p.ulValueLen as usize
-            != ::std::mem::size_of::<CK_SP800_108_DKM_LENGTH_FORMAT>()
-        {
+        if p.ulValueLen != sizeof!(CK_SP800_108_DKM_LENGTH_FORMAT) {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         let dkm =

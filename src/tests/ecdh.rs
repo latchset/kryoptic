@@ -56,8 +56,7 @@ fn test_ecc_derive_plain() {
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDH1_DERIVE,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
     };
 
     let derive_template = make_attr_template(
@@ -255,8 +254,7 @@ fn test_ecc_derive_plain() {
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDH1_DERIVE,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
     };
     let derive_template = make_attr_template(
         &[
@@ -332,8 +330,7 @@ fn test_ecc_derive_x963() {
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDH1_COFACTOR_DERIVE,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
     };
 
     let derive_template = make_attr_template(
@@ -411,8 +408,7 @@ fn test_ecc_derive_nist() {
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDH1_COFACTOR_DERIVE,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
     };
 
     let derive_template = make_attr_template(

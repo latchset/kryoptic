@@ -4,7 +4,7 @@
 use super::error;
 use super::interface;
 
-use super::{bytes_to_vec, err_not_found, err_rv};
+use super::{bytes_to_vec, err_not_found, err_rv, sizeof};
 use error::{KError, KResult};
 use interface::*;
 
@@ -442,13 +442,13 @@ pub fn attr_id_to_attrtype(id: CK_ULONG) -> KResult<AttrType> {
 
 impl CK_ATTRIBUTE {
     pub fn to_ulong(&self) -> KResult<CK_ULONG> {
-        if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
+        if self.ulValueLen != sizeof!(CK_ULONG) {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
     }
     pub fn to_bool(self) -> KResult<bool> {
-        if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
+        if self.ulValueLen != sizeof!(CK_BBOOL) {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
@@ -527,7 +527,7 @@ impl CK_ATTRIBUTE {
         CK_ATTRIBUTE {
             type_: type_,
             pValue: value as *const CK_ULONG as *mut std::ffi::c_void,
-            ulValueLen: std::mem::size_of::<CK_ULONG>() as CK_ULONG,
+            ulValueLen: sizeof!(CK_ULONG),
         }
     }
 
@@ -538,7 +538,7 @@ impl CK_ATTRIBUTE {
         CK_ATTRIBUTE {
             type_: type_,
             pValue: value as *const CK_BBOOL as *mut std::ffi::c_void,
-            ulValueLen: std::mem::size_of::<CK_BBOOL>() as CK_ULONG,
+            ulValueLen: sizeof!(CK_BBOOL),
         }
     }
 }

@@ -275,8 +275,7 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
         let mut mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_ECDH1_DERIVE,
             pParameter: &mut params as *mut _ as CK_VOID_PTR,
-            ulParameterLen: std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
-                as CK_ULONG,
+            ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
         };
 
         let ret = fn_derive_key(
