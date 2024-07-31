@@ -21,7 +21,7 @@ use super::sp800_108;
 use super::storage;
 use super::tlskdf;
 
-use super::{err_rv, get_random_data, to_rv};
+use super::{err_rv, get_random_data, sizeof, to_rv};
 use error::{KError, KResult};
 use interface::*;
 use mechanism::Mechanisms;
@@ -440,8 +440,7 @@ impl Token {
             &CK_MECHANISM {
                 mechanism: CKM_PKCS5_PBKD2,
                 pParameter: &params as *const _ as *mut _,
-                ulParameterLen: std::mem::size_of::<CK_PKCS5_PBKD2_PARAMS2>()
-                    as CK_ULONG,
+                ulParameterLen: sizeof!(CK_PKCS5_PBKD2_PARAMS2),
             },
             &template,
             &self.mechanisms,
@@ -477,8 +476,7 @@ impl Token {
             &CK_MECHANISM {
                 mechanism: CKM_AES_GCM,
                 pParameter: &self.wrapping_params() as *const _ as *mut _,
-                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
-                    as CK_ULONG,
+                ulParameterLen: sizeof!(CK_GCM_PARAMS),
             },
             wrapper,
             &kek,
@@ -507,8 +505,7 @@ impl Token {
             &CK_MECHANISM {
                 mechanism: CKM_AES_GCM,
                 pParameter: &self.wrapping_params() as *const _ as *mut _,
-                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
-                    as CK_ULONG,
+                ulParameterLen: sizeof!(CK_GCM_PARAMS),
             },
             wrapper,
             wrapped,
@@ -970,8 +967,7 @@ impl Token {
                 mechanism: CKM_AES_GCM,
                 pParameter: &mut params as *mut interface::CK_GCM_PARAMS
                     as *mut _,
-                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
-                    as CK_ULONG,
+                ulParameterLen: sizeof!(CK_GCM_PARAMS),
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
             let mut op = aes.encryption_new(&mech, &kek)?;
@@ -1024,8 +1020,7 @@ impl Token {
                 mechanism: CKM_AES_GCM,
                 pParameter: &mut params as *mut interface::CK_GCM_PARAMS
                     as *mut _,
-                ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>()
-                    as CK_ULONG,
+                ulParameterLen: sizeof!(CK_GCM_PARAMS),
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
             let mut op = aes.decryption_new(&mech, &kek)?;

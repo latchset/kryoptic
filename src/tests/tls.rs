@@ -309,8 +309,7 @@ fn test_tlskdf_units(
                         pVersion: std::ptr::null_mut(),
                         prfHashMechanism: section.prf,
                     },
-                    std::mem::size_of::<CK_TLS12_MASTER_KEY_DERIVE_PARAMS>()
-                        as CK_ULONG,
+                    sizeof!(CK_TLS12_MASTER_KEY_DERIVE_PARAMS),
                 ),
                 _ => panic!("Invalid mechanism"),
             };

@@ -45,8 +45,7 @@ fn test_sp800_kdf() {
     let mut data_params = [CK_PRF_DATA_PARAM {
         type_: CK_SP800_108_ITERATION_VARIABLE,
         pValue: &mut counter_format as *mut _ as CK_VOID_PTR,
-        ulValueLen: std::mem::size_of::<CK_SP800_108_COUNTER_FORMAT>()
-            as CK_ULONG,
+        ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
     }];
 
     let mut params = CK_SP800_108_KDF_PARAMS {
@@ -60,8 +59,7 @@ fn test_sp800_kdf() {
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_SP800_108_COUNTER_KDF,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_SP800_108_KDF_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
     };
 
     let mut handle3 = CK_INVALID_HANDLE;
@@ -175,8 +173,7 @@ fn test_sp800_kdf() {
         CK_PRF_DATA_PARAM {
             type_: CK_SP800_108_COUNTER,
             pValue: &mut counter_format as *mut _ as CK_VOID_PTR,
-            ulValueLen: std::mem::size_of::<CK_SP800_108_COUNTER_FORMAT>()
-                as CK_ULONG,
+            ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
         },
     ];
 
@@ -200,8 +197,7 @@ fn test_sp800_kdf() {
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_SP800_108_FEEDBACK_KDF,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_SP800_108_FEEDBACK_KDF_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_SP800_108_FEEDBACK_KDF_PARAMS),
     };
 
     let mut handle7 = CK_INVALID_HANDLE;
@@ -253,8 +249,7 @@ fn test_aes_enc_kdf() {
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_AES_ECB_ENCRYPT_DATA,
         pParameter: &mut derive_params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_KEY_DERIVATION_STRING_DATA>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
     };
 
     let mut aeskey2 = CK_INVALID_HANDLE;
@@ -276,8 +271,7 @@ fn test_aes_enc_kdf() {
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_AES_CBC_ENCRYPT_DATA,
         pParameter: &mut derive_params as *mut _ as CK_VOID_PTR,
-        ulParameterLen: std::mem::size_of::<CK_AES_CBC_ENCRYPT_DATA_PARAMS>()
-            as CK_ULONG,
+        ulParameterLen: sizeof!(CK_AES_CBC_ENCRYPT_DATA_PARAMS),
     };
 
     let mut aeskey3 = CK_INVALID_HANDLE;
@@ -628,8 +622,7 @@ fn test_hkdf() {
             let mut derive_mech = CK_MECHANISM {
                 mechanism: mech,
                 pParameter: void_ptr!(&hkdf_params),
-                ulParameterLen: std::mem::size_of::<CK_HKDF_PARAMS>()
-                    as CK_ULONG,
+                ulParameterLen: sizeof!(CK_HKDF_PARAMS),
             };
 
             let mut drv_handle = CK_INVALID_HANDLE;
@@ -741,7 +734,7 @@ fn test_hkdf() {
     let mut derive_mech = CK_MECHANISM {
         mechanism: CKM_HKDF_DATA,
         pParameter: void_ptr!(&hkdf_params),
-        ulParameterLen: std::mem::size_of::<CK_HKDF_PARAMS>() as CK_ULONG,
+        ulParameterLen: sizeof!(CK_HKDF_PARAMS),
     };
 
     let mut drv_handle = CK_INVALID_HANDLE;
@@ -857,7 +850,7 @@ fn test_pbkdf2() {
             session,
             CKM_PKCS5_PBKD2,
             void_ptr!(&params),
-            std::mem::size_of::<CK_PKCS5_PBKD2_PARAMS2>() as CK_ULONG,
+            sizeof!(CK_PKCS5_PBKD2_PARAMS2),
             &[
                 (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
                 (CKA_VALUE_LEN, test.3.len() as CK_ULONG),

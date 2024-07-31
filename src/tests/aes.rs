@@ -216,8 +216,7 @@ fn test_aes_operations() {
         let mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CTR,
             pParameter: void_ptr!(&param),
-            ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
-                as CK_ULONG,
+            ulParameterLen: sizeof!(CK_AES_CTR_PARAMS),
         };
 
         /* Stream mode, so arbitrary data size and matching output */
@@ -252,8 +251,7 @@ fn test_aes_operations() {
         let mut mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CTR,
             pParameter: void_ptr!(&param),
-            ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
-                as CK_ULONG,
+            ulParameterLen: sizeof!(CK_AES_CTR_PARAMS),
         };
 
         let ret = fn_encrypt_init(session, &mut mechanism, handle);
@@ -349,7 +347,7 @@ fn test_aes_operations() {
         let mut mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_GCM,
             pParameter: void_ptr!(&param),
-            ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>() as CK_ULONG,
+            ulParameterLen: sizeof!(CK_GCM_PARAMS),
         };
 
         let ret = fn_encrypt_init(session, &mut mechanism, handle);
@@ -433,7 +431,7 @@ fn test_aes_operations() {
         let mut mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CCM,
             pParameter: &mut param as *mut CK_CCM_PARAMS as CK_VOID_PTR,
-            ulParameterLen: std::mem::size_of::<CK_CCM_PARAMS>() as CK_ULONG,
+            ulParameterLen: sizeof!(CK_CCM_PARAMS),
         };
 
         let ret = fn_encrypt_init(session, &mut mechanism, handle);
@@ -596,7 +594,7 @@ fn test_aes_operations() {
         let mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_GCM,
             pParameter: void_ptr!(&param),
-            ulParameterLen: std::mem::size_of::<CK_GCM_PARAMS>() as CK_ULONG,
+            ulParameterLen: sizeof!(CK_GCM_PARAMS),
         };
 
         let ciphertext = [&ct[..], &tag[..]].concat();
@@ -640,8 +638,7 @@ fn test_aes_operations() {
         let mechanism: CK_MECHANISM = CK_MECHANISM {
             mechanism: CKM_AES_CTR,
             pParameter: void_ptr!(&param),
-            ulParameterLen: std::mem::size_of::<CK_AES_CTR_PARAMS>()
-                as CK_ULONG,
+            ulParameterLen: sizeof!(CK_AES_CTR_PARAMS),
         };
 
         let enc = ret_or_panic!(encrypt(

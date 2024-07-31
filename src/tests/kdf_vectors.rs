@@ -273,7 +273,7 @@ macro_rules! make_prf_data_param {
         CK_PRF_DATA_PARAM {
             type_: $type,
             pValue: $value as *const _ as CK_VOID_PTR,
-            ulValueLen: std::mem::size_of::<$a>() as CK_ULONG,
+            ulValueLen: sizeof!($a),
         }
     };
     ($type:expr, $value:expr, $a:expr) => {
@@ -409,9 +409,7 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                     let derive_mech = CK_MECHANISM {
                         mechanism: CKM_SP800_108_COUNTER_KDF,
                         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-                        ulParameterLen: std::mem::size_of::<
-                            CK_SP800_108_KDF_PARAMS,
-                        >() as CK_ULONG,
+                        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
                     };
 
                     let ret = fn_derive_key(
@@ -494,9 +492,9 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                     let derive_mech = CK_MECHANISM {
                         mechanism: CKM_SP800_108_FEEDBACK_KDF,
                         pParameter: &mut params as *mut _ as CK_VOID_PTR,
-                        ulParameterLen: std::mem::size_of::<
-                            CK_SP800_108_FEEDBACK_KDF_PARAMS,
-                        >() as CK_ULONG,
+                        ulParameterLen: sizeof!(
+                            CK_SP800_108_FEEDBACK_KDF_PARAMS
+                        ),
                     };
 
                     let ret = fn_derive_key(
