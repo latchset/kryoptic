@@ -14,7 +14,7 @@ use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
 
-use super::{bytes_to_vec, cast_params};
+use super::{bytes_to_slice, bytes_to_vec, cast_params};
 
 use std::fmt::Debug;
 
@@ -200,6 +200,26 @@ impl TLSPRFMechanism {
                 },
             }),
         );
+        mechs.add_mechanism(
+            CKM_TLS_KDF,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
+                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
+                    flags: CKF_DERIVE,
+                },
+            }),
+        );
+        mechs.add_mechanism(
+            CKM_TLS12_KDF,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
+                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
+                    flags: CKF_DERIVE,
+                },
+            }),
+        );
     }
 }
 
@@ -216,7 +236,9 @@ impl Mechanism for TLSPRFMechanism {
         match mech.mechanism {
             CKM_TLS12_MASTER_KEY_DERIVE
             | CKM_TLS12_KEY_AND_MAC_DERIVE
-            | CKM_TLS12_KEY_SAFE_DERIVE => {
+            | CKM_TLS12_KEY_SAFE_DERIVE
+            | CKM_TLS12_KDF
+            | CKM_TLS_KDF => {
                 Ok(Operation::Derive(Box::new(TLSKDFOperation::new(mech)?)))
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
@@ -262,6 +284,8 @@ struct TLSKDFOperation {
     server_random: Vec<u8>,
     version: Option<*mut CK_VERSION>,
     prf: CK_MECHANISM_TYPE,
+    label: &'static [u8],
+    context: &'static [u8],
     maclen: CK_ULONG,
     keylen: CK_ULONG,
     ivlen: CK_ULONG,
@@ -277,6 +301,8 @@ impl TLSKDFOperation {
             CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
             CKM_TLS12_KEY_AND_MAC_DERIVE => Self::new_tls12_keymac_derive(mech),
             CKM_TLS12_KEY_SAFE_DERIVE => Self::new_tls12_keymac_derive(mech),
+            CKM_TLS12_KDF => Self::new_tls_generic_key_derive(mech),
+            CKM_TLS_KDF => Self::new_tls_generic_key_derive(mech),
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         }
     }
@@ -317,6 +343,8 @@ impl TLSKDFOperation {
             server_random: srvrand,
             version: version,
             prf: prf,
+            label: TLS_MASTER_SECRET_LABEL,
+            context: &[],
             maclen: 0,
             keylen: 0,
             ivlen: 0,
@@ -372,6 +400,8 @@ impl TLSKDFOperation {
             server_random: srvrand,
             version: None,
             prf: prf,
+            label: TLS_KEY_EXPANSION_LABEL,
+            context: &[],
             maclen: maclen,
             keylen: if keylen > 0 {
                 keylen
@@ -380,6 +410,55 @@ impl TLSKDFOperation {
             },
             ivlen: ivlen,
             mat_out: Some(params.pReturnedKeyMaterial),
+        })
+    }
+
+    fn new_tls_generic_key_derive(
+        mech: &CK_MECHANISM,
+    ) -> KResult<TLSKDFOperation> {
+        let params = cast_params!(mech, CK_TLS_KDF_PARAMS);
+
+        if params.ulLabelLength == 0 {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        let clirand = bytes_to_vec!(
+            params.RandomInfo.pClientRandom,
+            params.RandomInfo.ulClientRandomLen
+        );
+        let srvrand = bytes_to_vec!(
+            params.RandomInfo.pServerRandom,
+            params.RandomInfo.ulServerRandomLen
+        );
+
+        if clirand.len() != TLS_RANDOM_SEED_SIZE
+            || srvrand.len() != TLS_RANDOM_SEED_SIZE
+        {
+            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        }
+
+        let prf = match hmac::hash_to_hmac_mech(params.prfMechanism) {
+            Ok(h) => h,
+            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        };
+
+        Ok(TLSKDFOperation {
+            finalized: false,
+            mech: mech.mechanism,
+            client_random: clirand,
+            server_random: srvrand,
+            version: None,
+            prf: prf,
+            label: bytes_to_slice!(params.pLabel, params.ulLabelLength, u8),
+            context: bytes_to_slice!(
+                params.pContextData,
+                params.ulContextDataLength,
+                u8
+            ),
+            maclen: 0,
+            keylen: 0,
+            ivlen: 0,
+            mat_out: None,
         })
     }
 
@@ -456,15 +535,24 @@ impl TLSKDFOperation {
         Ok(tmpl)
     }
 
-    fn tls_master_secret_seed(&self) -> Vec<u8> {
+    fn tls_prf_seed(&self, cli_first: bool) -> Vec<u8> {
         let mut seed = Vec::<u8>::with_capacity(
-            TLS_MASTER_SECRET_LABEL.len()
+            self.label.len()
                 + self.client_random.len()
-                + self.server_random.len(),
+                + self.server_random.len()
+                + self.context.len(),
         );
-        seed.extend_from_slice(TLS_MASTER_SECRET_LABEL);
-        seed.extend_from_slice(self.client_random.as_slice());
-        seed.extend_from_slice(self.server_random.as_slice());
+        seed.extend_from_slice(self.label);
+        if cli_first {
+            seed.extend_from_slice(self.client_random.as_slice());
+            seed.extend_from_slice(self.server_random.as_slice());
+        } else {
+            seed.extend_from_slice(self.server_random.as_slice());
+            seed.extend_from_slice(self.client_random.as_slice());
+        }
+        if self.context.len() > 0 {
+            seed.extend_from_slice(self.context);
+        }
         seed
     }
 
@@ -482,7 +570,7 @@ impl TLSKDFOperation {
         let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
 
         let mech = mechanisms.get(self.prf)?;
-        let seed = self.tls_master_secret_seed();
+        let seed = self.tls_prf_seed(true);
         let dkmlen = TLS_MASTER_SECRET_SIZE as usize;
         let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
         let dkm = tlsprf.finish(&seed, dkmlen)?;
@@ -550,18 +638,6 @@ impl TLSKDFOperation {
         Ok(tmpl)
     }
 
-    fn tls_key_expansion_seed(&self) -> Vec<u8> {
-        let mut seed = Vec::<u8>::with_capacity(
-            TLS_KEY_EXPANSION_LABEL.len()
-                + self.client_random.len()
-                + self.server_random.len(),
-        );
-        seed.extend_from_slice(TLS_KEY_EXPANSION_LABEL);
-        seed.extend_from_slice(self.server_random.as_slice());
-        seed.extend_from_slice(self.client_random.as_slice());
-        seed
-    }
-
     fn derive_mac_key(
         &mut self,
         key: &Object,
@@ -573,7 +649,7 @@ impl TLSKDFOperation {
         let key_tmpl = self.verify_key_expansion_template(key, template)?;
 
         let mech = mechanisms.get(self.prf)?;
-        let seed = self.tls_key_expansion_seed();
+        let seed = self.tls_prf_seed(false);
         let dkmlen = (2 * (self.maclen + self.keylen + self.ivlen)) as usize;
         let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
         let dkm = tlsprf.finish(&seed, dkmlen)?;
@@ -652,6 +728,39 @@ impl TLSKDFOperation {
 
         Ok(keys)
     }
+
+    fn derive_generic_key(
+        &mut self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+        mechanisms: &Mechanisms,
+        objfactories: &ObjectFactories,
+    ) -> KResult<Vec<Object>> {
+        self.verify_key(key)?;
+        let tmpl = misc::fixup_template(
+            template,
+            &[
+                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
+                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
+            ],
+        );
+
+        let factory =
+            objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
+        let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
+        let dkmlen = match dkey.get_attr_as_ulong(CKA_VALUE_LEN) {
+            Ok(n) => n as usize,
+            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+        };
+
+        let mech = mechanisms.get(self.prf)?;
+        let seed = self.tls_prf_seed(true);
+        let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
+        let dkm = tlsprf.finish(&seed, dkmlen)?;
+
+        factory.as_secret_key_factory()?.set_key(&mut dkey, dkm)?;
+        Ok(vec![dkey])
+    }
 }
 
 impl MechOperation for TLSKDFOperation {
@@ -682,6 +791,9 @@ impl Derive for TLSKDFOperation {
             }
             CKM_TLS12_KEY_SAFE_DERIVE => {
                 self.derive_mac_key(key, template, mechanisms, objfactories)
+            }
+            CKM_TLS12_KDF | CKM_TLS_KDF => {
+                self.derive_generic_key(key, template, mechanisms, objfactories)
             }
             _ => err_rv!(CKR_MECHANISM_INVALID),
         }
