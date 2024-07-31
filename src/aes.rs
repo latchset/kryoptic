@@ -5,7 +5,7 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::object;
-use super::{attr_element, err_rv};
+use super::{attr_element, cast_params, err_rv};
 
 use attribute::{from_bool, from_bytes, from_ulong};
 use error::{KError, KResult};
@@ -284,24 +284,12 @@ impl Mechanism for AesMechanism {
 
         let kdf = match mech.mechanism {
             CKM_AES_ECB_ENCRYPT_DATA => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_KEY_DERIVATION_STRING_DATA>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                AesKDFOperation::aes_ecb_new(
-                    mech.pParameter as *const CK_KEY_DERIVATION_STRING_DATA,
-                )?
+                let params = cast_params!(mech, CK_KEY_DERIVATION_STRING_DATA);
+                AesKDFOperation::aes_ecb_new(params)?
             }
             CKM_AES_CBC_ENCRYPT_DATA => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_AES_CBC_ENCRYPT_DATA_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                AesKDFOperation::aes_cbc_new(
-                    mech.pParameter as *const CK_AES_CBC_ENCRYPT_DATA_PARAMS,
-                )?
+                let params = cast_params!(mech, CK_AES_CBC_ENCRYPT_DATA_PARAMS);
+                AesKDFOperation::aes_cbc_new(params)?
             }
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
@@ -414,10 +402,11 @@ impl AesKDFOperation<'_> {
     }
 
     fn aes_ecb_new<'a>(
-        params: *const CK_KEY_DERIVATION_STRING_DATA,
+        params: CK_KEY_DERIVATION_STRING_DATA,
     ) -> KResult<AesKDFOperation<'a>> {
-        let p = unsafe { *params };
-        if p.pData == std::ptr::null_mut() || p.ulLen == 0 || p.ulLen % 16 != 0
+        if params.pData == std::ptr::null_mut()
+            || params.ulLen == 0
+            || params.ulLen % 16 != 0
         {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
@@ -426,29 +415,26 @@ impl AesKDFOperation<'_> {
             finalized: false,
             iv: &[],
             data: unsafe {
-                std::slice::from_raw_parts(p.pData, p.ulLen as usize)
+                std::slice::from_raw_parts(params.pData, params.ulLen as usize)
             },
         })
     }
 
     fn aes_cbc_new<'a>(
-        params: *const CK_AES_CBC_ENCRYPT_DATA_PARAMS,
+        params: CK_AES_CBC_ENCRYPT_DATA_PARAMS,
     ) -> KResult<AesKDFOperation<'a>> {
-        let p = unsafe { *params };
-        if p.pData == std::ptr::null_mut()
-            || p.length == 0
-            || p.length % 16 != 0
+        if params.pData == std::ptr::null_mut()
+            || params.length == 0
+            || params.length % 16 != 0
         {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         Ok(AesKDFOperation {
             prf: CKM_AES_CBC,
             finalized: false,
-            iv: unsafe {
-                std::slice::from_raw_parts((*params).iv.as_ptr(), 16)
-            },
+            iv: unsafe { std::slice::from_raw_parts(params.iv.as_ptr(), 16) },
             data: unsafe {
-                std::slice::from_raw_parts(p.pData, p.length as usize)
+                std::slice::from_raw_parts(params.pData, params.length as usize)
             },
         })
     }

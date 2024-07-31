@@ -6,7 +6,9 @@ use super::error;
 use super::interface;
 use super::kasn1;
 use super::object;
-use super::{attr_element, bytes_attr_not_empty, bytes_to_vec, err_rv};
+use super::{
+    attr_element, bytes_attr_not_empty, bytes_to_vec, cast_params, err_rv,
+};
 
 use attribute::{from_bool, from_bytes};
 use error::{KError, KResult};
@@ -407,15 +409,8 @@ impl Mechanism for EccMechanism {
         }
         let kdf = match mech.mechanism {
             CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => {
-                if mech.ulParameterLen as usize
-                    != ::std::mem::size_of::<CK_ECDH1_DERIVE_PARAMS>()
-                {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
-                }
-                ECDHOperation::derive_new(
-                    mech.mechanism,
-                    mech.pParameter as *const CK_ECDH1_DERIVE_PARAMS,
-                )?
+                let params = cast_params!(mech, CK_ECDH1_DERIVE_PARAMS);
+                ECDHOperation::derive_new(mech.mechanism, params)?
             }
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
@@ -505,24 +500,27 @@ impl ECDHOperation {
 
     fn derive_new<'a>(
         mechanism: CK_MECHANISM_TYPE,
-        params: *const CK_ECDH1_DERIVE_PARAMS,
+        params: CK_ECDH1_DERIVE_PARAMS,
     ) -> KResult<ECDHOperation> {
-        let p = unsafe { *params };
-        if p.kdf == CKD_NULL {
-            if p.pSharedData != std::ptr::null_mut() || p.ulSharedDataLen != 0 {
+        if params.kdf == CKD_NULL {
+            if params.pSharedData != std::ptr::null_mut()
+                || params.ulSharedDataLen != 0
+            {
                 return err_rv!(CKR_MECHANISM_PARAM_INVALID);
             }
         }
-        if p.pPublicData == std::ptr::null_mut() || p.ulPublicDataLen == 0 {
+        if params.pPublicData == std::ptr::null_mut()
+            || params.ulPublicDataLen == 0
+        {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
 
         Ok(ECDHOperation {
             finalized: false,
             mech: mechanism,
-            kdf: p.kdf,
-            shared: bytes_to_vec!(p.pSharedData, p.ulSharedDataLen),
-            public: bytes_to_vec!(p.pPublicData, p.ulPublicDataLen),
+            kdf: params.kdf,
+            shared: bytes_to_vec!(params.pSharedData, params.ulSharedDataLen),
+            public: bytes_to_vec!(params.pPublicData, params.ulPublicDataLen),
         })
     }
 }

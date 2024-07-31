@@ -6,7 +6,7 @@ use super::fips;
 
 use super::hash;
 use super::mechanism;
-use super::{bytes_to_vec, some_or_err};
+use super::{bytes_to_vec, cast_params, some_or_err};
 
 #[cfg(not(feature = "fips"))]
 use super::ossl;
@@ -20,7 +20,6 @@ use mechanism::*;
 #[cfg(not(feature = "fips"))]
 use ossl::*;
 
-use std::mem::size_of;
 use std::os::raw::c_char;
 use std::os::raw::c_int;
 use std::os::raw::c_uint;
@@ -188,23 +187,17 @@ fn parse_pss_params(mech: &CK_MECHANISM) -> KResult<RsaPssParams> {
         | CKM_SHA3_256_RSA_PKCS_PSS
         | CKM_SHA3_384_RSA_PKCS_PSS
         | CKM_SHA3_512_RSA_PKCS_PSS => {
-            if mech.ulParameterLen as usize
-                != size_of::<CK_RSA_PKCS_PSS_PARAMS>()
-            {
-                return err_rv!(CKR_ARGUMENTS_BAD);
-            }
-            let pss_params = mech.pParameter as *const CK_RSA_PKCS_PSS_PARAMS;
+            let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
             if mech.mechanism != CKM_RSA_PKCS_PSS {
-                let mdname =
-                    mech_type_to_digest_name(unsafe { (*pss_params).hashAlg });
+                let mdname = mech_type_to_digest_name(params.hashAlg);
                 if mech_type_to_digest_name(mech.mechanism) != mdname {
                     return err_rv!(CKR_ARGUMENTS_BAD);
                 }
             }
             Ok(RsaPssParams {
-                hash: unsafe { (*pss_params).hashAlg },
-                mgf: unsafe { (*pss_params).mgf },
-                saltlen: unsafe { (*pss_params).sLen } as c_int,
+                hash: params.hashAlg,
+                mgf: params.mgf,
+                saltlen: params.sLen as c_int,
             })
         }
         _ => Ok(no_pss_params()),
@@ -230,29 +223,26 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> KResult<RsaOaepParams> {
     if mech.mechanism != CKM_RSA_PKCS_OAEP {
         return Ok(no_oaep_params());
     }
-
-    if mech.ulParameterLen as usize != size_of::<CK_RSA_PKCS_OAEP_PARAMS>() {
-        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
-    }
-    let oaep_params = mech.pParameter as *const CK_RSA_PKCS_OAEP_PARAMS;
-    let p = unsafe { *oaep_params };
-    let source = match p.source {
+    let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
+    let source = match params.source {
         0 => {
-            if p.ulSourceDataLen != 0 {
+            if params.ulSourceDataLen != 0 {
                 return err_rv!(CKR_MECHANISM_PARAM_INVALID);
             }
             None
         }
-        CKZ_DATA_SPECIFIED => match p.ulSourceDataLen {
+        CKZ_DATA_SPECIFIED => match params.ulSourceDataLen {
             0 => None,
-            _ => Some(bytes_to_vec!(p.pSourceData, p.ulSourceDataLen)),
+            _ => {
+                Some(bytes_to_vec!(params.pSourceData, params.ulSourceDataLen))
+            }
         },
         _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
     };
 
     Ok(RsaOaepParams {
-        hash: p.hashAlg,
-        mgf: p.mgf,
+        hash: params.hashAlg,
+        mgf: params.mgf,
         source: source,
     })
 }
