@@ -53,6 +53,7 @@ mod hmac;
 mod pbkdf2;
 mod rsa;
 mod sp800_108;
+mod sshkdf;
 mod tlskdf;
 
 /* Helper code */

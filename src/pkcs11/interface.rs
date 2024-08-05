@@ -34,4 +34,5 @@ pub const KRR_TOKEN_NOT_INITIALIZED: CK_ULONG = KRY_VENDOR_OFFSET + 1;
 
 pub const KRY_UNSPEC: CK_ULONG = CK_UNAVAILABLE_INFORMATION;
 
+include!("extensions.rs");
 include!("validation_draft.rs");

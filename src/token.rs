@@ -18,6 +18,7 @@ use super::object;
 use super::pbkdf2;
 use super::rsa;
 use super::sp800_108;
+use super::sshkdf;
 use super::storage;
 use super::tlskdf;
 
@@ -205,6 +206,7 @@ impl Token {
         hkdf::register(&mut token.mechanisms, &mut token.object_factories);
         pbkdf2::register(&mut token.mechanisms, &mut token.object_factories);
         sp800_108::register(&mut token.mechanisms, &mut token.object_factories);
+        sshkdf::register(&mut token.mechanisms, &mut token.object_factories);
         tlskdf::register(&mut token.mechanisms, &mut token.object_factories);
 
         #[cfg(feature = "fips")]

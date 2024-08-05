@@ -121,6 +121,15 @@ pub static HASH_MECH_SET: [HashBasedOp; 9] = [
     },
 ];
 
+pub fn is_valid_hash(hash: CK_MECHANISM_TYPE) -> bool {
+    for hs in &HASH_MECH_SET {
+        if hs.hash == hash {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub fn hash_size(hash: CK_MECHANISM_TYPE) -> usize {
     for hs in &HASH_MECH_SET {
         if hs.hash == hash {

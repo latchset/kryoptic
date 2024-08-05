@@ -899,3 +899,278 @@ fn test_pbkdf2() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_sshkdf() {
+    let mut testtokn = TestToken::initialized("test_sshkdf.sql", None);
+    let session = testtokn.get_session(false);
+
+    testtokn.login();
+
+    for test in [
+        #[cfg(not(feature = "fips"))]
+        (
+            CKM_SHA_1,
+            hex::decode(
+                "000001001eb033aab0830ccd612bb4167300fadd3e74ebc7a51941\
+                 e374319e84b537452e20c7404ef71f7cb2fbbc86a0b3de6a5481da\
+                 9451f71286001558ed2e3ba184553f143aad3a1c7a97b095cbb645\
+                 d78202fe9a826b131eeb229f54895abdf108350596cbd9e37d2a7a\
+                 18c9efeebb360637d0e1c3ba0d2636d2a84a28451fcb3ae91aa155\
+                 ffa69127889244a02df18491d6fc7b4c440d385f7dcab120d7c620\
+                 f62a750f032131e8cee361ad9f03e315634f1da4c62e97af50f992\
+                 0f847ed0fbef05b0888993bb5029101ae4d384c03fde132c7b3b61\
+                 ebccf44fa32c24af984ec29e615d39cce25809178bc18475584566\
+                 e4901924493710971fca33dce88f64c25e",
+            )
+            .unwrap(), /* K */
+            hex::decode("82c692ef009ae5874044048bfbdef7438118ca1b").unwrap(), /* H */
+            hex::decode("82c692ef009ae5874044048bfbdef7438118ca1b").unwrap(), /* Session ID */
+            hex::decode("0f529afc2f2e1c67636822c1b456a798").unwrap(), /* A */
+            hex::decode("03b5596d748eef4122e356d10bc85ead").unwrap(), /* B */
+            hex::decode(
+                "1588f52090daeb6e88e3665e98f5cce933f0fae328a2befbe808ad\
+                 c37bf62b34",
+            )
+            .unwrap(), /* C */
+            hex::decode(
+                "5b6a435e02777bed749c10790e24d3e5bdff63161c4e2baf334279\
+                 33ffa831ff",
+            )
+            .unwrap(), /* D */
+            hex::decode("31bde53364f3445b0de695849b2a96a42ceaf4f3").unwrap(), /* E */
+            hex::decode("f39da5279ba483a705e83d837bb97044690ed9bc").unwrap(), /* F */
+        ),
+        (
+            CKM_SHA256,
+            hex::decode(
+                "000001004b3c931dbc90f471d53c81439b16a1f2b5cae0f327261d\
+                 398101d433e1a6eef9d5de7ab6ac4bf24ddbb1329e1cb785a436fb\
+                 597f4c7f7fdb087d921ccf8695473a6db93bef4fbc6ebfb6622d49\
+                 c17d818b691f07bf268496a88e75199524a43cb597dc839f5e799a\
+                 d16f28262ce1b3a2d9874e10af76cee054bad55fb0d0062397caf6\
+                 64a6e4d74cdde081904e137c43d5a061259829dd71bc0b1c80e489\
+                 c7c67a43bcd35744a2a19f9d953832aba1a4d12900e84f6cb06327\
+                 1e0ecbd7c99494809604570817af51774741738ea80b4ce4cc326e\
+                 eae3caa959e40528b341aa80cde04acea11bded12be73f7820d0e5\
+                 670234f0661d8e3e6b3e82b9fd3411a6da",
+            )
+            .unwrap(), /* K */
+            hex::decode(
+                "0eae56989310f527883af6e2b01943e7cd741f6a483bf60415c05b\
+                 3387c05eaf",
+            )
+            .unwrap(), /* H */
+            hex::decode(
+                "0eae56989310f527883af6e2b01943e7cd741f6a483bf60415c05b\
+                 3387c05eaf",
+            )
+            .unwrap(), /* Session ID */
+            hex::decode("28f2016a5d81305e8b03dcc7886e344c").unwrap(), /* A */
+            hex::decode("36e3705af889ccc5a9e84170f44b5322").unwrap(), /* B */
+            hex::decode(
+                "f2ecd739f4423ae5e08639a8465be3a8c33e3bf109da95c3fc73ca\
+                 306156a79f",
+            )
+            .unwrap(), /* C */
+            hex::decode(
+                "f3d2fc5bf516fc18c656a7fdc1e2e32cc61b2980f8226c8513f894\
+                 c31e38ed5f",
+            )
+            .unwrap(), /* D */
+            hex::decode(
+                "3fec8dd099f8b61da4eb6058e17aca7a89e10b6e403e83901d29d0\
+                 0aaf435b64",
+            )
+            .unwrap(), /* E */
+            hex::decode(
+                "cde71f736c0e31e81707b3679b5be187c8056965a08fc2f5d82f94\
+                 5cbec975bd",
+            )
+            .unwrap(), /* F */
+        ),
+        (
+            CKM_SHA384,
+            hex::decode(
+                "0000010100d4af17edd4baccef26d37991a62e124a78dc0a3136ce\
+                 8adb0fbbfa8ca9e41fdb589b24f78e953801c05a405353dd7ef12f\
+                 ad6872ef0b6a8a094453bf8600aed0355836f97ca6692a2523f000\
+                 6e51de272acb05e57645e69654bc00fa8aec453381a6d0177649d7\
+                 c191c9456579a02d25201b3307113cb89c00d7f797cdad28c91f41\
+                 6edc2e63d2f9647ab3e47c959357930f01721f992ef332081bf5e3\
+                 8ae3a75e24212d079fd1280d5979962c5414a90bc2e99454b1549c\
+                 f1b403c03a3b0857bd32efd4b41c7deeca452f11256bac9fdb8dce\
+                 eef6492ad804a80de67d916a57ec2a00ce6115d2bcc4bd8fa7f466\
+                 44088b9370597efacd0d6c937690d6248172",
+            )
+            .unwrap(), /* K */
+            hex::decode(
+                "c05cd92556dc72044c4969ccf09d1c7551fd725cdc42f16a15e69e\
+                 c9d89d75a366c9268277fee763a38d95543aa3652e",
+            )
+            .unwrap(), /* H */
+            hex::decode(
+                "c05cd92556dc72044c4969ccf09d1c7551fd725cdc42f16a15e69e\
+                 c9d89d75a366c9268277fee763a38d95543aa3652e",
+            )
+            .unwrap(), /* Session ID */
+            hex::decode("f727aecee81f151d552d4c6b165bef3b").unwrap(), /* A */
+            hex::decode("f4c72877550b4a24487d377d50739b63").unwrap(), /* B */
+            hex::decode(
+                "cc4e387b44068ca27da3646f5d2595d5a8b80732992bbe2336097c\
+                 af6c64cbbb",
+            )
+            .unwrap(), /* C */
+            hex::decode(
+                "a586ca518c54812f57c10a6d0e7499489490d5de062e424e9a9c41\
+                 ffd367981a",
+            )
+            .unwrap(), /* D */
+            hex::decode(
+                "0d587549efd9fdf1fcbc4ff56620f9a2b9138db9873c537d2b5071\
+                 eae7799f3649d769ae6300752972a891d36c4addf2",
+            )
+            .unwrap(), /* E */
+            hex::decode(
+                "35dd32a9425db34efd622e6516296b4652f4cffdcff8fb61b61df0\
+                 54144672e21bb0e43da674493360269fcc1d96fa85",
+            )
+            .unwrap(), /* F */
+        ),
+        (
+            CKM_SHA512,
+            hex::decode(
+                "0000010100b5ec7df0e63b61d9e676f055d467ea76ac2a4f9242a17\
+                 982f614dcf3e2a41e5270de58c0ed508d16bad51eef5ae1ff6c4428\
+                 0ff983d441664e23681c5ba883a53841136e8e40d8027022a86cde2\
+                 2790a8714db49183ce6af7c53044d8218a2a7b5778bae1e9fdeccef\
+                 1780cf0005495818bf6300a95d9653a079f70f55117c369f4250ec3\
+                 397be371eff7e5d066a5396ddb184ebe0ad8b81db2d462396769260\
+                 2e8960bd3eb560b1b348771abe94921ba9e802caef648937133cc12\
+                 9028954b0316d4996a92b65c1e65317ab1a2989027bef3e80c69d02\
+                 bfd0e765af9ec1060ca49549d181b45d670eb66f872030dba6a017d\
+                 4f8c61f68f733ee3b92302ad640",
+            )
+            .unwrap(), /* K */
+            hex::decode(
+                "d77e95d23d1fcdac73d3aa1907b952aba5f842b8755e1bc99268d1\
+                 74f2515187523e1572857c5b2c144929fe47b859b13323aaec1f73\
+                 b5dac7ee72cd0e29e337",
+            )
+            .unwrap(), /* H */
+            hex::decode(
+                "d77e95d23d1fcdac73d3aa1907b952aba5f842b8755e1bc99268d1\
+                 74f2515187523e1572857c5b2c144929fe47b859b13323aaec1f73\
+                 b5dac7ee72cd0e29e337",
+            )
+            .unwrap(), /* Session ID */
+            hex::decode("bd59bb5679b272a6e93c1d0267b868b9").unwrap(), /* A */
+            hex::decode("c99c79493d4ccef62f08a21d19b3294c").unwrap(), /* B */
+            hex::decode(
+                "c76f1ff0a3933433c3869444f8dafa0bc672b62f4d4ab79c645c3b\
+                 aa7ea557d4",
+            )
+            .unwrap(), /* C */
+            hex::decode(
+                "23c39f34b3c80b37915f0be671cb3a91c3483288097694d4218647\
+                 323a2dcb47",
+            )
+            .unwrap(), /* D */
+            hex::decode(
+                "4bd4bd7d0e84ccf31444b3ad1cb92490138342b8748af1ad525c0f\
+                 124db13e995bb98f47468b2378e668a938970054f017e610ced872\
+                 4a81319140fbc6b96898",
+            )
+            .unwrap(), /* E */
+            hex::decode(
+                "3ac38453d0243a62e87b74d1b9ca0b992012f09d3e0924fe1a1e9f\
+                 d1e1752ae9d5776ee7e66670203bb1ad5af1a0e7ff7a9fcc348185\
+                 8416500afa448d23f101",
+            )
+            .unwrap(), /* F */
+        ),
+    ] {
+        let handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[(CKA_VALUE, test.1.as_slice())],
+            &[(CKA_DERIVE, true)],
+        ));
+
+        for kt in [
+            (b"A", test.4),
+            (b"B", test.5),
+            (b"C", test.6),
+            (b"D", test.7),
+            (b"E", test.8),
+            (b"F", test.9),
+        ] {
+            let sshkdf_params = KR_SSHKDF_PARAMS {
+                prfHashMechanism: test.0,
+                derivedKeyType: kt.0[0],
+                pExchangeHash: byte_ptr!(test.2.as_ptr()),
+                ulExchangeHashLen: test.2.len() as CK_ULONG,
+                pSessionId: byte_ptr!(test.3.as_ptr()),
+                ulSessionIdLen: test.3.len() as CK_ULONG,
+            };
+
+            let mut derive_template = match kt.0 {
+                b"A" | b"B" => make_attr_template(
+                    &[
+                        (CKA_CLASS, CKO_DATA),
+                        (CKA_VALUE_LEN, kt.1.len() as CK_ULONG),
+                    ],
+                    &[],
+                    &[],
+                ),
+                b"C" | b"D" | b"E" | b"F" => make_attr_template(
+                    &[
+                        (CKA_CLASS, CKO_SECRET_KEY),
+                        (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                        (CKA_VALUE_LEN, kt.1.len() as CK_ULONG),
+                    ],
+                    &[],
+                    &[(CKA_EXTRACTABLE, true)],
+                ),
+                _ => panic!("What?"),
+            };
+
+            let mut derive_mech = CK_MECHANISM {
+                mechanism: KRM_SSHKDF_DERIVE,
+                pParameter: void_ptr!(&sshkdf_params),
+                ulParameterLen: sizeof!(KR_SSHKDF_PARAMS),
+            };
+
+            let mut drv_handle = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &mut derive_mech,
+                handle,
+                derive_template.as_mut_ptr(),
+                derive_template.len() as CK_ULONG,
+                &mut drv_handle,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut result = vec![0u8; kt.1.len()];
+            let mut extract_template = make_ptrs_template(&[(
+                CKA_VALUE,
+                void_ptr!(result.as_mut_ptr()),
+                kt.1.len(),
+            )]);
+
+            let ret = fn_get_attribute_value(
+                session,
+                drv_handle,
+                extract_template.as_mut_ptr(),
+                extract_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(result, kt.1);
+        }
+    }
+
+    testtokn.finalize();
+}
