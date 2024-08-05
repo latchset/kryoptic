@@ -11,13 +11,13 @@ use super::mechanism;
 use super::misc;
 use super::object;
 
-use attribute::{from_bytes, from_ulong};
+use attribute::from_bytes;
 use error::{KError, KResult};
 use hash::INVALID_HASH_SIZE;
 use hmac::hmac_size;
 use interface::*;
 use mechanism::*;
-use object::{Object, ObjectFactories, ObjectType};
+use object::{Object, ObjectFactories};
 
 use super::{bytes_to_slice, cast_params};
 
@@ -210,57 +210,6 @@ impl HKDFOperation {
             #[cfg(feature = "fips")]
             fips_approved: None,
         })
-    }
-
-    fn data_object_and_secret_size(
-        &self,
-        template: &[CK_ATTRIBUTE],
-        objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
-        let default_class = CKO_DATA;
-        let mut tmpl = misc::fixup_template(
-            template,
-            &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
-        );
-        let keysize = match tmpl.iter().position(|a| a.type_ == CKA_VALUE_LEN) {
-            Some(idx) => {
-                /* we must remove CKA_VALUE_LEN from the template as it is not
-                 * a valid attribute for a CKO_DATA object */
-                tmpl.swap_remove(idx).to_ulong()? as usize
-            }
-            None => self.prflen,
-        };
-        let obj = match objfactories.get_factory(ObjectType::new(CKO_DATA, 0)) {
-            Ok(f) => f.create(tmpl.as_slice())?,
-            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
-        };
-        Ok((obj, keysize))
-    }
-
-    fn key_object_and_secret_size(
-        &self,
-        key: &Object,
-        template: &[CK_ATTRIBUTE],
-        objfactories: &ObjectFactories,
-    ) -> KResult<(Object, usize)> {
-        let default_class = CKO_SECRET_KEY;
-        let tmpl = misc::fixup_template(
-            template,
-            &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
-        );
-        let mut obj =
-            objfactories.derive_key_from_template(key, tmpl.as_slice())?;
-        let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-            Ok(n) => n as usize,
-            Err(_) => {
-                obj.set_attr(from_ulong(
-                    CKA_VALUE_LEN,
-                    self.prflen as CK_ULONG,
-                ))?;
-                self.prflen
-            }
-        };
-        Ok((obj, keysize))
     }
 }
 

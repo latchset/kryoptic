@@ -27,9 +27,14 @@ impl Derive for HKDFOperation {
         }
 
         let (mut obj, keysize) = if self.emit_data_obj {
-            self.data_object_and_secret_size(template, objfactories)
+            misc::common_derive_data_object(template, objfactories, self.prflen)
         } else {
-            self.key_object_and_secret_size(key, template, objfactories)
+            misc::common_derive_key_object(
+                key,
+                template,
+                objfactories,
+                self.prflen,
+            )
         }?;
 
         if !self.expand && keysize != self.prflen {

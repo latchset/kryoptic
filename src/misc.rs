@@ -2,7 +2,15 @@
 // See LICENSE.txt file for terms
 
 /* misc utilities that do not really belong in any module */
+use super::attribute;
+use super::err_rv;
+use super::error;
 use super::interface;
+use super::object;
+
+use attribute::from_ulong;
+use error::{KError, KResult};
+use interface::*;
 
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<interface::CK_ULONG>();
 
@@ -89,4 +97,61 @@ macro_rules! bytes_to_slice {
             &[]
         }
     };
+}
+
+pub fn common_derive_data_object(
+    template: &[CK_ATTRIBUTE],
+    objfactories: &object::ObjectFactories,
+    default_len: usize,
+) -> KResult<(object::Object, usize)> {
+    let default_class = CKO_DATA;
+    let mut tmpl = fixup_template(
+        template,
+        &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
+    );
+    let value_len = match tmpl.iter().position(|a| a.type_ == CKA_VALUE_LEN) {
+        Some(idx) => {
+            /* we must remove CKA_VALUE_LEN from the template as it is not
+             * a valid attribute for a CKO_DATA object */
+            tmpl.swap_remove(idx).to_ulong()? as usize
+        }
+        None => {
+            if default_len == 0 {
+                return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+            }
+            default_len
+        }
+    };
+    let obj =
+        match objfactories.get_factory(object::ObjectType::new(CKO_DATA, 0)) {
+            Ok(f) => f.create(tmpl.as_slice())?,
+            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        };
+    Ok((obj, value_len))
+}
+
+pub fn common_derive_key_object(
+    key: &object::Object,
+    template: &[CK_ATTRIBUTE],
+    objfactories: &object::ObjectFactories,
+    default_len: usize,
+) -> KResult<(object::Object, usize)> {
+    let default_class = CKO_SECRET_KEY;
+    let tmpl = fixup_template(
+        template,
+        &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
+    );
+    let mut obj =
+        objfactories.derive_key_from_template(key, tmpl.as_slice())?;
+    let value_len = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
+        Ok(n) => n as usize,
+        Err(_) => {
+            if default_len == 0 {
+                return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+            }
+            obj.set_attr(from_ulong(CKA_VALUE_LEN, default_len as CK_ULONG))?;
+            default_len
+        }
+    };
+    Ok((obj, value_len))
 }
