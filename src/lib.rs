@@ -47,6 +47,7 @@ mod ossl;
 mod aes;
 mod drbg;
 mod ecc;
+mod eddsa;
 mod hash;
 mod hkdf;
 mod hmac;

@@ -789,6 +789,34 @@ impl ProviderSignatureCtx {
         }
     }
 
+    pub fn digest_sign(
+        &mut self,
+        signature: &mut [u8],
+        tbs: &[u8],
+    ) -> KResult<usize> {
+        unsafe {
+            match (*self.vtable).digest_sign {
+                Some(f) => {
+                    let mut siglen = 0usize;
+                    let siglen_ptr: *mut usize = &mut siglen;
+                    let res = f(
+                        self.ctx,
+                        signature.as_mut_ptr() as *mut c_uchar,
+                        siglen_ptr,
+                        signature.len(),
+                        tbs.as_ptr() as *mut c_uchar,
+                        tbs.len(),
+                    );
+                    if res != 1 {
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                    Ok(siglen)
+                }
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
     pub fn digest_verify_init(
         &mut self,
         mdname: *const c_char,
@@ -828,6 +856,25 @@ impl ProviderSignatureCtx {
                     self.ctx,
                     signature.as_ptr() as *const c_uchar,
                     signature.len()
+                )),
+                None => err_rv!(CKR_DEVICE_ERROR),
+            }
+        }
+    }
+
+    pub fn digest_verify(
+        &mut self,
+        signature: &[u8],
+        tbs: &[u8],
+    ) -> KResult<()> {
+        unsafe {
+            match (*self.vtable).digest_verify {
+                Some(f) => res_to_err!(f(
+                    self.ctx,
+                    signature.as_ptr() as *const c_uchar,
+                    signature.len(),
+                    tbs.as_ptr() as *const c_uchar,
+                    tbs.len()
                 )),
                 None => err_rv!(CKR_DEVICE_ERROR),
             }

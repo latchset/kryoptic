@@ -233,6 +233,8 @@ mod ecdh;
 
 mod ecdh_vectors;
 
+mod eddsa;
+
 mod hashes;
 
 mod signatures;
