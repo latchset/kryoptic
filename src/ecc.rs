@@ -21,6 +21,8 @@ use object::{
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
+use crate::ecc_misc::*;
+
 pub const MIN_EC_SIZE_BITS: usize = 256;
 pub const MAX_EC_SIZE_BITS: usize = 521;
 
@@ -171,40 +173,6 @@ impl ObjectFactory for ECCPubFactory {
 impl CommonKeyFactory for ECCPubFactory {}
 
 impl PubKeyFactory for ECCPubFactory {}
-
-type Version = u64;
-
-#[derive(asn1::Asn1Read, asn1::Asn1Write)]
-enum ECParameters<'a> {
-    // ecParametdders   ECParameters,
-    OId(asn1::ObjectIdentifier),
-    ImplicitlyCA(asn1::Null),
-    CurveName(asn1::PrintableString<'a>),
-}
-
-/// Defined in SECG SEC 1, C.4
-#[derive(asn1::Asn1Read, asn1::Asn1Write)]
-struct ECPrivateKey<'a> {
-    version: Version,
-    private_key: kasn1::DerEncOctetString<'a>,
-    #[explicit(0)]
-    parameters: Option<ECParameters<'a>>,
-    #[explicit(1)]
-    public_key: Option<asn1::BitString<'a>>,
-}
-
-impl ECPrivateKey<'_> {
-    pub fn new_owned<'a>(
-        private_key: &'a Vec<u8>,
-    ) -> KResult<ECPrivateKey<'a>> {
-        Ok(ECPrivateKey {
-            version: 1,
-            private_key: kasn1::DerEncOctetString::new(private_key.as_slice())?,
-            parameters: None,
-            public_key: None,
-        })
-    }
-}
 
 #[derive(Debug)]
 pub struct ECCPrivFactory {

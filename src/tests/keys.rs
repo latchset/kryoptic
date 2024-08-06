@@ -549,4 +549,57 @@ fn test_key() {
             ulParameterLen: 0,
         },
     ));
+
+    {
+        /* Ed25519 key pair */
+        let ec_params = hex::decode(
+            "130c656477617264733235353139", // edwards25519
+        )
+        .expect("Failed to decode hex ec_params");
+
+        let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
+            session,
+            CKM_EC_EDWARDS_KEY_PAIR_GEN,
+            &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_EC_EDWARDS),],
+            &[(CKA_EC_PARAMS, ec_params.as_slice())],
+            &[(CKA_VERIFY, true)],
+            &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC_EDWARDS),],
+            &[],
+            &[
+                (CKA_PRIVATE, true),
+                (CKA_SENSITIVE, true),
+                (CKA_TOKEN, true),
+                (CKA_SIGN, true),
+                (CKA_EXTRACTABLE, true),
+            ],
+        ));
+
+        let data = "plaintext";
+        let sig = ret_or_panic!(sig_gen(
+            session,
+            prikey,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_EDDSA,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+        ));
+        assert_eq!(sig.len(), 64);
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                pubkey,
+                data.as_bytes(),
+                sig.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_EDDSA,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                },
+            )
+        );
+    }
 }
