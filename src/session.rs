@@ -111,12 +111,13 @@ impl Session {
         &self.info
     }
 
+    #[cfg(feature = "fips")]
     pub fn set_fips_indicator(&mut self, flag: bool) {
         self.fips_indicator = Some(flag)
     }
 
+    #[cfg(feature = "fips")]
     pub fn get_last_validation_flags(&self) -> CK_FLAGS {
-        #[cfg(feature = "fips")]
         if self.fips_indicator == Some(true) {
             return fips::indicators::KRF_FIPS;
         }
