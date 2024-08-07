@@ -1650,23 +1650,28 @@ extern "C" fn fn_generate_key(
         return CKR_MECHANISM_INVALID;
     }
 
-    let mut obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
+    #[cfg(not(feature = "fips"))]
+    let obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
         Ok(o) => o,
         Err(e) => return err_to_rv!(e),
     };
     #[cfg(feature = "fips")]
-    {
-        /* must drop here or we deadlock trying to re-acquire for writing */
-        drop(session);
+    let obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
+        Ok(mut key) => {
+            /* must drop here or we deadlock trying to re-acquire for writing */
+            drop(session);
 
-        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-        session.set_fips_indicator(fips::indicators::is_approved(
-            data,
-            CKF_GENERATE,
-            None,
-            Some(&mut obj),
-        ));
-    }
+            let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+            session.set_fips_indicator(fips::indicators::is_approved(
+                data,
+                CKF_GENERATE,
+                None,
+                Some(&mut key),
+            ));
+            key
+        }
+        Err(e) => return err_to_rv!(e),
+    };
 
     let kh = res_or_ret!(token.insert_object(s_handle, obj));
     unsafe {

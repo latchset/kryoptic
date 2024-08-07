@@ -115,6 +115,7 @@ fn curve_name_to_oid(
     })
 }
 
+#[cfg(feature = "fips")]
 pub fn ec_key_curve_size(key: &Object) -> KResult<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
