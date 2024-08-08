@@ -550,6 +550,7 @@ fn test_key() {
         },
     ));
 
+    #[cfg(not(feature = "fips"))]
     {
         /* Ed25519 key pair */
         let ec_params = hex::decode(
