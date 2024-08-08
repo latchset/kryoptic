@@ -2,12 +2,17 @@
 // See LICENSE.txt file for terms
 
 use super::tests;
+#[cfg(not(feature = "fips"))]
 use tests::*;
 
+#[cfg(not(feature = "fips"))]
 use serial_test::parallel;
+
+/* TODO enable for FIPS when our OpenSSL will include EdDSA in FIPS module */
 
 #[test]
 #[parallel]
+#[cfg(not(feature = "fips"))]
 fn test_create_eddsa_objects() {
     let mut testtokn =
         TestToken::initialized("test_create_eddsa_objects.sql", None);
@@ -104,6 +109,7 @@ fn test_create_eddsa_objects() {
 
 #[test]
 #[parallel]
+#[cfg(not(feature = "fips"))]
 fn test_eddsa_operations() {
     let mut testtokn = TestToken::initialized(
         "test_eddsa_operations.sql",
