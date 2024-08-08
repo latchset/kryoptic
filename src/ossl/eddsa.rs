@@ -195,6 +195,7 @@ macro_rules! get_sig_ctx {
 
 impl EddsaOperation {
     fn register_mechanisms(mechs: &mut Mechanisms) {
+        #[cfg(not(feature = "fips"))]
         mechs.add_mechanism(
             CKM_EDDSA,
             Box::new(EddsaMechanism {
@@ -206,6 +207,7 @@ impl EddsaOperation {
             }),
         );
 
+        #[cfg(not(feature = "fips"))]
         mechs.add_mechanism(
             CKM_EC_EDWARDS_KEY_PAIR_GEN,
             Box::new(EddsaMechanism {
