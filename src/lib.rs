@@ -48,6 +48,7 @@ mod aes;
 mod drbg;
 mod ecc;
 mod ecc_misc;
+#[cfg(not(feature = "fips"))]
 mod eddsa;
 mod hash;
 mod hkdf;
