@@ -8,6 +8,7 @@ use std::vec::Vec;
 use super::aes;
 use super::attribute;
 use super::ecc;
+#[cfg(not(feature = "fips"))]
 use super::eddsa;
 use super::error;
 use super::hash;
@@ -202,6 +203,7 @@ impl Token {
         aes::register(&mut token.mechanisms, &mut token.object_factories);
         rsa::register(&mut token.mechanisms, &mut token.object_factories);
         ecc::register(&mut token.mechanisms, &mut token.object_factories);
+        #[cfg(not(feature = "fips"))]
         eddsa::register(&mut token.mechanisms, &mut token.object_factories);
         hash::register(&mut token.mechanisms, &mut token.object_factories);
         hmac::register(&mut token.mechanisms, &mut token.object_factories);

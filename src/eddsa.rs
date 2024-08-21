@@ -267,16 +267,12 @@ impl Mechanism for EddsaMechanism {
 }
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    /* TODO enable in FIPS Mode when our OpenSSL will have the EdDSA support */
-    #[cfg(not(feature = "fips"))]
     EddsaOperation::register_mechanisms(mechs);
 
-    #[cfg(not(feature = "fips"))]
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_EDWARDS),
         &PUBLIC_KEY_FACTORY,
     );
-    #[cfg(not(feature = "fips"))]
     ot.add_factory(
         ObjectType::new(CKO_PRIVATE_KEY, CKK_EC_EDWARDS),
         &PRIVATE_KEY_FACTORY,

@@ -195,7 +195,6 @@ macro_rules! get_sig_ctx {
 
 impl EddsaOperation {
     fn register_mechanisms(mechs: &mut Mechanisms) {
-        #[cfg(not(feature = "fips"))]
         mechs.add_mechanism(
             CKM_EDDSA,
             Box::new(EddsaMechanism {
@@ -207,7 +206,6 @@ impl EddsaOperation {
             }),
         );
 
-        #[cfg(not(feature = "fips"))]
         mechs.add_mechanism(
             CKM_EC_EDWARDS_KEY_PAIR_GEN,
             Box::new(EddsaMechanism {
@@ -408,16 +406,17 @@ impl Sign for EddsaOperation {
         }
         self.finalized = true;
 
-        let mut siglen = signature.len();
+        let siglen;
 
         #[cfg(not(feature = "fips"))]
         {
-            let siglen_ptr = &mut siglen;
+            let mut slen = signature.len();
+            let slen_ptr = &mut slen;
             if unsafe {
                 EVP_DigestSign(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     signature.as_mut_ptr(),
-                    siglen_ptr,
+                    slen_ptr,
                     self.data.as_ptr() as *const u8,
                     self.data.len(),
                 )
@@ -425,6 +424,7 @@ impl Sign for EddsaOperation {
             {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
+            siglen = slen;
         }
 
         #[cfg(feature = "fips")]
