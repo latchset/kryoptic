@@ -443,13 +443,12 @@ impl Token {
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
         let truebool: CK_BBOOL = CK_TRUE;
-        let template: [CK_ATTRIBUTE; 5] = [
-            CK_ATTRIBUTE::from_ulong(CKA_CLASS, &class),
-            CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &keytyp),
-            CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keylen),
-            CK_ATTRIBUTE::from_bool(CKA_WRAP, &truebool),
-            CK_ATTRIBUTE::from_bool(CKA_UNWRAP, &truebool),
-        ];
+        let mut template = attribute::CkAttrs::with_capacity(5);
+        template.add_ulong(CKA_CLASS, &class);
+        template.add_ulong(CKA_KEY_TYPE, &keytyp);
+        template.add_ulong(CKA_VALUE_LEN, &keylen);
+        template.add_bool(CKA_WRAP, &truebool);
+        template.add_bool(CKA_UNWRAP, &truebool);
         let pbkdf2 = self.mechanisms.get(CKM_PKCS5_PBKD2)?;
         pbkdf2.generate_key(
             &CK_MECHANISM {
@@ -457,7 +456,7 @@ impl Token {
                 pParameter: &params as *const _ as *mut _,
                 ulParameterLen: sizeof!(CK_PKCS5_PBKD2_PARAMS2),
             },
-            &template,
+            template.as_slice(),
             &self.mechanisms,
             &self.object_factories,
         )
@@ -508,13 +507,12 @@ impl Token {
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
         let truebool: CK_BBOOL = CK_TRUE;
-        let template: [CK_ATTRIBUTE; 5] = [
-            CK_ATTRIBUTE::from_ulong(CKA_CLASS, &class),
-            CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &keytyp),
-            CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keylen),
-            CK_ATTRIBUTE::from_bool(CKA_ENCRYPT, &truebool),
-            CK_ATTRIBUTE::from_bool(CKA_DECRYPT, &truebool),
-        ];
+        let mut template = attribute::CkAttrs::with_capacity(5);
+        template.add_ulong(CKA_CLASS, &class);
+        template.add_ulong(CKA_KEY_TYPE, &keytyp);
+        template.add_ulong(CKA_VALUE_LEN, &keylen);
+        template.add_bool(CKA_ENCRYPT, &truebool);
+        template.add_bool(CKA_DECRYPT, &truebool);
         let aes = self.mechanisms.get(CKM_AES_GCM)?;
         Ok(aes.unwrap_key(
             &CK_MECHANISM {
@@ -524,9 +522,9 @@ impl Token {
             },
             wrapper,
             wrapped,
-            &template,
+            template.as_slice(),
             self.object_factories
-                .get_obj_factory_from_key_template(&template)?,
+                .get_obj_factory_from_key_template(template.as_slice())?,
         )?)
     }
 
@@ -596,11 +594,10 @@ impl Token {
         let class = CKO_SECRET_KEY;
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
-        let template: [CK_ATTRIBUTE; 3] = [
-            CK_ATTRIBUTE::from_ulong(CKA_CLASS, &class),
-            CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &keytyp),
-            CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keylen),
-        ];
+        let mut template = attribute::CkAttrs::with_capacity(3);
+        template.add_ulong(CKA_CLASS, &class);
+        template.add_ulong(CKA_KEY_TYPE, &keytyp);
+        template.add_ulong(CKA_VALUE_LEN, &keylen);
         let aes = self.mechanisms.get(CKM_AES_KEY_GEN)?;
         let kek = aes.generate_key(
             &CK_MECHANISM {
@@ -608,7 +605,7 @@ impl Token {
                 pParameter: std::ptr::null_mut(),
                 ulParameterLen: 0,
             },
-            &template,
+            template.as_slice(),
             &self.mechanisms,
             &self.object_factories,
         )?;

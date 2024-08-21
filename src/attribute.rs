@@ -8,6 +8,7 @@ use super::{bytes_to_vec, err_not_found, err_rv, sizeof};
 use error::{KError, KResult};
 use interface::*;
 
+use std::borrow::Cow;
 use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -520,37 +521,191 @@ impl CK_ATTRIBUTE {
             AttrType::IgnoreType => Ok(from_ignore(self.type_, None)),
         }
     }
+}
 
-    pub fn from_slice<'a>(
-        type_: CK_ATTRIBUTE_TYPE,
-        value: &'a [u8],
-    ) -> CK_ATTRIBUTE {
-        CK_ATTRIBUTE {
-            type_: type_,
-            pValue: value.as_ptr() as *mut std::ffi::c_void,
-            ulValueLen: value.len() as CK_ULONG,
+#[derive(Debug)]
+pub struct CkAttrs<'a> {
+    v: Vec<Cow<'a, [u8]>>,
+    p: Cow<'a, [CK_ATTRIBUTE]>,
+    pub zeroize: bool,
+}
+
+impl Drop for CkAttrs<'_> {
+    fn drop(&mut self) {
+        if self.zeroize {
+            while let Some(mut elem) = self.v.pop() {
+                elem.to_mut().zeroize();
+            }
+        }
+    }
+}
+
+impl<'a> CkAttrs<'a> {
+    pub fn new() -> CkAttrs<'static> {
+        Self::with_capacity(0)
+    }
+
+    pub fn with_capacity(capacity: usize) -> CkAttrs<'static> {
+        CkAttrs {
+            v: Vec::new(),
+            p: Cow::Owned(Vec::with_capacity(capacity)),
+            zeroize: false,
         }
     }
 
-    pub fn from_ulong<'a>(
-        type_: CK_ATTRIBUTE_TYPE,
-        value: &'a CK_ULONG,
-    ) -> CK_ATTRIBUTE {
-        CK_ATTRIBUTE {
-            type_: type_,
-            pValue: value as *const CK_ULONG as *mut std::ffi::c_void,
+    pub fn from_ptr(
+        a: *mut CK_ATTRIBUTE,
+        l: CK_ULONG,
+    ) -> KResult<CkAttrs<'static>> {
+        if a.is_null() {
+            return err_rv!(CKR_ARGUMENTS_BAD);
+        }
+        Ok(CkAttrs {
+            v: Vec::new(),
+            p: Cow::Borrowed(unsafe {
+                std::slice::from_raw_parts(a, l as usize)
+            }),
+            zeroize: false,
+        })
+    }
+
+    pub fn from(a: &'a [CK_ATTRIBUTE]) -> CkAttrs<'a> {
+        CkAttrs {
+            v: Vec::new(),
+            p: Cow::Borrowed(a),
+            zeroize: false,
+        }
+    }
+
+    fn attr_from_last(&self, typ: CK_ATTRIBUTE_TYPE) -> KResult<CK_ATTRIBUTE> {
+        if let Some(r) = self.v.last() {
+            Ok(CK_ATTRIBUTE {
+                type_: typ,
+                pValue: r.as_ref().as_ptr() as *mut std::ffi::c_void,
+                ulValueLen: r.as_ref().len() as CK_ULONG,
+            })
+        } else {
+            err_rv!(CKR_GENERAL_ERROR)
+        }
+    }
+
+    pub fn add_owned_slice(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: &[u8],
+    ) -> KResult<()> {
+        self.v.push(Cow::Owned(val.to_vec()));
+        let a = self.attr_from_last(typ)?;
+        self.p.to_mut().push(a);
+        Ok(())
+    }
+
+    pub fn add_owned_ulong(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: CK_ULONG,
+    ) -> KResult<()> {
+        self.v.push(Cow::Owned(val.to_ne_bytes().to_vec()));
+        let a = self.attr_from_last(typ)?;
+        self.p.to_mut().push(a);
+        Ok(())
+    }
+
+    pub fn add_owned_bool(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: CK_BBOOL,
+    ) -> KResult<()> {
+        self.v.push(Cow::Owned(val.to_ne_bytes().to_vec()));
+        let a = self.attr_from_last(typ)?;
+        self.p.to_mut().push(a);
+        Ok(())
+    }
+
+    pub fn add_vec(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: Vec<u8>,
+    ) -> KResult<()> {
+        self.v.push(Cow::Owned(val));
+        let a = self.attr_from_last(typ)?;
+        self.p.to_mut().push(a);
+        Ok(())
+    }
+
+    pub fn add_slice(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a [u8]) {
+        self.p.to_mut().push(CK_ATTRIBUTE {
+            type_: typ,
+            pValue: val.as_ptr() as *mut std::ffi::c_void,
+            ulValueLen: val.len() as CK_ULONG,
+        });
+    }
+
+    pub fn add_ulong(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &CK_ULONG) {
+        self.p.to_mut().push(CK_ATTRIBUTE {
+            type_: typ,
+            pValue: val as *const CK_ULONG as *mut std::ffi::c_void,
             ulValueLen: sizeof!(CK_ULONG),
+        });
+    }
+
+    pub fn add_bool(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &CK_BBOOL) {
+        self.p.to_mut().push(CK_ATTRIBUTE {
+            type_: typ,
+            pValue: val as *const CK_BBOOL as *mut std::ffi::c_void,
+            ulValueLen: sizeof!(CK_BBOOL),
+        });
+    }
+
+    pub fn add_missing_slice(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a [u8]) {
+        match self.p.as_ref().iter().find(|a| a.type_ == typ) {
+            Some(_) => (),
+            None => self.add_slice(typ, val),
         }
     }
 
-    pub fn from_bool<'a>(
-        type_: CK_ATTRIBUTE_TYPE,
-        value: &'a CK_BBOOL,
-    ) -> CK_ATTRIBUTE {
-        CK_ATTRIBUTE {
-            type_: type_,
-            pValue: value as *const CK_BBOOL as *mut std::ffi::c_void,
-            ulValueLen: sizeof!(CK_BBOOL),
+    pub fn add_missing_ulong(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: &CK_ULONG,
+    ) {
+        match self.p.as_ref().iter().find(|a| a.type_ == typ) {
+            Some(_) => (),
+            None => self.add_ulong(typ, val),
         }
+    }
+
+    pub fn add_missing_bool(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &CK_BBOOL) {
+        match self.p.as_ref().iter().find(|a| a.type_ == typ) {
+            Some(_) => (),
+            None => self.add_bool(typ, val),
+        }
+    }
+
+    pub fn remove_ulong(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+    ) -> KResult<Option<CK_ULONG>> {
+        let idx = match self.p.as_ref().iter().position(|a| a.type_ == typ) {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+        let mut new_vec = self.p.as_ref()[..idx].to_vec();
+        new_vec.extend_from_slice(&self.p.as_ref()[(idx + 1)..]);
+        let val = self.p.as_ref()[idx].to_ulong()?;
+        self.p = Cow::Owned(new_vec);
+        Ok(Some(val))
+    }
+
+    pub fn len(&self) -> usize {
+        self.p.as_ref().len()
+    }
+
+    pub fn as_ptr(&self) -> *const CK_ATTRIBUTE {
+        self.p.as_ref().as_ptr()
+    }
+
+    pub fn as_slice(&'a self) -> &'a [CK_ATTRIBUTE] {
+        self.p.as_ref()
     }
 }
