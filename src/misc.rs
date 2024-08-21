@@ -8,7 +8,7 @@ use super::error;
 use super::interface;
 use super::object;
 
-use attribute::from_ulong;
+use attribute::{from_ulong, CkAttrs};
 use error::{KError, KResult};
 use interface::*;
 
@@ -44,22 +44,6 @@ macro_rules! byte_ptr {
     ($ptr:expr) => {
         $ptr as *const _ as CK_BYTE_PTR
     };
-}
-
-pub fn fixup_template(
-    template: &[interface::CK_ATTRIBUTE],
-    attributes: &[interface::CK_ATTRIBUTE],
-) -> Vec<interface::CK_ATTRIBUTE> {
-    let mut vec = template.to_vec();
-    for attr in attributes {
-        match template.iter().find(|a| a.type_ == attr.type_) {
-            Some(_) => (),
-            None => {
-                vec.push(attr.clone());
-            }
-        }
-    }
-    vec
 }
 
 #[macro_export]
@@ -105,16 +89,12 @@ pub fn common_derive_data_object(
     default_len: usize,
 ) -> KResult<(object::Object, usize)> {
     let default_class = CKO_DATA;
-    let mut tmpl = fixup_template(
-        template,
-        &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
-    );
-    let value_len = match tmpl.iter().position(|a| a.type_ == CKA_VALUE_LEN) {
-        Some(idx) => {
-            /* we must remove CKA_VALUE_LEN from the template as it is not
-             * a valid attribute for a CKO_DATA object */
-            tmpl.swap_remove(idx).to_ulong()? as usize
-        }
+    let mut tmpl = CkAttrs::from(template);
+    tmpl.add_missing_ulong(CKA_CLASS, &default_class);
+    /* we must remove CKA_VALUE_LEN from the template as it is not
+     * a valid attribute for a CKO_DATA object */
+    let value_len = match tmpl.remove_ulong(CKA_VALUE_LEN)? {
+        Some(val) => val as usize,
         None => {
             if default_len == 0 {
                 return err_rv!(CKR_TEMPLATE_INCOMPLETE);
@@ -137,10 +117,8 @@ pub fn common_derive_key_object(
     default_len: usize,
 ) -> KResult<(object::Object, usize)> {
     let default_class = CKO_SECRET_KEY;
-    let tmpl = fixup_template(
-        template,
-        &[CK_ATTRIBUTE::from_ulong(CKA_CLASS, &default_class)],
-    );
+    let mut tmpl = CkAttrs::from(template);
+    tmpl.add_missing_ulong(CKA_CLASS, &default_class);
     let mut obj =
         objfactories.derive_key_from_template(key, tmpl.as_slice())?;
     let value_len = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {

@@ -10,6 +10,7 @@ use {super::ossl, ossl::*};
 use super::mechanism;
 use super::some_or_err;
 
+use attribute::CkAttrs;
 use kasn1::DerEncBigUint;
 use mechanism::*;
 
@@ -810,12 +811,9 @@ impl Derive for ECDHOperation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
-        let mut tmpl = template.to_vec();
-
-        tmpl.push(CK_ATTRIBUTE::from_slice(
-            CKA_VALUE,
-            &secret[(secret_len - keylen)..],
-        ));
+        let mut tmpl = CkAttrs::from(template);
+        tmpl.add_owned_slice(CKA_VALUE, &secret[(secret_len - keylen)..])?;
+        tmpl.zeroize = true;
         let mut obj = factory.create(tmpl.as_slice())?;
 
         object::default_key_attributes(&mut obj, self.mech)?;

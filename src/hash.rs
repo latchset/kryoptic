@@ -1,12 +1,14 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use super::attribute;
 use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
 
+use attribute::CkAttrs;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
@@ -261,23 +263,19 @@ impl Derive for HashKDFOperation {
         let hashsize = hash_size(self.prf);
         let mut keysize = hashsize as CK_ULONG;
 
-        let gensec: CK_ULONG = CKK_GENERIC_SECRET;
-        let mut templ_plus = Vec::<CK_ATTRIBUTE>::new();
-        let mut tptr = template;
-        if template.iter().find(|a| a.type_ == CKA_KEY_TYPE).is_none() {
-            if templ_plus.len() == 0 {
-                if templ_plus.try_reserve(template.len() + 1).is_err() {
-                    return err_rv!(CKR_HOST_MEMORY);
-                }
-                templ_plus.extend_from_slice(template);
-            }
-            templ_plus.push(CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &gensec));
-            tptr = templ_plus.as_slice()
+        let mut tmpl = CkAttrs::from(template);
+        if tmpl
+            .as_slice()
+            .iter()
+            .find(|a| a.type_ == CKA_KEY_TYPE)
+            .is_none()
+        {
+            tmpl.add_owned_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET)?;
         }
+        let factory =
+            objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
 
-        let factory = objfactories.get_obj_factory_from_key_template(tptr)?;
-
-        match template.iter().find(|a| a.type_ == CKA_VALUE_LEN) {
+        match tmpl.as_slice().iter().find(|a| a.type_ == CKA_VALUE_LEN) {
             Some(a) => {
                 let size = a.to_ulong()?;
                 if size > keysize {
@@ -286,25 +284,16 @@ impl Derive for HashKDFOperation {
                 keysize = size;
             }
             None => {
-                if templ_plus.len() == 0 {
-                    if templ_plus.try_reserve(template.len() + 1).is_err() {
-                        return err_rv!(CKR_HOST_MEMORY);
-                    }
-                    templ_plus.extend_from_slice(template);
-                }
-
                 keysize = factory
                     .as_secret_key_factory()?
                     .recommend_key_size(hashsize)?
                     as CK_ULONG;
 
-                templ_plus
-                    .push(CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &keysize));
-                tptr = templ_plus.as_slice()
+                tmpl.add_ulong(CKA_VALUE_LEN, &keysize);
             }
         }
 
-        let mut obj = factory.default_object_derive(tptr, key)?;
+        let mut obj = factory.default_object_derive(tmpl.as_slice(), key)?;
 
         let mut dkm = vec![0u8; hashsize];
         op.digest(

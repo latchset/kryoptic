@@ -1,6 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use super::attribute;
 use super::err_rv;
 use super::error;
 use super::hmac;
@@ -9,6 +10,7 @@ use super::mechanism;
 use super::misc;
 use super::object;
 
+use attribute::CkAttrs;
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
@@ -478,32 +480,25 @@ impl TLSKDFOperation {
         }
     }
 
-    fn verify_mk_template(
+    fn verify_mk_template<'a>(
         &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> KResult<Vec<interface::CK_ATTRIBUTE>> {
+        template: &'a [CK_ATTRIBUTE],
+    ) -> KResult<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
         let allowed = unsafe {
             std::mem::transmute::<&[CK_ULONG; 4], &[u8; 4 * misc::CK_ULONG_SIZE]>(
                 &TLS_MASTER_SECRET_ALLOWED_MECHS,
             )
         };
-        let tmpl = misc::fixup_template(
-            template,
-            &[
-                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
-                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
-                CK_ATTRIBUTE::from_ulong(
-                    CKA_VALUE_LEN,
-                    &TLS_MASTER_SECRET_SIZE,
-                ),
-                CK_ATTRIBUTE::from_slice(CKA_ALLOWED_MECHANISMS, allowed),
-                CK_ATTRIBUTE::from_bool(CKA_SIGN, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_VERIFY, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_DERIVE, &CK_TRUE),
-            ],
-        );
-        for attr in &tmpl {
+        let mut tmpl = CkAttrs::from(template);
+        tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
+        tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
+        tmpl.add_missing_ulong(CKA_VALUE_LEN, &TLS_MASTER_SECRET_SIZE);
+        tmpl.add_missing_slice(CKA_ALLOWED_MECHANISMS, allowed);
+        tmpl.add_missing_bool(CKA_SIGN, &CK_TRUE);
+        tmpl.add_missing_bool(CKA_VERIFY, &CK_TRUE);
+        tmpl.add_missing_bool(CKA_DERIVE, &CK_TRUE);
+        for attr in tmpl.as_slice() {
             match attr.type_ {
                 CKA_CLASS => {
                     let val = attr.to_ulong()?;
@@ -601,28 +596,24 @@ impl TLSKDFOperation {
         Ok(vec![dkey])
     }
 
-    fn verify_key_expansion_template(
+    fn verify_key_expansion_template<'a>(
         &self,
         key: &Object,
-        template: &[CK_ATTRIBUTE],
-    ) -> KResult<Vec<interface::CK_ATTRIBUTE>> {
+        template: &'a [CK_ATTRIBUTE],
+    ) -> KResult<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
         let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE, Some(true));
         let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE, Some(false));
-        let tmpl = misc::fixup_template(
-            template,
-            &[
-                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
-                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
-                CK_ATTRIBUTE::from_ulong(CKA_VALUE_LEN, &self.keylen),
-                CK_ATTRIBUTE::from_bool(CKA_ENCRYPT, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_DECRYPT, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_DERIVE, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_SENSITIVE, &is_sensitive),
-                CK_ATTRIBUTE::from_bool(CKA_EXTRACTABLE, &is_extractable),
-            ],
-        );
-        for attr in &tmpl {
+        let mut tmpl = CkAttrs::from(template);
+        tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
+        tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
+        tmpl.add_missing_ulong(CKA_VALUE_LEN, &self.keylen);
+        tmpl.add_missing_bool(CKA_ENCRYPT, &CK_TRUE);
+        tmpl.add_missing_bool(CKA_DECRYPT, &CK_TRUE);
+        tmpl.add_missing_bool(CKA_DERIVE, &CK_TRUE);
+        tmpl.add_missing_bool(CKA_SENSITIVE, &is_sensitive);
+        tmpl.add_missing_bool(CKA_EXTRACTABLE, &is_extractable);
+        for attr in tmpl.as_slice() {
             match attr.type_ {
                 CKA_VALUE_LEN => {
                     let val = attr.to_ulong()?;
@@ -662,25 +653,26 @@ impl TLSKDFOperation {
             let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE, Some(true));
             let is_extractable =
                 as_ck_bbool!(key, CKA_EXTRACTABLE, Some(false));
-            let mac_tmpl = [
-                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
-                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
-                CK_ATTRIBUTE::from_bool(CKA_SIGN, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_VERIFY, &CK_TRUE),
-                CK_ATTRIBUTE::from_bool(CKA_SENSITIVE, &is_sensitive),
-                CK_ATTRIBUTE::from_bool(CKA_EXTRACTABLE, &is_extractable),
-            ];
+            let mut mac_tmpl = CkAttrs::with_capacity(6);
+            mac_tmpl.add_ulong(CKA_CLASS, &CKO_SECRET_KEY);
+            mac_tmpl.add_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
+            mac_tmpl.add_bool(CKA_SIGN, &CK_TRUE);
+            mac_tmpl.add_bool(CKA_VERIFY, &CK_TRUE);
+            mac_tmpl.add_bool(CKA_SENSITIVE, &is_sensitive);
+            mac_tmpl.add_bool(CKA_EXTRACTABLE, &is_extractable);
 
-            let factory =
-                objfactories.get_obj_factory_from_key_template(&mac_tmpl)?;
-            let mut climac = factory.default_object_derive(&mac_tmpl, key)?;
+            let factory = objfactories
+                .get_obj_factory_from_key_template(mac_tmpl.as_slice())?;
+            let mut climac =
+                factory.default_object_derive(mac_tmpl.as_slice(), key)?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut climac, dkm[i..(i + maclen)].to_vec())?;
 
             i += maclen;
             keys.push(climac);
-            let mut srvmac = factory.default_object_derive(&mac_tmpl, key)?;
+            let mut srvmac =
+                factory.default_object_derive(mac_tmpl.as_slice(), key)?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut srvmac, dkm[i..(i + maclen)].to_vec())?;
@@ -737,13 +729,9 @@ impl TLSKDFOperation {
         objfactories: &ObjectFactories,
     ) -> KResult<Vec<Object>> {
         self.verify_key(key)?;
-        let tmpl = misc::fixup_template(
-            template,
-            &[
-                CK_ATTRIBUTE::from_ulong(CKA_CLASS, &CKO_SECRET_KEY),
-                CK_ATTRIBUTE::from_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET),
-            ],
-        );
+        let mut tmpl = CkAttrs::from(template);
+        tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
+        tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
 
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;

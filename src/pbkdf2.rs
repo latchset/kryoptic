@@ -9,7 +9,7 @@ use super::mechanism;
 use super::object;
 use super::{cast_params, err_rv};
 
-use attribute::{from_bool, from_bytes, from_ulong};
+use attribute::{from_bool, from_bytes, from_ulong, CkAttrs};
 use error::{KError, KResult};
 use interface::*;
 use mechanism::*;
@@ -134,8 +134,9 @@ impl Mechanism for PBKDF2Mechanism {
 
         let dkm = pbkdf2.derive(mechanisms, keylen)?;
 
-        let mut tmpl = template.to_vec();
-        tmpl.push(CK_ATTRIBUTE::from_slice(CKA_VALUE, dkm.as_slice()));
+        let mut tmpl = CkAttrs::from(template);
+        tmpl.add_vec(CKA_VALUE, dkm)?;
+        tmpl.zeroize = true;
 
         let mut key = factory.create(tmpl.as_slice())?;
         object::default_key_attributes(&mut key, mech.mechanism)?;
