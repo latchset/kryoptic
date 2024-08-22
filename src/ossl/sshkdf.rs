@@ -25,29 +25,30 @@ impl Derive for SSHKDFOperation {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let params = OsslParam::with_capacity(6)
-            .set_zeroize()
-            .add_const_c_string(
-                name_as_char(OSSL_ALG_PARAM_DIGEST),
-                mech_type_to_digest_name(self.prf),
-            )?
-            .add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?,
-            )?
-            .add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
-                &self.exchange_hash,
-            )?
-            .add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
-                &self.session_id,
-            )?
-            .add_utf8_string(
-                name_as_char(OSSL_KDF_PARAM_SSHKDF_TYPE),
-                &vec![self.key_type, 0u8],
-            )?
-            .finalize();
+        let sshkdf_type = vec![self.key_type, 0u8];
+        let mut params = OsslParam::with_capacity(5);
+        params.zeroize = true;
+        params.add_const_c_string(
+            name_as_char(OSSL_ALG_PARAM_DIGEST),
+            mech_type_to_digest_name(self.prf),
+        )?;
+        params.add_octet_string(
+            name_as_char(OSSL_KDF_PARAM_KEY),
+            key.get_attr_as_bytes(CKA_VALUE)?,
+        )?;
+        params.add_octet_string(
+            name_as_char(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
+            &self.exchange_hash,
+        )?;
+        params.add_octet_string(
+            name_as_char(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
+            &self.session_id,
+        )?;
+        params.add_utf8_string(
+            name_as_char(OSSL_KDF_PARAM_SSHKDF_TYPE),
+            &sshkdf_type,
+        )?;
+        params.finalize();
 
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_SSHKDF))?;
         let mut dkm = vec![0u8; value_len];

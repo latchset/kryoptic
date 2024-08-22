@@ -1,12 +1,12 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::object;
+use super::{byte_ptr, void_ptr};
 
 use interface::*;
 
-use core::ffi::c_int;
-use core::ffi::c_uint;
+use core::ffi::{c_int, c_uint};
+use std::borrow::Cow;
 
 macro_rules! ptr_wrapper_struct {
     ($name:ident; $ossl:ident) => {
@@ -275,44 +275,38 @@ pub fn bn_num_bytes(a: *const BIGNUM) -> usize {
 }
 
 #[derive(Debug)]
-pub struct OsslParam {
+pub struct OsslParam<'a> {
     v: Vec<Vec<u8>>,
-    p: Vec<OSSL_PARAM>,
+    p: Cow<'a, [OSSL_PARAM]>,
     finalized: bool,
-    zeroize: bool,
-    imported: bool,
-    ptr: *mut OSSL_PARAM,
-    nelem: usize,
+    pub zeroize: bool,
 }
 
-impl Drop for OsslParam {
+impl Drop for OsslParam<'_> {
     fn drop(&mut self) {
         if self.zeroize {
-            while let Some(mut vec) = self.v.pop() {
-                vec.zeroize();
+            while let Some(mut elem) = self.v.pop() {
+                elem.zeroize();
             }
         }
     }
 }
 
-impl OsslParam {
-    pub fn new() -> OsslParam {
+impl<'a> OsslParam<'a> {
+    pub fn new() -> OsslParam<'static> {
         Self::with_capacity(0)
     }
 
-    pub fn with_capacity(capacity: usize) -> OsslParam {
+    pub fn with_capacity(capacity: usize) -> OsslParam<'static> {
         OsslParam {
             v: Vec::new(),
-            p: Vec::with_capacity(capacity + 1),
+            p: Cow::Owned(Vec::with_capacity(capacity + 1)),
             finalized: false,
-            imported: false,
             zeroize: false,
-            ptr: std::ptr::null_mut(),
-            nelem: 0,
         }
     }
 
-    pub fn from_ptr(ptr: *mut OSSL_PARAM) -> KResult<OsslParam> {
+    pub fn from_ptr(ptr: *mut OSSL_PARAM) -> KResult<OsslParam<'static>> {
         if ptr.is_null() {
             return err_rv!(CKR_DEVICE_ERROR);
         }
@@ -325,45 +319,43 @@ impl OsslParam {
                 counter = counter.offset(1);
             }
         }
+        /* Mark as finalized as no changes are allowed to imported params */
         Ok(OsslParam {
             v: Vec::new(),
-            p: Vec::new(),
+            p: Cow::Borrowed(unsafe {
+                std::slice::from_raw_parts(ptr, (nelem + 1) as usize)
+            }),
             finalized: true,
-            imported: true,
             zeroize: false,
-            ptr: ptr,
-            nelem: nelem,
         })
     }
 
-    pub fn empty() -> OsslParam {
-        OsslParam {
+    pub fn empty() -> OsslParam<'static> {
+        let mut p = OsslParam {
             v: Vec::new(),
-            p: Vec::new(),
-            finalized: true,
-            imported: true,
+            p: Cow::Owned(Vec::with_capacity(1)),
+            finalized: false,
             zeroize: false,
-            ptr: std::ptr::null_mut(),
-            nelem: 0,
-        }
+        };
+        p.finalize();
+        p
     }
 
-    pub fn set_zeroize(mut self) -> OsslParam {
-        if !self.imported {
-            self.zeroize = true;
-        }
-        self
-    }
-
-    pub fn add_bn(
-        mut self,
-        key: *const c_char,
-        v: &Vec<u8>,
-    ) -> KResult<OsslParam> {
+    pub fn add_bn(&mut self, key: *const c_char, v: &Vec<u8>) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        /* need to go through all these functions because,
+         * BN_bin2bn() takes a Big Endian number,
+         * but BN_bn2nativepad() later will convert it to
+         * native endianness, ensuring the buffer we pass in
+         * is in the correct order for openssl ...
+         */
         let bn = unsafe {
             BN_bin2bn(
                 v.as_ptr() as *mut u8,
@@ -374,68 +366,83 @@ impl OsslParam {
         if bn.is_null() {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        let mut param =
-            unsafe { OSSL_PARAM_construct_BN(key, std::ptr::null_mut(), 0) };
-        /* calculate needed size */
-        unsafe {
-            OSSL_PARAM_set_BN(&mut param, bn);
+        let mut size = unsafe { (BN_num_bits(bn) + 7) / 8 } as usize;
+        if size == 0 {
+            size += 1;
         }
-        let mut container = Vec::<u8>::with_capacity(param.return_size);
-        container.resize(param.return_size, 0);
-        param.data = container.as_mut_ptr() as *mut std::os::raw::c_void;
-        param.data_size = container.len();
-        unsafe {
-            OSSL_PARAM_set_BN(&mut param, bn);
+        let mut container = vec![0u8; size];
+        if unsafe {
+            BN_bn2nativepad(
+                bn,
+                container.as_mut_ptr(),
+                container.len() as c_int,
+            )
+        } < 1
+        {
+            return err_rv!(CKR_DEVICE_ERROR);
         }
-        self.v.push(container);
-        self.p.push(param);
-        Ok(self)
-    }
-
-    pub fn add_bn_from_obj(
-        self,
-        obj: &object::Object,
-        attr: CK_ATTRIBUTE_TYPE,
-        key: *const c_char,
-    ) -> KResult<OsslParam> {
-        if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-
-        let val = match obj.get_attr_as_bytes(attr) {
-            Ok(v) => v,
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
-        };
-        self.add_bn(key, val)
-    }
-
-    pub fn add_utf8_string(
-        mut self,
-        key: *const c_char,
-        v: &Vec<u8>,
-    ) -> KResult<OsslParam> {
-        if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
-        }
-
-        let mut container = v.clone();
         let param = unsafe {
-            OSSL_PARAM_construct_utf8_string(
+            OSSL_PARAM_construct_BN(
                 key,
-                container.as_mut_ptr() as *mut i8,
-                0,
+                byte_ptr!(container.as_ptr()),
+                container.len(),
             )
         };
         self.v.push(container);
-        self.p.push(param);
-        Ok(self)
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    pub fn add_utf8_string(
+        &mut self,
+        key: *const c_char,
+        v: &'a Vec<u8>,
+    ) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let param = unsafe {
+            OSSL_PARAM_construct_utf8_string(
+                key,
+                void_ptr!(v.as_ptr()) as *mut i8,
+                0,
+            )
+        };
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    pub fn add_owned_utf8_string(
+        &mut self,
+        key: *const c_char,
+        v: Vec<u8>,
+    ) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let param = unsafe {
+            OSSL_PARAM_construct_utf8_string(
+                key,
+                void_ptr!(v.as_ptr()) as *mut i8,
+                0,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
     }
 
     pub fn add_const_c_string(
-        mut self,
+        &mut self,
         key: *const c_char,
         val: *const c_char,
-    ) -> KResult<OsslParam> {
+    ) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -446,15 +453,15 @@ impl OsslParam {
 
         let param =
             unsafe { OSSL_PARAM_construct_utf8_string(key, val as *mut i8, 0) };
-        self.p.push(param);
-        Ok(self)
+        self.p.to_mut().push(param);
+        Ok(())
     }
 
     pub fn add_octet_string(
-        mut self,
+        &mut self,
         key: *const c_char,
-        v: &Vec<u8>,
-    ) -> KResult<OsslParam> {
+        v: &'a Vec<u8>,
+    ) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -463,113 +470,172 @@ impl OsslParam {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
-        let mut container = v.clone();
         let param = unsafe {
             OSSL_PARAM_construct_octet_string(
                 key,
-                container.as_mut_ptr() as *mut std::os::raw::c_void,
-                container.len(),
+                void_ptr!(v.as_ptr()),
+                v.len(),
             )
         };
-        self.v.push(container);
-        self.p.push(param);
-        Ok(self)
+        self.p.to_mut().push(param);
+        Ok(())
     }
 
     pub fn add_size_t(
-        mut self,
+        &mut self,
         key: *const c_char,
-        val: usize,
-    ) -> KResult<OsslParam> {
+        val: &'a usize,
+    ) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
-        let container = val.to_ne_bytes().to_vec();
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
         let param = unsafe {
-            OSSL_PARAM_construct_size_t(key, container.as_ptr() as *mut usize)
+            OSSL_PARAM_construct_size_t(key, val as *const _ as *mut usize)
         };
-        self.v.push(container);
-        self.p.push(param);
-        Ok(self)
+        self.p.to_mut().push(param);
+        Ok(())
     }
 
     pub fn add_uint(
-        mut self,
+        &mut self,
         key: *const c_char,
-        val: c_uint,
-    ) -> KResult<OsslParam> {
+        val: &'a c_uint,
+    ) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
-        let container = val.to_ne_bytes().to_vec();
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
         let param = unsafe {
-            OSSL_PARAM_construct_uint(key, container.as_ptr() as *mut c_uint)
+            OSSL_PARAM_construct_uint(key, val as *const _ as *mut c_uint)
         };
-        self.v.push(container);
-        self.p.push(param);
-        Ok(self)
+        self.p.to_mut().push(param);
+        Ok(())
     }
 
     pub fn add_int(
-        mut self,
+        &mut self,
         key: *const c_char,
-        val: c_int,
-    ) -> KResult<OsslParam> {
+        val: &'a c_int,
+    ) -> KResult<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 
-        let container = val.to_ne_bytes().to_vec();
-        let param = unsafe {
-            OSSL_PARAM_construct_int(key, container.as_ptr() as *mut c_int)
-        };
-        self.v.push(container);
-        self.p.push(param);
-        Ok(self)
-    }
-
-    pub fn get_int<'a>(
-        mut self,
-        key: *const c_char,
-        val: &'a mut c_int,
-    ) -> KResult<OsslParam> {
-        let param = unsafe { OSSL_PARAM_construct_int(key, val as *mut c_int) };
-        self.p.push(param);
-        Ok(self)
-    }
-
-    pub fn finalize(mut self) -> OsslParam {
-        if self.finalized {
-            return self;
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
         }
-        self.p.push(unsafe { OSSL_PARAM_construct_end() });
-        self.finalized = true;
-        self.ptr = self.p.as_mut_ptr();
-        self.nelem = self.p.len() - 1;
-        self
+
+        let param = unsafe {
+            OSSL_PARAM_construct_int(key, val as *const _ as *mut c_int)
+        };
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    pub fn add_owned_uint(
+        &mut self,
+        key: *const c_char,
+        val: c_uint,
+    ) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let v = val.to_ne_bytes().to_vec();
+
+        let param = unsafe {
+            OSSL_PARAM_construct_uint(
+                key,
+                v.as_ptr() as *const _ as *mut c_uint,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    pub fn add_owned_int(
+        &mut self,
+        key: *const c_char,
+        val: c_int,
+    ) -> KResult<()> {
+        if self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        if key == std::ptr::null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+
+        let v = val.to_ne_bytes().to_vec();
+
+        let param = unsafe {
+            OSSL_PARAM_construct_int(key, v.as_ptr() as *const _ as *mut c_int)
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    pub fn finalize(&mut self) {
+        if !self.finalized {
+            self.p.to_mut().push(unsafe { OSSL_PARAM_construct_end() });
+            self.finalized = true;
+        }
     }
 
     pub fn as_ptr(&self) -> *const OSSL_PARAM {
         if !self.finalized {
             panic!("Unfinalized OsslParam");
         }
-        self.ptr
+        self.p.as_ref().as_ptr()
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut OSSL_PARAM {
         if !self.finalized {
             panic!("Unfinalized OsslParam");
         }
-        self.ptr
+        self.p.to_mut().as_mut_ptr()
+    }
+
+    pub fn get_int(&self, key: *const c_char) -> KResult<c_int> {
+        if !self.finalized {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let p = unsafe {
+            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
+        };
+        if p.is_null() {
+            return err_rv!(CKR_GENERAL_ERROR);
+        }
+        let mut val: c_int = 0;
+        let res = unsafe { OSSL_PARAM_get_int(p, &mut val) };
+        if res != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        Ok(val)
     }
 
     pub fn get_bn(&self, key: *const c_char) -> KResult<Vec<u8>> {
         if !self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        let p = unsafe { OSSL_PARAM_locate(self.ptr, key) };
+        let p = unsafe {
+            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
+        };
         if p.is_null() {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -594,43 +660,26 @@ impl OsslParam {
         Ok(vec)
     }
 
-    pub fn get_octet_string(&self, key: *const c_char) -> KResult<Vec<u8>> {
+    pub fn get_octet_string(&self, key: *const c_char) -> KResult<&'a [u8]> {
         if !self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        let p = unsafe { OSSL_PARAM_locate(self.ptr, key) };
+        let p = unsafe {
+            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
+        };
         if p.is_null() {
             return err_rv!(CKR_GENERAL_ERROR);
         }
-        // get length
-        let mut buf_len = 0;
+        let mut buf: *const c_void = std::ptr::null_mut();
+        let mut buf_len: usize = 0;
         let res = unsafe {
-            OSSL_PARAM_get_octet_string(
-                p,
-                std::ptr::null_mut(),
-                0,
-                &mut buf_len,
-            )
+            OSSL_PARAM_get_octet_string_ptr(p, &mut buf, &mut buf_len)
         };
         if res != 1 {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        let mut octet = Vec::with_capacity(buf_len);
-        let buf_ptr = &mut octet.as_ptr();
-        let res = unsafe {
-            OSSL_PARAM_get_octet_string(
-                p,
-                buf_ptr as *mut _ as *mut *mut std::os::raw::c_void,
-                buf_len,
-                &mut buf_len,
-            )
-        };
-        if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
-        }
-        unsafe {
-            octet.set_len(buf_len);
-        }
+        let octet =
+            unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) };
         Ok(octet)
     }
 }

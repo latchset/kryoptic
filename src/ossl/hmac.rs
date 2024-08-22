@@ -20,12 +20,12 @@ impl HMACOperation {
         outputlen: usize,
     ) -> KResult<HMACOperation> {
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
-        let params = OsslParam::new()
-            .add_const_c_string(
-                name_as_char(OSSL_MAC_PARAM_DIGEST),
-                mech_type_to_digest_name(hash),
-            )?
-            .finalize();
+        let mut params = OsslParam::with_capacity(1);
+        params.add_const_c_string(
+            name_as_char(OSSL_MAC_PARAM_DIGEST),
+            mech_type_to_digest_name(hash),
+        )?;
+        params.finalize();
 
         if unsafe {
             EVP_MAC_init(

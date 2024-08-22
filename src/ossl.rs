@@ -15,7 +15,7 @@ use super::interface;
 use error::{KError, KResult};
 use interface::CKR_DEVICE_ERROR;
 
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
 use zeroize::Zeroize;
 
 struct OsslContext {
