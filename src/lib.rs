@@ -2635,10 +2635,16 @@ pub extern "C" fn C_GetInterface(
         unsafe { *version }
     };
 
+    let request_name: *const CK_UTF8CHAR = if interface_name.is_null() {
+        INTERFACE_NAME_STD_NUL.as_ptr()
+    } else {
+        interface_name
+    };
+
     for intf in &INTERFACE_SET {
         let found: bool = unsafe {
             let name = (*intf.interface).pInterfaceName as *const i8;
-            libc::strcmp(interface_name as *const i8, name) == 0
+            libc::strcmp(request_name as *const i8, name) == 0
         };
 
         if found {
