@@ -4,7 +4,7 @@
 use super::error;
 use super::interface;
 
-use super::{bytes_to_vec, err_not_found, err_rv, sizeof};
+use super::{bytes_to_vec, err_not_found, err_rv, sizeof, void_ptr};
 use error::{KError, KResult};
 use interface::*;
 
@@ -525,7 +525,7 @@ impl CK_ATTRIBUTE {
 
 #[derive(Debug)]
 pub struct CkAttrs<'a> {
-    v: Vec<Cow<'a, [u8]>>,
+    v: Vec<Vec<u8>>,
     p: Cow<'a, [CK_ATTRIBUTE]>,
     pub zeroize: bool,
 }
@@ -534,7 +534,7 @@ impl Drop for CkAttrs<'_> {
     fn drop(&mut self) {
         if self.zeroize {
             while let Some(mut elem) = self.v.pop() {
-                elem.to_mut().zeroize();
+                elem.zeroize();
             }
         }
     }
@@ -581,8 +581,8 @@ impl<'a> CkAttrs<'a> {
         if let Some(r) = self.v.last() {
             Ok(CK_ATTRIBUTE {
                 type_: typ,
-                pValue: r.as_ref().as_ptr() as *mut std::ffi::c_void,
-                ulValueLen: r.as_ref().len() as CK_ULONG,
+                pValue: void_ptr!(r.as_ptr()),
+                ulValueLen: r.len() as CK_ULONG,
             })
         } else {
             err_rv!(CKR_GENERAL_ERROR)
@@ -594,7 +594,7 @@ impl<'a> CkAttrs<'a> {
         typ: CK_ATTRIBUTE_TYPE,
         val: &[u8],
     ) -> KResult<()> {
-        self.v.push(Cow::Owned(val.to_vec()));
+        self.v.push(val.to_vec());
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
         Ok(())
@@ -605,7 +605,7 @@ impl<'a> CkAttrs<'a> {
         typ: CK_ATTRIBUTE_TYPE,
         val: CK_ULONG,
     ) -> KResult<()> {
-        self.v.push(Cow::Owned(val.to_ne_bytes().to_vec()));
+        self.v.push(val.to_ne_bytes().to_vec());
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
         Ok(())
@@ -616,7 +616,7 @@ impl<'a> CkAttrs<'a> {
         typ: CK_ATTRIBUTE_TYPE,
         val: CK_BBOOL,
     ) -> KResult<()> {
-        self.v.push(Cow::Owned(val.to_ne_bytes().to_vec()));
+        self.v.push(val.to_ne_bytes().to_vec());
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
         Ok(())
@@ -627,7 +627,7 @@ impl<'a> CkAttrs<'a> {
         typ: CK_ATTRIBUTE_TYPE,
         val: Vec<u8>,
     ) -> KResult<()> {
-        self.v.push(Cow::Owned(val));
+        self.v.push(val);
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
         Ok(())
@@ -641,7 +641,7 @@ impl<'a> CkAttrs<'a> {
         });
     }
 
-    pub fn add_ulong(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &CK_ULONG) {
+    pub fn add_ulong(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a CK_ULONG) {
         self.p.to_mut().push(CK_ATTRIBUTE {
             type_: typ,
             pValue: val as *const CK_ULONG as *mut std::ffi::c_void,
@@ -649,7 +649,7 @@ impl<'a> CkAttrs<'a> {
         });
     }
 
-    pub fn add_bool(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &CK_BBOOL) {
+    pub fn add_bool(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a CK_BBOOL) {
         self.p.to_mut().push(CK_ATTRIBUTE {
             type_: typ,
             pValue: val as *const CK_BBOOL as *mut std::ffi::c_void,
@@ -667,7 +667,7 @@ impl<'a> CkAttrs<'a> {
     pub fn add_missing_ulong(
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
-        val: &CK_ULONG,
+        val: &'a CK_ULONG,
     ) {
         match self.p.as_ref().iter().find(|a| a.type_ == typ) {
             Some(_) => (),
@@ -675,7 +675,11 @@ impl<'a> CkAttrs<'a> {
         }
     }
 
-    pub fn add_missing_bool(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &CK_BBOOL) {
+    pub fn add_missing_bool(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: &'a CK_BBOOL,
+    ) {
         match self.p.as_ref().iter().find(|a| a.type_ == typ) {
             Some(_) => (),
             None => self.add_bool(typ, val),
@@ -686,15 +690,10 @@ impl<'a> CkAttrs<'a> {
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
     ) -> KResult<Option<CK_ULONG>> {
-        let idx = match self.p.as_ref().iter().position(|a| a.type_ == typ) {
-            Some(idx) => idx,
+        match self.p.as_ref().iter().position(|a| a.type_ == typ) {
+            Some(idx) => Ok(Some(self.p.to_mut().swap_remove(idx).to_ulong()?)),
             None => return Ok(None),
-        };
-        let mut new_vec = self.p.as_ref()[..idx].to_vec();
-        new_vec.extend_from_slice(&self.p.as_ref()[(idx + 1)..]);
-        let val = self.p.as_ref()[idx].to_ulong()?;
-        self.p = Cow::Owned(new_vec);
-        Ok(Some(val))
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -703,6 +702,10 @@ impl<'a> CkAttrs<'a> {
 
     pub fn as_ptr(&self) -> *const CK_ATTRIBUTE {
         self.p.as_ref().as_ptr()
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut CK_ATTRIBUTE {
+        self.p.to_mut().as_mut_ptr()
     }
 
     pub fn as_slice(&'a self) -> &'a [CK_ATTRIBUTE] {
