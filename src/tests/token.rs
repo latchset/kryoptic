@@ -125,3 +125,184 @@ fn test_token_sql() {
     test_token_env("test_token.sql");
     test_token_null_args("test_token.sql");
 }
+
+#[test]
+#[parallel]
+fn test_interface_null() {
+    let mut testtokn = TestToken::new("test_interface_null.sql", true);
+    testtokn.setup_db(None);
+
+    /* NULL interface name and NULL version -- the module should return default one */
+    let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
+    let ppiface = &mut piface;
+    let result = C_GetInterface(
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        &mut *ppiface,
+        0,
+    );
+    assert_eq!(result, CKR_OK);
+    unsafe {
+        let iface: CK_INTERFACE = *piface;
+        let list: CK_FUNCTION_LIST_3_0 =
+            *(iface.pFunctionList as CK_FUNCTION_LIST_3_0_PTR);
+        match list.C_Initialize {
+            Some(value) => {
+                let mut args = testtokn.make_init_args();
+                let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+                let ret = value(args_ptr as *mut std::ffi::c_void);
+                assert_eq!(ret, CKR_OK)
+            }
+            None => todo!(),
+        }
+    }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_interface_pkcs11() {
+    let mut testtokn = TestToken::new("test_interface_pkcs11.sql", true);
+    testtokn.setup_db(None);
+
+    /* NULL version -- the module should return default one */
+    let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
+    let ppiface = &mut piface;
+    let result = C_GetInterface(
+        "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
+        std::ptr::null_mut(),
+        &mut *ppiface,
+        0,
+    );
+    assert_eq!(result, CKR_OK);
+    unsafe {
+        let iface: CK_INTERFACE = *piface;
+        let list: CK_FUNCTION_LIST_3_0 =
+            *(iface.pFunctionList as CK_FUNCTION_LIST_3_0_PTR);
+        match list.C_Initialize {
+            Some(value) => {
+                let mut args = testtokn.make_init_args();
+                let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+                let ret = value(args_ptr as *mut std::ffi::c_void);
+                assert_eq!(ret, CKR_OK)
+            }
+            None => todo!(),
+        }
+    }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_interface_pkcs11_version3() {
+    let mut testtokn =
+        TestToken::new("test_interface_pkcs11_version3.sql", true);
+    testtokn.setup_db(None);
+
+    /* Get the specific version 3.0 */
+    let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
+    let ppiface = &mut piface;
+    let mut version = { CK_VERSION { major: 3, minor: 0 } };
+    let result = C_GetInterface(
+        "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
+        &mut version,
+        &mut *ppiface,
+        0,
+    );
+    assert_eq!(result, CKR_OK);
+    unsafe {
+        let iface: CK_INTERFACE = *piface;
+        let list: CK_FUNCTION_LIST_3_0 =
+            *(iface.pFunctionList as CK_FUNCTION_LIST_3_0_PTR);
+        match list.C_Initialize {
+            Some(value) => {
+                let mut args = testtokn.make_init_args();
+                let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+                let ret = value(args_ptr as *mut std::ffi::c_void);
+                assert_eq!(ret, CKR_OK)
+            }
+            None => todo!(),
+        }
+    }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_interface_pkcs11_version240() {
+    let mut testtokn =
+        TestToken::new("test_interface_pkcs11_version240.sql", true);
+    testtokn.setup_db(None);
+
+    /* Get the specific version 2.40 */
+    let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
+    let ppiface = &mut piface;
+    let mut version = {
+        CK_VERSION {
+            major: 2,
+            minor: 40,
+        }
+    };
+    let result = C_GetInterface(
+        "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
+        &mut version,
+        &mut *ppiface,
+        0,
+    );
+    assert_eq!(result, CKR_OK);
+    unsafe {
+        let iface: CK_INTERFACE = *piface;
+        let list: CK_FUNCTION_LIST =
+            *(iface.pFunctionList as CK_FUNCTION_LIST_PTR);
+        match list.C_Initialize {
+            Some(value) => {
+                let mut args = testtokn.make_init_args();
+                let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+                let ret = value(args_ptr as *mut std::ffi::c_void);
+                assert_eq!(ret, CKR_OK)
+            }
+            None => todo!(),
+        }
+    }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_interface_invalid_name() {
+    /* Try to get in valid name */
+    let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
+    let ppiface = &mut piface;
+    let result = C_GetInterface(
+        "MyPKCS 12\0".as_ptr() as CK_UTF8CHAR_PTR,
+        std::ptr::null_mut(),
+        &mut *ppiface,
+        0,
+    );
+    assert_eq!(result, CKR_ARGUMENTS_BAD);
+}
+
+#[test]
+#[parallel]
+fn test_interface_invalid_version() {
+    /* Try to get in valid name */
+    let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
+    let ppiface = &mut piface;
+    let mut version = {
+        CK_VERSION {
+            major: 2,
+            minor: 99,
+        }
+    };
+    let result = C_GetInterface(
+        "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
+        &mut version,
+        &mut *ppiface,
+        0,
+    );
+    assert_eq!(result, CKR_ARGUMENTS_BAD);
+}
