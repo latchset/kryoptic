@@ -7,19 +7,23 @@ use fips::*;
 
 impl PBKDF2 {
     fn derive(&self, _: &Mechanisms, len: usize) -> KResult<Vec<u8>> {
-        let params = OsslParam::with_capacity(4)
-            .set_zeroize()
-            .add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_PASSWORD),
-                self.pass.get_attr_as_bytes(CKA_VALUE)?,
-            )?
-            .add_octet_string(name_as_char(OSSL_KDF_PARAM_SALT), &self.salt)?
-            .add_uint(name_as_char(OSSL_KDF_PARAM_ITER), self.iter as c_uint)?
-            .add_const_c_string(
-                name_as_char(OSSL_KDF_PARAM_DIGEST),
-                mech_type_to_digest_name(self.prf),
-            )?
-            .finalize();
+        let mut params = OsslParam::with_capacity(4);
+        params.zeroize = true;
+        params.add_octet_string(
+            name_as_char(OSSL_KDF_PARAM_PASSWORD),
+            self.pass.get_attr_as_bytes(CKA_VALUE)?,
+        )?;
+        params
+            .add_octet_string(name_as_char(OSSL_KDF_PARAM_SALT), &self.salt)?;
+        params.add_owned_uint(
+            name_as_char(OSSL_KDF_PARAM_ITER),
+            self.iter as c_uint,
+        )?;
+        params.add_const_c_string(
+            name_as_char(OSSL_KDF_PARAM_DIGEST),
+            mech_type_to_digest_name(self.prf),
+        )?;
+        params.finalize();
 
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_PBKDF2))?;
         let mut dkm = vec![0u8; len];

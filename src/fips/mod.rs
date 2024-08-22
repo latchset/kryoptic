@@ -29,6 +29,7 @@ use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
+use super::object;
 use super::token;
 use error::{KError, KResult};
 use interface::CKR_DEVICE_ERROR;

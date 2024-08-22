@@ -1091,17 +1091,19 @@ pub fn is_approved(
 pub fn check_kdf_fips_indicators(
     kctx: &mut EvpKdfCtx,
 ) -> KResult<Option<bool>> {
-    let mut indicator: c_int =
-        EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED as c_int;
-    let mut params = OsslParam::with_capacity(1)
-        .get_int(
-            name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR),
-            &mut indicator,
-        )?
-        .finalize();
+    let mut params = OsslParam::with_capacity(1);
+    params.add_owned_int(
+        name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR),
+        EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED as c_int,
+    )?;
+    params.finalize();
     unsafe { EVP_KDF_CTX_get_params(kctx.as_mut_ptr(), params.as_mut_ptr()) };
+
+    let indicator: c_uint = params
+        .get_int(name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR))?
+        as c_uint;
     /* in case of error it will remain undetermined */
-    Ok(match indicator as c_uint {
+    Ok(match indicator {
         EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED => None,
         EVP_KDF_REDHAT_FIPS_INDICATOR_APPROVED => Some(true),
         EVP_KDF_REDHAT_FIPS_INDICATOR_NOT_APPROVED => Some(false),

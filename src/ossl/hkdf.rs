@@ -52,34 +52,34 @@ impl Derive for HKDFOperation {
             }
         } else {
             EVP_KDF_HKDF_MODE_EXPAND_ONLY
-        };
+        } as c_int;
 
-        let mut params = OsslParam::with_capacity(5)
-            .set_zeroize()
-            .add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?,
-            )?
-            .add_const_c_string(
-                name_as_char(OSSL_KDF_PARAM_DIGEST),
-                mech_type_to_digest_name(self.prf),
-            )?
-            .add_int(name_as_char(OSSL_KDF_PARAM_MODE), mode as c_int)?;
+        let mut params = OsslParam::with_capacity(5);
+        params.zeroize = true;
+        params.add_octet_string(
+            name_as_char(OSSL_KDF_PARAM_KEY),
+            key.get_attr_as_bytes(CKA_VALUE)?,
+        )?;
+        params.add_const_c_string(
+            name_as_char(OSSL_KDF_PARAM_DIGEST),
+            mech_type_to_digest_name(self.prf),
+        )?;
+        params.add_int(name_as_char(OSSL_KDF_PARAM_MODE), &mode)?;
 
         if self.salt.len() > 0 {
-            params = params.add_octet_string(
+            params.add_octet_string(
                 name_as_char(OSSL_KDF_PARAM_SALT),
                 &self.salt,
             )?;
         }
 
         if self.info.len() > 0 {
-            params = params.add_octet_string(
+            params.add_octet_string(
                 name_as_char(OSSL_KDF_PARAM_INFO),
                 &self.info,
             )?;
         }
-        params = params.finalize();
+        params.finalize();
 
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];

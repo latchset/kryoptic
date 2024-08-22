@@ -135,13 +135,15 @@ fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
         Ok(a) => a.to_vec(),
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
     };
+    let mut params = OsslParam::with_capacity(1);
+    params.zeroize = true;
+    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), &octet)?;
+    params.finalize();
+
     EvpPkey::fromdata(
         get_ossl_name_from_obj(key)?.as_ptr() as *const i8,
         EVP_PKEY_PUBLIC_KEY,
-        &OsslParam::with_capacity(3)
-            .set_zeroize()
-            .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), &octet)?
-            .finalize(),
+        &params,
     )
 }
 
@@ -155,13 +157,17 @@ fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
     priv_key_octet.push(4); /* tag octet string */
     priv_key_octet.push(priv_key.len() as u8); /* length */
     priv_key_octet.extend(priv_key);
+
+    let mut params = OsslParam::with_capacity(1);
+    params.zeroize = true;
+    params
+        .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY), priv_key)?;
+    params.finalize();
+
     EvpPkey::fromdata(
         get_ossl_name_from_obj(key)?.as_ptr() as *const i8,
         EVP_PKEY_PRIVATE_KEY,
-        &OsslParam::with_capacity(2)
-            .set_zeroize()
-            .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY), priv_key)?
-            .finalize(),
+        &params,
     )
 }
 
@@ -262,7 +268,7 @@ impl EddsaOperation {
     ) -> KResult<()> {
         let evp_pkey = EvpPkey::generate(
             get_ossl_name_from_obj(pubkey)?.as_ptr() as *const i8,
-            &OsslParam::with_capacity(1).finalize(),
+            &OsslParam::empty(),
         )?;
 
         let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
@@ -278,68 +284,67 @@ impl EddsaOperation {
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
-        let point =
-            params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?;
-        let point_encoded = match asn1::write_single(&point.as_slice()) {
+        let point_encoded = match asn1::write_single(
+            &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
+        ) {
             Ok(b) => b,
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         };
         pubkey.set_attr(attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
         /* Private Key */
-        let value =
-            params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?;
+        let value = params
+            .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?
+            .to_vec();
         privkey.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
         Ok(())
     }
 }
 
-fn get_sig_params(op: &mut EddsaOperation) -> KResult<OsslParam> {
-    let mut params = OsslParam::with_capacity(3).set_zeroize();
-    match &op.params.context_data {
-        Some(v) => {
-            params = params.add_octet_string(
-                name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
-                &v,
-            )?;
-        }
-        _ => (),
-    };
+macro_rules! sig_params {
+    ($op:expr) => {{
+        let mut params = OsslParam::with_capacity(2);
+        params.zeroize = true;
+        match &$op.params.context_data {
+            Some(v) => {
+                params.add_octet_string(
+                    name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+                    &v,
+                )?;
+            }
+            _ => (),
+        };
 
-    let instance = match op.params.ph_flag {
-        None => {
-            if op.is448 {
-                return err_rv!(CKR_GENERAL_ERROR);
-            } else {
-                "Ed25519"
+        let instance = match $op.params.ph_flag {
+            None => {
+                if $op.is448 {
+                    return err_rv!(CKR_GENERAL_ERROR);
+                } else {
+                    b"Ed25519\0".to_vec()
+                }
             }
-        }
-        Some(true) => {
-            if op.is448 {
-                "Ed448ph"
-            } else {
-                "Ed25519ph"
+            Some(true) => {
+                if $op.is448 {
+                    b"Ed448ph\0".to_vec()
+                } else {
+                    b"Ed25519ph\0".to_vec()
+                }
             }
-        }
-        Some(false) => {
-            if op.is448 {
-                "Ed448"
-            } else {
-                "Ed25519ctx"
+            Some(false) => {
+                if $op.is448 {
+                    b"Ed448\0".to_vec()
+                } else {
+                    b"Ed25519ctx\0".to_vec()
+                }
             }
-        }
-    };
-    let mut instance_vec = Vec::with_capacity(instance.len() + 1);
-    instance_vec.extend_from_slice(instance.as_bytes());
-    /* null byte terminator in c string */
-    instance_vec.push(0);
-    params = params
-        .add_utf8_string(
+        };
+        params.add_owned_utf8_string(
             name_as_char(OSSL_SIGNATURE_PARAM_INSTANCE),
-            &instance_vec,
-        )?
-        .finalize();
-    Ok(params)
+            instance,
+        )?;
+        params.finalize();
+        params
+    }};
 }
 
 impl MechOperation for EddsaOperation {
@@ -367,7 +372,8 @@ impl Sign for EddsaOperation {
         if !self.in_use {
             self.in_use = true;
 
-            let mut params = get_sig_params(self)?;
+            let mut params = sig_params!(self);
+
             #[cfg(not(feature = "fips"))]
             if unsafe {
                 EVP_DigestSignInit_ex(
@@ -466,7 +472,7 @@ impl Verify for EddsaOperation {
         if !self.in_use {
             self.in_use = true;
 
-            let mut params = get_sig_params(self)?;
+            let mut params = sig_params!(self);
 
             #[cfg(not(feature = "fips"))]
             if unsafe {

@@ -69,79 +69,70 @@ pub fn rsa_import(obj: &mut Object) -> KResult<()> {
 }
 
 fn object_to_rsa_public_key(key: &Object) -> KResult<EvpPkey> {
-    EvpPkey::fromdata(
-        name_as_char(RSA_NAME),
-        EVP_PKEY_PUBLIC_KEY,
-        &OsslParam::with_capacity(3)
-            .set_zeroize()
-            .add_bn_from_obj(
-                key,
-                CKA_MODULUS,
-                name_as_char(OSSL_PKEY_PARAM_RSA_N),
-            )?
-            .add_bn_from_obj(
-                key,
-                CKA_PUBLIC_EXPONENT,
-                name_as_char(OSSL_PKEY_PARAM_RSA_E),
-            )?
-            .finalize(),
-    )
+    let mut params = OsslParam::with_capacity(2);
+    params.zeroize = true;
+    params.add_bn(
+        name_as_char(OSSL_PKEY_PARAM_RSA_N),
+        key.get_attr_as_bytes(CKA_MODULUS)?,
+    )?;
+    params.add_bn(
+        name_as_char(OSSL_PKEY_PARAM_RSA_E),
+        key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
+    )?;
+    params.finalize();
+
+    EvpPkey::fromdata(name_as_char(RSA_NAME), EVP_PKEY_PUBLIC_KEY, &params)
 }
 
 fn object_to_rsa_private_key(key: &Object) -> KResult<EvpPkey> {
-    let mut params = OsslParam::with_capacity(9)
-        .set_zeroize()
-        .add_bn_from_obj(key, CKA_MODULUS, name_as_char(OSSL_PKEY_PARAM_RSA_N))?
-        .add_bn_from_obj(
-            key,
-            CKA_PUBLIC_EXPONENT,
-            name_as_char(OSSL_PKEY_PARAM_RSA_E),
-        )?
-        .add_bn_from_obj(
-            key,
-            CKA_PRIVATE_EXPONENT,
-            name_as_char(OSSL_PKEY_PARAM_RSA_D),
-        )?;
+    let mut params = OsslParam::with_capacity(9);
+    params.zeroize = true;
+    params.add_bn(
+        name_as_char(OSSL_PKEY_PARAM_RSA_N),
+        key.get_attr_as_bytes(CKA_MODULUS)?,
+    )?;
+    params.add_bn(
+        name_as_char(OSSL_PKEY_PARAM_RSA_E),
+        key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
+    )?;
+    params.add_bn(
+        name_as_char(OSSL_PKEY_PARAM_RSA_D),
+        key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
+    )?;
 
     /* OpenSSL can compute a,b,c with just p,q */
     if key.get_attr(CKA_PRIME_1).is_some()
         && key.get_attr(CKA_PRIME_2).is_some()
     {
-        params = params
-            .add_bn_from_obj(
-                key,
-                CKA_PRIME_1,
-                name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1),
-            )?
-            .add_bn_from_obj(
-                key,
-                CKA_PRIME_2,
-                name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2),
-            )?;
+        params.add_bn(
+            name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1),
+            key.get_attr_as_bytes(CKA_PRIME_1)?,
+        )?;
+        params.add_bn(
+            name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2),
+            key.get_attr_as_bytes(CKA_PRIME_2)?,
+        )?;
     }
 
     if key.get_attr(CKA_EXPONENT_1).is_some()
         && key.get_attr(CKA_EXPONENT_2).is_some()
         && key.get_attr(CKA_COEFFICIENT).is_some()
     {
-        params = params
-            .add_bn_from_obj(
-                key,
-                CKA_EXPONENT_1,
-                name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1),
-            )?
-            .add_bn_from_obj(
-                key,
-                CKA_EXPONENT_2,
-                name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2),
-            )?
-            .add_bn_from_obj(
-                key,
-                CKA_COEFFICIENT,
-                name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
-            )?;
+        params.add_bn(
+            name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1),
+            key.get_attr_as_bytes(CKA_EXPONENT_1)?,
+        )?;
+        params.add_bn(
+            name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2),
+            key.get_attr_as_bytes(CKA_EXPONENT_2)?,
+        )?;
+        params.add_bn(
+            name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
+            key.get_attr_as_bytes(CKA_COEFFICIENT)?,
+        )?;
     }
-    params = params.finalize();
+    params.finalize();
+
     EvpPkey::fromdata(name_as_char(RSA_NAME), EVP_PKEY_PRIVATE_KEY, &params)
 }
 
@@ -506,16 +497,13 @@ impl RsaPKCSOperation {
         if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        let evp_pkey = EvpPkey::generate(
-            name_as_char(RSA_NAME),
-            &OsslParam::with_capacity(3)
-                .add_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E), &exponent)?
-                .add_uint(
-                    name_as_char(OSSL_PKEY_PARAM_RSA_BITS),
-                    bits as c_uint,
-                )?
-                .finalize(),
-        )?;
+        let c_bits = bits as c_uint;
+        let mut params = OsslParam::with_capacity(2);
+        params.add_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E), &exponent)?;
+        params.add_uint(name_as_char(OSSL_PKEY_PARAM_RSA_BITS), &c_bits)?;
+        params.finalize();
+
+        let evp_pkey = EvpPkey::generate(name_as_char(RSA_NAME), &params)?;
 
         let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
         let res = unsafe {

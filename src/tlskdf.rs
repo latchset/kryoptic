@@ -43,23 +43,6 @@ macro_rules! as_ck_bbool {
     }};
 }
 
-macro_rules! check_as_ck_bbool {
-    ($attr:expr, $value:expr) => {
-        match $attr.to_bool()? {
-            true => {
-                if $value != CK_TRUE {
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-                }
-            }
-            false => {
-                if $value != CK_FALSE {
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
-                }
-            }
-        }
-    };
-}
-
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     TLSPRFMechanism::register_mechanisms(mechs);
 }
@@ -597,13 +580,13 @@ impl TLSKDFOperation {
     }
 
     fn verify_key_expansion_template<'a>(
-        &self,
+        &'a self,
         key: &Object,
         template: &'a [CK_ATTRIBUTE],
     ) -> KResult<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
-        let is_sensitive = as_ck_bbool!(key, CKA_SENSITIVE, Some(true));
-        let is_extractable = as_ck_bbool!(key, CKA_EXTRACTABLE, Some(false));
+        let is_sensitive = key.is_sensitive();
+        let is_extractable = key.is_extractable();
         let mut tmpl = CkAttrs::from(template);
         tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
@@ -611,8 +594,17 @@ impl TLSKDFOperation {
         tmpl.add_missing_bool(CKA_ENCRYPT, &CK_TRUE);
         tmpl.add_missing_bool(CKA_DECRYPT, &CK_TRUE);
         tmpl.add_missing_bool(CKA_DERIVE, &CK_TRUE);
-        tmpl.add_missing_bool(CKA_SENSITIVE, &is_sensitive);
-        tmpl.add_missing_bool(CKA_EXTRACTABLE, &is_extractable);
+        if is_sensitive {
+            tmpl.add_missing_bool(CKA_SENSITIVE, &CK_TRUE);
+        } else {
+            tmpl.add_missing_bool(CKA_SENSITIVE, &CK_FALSE);
+        }
+        if is_extractable {
+            tmpl.add_missing_bool(CKA_EXTRACTABLE, &CK_TRUE);
+        } else {
+            tmpl.add_missing_bool(CKA_EXTRACTABLE, &CK_FALSE);
+        }
+
         for attr in tmpl.as_slice() {
             match attr.type_ {
                 CKA_VALUE_LEN => {
@@ -621,8 +613,18 @@ impl TLSKDFOperation {
                         return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
                     }
                 }
-                CKA_SENSITIVE => check_as_ck_bbool!(attr, is_sensitive),
-                CKA_EXTRACTABLE => check_as_ck_bbool!(attr, is_extractable),
+                CKA_SENSITIVE => {
+                    let val = attr.to_bool()?;
+                    if val != is_sensitive {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
+                CKA_EXTRACTABLE => {
+                    let val = attr.to_bool()?;
+                    if val != is_extractable {
+                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    }
+                }
                 _ => (),
             }
         }

@@ -1750,17 +1750,17 @@ impl AesCmacOperation {
         };
         let mackey = object_to_raw_key(key)?;
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_CMAC))?;
-        let params = OsslParam::new()
-            .add_const_c_string(
-                name_as_char(OSSL_MAC_PARAM_CIPHER),
-                match mackey.raw.len() {
-                    16 => name_as_char(CIPHER_NAME_AES128),
-                    24 => name_as_char(CIPHER_NAME_AES192),
-                    32 => name_as_char(CIPHER_NAME_AES256),
-                    _ => return err_rv!(CKR_KEY_INDIGESTIBLE),
-                },
-            )?
-            .finalize();
+        let mut params = OsslParam::with_capacity(1);
+        params.add_const_c_string(
+            name_as_char(OSSL_MAC_PARAM_CIPHER),
+            match mackey.raw.len() {
+                16 => name_as_char(CIPHER_NAME_AES128),
+                24 => name_as_char(CIPHER_NAME_AES192),
+                32 => name_as_char(CIPHER_NAME_AES256),
+                _ => return err_rv!(CKR_KEY_INDIGESTIBLE),
+            },
+        )?;
+        params.finalize();
 
         if unsafe {
             EVP_MAC_init(

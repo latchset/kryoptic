@@ -14,7 +14,7 @@ use attribute::CkAttrs;
 use kasn1::DerEncBigUint;
 use mechanism::*;
 
-use core::ffi::c_char;
+use core::ffi::{c_char, c_uint};
 use std::borrow::Cow;
 use zeroize::Zeroize;
 
@@ -115,18 +115,16 @@ fn make_ecc_public_key(
     curve_name: &Vec<u8>,
     ec_point: &Vec<u8>,
 ) -> KResult<EvpPkey> {
-    EvpPkey::fromdata(
-        name_as_char(EC_NAME),
-        EVP_PKEY_PUBLIC_KEY,
-        &OsslParam::with_capacity(3)
-            .set_zeroize()
-            .add_utf8_string(
-                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-                curve_name,
-            )?
-            .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?
-            .finalize(),
-    )
+    let mut params = OsslParam::with_capacity(2);
+    params.zeroize = true;
+    params.add_utf8_string(
+        name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+        curve_name,
+    )?;
+    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
+    params.finalize();
+
+    EvpPkey::fromdata(name_as_char(EC_NAME), EVP_PKEY_PUBLIC_KEY, &params)
 }
 
 /// Convert the PKCS #11 public key object to OpenSSL EVP_PKEY
@@ -139,22 +137,20 @@ fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
 
 /// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
 fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
-    EvpPkey::fromdata(
-        name_as_char(EC_NAME),
-        EVP_PKEY_PRIVATE_KEY,
-        &OsslParam::with_capacity(3)
-            .set_zeroize()
-            .add_utf8_string(
-                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-                &get_curve_name_from_obj(key)?,
-            )?
-            .add_bn_from_obj(
-                key,
-                CKA_VALUE,
-                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
-            )?
-            .finalize(),
-    )
+    let curve_name = get_curve_name_from_obj(key)?;
+    let mut params = OsslParam::with_capacity(2);
+    params.zeroize = true;
+    params.add_utf8_string(
+        name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+        &curve_name,
+    )?;
+    params.add_bn(
+        name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+        key.get_attr_as_bytes(CKA_VALUE)?,
+    )?;
+    params.finalize();
+
+    EvpPkey::fromdata(name_as_char(EC_NAME), EVP_PKEY_PRIVATE_KEY, &params)
 }
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
@@ -312,15 +308,15 @@ impl EccOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> KResult<()> {
-        let evp_pkey = EvpPkey::generate(
-            name_as_char(EC_NAME),
-            &OsslParam::with_capacity(2)
-                .add_utf8_string(
-                    name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-                    &get_curve_name_from_obj(pubkey)?,
-                )?
-                .finalize(),
+        let curve_name = get_curve_name_from_obj(pubkey)?;
+        let mut params = OsslParam::with_capacity(1);
+        params.add_utf8_string(
+            name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+            &curve_name,
         )?;
+        params.finalize();
+
+        let evp_pkey = EvpPkey::generate(name_as_char(EC_NAME), &params)?;
 
         let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
         let res = unsafe {
@@ -335,9 +331,9 @@ impl EccOperation {
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
-        let point =
-            params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?;
-        let point_encoded = match asn1::write_single(&point.as_slice()) {
+        let point_encoded = match asn1::write_single(
+            &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
+        ) {
             Ok(b) => b,
             Err(_) => return err_rv!(CKR_GENERAL_ERROR),
         };
@@ -376,8 +372,6 @@ impl Sign for EccOperation {
             if res != 1 {
                 return err_rv!(CKR_DEVICE_ERROR);
             }
-
-            self.finalized = true;
 
             let mut siglen = 0usize;
             let siglen_ptr: *mut usize = &mut siglen;
@@ -684,14 +678,20 @@ impl Derive for ECDHOperation {
         }
         self.finalized = true;
 
-        let mut params = OsslParam::with_capacity(6).set_zeroize().add_int(
+        let mode = if self.mech == CKM_ECDH1_COFACTOR_DERIVE {
+            1
+        } else {
+            -1
+        } as core::ffi::c_int;
+        let outlen: c_uint;
+
+        let mut params = OsslParam::with_capacity(5);
+        params.zeroize = true;
+        params.add_int(
             name_as_char(OSSL_EXCHANGE_PARAM_EC_ECDH_COFACTOR_MODE),
-            if self.mech == CKM_ECDH1_COFACTOR_DERIVE {
-                1
-            } else {
-                -1
-            } as i32,
+            &mode,
         )?;
+
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
 
@@ -724,33 +724,31 @@ impl Derive for ECDHOperation {
             CKD_SHA1_KDF | CKD_SHA224_KDF | CKD_SHA256_KDF | CKD_SHA384_KDF
             | CKD_SHA512_KDF | CKD_SHA3_224_KDF | CKD_SHA3_256_KDF
             | CKD_SHA3_384_KDF | CKD_SHA3_512_KDF => {
-                params = params
-                    .add_const_c_string(
-                        name_as_char(OSSL_EXCHANGE_PARAM_KDF_TYPE),
-                        OSSL_KDF_NAME_X963KDF.as_ptr() as *const c_char,
-                    )?
-                    .add_const_c_string(
-                        name_as_char(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
-                        mech_type_to_digest_name(kdf_type_to_hash_mech(
-                            self.kdf,
-                        )?),
-                    )?;
+                params.add_const_c_string(
+                    name_as_char(OSSL_EXCHANGE_PARAM_KDF_TYPE),
+                    OSSL_KDF_NAME_X963KDF.as_ptr() as *const c_char,
+                )?;
+                params.add_const_c_string(
+                    name_as_char(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
+                    mech_type_to_digest_name(kdf_type_to_hash_mech(self.kdf)?),
+                )?;
                 if self.shared.len() > 0 {
-                    params = params.add_octet_string(
+                    params.add_octet_string(
                         name_as_char(OSSL_EXCHANGE_PARAM_KDF_UKM),
                         &self.shared,
                     )?;
                 }
-                params = params.add_uint(
+                outlen = keylen as c_uint;
+                params.add_uint(
                     name_as_char(OSSL_EXCHANGE_PARAM_KDF_OUTLEN),
-                    keylen as u32,
+                    &outlen,
                 )?;
             }
             CKD_NULL => (),
             _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
         }
 
-        params = params.finalize();
+        params.finalize();
 
         let mut pkey = object_to_ecc_private_key(key)?;
         let mut ctx = pkey.new_ctx()?;
