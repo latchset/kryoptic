@@ -40,3 +40,4 @@ zeroize = "1.6.0"
 
 [features]
 fips = ["rusqlite/bundled"]
+slow = [] # Enables slow tests

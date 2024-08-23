@@ -233,6 +233,7 @@ mod ecdh;
 
 mod ecdh_vectors;
 
+#[cfg(not(feature = "fips"))]
 mod eddsa;
 
 mod hashes;

@@ -2,20 +2,17 @@
 // See LICENSE.txt file for terms
 
 use super::tests;
-#[cfg(not(feature = "fips"))]
 use tests::*;
 
 use std::io;
 use std::io::BufRead;
 
-#[cfg(not(feature = "fips"))]
 use serial_test::parallel;
 
 /* TODO enable for FIPS when our OpenSSL will include EdDSA in FIPS module */
 
 #[test]
 #[parallel]
-#[cfg(not(feature = "fips"))]
 fn test_create_eddsa_objects() {
     let mut testtokn =
         TestToken::initialized("test_create_eddsa_objects.sql", None);
@@ -112,7 +109,6 @@ fn test_create_eddsa_objects() {
 
 #[test]
 #[parallel]
-#[cfg(not(feature = "fips"))]
 fn test_eddsa_operations() {
     let mut testtokn = TestToken::initialized(
         "test_eddsa_operations.sql",
@@ -306,7 +302,6 @@ fn test_eddsa_operations() {
 }
 
 #[derive(Debug)]
-#[cfg(not(feature = "fips"))]
 struct EddsaTestUnit {
     line: usize,
     label: String,
@@ -318,7 +313,6 @@ struct EddsaTestUnit {
     signature: Vec<u8>,
 }
 
-#[cfg(not(feature = "fips"))]
 enum EddsaParserState {
     StateNone,
     StateAlgorithm,
@@ -329,7 +323,6 @@ enum EddsaParserState {
     StateSignature,
 }
 
-#[cfg(not(feature = "fips"))]
 fn parse_eddsa_vector(filename: &str) -> Vec<EddsaTestUnit> {
     let file = ret_or_panic!(std::fs::File::open(filename));
 
@@ -440,7 +433,6 @@ fn parse_eddsa_vector(filename: &str) -> Vec<EddsaTestUnit> {
     data
 }
 
-#[cfg(not(feature = "fips"))]
 fn algo_to_ec_params(algo: &String) -> Vec<u8> {
     if algo.starts_with("Ed25519") {
         return hex::decode("130c656477617264733235353139")
@@ -453,7 +445,6 @@ fn algo_to_ec_params(algo: &String) -> Vec<u8> {
     }
 }
 
-#[cfg(not(feature = "fips"))]
 fn test_eddsa_units(session: CK_SESSION_HANDLE, test_data: Vec<EddsaTestUnit>) {
     for unit in test_data {
         println!("Executing test at line {}", unit.line);
@@ -557,7 +548,6 @@ fn test_eddsa_units(session: CK_SESSION_HANDLE, test_data: Vec<EddsaTestUnit>) {
 
 #[test]
 #[parallel]
-#[cfg(not(feature = "fips"))]
 fn test_eddsa_vector() {
     /* Taken from RFC, filtered out the headers */
     let test_data = parse_eddsa_vector("testdata/rfc8032.txt");
