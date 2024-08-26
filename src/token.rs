@@ -74,11 +74,20 @@ fn default_password() -> Vec<u8> {
 }
 
 fn copy_sized_string(s: &[u8], d: &mut [u8]) {
-    if s.len() >= d.len() {
+    let mut slen = s.len();
+    match s.last() {
+        None => return,
+        Some(c) => {
+            if *c == b'\0' {
+                slen -= 1;
+            }
+        }
+    }
+    if slen >= d.len() {
         d.copy_from_slice(&s[..d.len()]);
     } else {
-        d[..s.len()].copy_from_slice(s);
-        d[s.len()..].fill(0x20); /* space in ASCII/UTF8 */
+        d[..slen].copy_from_slice(&s[..slen]);
+        d[slen..].fill(0x20); /* space in ASCII/UTF8 */
     }
 }
 
