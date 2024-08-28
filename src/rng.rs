@@ -7,7 +7,7 @@ use super::error;
 use super::interface;
 use super::mechanism;
 
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 
 #[derive(Debug)]
@@ -16,7 +16,7 @@ pub struct RNG {
 }
 
 impl RNG {
-    pub fn new(alg: &str) -> KResult<RNG> {
+    pub fn new(alg: &str) -> Result<RNG> {
         match alg {
             "HMAC DRBG SHA256" => Ok(RNG {
                 drbg: Box::new(drbg::HmacSha256Drbg::new()?),
@@ -28,7 +28,7 @@ impl RNG {
         }
     }
 
-    pub fn generate_random(&mut self, buffer: &mut [u8]) -> KResult<()> {
+    pub fn generate_random(&mut self, buffer: &mut [u8]) -> Result<()> {
         let noaddtl: [u8; 0] = [];
         self.drbg.generate(&noaddtl, buffer)
     }

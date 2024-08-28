@@ -8,7 +8,7 @@ use super::mechanism;
 use super::object;
 use super::{err_rv, sizeof};
 
-use error::{KError, KResult};
+use error::{Error, Result};
 use interface::*;
 use mechanism::*;
 use object::{GenericSecretKeyFactory, Object, ObjectFactory};
@@ -42,7 +42,7 @@ pub fn hmac_size(mech: CK_MECHANISM_TYPE) -> usize {
 
 pub fn hmac_mech_to_hash_mech(
     mech: CK_MECHANISM_TYPE,
-) -> KResult<CK_MECHANISM_TYPE> {
+) -> Result<CK_MECHANISM_TYPE> {
     Ok(match mech {
         CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => CKM_SHA_1,
         CKM_SHA224_HMAC | CKM_SHA224_HMAC_GENERAL => CKM_SHA224,
@@ -57,9 +57,7 @@ pub fn hmac_mech_to_hash_mech(
     })
 }
 
-pub fn hash_to_hmac_mech(
-    mech: CK_MECHANISM_TYPE,
-) -> KResult<CK_MECHANISM_TYPE> {
+pub fn hash_to_hmac_mech(mech: CK_MECHANISM_TYPE) -> Result<CK_MECHANISM_TYPE> {
     Ok(match mech {
         CKM_SHA_1 => CKM_SHA_1_HMAC,
         CKM_SHA224 => CKM_SHA224_HMAC,
@@ -118,7 +116,7 @@ impl HMACMechanism {
         &self,
         key: &Object,
         op: CK_ATTRIBUTE_TYPE,
-    ) -> KResult<HmacKey> {
+    ) -> Result<HmacKey> {
         if key.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
         }
@@ -126,7 +124,7 @@ impl HMACMechanism {
         if t != CKK_GENERIC_SECRET && t != self.keytype {
             return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
         }
-        if !key.get_attr_as_bool(op).or(Ok(false))? {
+        if !key.get_attr_as_bool(op).or::<Error>(Ok(false))? {
             return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
         }
         Ok(HmacKey {
@@ -134,7 +132,7 @@ impl HMACMechanism {
         })
     }
 
-    fn check_and_fetch_param(&self, mech: &CK_MECHANISM) -> KResult<usize> {
+    fn check_and_fetch_param(&self, mech: &CK_MECHANISM) -> Result<usize> {
         if self.minlen == self.maxlen {
             if mech.ulParameterLen != 0 {
                 return err_rv!(CKR_MECHANISM_PARAM_INVALID);
@@ -160,7 +158,7 @@ impl HMACMechanism {
         mech: &CK_MECHANISM,
         keyobj: &Object,
         op_type: CK_FLAGS,
-    ) -> KResult<HMACOperation> {
+    ) -> Result<HMACOperation> {
         /* the mechanism advertises only SIGN/VERIFY to the callers
          * DERIVE is a mediated operation so it is not advertised
          * and we do not check it */
@@ -198,7 +196,7 @@ impl Mechanism for HMACMechanism {
         mech: &CK_MECHANISM,
         keyobj: &Object,
         op_type: CK_FLAGS,
-    ) -> KResult<Box<dyn Mac>> {
+    ) -> Result<Box<dyn Mac>> {
         Ok(Box::new(self.new_op(mech, keyobj, op_type)?))
     }
 
@@ -206,7 +204,7 @@ impl Mechanism for HMACMechanism {
         &self,
         mech: &CK_MECHANISM,
         keyobj: &Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN)?))
     }
 
@@ -214,7 +212,7 @@ impl Mechanism for HMACMechanism {
         &self,
         mech: &CK_MECHANISM,
         keyobj: &Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY)?))
     }
 }
@@ -251,7 +249,7 @@ impl HMACOperation {
         hash: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
-    ) -> KResult<HMACOperation> {
+    ) -> Result<HMACOperation> {
         let mut hmac = HMACOperation {
             key: key,
             hash: hash,
@@ -269,7 +267,7 @@ impl HMACOperation {
         Ok(hmac)
     }
 
-    fn init(&mut self) -> KResult<()> {
+    fn init(&mut self) -> Result<()> {
         /* The hash mechanism is unimportant here,
          * what matters is the psecdef algorithm */
         let hashop = hash::internal_hash_op(self.hash)?;
@@ -314,14 +312,14 @@ impl HMACOperation {
         Ok(())
     }
 
-    fn begin(&mut self) -> KResult<()> {
+    fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         Ok(())
     }
 
-    fn update(&mut self, data: &[u8]) -> KResult<()> {
+    fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -338,7 +336,7 @@ impl HMACOperation {
         ret
     }
 
-    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+    fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -373,7 +371,7 @@ impl HMACOperation {
         Ok(())
     }
 
-    fn reinit(&mut self) -> KResult<()> {
+    fn reinit(&mut self) -> Result<()> {
         self.hashlen = 0;
         self.blocklen = 0;
         self.state = Vec::new();
@@ -393,63 +391,63 @@ impl MechOperation for HMACOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
-    fn reset(&mut self) -> KResult<()> {
+    fn reset(&mut self) -> Result<()> {
         self.reinit()
     }
 }
 
 impl Mac for HMACOperation {
-    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> KResult<()> {
+    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.finalize(mac)
     }
 
-    fn mac_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn mac_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn mac_final(&mut self, mac: &mut [u8]) -> KResult<()> {
+    fn mac_final(&mut self, mac: &mut [u8]) -> Result<()> {
         self.finalize(mac)
     }
 
-    fn mac_len(&self) -> KResult<usize> {
+    fn mac_len(&self) -> Result<usize> {
         Ok(self.outputlen)
     }
 }
 
 impl Sign for HMACOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.finalize(signature)
     }
 
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         self.finalize(signature)
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.outputlen)
     }
 }
 
 impl Verify for HMACOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.verify_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         let mut verify: Vec<u8> = vec![0; self.outputlen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
@@ -458,7 +456,7 @@ impl Verify for HMACOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.outputlen)
     }
 }

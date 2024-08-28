@@ -11,7 +11,7 @@ impl Derive for HKDFOperation {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

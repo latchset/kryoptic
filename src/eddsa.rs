@@ -8,7 +8,7 @@ use super::object;
 use super::{attr_element, bytes_attr_not_empty, bytes_to_vec, err_rv};
 
 use attribute::{from_bool, from_bytes};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use object::{
     CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
@@ -39,7 +39,7 @@ const STRING_ED448: &[u8] = &[
     0x13, 0x0a, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x34, 0x34, 0x38,
 ];
 
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
+fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         OID_ED25519 => Ok(BITS_ED25519),
         OID_ED448 => Ok(BITS_ED448),
@@ -47,7 +47,7 @@ fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
     }
 }
 
-fn curve_name_to_bits(name: asn1::PrintableString) -> KResult<usize> {
+fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -82,7 +82,7 @@ impl EDDSAPubFactory {
 }
 
 impl ObjectFactory for EDDSAPubFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
         bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
@@ -135,7 +135,7 @@ impl EDDSAPrivFactory {
 }
 
 impl ObjectFactory for EDDSAPrivFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
         eddsa_import(&mut obj)?;
@@ -147,7 +147,7 @@ impl ObjectFactory for EDDSAPrivFactory {
         &self.attributes
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
 
@@ -155,7 +155,7 @@ impl ObjectFactory for EDDSAPrivFactory {
         &self,
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
     }
 }
@@ -184,7 +184,7 @@ impl Mechanism for EddsaMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -198,7 +198,7 @@ impl Mechanism for EddsaMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -214,7 +214,7 @@ impl Mechanism for EddsaMechanism {
         mech: &CK_MECHANISM,
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<(Object, Object)> {
+    ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
         if !pubkey.check_or_set_attr(attribute::from_ulong(

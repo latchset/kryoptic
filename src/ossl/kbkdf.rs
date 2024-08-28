@@ -9,7 +9,7 @@ const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";
 fn prep_counter_kdf<'a>(
     sparams: &'a Vec<Sp800Params>,
     params: &mut OsslParam<'a>,
-) -> KResult<()> {
+) -> Result<()> {
     if sparams.len() < 1 {
         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
     }
@@ -119,7 +119,7 @@ fn prep_counter_kdf<'a>(
 fn prep_feedback_kdf<'a>(
     sparams: &'a Vec<Sp800Params>,
     params: &mut OsslParam<'a>,
-) -> KResult<()> {
+) -> Result<()> {
     if sparams.len() < 1 {
         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
     }
@@ -242,7 +242,7 @@ fn prep_feedback_kdf<'a>(
 fn get_segment_size(
     mechanisms: &Mechanisms,
     hmac: CK_MECHANISM_TYPE,
-) -> KResult<usize> {
+) -> Result<usize> {
     let mech = CK_MECHANISM {
         mechanism: match hmac {
             CKM_SHA_1_HMAC => CKM_SHA_1,
@@ -277,7 +277,7 @@ impl Derive for Sp800Operation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

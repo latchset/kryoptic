@@ -9,7 +9,7 @@ use super::object;
 use super::{err_rv, sizeof};
 
 use attribute::from_bytes;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
@@ -42,7 +42,7 @@ impl Mechanism for Sp800KDFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -129,7 +129,7 @@ impl Sp800Operation {
 
     fn parse_counter_format(
         p: &CK_PRF_DATA_PARAM,
-    ) -> KResult<Sp800CounterFormat> {
+    ) -> Result<Sp800CounterFormat> {
         if p.ulValueLen == 0 && p.pValue == std::ptr::null_mut() {
             return Ok(Sp800CounterFormat {
                 defined: false,
@@ -155,16 +155,14 @@ impl Sp800Operation {
         })
     }
 
-    fn parse_byte_array(p: &CK_PRF_DATA_PARAM) -> KResult<Vec<u8>> {
+    fn parse_byte_array(p: &CK_PRF_DATA_PARAM) -> Result<Vec<u8>> {
         if p.ulValueLen == 0 || p.pValue == std::ptr::null_mut() {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         Ok(bytes_to_vec!(p.pValue, p.ulValueLen))
     }
 
-    fn parse_dkm_length(
-        p: &CK_PRF_DATA_PARAM,
-    ) -> KResult<Sp800DKMLengthFormat> {
+    fn parse_dkm_length(p: &CK_PRF_DATA_PARAM) -> Result<Sp800DKMLengthFormat> {
         if p.ulValueLen != sizeof!(CK_SP800_108_DKM_LENGTH_FORMAT) {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
@@ -194,7 +192,7 @@ impl Sp800Operation {
 
     fn parse_data_params(
         params: &[CK_PRF_DATA_PARAM],
-    ) -> KResult<Vec<Sp800Params>> {
+    ) -> Result<Vec<Sp800Params>> {
         let mut result = Vec::<Sp800Params>::with_capacity(params.len());
 
         for p in params {
@@ -222,11 +220,11 @@ impl Sp800Operation {
         Ok(result)
     }
 
-    fn check_key_op(key: &Object, ktype: CK_KEY_TYPE) -> KResult<()> {
+    fn check_key_op(key: &Object, ktype: CK_KEY_TYPE) -> Result<()> {
         key.check_key_ops(CKO_SECRET_KEY, ktype, CKA_DERIVE)
     }
 
-    fn verify_prf_key(mech: CK_MECHANISM_TYPE, key: &Object) -> KResult<()> {
+    fn verify_prf_key(mech: CK_MECHANISM_TYPE, key: &Object) -> Result<()> {
         match Self::check_key_op(key, CKK_GENERIC_SECRET) {
             Ok(_) => match mech {
                 CKM_SHA_1_HMAC | CKM_SHA224_HMAC | CKM_SHA256_HMAC
@@ -256,7 +254,7 @@ impl Sp800Operation {
 
     fn counter_kdf_new(
         params: CK_SP800_108_KDF_PARAMS,
-    ) -> KResult<Sp800Operation> {
+    ) -> Result<Sp800Operation> {
         let data_params = bytes_to_slice!(
             params.pDataParams,
             params.ulNumberOfDataParams,
@@ -281,7 +279,7 @@ impl Sp800Operation {
 
     fn feedback_kdf_new(
         params: CK_SP800_108_FEEDBACK_KDF_PARAMS,
-    ) -> KResult<Sp800Operation> {
+    ) -> Result<Sp800Operation> {
         let data_params = bytes_to_slice!(
             params.pDataParams,
             params.ulNumberOfDataParams,
@@ -321,7 +319,7 @@ impl Sp800Operation {
         param: &Sp800CounterFormat,
         ctr: usize,
         op: &mut Box<dyn Mac>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if !param.defined {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
@@ -375,7 +373,7 @@ impl Sp800Operation {
         klen: usize,
         slen: usize,
         op: &mut Box<dyn Mac>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let mut len = match param.method {
             CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS => slen,
             CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS => klen,
@@ -461,7 +459,7 @@ impl Sp800Operation {
         ctr: usize,
         dkmklen: usize,
         dkmslen: usize,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let mut seen_dkmlen = false;
         let mut seen_iter = false;
         for p in params {
@@ -502,7 +500,7 @@ impl Sp800Operation {
         ctr: usize,
         dkmklen: usize,
         dkmslen: usize,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let mut seen_dkmlen = false;
         let mut seen_iter = false;
         let mut seen_counter = false;
@@ -562,7 +560,7 @@ impl Derive for Sp800Operation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

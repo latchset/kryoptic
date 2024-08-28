@@ -15,7 +15,7 @@ use super::memory;
 use super::Storage;
 
 use attribute::{AttrType, Attribute};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use object::Object;
 
@@ -43,6 +43,14 @@ fn to_json_value(a: &Attribute) -> Value {
     }
 }
 
+fn uninit(e: std::io::Error) -> error::Error {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        error::Error::ck_rv_from_error(CKR_CRYPTOKI_NOT_INITIALIZED, e)
+    } else {
+        error::Error::other_error(e)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonObject {
     attributes: Map<String, Value>,
@@ -66,22 +74,14 @@ pub struct JsonToken {
 }
 
 impl JsonToken {
-    pub fn load(filename: &str) -> KResult<JsonToken> {
+    pub fn load(filename: &str) -> Result<JsonToken> {
         match std::fs::File::open(filename) {
-            Ok(f) => match from_reader::<std::fs::File, JsonToken>(f) {
-                Ok(jt) => Ok(jt),
-                Err(e) => Err(KError::JsonError(e)),
-            },
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => {
-                    err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED)
-                }
-                _ => Err(KError::FileError(e)),
-            },
+            Ok(f) => Ok(from_reader::<std::fs::File, JsonToken>(f)?),
+            Err(e) => Err(uninit(e)),
         }
     }
 
-    pub fn prime_cache(&self, cache: &mut Box<dyn Storage>) -> KResult<()> {
+    pub fn prime_cache(&self, cache: &mut Box<dyn Storage>) -> Result<()> {
         for jo in &self.objects {
             let mut obj = Object::new();
             let mut uid: Option<String> = None;
@@ -165,14 +165,14 @@ impl JsonToken {
         jt
     }
 
-    pub fn save(&self, filename: &str) -> KResult<()> {
+    pub fn save(&self, filename: &str) -> Result<()> {
         let jstr = match to_string_pretty(&self) {
             Ok(j) => j,
-            Err(e) => return Err(KError::JsonError(e)),
+            Err(e) => return Err(error::Error::other_error(e)),
         };
         match std::fs::write(filename, jstr) {
             Ok(_) => Ok(()),
-            Err(e) => Err(KError::FileError(e)),
+            Err(e) => Err(error::Error::other_error(e)),
         }
     }
 }
@@ -184,30 +184,30 @@ pub struct JsonStorage {
 }
 
 impl Storage for JsonStorage {
-    fn open(&mut self, filename: &String) -> KResult<()> {
+    fn open(&mut self, filename: &String) -> Result<()> {
         self.filename = filename.clone();
         let token = JsonToken::load(&self.filename)?;
         token.prime_cache(&mut self.cache)
     }
-    fn reinit(&mut self) -> KResult<()> {
+    fn reinit(&mut self) -> Result<()> {
         // TODO
         Ok(())
     }
-    fn flush(&mut self) -> KResult<()> {
+    fn flush(&mut self) -> Result<()> {
         let token = JsonToken::from_cache(&mut self.cache);
         token.save(&self.filename)
     }
-    fn fetch_by_uid(&self, uid: &String) -> KResult<Object> {
+    fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
         self.cache.fetch_by_uid(uid)
     }
-    fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
+    fn store(&mut self, uid: &String, obj: Object) -> Result<()> {
         self.cache.store(uid, obj)?;
         self.flush()
     }
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<Object>> {
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
         self.cache.search(template)
     }
-    fn remove_by_uid(&mut self, uid: &String) -> KResult<()> {
+    fn remove_by_uid(&mut self, uid: &String) -> Result<()> {
         self.cache.remove_by_uid(uid)?;
         self.flush()
     }

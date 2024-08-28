@@ -13,7 +13,7 @@ use attribute::{
     from_bool, from_bytes, from_date_bytes, from_ignore, from_string,
     from_ulong, AttrType, Attribute,
 };
-use error::{KError, KResult};
+use error::{Error, Result};
 use interface::*;
 use mechanism::{Mechanism, Mechanisms};
 use std::fmt::Debug;
@@ -39,7 +39,7 @@ macro_rules! create_bool_checker {
 
 macro_rules! attr_as_type {
     (make $name:ident; with $r:ty; $atype:ident; via $conv:ident) => {
-        pub fn $name(&self, t: CK_ULONG) -> KResult<$r> {
+        pub fn $name(&self, t: CK_ULONG) -> Result<$r> {
             for attr in &self.attributes {
                 if attr.get_type() == t {
                     if attr.get_attrtype() != AttrType::$atype {
@@ -51,6 +51,14 @@ macro_rules! attr_as_type {
             err_not_found!(t.to_string())
         }
     };
+}
+
+fn incomplete(e: Error) -> Error {
+    if e.attr_not_found() {
+        Error::ck_rv(CKR_TEMPLATE_INCOMPLETE)
+    } else {
+        e
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +105,7 @@ impl Object {
         }
     }
 
-    pub fn blind_copy(&self) -> KResult<Object> {
+    pub fn blind_copy(&self) -> Result<Object> {
         let mut obj = Object::new();
         obj.generate_unique();
         for attr in &self.attributes {
@@ -138,7 +146,7 @@ impl Object {
         self.attributes.iter().find(|r| r.get_type() == ck_type)
     }
 
-    pub fn set_attr(&mut self, a: Attribute) -> KResult<()> {
+    pub fn set_attr(&mut self, a: Attribute) -> Result<()> {
         let atype = a.get_type();
         match self.attributes.iter().position(|r| r.get_type() == atype) {
             Some(idx) => self.attributes[idx] = a,
@@ -147,7 +155,7 @@ impl Object {
         Ok(())
     }
 
-    pub fn check_or_set_attr(&mut self, a: Attribute) -> KResult<bool> {
+    pub fn check_or_set_attr(&mut self, a: Attribute) -> Result<bool> {
         let atype = a.get_type();
         match self.attributes.iter().find(|r| r.get_type() == atype) {
             Some(attr) => {
@@ -191,7 +199,7 @@ impl Object {
         class: CK_OBJECT_CLASS,
         ktype: CK_KEY_TYPE,
         op: CK_ATTRIBUTE_TYPE,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.get_attr_as_ulong(CKA_CLASS)? != class {
             return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
         }
@@ -201,13 +209,13 @@ impl Object {
                 return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
             }
         }
-        if self.get_attr_as_bool(op).or(Ok(false))? {
+        if self.get_attr_as_bool(op).or::<Error>(Ok(false))? {
             return Ok(());
         }
         return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
     }
 
-    pub fn rough_size(&self) -> KResult<usize> {
+    pub fn rough_size(&self) -> Result<usize> {
         let mut size = std::mem::size_of::<Attribute>() * self.attributes.len();
         for val in &self.attributes {
             size += val.get_value().len();
@@ -312,20 +320,23 @@ macro_rules! bytes_attr_not_empty {
                     return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
                 }
             }
-            Err(e) => match e {
-                KError::NotFound(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
-                _ => return Err(e),
-            },
+            Err(e) => {
+                if e.attr_not_found() {
+                    return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                } else {
+                    return Err(e);
+                }
+            }
         }
     };
 }
 
 pub trait ObjectFactory: Debug + Send + Sync {
-    fn create(&self, _template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 
-    fn copy(&self, obj: &Object, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn copy(&self, obj: &Object, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         self.default_copy(obj, template)
     }
 
@@ -351,7 +362,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn default_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         self.internal_object_create(
             template,
             OAFlags::NeverSettable,
@@ -362,7 +373,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn default_object_generate(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let mut key = self.internal_object_create(
             template,
             OAFlags::SettableOnlyOnCreate,
@@ -375,7 +386,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         self.internal_object_create(
             template,
             OAFlags::SettableOnlyOnCreate,
@@ -387,7 +398,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         self.internal_object_derive(template, origin)
     }
 
@@ -395,7 +406,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         /* FIXME: handle CKA_DERIVE_TEMPLATE */
 
         let mut obj = self.internal_object_create(
@@ -437,7 +448,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         template: &[CK_ATTRIBUTE],
         unacceptable_flags: OAFlags,
         required_flags: OAFlags,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let attributes = self.get_attributes();
         let mut obj = Object::new();
 
@@ -485,7 +496,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         origin: &Object,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let attributes = self.get_attributes();
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
@@ -553,7 +564,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
-    fn export_for_wrapping(&self, _obj: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 
@@ -561,11 +572,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         mut _data: Vec<u8>,
         _template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 
-    fn as_secret_key_factory(&self) -> KResult<&dyn SecretKeyFactory> {
+    fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
@@ -592,7 +603,7 @@ impl DataFactory {
 }
 
 impl ObjectFactory for DataFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         self.default_object_create(template)
     }
 
@@ -600,7 +611,7 @@ impl ObjectFactory for DataFactory {
         &self,
         origin: &Object,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         self.default_copy(origin, template)
     }
 
@@ -681,7 +692,7 @@ impl X509Factory {
 }
 
 impl ObjectFactory for X509Factory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
         let ret = self.basic_cert_object_create_checks(&mut obj);
@@ -795,7 +806,7 @@ pub trait PrivKeyFactory {
         ]
     }
 
-    fn export_for_wrapping(&self, _obj: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 
@@ -803,7 +814,7 @@ pub trait PrivKeyFactory {
         &self,
         mut _data: Vec<u8>,
         _template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 }
@@ -843,7 +854,7 @@ pub trait SecretKeyFactory {
         ]
     }
 
-    fn export_for_wrapping(&self, obj: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, obj: &Object) -> Result<Vec<u8>> {
         if !obj.is_extractable() {
             return err_rv!(CKR_KEY_UNEXTRACTABLE);
         }
@@ -857,7 +868,7 @@ pub trait SecretKeyFactory {
         &self,
         mut data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let mut obj =
             ok_or_clear!(&mut data; self.default_object_unwrap(template));
         self.set_key(&mut obj, data)?;
@@ -867,16 +878,13 @@ pub trait SecretKeyFactory {
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object>;
+    ) -> Result<Object>;
 
-    fn get_key_buffer_len(&self, obj: &Object) -> KResult<usize> {
-        match obj.get_attr_as_bytes(CKA_VALUE) {
-            Ok(k) => Ok(k.len()),
-            Err(e) => match e {
-                KError::NotFound(_) => err_rv!(CKR_TEMPLATE_INCOMPLETE),
-                _ => Err(e),
-            },
-        }
+    fn get_key_buffer_len(&self, obj: &Object) -> Result<usize> {
+        Ok(obj
+            .get_attr_as_bytes(CKA_VALUE)
+            .map_err(|e| incomplete(e))?
+            .len())
     }
 
     fn get_key_len(&self, obj: &Object) -> usize {
@@ -886,7 +894,7 @@ pub trait SecretKeyFactory {
         }
     }
 
-    fn set_key_len(&self, obj: &mut Object, len: usize) -> KResult<()> {
+    fn set_key_len(&self, obj: &mut Object, len: usize) -> Result<()> {
         match self.get_key_buffer_len(obj) {
             Ok(blen) => {
                 if len != blen {
@@ -905,14 +913,14 @@ pub trait SecretKeyFactory {
         }
     }
 
-    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> KResult<()> {
+    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
         let keylen = key.len();
         obj.set_attr(from_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
     }
 
-    fn recommend_key_size(&self, _: usize) -> KResult<usize> {
+    fn recommend_key_size(&self, _: usize) -> Result<usize> {
         return err_rv!(CKR_GENERAL_ERROR);
     }
 }
@@ -961,7 +969,7 @@ impl GenericSecretKeyFactory {
 }
 
 impl ObjectFactory for GenericSecretKeyFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
@@ -981,7 +989,7 @@ impl ObjectFactory for GenericSecretKeyFactory {
         &self.attributes
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         SecretKeyFactory::export_for_wrapping(self, key)
     }
 
@@ -989,11 +997,11 @@ impl ObjectFactory for GenericSecretKeyFactory {
         &self,
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         SecretKeyFactory::import_from_wrapped(self, data, template)
     }
 
-    fn as_secret_key_factory(&self) -> KResult<&dyn SecretKeyFactory> {
+    fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Ok(self)
     }
 }
@@ -1004,11 +1012,11 @@ impl SecretKeyFactory for GenericSecretKeyFactory {
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         ObjectFactory::default_object_unwrap(self, template)
     }
 
-    fn recommend_key_size(&self, max: usize) -> KResult<usize> {
+    fn recommend_key_size(&self, max: usize) -> Result<usize> {
         if self.keysize != 0 {
             Ok(self.keysize)
         } else {
@@ -1039,7 +1047,7 @@ impl GenericSecretKeyMechanism {
     }
 }
 
-pub fn default_secret_key_generate(key: &mut Object) -> KResult<()> {
+pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
     let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
 
     let mut value: Vec<u8> = vec![0; value_len];
@@ -1056,7 +1064,7 @@ pub fn default_secret_key_generate(key: &mut Object) -> KResult<()> {
 pub fn default_key_attributes(
     key: &mut Object,
     mech: CK_MECHANISM_TYPE,
-) -> KResult<()> {
+) -> Result<()> {
     key.set_attr(from_bool(CKA_LOCAL, true))?;
     key.set_attr(from_ulong(CKA_KEY_GEN_MECHANISM, mech))?;
     Ok(())
@@ -1073,7 +1081,7 @@ impl Mechanism for GenericSecretKeyMechanism {
         template: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let mut key =
             GENERIC_SECRET_FACTORY.default_object_generate(template)?;
         if !key.check_or_set_attr(attribute::from_ulong(
@@ -1133,14 +1141,14 @@ impl ObjectFactories {
     pub fn get_factory(
         &self,
         otype: ObjectType,
-    ) -> KResult<&Box<dyn ObjectFactory>> {
+    ) -> Result<&Box<dyn ObjectFactory>> {
         match self.factories.get(&otype) {
             Some(b) => Ok(b),
             None => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
 
-    pub fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    pub fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let class = match template.iter().find(|a| a.type_ == CKA_CLASS) {
             Some(c) => c.to_ulong()?,
             None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
@@ -1186,7 +1194,7 @@ impl ObjectFactories {
     pub fn get_object_factory(
         &self,
         obj: &Object,
-    ) -> KResult<&Box<dyn ObjectFactory>> {
+    ) -> Result<&Box<dyn ObjectFactory>> {
         let class = obj.get_attr_as_ulong(CKA_CLASS)?;
         let type_ = match class {
             CKO_CERTIFICATE => obj.get_attr_as_ulong(CKA_CERTIFICATE_TYPE)?,
@@ -1202,7 +1210,7 @@ impl ObjectFactories {
         &self,
         obj: &Object,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template {
             match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
@@ -1220,7 +1228,7 @@ impl ObjectFactories {
     pub fn get_sensitive_attrs(
         &self,
         obj: &Object,
-    ) -> KResult<Vec<CK_ATTRIBUTE_TYPE>> {
+    ) -> Result<Vec<CK_ATTRIBUTE_TYPE>> {
         let mut v = Vec::<CK_ATTRIBUTE_TYPE>::new();
         let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for attr in &obj.attributes {
@@ -1243,7 +1251,7 @@ impl ObjectFactories {
         &self,
         obj: &Object,
         template: &mut [CK_ATTRIBUTE],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let mut result = CKR_OK;
         let sensitive = obj.is_sensitive() & !obj.is_extractable();
         let obj_attrs = obj.get_attributes();
@@ -1308,7 +1316,7 @@ impl ObjectFactories {
         &self,
         obj: &mut Object,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if !obj.is_modifiable() {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
@@ -1362,7 +1370,7 @@ impl ObjectFactories {
         &self,
         obj: &Object,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         if !obj.is_copyable() {
             return err_rv!(CKR_ACTION_PROHIBITED);
         }
@@ -1372,7 +1380,7 @@ impl ObjectFactories {
     pub fn get_obj_factory_from_key_template(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<&Box<dyn ObjectFactory>> {
+    ) -> Result<&Box<dyn ObjectFactory>> {
         let class = match template.iter().position(|x| x.type_ == CKA_CLASS) {
             Some(idx) => template[idx].to_ulong()?,
             None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
@@ -1389,7 +1397,7 @@ impl ObjectFactories {
         &self,
         key: &Object,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let factory = self.get_obj_factory_from_key_template(template)?;
         factory.default_object_derive(template, key)
     }

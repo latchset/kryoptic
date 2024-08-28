@@ -13,28 +13,16 @@ use super::super::{err_not_found, err_rv};
 use super::Storage;
 
 use attribute::AttrType;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use object::Object;
 
-/* causes .or to fail to find which impl to use
-impl From<rusqlite::Error> for KError {
-    fn from(error: rusqlite::Error) -> Self {
-        KError::RvError(error::CkRvError { rv: CKR_DEVICE_MEMORY })
-    }
-}
-*/
-
-fn bad_code<T>(_error: T) -> KError {
-    KError::RvError(error::CkRvError {
-        rv: CKR_GENERAL_ERROR,
-    })
+fn bad_code<E: std::error::Error + 'static>(error: E) -> error::Error {
+    error::Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
 }
 
-fn bad_storage<T>(_error: T) -> KError {
-    KError::RvError(error::CkRvError {
-        rv: CKR_DEVICE_MEMORY,
-    })
+fn bad_storage<E: std::error::Error + 'static>(error: E) -> error::Error {
+    error::Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
 }
 
 const IS_DB_INITIALIZED: &str =
@@ -62,7 +50,7 @@ pub struct SqliteStorage {
 }
 
 impl SqliteStorage {
-    fn is_initialized(&self) -> KResult<()> {
+    fn is_initialized(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let result = conn
             .query_row_and_then(IS_DB_INITIALIZED, [], |row| row.get(0))
@@ -74,7 +62,7 @@ impl SqliteStorage {
         }
     }
 
-    fn db_reset(&mut self) -> KResult<()> {
+    fn db_reset(&mut self) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
@@ -85,7 +73,7 @@ impl SqliteStorage {
         tx.commit().map_err(bad_storage)
     }
 
-    fn rows_to_objects(mut rows: Rows) -> KResult<Vec<Object>> {
+    fn rows_to_objects(mut rows: Rows) -> Result<Vec<Object>> {
         let mut objid = 0;
         let mut objects = Vec::<Object>::new();
         while let Some(row) = rows.next().map_err(bad_storage)? {
@@ -148,7 +136,7 @@ impl SqliteStorage {
         Ok(objects)
     }
 
-    fn search_by_unique_id(conn: &Connection, uid: &String) -> KResult<Object> {
+    fn search_by_unique_id(conn: &Connection, uid: &String) -> Result<Object> {
         let mut stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
         let rows = stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?;
         let mut objects = Self::rows_to_objects(rows)?;
@@ -162,7 +150,7 @@ impl SqliteStorage {
     fn search_with_filter(
         conn: &Connection,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         let mut search_query = String::from(SEARCH_ALL);
         let mut subqcount = 0;
         let mut search_params = Vec::<Value>::with_capacity(template.len() * 2);
@@ -210,7 +198,7 @@ impl SqliteStorage {
         tx: &mut Transaction,
         uid: &String,
         obj: &Object,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let objid = match Self::delete_object(tx, uid)? {
             0 => {
                 /* find new id to use for new object */
@@ -243,7 +231,7 @@ impl SqliteStorage {
         Ok(())
     }
 
-    fn delete_object(tx: &mut Transaction, uid: &String) -> KResult<i32> {
+    fn delete_object(tx: &mut Transaction, uid: &String) -> Result<i32> {
         let mut stmt = tx.prepare(SEARCH_OBJ_ID).map_err(bad_storage)?;
         let objid = match stmt
             .query_row(params![CKA_UNIQUE_ID, uid], |row| row.get(0))
@@ -264,7 +252,7 @@ impl SqliteStorage {
 }
 
 impl Storage for SqliteStorage {
-    fn open(&mut self, filename: &String) -> KResult<()> {
+    fn open(&mut self, filename: &String) -> Result<()> {
         self.filename = filename.clone();
         self.conn = match Connection::open(&self.filename) {
             Ok(c) => Arc::new(Mutex::from(c)),
@@ -272,24 +260,24 @@ impl Storage for SqliteStorage {
         };
         self.is_initialized()
     }
-    fn reinit(&mut self) -> KResult<()> {
+    fn reinit(&mut self) -> Result<()> {
         self.db_reset()
     }
-    fn flush(&mut self) -> KResult<()> {
+    fn flush(&mut self) -> Result<()> {
         Ok(())
     }
-    fn fetch_by_uid(&self, uid: &String) -> KResult<Object> {
+    fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
         let conn = self.conn.lock().unwrap();
         Self::search_by_unique_id(&conn, uid)
     }
-    fn store(&mut self, uid: &String, obj: Object) -> KResult<()> {
+    fn store(&mut self, uid: &String, obj: Object) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
         Self::store_object(&mut tx, uid, &obj)?;
         tx.commit().map_err(bad_storage)
     }
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> KResult<Vec<Object>> {
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
         let conn = self.conn.lock().unwrap();
         let mut objects = Self::search_with_filter(&conn, template)?;
         drop(conn);
@@ -301,7 +289,7 @@ impl Storage for SqliteStorage {
         }
         Ok(result)
     }
-    fn remove_by_uid(&mut self, uid: &String) -> KResult<()> {
+    fn remove_by_uid(&mut self, uid: &String) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);

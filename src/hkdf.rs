@@ -12,7 +12,7 @@ use super::misc;
 use super::object;
 
 use attribute::from_bytes;
-use error::{KError, KResult};
+use error::Result;
 use hash::INVALID_HASH_SIZE;
 use hmac::hmac_size;
 use interface::*;
@@ -42,7 +42,7 @@ impl Mechanism for HKDFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -100,7 +100,7 @@ impl HKDFOperation {
         );
     }
 
-    fn verify_key(&self, key: &Object, matchlen: usize) -> KResult<()> {
+    fn verify_key(&self, key: &Object, matchlen: usize) -> Result<()> {
         if let Ok(class) = key.get_attr_as_ulong(CKA_CLASS) {
             match class {
                 CKO_SECRET_KEY => {
@@ -149,7 +149,7 @@ impl HKDFOperation {
         Ok(())
     }
 
-    fn new(mech: &CK_MECHANISM) -> KResult<HKDFOperation> {
+    fn new(mech: &CK_MECHANISM) -> Result<HKDFOperation> {
         let params = cast_params!(mech, CK_HKDF_PARAMS);
         if params.bExtract == CK_FALSE && params.bExpand == CK_FALSE {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
@@ -221,7 +221,7 @@ impl MechOperation for HKDFOperation {
     fn fips_approved(&self) -> Option<bool> {
         self.fips_approved
     }
-    fn requires_objects(&self) -> KResult<&[CK_OBJECT_HANDLE]> {
+    fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
         if self.salt_type == CKF_HKDF_SALT_KEY {
             return Ok(&self.salt_key);
         } else {
@@ -229,7 +229,7 @@ impl MechOperation for HKDFOperation {
             return err_rv!(CKR_OK);
         }
     }
-    fn receives_objects(&mut self, objs: &[&Object]) -> KResult<()> {
+    fn receives_objects(&mut self, objs: &[&Object]) -> Result<()> {
         if objs.len() != 1 {
             return err_rv!(CKR_GENERAL_ERROR);
         }

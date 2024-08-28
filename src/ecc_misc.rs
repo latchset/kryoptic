@@ -1,7 +1,7 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use super::error::KResult;
+use super::error::Result;
 use super::kasn1;
 
 type Version = u64;
@@ -26,9 +26,7 @@ pub struct ECPrivateKey<'a> {
 }
 
 impl ECPrivateKey<'_> {
-    pub fn new_owned<'a>(
-        private_key: &'a Vec<u8>,
-    ) -> KResult<ECPrivateKey<'a>> {
+    pub fn new_owned<'a>(private_key: &'a Vec<u8>) -> Result<ECPrivateKey<'a>> {
         Ok(ECPrivateKey {
             version: 1,
             private_key: kasn1::DerEncOctetString::new(private_key.as_slice())?,

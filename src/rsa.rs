@@ -9,7 +9,7 @@ use super::object;
 use super::{attr_element, bytes_attr_not_empty, err_rv};
 
 use attribute::{from_bool, from_bytes, from_ulong};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use kasn1::DerEncBigUint;
 use object::{
@@ -48,7 +48,7 @@ impl RSAPubFactory {
 }
 
 impl ObjectFactory for RSAPubFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
         rsa_import(&mut obj)?;
@@ -98,7 +98,7 @@ impl RSAPrivateKey<'_> {
         exponent1: &'a Vec<u8>,
         exponent2: &'a Vec<u8>,
         coefficient: &'a Vec<u8>,
-    ) -> KResult<RSAPrivateKey<'a>> {
+    ) -> Result<RSAPrivateKey<'a>> {
         Ok(RSAPrivateKey {
             version: 0,
             modulus: DerEncBigUint::new(modulus.as_slice())?,
@@ -155,7 +155,7 @@ impl RSAPrivFactory {
 }
 
 impl ObjectFactory for RSAPrivFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
         rsa_import(&mut obj)?;
@@ -167,7 +167,7 @@ impl ObjectFactory for RSAPrivFactory {
         &self.attributes
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
 
@@ -175,7 +175,7 @@ impl ObjectFactory for RSAPrivFactory {
         &self,
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
     }
 }
@@ -183,7 +183,7 @@ impl ObjectFactory for RSAPrivFactory {
 impl CommonKeyFactory for RSAPrivFactory {}
 
 impl PrivKeyFactory for RSAPrivFactory {
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_EXTRACTABLE)?;
 
         let pkey = match asn1::write_single(&RSAPrivateKey::new_owned(
@@ -212,7 +212,7 @@ impl PrivKeyFactory for RSAPrivFactory {
         &self,
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let mut key = self.default_object_unwrap(template)?;
 
         if !key.check_or_set_attr(attribute::from_ulong(
@@ -322,7 +322,7 @@ impl Mechanism for RsaPKCSMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Encryption>> {
+    ) -> Result<Box<dyn Encryption>> {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -339,7 +339,7 @@ impl Mechanism for RsaPKCSMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Decryption>> {
+    ) -> Result<Box<dyn Decryption>> {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -355,7 +355,7 @@ impl Mechanism for RsaPKCSMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -369,7 +369,7 @@ impl Mechanism for RsaPKCSMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -387,7 +387,7 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<(Object, Object)> {
+    ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
         if !pubkey.check_or_set_attr(attribute::from_ulong(
@@ -448,7 +448,7 @@ impl Mechanism for RsaPKCSMechanism {
         data: CK_BYTE_PTR,
         data_len: CK_ULONG_PTR,
         key_template: &Box<dyn ObjectFactory>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -470,7 +470,7 @@ impl Mechanism for RsaPKCSMechanism {
         data: &[u8],
         template: &[CK_ATTRIBUTE],
         key_template: &Box<dyn ObjectFactory>,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }

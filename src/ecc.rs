@@ -11,7 +11,7 @@ use super::{
 };
 
 use attribute::{from_bool, from_bytes};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use object::{
     CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
@@ -51,7 +51,7 @@ const BITS_SECP256R1: usize = 256;
 const BITS_SECP384R1: usize = 384;
 const BITS_SECP521R1: usize = 521;
 
-fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
+fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> Result<&'static str> {
     match oid {
         OID_SECP256R1 => Ok(NAME_SECP256R1),
         OID_SECP384R1 => Ok(NAME_SECP384R1),
@@ -61,7 +61,7 @@ fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> KResult<&'static str> {
 }
 
 #[cfg(test)]
-pub fn curve_name_to_ec_params(name: &'static str) -> KResult<&'static [u8]> {
+pub fn curve_name_to_ec_params(name: &'static str) -> Result<&'static [u8]> {
     match name {
         NAME_SECP256R1 => Ok(STRING_SECP256R1),
         NAME_SECP384R1 => Ok(STRING_SECP384R1),
@@ -71,7 +71,7 @@ pub fn curve_name_to_ec_params(name: &'static str) -> KResult<&'static [u8]> {
 }
 
 #[cfg(test)]
-pub fn name_to_bits(name: &'static str) -> KResult<usize> {
+pub fn name_to_bits(name: &'static str) -> Result<usize> {
     match name {
         NAME_SECP256R1 => Ok(BITS_SECP256R1),
         NAME_SECP384R1 => Ok(BITS_SECP384R1),
@@ -80,7 +80,7 @@ pub fn name_to_bits(name: &'static str) -> KResult<usize> {
     }
 }
 
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
+fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         OID_SECP256R1 => Ok(BITS_SECP256R1),
         OID_SECP384R1 => Ok(BITS_SECP384R1),
@@ -89,7 +89,7 @@ fn oid_to_bits(oid: asn1::ObjectIdentifier) -> KResult<usize> {
     }
 }
 
-fn curve_name_to_bits(name: asn1::PrintableString) -> KResult<usize> {
+fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -104,7 +104,7 @@ fn curve_name_to_bits(name: asn1::PrintableString) -> KResult<usize> {
 
 fn curve_name_to_oid(
     name: asn1::PrintableString,
-) -> KResult<asn1::ObjectIdentifier> {
+) -> Result<asn1::ObjectIdentifier> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -118,7 +118,7 @@ fn curve_name_to_oid(
 }
 
 #[cfg(feature = "fips")]
-pub fn ec_key_curve_size(key: &Object) -> KResult<usize> {
+pub fn ec_key_curve_size(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -156,7 +156,7 @@ impl ECCPubFactory {
 }
 
 impl ObjectFactory for ECCPubFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
         bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
@@ -209,7 +209,7 @@ impl ECCPrivFactory {
 }
 
 impl ObjectFactory for ECCPrivFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
         ecc_import(&mut obj)?;
@@ -221,7 +221,7 @@ impl ObjectFactory for ECCPrivFactory {
         &self.attributes
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
 
@@ -229,12 +229,12 @@ impl ObjectFactory for ECCPrivFactory {
         &self,
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
     }
 }
 
-fn get_oid_from_obj(key: &Object) -> KResult<asn1::ObjectIdentifier> {
+fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -252,7 +252,7 @@ fn get_oid_from_obj(key: &Object) -> KResult<asn1::ObjectIdentifier> {
 impl CommonKeyFactory for ECCPrivFactory {}
 
 impl PrivKeyFactory for ECCPrivFactory {
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_EXTRACTABLE)?;
 
         let oid = match get_oid_from_obj(key) {
@@ -278,7 +278,7 @@ impl PrivKeyFactory for ECCPrivFactory {
         &self,
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let mut key = self.default_object_unwrap(template)?;
 
         if !key.check_or_set_attr(attribute::from_ulong(
@@ -362,7 +362,7 @@ impl Mechanism for EccMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -376,7 +376,7 @@ impl Mechanism for EccMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -387,7 +387,7 @@ impl Mechanism for EccMechanism {
         Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -406,7 +406,7 @@ impl Mechanism for EccMechanism {
         mech: &CK_MECHANISM,
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<(Object, Object)> {
+    ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
         if !pubkey.check_or_set_attr(attribute::from_ulong(
@@ -485,7 +485,7 @@ impl ECDHOperation {
     fn derive_new<'a>(
         mechanism: CK_MECHANISM_TYPE,
         params: CK_ECDH1_DERIVE_PARAMS,
-    ) -> KResult<ECDHOperation> {
+    ) -> Result<ECDHOperation> {
         if params.kdf == CKD_NULL {
             if params.pSharedData != std::ptr::null_mut()
                 || params.ulSharedDataLen != 0

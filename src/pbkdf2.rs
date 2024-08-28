@@ -10,7 +10,7 @@ use super::object;
 use super::{cast_params, err_rv};
 
 use attribute::{from_bool, from_bytes, from_ulong, CkAttrs};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
@@ -45,7 +45,7 @@ impl PBKDF2Mechanism {
         );
     }
 
-    fn mock_password_object(&self, key: Vec<u8>) -> KResult<Object> {
+    fn mock_password_object(&self, key: Vec<u8>) -> Result<Object> {
         let mut obj = Object::new();
         obj.set_zeroize();
         obj.set_attr(from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
@@ -68,7 +68,7 @@ impl Mechanism for PBKDF2Mechanism {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         if self.info.flags & CKF_GENERATE != CKF_GENERATE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -171,7 +171,7 @@ impl PBKDF2 {
         mech: &Box<dyn Mechanism>,
         i: &[u8],
         o: &mut [u8],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         mech.mac_new(
             &CK_MECHANISM {
                 mechanism: self.prf,
@@ -184,11 +184,7 @@ impl PBKDF2 {
         .mac(i, o)
     }
 
-    fn derive(
-        &self,
-        mechanisms: &Mechanisms,
-        dklen: usize,
-    ) -> KResult<Vec<u8>> {
+    fn derive(&self, mechanisms: &Mechanisms, dklen: usize) -> Result<Vec<u8>> {
         let hlen = hmac::hmac_size(self.prf);
         if hlen == CK_UNAVAILABLE_INFORMATION as usize {
             return err_rv!(CKR_MECHANISM_INVALID);

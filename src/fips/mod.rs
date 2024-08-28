@@ -13,7 +13,6 @@ use once_cell::sync::Lazy;
 use std::ffi::CStr;
 use std::fs::File;
 use std::io::Read;
-use std::io::Result;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::os::raw::c_char;
@@ -31,7 +30,7 @@ use super::interface;
 use super::mechanism;
 use super::object;
 use super::token;
-use error::{KError, KResult};
+use error::Result;
 use interface::CKR_DEVICE_ERROR;
 use mechanism::Mechanisms;
 use object::{ObjectFactories, ObjectType};
@@ -293,7 +292,7 @@ impl FileBio {
         })
     }
 
-    fn read(&mut self, v: &mut [u8]) -> Result<usize> {
+    fn read(&mut self, v: &mut [u8]) -> std::io::Result<usize> {
         let size = self.file.metadata()?.len();
         let pos = self.file.seek(SeekFrom::Current(0))?;
         if pos >= size {
@@ -317,7 +316,7 @@ impl MemBio<'_> {
         MemBio { mem: v, cursor: 0 }
     }
 
-    fn read(&mut self, v: &mut [u8]) -> Result<usize> {
+    fn read(&mut self, v: &mut [u8]) -> std::io::Result<usize> {
         let avail = self.mem.len() - self.cursor;
         if avail == 0 {
             return Ok(0);
@@ -673,7 +672,7 @@ pub fn init() {
     assert!(FIPS_PROVIDER.provider != std::ptr::null_mut());
 }
 
-pub fn token_init(token: &mut Token) -> KResult<()> {
+pub fn token_init(token: &mut Token) -> Result<()> {
     indicators::insert_fips_validation(token)
 }
 
@@ -708,7 +707,7 @@ pub struct ProviderSignatureCtx {
 }
 
 impl ProviderSignatureCtx {
-    pub fn new(alg: *const c_char) -> KResult<ProviderSignatureCtx> {
+    pub fn new(alg: *const c_char) -> Result<ProviderSignatureCtx> {
         let sigtable =
             unsafe { EVP_SIGNATURE_fetch(get_libctx(), alg, std::ptr::null()) };
         if sigtable.is_null() {
@@ -738,7 +737,7 @@ impl ProviderSignatureCtx {
         mdname: *const c_char,
         pkey: &EvpPkey,
         params: *const OSSL_PARAM,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         unsafe {
             match (*self.vtable).digest_sign_init {
                 Some(f) => res_to_err!(f(
@@ -752,7 +751,7 @@ impl ProviderSignatureCtx {
         }
     }
 
-    pub fn digest_sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    pub fn digest_sign_update(&mut self, data: &[u8]) -> Result<()> {
         unsafe {
             match (*self.vtable).digest_sign_update {
                 Some(f) => res_to_err!(f(
@@ -765,10 +764,7 @@ impl ProviderSignatureCtx {
         }
     }
 
-    pub fn digest_sign_final(
-        &mut self,
-        signature: &mut [u8],
-    ) -> KResult<usize> {
+    pub fn digest_sign_final(&mut self, signature: &mut [u8]) -> Result<usize> {
         unsafe {
             match (*self.vtable).digest_sign_final {
                 Some(f) => {
@@ -794,7 +790,7 @@ impl ProviderSignatureCtx {
         &mut self,
         signature: &mut [u8],
         tbs: &[u8],
-    ) -> KResult<usize> {
+    ) -> Result<usize> {
         unsafe {
             match (*self.vtable).digest_sign {
                 Some(f) => {
@@ -823,7 +819,7 @@ impl ProviderSignatureCtx {
         mdname: *const c_char,
         pkey: &EvpPkey,
         params: *const OSSL_PARAM,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         unsafe {
             match (*self.vtable).digest_verify_init {
                 Some(f) => res_to_err!(f(
@@ -837,7 +833,7 @@ impl ProviderSignatureCtx {
         }
     }
 
-    pub fn digest_verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    pub fn digest_verify_update(&mut self, data: &[u8]) -> Result<()> {
         unsafe {
             match (*self.vtable).digest_verify_update {
                 Some(f) => res_to_err!(f(
@@ -850,7 +846,7 @@ impl ProviderSignatureCtx {
         }
     }
 
-    pub fn digest_verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    pub fn digest_verify_final(&mut self, signature: &[u8]) -> Result<()> {
         unsafe {
             match (*self.vtable).digest_verify_final {
                 Some(f) => res_to_err!(f(
@@ -867,7 +863,7 @@ impl ProviderSignatureCtx {
         &mut self,
         signature: &[u8],
         tbs: &[u8],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         unsafe {
             match (*self.vtable).digest_verify {
                 Some(f) => res_to_err!(f(

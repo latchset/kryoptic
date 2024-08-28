@@ -28,7 +28,7 @@ impl AesMacOperation {
         }
     }
 
-    fn init(mech: &CK_MECHANISM, key: &Object) -> KResult<AesMacOperation> {
+    fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesMacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_MAC_GENERAL => {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
@@ -65,14 +65,14 @@ impl AesMacOperation {
         })
     }
 
-    fn begin(&mut self) -> KResult<()> {
+    fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         Ok(())
     }
 
-    fn update(&mut self, data: &[u8]) -> KResult<()> {
+    fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -133,7 +133,7 @@ impl AesMacOperation {
         Ok(())
     }
 
-    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+    fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -176,37 +176,37 @@ impl MechOperation for AesMacOperation {
 }
 
 impl Sign for AesMacOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.finalize(signature)
     }
 
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         self.finalize(signature)
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.maclen)
     }
 }
 
 impl Verify for AesMacOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.verify_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         let mut verify: Vec<u8> = vec![0; self.maclen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
@@ -215,7 +215,7 @@ impl Verify for AesMacOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.maclen)
     }
 }

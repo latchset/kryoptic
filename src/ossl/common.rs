@@ -49,7 +49,7 @@ macro_rules! ptr_wrapper {
         ptr_wrapper_struct!($name; $ossl);
 
         impl $name {
-            pub fn new() -> KResult<$name> {
+            pub fn new() -> Result<$name> {
                 let ptr = unsafe {
                     $newctx()
                 };
@@ -69,7 +69,7 @@ macro_rules! ptr_wrapper {
         ptr_wrapper_struct!($name; $ossl);
 
         impl $name {
-            pub fn new(name: *const c_char) -> KResult<$name> {
+            pub fn new(name: *const c_char) -> Result<$name> {
                 let arg = unsafe {
                     $in_fetch(get_libctx(), name, std::ptr::null_mut())
                 };
@@ -100,7 +100,7 @@ macro_rules! ptr_wrapper {
         ptr_wrapper_struct!($name; $ossl);
 
         impl $name {
-            pub fn new(name: *const c_char) -> KResult<$name> {
+            pub fn new(name: *const c_char) -> Result<$name> {
                 let ptr = unsafe {
                     $fetch(get_libctx(), name, std::ptr::null_mut())
                 };
@@ -132,7 +132,7 @@ pub struct EvpPkeyCtx {
 }
 
 impl EvpPkeyCtx {
-    pub fn new(name: *const c_char) -> KResult<EvpPkeyCtx> {
+    pub fn new(name: *const c_char) -> Result<EvpPkeyCtx> {
         let ptr = unsafe {
             EVP_PKEY_CTX_new_from_name(get_libctx(), name, std::ptr::null())
         };
@@ -142,7 +142,7 @@ impl EvpPkeyCtx {
         Ok(EvpPkeyCtx { ptr: ptr })
     }
 
-    pub unsafe fn from_ptr(ptr: *mut EVP_PKEY_CTX) -> KResult<EvpPkeyCtx> {
+    pub unsafe fn from_ptr(ptr: *mut EVP_PKEY_CTX) -> Result<EvpPkeyCtx> {
         if ptr.is_null() {
             return err_rv!(CKR_DEVICE_ERROR);
         }
@@ -179,7 +179,7 @@ impl EvpPkey {
         pkey_name: *const c_char,
         pkey_type: u32,
         params: &OsslParam,
-    ) -> KResult<EvpPkey> {
+    ) -> Result<EvpPkey> {
         let mut ctx = EvpPkeyCtx::new(pkey_name)?;
         let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
         if res != 1 {
@@ -203,7 +203,7 @@ impl EvpPkey {
     pub fn generate(
         pkey_name: *const c_char,
         params: &OsslParam,
-    ) -> KResult<EvpPkey> {
+    ) -> Result<EvpPkey> {
         let mut ctx = EvpPkeyCtx::new(pkey_name)?;
         let res = unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) };
         if res != 1 {
@@ -223,7 +223,7 @@ impl EvpPkey {
         Ok(EvpPkey { ptr: pkey })
     }
 
-    pub fn new_ctx(&mut self) -> KResult<EvpPkeyCtx> {
+    pub fn new_ctx(&mut self) -> Result<EvpPkeyCtx> {
         /* this function takes care of checking for NULL */
         unsafe {
             EvpPkeyCtx::from_ptr(
@@ -306,7 +306,7 @@ impl<'a> OsslParam<'a> {
         }
     }
 
-    pub fn from_ptr(ptr: *mut OSSL_PARAM) -> KResult<OsslParam<'static>> {
+    pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>> {
         if ptr.is_null() {
             return err_rv!(CKR_DEVICE_ERROR);
         }
@@ -341,7 +341,7 @@ impl<'a> OsslParam<'a> {
         p
     }
 
-    pub fn add_bn(&mut self, key: *const c_char, v: &Vec<u8>) -> KResult<()> {
+    pub fn add_bn(&mut self, key: *const c_char, v: &Vec<u8>) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -397,7 +397,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         v: &'a Vec<u8>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -417,7 +417,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         v: Vec<u8>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -442,7 +442,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         val: *const c_char,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -461,7 +461,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         v: &'a Vec<u8>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -485,7 +485,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         val: &'a usize,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -505,7 +505,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         val: &'a c_uint,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -525,7 +525,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         val: &'a c_int,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -545,7 +545,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         val: c_uint,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -571,7 +571,7 @@ impl<'a> OsslParam<'a> {
         &mut self,
         key: *const c_char,
         val: c_int,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -611,7 +611,7 @@ impl<'a> OsslParam<'a> {
         self.p.to_mut().as_mut_ptr()
     }
 
-    pub fn get_int(&self, key: *const c_char) -> KResult<c_int> {
+    pub fn get_int(&self, key: *const c_char) -> Result<c_int> {
         if !self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -629,7 +629,7 @@ impl<'a> OsslParam<'a> {
         Ok(val)
     }
 
-    pub fn get_bn(&self, key: *const c_char) -> KResult<Vec<u8>> {
+    pub fn get_bn(&self, key: *const c_char) -> Result<Vec<u8>> {
         if !self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -660,7 +660,7 @@ impl<'a> OsslParam<'a> {
         Ok(vec)
     }
 
-    pub fn get_octet_string(&self, key: *const c_char) -> KResult<&'a [u8]> {
+    pub fn get_octet_string(&self, key: *const c_char) -> Result<&'a [u8]> {
         if !self.finalized {
             return err_rv!(CKR_GENERAL_ERROR);
         }

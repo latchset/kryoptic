@@ -25,7 +25,7 @@ use super::storage;
 use super::tlskdf;
 
 use super::{err_rv, get_random_data, sizeof, to_rv};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::Mechanisms;
 use object::{Object, ObjectFactories};
@@ -157,7 +157,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(filename: String) -> KResult<Token> {
+    pub fn new(filename: String) -> Result<Token> {
         /* when no filename is provided we assume a memory only
          * token that has no backing store */
         let store = if filename.ends_with(".json") {
@@ -235,13 +235,9 @@ impl Token {
                         token.info.flags &= !CKF_RESTORE_KEY_NOT_NEEDED;
                     }
                 }
-                Err(err) => match err {
-                    KError::RvError(ref e) => {
-                        /* empty file is legal but leaves the token uninitialized */
-                        if e.rv != CKR_CRYPTOKI_NOT_INITIALIZED {
-                            return Err(err);
-                        }
-                        token.info.flags &= !CKF_TOKEN_INITIALIZED;
+                Err(err) => match err.rv() {
+                    CKR_CRYPTOKI_NOT_INITIALIZED => {
+                        token.info.flags &= !CKF_TOKEN_INITIALIZED
                     }
                     _ => return Err(err),
                 },
@@ -283,19 +279,19 @@ impl Token {
         self.info.flags & CKF_LOGIN_REQUIRED == CKF_LOGIN_REQUIRED
     }
 
-    fn load_token_info(&mut self) -> KResult<()> {
+    fn load_token_info(&mut self) -> Result<()> {
         let uid = TOKEN_INFO_UID.to_string();
         let obj = match self.storage.fetch_by_uid(&uid) {
             Ok(o) => o,
-            Err(e) => match e {
-                KError::NotFound(_) => {
+            Err(e) => {
+                if e.attr_not_found() {
                     /* it is ok if no token data is stored yet,
                      * we'll use defaults */
                     return Ok(());
+                } else {
+                    return Err(e);
                 }
-                KError::RvError(e) => return err_rv!(e.rv),
-                _ => return err_rv!(CKR_GENERAL_ERROR),
-            },
+            }
         };
         if obj.get_attr_as_ulong(CKA_CLASS)? != KRO_TOKEN_DATA {
             return err_rv!(CKR_TOKEN_NOT_RECOGNIZED);
@@ -323,7 +319,7 @@ impl Token {
         Ok(())
     }
 
-    fn store_token_info(&mut self) -> KResult<()> {
+    fn store_token_info(&mut self) -> Result<()> {
         let uid = TOKEN_INFO_UID.to_string();
         let mut obj = match self.storage.fetch_by_uid(&uid) {
             Ok(o) => o.clone(),
@@ -357,16 +353,16 @@ impl Token {
         return Ok(());
     }
 
-    fn fetch_pin_object(&mut self, uid: &str) -> KResult<Object> {
+    fn fetch_pin_object(&mut self, uid: &str) -> Result<Object> {
         let obj = match self.storage.fetch_by_uid(&uid.to_string()) {
             Ok(o) => o,
-            Err(e) => match e {
-                KError::NotFound(_) => {
+            Err(e) => {
+                if e.attr_not_found() {
                     return err_rv!(CKR_USER_PIN_NOT_INITIALIZED);
+                } else {
+                    return Err(e);
                 }
-                KError::RvError(e) => return err_rv!(e.rv),
-                _ => return err_rv!(CKR_GENERAL_ERROR),
-            },
+            }
         };
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
             return err_rv!(CKR_GENERAL_ERROR);
@@ -382,7 +378,7 @@ impl Token {
         uid: String,
         label: String,
         wrapped: Vec<u8>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         match self.storage.fetch_by_uid(&uid) {
             Ok(o) => {
                 let mut obj = o.clone();
@@ -417,7 +413,7 @@ impl Token {
         return Ok(());
     }
 
-    fn parse_pin_label(&self, label: &str) -> KResult<(String, usize)> {
+    fn parse_pin_label(&self, label: &str) -> Result<(String, usize)> {
         let parts: Vec<_> = label.split(":").collect();
         if parts.len() != 2 {
             return err_rv!(CKR_GENERAL_ERROR);
@@ -436,7 +432,7 @@ impl Token {
         pin: &Vec<u8>,
         salt: &str,
         iterations: usize,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let params = CK_PKCS5_PBKD2_PARAMS2 {
             saltSource: CKZ_DATA_SPECIFIED,
             pSaltSourceData: salt.as_ptr() as *const _ as *mut _,
@@ -486,7 +482,7 @@ impl Token {
         &mut self,
         wrapper: &Object,
         mut kek: Object,
-    ) -> KResult<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         let vlen = kek.get_attr_as_ulong(CKA_VALUE_LEN)?;
         let bs = aes::AES_BLOCK_SIZE;
         let mut buf = vec![0u8; (((vlen as usize + bs) / bs) + 1) * bs];
@@ -511,7 +507,7 @@ impl Token {
         Ok(buf)
     }
 
-    fn unwrap_kek(&self, wrapper: &Object, wrapped: &[u8]) -> KResult<Object> {
+    fn unwrap_kek(&self, wrapper: &Object, wrapped: &[u8]) -> Result<Object> {
         let class = CKO_SECRET_KEY;
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
@@ -537,7 +533,7 @@ impl Token {
         )?)
     }
 
-    fn update_pin_flags(&mut self, obj: &Object) -> KResult<()> {
+    fn update_pin_flags(&mut self, obj: &Object) -> Result<()> {
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
         let is_so = match uid.as_str() {
             SO_PIN_UID => true,
@@ -581,7 +577,7 @@ impl Token {
         Ok(())
     }
 
-    fn init_pin_flags(&mut self) -> KResult<()> {
+    fn init_pin_flags(&mut self) -> Result<()> {
         let so = self.fetch_pin_object(SO_PIN_UID)?;
         self.update_pin_flags(&so)?;
         let so_label = so.get_attr_as_string(CKA_LABEL)?;
@@ -599,7 +595,7 @@ impl Token {
         Ok(())
     }
 
-    fn reset_user_pin(&mut self) -> KResult<()> {
+    fn reset_user_pin(&mut self) -> Result<()> {
         let class = CKO_SECRET_KEY;
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
@@ -630,7 +626,7 @@ impl Token {
         )
     }
 
-    fn random_pin_salt(&self) -> KResult<String> {
+    fn random_pin_salt(&self) -> Result<String> {
         let mut data = [0u8; 8];
         get_random_data(&mut data)?;
         Ok(hex::encode(data))
@@ -641,7 +637,7 @@ impl Token {
         user_type: CK_USER_TYPE,
         pin: &Vec<u8>,
         old: &Vec<u8>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let utype = match user_type {
             CK_UNAVAILABLE_INFORMATION => {
                 if self.so_logged_in {
@@ -712,11 +708,7 @@ impl Token {
         Ok(())
     }
 
-    pub fn initialize(
-        &mut self,
-        pin: &Vec<u8>,
-        label: &Vec<u8>,
-    ) -> KResult<()> {
+    pub fn initialize(&mut self, pin: &Vec<u8>, label: &Vec<u8>) -> Result<()> {
         if self.is_initialized() {
             self.check_so_login(pin)?;
         };
@@ -757,13 +749,13 @@ impl Token {
         &mut self,
         uid: String,
         attempts: CK_ULONG,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let mut obj = self.storage.fetch_by_uid(&uid)?.clone();
         obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
         self.storage.store(&uid, obj)
     }
 
-    fn check_so_login(&mut self, pin: &Vec<u8>) -> KResult<()> {
+    fn check_so_login(&mut self, pin: &Vec<u8>) -> Result<()> {
         let mut obj = self.fetch_pin_object(SO_PIN_UID)?;
 
         let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
@@ -804,7 +796,7 @@ impl Token {
         return err_rv!(CKR_PIN_INCORRECT);
     }
 
-    fn check_user_login(&mut self, pin: &Vec<u8>) -> KResult<Object> {
+    fn check_user_login(&mut self, pin: &Vec<u8>) -> Result<Object> {
         let mut obj = self.fetch_pin_object(USER_PIN_UID)?;
 
         let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
@@ -879,10 +871,7 @@ impl Token {
                         self.so_logged_in = true;
                         CKR_OK
                     }
-                    Err(e) => match e {
-                        KError::RvError(e) => e.rv,
-                        _ => CKR_GENERAL_ERROR,
-                    },
+                    Err(e) => e.rv(),
                 }
             }
             CKU_USER => {
@@ -897,18 +886,12 @@ impl Token {
                         self.kek = Some(kek);
                         CKR_OK
                     }
-                    Err(e) => match e {
-                        KError::RvError(e) => e.rv,
-                        _ => CKR_GENERAL_ERROR,
-                    },
+                    Err(e) => e.rv(),
                 }
             }
             CKU_CONTEXT_SPECIFIC => match self.check_user_login(pin) {
                 Ok(_) => CKR_OK,
-                Err(e) => match e {
-                    KError::RvError(e) => e.rv,
-                    _ => CKR_GENERAL_ERROR,
-                },
+                Err(e) => e.rv(),
             },
             _ => CKR_USER_TYPE_INVALID,
         }
@@ -936,7 +919,7 @@ impl Token {
         CKR_OK
     }
 
-    pub fn save(&mut self) -> KResult<()> {
+    pub fn save(&mut self) -> Result<()> {
         self.storage.flush()
     }
 
@@ -988,7 +971,7 @@ impl Token {
         }
     }
 
-    fn encrypt_value(&self, uid: &String, val: &Vec<u8>) -> KResult<Vec<u8>> {
+    fn encrypt_value(&self, uid: &String, val: &Vec<u8>) -> Result<Vec<u8>> {
         if let Some(ref kek) = self.kek {
             let mut iv = [0u8; DEFAULT_IV_SIZE];
             get_random_data(&mut iv)?;
@@ -1025,7 +1008,7 @@ impl Token {
         &mut self,
         mut obj: Object,
         encrypt: bool,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
         if encrypt && self.info.flags & CKF_RESTORE_KEY_NOT_NEEDED != 0 {
             let ats = self.object_factories.get_sensitive_attrs(&obj)?;
@@ -1040,7 +1023,7 @@ impl Token {
         self.storage.store(&uid, obj)
     }
 
-    fn decrypt_value(&self, uid: &String, val: &Vec<u8>) -> KResult<Vec<u8>> {
+    fn decrypt_value(&self, uid: &String, val: &Vec<u8>) -> Result<Vec<u8>> {
         if let Some(ref kek) = self.kek {
             let mut params = self.encryption_params(
                 &val.as_slice()[..DEFAULT_IV_SIZE],
@@ -1075,7 +1058,7 @@ impl Token {
         &self,
         uid: &String,
         decrypt: bool,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let mut obj = self.storage.fetch_by_uid(uid)?;
         if decrypt && self.info.flags & CKF_RESTORE_KEY_NOT_NEEDED != 0 {
             let ats = self.object_factories.get_sensitive_attrs(&obj)?;
@@ -1093,7 +1076,7 @@ impl Token {
     pub fn get_object_by_handle(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
         let mut obj = match self.handles.get(o_handle) {
             Some(s) => {
@@ -1118,7 +1101,7 @@ impl Token {
         &mut self,
         s_handle: CK_SESSION_HANDLE,
         mut obj: Object,
-    ) -> KResult<CK_OBJECT_HANDLE> {
+    ) -> Result<CK_OBJECT_HANDLE> {
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
         let is_token = obj.is_token();
         if is_token {
@@ -1143,15 +1126,12 @@ impl Token {
         &mut self,
         s_handle: CK_SESSION_HANDLE,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<CK_OBJECT_HANDLE> {
+    ) -> Result<CK_OBJECT_HANDLE> {
         let object = self.object_factories.create(template)?;
         self.insert_object(s_handle, object)
     }
 
-    pub fn destroy_object(
-        &mut self,
-        o_handle: CK_OBJECT_HANDLE,
-    ) -> KResult<()> {
+    pub fn destroy_object(&mut self, o_handle: CK_OBJECT_HANDLE) -> Result<()> {
         match self.session_objects.get(&o_handle) {
             Some(obj) => {
                 if !obj.is_destroyable() {
@@ -1183,7 +1163,7 @@ impl Token {
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
         template: &mut [CK_ATTRIBUTE],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let is_logged = self.is_logged_in(KRY_UNSPEC);
         let obj = match self.handles.get(o_handle) {
             Some(uid) => {
@@ -1206,7 +1186,7 @@ impl Token {
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
         template: &mut [CK_ATTRIBUTE],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let uid = match self.handles.get(o_handle) {
             Some(u) => u,
             None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
@@ -1240,17 +1220,14 @@ impl Token {
     pub fn get_mech_info(
         &self,
         typ: CK_MECHANISM_TYPE,
-    ) -> KResult<&CK_MECHANISM_INFO> {
+    ) -> Result<&CK_MECHANISM_INFO> {
         match self.mechanisms.info(typ) {
             Some(m) => Ok(m),
             None => err_rv!(CKR_MECHANISM_INVALID),
         }
     }
 
-    pub fn get_object_size(
-        &self,
-        o_handle: CK_OBJECT_HANDLE,
-    ) -> KResult<usize> {
+    pub fn get_object_size(&self, o_handle: CK_OBJECT_HANDLE) -> Result<usize> {
         match self.handles.get(o_handle) {
             Some(s) => {
                 if let Some(o) = self.session_objects.get(&o_handle) {
@@ -1268,7 +1245,7 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         o_handle: CK_OBJECT_HANDLE,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<CK_OBJECT_HANDLE> {
+    ) -> Result<CK_OBJECT_HANDLE> {
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
         let obj: Cow<'_, Object> = match self.handles.get(o_handle) {
             Some(uid) => {
@@ -1290,7 +1267,7 @@ impl Token {
     pub fn search_objects(
         &mut self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+    ) -> Result<Vec<CK_OBJECT_HANDLE>> {
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
         let is_logged_in = self.is_logged_in(KRY_UNSPEC);
 

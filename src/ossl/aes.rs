@@ -42,7 +42,7 @@ impl AesCipher {
         }
     }
 
-    pub fn get_cipher(&self) -> KResult<&EvpCipher> {
+    pub fn get_cipher(&self) -> Result<&EvpCipher> {
         if let Some(ref ec) = self.cipher {
             Ok(ec)
         } else {
@@ -121,7 +121,7 @@ impl Drop for AesKey {
     }
 }
 
-fn object_to_raw_key(key: &Object) -> KResult<AesKey> {
+fn object_to_raw_key(key: &Object) -> Result<AesKey> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
     check_key_len(val.len())?;
     Ok(AesKey { raw: val.clone() })
@@ -200,7 +200,7 @@ impl AesOperation {
         mechs.add_mechanism(CKM_AES_KEY_GEN, new_mechanism(CKF_GENERATE));
     }
 
-    fn init_params(mech: &CK_MECHANISM) -> KResult<AesParams> {
+    fn init_params(mech: &CK_MECHANISM) -> Result<AesParams> {
         match mech.mechanism {
             CKM_AES_CCM => {
                 let params = cast_params!(mech, CK_CCM_PARAMS);
@@ -376,7 +376,7 @@ impl AesOperation {
     fn init_cipher(
         mech: CK_MECHANISM_TYPE,
         keylen: usize,
-    ) -> KResult<&'static EvpCipher> {
+    ) -> Result<&'static EvpCipher> {
         Ok(match mech {
             CKM_AES_CCM => match keylen {
                 16 => AES_128_CCM.get_cipher()?,
@@ -464,7 +464,7 @@ impl AesOperation {
         })
     }
 
-    fn encrypt_initialize(&mut self) -> KResult<()> {
+    fn encrypt_initialize(&mut self) -> Result<()> {
         let evpcipher = match Self::init_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
@@ -634,7 +634,7 @@ impl AesOperation {
         Ok(())
     }
 
-    fn decrypt_initialize(&mut self) -> KResult<()> {
+    fn decrypt_initialize(&mut self) -> Result<()> {
         let evpcipher = match Self::init_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
@@ -802,7 +802,7 @@ impl AesOperation {
         Ok(())
     }
 
-    fn encrypt_new(mech: &CK_MECHANISM, key: &Object) -> KResult<AesOperation> {
+    fn encrypt_new(mech: &CK_MECHANISM, key: &Object) -> Result<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
             key: object_to_raw_key(key)?,
@@ -815,7 +815,7 @@ impl AesOperation {
         })
     }
 
-    fn decrypt_new(mech: &CK_MECHANISM, key: &Object) -> KResult<AesOperation> {
+    fn decrypt_new(mech: &CK_MECHANISM, key: &Object) -> Result<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
             key: object_to_raw_key(key)?,
@@ -834,7 +834,7 @@ impl AesOperation {
         mut keydata: Vec<u8>,
         output: CK_BYTE_PTR,
         output_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let mut op = match Self::encrypt_new(mech, wrapping_key) {
             Ok(o) => o,
             Err(e) => {
@@ -869,7 +869,7 @@ impl AesOperation {
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         data: &[u8],
-    ) -> KResult<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         let mut op = Self::decrypt_new(mech, wrapping_key)?;
         let mut result = vec![0u8; data.len()];
         let mut len = result.len() as CK_ULONG;
@@ -891,7 +891,7 @@ impl Encryption for AesOperation {
         plain: &[u8],
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -918,7 +918,7 @@ impl Encryption for AesOperation {
         plain: &[u8],
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if cipher_len.is_null() {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
@@ -1044,7 +1044,7 @@ impl Encryption for AesOperation {
         &mut self,
         cipher: CK_BYTE_PTR,
         cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -1204,7 +1204,7 @@ impl Encryption for AesOperation {
         Ok(())
     }
 
-    fn encryption_len(&self, data_len: CK_ULONG) -> KResult<usize> {
+    fn encryption_len(&self, data_len: CK_ULONG) -> Result<usize> {
         let len: usize = match self.mech {
             CKM_AES_CCM => self.params.datalen + self.params.taglen,
             CKM_AES_GCM => data_len as usize + self.params.taglen,
@@ -1242,7 +1242,7 @@ impl Decryption for AesOperation {
         cipher: &[u8],
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -1278,7 +1278,7 @@ impl Decryption for AesOperation {
         cipher: &[u8],
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if plain_len.is_null() {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
@@ -1518,7 +1518,7 @@ impl Decryption for AesOperation {
         &mut self,
         plain: CK_BYTE_PTR,
         plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -1679,7 +1679,7 @@ impl Decryption for AesOperation {
         Ok(())
     }
 
-    fn decryption_len(&self, data_len: CK_ULONG) -> KResult<usize> {
+    fn decryption_len(&self, data_len: CK_ULONG) -> Result<usize> {
         Ok(match self.mech {
             CKM_AES_CCM => self.params.datalen,
             CKM_AES_GCM => {
@@ -1730,7 +1730,7 @@ impl AesCmacOperation {
         }
     }
 
-    fn init(mech: &CK_MECHANISM, key: &Object) -> KResult<AesCmacOperation> {
+    fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesCmacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_CMAC_GENERAL => {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
@@ -1782,14 +1782,14 @@ impl AesCmacOperation {
         })
     }
 
-    fn begin(&mut self) -> KResult<()> {
+    fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         Ok(())
     }
 
-    fn update(&mut self, data: &[u8]) -> KResult<()> {
+    fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -1805,7 +1805,7 @@ impl AesCmacOperation {
         Ok(())
     }
 
-    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+    fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -1843,7 +1843,7 @@ impl MechOperation for AesCmacOperation {
 }
 
 impl Mac for AesCmacOperation {
-    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> KResult<()> {
+    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> Result<()> {
         self.begin()?;
         if data.len() > 0 {
             self.update(data)?;
@@ -1851,21 +1851,21 @@ impl Mac for AesCmacOperation {
         self.finalize(mac)
     }
 
-    fn mac_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn mac_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn mac_final(&mut self, mac: &mut [u8]) -> KResult<()> {
+    fn mac_final(&mut self, mac: &mut [u8]) -> Result<()> {
         self.finalize(mac)
     }
 
-    fn mac_len(&self) -> KResult<usize> {
+    fn mac_len(&self) -> Result<usize> {
         Ok(self.maclen)
     }
 }
 
 impl Sign for AesCmacOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         self.begin()?;
         if data.len() > 0 {
             self.update(data)?;
@@ -1873,21 +1873,21 @@ impl Sign for AesCmacOperation {
         self.finalize(signature)
     }
 
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         self.finalize(signature)
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.maclen)
     }
 }
 
 impl Verify for AesCmacOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
         if data.len() > 0 {
             self.update(data)?;
@@ -1895,11 +1895,11 @@ impl Verify for AesCmacOperation {
         self.verify_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         let mut verify: Vec<u8> = vec![0; self.maclen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
@@ -1908,7 +1908,7 @@ impl Verify for AesCmacOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.maclen)
     }
 }
