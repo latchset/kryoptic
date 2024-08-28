@@ -29,7 +29,7 @@ mod slot;
 mod storage;
 mod token;
 
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::Operation;
 use rng::RNG;
@@ -63,20 +63,11 @@ mod tlskdf;
 mod kasn1;
 mod misc;
 
-macro_rules! err_to_rv {
-    ($err:expr) => {
-        match $err {
-            KError::RvError(e) => e.rv,
-            _ => CKR_GENERAL_ERROR,
-        }
-    };
-}
-
 macro_rules! ret_to_rv {
     ($ret:expr) => {
         match $ret {
             Ok(()) => CKR_OK,
-            Err(e) => err_to_rv!(e),
+            Err(e) => e.rv(),
         }
     };
 }
@@ -85,7 +76,7 @@ macro_rules! res_or_ret {
     ($ret:expr) => {
         match $ret {
             Ok(x) => x,
-            Err(e) => return err_to_rv!(e),
+            Err(e) => return e.rv(),
         }
     };
 }
@@ -101,7 +92,7 @@ macro_rules! ok_or_ret {
 
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
-pub fn get_random_data(data: &mut [u8]) -> KResult<()> {
+pub fn get_random_data(data: &mut [u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().generate_random(data))
 }
 
@@ -143,7 +134,7 @@ impl State {
         self.next_handle != 0
     }
 
-    fn get_slot(&self, slot_id: CK_SLOT_ID) -> KResult<&Slot> {
+    fn get_slot(&self, slot_id: CK_SLOT_ID) -> Result<&Slot> {
         if !self.is_initialized() {
             return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED);
         }
@@ -153,7 +144,7 @@ impl State {
         }
     }
 
-    fn get_slot_mut(&mut self, slot_id: CK_SLOT_ID) -> KResult<&mut Slot> {
+    fn get_slot_mut(&mut self, slot_id: CK_SLOT_ID) -> Result<&mut Slot> {
         if !self.is_initialized() {
             return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED);
         }
@@ -183,7 +174,7 @@ impl State {
     fn get_session(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<RwLockReadGuard<'_, Session>> {
+    ) -> Result<RwLockReadGuard<'_, Session>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
             None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
@@ -194,7 +185,7 @@ impl State {
     fn get_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<RwLockWriteGuard<'_, Session>> {
+    ) -> Result<RwLockWriteGuard<'_, Session>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
             None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
@@ -207,7 +198,7 @@ impl State {
         slot_id: CK_SLOT_ID,
         user_type: CK_USER_TYPE,
         flags: CK_FLAGS,
-    ) -> KResult<CK_SESSION_HANDLE> {
+    ) -> Result<CK_SESSION_HANDLE> {
         let handle = self.next_handle;
         self.get_slot_mut(slot_id)?
             .add_session(handle, Session::new(slot_id, user_type, flags)?);
@@ -216,11 +207,11 @@ impl State {
         Ok(handle)
     }
 
-    fn has_sessions(&self, slot_id: CK_SLOT_ID) -> KResult<bool> {
+    fn has_sessions(&self, slot_id: CK_SLOT_ID) -> Result<bool> {
         Ok(self.get_slot(slot_id)?.has_sessions())
     }
 
-    fn has_ro_sessions(&self, slot_id: CK_SLOT_ID) -> KResult<bool> {
+    fn has_ro_sessions(&self, slot_id: CK_SLOT_ID) -> Result<bool> {
         Ok(self.get_slot(slot_id)?.has_ro_sessions())
     }
 
@@ -228,19 +219,16 @@ impl State {
         &self,
         slot_id: CK_SLOT_ID,
         user_type: CK_USER_TYPE,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         self.get_slot(slot_id)?.change_session_states(user_type)
     }
 
-    pub fn invalidate_session_states(
-        &self,
-        slot_id: CK_SLOT_ID,
-    ) -> KResult<()> {
+    pub fn invalidate_session_states(&self, slot_id: CK_SLOT_ID) -> Result<()> {
         self.get_slot(slot_id)?.invalidate_session_states();
         Ok(())
     }
 
-    fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> KResult<()> {
+    fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> Result<()> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
             None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
@@ -253,7 +241,7 @@ impl State {
     fn drop_all_sessions_slot(
         &mut self,
         slot_id: CK_SLOT_ID,
-    ) -> KResult<Vec<CK_SESSION_HANDLE>> {
+    ) -> Result<Vec<CK_SESSION_HANDLE>> {
         self.sessionmap.retain(|_key, val| *val != slot_id);
         Ok(self.get_slot_mut(slot_id)?.drop_all_sessions())
     }
@@ -261,28 +249,28 @@ impl State {
     fn get_token_from_slot(
         &self,
         slot_id: CK_SLOT_ID,
-    ) -> KResult<RwLockReadGuard<'_, Token>> {
+    ) -> Result<RwLockReadGuard<'_, Token>> {
         self.get_slot(slot_id)?.get_token()
     }
 
     fn get_token_from_slot_mut(
         &self,
         slot_id: CK_SLOT_ID,
-    ) -> KResult<RwLockWriteGuard<'_, Token>> {
+    ) -> Result<RwLockWriteGuard<'_, Token>> {
         self.get_slot(slot_id)?.get_token_mut(false)
     }
 
     fn get_token_from_slot_mut_nochecks(
         &self,
         slot_id: CK_SLOT_ID,
-    ) -> KResult<RwLockWriteGuard<'_, Token>> {
+    ) -> Result<RwLockWriteGuard<'_, Token>> {
         self.get_slot(slot_id)?.get_token_mut(true)
     }
 
     fn get_token_from_session(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<RwLockReadGuard<'_, Token>> {
+    ) -> Result<RwLockReadGuard<'_, Token>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
             None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
@@ -293,7 +281,7 @@ impl State {
     fn get_token_from_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<RwLockWriteGuard<'_, Token>> {
+    ) -> Result<RwLockWriteGuard<'_, Token>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
             None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
@@ -364,7 +352,7 @@ pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
 
 pub const DEFAULT_CONF_NAME: &str = "token.sql";
 
-fn find_conf() -> KResult<String> {
+fn find_conf() -> Result<String> {
     /* First check for our own env var,
      * this has the highest precedence */
     match env::var("KRYOPTIC_CONF") {
@@ -456,13 +444,10 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
                 return CKR_ARGUMENTS_BAD;
             }
         }
-        Err(e) => match e {
-            KError::RvError(cke) => match cke.rv {
-                CKR_SLOT_ID_INVALID => (),
-                CKR_CRYPTOKI_NOT_INITIALIZED => (),
-                _ => return cke.rv,
-            },
-            _ => return CKR_GENERAL_ERROR,
+        Err(e) => match e.rv() {
+            CKR_SLOT_ID_INVALID => (),
+            CKR_CRYPTOKI_NOT_INITIALIZED => (),
+            x => return x,
         },
     }
 
@@ -671,7 +656,7 @@ extern "C" fn fn_login(
     if user_type == CKU_CONTEXT_SPECIFIC {
         let session = res_or_ret!(rstate.get_session_mut(s_handle));
         match session.get_operation() {
-            Err(e) => match err_to_rv!(e) {
+            Err(e) => match e.rv() {
                 CKR_USER_NOT_LOGGED_IN => (),
                 _ => return CKR_OPERATION_NOT_INITIALIZED,
             },
@@ -701,7 +686,7 @@ extern "C" fn fn_login(
                 Err(e) => {
                     token.logout();
                     let _ = rstate.invalidate_session_states(slot_id);
-                    err_to_rv!(e)
+                    e.rv()
                 }
             },
             err => err,
@@ -752,7 +737,7 @@ extern "C" fn fn_create_object(
 
     let oh = match token.create_object(s_handle, tmpl) {
         Ok(h) => h,
-        Err(e) => return err_to_rv!(e),
+        Err(e) => return e.rv(),
     };
 
     unsafe {
@@ -1657,7 +1642,7 @@ extern "C" fn fn_generate_key(
     #[cfg(not(feature = "fips"))]
     let obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
         Ok(o) => o,
-        Err(e) => return err_to_rv!(e),
+        Err(e) => return e.rv(),
     };
     #[cfg(feature = "fips")]
     let obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
@@ -1674,7 +1659,7 @@ extern "C" fn fn_generate_key(
             ));
             key
         }
-        Err(e) => return err_to_rv!(e),
+        Err(e) => return e.rv(),
     };
 
     let kh = res_or_ret!(token.insert_object(s_handle, obj));
@@ -1737,11 +1722,11 @@ extern "C" fn fn_generate_key_pair(
                 }
                 Err(e) => {
                     let _ = token.destroy_object(pubh);
-                    err_to_rv!(e)
+                    e.rv()
                 }
             }
         }
-        Err(e) => err_to_rv!(e),
+        Err(e) => e.rv(),
     }
 }
 
@@ -1840,7 +1825,7 @@ extern "C" fn fn_unwrap_key(
             }
             CKR_OK
         }
-        Err(e) => err_to_rv!(e),
+        Err(e) => e.rv(),
     }
 }
 
@@ -1896,7 +1881,7 @@ extern "C" fn fn_derive_key(
             }
             res_or_ret!(operation.receives_objects(send.as_slice()));
         }
-        Err(e) => match err_to_rv!(e) {
+        Err(e) => match e.rv() {
             CKR_OK => (),
             err => return err,
         },
@@ -1973,7 +1958,7 @@ extern "C" fn fn_derive_key(
                 while result.len() > 0 {
                     match token.insert_object(s_handle, result.remove(0)) {
                         Ok(h) => ah.push(h),
-                        Err(e) => rv = err_to_rv!(e),
+                        Err(e) => rv = e.rv(),
                     }
                     if rv != CKR_OK {
                         break;
@@ -2015,7 +2000,7 @@ extern "C" fn fn_derive_key(
                         for h in ah {
                             let _ = token.destroy_object(h);
                         }
-                        return err_to_rv!(e);
+                        return e.rv();
                     }
                 }
             }
@@ -2193,7 +2178,7 @@ extern "C" fn fn_get_slot_info(
     let rstate = global_rlock!(STATE);
     let slot = match rstate.get_slot(slot_id) {
         Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
+        Err(e) => return e.rv(),
     };
     let slotinfo = slot.get_slot_info();
     unsafe {
@@ -2209,7 +2194,7 @@ extern "C" fn fn_get_token_info(
     let rstate = global_rlock!(STATE);
     let slot = match rstate.get_slot(slot_id) {
         Ok(s) => s,
-        Err(e) => return err_to_rv!(e),
+        Err(e) => return e.rv(),
     };
     let tokinfo = slot.get_token_info();
     unsafe {

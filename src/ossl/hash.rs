@@ -13,7 +13,7 @@ pub struct HashState {
 }
 
 impl HashState {
-    pub fn new(alg: &[u8]) -> KResult<HashState> {
+    pub fn new(alg: &[u8]) -> Result<HashState> {
         Ok(HashState {
             md: EvpMd::new(alg.as_ptr() as *const c_char)?,
             ctx: EvpMdCtx::new()?,
@@ -25,7 +25,7 @@ unsafe impl Send for HashState {}
 unsafe impl Sync for HashState {}
 
 impl HashOperation {
-    pub fn new(mech: CK_MECHANISM_TYPE) -> KResult<HashOperation> {
+    pub fn new(mech: CK_MECHANISM_TYPE) -> Result<HashOperation> {
         let alg: &[u8] = match mech {
             CKM_SHA_1 => OSSL_DIGEST_NAME_SHA1,
             CKM_SHA224 => OSSL_DIGEST_NAME_SHA2_224,
@@ -44,7 +44,7 @@ impl HashOperation {
             in_use: false,
         })
     }
-    fn digest_init(&mut self) -> KResult<()> {
+    fn digest_init(&mut self) -> Result<()> {
         unsafe {
             match EVP_DigestInit(
                 self.state.ctx.as_mut_ptr(),
@@ -61,7 +61,7 @@ impl MechOperation for HashOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
-    fn reset(&mut self) -> KResult<()> {
+    fn reset(&mut self) -> Result<()> {
         self.finalized = false;
         self.in_use = false;
         Ok(())
@@ -69,7 +69,7 @@ impl MechOperation for HashOperation {
 }
 
 impl Digest for HashOperation {
-    fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> KResult<()> {
+    fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> Result<()> {
         if self.in_use || self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -95,7 +95,7 @@ impl Digest for HashOperation {
         Ok(())
     }
 
-    fn digest_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn digest_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -119,7 +119,7 @@ impl Digest for HashOperation {
         }
     }
 
-    fn digest_final(&mut self, digest: &mut [u8]) -> KResult<()> {
+    fn digest_final(&mut self, digest: &mut [u8]) -> Result<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -144,7 +144,7 @@ impl Digest for HashOperation {
         Ok(())
     }
 
-    fn digest_len(&self) -> KResult<usize> {
+    fn digest_len(&self) -> Result<usize> {
         Ok(unsafe { EVP_MD_get_size(self.state.md.as_ptr()) as usize })
     }
 }

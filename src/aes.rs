@@ -8,7 +8,7 @@ use super::object;
 use super::{attr_element, cast_params, err_rv};
 
 use attribute::{from_bool, from_bytes, from_ulong};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use object::{
     CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
@@ -26,7 +26,7 @@ pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
 pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
 pub const AES_BLOCK_SIZE: usize = 16;
 
-fn check_key_len(len: usize) -> KResult<()> {
+fn check_key_len(len: usize) -> Result<()> {
     match len {
         16 | 24 | 32 => Ok(()),
         _ => err_rv!(CKR_KEY_SIZE_RANGE),
@@ -68,7 +68,7 @@ impl AesKeyFactory {
 }
 
 impl ObjectFactory for AesKeyFactory {
-    fn create(&self, template: &[CK_ATTRIBUTE]) -> KResult<Object> {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
@@ -83,7 +83,7 @@ impl ObjectFactory for AesKeyFactory {
         &self.attributes
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> KResult<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         SecretKeyFactory::export_for_wrapping(self, key)
     }
 
@@ -91,7 +91,7 @@ impl ObjectFactory for AesKeyFactory {
         &self,
         mut data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         /* AES keys can only be 16, 24, 32 bytes long,
          * ensure we allow only these sizes */
         match template.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
@@ -121,7 +121,7 @@ impl ObjectFactory for AesKeyFactory {
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         let obj = self.internal_object_derive(template, origin)?;
 
         let key_len = self.get_key_len(&obj);
@@ -133,7 +133,7 @@ impl ObjectFactory for AesKeyFactory {
         Ok(obj)
     }
 
-    fn as_secret_key_factory(&self) -> KResult<&dyn SecretKeyFactory> {
+    fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Ok(self)
     }
 }
@@ -144,11 +144,11 @@ impl SecretKeyFactory for AesKeyFactory {
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         ObjectFactory::default_object_unwrap(self, template)
     }
 
-    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> KResult<()> {
+    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
         let keylen = key.len();
         check_key_len(keylen)?;
         obj.set_attr(from_bytes(CKA_VALUE, key))?;
@@ -156,7 +156,7 @@ impl SecretKeyFactory for AesKeyFactory {
         Ok(())
     }
 
-    fn recommend_key_size(&self, max: usize) -> KResult<usize> {
+    fn recommend_key_size(&self, max: usize) -> Result<usize> {
         if max >= MAX_AES_SIZE_BYTES {
             Ok(MAX_AES_SIZE_BYTES)
         } else if max > MID_AES_SIZE_BYTES {
@@ -186,7 +186,7 @@ impl Mechanism for AesMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Encryption>> {
+    ) -> Result<Box<dyn Encryption>> {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -201,7 +201,7 @@ impl Mechanism for AesMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Decryption>> {
+    ) -> Result<Box<dyn Decryption>> {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -218,7 +218,7 @@ impl Mechanism for AesMechanism {
         template: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         if mech.mechanism != CKM_AES_KEY_GEN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -248,7 +248,7 @@ impl Mechanism for AesMechanism {
         data: CK_BYTE_PTR,
         data_len: CK_ULONG_PTR,
         key_template: &Box<dyn ObjectFactory>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -269,7 +269,7 @@ impl Mechanism for AesMechanism {
         data: &[u8],
         template: &[CK_ATTRIBUTE],
         key_template: &Box<dyn ObjectFactory>,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -277,7 +277,7 @@ impl Mechanism for AesMechanism {
         key_template.import_from_wrapped(keydata, template)
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -301,7 +301,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
         op_type: CK_FLAGS,
-    ) -> KResult<Box<dyn Mac>> {
+    ) -> Result<Box<dyn Mac>> {
         /* the mechanism advertises only SIGN/VERIFY to the callers
          * DERIVE is a mediated operation so it is not advertised
          * and we do not check it against self.info nor the key */
@@ -320,7 +320,7 @@ impl Mechanism for AesMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -344,7 +344,7 @@ impl Mechanism for AesMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -403,7 +403,7 @@ impl AesKDFOperation<'_> {
 
     fn aes_ecb_new<'a>(
         params: CK_KEY_DERIVATION_STRING_DATA,
-    ) -> KResult<AesKDFOperation<'a>> {
+    ) -> Result<AesKDFOperation<'a>> {
         if params.pData == std::ptr::null_mut()
             || params.ulLen == 0
             || params.ulLen % 16 != 0
@@ -422,7 +422,7 @@ impl AesKDFOperation<'_> {
 
     fn aes_cbc_new<'a>(
         params: CK_AES_CBC_ENCRYPT_DATA_PARAMS,
-    ) -> KResult<AesKDFOperation<'a>> {
+    ) -> Result<AesKDFOperation<'a>> {
         if params.pData == std::ptr::null_mut()
             || params.length == 0
             || params.length % 16 != 0
@@ -453,7 +453,7 @@ impl Derive for AesKDFOperation<'_> {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

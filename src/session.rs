@@ -9,7 +9,7 @@ use super::mechanism;
 use super::token;
 
 use super::err_rv;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::{Operation, SearchOperation};
 use token::Token;
@@ -24,7 +24,7 @@ pub struct SessionSearch {
 }
 
 impl SearchOperation for SessionSearch {
-    fn results(&mut self, max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+    fn results(&mut self, max: usize) -> Result<Vec<CK_OBJECT_HANDLE>> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -63,7 +63,7 @@ impl Session {
         slotid: CK_SLOT_ID,
         user_type: CK_USER_TYPE,
         flags: CK_FLAGS,
-    ) -> KResult<Session> {
+    ) -> Result<Session> {
         if flags & CKF_SERIAL_SESSION != CKF_SERIAL_SESSION {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
@@ -197,7 +197,7 @@ impl Session {
         &mut self,
         token: &mut Token,
         template: &[CK_ATTRIBUTE],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         if !self.operation.finalized() {
             return err_rv!(CKR_OPERATION_ACTIVE);
         }
@@ -214,7 +214,7 @@ impl Session {
         &self.operation
     }
 
-    pub fn get_operation(&self) -> KResult<&Operation> {
+    pub fn get_operation(&self) -> Result<&Operation> {
         match self.login_status {
             OpLoginStatus::NotInitialized => err_rv!(CKR_GENERAL_ERROR),
             OpLoginStatus::NotRequired => Ok(&self.operation),
@@ -223,7 +223,7 @@ impl Session {
         }
     }
 
-    pub fn get_operation_mut(&mut self) -> KResult<&mut Operation> {
+    pub fn get_operation_mut(&mut self) -> Result<&mut Operation> {
         match self.login_status {
             OpLoginStatus::NotInitialized => err_rv!(CKR_GENERAL_ERROR),
             OpLoginStatus::NotRequired => Ok(&mut self.operation),

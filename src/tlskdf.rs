@@ -11,7 +11,7 @@ use super::misc;
 use super::object;
 
 use attribute::CkAttrs;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
@@ -70,7 +70,7 @@ impl TLSPRF {
         key: &Object,
         mech: &Box<dyn Mechanism>,
         prf: CK_MECHANISM_TYPE,
-    ) -> KResult<TLSPRF> {
+    ) -> Result<TLSPRF> {
         Ok(TLSPRF {
             op: mech.mac_new(
                 &CK_MECHANISM {
@@ -84,7 +84,7 @@ impl TLSPRF {
         })
     }
 
-    fn finish(&mut self, seed: &Vec<u8>, reqlen: usize) -> KResult<Vec<u8>> {
+    fn finish(&mut self, seed: &Vec<u8>, reqlen: usize) -> Result<Vec<u8>> {
         let maclen = self.op.mac_len()?;
 
         let mut ax = vec![0u8; maclen];
@@ -123,7 +123,7 @@ pub fn test_tlsprf(
     prf: CK_MECHANISM_TYPE,
     seed: &Vec<u8>,
     reqlen: usize,
-) -> KResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let mut tlsprf = TLSPRF::init(key, mech, prf)?;
     tlsprf.finish(seed, reqlen)
 }
@@ -213,7 +213,7 @@ impl Mechanism for TLSPRFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -233,7 +233,7 @@ impl Mechanism for TLSPRFMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &object::Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -248,7 +248,7 @@ impl Mechanism for TLSPRFMechanism {
         &self,
         mech: &CK_MECHANISM,
         key: &object::Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -281,7 +281,7 @@ unsafe impl Send for TLSKDFOperation {}
 unsafe impl Sync for TLSKDFOperation {}
 
 impl TLSKDFOperation {
-    fn new(mech: &CK_MECHANISM) -> KResult<TLSKDFOperation> {
+    fn new(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         match mech.mechanism {
             CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
             CKM_TLS12_KEY_AND_MAC_DERIVE => Self::new_tls12_keymac_derive(mech),
@@ -292,7 +292,7 @@ impl TLSKDFOperation {
         }
     }
 
-    fn new_tls12_mk_derive(mech: &CK_MECHANISM) -> KResult<TLSKDFOperation> {
+    fn new_tls12_mk_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
 
         let clirand = bytes_to_vec!(
@@ -337,9 +337,7 @@ impl TLSKDFOperation {
         })
     }
 
-    fn new_tls12_keymac_derive(
-        mech: &CK_MECHANISM,
-    ) -> KResult<TLSKDFOperation> {
+    fn new_tls12_keymac_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS12_KEY_MAT_PARAMS);
 
         let maclen = params.ulMacSizeInBits / 8;
@@ -400,7 +398,7 @@ impl TLSKDFOperation {
 
     fn new_tls_generic_key_derive(
         mech: &CK_MECHANISM,
-    ) -> KResult<TLSKDFOperation> {
+    ) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS_KDF_PARAMS);
 
         if params.ulLabelLength == 0 {
@@ -447,7 +445,7 @@ impl TLSKDFOperation {
         })
     }
 
-    fn verify_key(&self, key: &Object) -> KResult<()> {
+    fn verify_key(&self, key: &Object) -> Result<()> {
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
         match key.get_attr(CKA_VALUE_LEN) {
             Some(a) => match a.to_ulong() {
@@ -466,7 +464,7 @@ impl TLSKDFOperation {
     fn verify_mk_template<'a>(
         &self,
         template: &'a [CK_ATTRIBUTE],
-    ) -> KResult<CkAttrs<'a>> {
+    ) -> Result<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
         let allowed = unsafe {
             std::mem::transmute::<&[CK_ULONG; 4], &[u8; 4 * misc::CK_ULONG_SIZE]>(
@@ -540,7 +538,7 @@ impl TLSKDFOperation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         self.verify_key(key)?;
         let tmpl = self.verify_mk_template(template)?;
         let factory =
@@ -583,7 +581,7 @@ impl TLSKDFOperation {
         &'a self,
         key: &Object,
         template: &'a [CK_ATTRIBUTE],
-    ) -> KResult<CkAttrs<'a>> {
+    ) -> Result<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
         let is_sensitive = key.is_sensitive();
         let is_extractable = key.is_extractable();
@@ -637,7 +635,7 @@ impl TLSKDFOperation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         self.verify_key(key)?;
         let key_tmpl = self.verify_key_expansion_template(key, template)?;
 
@@ -729,7 +727,7 @@ impl TLSKDFOperation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         self.verify_key(key)?;
         let mut tmpl = CkAttrs::from(template);
         tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
@@ -766,7 +764,7 @@ impl Derive for TLSKDFOperation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -806,7 +804,7 @@ struct TLSMACOperation {
 }
 
 impl TLSMACOperation {
-    fn new(mech: &CK_MECHANISM, key: &Object) -> KResult<TLSMACOperation> {
+    fn new(mech: &CK_MECHANISM, key: &Object) -> Result<TLSMACOperation> {
         match mech.mechanism {
             CKM_TLS_MAC | CKM_TLS12_MAC => (),
             _ => return err_rv!(CKR_MECHANISM_INVALID),
@@ -834,13 +832,13 @@ impl TLSMACOperation {
         })
     }
 
-    fn begin(&mut self) -> KResult<()> {
+    fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         Ok(())
     }
-    fn update(&mut self, data: &[u8]) -> KResult<()> {
+    fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -848,7 +846,7 @@ impl TLSMACOperation {
         self.seed.extend_from_slice(data);
         Ok(())
     }
-    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+    fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -873,37 +871,37 @@ impl MechOperation for TLSMACOperation {
 }
 
 impl Sign for TLSMACOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.finalize(signature)
     }
 
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         self.finalize(signature)
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.outputlen)
     }
 }
 
 impl Verify for TLSMACOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
         self.verify_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         self.update(data)
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         let mut verify: Vec<u8> = vec![0; self.outputlen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
@@ -912,7 +910,7 @@ impl Verify for TLSMACOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.outputlen)
     }
 }

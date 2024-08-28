@@ -6,7 +6,7 @@ use core::ffi::c_uint;
 use fips::*;
 
 impl PBKDF2 {
-    fn derive(&self, _: &Mechanisms, len: usize) -> KResult<Vec<u8>> {
+    fn derive(&self, _: &Mechanisms, len: usize) -> Result<Vec<u8>> {
         let mut params = OsslParam::with_capacity(4);
         params.zeroize = true;
         params.add_octet_string(

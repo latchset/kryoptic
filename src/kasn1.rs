@@ -7,7 +7,7 @@ use super::error;
 use super::interface;
 
 use asn1;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use std::borrow::Cow;
 
@@ -18,7 +18,7 @@ pub struct DerEncBigUint<'a> {
 }
 
 impl<'a> DerEncBigUint<'a> {
-    pub fn new(data: &'a [u8]) -> KResult<Self> {
+    pub fn new(data: &'a [u8]) -> Result<Self> {
         let mut de = DerEncBigUint {
             data: Cow::from(data),
         };
@@ -98,7 +98,7 @@ pub struct DerEncOctetString<'a> {
 }
 
 impl<'a> DerEncOctetString<'a> {
-    pub fn new(data: &'a [u8]) -> KResult<Self> {
+    pub fn new(data: &'a [u8]) -> Result<Self> {
         Ok(DerEncOctetString {
             data: Cow::from(data),
         })
@@ -159,7 +159,7 @@ impl PrivateKeyInfo<'_> {
     pub fn new<'a>(
         private_key_asn1: &'a [u8],
         oid: asn1::ObjectIdentifier,
-    ) -> KResult<PrivateKeyInfo<'a>> {
+    ) -> Result<PrivateKeyInfo<'a>> {
         Ok(PrivateKeyInfo {
             version: 0,
             private_key_algorithm: oid,

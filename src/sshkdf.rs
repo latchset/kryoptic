@@ -11,7 +11,7 @@ use super::misc;
 use super::object;
 
 use attribute::from_bytes;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
@@ -37,7 +37,7 @@ impl Mechanism for SSHKDFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -77,7 +77,7 @@ impl SSHKDFOperation {
         );
     }
 
-    fn new(mech: &CK_MECHANISM) -> KResult<SSHKDFOperation> {
+    fn new(mech: &CK_MECHANISM) -> Result<SSHKDFOperation> {
         let params = cast_params!(mech, KR_SSHKDF_PARAMS);
 
         if !hash::is_valid_hash(params.prfHashMechanism) {
@@ -128,7 +128,7 @@ impl Derive for SSHKDFOperation {
         template: &[CK_ATTRIBUTE],
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

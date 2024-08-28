@@ -28,25 +28,16 @@ macro_rules! ret_or_panic {
 
 macro_rules! err_or_panic {
     ($ret:expr, $err:expr) => {
-        if !match $ret {
-            Ok(_) => false,
-            Err(e) => match e {
-                KError::RvError(r) => {
-                    if r.rv != $err {
-                        panic!(
-                            "Should have returned error {}, but got {}",
-                            $err, r.rv
-                        );
-                    }
-                    true
-                }
-                _ => false,
-            },
-        } {
-            panic!(
-                "Should have returned error {}, but got other error kind",
-                $err
-            );
+        if let Err(e) = $ret {
+            if e.rv() != $err {
+                panic!(
+                    "Should have returned error {}, but got {}",
+                    $err,
+                    e.rv()
+                );
+            }
+        } else {
+            panic!("Should have returned error {}, but got {:?}", $err, $ret);
         }
     };
 }
@@ -64,7 +55,7 @@ pub fn get_test_data(
     session: CK_SESSION_HANDLE,
     name: &str,
     data: &str,
-) -> Result<Vec<u8>, CK_RV> {
+) -> std::result::Result<Vec<u8>, CK_RV> {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let mut template = vec![
         make_attribute!(
@@ -129,7 +120,7 @@ pub fn decrypt(
     key: CK_OBJECT_HANDLE,
     ciphertext: &[u8],
     mechanism: &CK_MECHANISM,
-) -> KResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let ret = fn_decrypt_init(
         session,
         mechanism as *const _ as CK_MECHANISM_PTR,
@@ -172,7 +163,7 @@ pub fn encrypt(
     key: CK_OBJECT_HANDLE,
     plaintext: &[u8],
     mechanism: &CK_MECHANISM,
-) -> KResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let ret = fn_encrypt_init(
         session,
         mechanism as *const _ as CK_MECHANISM_PTR,
@@ -215,7 +206,7 @@ pub fn get_test_key_handle(
     session: CK_SESSION_HANDLE,
     name: &str,
     class: CK_ULONG,
-) -> KResult<CK_OBJECT_HANDLE> {
+) -> Result<CK_OBJECT_HANDLE> {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let mut classbuf = class;
     let mut template = vec![
@@ -273,7 +264,7 @@ pub fn sig_gen(
     key: CK_OBJECT_HANDLE,
     data: &[u8],
     mechanism: &CK_MECHANISM,
-) -> KResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let ret =
         fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
     if ret != CKR_OK {
@@ -314,7 +305,7 @@ pub fn sig_gen_multipart(
     key: CK_OBJECT_HANDLE,
     data: &Vec<u8>,
     mechanism: &CK_MECHANISM,
-) -> KResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let ret =
         fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
     if ret != CKR_OK {
@@ -425,7 +416,7 @@ pub fn import_object(
     ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
     bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
     bools: &[(CK_ATTRIBUTE_TYPE, bool)],
-) -> KResult<CK_OBJECT_HANDLE> {
+) -> Result<CK_OBJECT_HANDLE> {
     let mut template = make_attr_template(ulongs, bytes, bools);
     template.push(make_attribute!(
         CKA_CLASS,
@@ -455,7 +446,7 @@ pub fn generate_key(
     ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
     bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
     bools: &[(CK_ATTRIBUTE_TYPE, bool)],
-) -> KResult<CK_OBJECT_HANDLE> {
+) -> Result<CK_OBJECT_HANDLE> {
     let class = CKO_SECRET_KEY;
     let mut template = make_attr_template(ulongs, bytes, bools);
     template.push(make_attribute!(
@@ -494,7 +485,7 @@ pub fn generate_key_pair(
     pri_ulongs: &[(CK_ATTRIBUTE_TYPE, CK_ULONG)],
     pri_bytes: &[(CK_ATTRIBUTE_TYPE, &[u8])],
     pri_bools: &[(CK_ATTRIBUTE_TYPE, bool)],
-) -> KResult<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
+) -> Result<(CK_OBJECT_HANDLE, CK_OBJECT_HANDLE)> {
     let pub_template = make_attr_template(pub_ulongs, pub_bytes, pub_bools);
     let pri_template = make_attr_template(pri_ulongs, pri_bytes, pri_bools);
 
@@ -630,7 +621,7 @@ pub fn extract_key_value(
     session: CK_SESSION_HANDLE,
     handle: CK_OBJECT_HANDLE,
     keysize: usize,
-) -> KResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let mut value = vec![0u8; keysize];
     let mut extract_template = make_ptrs_template(&[(
         CKA_VALUE,

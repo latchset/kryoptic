@@ -18,7 +18,7 @@ impl HMACOperation {
         hash: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
-    ) -> KResult<HMACOperation> {
+    ) -> Result<HMACOperation> {
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
@@ -48,14 +48,14 @@ impl HMACOperation {
         })
     }
 
-    fn begin(&mut self) -> KResult<()> {
+    fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         Ok(())
     }
 
-    fn update(&mut self, data: &[u8]) -> KResult<()> {
+    fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -71,7 +71,7 @@ impl HMACOperation {
         Ok(())
     }
 
-    fn finalize(&mut self, output: &mut [u8]) -> KResult<()> {
+    fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -106,7 +106,7 @@ impl HMACOperation {
         Ok(())
     }
 
-    fn reinit(&mut self) -> KResult<()> {
+    fn reinit(&mut self) -> Result<()> {
         if unsafe {
             EVP_MAC_init(
                 self.ctx.as_mut_ptr(),

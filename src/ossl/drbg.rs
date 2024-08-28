@@ -2,7 +2,7 @@ use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::*;
 use std::fmt::Debug;
@@ -28,7 +28,7 @@ impl Drop for HmacSha256Drbg {
 }
 
 impl HmacSha256Drbg {
-    pub fn new() -> KResult<HmacSha256Drbg> {
+    pub fn new() -> Result<HmacSha256Drbg> {
         unsafe {
             let rng_spec: &[u8; 10] = b"HMAC-DRBG\0";
             let rand = EVP_RAND_fetch(
@@ -56,7 +56,7 @@ impl DRBG for HmacSha256Drbg {
         _entropy: &[u8],
         _nonce: &[u8],
         pers: &[u8],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         unsafe {
             let rng_mac = b"HMAC\0";
             let rng_digest = b"SHA256\0";
@@ -89,7 +89,7 @@ impl DRBG for HmacSha256Drbg {
         self.initialized = true;
         Ok(())
     }
-    fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> KResult<()> {
+    fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> Result<()> {
         if !self.initialized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -108,7 +108,7 @@ impl DRBG for HmacSha256Drbg {
         }
         Ok(())
     }
-    fn generate(&mut self, addtl: &[u8], output: &mut [u8]) -> KResult<()> {
+    fn generate(&mut self, addtl: &[u8], output: &mut [u8]) -> Result<()> {
         if !self.initialized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -148,7 +148,7 @@ impl Drop for HmacSha512Drbg {
 }
 
 impl HmacSha512Drbg {
-    pub fn new() -> KResult<HmacSha512Drbg> {
+    pub fn new() -> Result<HmacSha512Drbg> {
         unsafe {
             let rng_spec = b"HMAC-DRBG\0";
             let rand = EVP_RAND_fetch(
@@ -176,7 +176,7 @@ impl DRBG for HmacSha512Drbg {
         _entropy: &[u8],
         _nonce: &[u8],
         pers: &[u8],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         unsafe {
             let rng_mac = b"HMAC\0";
             let rng_digest = b"SHA512\0";
@@ -209,7 +209,7 @@ impl DRBG for HmacSha512Drbg {
         self.initialized = true;
         Ok(())
     }
-    fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> KResult<()> {
+    fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> Result<()> {
         if !self.initialized {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -228,7 +228,7 @@ impl DRBG for HmacSha512Drbg {
         }
         Ok(())
     }
-    fn generate(&mut self, addtl: &[u8], output: &mut [u8]) -> KResult<()> {
+    fn generate(&mut self, addtl: &[u8], output: &mut [u8]) -> Result<()> {
         if !self.initialized {
             return err_rv!(CKR_GENERAL_ERROR);
         }

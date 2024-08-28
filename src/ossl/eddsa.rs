@@ -13,7 +13,7 @@ use super::{cast_params, some_or_err};
 use mechanism::*;
 
 // TODO could probably reuse the ECC one as its the same?
-pub fn eddsa_import(obj: &mut Object) -> KResult<()> {
+pub fn eddsa_import(obj: &mut Object) -> Result<()> {
     bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
     bytes_attr_not_empty!(obj; CKA_VALUE);
     Ok(())
@@ -60,7 +60,7 @@ struct EddsaOperation {
 static OSSL_ED25519: &[u8; 8] = b"ED25519\0";
 static OSSL_ED448: &[u8; 6] = b"ED448\0";
 
-fn get_ossl_name_from_obj(key: &Object) -> KResult<&'static [u8]> {
+fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
     match make_bits_from_ec_params(key) {
         Ok(BITS_ED25519) => Ok(OSSL_ED25519),
         Ok(BITS_ED448) => Ok(OSSL_ED448),
@@ -68,7 +68,7 @@ fn get_ossl_name_from_obj(key: &Object) -> KResult<&'static [u8]> {
     }
 }
 
-fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
+fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -84,7 +84,7 @@ fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
     Ok(bits)
 }
 
-fn make_output_length_from_obj(key: &Object) -> KResult<usize> {
+fn make_output_length_from_obj(key: &Object) -> Result<usize> {
     match make_bits_from_ec_params(key) {
         Ok(255) => Ok(64),
         Ok(448) => Ok(114),
@@ -92,7 +92,7 @@ fn make_output_length_from_obj(key: &Object) -> KResult<usize> {
     }
 }
 
-fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> KResult<EddsaParams> {
+fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> Result<EddsaParams> {
     if mech.mechanism != CKM_EDDSA {
         return err_rv!(CKR_MECHANISM_INVALID);
     }
@@ -125,7 +125,7 @@ fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> KResult<EddsaParams> {
 }
 
 /// Convert the PKCS #11 public key object to OpenSSL EVP_PKEY
-fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
+fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
     let ec_point = match key.get_attr_as_bytes(CKA_EC_POINT) {
         Ok(v) => v,
         Err(_) => return err_rv!(CKR_DEVICE_ERROR),
@@ -148,7 +148,7 @@ fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
 }
 
 /// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
-fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
+fn object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
     let priv_key = match key.get_attr_as_bytes(CKA_VALUE) {
         Ok(v) => v,
         Err(_) => return err_rv!(CKR_DEVICE_ERROR),
@@ -178,7 +178,7 @@ fn no_params() -> EddsaParams {
     }
 }
 
-fn is_448_curve(key: &Object) -> KResult<bool> {
+fn is_448_curve(key: &Object) -> Result<bool> {
     match make_bits_from_ec_params(key) {
         Ok(BITS_ED25519) => Ok(false),
         Ok(BITS_ED448) => Ok(true),
@@ -228,7 +228,7 @@ impl EddsaOperation {
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
-    ) -> KResult<EddsaOperation> {
+    ) -> Result<EddsaOperation> {
         let is_448 = is_448_curve(key)?;
         Ok(EddsaOperation {
             output_len: make_output_length_from_obj(key)?,
@@ -247,7 +247,7 @@ impl EddsaOperation {
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
-    ) -> KResult<EddsaOperation> {
+    ) -> Result<EddsaOperation> {
         let is_448 = is_448_curve(key)?;
         Ok(EddsaOperation {
             output_len: make_output_length_from_obj(key)?,
@@ -265,7 +265,7 @@ impl EddsaOperation {
     fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let evp_pkey = EvpPkey::generate(
             get_ossl_name_from_obj(pubkey)?.as_ptr() as *const i8,
             &OsslParam::empty(),
@@ -354,7 +354,7 @@ impl MechOperation for EddsaOperation {
 }
 
 impl Sign for EddsaOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -365,7 +365,7 @@ impl Sign for EddsaOperation {
         self.sign_final(signature)
     }
 
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -403,7 +403,7 @@ impl Sign for EddsaOperation {
         Ok(())
     }
 
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -448,13 +448,13 @@ impl Sign for EddsaOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
     }
 }
 
 impl Verify for EddsaOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -465,7 +465,7 @@ impl Verify for EddsaOperation {
         self.verify_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -503,7 +503,7 @@ impl Verify for EddsaOperation {
         Ok(())
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -536,7 +536,7 @@ impl Verify for EddsaOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
     }
 }

@@ -9,7 +9,7 @@ use super::interface;
 use super::object;
 
 use attribute::{from_ulong, CkAttrs};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<interface::CK_ULONG>();
@@ -87,7 +87,7 @@ pub fn common_derive_data_object(
     template: &[CK_ATTRIBUTE],
     objfactories: &object::ObjectFactories,
     default_len: usize,
-) -> KResult<(object::Object, usize)> {
+) -> Result<(object::Object, usize)> {
     let default_class = CKO_DATA;
     let mut tmpl = CkAttrs::from(template);
     tmpl.add_missing_ulong(CKA_CLASS, &default_class);
@@ -115,7 +115,7 @@ pub fn common_derive_key_object(
     template: &[CK_ATTRIBUTE],
     objfactories: &object::ObjectFactories,
     default_len: usize,
-) -> KResult<(object::Object, usize)> {
+) -> Result<(object::Object, usize)> {
     let default_class = CKO_SECRET_KEY;
     let mut tmpl = CkAttrs::from(template);
     tmpl.add_missing_ulong(CKA_CLASS, &default_class);

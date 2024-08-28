@@ -9,7 +9,7 @@ use super::mechanism;
 use super::object;
 
 use attribute::CkAttrs;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use mechanism::*;
 use object::{Object, ObjectFactories};
@@ -188,14 +188,14 @@ impl Mechanism for HashMechanism {
         &self.info
     }
 
-    fn digest_new(&self, mech: &CK_MECHANISM) -> KResult<Box<dyn Digest>> {
+    fn digest_new(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Digest>> {
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
         Ok(Box::new(HashOperation::new(mech.mechanism)?))
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -226,7 +226,7 @@ struct HashKDFOperation {
 }
 
 impl HashKDFOperation {
-    fn new(prf: CK_MECHANISM_TYPE) -> KResult<HashKDFOperation> {
+    fn new(prf: CK_MECHANISM_TYPE) -> Result<HashKDFOperation> {
         Ok(HashKDFOperation {
             prf: prf,
             finalized: false,
@@ -247,7 +247,7 @@ impl Derive for HashKDFOperation {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -310,7 +310,7 @@ impl Derive for HashKDFOperation {
 }
 
 #[cfg(not(feature = "fips"))]
-pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> KResult<Box<dyn Digest>> {
+pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
 }
 

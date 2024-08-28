@@ -5,7 +5,7 @@ use super::error;
 use super::interface;
 
 use super::{bytes_to_vec, err_not_found, err_rv, sizeof, void_ptr};
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 
 use std::borrow::Cow;
@@ -228,7 +228,7 @@ impl Attribute {
         return self.ck_type.to_string();
     }
 
-    pub fn to_bool(&self) -> KResult<bool> {
+    pub fn to_bool(&self) -> Result<bool> {
         if self.value.len() != 1 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
@@ -237,7 +237,7 @@ impl Attribute {
         }
         Ok(true)
     }
-    pub fn to_ulong(&self) -> KResult<CK_ULONG> {
+    pub fn to_ulong(&self) -> Result<CK_ULONG> {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
@@ -247,18 +247,18 @@ impl Attribute {
         )
     }
 
-    pub fn to_string(&self) -> KResult<String> {
+    pub fn to_string(&self) -> Result<String> {
         match std::str::from_utf8(&self.value) {
             Ok(s) => Ok(s.to_string()),
             Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
 
-    pub fn to_bytes(&self) -> KResult<&Vec<u8>> {
+    pub fn to_bytes(&self) -> Result<&Vec<u8>> {
         Ok(&self.value)
     }
 
-    pub fn to_date_string(&self) -> KResult<String> {
+    pub fn to_date_string(&self) -> Result<String> {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
@@ -294,7 +294,7 @@ macro_rules! conversion_from_type {
         }
 
         #[allow(dead_code)]
-        pub fn $fn2(t: CK_ULONG, val: $rtype) -> KResult<Attribute> {
+        pub fn $fn2(t: CK_ULONG, val: $rtype) -> Result<Attribute> {
             for a in &ATTRMAP {
                 if a.id == t {
                     if a.atype == AttrType::$atype {
@@ -307,7 +307,7 @@ macro_rules! conversion_from_type {
         }
 
         #[allow(dead_code)]
-        pub fn $fn3(s: String, val: $rtype) -> KResult<Attribute> {
+        pub fn $fn3(s: String, val: $rtype) -> Result<Attribute> {
             for a in &ATTRMAP {
                 if a.name == &s {
                     if a.atype == AttrType::$atype {
@@ -387,7 +387,7 @@ const ASCII_DASH: u8 = 0x2D;
 const MIN_ASCII_DIGIT: u8 = 0x30;
 const MAX_ASCII_DIGIT: u8 = 0x39;
 
-fn vec_to_date_validate(val: Vec<u8>) -> KResult<CK_DATE> {
+fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE> {
     if val.len() != 8 {
         return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
     }
@@ -399,7 +399,7 @@ fn vec_to_date_validate(val: Vec<u8>) -> KResult<CK_DATE> {
     Ok(vec_to_date(val))
 }
 
-pub fn string_to_ck_date(date: &str) -> KResult<CK_DATE> {
+pub fn string_to_ck_date(date: &str) -> Result<CK_DATE> {
     let s = date.as_bytes().to_vec();
     if s.len() != 10 {
         return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
@@ -435,7 +435,7 @@ pub fn from_ignore(t: CK_ULONG, _val: Option<()>) -> Attribute {
     }
 }
 
-pub fn attr_name_to_id_type(s: &String) -> KResult<(CK_ULONG, AttrType)> {
+pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
     for a in &ATTRMAP {
         if a.name == s {
             return Ok((a.id, a.atype));
@@ -444,7 +444,7 @@ pub fn attr_name_to_id_type(s: &String) -> KResult<(CK_ULONG, AttrType)> {
     err_not_found!(s.clone())
 }
 
-pub fn attr_id_to_attrtype(id: CK_ULONG) -> KResult<AttrType> {
+pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
     for a in &ATTRMAP {
         if a.id == id {
             return Ok(a.atype);
@@ -454,13 +454,13 @@ pub fn attr_id_to_attrtype(id: CK_ULONG) -> KResult<AttrType> {
 }
 
 impl CK_ATTRIBUTE {
-    pub fn to_ulong(&self) -> KResult<CK_ULONG> {
+    pub fn to_ulong(&self) -> Result<CK_ULONG> {
         if self.ulValueLen != sizeof!(CK_ULONG) {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
     }
-    pub fn to_bool(self) -> KResult<bool> {
+    pub fn to_bool(self) -> Result<bool> {
         if self.ulValueLen != sizeof!(CK_BBOOL) {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
@@ -471,7 +471,7 @@ impl CK_ATTRIBUTE {
             Ok(true)
         }
     }
-    pub fn to_string(&self) -> KResult<String> {
+    pub fn to_string(&self) -> Result<String> {
         let buf: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const _,
@@ -483,7 +483,7 @@ impl CK_ATTRIBUTE {
             Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
         }
     }
-    pub fn to_slice(&self) -> KResult<&[u8]> {
+    pub fn to_slice(&self) -> Result<&[u8]> {
         Ok(unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const u8,
@@ -491,17 +491,17 @@ impl CK_ATTRIBUTE {
             )
         })
     }
-    pub fn to_buf(&self) -> KResult<Vec<u8>> {
+    pub fn to_buf(&self) -> Result<Vec<u8>> {
         Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
-    pub fn to_date(&self) -> KResult<CK_DATE> {
+    pub fn to_date(&self) -> Result<CK_DATE> {
         if self.ulValueLen != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
         vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
 
-    pub fn to_attribute(&self) -> KResult<Attribute> {
+    pub fn to_attribute(&self) -> Result<Attribute> {
         let mut atype = AttrType::DenyType;
         for amap in &ATTRMAP {
             if amap.id == self.type_ {
@@ -556,7 +556,7 @@ impl<'a> CkAttrs<'a> {
     pub fn from_ptr(
         a: *mut CK_ATTRIBUTE,
         l: CK_ULONG,
-    ) -> KResult<CkAttrs<'static>> {
+    ) -> Result<CkAttrs<'static>> {
         if a.is_null() {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
@@ -577,7 +577,7 @@ impl<'a> CkAttrs<'a> {
         }
     }
 
-    fn attr_from_last(&self, typ: CK_ATTRIBUTE_TYPE) -> KResult<CK_ATTRIBUTE> {
+    fn attr_from_last(&self, typ: CK_ATTRIBUTE_TYPE) -> Result<CK_ATTRIBUTE> {
         if let Some(r) = self.v.last() {
             Ok(CK_ATTRIBUTE {
                 type_: typ,
@@ -593,7 +593,7 @@ impl<'a> CkAttrs<'a> {
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
         val: &[u8],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         self.v.push(val.to_vec());
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
@@ -604,7 +604,7 @@ impl<'a> CkAttrs<'a> {
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
         val: CK_ULONG,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         self.v.push(val.to_ne_bytes().to_vec());
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
@@ -615,7 +615,7 @@ impl<'a> CkAttrs<'a> {
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
         val: CK_BBOOL,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         self.v.push(val.to_ne_bytes().to_vec());
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
@@ -626,7 +626,7 @@ impl<'a> CkAttrs<'a> {
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
         val: Vec<u8>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         self.v.push(val);
         let a = self.attr_from_last(typ)?;
         self.p.to_mut().push(a);
@@ -689,7 +689,7 @@ impl<'a> CkAttrs<'a> {
     pub fn remove_ulong(
         &mut self,
         typ: CK_ATTRIBUTE_TYPE,
-    ) -> KResult<Option<CK_ULONG>> {
+    ) -> Result<Option<CK_ULONG>> {
         match self.p.as_ref().iter().position(|a| a.type_ == typ) {
             Some(idx) => Ok(Some(self.p.to_mut().swap_remove(idx).to_ulong()?)),
             None => return Ok(None),

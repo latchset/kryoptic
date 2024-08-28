@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 use super::err_rv;
 use super::error;
 use super::interface;
-use error::{KError, KResult};
+use error::Result;
 use interface::CKR_DEVICE_ERROR;
 
 use std::os::raw::{c_char, c_void};

@@ -18,7 +18,7 @@ use core::ffi::{c_char, c_uint};
 use std::borrow::Cow;
 use zeroize::Zeroize;
 
-pub fn ecc_import(obj: &mut Object) -> KResult<()> {
+pub fn ecc_import(obj: &mut Object) -> Result<()> {
     bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
     bytes_attr_not_empty!(obj; CKA_VALUE);
     Ok(())
@@ -53,7 +53,7 @@ struct EccOperation {
     sigctx: Option<ProviderSignatureCtx>,
 }
 
-fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
+fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -69,7 +69,7 @@ fn make_bits_from_ec_params(key: &Object) -> KResult<usize> {
     Ok(bits)
 }
 
-fn make_output_length_from_obj(key: &Object) -> KResult<usize> {
+fn make_output_length_from_obj(key: &Object) -> Result<usize> {
     let bits = match make_bits_from_ec_params(key) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -77,7 +77,7 @@ fn make_output_length_from_obj(key: &Object) -> KResult<usize> {
     Ok(2 * ((bits + 7) / 8))
 }
 
-fn get_curve_name_from_obj(key: &Object) -> KResult<Vec<u8>> {
+fn get_curve_name_from_obj(key: &Object) -> Result<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -97,7 +97,7 @@ fn get_curve_name_from_obj(key: &Object) -> KResult<Vec<u8>> {
     Ok(curve_name)
 }
 
-fn get_ec_point_from_obj(key: &Object) -> KResult<Vec<u8>> {
+fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_POINT) {
         Ok(b) => b,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -114,7 +114,7 @@ fn get_ec_point_from_obj(key: &Object) -> KResult<Vec<u8>> {
 fn make_ecc_public_key(
     curve_name: &Vec<u8>,
     ec_point: &Vec<u8>,
-) -> KResult<EvpPkey> {
+) -> Result<EvpPkey> {
     let mut params = OsslParam::with_capacity(2);
     params.zeroize = true;
     params.add_utf8_string(
@@ -128,7 +128,7 @@ fn make_ecc_public_key(
 }
 
 /// Convert the PKCS #11 public key object to OpenSSL EVP_PKEY
-fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
+fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
     make_ecc_public_key(
         &get_curve_name_from_obj(key)?,
         &get_ec_point_from_obj(key)?,
@@ -136,7 +136,7 @@ fn object_to_ecc_public_key(key: &Object) -> KResult<EvpPkey> {
 }
 
 /// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
-fn object_to_ecc_private_key(key: &Object) -> KResult<EvpPkey> {
+fn object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
     let curve_name = get_curve_name_from_obj(key)?;
     let mut params = OsslParam::with_capacity(2);
     params.zeroize = true;
@@ -159,7 +159,7 @@ struct EcdsaSignature<'a> {
     s: DerEncBigUint<'a>,
 }
 
-fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> KResult<()> {
+fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> Result<()> {
     let mut len = hin.len();
     if len > hout.len() {
         /* check for leading zeros */
@@ -193,7 +193,7 @@ fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> KResult<()> {
 fn ossl_to_pkcs11_signature(
     ossl_sign: &Vec<u8>,
     signature: &mut [u8],
-) -> KResult<()> {
+) -> Result<()> {
     let sig = match asn1::parse_single::<EcdsaSignature>(ossl_sign.as_slice()) {
         Ok(a) => a,
         Err(_) => return err_rv!(CKR_GENERAL_ERROR),
@@ -208,7 +208,7 @@ fn ossl_to_pkcs11_signature(
 /// The PKCS #11 represents the ECDSA signature only as a two padded values of fixed length.
 /// The OpenSSL expects the signature to be DER encoded SEQUENCE of two bignums so
 /// we split here the provided buffer and wrap it with the DER encoding.
-fn pkcs11_to_ossl_signature(signature: &[u8]) -> KResult<Vec<u8>> {
+fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
     let bn_len = signature.len() / 2;
     let sig = EcdsaSignature {
         r: DerEncBigUint::new(&signature[..bn_len])?,
@@ -264,7 +264,7 @@ impl EccOperation {
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
-    ) -> KResult<EccOperation> {
+    ) -> Result<EccOperation> {
         Ok(EccOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
@@ -286,7 +286,7 @@ impl EccOperation {
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
-    ) -> KResult<EccOperation> {
+    ) -> Result<EccOperation> {
         Ok(EccOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
@@ -307,7 +307,7 @@ impl EccOperation {
     fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         let curve_name = get_curve_name_from_obj(pubkey)?;
         let mut params = OsslParam::with_capacity(1);
         params.add_utf8_string(
@@ -355,7 +355,7 @@ impl MechOperation for EccOperation {
 }
 
 impl Sign for EccOperation {
-    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -411,7 +411,7 @@ impl Sign for EccOperation {
         self.sign_final(signature)
     }
 
-    fn sign_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -462,7 +462,7 @@ impl Sign for EccOperation {
         self.sigctx.as_mut().unwrap().digest_sign_update(data)
     }
 
-    fn sign_final(&mut self, signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -511,13 +511,13 @@ impl Sign for EccOperation {
         ret
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
     }
 }
 
 impl Verify for EccOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -558,7 +558,7 @@ impl Verify for EccOperation {
         self.verify_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -610,7 +610,7 @@ impl Verify for EccOperation {
         self.sigctx.as_mut().unwrap().digest_verify_update(data)
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         if !self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -645,12 +645,12 @@ impl Verify for EccOperation {
         Ok(())
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
     }
 }
 
-fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> KResult<CK_MECHANISM_TYPE> {
+fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     match mech {
         CKD_SHA1_KDF => Ok(CKM_SHA_1),
         CKD_SHA224_KDF => Ok(CKM_SHA224),
@@ -672,7 +672,7 @@ impl Derive for ECDHOperation {
         template: &[CK_ATTRIBUTE],
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }

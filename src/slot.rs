@@ -10,7 +10,7 @@ use super::session::Session;
 use super::token::Token;
 
 use super::err_rv;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 
 static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] =
@@ -26,7 +26,7 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new(filename: String) -> KResult<Slot> {
+    pub fn new(filename: String) -> Result<Slot> {
         Ok(Slot {
             slot_info: CK_SLOT_INFO {
                 slotDescription: SLOT_DESCRIPTION,
@@ -49,7 +49,7 @@ impl Slot {
         *tok.get_token_info()
     }
 
-    pub fn get_token(&self) -> KResult<RwLockReadGuard<'_, Token>> {
+    pub fn get_token(&self) -> Result<RwLockReadGuard<'_, Token>> {
         match self.token.read() {
             Ok(token) => {
                 if token.is_initialized() {
@@ -67,7 +67,7 @@ impl Slot {
     pub fn get_token_mut(
         &self,
         nochecks: bool,
-    ) -> KResult<RwLockWriteGuard<'_, Token>> {
+    ) -> Result<RwLockWriteGuard<'_, Token>> {
         match self.token.write() {
             Ok(token) => {
                 if nochecks {
@@ -91,7 +91,7 @@ impl Slot {
     pub fn get_session(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<RwLockReadGuard<'_, Session>> {
+    ) -> Result<RwLockReadGuard<'_, Session>> {
         match self.sessions.get(&handle) {
             Some(s) => match s.read() {
                 Ok(sess) => Ok(sess),
@@ -104,7 +104,7 @@ impl Slot {
     pub fn get_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
-    ) -> KResult<RwLockWriteGuard<'_, Session>> {
+    ) -> Result<RwLockWriteGuard<'_, Session>> {
         match self.sessions.get(&handle) {
             Some(s) => match s.write() {
                 Ok(sess) => Ok(sess),
@@ -128,10 +128,7 @@ impl Slot {
         false
     }
 
-    pub fn change_session_states(
-        &self,
-        user_type: CK_USER_TYPE,
-    ) -> KResult<()> {
+    pub fn change_session_states(&self, user_type: CK_USER_TYPE) -> Result<()> {
         for (_key, val) in self.sessions.iter() {
             let ret = val.write().unwrap().change_session_state(user_type);
             if ret != CKR_OK {
@@ -164,7 +161,7 @@ impl Slot {
         handles
     }
 
-    pub fn finalize(&mut self) -> KResult<()> {
+    pub fn finalize(&mut self) -> Result<()> {
         self.drop_all_sessions();
         self.token.write().unwrap().save()
     }

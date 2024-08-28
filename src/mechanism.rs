@@ -7,7 +7,7 @@ use super::err_rv;
 use super::error;
 use super::interface;
 use super::object;
-use error::{KError, KResult};
+use error::Result;
 use interface::*;
 use object::{Object, ObjectFactories, ObjectFactory};
 
@@ -19,17 +19,17 @@ pub trait Mechanism: Debug + Send + Sync {
         &self,
         _: &CK_MECHANISM,
         _: &object::Object,
-    ) -> KResult<Box<dyn Encryption>> {
+    ) -> Result<Box<dyn Encryption>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
     fn decryption_new(
         &self,
         _: &CK_MECHANISM,
         _: &object::Object,
-    ) -> KResult<Box<dyn Decryption>> {
+    ) -> Result<Box<dyn Decryption>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
-    fn digest_new(&self, _: &CK_MECHANISM) -> KResult<Box<dyn Digest>> {
+    fn digest_new(&self, _: &CK_MECHANISM) -> Result<Box<dyn Digest>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
     fn mac_new(
@@ -37,21 +37,21 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &CK_MECHANISM,
         _: &object::Object,
         _: CK_FLAGS,
-    ) -> KResult<Box<dyn Mac>> {
+    ) -> Result<Box<dyn Mac>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
     fn sign_new(
         &self,
         _: &CK_MECHANISM,
         _: &object::Object,
-    ) -> KResult<Box<dyn Sign>> {
+    ) -> Result<Box<dyn Sign>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
     fn verify_new(
         &self,
         _: &CK_MECHANISM,
         _: &object::Object,
-    ) -> KResult<Box<dyn Verify>> {
+    ) -> Result<Box<dyn Verify>> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 
@@ -61,7 +61,7 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 
@@ -70,7 +70,7 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &CK_MECHANISM,
         _pubkey_template: &[CK_ATTRIBUTE],
         _prikey_template: &[CK_ATTRIBUTE],
-    ) -> KResult<(Object, Object)> {
+    ) -> Result<(Object, Object)> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 
@@ -82,7 +82,7 @@ pub trait Mechanism: Debug + Send + Sync {
         _: CK_BYTE_PTR,
         _: CK_ULONG_PTR,
         _: &Box<dyn ObjectFactory>,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 
@@ -93,11 +93,11 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &[u8],
         _: &[CK_ATTRIBUTE],
         _: &Box<dyn ObjectFactory>,
-    ) -> KResult<Object> {
+    ) -> Result<Object> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 
-    fn derive_operation(&self, _: &CK_MECHANISM) -> KResult<Operation> {
+    fn derive_operation(&self, _: &CK_MECHANISM) -> Result<Operation> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 }
@@ -137,7 +137,7 @@ impl Mechanisms {
         }
     }
 
-    pub fn get(&self, typ: CK_MECHANISM_TYPE) -> KResult<&Box<dyn Mechanism>> {
+    pub fn get(&self, typ: CK_MECHANISM_TYPE) -> Result<&Box<dyn Mechanism>> {
         match self.tree.get(&typ) {
             Some(m) => Ok(m),
             None => err_rv!(CKR_MECHANISM_INVALID),
@@ -147,14 +147,14 @@ impl Mechanisms {
 
 pub trait MechOperation: Debug + Send + Sync {
     fn finalized(&self) -> bool;
-    fn reset(&mut self) -> KResult<()> {
+    fn reset(&mut self) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn requires_objects(&self) -> KResult<&[CK_OBJECT_HANDLE]> {
+    fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
         /* nothing needed by default */
         err_rv!(CKR_OK)
     }
-    fn receives_objects(&mut self, _: &[&Object]) -> KResult<()> {
+    fn receives_objects(&mut self, _: &[&Object]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     #[cfg(feature = "fips")]
@@ -169,7 +169,7 @@ pub trait Encryption: MechOperation {
         _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn encrypt_update(
@@ -177,17 +177,17 @@ pub trait Encryption: MechOperation {
         _plain: &[u8],
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn encrypt_final(
         &mut self,
         _cipher: CK_BYTE_PTR,
         _cipher_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn encryption_len(&self, _data_len: CK_ULONG) -> KResult<usize> {
+    fn encryption_len(&self, _data_len: CK_ULONG) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
@@ -198,7 +198,7 @@ pub trait Decryption: MechOperation {
         _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn decrypt_update(
@@ -206,85 +206,85 @@ pub trait Decryption: MechOperation {
         _cipher: &[u8],
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn decrypt_final(
         &mut self,
         _plain: CK_BYTE_PTR,
         _plain_len: CK_ULONG_PTR,
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn decryption_len(&self, _data_len: CK_ULONG) -> KResult<usize> {
+    fn decryption_len(&self, _data_len: CK_ULONG) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
 pub trait SearchOperation: Debug + Send + Sync {
     fn finalized(&self) -> bool;
-    fn results(&mut self, _max: usize) -> KResult<Vec<CK_OBJECT_HANDLE>> {
+    fn results(&mut self, _max: usize) -> Result<Vec<CK_OBJECT_HANDLE>> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
 pub trait Digest: MechOperation {
-    fn digest(&mut self, _data: &[u8], _digest: &mut [u8]) -> KResult<()> {
+    fn digest(&mut self, _data: &[u8], _digest: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn digest_update(&mut self, _data: &[u8]) -> KResult<()> {
+    fn digest_update(&mut self, _data: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn digest_final(&mut self, _digest: &mut [u8]) -> KResult<()> {
+    fn digest_final(&mut self, _digest: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn digest_len(&self) -> KResult<usize> {
+    fn digest_len(&self) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
 pub trait Mac: MechOperation {
-    fn mac(&mut self, _data: &[u8], _digest: &mut [u8]) -> KResult<()> {
+    fn mac(&mut self, _data: &[u8], _digest: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn mac_update(&mut self, _data: &[u8]) -> KResult<()> {
+    fn mac_update(&mut self, _data: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn mac_final(&mut self, _digest: &mut [u8]) -> KResult<()> {
+    fn mac_final(&mut self, _digest: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn mac_len(&self) -> KResult<usize> {
+    fn mac_len(&self) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
 pub trait Sign: MechOperation {
-    fn sign(&mut self, _data: &[u8], _signature: &mut [u8]) -> KResult<()> {
+    fn sign(&mut self, _data: &[u8], _signature: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn sign_update(&mut self, _data: &[u8]) -> KResult<()> {
+    fn sign_update(&mut self, _data: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn sign_final(&mut self, _signature: &mut [u8]) -> KResult<()> {
+    fn sign_final(&mut self, _signature: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
 pub trait Verify: MechOperation {
-    fn verify(&mut self, _data: &[u8], _signature: &[u8]) -> KResult<()> {
+    fn verify(&mut self, _data: &[u8], _signature: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn verify_update(&mut self, _data: &[u8]) -> KResult<()> {
+    fn verify_update(&mut self, _data: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn verify_final(&mut self, _signature: &[u8]) -> KResult<()> {
+    fn verify_final(&mut self, _signature: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 
-    fn signature_len(&self) -> KResult<usize> {
+    fn signature_len(&self) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
@@ -296,7 +296,7 @@ pub trait Derive: MechOperation {
         _: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,
-    ) -> KResult<Vec<Object>> {
+    ) -> Result<Vec<Object>> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
@@ -334,13 +334,13 @@ pub trait DRBG: Debug + Send + Sync {
         _entropy: &[u8],
         _nonce: &[u8],
         _pers: &[u8],
-    ) -> KResult<()> {
+    ) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn reseed(&mut self, _entropy: &[u8], _addtl: &[u8]) -> KResult<()> {
+    fn reseed(&mut self, _entropy: &[u8], _addtl: &[u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn generate(&mut self, _addtl: &[u8], _output: &mut [u8]) -> KResult<()> {
+    fn generate(&mut self, _addtl: &[u8], _output: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }

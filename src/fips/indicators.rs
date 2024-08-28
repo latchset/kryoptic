@@ -88,7 +88,7 @@ impl ObjectFactory for ValidationFactory {
 pub static VALIDATION_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ValidationFactory::new()));
 
-pub fn insert_fips_validation(token: &mut Token) -> KResult<()> {
+pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
     /* Synthesize a FIPS CKO_VALIDATION object */
     let mut obj = Object::new();
     obj.set_attr(attribute::from_bool(CKA_TOKEN, false))?;
@@ -209,7 +209,7 @@ macro_rules! restrict {
     };
 }
 
-fn flag_to_op(flag: CK_FLAGS) -> KResult<CK_ATTRIBUTE_TYPE> {
+fn flag_to_op(flag: CK_FLAGS) -> Result<CK_ATTRIBUTE_TYPE> {
     Ok(match flag {
         CKF_SIGN => CKA_SIGN,
         CKF_VERIFY => CKA_VERIFY,
@@ -1088,9 +1088,7 @@ pub fn is_approved(
     false
 }
 
-pub fn check_kdf_fips_indicators(
-    kctx: &mut EvpKdfCtx,
-) -> KResult<Option<bool>> {
+pub fn check_kdf_fips_indicators(kctx: &mut EvpKdfCtx) -> Result<Option<bool>> {
     let mut params = OsslParam::with_capacity(1);
     params.add_owned_int(
         name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR),
