@@ -774,11 +774,11 @@ pub trait PubKeyFactory {
     fn init_common_public_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_SUBJECT; OAFlags::Defval; from_bytes; val Vec::new()),
-            attr_element!(CKA_ENCRYPT; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_VERIFY; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_VERIFY_RECOVER; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_WRAP; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_TRUSTED; OAFlags::NeverSettable; from_bool; val false),
+            attr_element!(CKA_ENCRYPT; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_VERIFY; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_VERIFY_RECOVER; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_WRAP; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_WRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()),
             attr_element!(CKA_PUBLIC_KEY_INFO; OAFlags::empty(); from_bytes; val Vec::new()),
         ]
@@ -791,11 +791,11 @@ pub trait PrivKeyFactory {
         vec![
             attr_element!(CKA_SUBJECT; OAFlags::Defval; from_bytes; val Vec::new()),
             attr_element!(CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val true),
-            attr_element!(CKA_DECRYPT; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_SIGN; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_SIGN_RECOVER; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_UNWRAP; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_EXTRACTABLE; OAFlags::ChangeToFalse; from_bool; val false),
+            attr_element!(CKA_DECRYPT; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_SIGN; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_SIGN_RECOVER; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_UNWRAP; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_EXTRACTABLE; OAFlags::ChangeToFalse | OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable; from_bool; val false),
             attr_element!(CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable; from_bool; val false),
             attr_element!(CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val false),
@@ -836,18 +836,18 @@ pub trait SecretKeyFactory {
     fn init_common_secret_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
             attr_element!(CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val true),
-            attr_element!(CKA_ENCRYPT; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_DECRYPT; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_SIGN; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_VERIFY; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_WRAP; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_UNWRAP; OAFlags::empty(); from_bool; val false),
-            attr_element!(CKA_EXTRACTABLE; OAFlags::ChangeToFalse; from_bool; val false),
+            attr_element!(CKA_ENCRYPT; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_DECRYPT; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_SIGN; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_VERIFY; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_WRAP; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_UNWRAP; OAFlags::Defval; from_bool; val false),
+            attr_element!(CKA_EXTRACTABLE; OAFlags::ChangeToFalse | OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable; from_bool; val false),
             attr_element!(CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable; from_bool; val false),
             attr_element!(CKA_CHECK_VALUE; OAFlags::Ignored; from_ignore; val None),
             attr_element!(CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue; from_bool; val false),
-            attr_element!(CKA_TRUSTED; OAFlags::NeverSettable; from_bool; val false),
+            attr_element!(CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval; from_bool; val false),
             attr_element!(CKA_WRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()),
             attr_element!(CKA_UNWRAP_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()),
             attr_element!(CKA_DERIVE_TEMPLATE; OAFlags::empty(); from_bytes; val Vec::new()),
@@ -1067,6 +1067,20 @@ pub fn default_key_attributes(
 ) -> Result<()> {
     key.set_attr(from_bool(CKA_LOCAL, true))?;
     key.set_attr(from_ulong(CKA_KEY_GEN_MECHANISM, mech))?;
+
+    let extractable = if let Ok(b) = key.get_attr_as_bool(CKA_EXTRACTABLE) {
+        b
+    } else {
+        true
+    };
+    key.set_attr(from_bool(CKA_NEVER_EXTRACTABLE, !extractable))?;
+    let sensitive = if let Ok(b) = key.get_attr_as_bool(CKA_SENSITIVE) {
+        b
+    } else {
+        false
+    };
+    key.set_attr(from_bool(CKA_ALWAYS_SENSITIVE, sensitive))?;
+
     Ok(())
 }
 
