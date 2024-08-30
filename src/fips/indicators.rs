@@ -908,7 +908,7 @@ fn check_key(
         _ => {
             /* assume everything else is a symmetric key */
             match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-                Ok(l) => l as usize,
+                Ok(l) => usize::try_from(l).unwrap(),
                 Err(_) => return false,
             }
         }
@@ -1092,14 +1092,14 @@ pub fn check_kdf_fips_indicators(kctx: &mut EvpKdfCtx) -> Result<Option<bool>> {
     let mut params = OsslParam::with_capacity(1);
     params.add_owned_int(
         name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR),
-        EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED as c_int,
+        c_int::try_from(EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED)?,
     )?;
     params.finalize();
     unsafe { EVP_KDF_CTX_get_params(kctx.as_mut_ptr(), params.as_mut_ptr()) };
 
-    let indicator: c_uint = params
-        .get_int(name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR))?
-        as c_uint;
+    let indicator = c_uint::try_from(
+        params.get_int(name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR))?,
+    )?;
     /* in case of error it will remain undetermined */
     Ok(match indicator {
         EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED => None,

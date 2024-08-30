@@ -7,7 +7,7 @@ use {super::fips, fips::*};
 #[cfg(not(feature = "fips"))]
 use {super::ossl, ossl::*};
 
-use super::bytes_to_vec;
+use super::{bytes_to_vec, map_err};
 
 use constant_time_eq::constant_time_eq;
 use std::ffi::{c_char, c_int, c_void};
@@ -130,8 +130,8 @@ fn object_to_raw_key(key: &Object) -> Result<AesKey> {
 fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
     Box::new(AesMechanism {
         info: CK_MECHANISM_INFO {
-            ulMinKeySize: MIN_AES_SIZE_BYTES as CK_ULONG,
-            ulMaxKeySize: MAX_AES_SIZE_BYTES as CK_ULONG,
+            ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
+            ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
             flags: flags,
         },
     })
@@ -211,11 +211,11 @@ impl AesOperation {
                 if params.ulDataLen == 0
                     || params.ulDataLen > (1 << (8 * l))
                     || (params.ulDataLen + params.ulMACLen)
-                        > u64::MAX as CK_ULONG
+                        > CK_ULONG::try_from(u64::MAX)?
                 {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
-                if params.ulAADLen > (u32::MAX - 1) as CK_ULONG {
+                if params.ulAADLen > CK_ULONG::try_from(u32::MAX - 1)? {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
                 match params.ulMACLen {
@@ -226,9 +226,15 @@ impl AesOperation {
                     iv: bytes_to_vec!(params.pNonce, params.ulNonceLen),
                     maxblocks: 0,
                     ctsmode: 0,
-                    datalen: params.ulDataLen as usize,
+                    datalen: map_err!(
+                        usize::try_from(params.ulDataLen),
+                        CKR_MECHANISM_PARAM_INVALID
+                    )?,
                     aad: bytes_to_vec!(params.pAAD, params.ulAADLen),
-                    taglen: params.ulMACLen as usize,
+                    taglen: map_err!(
+                        usize::try_from(params.ulMACLen),
+                        CKR_MECHANISM_PARAM_INVALID
+                    )?,
                 })
             }
             CKM_AES_GCM => {
@@ -245,19 +251,26 @@ impl AesOperation {
                 if params.ulIvLen < 1 || params.pIv == std::ptr::null_mut() {
                     return err_rv!(CKR_MECHANISM_PARAM_INVALID);
                 }
+                let tagbits = map_err!(
+                    usize::try_from(params.ulTagBits),
+                    CKR_MECHANISM_PARAM_INVALID
+                )?;
                 Ok(AesParams {
                     iv: bytes_to_vec!(params.pIv, params.ulIvLen),
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
                     aad: bytes_to_vec!(params.pAAD, params.ulAADLen),
-                    taglen: (params.ulTagBits as usize + 7) / 8,
+                    taglen: (tagbits + 7) / 8,
                 })
             }
             CKM_AES_CTR => {
                 let params = cast_params!(mech, CK_AES_CTR_PARAMS);
                 let iv = params.cb.to_vec();
-                let ctrbits = params.ulCounterBits as usize;
+                let ctrbits = map_err!(
+                    usize::try_from(params.ulCounterBits),
+                    CKR_MECHANISM_PARAM_INVALID
+                )?;
                 let mut maxblocks = 0u128;
                 if ctrbits < (AES_BLOCK_SIZE * 8) {
                     /* FIXME: support arbitrary counterbits wrapping.
@@ -276,13 +289,13 @@ impl AesOperation {
                     let fulloctects = ctrbits / 8;
                     let mut idx = 0;
                     while fulloctects > idx {
-                        maxblocks -= (iv[15 - idx] as u128) << (idx * 8);
+                        maxblocks -= u128::try_from(iv[15 - idx])? << (idx * 8);
                         idx += 1;
                     }
-                    let part = ctrbits % 8;
+                    let part = u128::try_from(ctrbits % 8)?;
                     if part > 0 {
-                        maxblocks -= ((iv[15 - idx] as u128) & (part as u128))
-                            << (idx * 8);
+                        maxblocks -=
+                            (u128::try_from(iv[15 - idx])? & part) << (idx * 8);
                     }
                     if maxblocks == 0 {
                         return err_rv!(CKR_MECHANISM_PARAM_INVALID);
@@ -301,7 +314,7 @@ impl AesOperation {
                 })
             }
             CKM_AES_CTS | CKM_AES_CBC | CKM_AES_CBC_PAD => {
-                if mech.ulParameterLen != (AES_BLOCK_SIZE as CK_ULONG) {
+                if mech.ulParameterLen != CK_ULONG::try_from(AES_BLOCK_SIZE)? {
                     return err_rv!(CKR_ARGUMENTS_BAD);
                 }
                 let mut ctsmode = 0u8;
@@ -327,7 +340,7 @@ impl AesOperation {
             }),
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
-                if mech.ulParameterLen != (AES_BLOCK_SIZE as CK_ULONG) {
+                if mech.ulParameterLen != CK_ULONG::try_from(AES_BLOCK_SIZE)? {
                     return err_rv!(CKR_ARGUMENTS_BAD);
                 }
                 Ok(AesParams {
@@ -502,8 +515,8 @@ impl AesOperation {
                     let res = unsafe {
                         EVP_CIPHER_CTX_ctrl(
                             self.ctx.as_mut_ptr(),
-                            EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                            self.params.iv.len() as c_int,
+                            c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                            c_int::try_from(self.params.iv.len())?,
                             std::ptr::null_mut(),
                         )
                     };
@@ -517,8 +530,8 @@ impl AesOperation {
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
                         self.ctx.as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                        self.params.iv.len() as c_int,
+                        c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                        c_int::try_from(self.params.iv.len())?,
                         std::ptr::null_mut(),
                     )
                 };
@@ -529,8 +542,8 @@ impl AesOperation {
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
                         self.ctx.as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_TAG as c_int,
-                        self.params.taglen as c_int,
+                        c_int::try_from(EVP_CTRL_AEAD_SET_TAG)?,
+                        c_int::try_from(self.params.taglen)?,
                         std::ptr::null_mut(),
                     )
                 };
@@ -605,7 +618,7 @@ impl AesOperation {
                     std::ptr::null_mut(),
                     &mut outl,
                     std::ptr::null(),
-                    self.params.datalen as c_int,
+                    c_int::try_from(self.params.datalen)?,
                 )
             };
             if res != 1 {
@@ -622,7 +635,7 @@ impl AesOperation {
                     std::ptr::null_mut(),
                     &mut outl,
                     self.params.aad.as_ptr(),
-                    self.params.aad.len() as c_int,
+                    c_int::try_from(self.params.aad.len())?,
                 )
             };
             if res != 1 {
@@ -668,8 +681,8 @@ impl AesOperation {
                     let res = unsafe {
                         EVP_CIPHER_CTX_ctrl(
                             self.ctx.as_mut_ptr(),
-                            EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                            self.params.iv.len() as c_int,
+                            c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                            c_int::try_from(self.params.iv.len())?,
                             std::ptr::null_mut(),
                         )
                     };
@@ -683,8 +696,8 @@ impl AesOperation {
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
                         self.ctx.as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_IVLEN as c_int,
-                        self.params.iv.len() as c_int,
+                        c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                        c_int::try_from(self.params.iv.len())?,
                         std::ptr::null_mut(),
                     )
                 };
@@ -695,8 +708,8 @@ impl AesOperation {
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
                         self.ctx.as_mut_ptr(),
-                        EVP_CTRL_AEAD_SET_TAG as c_int,
-                        self.params.taglen as c_int,
+                        c_int::try_from(EVP_CTRL_AEAD_SET_TAG)?,
+                        c_int::try_from(self.params.taglen)?,
                         std::ptr::null_mut(),
                     )
                 };
@@ -773,7 +786,7 @@ impl AesOperation {
                     std::ptr::null_mut(),
                     &mut outl,
                     std::ptr::null(),
-                    self.params.datalen as c_int,
+                    c_int::try_from(self.params.datalen)?,
                 )
             };
             if res != 1 {
@@ -790,7 +803,7 @@ impl AesOperation {
                     std::ptr::null_mut(),
                     &mut outl,
                     self.params.aad.as_ptr(),
-                    self.params.aad.len() as c_int,
+                    c_int::try_from(self.params.aad.len())?,
                 )
             };
             if res != 1 {
@@ -925,7 +938,7 @@ impl Encryption for AesOperation {
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        let mut outlen = self.encryption_len(plain.len() as u64)?;
+        let mut outlen = self.encryption_len(plain.len())?;
         if cipher.is_null() {
             unsafe {
                 *cipher_len = outlen as CK_ULONG;
@@ -1204,32 +1217,31 @@ impl Encryption for AesOperation {
         Ok(())
     }
 
-    fn encryption_len(&self, data_len: CK_ULONG) -> Result<usize> {
+    fn encryption_len(&self, data_len: usize) -> Result<usize> {
         let len: usize = match self.mech {
             CKM_AES_CCM => self.params.datalen + self.params.taglen,
-            CKM_AES_GCM => data_len as usize + self.params.taglen,
-            CKM_AES_CTR | CKM_AES_CTS => data_len as usize,
+            CKM_AES_GCM => data_len + self.params.taglen,
+            CKM_AES_CTR | CKM_AES_CTS => data_len,
             CKM_AES_CBC | CKM_AES_ECB => {
-                ((data_len as usize + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE)
+                ((data_len + AES_BLOCK_SIZE - 1) / AES_BLOCK_SIZE)
                     * AES_BLOCK_SIZE
             }
             CKM_AES_CBC_PAD => {
                 // The PKCS#7 padding adds always at least 1 byte
-                ((data_len as usize + AES_BLOCK_SIZE) / AES_BLOCK_SIZE)
-                    * AES_BLOCK_SIZE
+                ((data_len + AES_BLOCK_SIZE) / AES_BLOCK_SIZE) * AES_BLOCK_SIZE
             }
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
-                data_len as usize
+                data_len
             }
             CKM_AES_KEY_WRAP => {
-                if data_len as usize % 8 != 0 {
+                if data_len % 8 != 0 {
                     return err_rv!(CKR_DATA_LEN_RANGE);
                 } else {
-                    data_len as usize + 8
+                    data_len + 8
                 }
             }
-            CKM_AES_KEY_WRAP_KWP => ((data_len as usize + 15) / 8) * 8,
+            CKM_AES_KEY_WRAP_KWP => ((data_len + 15) / 8) * 8,
             _ => return err_rv!(CKR_GENERAL_ERROR),
         };
         Ok(len)
@@ -1679,30 +1691,30 @@ impl Decryption for AesOperation {
         Ok(())
     }
 
-    fn decryption_len(&self, data_len: CK_ULONG) -> Result<usize> {
+    fn decryption_len(&self, data_len: usize) -> Result<usize> {
         Ok(match self.mech {
             CKM_AES_CCM => self.params.datalen,
             CKM_AES_GCM => {
-                let len = data_len as usize;
+                let len = data_len;
                 if len > self.params.taglen {
                     len - self.params.taglen
                 } else {
                     0
                 }
             }
-            CKM_AES_CTR | CKM_AES_CTS => data_len as usize,
+            CKM_AES_CTR | CKM_AES_CTS => data_len,
             CKM_AES_CBC | CKM_AES_CBC_PAD | CKM_AES_ECB => {
-                (data_len as usize / AES_BLOCK_SIZE) * AES_BLOCK_SIZE
+                (data_len / AES_BLOCK_SIZE) * AES_BLOCK_SIZE
             }
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
-                data_len as usize
+                data_len
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
                 if data_len % 8 != 0 {
                     return err_rv!(CKR_DATA_LEN_RANGE);
                 } else {
-                    ((data_len as usize / 8) * 8) - 8
+                    ((data_len / 8) * 8) - 8
                 }
             }
             _ => return err_rv!(CKR_GENERAL_ERROR),

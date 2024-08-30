@@ -241,10 +241,9 @@ impl Attribute {
         if self.value.len() != 8 {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        Ok(
-            u64::from_ne_bytes(self.value.as_slice().try_into().unwrap())
-                as CK_ULONG,
-        )
+        Ok(CK_ULONG::from_ne_bytes(
+            self.value.as_slice().try_into().unwrap(),
+        ))
     }
 
     pub fn to_string(&self) -> Result<String> {
@@ -322,12 +321,12 @@ macro_rules! conversion_from_type {
 }
 
 fn bool_to_vec(val: bool) -> Vec<u8> {
-    Vec::from(if val { &[1 as u8][..] } else { &[0 as u8][..] })
+    Vec::from(if val { &[1u8][..] } else { &[0u8][..] })
 }
 conversion_from_type! {make from_bool; from_type_bool; from_string_bool; from bool; as BoolType; via bool_to_vec}
 
 fn ulong_to_vec(val: CK_ULONG) -> Vec<u8> {
-    Vec::from((val as u64).to_ne_bytes())
+    Vec::from(val.to_ne_bytes())
 }
 conversion_from_type! {make from_ulong; from_type_ulong; from_string_ulong; from CK_ULONG; as NumType; via ulong_to_vec}
 
@@ -475,7 +474,7 @@ impl CK_ATTRIBUTE {
         let buf: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const _,
-                self.ulValueLen as usize,
+                usize::try_from(self.ulValueLen)?,
             )
         };
         match std::str::from_utf8(buf) {
@@ -487,7 +486,7 @@ impl CK_ATTRIBUTE {
         Ok(unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const u8,
-                self.ulValueLen as usize,
+                usize::try_from(self.ulValueLen)?,
             )
         })
     }
@@ -563,7 +562,7 @@ impl<'a> CkAttrs<'a> {
         Ok(CkAttrs {
             v: Vec::new(),
             p: Cow::Borrowed(unsafe {
-                std::slice::from_raw_parts(a, l as usize)
+                std::slice::from_raw_parts(a, usize::try_from(l)?)
             }),
             zeroize: false,
         })
@@ -582,7 +581,7 @@ impl<'a> CkAttrs<'a> {
             Ok(CK_ATTRIBUTE {
                 type_: typ,
                 pValue: void_ptr!(r.as_ptr()),
-                ulValueLen: r.len() as CK_ULONG,
+                ulValueLen: CK_ULONG::try_from(r.len())?,
             })
         } else {
             err_rv!(CKR_GENERAL_ERROR)
@@ -633,12 +632,17 @@ impl<'a> CkAttrs<'a> {
         Ok(())
     }
 
-    pub fn add_slice(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a [u8]) {
+    pub fn add_slice(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: &'a [u8],
+    ) -> Result<()> {
         self.p.to_mut().push(CK_ATTRIBUTE {
             type_: typ,
             pValue: val.as_ptr() as *mut std::ffi::c_void,
-            ulValueLen: val.len() as CK_ULONG,
+            ulValueLen: CK_ULONG::try_from(val.len())?,
         });
+        Ok(())
     }
 
     pub fn add_ulong(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a CK_ULONG) {
@@ -657,9 +661,13 @@ impl<'a> CkAttrs<'a> {
         });
     }
 
-    pub fn add_missing_slice(&mut self, typ: CK_ATTRIBUTE_TYPE, val: &'a [u8]) {
+    pub fn add_missing_slice(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: &'a [u8],
+    ) -> Result<()> {
         match self.p.as_ref().iter().find(|a| a.type_ == typ) {
-            Some(_) => (),
+            Some(_) => Ok(()),
             None => self.add_slice(typ, val),
         }
     }

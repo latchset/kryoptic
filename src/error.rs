@@ -134,6 +134,18 @@ impl From<serde_json::Error> for Error {
     }
 }
 
+impl From<std::num::TryFromIntError> for Error {
+    fn from(error: std::num::TryFromIntError) -> Error {
+        Error::other_error(error)
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(error: std::convert::Infallible) -> Error {
+        Error::other_error(error)
+    }
+}
+
 #[macro_export]
 macro_rules! some_or_err {
     ($action:expr) => {

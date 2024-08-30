@@ -6,7 +6,7 @@ use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::{err_rv, sizeof};
+use super::{err_rv, map_err, sizeof};
 
 use attribute::from_bytes;
 use error::Result;
@@ -26,7 +26,7 @@ macro_rules! maxsize {
     ($size: expr) => {
         match $size {
             8 | 16 | 24 | 32 | 40 | 48 | 56 => (1 << $size) - 1,
-            64 => u64::MAX as usize,
+            64 => usize::try_from(u64::MAX)?,
             _ => panic!("Invalid size"),
         }
     };
@@ -110,7 +110,7 @@ impl Sp800Operation {
             Box::new(Sp800KDFMechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: 0,
-                    ulMaxKeySize: std::u32::MAX as CK_ULONG,
+                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
                     flags: CKF_DERIVE,
                 },
             }),
@@ -120,7 +120,7 @@ impl Sp800Operation {
             Box::new(Sp800KDFMechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: 0,
-                    ulMaxKeySize: std::u32::MAX as CK_ULONG,
+                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
                     flags: CKF_DERIVE,
                 },
             }),
@@ -149,7 +149,10 @@ impl Sp800Operation {
                 _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             },
             bits: match cf.ulWidthInBits {
-                8 | 16 | 24 | 32 => cf.ulWidthInBits as usize,
+                8 | 16 | 24 | 32 => map_err!(
+                    usize::try_from(cf.ulWidthInBits),
+                    CKR_MECHANISM_PARAM_INVALID
+                )?,
                 _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             },
         })
@@ -182,9 +185,10 @@ impl Sp800Operation {
                 _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             },
             bits: match dkm.ulWidthInBits {
-                8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 => {
-                    dkm.ulWidthInBits as usize
-                }
+                8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 => map_err!(
+                    usize::try_from(dkm.ulWidthInBits),
+                    CKR_MECHANISM_PARAM_INVALID
+                )?,
                 _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             },
         })
@@ -314,6 +318,8 @@ impl Sp800Operation {
         ((key + segment - 1) / segment) * segment
     }
 
+    /* NOTE: In this function the ctr is intnetionally truncated by
+     * casting, do not convert with try_from() */
     #[cfg(not(feature = "fips"))]
     fn ctr_update(
         param: &Sp800CounterFormat,
@@ -367,6 +373,8 @@ impl Sp800Operation {
         }
     }
 
+    /* NOTE: In this function the len is intentionally truncated by
+     * casting, do not convert with try_from() */
     #[cfg(not(feature = "fips"))]
     fn dkm_update(
         param: &Sp800DKMLengthFormat,
@@ -587,10 +595,10 @@ impl Derive for Sp800Operation {
 
         let obj = objfactories.derive_key_from_template(key, template)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-            Ok(n) => n as usize,
+            Ok(size) => usize::try_from(size)?,
             Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
         };
-        if keysize == 0 || keysize > (u32::MAX as usize) {
+        if keysize == 0 || keysize > usize::try_from(u32::MAX)? {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
 
@@ -606,7 +614,10 @@ impl Derive for Sp800Operation {
             let tmpl: &[CK_ATTRIBUTE] = unsafe {
                 std::slice::from_raw_parts_mut(
                     ak.pTemplate,
-                    ak.ulAttributeCount as usize,
+                    map_err!(
+                        usize::try_from(ak.ulAttributeCount),
+                        CKR_MECHANISM_PARAM_INVALID
+                    )?,
                 )
             };
             let obj = match objfactories.derive_key_from_template(key, tmpl) {
@@ -620,10 +631,10 @@ impl Derive for Sp800Operation {
                 }
             };
             let aksize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-                Ok(n) => n as usize,
+                Ok(size) => usize::try_from(size)?,
                 Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
             };
-            if aksize == 0 || aksize > (u32::MAX as usize) {
+            if aksize == 0 || aksize > usize::try_from(u32::MAX)? {
                 return err_rv!(CKR_KEY_SIZE_RANGE);
             }
             klen += aksize;
@@ -672,7 +683,8 @@ impl Derive for Sp800Operation {
 
         let mut cursor = 0;
         for key in &mut keys {
-            let keysize = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+            let keysize =
+                usize::try_from(key.get_attr_as_ulong(CKA_VALUE_LEN)?)?;
             key.set_attr(from_bytes(
                 CKA_VALUE,
                 dkm[cursor..(cursor + keysize)].to_vec(),

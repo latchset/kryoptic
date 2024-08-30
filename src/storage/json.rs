@@ -26,7 +26,7 @@ fn to_json_value(a: &Attribute) -> Value {
             Err(_) => Value::Null,
         },
         AttrType::NumType => match a.to_ulong() {
-            Ok(l) => Value::Number(Number::from(l as u64)),
+            Ok(l) => Value::Number(Number::from(l)),
             Err(_) => Value::Null,
         },
         AttrType::StringType => match a.to_string() {
@@ -93,7 +93,7 @@ impl JsonToken {
                         None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     },
                     AttrType::NumType => match val.as_u64() {
-                        Some(n) => attribute::from_ulong(id, n as CK_ULONG),
+                        Some(n) => attribute::from_ulong(id, n),
                         None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     },
                     AttrType::StringType => match val.as_str() {

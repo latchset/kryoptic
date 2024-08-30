@@ -78,7 +78,7 @@ impl Digest for HashOperation {
         }
         self.finalized = true;
         /* NOTE: It is ok if data and digest point to the same buffer*/
-        let mut digest_len = self.digest_len()? as c_uint;
+        let mut digest_len = c_uint::try_from(self.digest_len()?)?;
         let r = unsafe {
             EVP_Digest(
                 data.as_ptr() as *const c_void,
@@ -89,7 +89,7 @@ impl Digest for HashOperation {
                 std::ptr::null_mut(),
             )
         };
-        if r != 1 || digest_len as usize != digest.len() {
+        if r != 1 || usize::try_from(digest_len)? != digest.len() {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         Ok(())
@@ -130,7 +130,7 @@ impl Digest for HashOperation {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         self.finalized = true;
-        let mut digest_len = self.digest_len()? as c_uint;
+        let mut digest_len = c_uint::try_from(self.digest_len()?)?;
         let r = unsafe {
             EVP_DigestFinal_ex(
                 self.state.ctx.as_mut_ptr(),
@@ -138,13 +138,14 @@ impl Digest for HashOperation {
                 &mut digest_len,
             )
         };
-        if r != 1 || digest_len as usize != digest.len() {
+        if r != 1 || usize::try_from(digest_len)? != digest.len() {
             return err_rv!(CKR_GENERAL_ERROR);
         }
         Ok(())
     }
 
     fn digest_len(&self) -> Result<usize> {
-        Ok(unsafe { EVP_MD_get_size(self.state.md.as_ptr()) as usize })
+        let len = unsafe { EVP_MD_get_size(self.state.md.as_ptr()) };
+        Ok(usize::try_from(len)?)
     }
 }

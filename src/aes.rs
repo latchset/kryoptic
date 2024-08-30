@@ -72,7 +72,10 @@ impl ObjectFactory for AesKeyFactory {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
-        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))? {
+        if !obj.check_or_set_attr(from_ulong(
+            CKA_VALUE_LEN,
+            CK_ULONG::try_from(len)?,
+        ))? {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
 
@@ -96,7 +99,7 @@ impl ObjectFactory for AesKeyFactory {
          * ensure we allow only these sizes */
         match template.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
             Some(idx) => {
-                let len = template[idx].to_ulong()? as usize;
+                let len = usize::try_from(template[idx].to_ulong()?)?;
                 if len > data.len() {
                     data.zeroize();
                     return err_rv!(CKR_KEY_SIZE_RANGE);
@@ -415,7 +418,10 @@ impl AesKDFOperation<'_> {
             finalized: false,
             iv: &[],
             data: unsafe {
-                std::slice::from_raw_parts(params.pData, params.ulLen as usize)
+                std::slice::from_raw_parts(
+                    params.pData,
+                    usize::try_from(params.ulLen)?,
+                )
             },
         })
     }
@@ -434,7 +440,10 @@ impl AesKDFOperation<'_> {
             finalized: false,
             iv: unsafe { std::slice::from_raw_parts(params.iv.as_ptr(), 16) },
             data: unsafe {
-                std::slice::from_raw_parts(params.pData, params.length as usize)
+                std::slice::from_raw_parts(
+                    params.pData,
+                    usize::try_from(params.length)?,
+                )
             },
         })
     }
@@ -472,16 +481,16 @@ impl Derive for AesKDFOperation<'_> {
             } else {
                 std::ptr::null_mut()
             },
-            ulParameterLen: self.iv.len() as CK_ULONG,
+            ulParameterLen: CK_ULONG::try_from(self.iv.len())?,
         };
         let mut op = AesOperation::encrypt_new(&mechanism, key)?;
 
-        let keysize = op.encryption_len(self.data.len() as CK_ULONG)?;
+        let keysize = op.encryption_len(self.data.len())?;
 
         let mut dkm = vec![0u8; keysize];
-        let mut outsize = keysize as CK_ULONG;
+        let mut outsize = CK_ULONG::try_from(keysize)?;
         op.encrypt(self.data, dkm.as_mut_ptr(), &mut outsize)?;
-        if (outsize as usize) != keysize {
+        if (usize::try_from(outsize)?) != keysize {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 

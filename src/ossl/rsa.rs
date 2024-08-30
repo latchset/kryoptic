@@ -189,7 +189,7 @@ fn parse_pss_params(mech: &CK_MECHANISM) -> Result<RsaPssParams> {
             Ok(RsaPssParams {
                 hash: params.hashAlg,
                 mgf: params.mgf,
-                saltlen: params.sLen as c_int,
+                saltlen: c_int::try_from(params.sLen)?,
             })
         }
         _ => Ok(no_pss_params()),
@@ -262,8 +262,8 @@ impl RsaPKCSOperation {
     fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
         Box::new(RsaPKCSMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: MIN_RSA_SIZE_BITS as CK_ULONG,
-                ulMaxKeySize: MAX_RSA_SIZE_BITS as CK_ULONG,
+                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
                 flags: flags,
             },
         })
@@ -820,7 +820,7 @@ impl Encryption for RsaPKCSOperation {
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn encryption_len(&self, _data_len: CK_ULONG) -> Result<usize> {
+    fn encryption_len(&self, _data_len: usize) -> Result<usize> {
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
             _ => err_rv!(CKR_GENERAL_ERROR),
@@ -927,7 +927,7 @@ impl Decryption for RsaPKCSOperation {
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn decryption_len(&self, _data_len: CK_ULONG) -> Result<usize> {
+    fn decryption_len(&self, _data_len: usize) -> Result<usize> {
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
             _ => err_rv!(CKR_GENERAL_ERROR),

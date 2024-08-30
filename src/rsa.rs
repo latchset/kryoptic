@@ -402,7 +402,8 @@ impl Mechanism for RsaPKCSMechanism {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 
-        let bits = pubkey.get_attr_as_ulong(CKA_MODULUS_BITS)? as usize;
+        let bits =
+            usize::try_from(pubkey.get_attr_as_ulong(CKA_MODULUS_BITS)?)?;
         let exponent: Vec<u8> = match pubkey.get_attr(CKA_PUBLIC_EXPONENT) {
             Some(a) => a.get_value().clone(),
             None => {

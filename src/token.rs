@@ -981,9 +981,9 @@ impl Token {
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
             let mut op = aes.encryption_new(&mech, &kek)?;
-            let mut clen: CK_ULONG =
-                (op.encryption_len(val.len() as CK_ULONG)? + DEFAULT_IV_SIZE)
-                    as CK_ULONG;
+            let mut clen = CK_ULONG::try_from(
+                op.encryption_len(val.len())? + DEFAULT_IV_SIZE,
+            )?;
             let mut cipher = Vec::<u8>::with_capacity(clen as usize);
             cipher.extend_from_slice(&iv);
             cipher.resize(clen as usize, 0);
@@ -1034,9 +1034,8 @@ impl Token {
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
             let mut op = aes.decryption_new(&mech, &kek)?;
-            let mut plen: CK_ULONG = op
-                .decryption_len((val.len() - DEFAULT_IV_SIZE) as CK_ULONG)?
-                as CK_ULONG;
+            let mut plen: CK_ULONG =
+                op.decryption_len(val.len() - DEFAULT_IV_SIZE)? as CK_ULONG;
             let mut plain = Vec::<u8>::with_capacity(plen as usize);
             op.decrypt(
                 &val.as_slice()[DEFAULT_IV_SIZE..],

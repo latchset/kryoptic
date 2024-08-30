@@ -40,19 +40,19 @@ impl Derive for HKDFOperation {
         if !self.expand && keysize != self.prflen {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
-        if keysize == 0 || keysize > (u32::MAX as usize) {
+        if keysize == 0 || keysize > usize::try_from(u32::MAX)? {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
 
         let mode = if self.extract {
             if self.expand {
-                EVP_KDF_HKDF_MODE_EXTRACT_AND_EXPAND
+                c_int::try_from(EVP_KDF_HKDF_MODE_EXTRACT_AND_EXPAND)?
             } else {
-                EVP_KDF_HKDF_MODE_EXTRACT_ONLY
+                c_int::try_from(EVP_KDF_HKDF_MODE_EXTRACT_ONLY)?
             }
         } else {
-            EVP_KDF_HKDF_MODE_EXPAND_ONLY
-        } as c_int;
+            c_int::try_from(EVP_KDF_HKDF_MODE_EXPAND_ONLY)?
+        };
 
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;

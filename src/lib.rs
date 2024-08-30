@@ -90,6 +90,21 @@ macro_rules! ok_or_ret {
     };
 }
 
+macro_rules! cast_or_ret {
+    ($type:tt from $val:expr) => {{
+        let Ok(cast) = $type::try_from($val) else {
+            return CKR_GENERAL_ERROR;
+        };
+        cast
+    }};
+    ($type:tt from $val:expr => $err:expr) => {{
+        let Ok(cast) = $type::try_from($val) else {
+            return $err;
+        };
+        cast
+    }};
+}
+
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
 pub fn get_random_data(data: &mut [u8]) -> Result<()> {
@@ -420,8 +435,9 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         let mut slot_high: i64 = -1;
         let slots = wstate.get_slots_ids();
         for s in &slots {
-            if (*s) as i64 > slot_high {
-                slot_high = (*s) as i64;
+            let sn = cast_or_ret!(i64 from *s);
+            if sn > slot_high {
+                slot_high = sn;
             }
             match wstate.get_token_from_slot(*s) {
                 Ok(t) => {
@@ -432,7 +448,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
                 Err(_) => return CKR_GENERAL_ERROR,
             }
         }
-        slotnum = (slot_high + 1) as u64;
+        slotnum = cast_or_ret!(CK_SLOT_ID from slot_high + 1);
     }
 
     /* check that this slot was not already initialized with a different db */
@@ -469,26 +485,28 @@ extern "C" fn fn_get_mechanism_list(
     let rstate = global_rlock!(STATE);
     let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
     if mechanism_list.is_null() {
+        let cnt = cast_or_ret!(CK_ULONG from token.get_mechs_num());
         unsafe {
-            *count = token.get_mechs_num() as CK_ULONG;
+            *count = cnt;
         }
         return CKR_OK;
     }
     let mechs = token.get_mechs_list();
-    unsafe {
-        let num: CK_ULONG = *count;
-        if num < mechs.len() as CK_ULONG {
-            return CKR_BUFFER_TOO_SMALL;
-        }
+    let num = cast_or_ret!(
+        usize from unsafe { *count as CK_ULONG } => CKR_ARGUMENTS_BAD
+    );
+    if num < mechs.len() {
+        return CKR_BUFFER_TOO_SMALL;
     }
-    for item in mechs.iter().enumerate() {
-        let (idx, mech): (usize, &CK_MECHANISM_TYPE) = item;
+    for (udx, mech) in mechs.iter().enumerate() {
+        let idx = cast_or_ret!(isize from udx);
         unsafe {
-            core::ptr::write(mechanism_list.offset(idx as isize), *mech);
+            core::ptr::write(mechanism_list.offset(idx), *mech);
         }
     }
+    let cnt = cast_or_ret!(CK_ULONG from mechs.len());
     unsafe {
-        *count = mechs.len() as CK_ULONG;
+        *count = cnt;
     }
     CKR_OK
 }
@@ -517,7 +535,7 @@ extern "C" fn fn_init_token(
     }
     let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
     let vlabel: Vec<u8> = if label.is_null() {
-        vec![0x20 as u8; 32]
+        vec![0x20u8; 32]
     } else {
         bytes_to_vec!(label, 32)
     };
@@ -727,8 +745,9 @@ extern "C" fn fn_create_object(
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
+    let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*tmpl);
     }
@@ -755,8 +774,9 @@ extern "C" fn fn_copy_object(
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
+    let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*tmpl);
     }
@@ -795,10 +815,10 @@ extern "C" fn fn_get_object_size(
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let token = res_or_ret!(rstate.get_token_from_session(s_handle));
-    let len = res_or_ret!(token.get_object_size(o_handle));
-    unsafe {
-        *size = len as CK_ULONG;
-    }
+    let len = cast_or_ret!(
+        CK_ULONG from res_or_ret!(token.get_object_size(o_handle))
+    );
+    unsafe { *size = len }
     CKR_OK
 }
 
@@ -810,8 +830,9 @@ extern "C" fn fn_get_attribute_value(
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
+    let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let mut tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl))
 }
 extern "C" fn fn_set_attribute_value(
@@ -833,8 +854,9 @@ extern "C" fn fn_set_attribute_value(
             return CKR_SESSION_READ_ONLY;
         }
     }
+    let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let mut tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     ret_to_rv!(token.set_object_attrs(o_handle, &mut tmpl))
 }
 extern "C" fn fn_find_objects_init(
@@ -846,8 +868,9 @@ extern "C" fn fn_find_objects_init(
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let tmpl: &[CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts(template, count as usize) };
+    let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
+    let tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     ret_to_rv!(session.new_search_operation(&mut token, tmpl))
 }
 
@@ -867,19 +890,22 @@ extern "C" fn fn_find_objects(
         Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
         _ => return CKR_OPERATION_ACTIVE,
     };
-    let handles = res_or_ret!(operation.results(max_object_count as usize));
+    let moc = cast_or_ret!(usize from max_object_count => CKR_ARGUMENTS_BAD);
+    let handles = res_or_ret!(operation.results(moc));
     let hlen = handles.len();
     if hlen > 0 {
         let mut idx = 0;
         while idx < hlen {
+            let offset = cast_or_ret!(isize from idx);
             unsafe {
-                core::ptr::write(ph_object.offset(idx as isize), handles[idx]);
+                core::ptr::write(ph_object.offset(offset), handles[idx]);
             }
             idx += 1;
         }
     }
+    let poc = cast_or_ret!(CK_ULONG from hlen);
     unsafe {
-        core::ptr::write(pul_object_count.offset(0), hlen as CK_ULONG);
+        core::ptr::write(pul_object_count.offset(0), poc);
     }
     CKR_OK
 }
@@ -985,15 +1011,17 @@ extern "C" fn fn_encrypt(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
+    let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
     if encrypted_data.is_null() {
-        let encryption_len = res_or_ret!(operation.encryption_len(data_len));
+        let encryption_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.encryption_len(dlen))
+        );
         unsafe {
-            *pul_encrypted_data_len = encryption_len as CK_ULONG;
+            *pul_encrypted_data_len = encryption_len;
         }
         return CKR_OK;
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     ret_to_rv!(operation.encrypt(data, encrypted_data, pul_encrypted_data_len))
 }
 extern "C" fn fn_encrypt_update(
@@ -1015,15 +1043,17 @@ extern "C" fn fn_encrypt_update(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
+    let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
     if encrypted_part.is_null() {
-        let encryption_len = res_or_ret!(operation.encryption_len(part_len));
+        let encryption_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.encryption_len(plen))
+        );
         unsafe {
-            *pul_encrypted_part_len = encryption_len as CK_ULONG;
+            *pul_encrypted_part_len = encryption_len;
         }
         return CKR_OK;
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(part, part_len as usize) };
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.encrypt_update(
         data,
         encrypted_part,
@@ -1048,9 +1078,11 @@ extern "C" fn fn_encrypt_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if last_encrypted_part.is_null() {
-        let encryption_len = res_or_ret!(operation.encryption_len(0));
+        let encryption_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.encryption_len(0))
+        );
         unsafe {
-            *pul_last_encrypted_part_len = encryption_len as CK_ULONG;
+            *pul_last_encrypted_part_len = encryption_len;
         }
         return CKR_OK;
     }
@@ -1100,18 +1132,19 @@ extern "C" fn fn_decrypt(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
+    let elen = cast_or_ret!(usize from encrypted_data_len => CKR_ARGUMENTS_BAD);
     if data.is_null() {
-        let decryption_len =
-            res_or_ret!(operation.decryption_len(encrypted_data_len));
+        let decryption_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.decryption_len(elen))
+        );
         unsafe {
-            *pul_data_len = decryption_len as CK_ULONG;
+            *pul_data_len = decryption_len;
         }
         return CKR_OK;
     }
-    let enc: &[u8] = unsafe {
-        std::slice::from_raw_parts(encrypted_data, encrypted_data_len as usize)
-    };
-    ret_to_rv!(operation.decrypt(enc, data, pul_data_len,))
+    let enc: &[u8] =
+        unsafe { std::slice::from_raw_parts(encrypted_data, elen) };
+    ret_to_rv!(operation.decrypt(enc, data, pul_data_len))
 }
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1132,18 +1165,19 @@ extern "C" fn fn_decrypt_update(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
+    let elen = cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
     if part.is_null() {
-        let decryption_len =
-            res_or_ret!(operation.decryption_len(encrypted_part_len));
+        let decryption_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.decryption_len(elen))
+        );
         unsafe {
-            *pul_part_len = decryption_len as CK_ULONG;
+            *pul_part_len = decryption_len;
         }
         return CKR_OK;
     }
-    let enc: &[u8] = unsafe {
-        std::slice::from_raw_parts(encrypted_part, encrypted_part_len as usize)
-    };
-    ret_to_rv!(operation.decrypt_update(enc, part, pul_part_len,))
+    let enc: &[u8] =
+        unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
+    ret_to_rv!(operation.decrypt_update(enc, part, pul_part_len))
 }
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1163,9 +1197,11 @@ extern "C" fn fn_decrypt_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     if last_part.is_null() {
-        let decryption_len = res_or_ret!(operation.decryption_len(0));
+        let decryption_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.decryption_len(0))
+        );
         unsafe {
-            *pul_last_part_len = decryption_len as CK_ULONG;
+            *pul_last_part_len = decryption_len;
         }
         return CKR_OK;
     }
@@ -1211,25 +1247,26 @@ extern "C" fn fn_digest(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let digest_len = res_or_ret!(operation.digest_len());
+    let dgst_len = cast_or_ret!(CK_ULONG from digest_len);
     if pdigest.is_null() {
         unsafe {
-            *pul_digest_len = digest_len as CK_ULONG;
+            *pul_digest_len = dgst_len;
         }
         return CKR_OK;
     }
     unsafe {
-        if *pul_digest_len < digest_len as CK_ULONG {
+        if *pul_digest_len < dgst_len {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
+    let dlen = cast_or_ret!(usize from data_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     let digest: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(pdigest, digest_len) };
     let ret = ret_to_rv!(operation.digest(data, digest));
     if ret == CKR_OK {
         unsafe {
-            *pul_digest_len = digest_len as u64;
+            *pul_digest_len = dgst_len;
         }
     }
     ret
@@ -1251,8 +1288,8 @@ extern "C" fn fn_digest_update(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(part, part_len as usize) };
+    let plen = cast_or_ret!(usize from part_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.digest_update(data))
 }
 extern "C" fn fn_digest_key(
@@ -1298,14 +1335,15 @@ extern "C" fn fn_digest_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let digest_len = res_or_ret!(operation.digest_len());
+    let dgst_len = cast_or_ret!(CK_ULONG from digest_len);
     if pdigest.is_null() {
         unsafe {
-            *pul_digest_len = digest_len as CK_ULONG;
+            *pul_digest_len = dgst_len;
         }
         return CKR_OK;
     }
     unsafe {
-        if *pul_digest_len < digest_len as CK_ULONG {
+        if *pul_digest_len < dgst_len {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
@@ -1314,7 +1352,7 @@ extern "C" fn fn_digest_final(
     let ret = ret_to_rv!(operation.digest_final(digest));
     if ret == CKR_OK {
         unsafe {
-            *pul_digest_len = digest_len as u64;
+            *pul_digest_len = dgst_len;
         }
     }
     ret
@@ -1362,26 +1400,27 @@ extern "C" fn fn_sign(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let signature_len = res_or_ret!(operation.signature_len());
+    let sig_len = cast_or_ret!(CK_ULONG from signature_len);
     if psignature.is_null() {
         unsafe {
-            *pul_signature_len = signature_len as CK_ULONG;
+            *pul_signature_len = sig_len;
         }
         return CKR_OK;
     }
     unsafe {
-        if *pul_signature_len < signature_len as CK_ULONG {
+        if *pul_signature_len < sig_len {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
+    let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
 
     let ret = ret_to_rv!(operation.sign(data, signature));
     if ret == CKR_OK {
         unsafe {
-            *pul_signature_len = signature_len as CK_ULONG;
+            *pul_signature_len = sig_len;
         }
     }
     ret
@@ -1403,8 +1442,8 @@ extern "C" fn fn_sign_update(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(part, part_len as usize) };
+    let plen = cast_or_ret!(usize from part_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.sign_update(data))
 }
 extern "C" fn fn_sign_final(
@@ -1425,14 +1464,15 @@ extern "C" fn fn_sign_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let signature_len = res_or_ret!(operation.signature_len());
+    let sig_len = cast_or_ret!(CK_ULONG from signature_len);
     if psignature.is_null() {
         unsafe {
-            *pul_signature_len = signature_len as CK_ULONG;
+            *pul_signature_len = sig_len;
         }
         return CKR_OK;
     }
     unsafe {
-        if *pul_signature_len < signature_len as CK_ULONG {
+        if *pul_signature_len < sig_len {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
@@ -1441,7 +1481,7 @@ extern "C" fn fn_sign_final(
     let ret = ret_to_rv!(operation.sign_final(signature));
     if ret == CKR_OK {
         unsafe {
-            *pul_signature_len = signature_len as CK_ULONG;
+            *pul_signature_len = sig_len;
         }
     }
     ret
@@ -1504,11 +1544,12 @@ extern "C" fn fn_verify(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let signature_len = res_or_ret!(operation.signature_len());
-    if psignature_len != signature_len as CK_ULONG {
+    let sig_len = cast_or_ret!(CK_ULONG from signature_len);
+    if psignature_len != sig_len {
         return CKR_SIGNATURE_LEN_RANGE;
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(pdata, data_len as usize) };
+    let dlen = cast_or_ret!(usize from data_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     let signature: &[u8] =
         unsafe { std::slice::from_raw_parts(psignature, signature_len) };
     ret_to_rv!(operation.verify(data, signature))
@@ -1530,8 +1571,8 @@ extern "C" fn fn_verify_update(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
-    let data: &[u8] =
-        unsafe { std::slice::from_raw_parts(part, part_len as usize) };
+    let plen = cast_or_ret!(usize from part_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.verify_update(data))
 }
 extern "C" fn fn_verify_final(
@@ -1552,7 +1593,8 @@ extern "C" fn fn_verify_final(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let signature_len = res_or_ret!(operation.signature_len());
-    if psignature_len != signature_len as CK_ULONG {
+    let sig_len = cast_or_ret!(CK_ULONG from signature_len);
+    if psignature_len != sig_len {
         return CKR_SIGNATURE_LEN_RANGE;
     }
     let signature: &mut [u8] =
@@ -1623,8 +1665,9 @@ extern "C" fn fn_generate_key(
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let data: &CK_MECHANISM = unsafe { &*mechanism };
+    let cnt = cast_or_ret!(usize from count);
     let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, count as usize) };
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*tmpl);
     }
@@ -1683,18 +1726,12 @@ extern "C" fn fn_generate_key_pair(
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let data: &CK_MECHANISM = unsafe { &*mechanism };
-    let pubtmpl: &mut [CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts_mut(
-            public_key_template,
-            public_key_attribute_count as usize,
-        )
-    };
-    let pritmpl: &mut [CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts_mut(
-            private_key_template,
-            private_key_attribute_count as usize,
-        )
-    };
+    let pubcnt = cast_or_ret!(usize from public_key_attribute_count);
+    let pubtmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(public_key_template, pubcnt) };
+    let pricnt = cast_or_ret!(usize from private_key_attribute_count);
+    let pritmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(private_key_template, pricnt) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*pritmpl);
         fail_if_cka_token_true!(&*pubtmpl);
@@ -1790,9 +1827,9 @@ extern "C" fn fn_unwrap_key(
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
-    let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts_mut(template, attribute_count as usize)
-    };
+    let cnt = cast_or_ret!(usize from attribute_count);
+    let tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*tmpl);
     }
@@ -1803,9 +1840,8 @@ extern "C" fn fn_unwrap_key(
     let factories = token.get_object_factories();
     let factory =
         res_or_ret!(factories.get_obj_factory_from_key_template(tmpl));
-    let data: &[u8] = unsafe {
-        std::slice::from_raw_parts(wrapped_key, wrapped_key_len as usize)
-    };
+    let wklen = cast_or_ret!(usize from wrapped_key_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(wrapped_key, wklen) };
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return CKR_MECHANISM_INVALID;
@@ -1841,9 +1877,9 @@ extern "C" fn fn_derive_key(
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
-    let tmpl: &mut [CK_ATTRIBUTE] = unsafe {
-        std::slice::from_raw_parts_mut(template, attribute_count as usize)
-    };
+    let cnt = cast_or_ret!(usize from attribute_count);
+    let tmpl: &mut [CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     if !session.is_writable() {
         fail_if_cka_token_true!(&*tmpl);
     }
@@ -2044,9 +2080,9 @@ extern "C" fn fn_generate_random(
 ) -> CK_RV {
     /* check session is valid */
     drop(global_rlock!(STATE).get_session(s_handle));
-    let data: &mut [u8] = unsafe {
-        std::slice::from_raw_parts_mut(random_data, random_len as usize)
-    };
+    let rndlen = cast_or_ret!(usize from random_len);
+    let data: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
     ret_to_rv!(get_random_data(data))
 }
 extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
@@ -2147,26 +2183,27 @@ extern "C" fn fn_get_slot_list(
         return CKR_ARGUMENTS_BAD;
     }
     let slotids = global_rlock!(STATE).get_slots_ids();
+    let silen = cast_or_ret!(CK_ULONG from slotids.len());
     if slot_list.is_null() {
         unsafe {
-            *count = slotids.len() as CK_ULONG;
+            *count = silen;
         }
         return CKR_OK;
     }
     unsafe {
         let num: CK_ULONG = *count;
-        if num < slotids.len() as CK_ULONG {
+        if num < silen {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
-    for item in slotids.iter().enumerate() {
-        let (idx, slotid): (usize, &CK_SLOT_ID) = item;
+    for (udx, slotid) in slotids.iter().enumerate() {
+        let idx = cast_or_ret!(isize from udx);
         unsafe {
-            core::ptr::write(slot_list.offset(idx as isize), *slotid);
+            core::ptr::write(slot_list.offset(idx), *slotid);
         }
     }
     unsafe {
-        *count = slotids.len() as CK_ULONG;
+        *count = silen;
     }
     CKR_OK
 }
@@ -2574,28 +2611,29 @@ pub extern "C" fn C_GetInterfaceList(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
+    let iflen = cast_or_ret!(CK_ULONG from INTERFACE_SET.len());
     if interfaces_list.is_null() {
         unsafe {
-            *count = INTERFACE_SET.len() as CK_ULONG;
+            *count = iflen;
         }
         return CKR_OK;
     }
     unsafe {
-        let num = *count as usize;
-        if num < INTERFACE_SET.len() {
+        if *count < iflen {
             return CKR_BUFFER_TOO_SMALL;
         }
     }
     for i in 0..INTERFACE_SET.len() {
+        let offset = cast_or_ret!(isize from i);
         unsafe {
             core::ptr::write(
-                interfaces_list.offset(i as isize) as *mut CK_INTERFACE,
+                interfaces_list.offset(offset) as *mut CK_INTERFACE,
                 *(INTERFACE_SET[i].interface),
             );
         }
     }
     unsafe {
-        *count = INTERFACE_SET.len() as CK_ULONG;
+        *count = iflen;
     }
     CKR_OK
 }

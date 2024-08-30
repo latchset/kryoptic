@@ -38,7 +38,7 @@ impl PBKDF2Mechanism {
             Box::new(PBKDF2Mechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: 0,
-                    ulMaxKeySize: std::u32::MAX as CK_ULONG,
+                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
                     flags: CKF_GENERATE,
                 },
             }),
@@ -50,7 +50,10 @@ impl PBKDF2Mechanism {
         obj.set_zeroize();
         obj.set_attr(from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
         obj.set_attr(from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
-        obj.set_attr(from_ulong(CKA_VALUE_LEN, key.len() as CK_ULONG))?;
+        obj.set_attr(from_ulong(
+            CKA_VALUE_LEN,
+            CK_ULONG::try_from(key.len())?,
+        ))?;
         obj.set_attr(from_bytes(CKA_VALUE, key))?;
         obj.set_attr(from_bool(CKA_DERIVE, true))?;
         Ok(obj)
@@ -111,7 +114,7 @@ impl Mechanism for PBKDF2Mechanism {
                 }
                 _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
             },
-            iter: params.iterations as usize,
+            iter: usize::try_from(params.iterations)?,
         };
 
         /* check early that we have key class and type defined */
@@ -119,10 +122,10 @@ impl Mechanism for PBKDF2Mechanism {
             objfactories.get_obj_factory_from_key_template(template)?;
 
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
-            Some(a) => a.to_ulong()? as usize,
+            Some(a) => usize::try_from(a.to_ulong()?)?,
             None => {
                 let max = hmac::hmac_size(pbkdf2.prf);
-                if max == CK_UNAVAILABLE_INFORMATION as usize {
+                if max == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
                     return err_rv!(CKR_MECHANISM_INVALID);
                 }
                 match factory.as_secret_key_factory()?.recommend_key_size(max) {
@@ -186,11 +189,11 @@ impl PBKDF2 {
 
     fn derive(&self, mechanisms: &Mechanisms, dklen: usize) -> Result<Vec<u8>> {
         let hlen = hmac::hmac_size(self.prf);
-        if hlen == CK_UNAVAILABLE_INFORMATION as usize {
+        if hlen == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
 
-        if dklen > (hlen * (u32::MAX as usize)) {
+        if dklen > (hlen * usize::try_from(u32::MAX)?) {
             return err_rv!(CKR_KEY_SIZE_RANGE);
         }
 
@@ -201,7 +204,7 @@ impl PBKDF2 {
         let mech = mechanisms.get(self.prf)?;
 
         for b in 0..l {
-            let i = b as u32 + 1;
+            let i = u32::try_from(b + 1)?;
             let mut t_i = vec![0u8; hlen];
             let mut u_out = vec![0u8; hlen];
             let mut u_in = self.salt.clone();

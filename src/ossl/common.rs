@@ -5,7 +5,6 @@ use super::{byte_ptr, void_ptr};
 
 use interface::*;
 
-use core::ffi::{c_int, c_uint};
 use std::borrow::Cow;
 
 macro_rules! ptr_wrapper_struct {
@@ -271,7 +270,7 @@ pub fn name_as_char(name: &[u8]) -> *const c_char {
 
 pub fn bn_num_bytes(a: *const BIGNUM) -> usize {
     let x = unsafe { (BN_num_bits(a) + 7) / 8 };
-    x as usize
+    usize::try_from(x).unwrap()
 }
 
 #[derive(Debug)]
@@ -323,7 +322,7 @@ impl<'a> OsslParam<'a> {
         Ok(OsslParam {
             v: Vec::new(),
             p: Cow::Borrowed(unsafe {
-                std::slice::from_raw_parts(ptr, (nelem + 1) as usize)
+                std::slice::from_raw_parts(ptr, nelem + 1)
             }),
             finalized: true,
             zeroize: false,
@@ -359,14 +358,14 @@ impl<'a> OsslParam<'a> {
         let bn = unsafe {
             BN_bin2bn(
                 v.as_ptr() as *mut u8,
-                v.len() as i32,
+                c_int::try_from(v.len())?,
                 std::ptr::null_mut(),
             )
         };
         if bn.is_null() {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        let mut size = unsafe { (BN_num_bits(bn) + 7) / 8 } as usize;
+        let mut size = usize::try_from((unsafe { BN_num_bits(bn) } + 7) / 8)?;
         if size == 0 {
             size += 1;
         }
@@ -375,7 +374,7 @@ impl<'a> OsslParam<'a> {
             BN_bn2nativepad(
                 bn,
                 container.as_mut_ptr(),
-                container.len() as c_int,
+                c_int::try_from(container.len())?,
             )
         } < 1
         {
@@ -645,12 +644,13 @@ impl<'a> OsslParam<'a> {
         }
         let len = bn_num_bytes(bn as *const BIGNUM);
         let mut vec = Vec::<u8>::with_capacity(len);
-        if unsafe {
-            BN_bn2bin(
-                bn as *const BIGNUM,
-                vec.as_mut_ptr() as *mut std::os::raw::c_uchar,
-            ) as usize
-        } != len
+        if len
+            != usize::try_from(unsafe {
+                BN_bn2bin(
+                    bn as *const BIGNUM,
+                    vec.as_mut_ptr() as *mut std::os::raw::c_uchar,
+                )
+            })?
         {
             return err_rv!(CKR_DEVICE_ERROR);
         }

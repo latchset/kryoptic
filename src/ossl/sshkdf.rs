@@ -21,7 +21,7 @@ impl Derive for SSHKDFOperation {
         } else {
             misc::common_derive_key_object(key, template, objfactories, 0)
         }?;
-        if value_len == 0 || value_len > (u32::MAX as usize) {
+        if value_len == 0 || value_len > usize::try_from(u32::MAX)? {
             return err_rv!(CKR_TEMPLATE_INCONSISTENT);
         }
 

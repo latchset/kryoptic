@@ -79,7 +79,7 @@ impl HKDFOperation {
             Box::new(HKDFMechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: 0,
-                    ulMaxKeySize: std::u32::MAX as CK_ULONG,
+                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
                     flags: CKF_DERIVE,
                 },
             }),
@@ -89,7 +89,7 @@ impl HKDFOperation {
             Box::new(HKDFMechanism {
                 info: CK_MECHANISM_INFO {
                     ulMinKeySize: 0,
-                    ulMaxKeySize: std::u32::MAX as CK_ULONG,
+                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
                     flags: CKF_DERIVE,
                 },
             }),
@@ -135,7 +135,7 @@ impl HKDFOperation {
 
         if matchlen > 0 {
             let keylen = match key.get_attr_as_ulong(CKA_VALUE_LEN) {
-                Ok(len) => len as usize,
+                Ok(len) => usize::try_from(len)?,
                 Err(_) => match key.get_attr_as_bytes(CKA_VALUE) {
                     Ok(v) => v.len(),
                     Err(_) => 0,

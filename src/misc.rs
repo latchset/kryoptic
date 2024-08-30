@@ -15,10 +15,17 @@ use interface::*;
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<interface::CK_ULONG>();
 
 #[macro_export]
+macro_rules! map_err {
+    ($map:expr, $err:tt) => {{
+        $map.map_err(|e| error::Error::ck_rv_from_error($err, e))
+    }};
+}
+
+#[macro_export]
 macro_rules! bytes_to_vec {
     ($ptr:expr, $len:expr) => {{
         let ptr = $ptr as *const u8;
-        let size = $len as usize;
+        let size = usize::try_from($len).unwrap();
         if ptr == std::ptr::null_mut() || size == 0 {
             Vec::new()
         } else {
@@ -49,14 +56,20 @@ macro_rules! byte_ptr {
 #[macro_export]
 macro_rules! cast_params {
     ($mech:expr, $params:ty) => {{
-        if $mech.ulParameterLen as usize != std::mem::size_of::<$params>() {
+        let Ok(len) = usize::try_from($mech.ulParameterLen) else {
+            return err_rv!(CKR_ARGUMENTS_BAD);
+        };
+        if len != std::mem::size_of::<$params>() {
             return err_rv!(CKR_ARGUMENTS_BAD);
         }
         unsafe { *($mech.pParameter as *const $params) }
     }};
 
     (raw_err $mech:expr, $params:ty) => {{
-        if $mech.ulParameterLen as usize != std::mem::size_of::<$params>() {
+        let Ok(len) = usize::try_from($mech.ulParameterLen) else {
+            return CKR_ARGUMENTS_BAD;
+        };
+        if len != std::mem::size_of::<$params>() {
             return CKR_ARGUMENTS_BAD;
         }
         unsafe { *($mech.pParameter as *const $params) }
@@ -66,7 +79,7 @@ macro_rules! cast_params {
 #[macro_export]
 macro_rules! sizeof {
     ($type:ty) => {
-        std::mem::size_of::<$type>() as CK_ULONG
+        CK_ULONG::try_from(std::mem::size_of::<$type>()).unwrap()
     };
 }
 
@@ -75,7 +88,10 @@ macro_rules! bytes_to_slice {
     ($ptr: expr, $len:expr, $typ:ty) => {
         if $len > 0 {
             unsafe {
-                std::slice::from_raw_parts($ptr as *const $typ, $len as usize)
+                std::slice::from_raw_parts(
+                    $ptr as *const $typ,
+                    usize::try_from($len).unwrap(),
+                )
             }
         } else {
             &[]
@@ -94,7 +110,7 @@ pub fn common_derive_data_object(
     /* we must remove CKA_VALUE_LEN from the template as it is not
      * a valid attribute for a CKO_DATA object */
     let value_len = match tmpl.remove_ulong(CKA_VALUE_LEN)? {
-        Some(val) => val as usize,
+        Some(val) => usize::try_from(val)?,
         None => {
             if default_len == 0 {
                 return err_rv!(CKR_TEMPLATE_INCOMPLETE);
@@ -122,12 +138,15 @@ pub fn common_derive_key_object(
     let mut obj =
         objfactories.derive_key_from_template(key, tmpl.as_slice())?;
     let value_len = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-        Ok(n) => n as usize,
+        Ok(val) => usize::try_from(val)?,
         Err(_) => {
             if default_len == 0 {
                 return err_rv!(CKR_TEMPLATE_INCOMPLETE);
             }
-            obj.set_attr(from_ulong(CKA_VALUE_LEN, default_len as CK_ULONG))?;
+            obj.set_attr(from_ulong(
+                CKA_VALUE_LEN,
+                CK_ULONG::try_from(default_len)?,
+            ))?;
             default_len
         }
     };
