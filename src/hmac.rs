@@ -142,11 +142,9 @@ impl HMACMechanism {
         if mech.ulParameterLen != sizeof!(CK_ULONG) {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
-        let genlen = unsafe {
-            let val: &[CK_ULONG] =
-                std::slice::from_raw_parts(mech.pParameter as *const _, 1);
-            val[0] as usize
-        };
+        let genlen = usize::try_from(unsafe {
+            std::slice::from_raw_parts(mech.pParameter as *const CK_ULONG, 1)[0]
+        })?;
         if genlen < self.minlen || genlen > self.maxlen {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }

@@ -888,10 +888,13 @@ pub trait SecretKeyFactory {
     }
 
     fn get_key_len(&self, obj: &Object) -> usize {
-        match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
-            Ok(l) => l as usize,
-            Err(_) => 0,
-        }
+        let Ok(len) = obj.get_attr_as_ulong(CKA_VALUE_LEN) else {
+            return 0;
+        };
+        let Ok(len) = usize::try_from(len) else {
+            return 0;
+        };
+        len
     }
 
     fn set_key_len(&self, obj: &mut Object, len: usize) -> Result<()> {
@@ -904,7 +907,10 @@ pub trait SecretKeyFactory {
             Err(_) => (),
         }
         if obj
-            .check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))
+            .check_or_set_attr(from_ulong(
+                CKA_VALUE_LEN,
+                CK_ULONG::try_from(len)?,
+            ))
             .is_ok()
         {
             Ok(())
@@ -978,7 +984,8 @@ impl ObjectFactory for GenericSecretKeyFactory {
         if self.keysize != 0 && len != self.keysize {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
-        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len as CK_ULONG))? {
+        let len = CK_ULONG::try_from(len)?;
+        if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len))? {
             return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
         }
 
@@ -1048,7 +1055,7 @@ impl GenericSecretKeyMechanism {
 }
 
 pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
-    let value_len = key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize;
+    let value_len = usize::try_from(key.get_attr_as_ulong(CKA_VALUE_LEN)?)?;
 
     let mut value: Vec<u8> = vec![0; value_len];
     match super::CSPRNG
@@ -1298,7 +1305,7 @@ impl ObjectFactories {
                 }
                 Some(attr) => {
                     let attr_val = attr.get_value();
-                    let attr_len = attr_val.len() as CK_ULONG;
+                    let attr_len = CK_ULONG::try_from(attr_val.len())?;
                     if ck_attr.pValue.is_null() {
                         ck_attr.ulValueLen = attr_len;
                     } else {

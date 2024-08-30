@@ -469,8 +469,8 @@ impl ECDHOperation {
     fn new_mechanism() -> Box<dyn Mechanism> {
         Box::new(EccMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
-                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
                 flags: CKF_DERIVE,
             },
         })

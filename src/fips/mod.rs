@@ -11,13 +11,11 @@ use getrandom;
 use libc;
 use once_cell::sync::Lazy;
 use std::ffi::CStr;
+use std::ffi::{c_char, c_int, c_uchar, c_uint, c_void};
 use std::fs::File;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
-use std::os::raw::c_char;
-use std::os::raw::c_uchar;
-use std::os::raw::c_void;
 use std::path::Path;
 use std::slice;
 use zeroize::Zeroize;
@@ -45,7 +43,9 @@ unsafe extern "C" fn fips_get_entropy(
     min_len: usize,
     max_len: usize,
 ) -> usize {
-    let mut len = entropy as usize;
+    let Ok(mut len) = usize::try_from(entropy) else {
+        return 0;
+    };
     if len < min_len {
         len = min_len;
     }
@@ -91,13 +91,11 @@ unsafe extern "C" fn fips_get_nonce(
      * we return just getrandom data | salt string.
      * Need to check if this is ok */
 
-    let out = fips_get_entropy(
-        handle,
-        pout,
-        min_len as ::std::os::raw::c_int,
-        min_len,
-        max_len,
-    );
+    let Ok(entropy) = c_int::try_from(min_len) else {
+        return 0;
+    };
+
+    let out = fips_get_entropy(handle, pout, entropy, min_len, max_len);
     if out == 0 {
         return 0;
     }
@@ -298,7 +296,9 @@ impl FileBio {
         if pos >= size {
             return Ok(0);
         }
-        let mut avail = (size - pos) as usize;
+        let mut avail = usize::try_from(size - pos).map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, e)
+        })?;
         if v.len() < avail {
             avail = v.len();
         }
@@ -369,9 +369,9 @@ unsafe extern "C" fn fips_bio_new_membuf(
     len: ::std::os::raw::c_int,
 ) -> *mut OSSL_CORE_BIO {
     let size = if len > 0 {
-        len as usize
+        usize::try_from(len).unwrap()
     } else if len < 0 {
-        libc::strlen(buf as *const i8) as usize
+        usize::try_from(libc::strlen(buf as *const i8)).unwrap()
     } else {
         return std::ptr::null_mut();
     };
@@ -552,7 +552,7 @@ unsafe impl Sync for FipsProvider {}
 macro_rules! dispatcher_struct {
     (args1; $fn_id:expr; $fn:expr) => {
         OSSL_DISPATCH {
-            function_id: $fn_id as i32,
+            function_id: i32::try_from($fn_id).unwrap(),
             function: Some(std::mem::transmute::<
                 unsafe extern "C" fn(_) -> _,
                 unsafe extern "C" fn(),
@@ -561,7 +561,7 @@ macro_rules! dispatcher_struct {
     };
     (args2; $fn_id:expr; $fn:expr) => {
         OSSL_DISPATCH {
-            function_id: $fn_id as i32,
+            function_id: i32::try_from($fn_id).unwrap(),
             function: Some(std::mem::transmute::<
                 unsafe extern "C" fn(_, _) -> _,
                 unsafe extern "C" fn(),
@@ -570,7 +570,7 @@ macro_rules! dispatcher_struct {
     };
     (args3; $fn_id:expr; $fn:expr) => {
         OSSL_DISPATCH {
-            function_id: $fn_id as i32,
+            function_id: i32::try_from($fn_id).unwrap(),
             function: Some(std::mem::transmute::<
                 unsafe extern "C" fn(_, _, _) -> _,
                 unsafe extern "C" fn(),
@@ -579,7 +579,7 @@ macro_rules! dispatcher_struct {
     };
     (args4; $fn_id:expr; $fn:expr) => {
         OSSL_DISPATCH {
-            function_id: $fn_id as i32,
+            function_id: i32::try_from($fn_id).unwrap(),
             function: Some(std::mem::transmute::<
                 unsafe extern "C" fn(_, _, _, _) -> _,
                 unsafe extern "C" fn(),
@@ -588,7 +588,7 @@ macro_rules! dispatcher_struct {
     };
     (args5; $fn_id:expr; $fn:expr) => {
         OSSL_DISPATCH {
-            function_id: $fn_id as i32,
+            function_id: i32::try_from($fn_id).unwrap(),
             function: Some(std::mem::transmute::<
                 unsafe extern "C" fn(_, _, _, _, _) -> _,
                 unsafe extern "C" fn(),
@@ -597,7 +597,7 @@ macro_rules! dispatcher_struct {
     };
     (args6; $fn_id:expr; $fn:expr) => {
         OSSL_DISPATCH {
-            function_id: $fn_id as i32,
+            function_id: i32::try_from($fn_id).unwrap(),
             function: Some(std::mem::transmute::<
                 unsafe extern "C" fn(_, _, _, _, _, _) -> _,
                 unsafe extern "C" fn(),

@@ -98,7 +98,9 @@ impl SqliteStorage {
                         .as_i64_or_null()
                         .map_err(bad_storage)?
                     {
-                        Some(n) => attribute::from_ulong(atype, n as CK_ULONG),
+                        Some(n) => {
+                            attribute::from_ulong(atype, CK_ULONG::try_from(n)?)
+                        }
                         None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     },
                     AttrType::StringType => match val
@@ -163,11 +165,13 @@ impl SqliteStorage {
             }
             search_query.push_str(SEARCH_OBJ_ID);
             /* add parameters */
-            search_params.push(Value::from(a.type_ as u32));
+            search_params.push(Value::from(u32::try_from(a.type_)?));
             search_params.push(
                 match attribute::attr_id_to_attrtype(a.type_)? {
                     AttrType::BoolType => Value::from(a.to_bool()?),
-                    AttrType::NumType => Value::from(a.to_ulong()? as u32),
+                    AttrType::NumType => {
+                        Value::from(u32::try_from(a.to_ulong()?)?)
+                    }
                     AttrType::StringType => Value::from(a.to_string()?),
                     AttrType::BytesType => Value::from(a.to_buf()?),
                     AttrType::DateType => {
@@ -214,11 +218,11 @@ impl SqliteStorage {
         };
         let mut stmt = tx.prepare(UPDATE_ATTR).map_err(bad_storage)?;
         for a in obj.get_attributes() {
-            let col_id = Value::from(objid as i32);
-            let col_attr = Value::from(a.get_type() as u32);
+            let col_id = Value::from(i32::try_from(objid)?);
+            let col_attr = Value::from(u32::try_from(a.get_type())?);
             let col_val = match a.get_attrtype() {
                 AttrType::BoolType => Value::from(a.to_bool()?),
-                AttrType::NumType => Value::from(a.to_ulong()? as u32),
+                AttrType::NumType => Value::from(u32::try_from(a.to_ulong()?)?),
                 AttrType::StringType => Value::from(a.to_string()?),
                 AttrType::BytesType => Value::from(a.to_bytes()?.clone()),
                 AttrType::DateType => Value::from(a.to_date_string()?),

@@ -475,7 +475,7 @@ impl TLSKDFOperation {
         tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
         tmpl.add_missing_ulong(CKA_VALUE_LEN, &TLS_MASTER_SECRET_SIZE);
-        tmpl.add_missing_slice(CKA_ALLOWED_MECHANISMS, allowed);
+        tmpl.add_missing_slice(CKA_ALLOWED_MECHANISMS, allowed)?;
         tmpl.add_missing_bool(CKA_SIGN, &CK_TRUE);
         tmpl.add_missing_bool(CKA_VERIFY, &CK_TRUE);
         tmpl.add_missing_bool(CKA_DERIVE, &CK_TRUE);

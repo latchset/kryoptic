@@ -17,7 +17,7 @@ impl PBKDF2 {
             .add_octet_string(name_as_char(OSSL_KDF_PARAM_SALT), &self.salt)?;
         params.add_owned_uint(
             name_as_char(OSSL_KDF_PARAM_ITER),
-            self.iter as c_uint,
+            c_uint::try_from(self.iter)?,
         )?;
         params.add_const_c_string(
             name_as_char(OSSL_KDF_PARAM_DIGEST),

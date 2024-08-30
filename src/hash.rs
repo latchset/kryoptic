@@ -261,7 +261,7 @@ impl Derive for HashKDFOperation {
 
         let mut op = HashOperation::new(self.prf)?;
         let hashsize = hash_size(self.prf);
-        let mut keysize = hashsize as CK_ULONG;
+        let mut keysize = CK_ULONG::try_from(hashsize)?;
 
         let mut tmpl = CkAttrs::from(template);
         if tmpl
@@ -284,10 +284,11 @@ impl Derive for HashKDFOperation {
                 keysize = size;
             }
             None => {
-                keysize = factory
-                    .as_secret_key_factory()?
-                    .recommend_key_size(hashsize)?
-                    as CK_ULONG;
+                keysize = CK_ULONG::try_from(
+                    factory
+                        .as_secret_key_factory()?
+                        .recommend_key_size(hashsize)?,
+                )?;
 
                 tmpl.add_ulong(CKA_VALUE_LEN, &keysize);
             }
@@ -303,7 +304,7 @@ impl Derive for HashKDFOperation {
 
         factory
             .as_secret_key_factory()?
-            .set_key(&mut obj, dkm[..(keysize as usize)].to_vec())?;
+            .set_key(&mut obj, dkm[..(usize::try_from(keysize)?)].to_vec())?;
 
         Ok(vec![obj])
     }

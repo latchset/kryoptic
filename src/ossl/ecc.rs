@@ -14,7 +14,7 @@ use attribute::CkAttrs;
 use kasn1::DerEncBigUint;
 use mechanism::*;
 
-use core::ffi::{c_char, c_uint};
+use core::ffi::{c_char, c_int, c_uint};
 use std::borrow::Cow;
 use zeroize::Zeroize;
 
@@ -225,8 +225,8 @@ impl EccOperation {
     fn new_mechanism() -> Box<dyn Mechanism> {
         Box::new(EccMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
-                ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
                 flags: CKF_SIGN | CKF_VERIFY,
             },
         })
@@ -252,8 +252,8 @@ impl EccOperation {
             CKM_EC_KEY_PAIR_GEN,
             Box::new(EccMechanism {
                 info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_EC_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_EC_SIZE_BITS as CK_ULONG,
+                    ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
                     flags: CKF_GENERATE_KEY_PAIR,
                 },
             }),
@@ -322,7 +322,7 @@ impl EccOperation {
         let res = unsafe {
             EVP_PKEY_todata(
                 evp_pkey.as_ptr(),
-                EVP_PKEY_KEYPAIR as std::os::raw::c_int,
+                c_int::try_from(EVP_PKEY_KEYPAIR)?,
                 &mut params,
             )
         };
@@ -678,11 +678,11 @@ impl Derive for ECDHOperation {
         }
         self.finalized = true;
 
-        let mode = if self.mech == CKM_ECDH1_COFACTOR_DERIVE {
+        let mode: c_int = if self.mech == CKM_ECDH1_COFACTOR_DERIVE {
             1
         } else {
             -1
-        } as core::ffi::c_int;
+        };
         let outlen: c_uint;
 
         let mut params = OsslParam::with_capacity(5);
@@ -699,7 +699,7 @@ impl Derive for ECDHOperation {
         let raw_max = make_output_length_from_obj(key)?;
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => {
-                let value_len = a.to_ulong()? as usize;
+                let value_len = usize::try_from(a.to_ulong()?)?;
                 if self.kdf == CKD_NULL && value_len > raw_max {
                     return err_rv!(CKR_TEMPLATE_INCONSISTENT);
                 }
@@ -738,7 +738,7 @@ impl Derive for ECDHOperation {
                         &self.shared,
                     )?;
                 }
-                outlen = keylen as c_uint;
+                outlen = c_uint::try_from(keylen)?;
                 params.add_uint(
                     name_as_char(OSSL_EXCHANGE_PARAM_KDF_OUTLEN),
                     &outlen,

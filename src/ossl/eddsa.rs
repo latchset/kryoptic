@@ -12,6 +12,8 @@ use super::{cast_params, some_or_err};
 
 use mechanism::*;
 
+use std::ffi::c_int;
+
 // TODO could probably reuse the ECC one as its the same?
 pub fn eddsa_import(obj: &mut Object) -> Result<()> {
     bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
@@ -155,7 +157,7 @@ fn object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
     };
     let mut priv_key_octet: Vec<u8> = Vec::with_capacity(priv_key.len() + 2);
     priv_key_octet.push(4); /* tag octet string */
-    priv_key_octet.push(priv_key.len() as u8); /* length */
+    priv_key_octet.push(u8::try_from(priv_key.len())?); /* length */
     priv_key_octet.extend(priv_key);
 
     let mut params = OsslParam::with_capacity(1);
@@ -205,8 +207,10 @@ impl EddsaOperation {
             CKM_EDDSA,
             Box::new(EddsaMechanism {
                 info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_EDDSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_EDDSA_SIZE_BITS as CK_ULONG,
+                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
+                        .unwrap(),
                     flags: CKF_SIGN | CKF_VERIFY,
                 },
             }),
@@ -216,8 +220,10 @@ impl EddsaOperation {
             CKM_EC_EDWARDS_KEY_PAIR_GEN,
             Box::new(EddsaMechanism {
                 info: CK_MECHANISM_INFO {
-                    ulMinKeySize: MIN_EDDSA_SIZE_BITS as CK_ULONG,
-                    ulMaxKeySize: MAX_EDDSA_SIZE_BITS as CK_ULONG,
+                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
+                        .unwrap(),
                     flags: CKF_GENERATE_KEY_PAIR,
                 },
             }),
@@ -275,7 +281,7 @@ impl EddsaOperation {
         let res = unsafe {
             EVP_PKEY_todata(
                 evp_pkey.as_ptr(),
-                EVP_PKEY_KEYPAIR as std::os::raw::c_int,
+                c_int::try_from(EVP_PKEY_KEYPAIR)?,
                 &mut params,
             )
         };
