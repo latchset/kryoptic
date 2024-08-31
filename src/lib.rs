@@ -1014,7 +1014,7 @@ extern "C" fn fn_encrypt(
     let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
     if encrypted_data.is_null() {
         let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(dlen))
+            CK_ULONG from res_or_ret!(operation.encryption_len(dlen, false))
         );
         unsafe {
             *pul_encrypted_data_len = encryption_len;
@@ -1022,7 +1022,14 @@ extern "C" fn fn_encrypt(
         return CKR_OK;
     }
     let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
-    ret_to_rv!(operation.encrypt(data, encrypted_data, pul_encrypted_data_len))
+    let penclen = unsafe { *pul_encrypted_data_len as CK_ULONG };
+    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
+    let encdata: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(encrypted_data, enclen) };
+    let outlen = res_or_ret!(operation.encrypt(data, encdata));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_encrypted_data_len = retlen };
+    CKR_OK
 }
 extern "C" fn fn_encrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1046,7 +1053,7 @@ extern "C" fn fn_encrypt_update(
     let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
     if encrypted_part.is_null() {
         let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(plen))
+            CK_ULONG from res_or_ret!(operation.encryption_len(plen, false))
         );
         unsafe {
             *pul_encrypted_part_len = encryption_len;
@@ -1054,11 +1061,14 @@ extern "C" fn fn_encrypt_update(
         return CKR_OK;
     }
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    ret_to_rv!(operation.encrypt_update(
-        data,
-        encrypted_part,
-        pul_encrypted_part_len
-    ))
+    let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
+    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
+    let encpart: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
+    let outlen = res_or_ret!(operation.encrypt_update(data, encpart));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_encrypted_part_len = retlen };
+    CKR_OK
 }
 extern "C" fn fn_encrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1077,17 +1087,23 @@ extern "C" fn fn_encrypt_final(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
+    let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
+    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
     if last_encrypted_part.is_null() {
         let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(0))
+            CK_ULONG from res_or_ret!(operation.encryption_len(enclen, true))
         );
         unsafe {
             *pul_last_encrypted_part_len = encryption_len;
         }
         return CKR_OK;
     }
-    ret_to_rv!(operation
-        .encrypt_final(last_encrypted_part, pul_last_encrypted_part_len))
+    let enclast: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(last_encrypted_part, enclen) };
+    let outlen = res_or_ret!(operation.encrypt_final(enclast));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_last_encrypted_part_len = retlen };
+    CKR_OK
 }
 
 extern "C" fn fn_decrypt_init(
@@ -1135,7 +1151,7 @@ extern "C" fn fn_decrypt(
     let elen = cast_or_ret!(usize from encrypted_data_len => CKR_ARGUMENTS_BAD);
     if data.is_null() {
         let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(elen))
+            CK_ULONG from res_or_ret!(operation.decryption_len(elen, false))
         );
         unsafe {
             *pul_data_len = decryption_len;
@@ -1144,7 +1160,14 @@ extern "C" fn fn_decrypt(
     }
     let enc: &[u8] =
         unsafe { std::slice::from_raw_parts(encrypted_data, elen) };
-    ret_to_rv!(operation.decrypt(enc, data, pul_data_len))
+    let pdlen = unsafe { *pul_data_len as CK_ULONG };
+    let dlen = cast_or_ret!(usize from pdlen => CKR_ARGUMENTS_BAD);
+    let ddata: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(data, dlen) };
+    let outlen = res_or_ret!(operation.decrypt(enc, ddata));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_data_len = retlen };
+    CKR_OK
 }
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1168,7 +1191,7 @@ extern "C" fn fn_decrypt_update(
     let elen = cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
     if part.is_null() {
         let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(elen))
+            CK_ULONG from res_or_ret!(operation.decryption_len(elen, false))
         );
         unsafe {
             *pul_part_len = decryption_len;
@@ -1177,7 +1200,14 @@ extern "C" fn fn_decrypt_update(
     }
     let enc: &[u8] =
         unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
-    ret_to_rv!(operation.decrypt_update(enc, part, pul_part_len))
+    let pplen = unsafe { *pul_part_len as CK_ULONG };
+    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
+    let dpart: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(part, plen) };
+    let outlen = res_or_ret!(operation.decrypt_update(enc, dpart));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_part_len = retlen };
+    CKR_OK
 }
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1196,16 +1226,23 @@ extern "C" fn fn_decrypt_final(
     if operation.finalized() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
+    let pplen = unsafe { *pul_last_part_len as CK_ULONG };
+    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
     if last_part.is_null() {
         let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(0))
+            CK_ULONG from res_or_ret!(operation.decryption_len(plen, true))
         );
         unsafe {
             *pul_last_part_len = decryption_len;
         }
         return CKR_OK;
     }
-    ret_to_rv!(operation.decrypt_final(last_part, pul_last_part_len))
+    let dlast: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(last_part, plen) };
+    let outlen = res_or_ret!(operation.decrypt_final(dlast));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_last_part_len = retlen };
+    CKR_OK
 }
 
 extern "C" fn fn_digest_init(
@@ -1803,14 +1840,15 @@ extern "C" fn fn_wrap_key(
         }
     }
 
-    ret_to_rv!(mech.wrap_key(
-        mechanism,
-        &wkey,
-        &key,
-        wrapped_key,
-        pul_wrapped_key_len,
-        factory,
-    ))
+    let pwraplen = unsafe { *pul_wrapped_key_len as CK_ULONG };
+    let wraplen = cast_or_ret!(usize from pwraplen => CKR_ARGUMENTS_BAD);
+    let wrapped: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) };
+    let outlen =
+        res_or_ret!(mech.wrap_key(mechanism, &wkey, &key, wrapped, factory,));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_wrapped_key_len = retlen };
+    CKR_OK
 }
 
 extern "C" fn fn_unwrap_key(

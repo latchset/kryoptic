@@ -1,7 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::{byte_ptr, void_ptr};
+use super::void_ptr;
 
 #[derive(Debug)]
 struct AesMacOperation {
@@ -80,7 +80,6 @@ impl AesMacOperation {
 
         let mut data_len = self.padlen + data.len();
         let mut cursor = 0;
-        let mut outlen: CK_ULONG = AES_BLOCK_SIZE as CK_ULONG;
 
         if data_len < AES_BLOCK_SIZE {
             self.padbuf[self.padlen..data_len].copy_from_slice(data);
@@ -91,16 +90,9 @@ impl AesMacOperation {
             /* first full block */
             cursor = AES_BLOCK_SIZE - self.padlen;
             self.padbuf[self.padlen..].copy_from_slice(&data[..cursor]);
-            if !self
-                .op
-                .encrypt_update(
-                    &self.padbuf,
-                    byte_ptr!(self.macbuf.as_ptr()),
-                    &mut outlen,
-                )
-                .is_ok()
-                || outlen != AES_BLOCK_SIZE as CK_ULONG
-            {
+            let outlen =
+                self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
+            if outlen != AES_BLOCK_SIZE {
                 self.finalized = true;
                 return err_rv!(CKR_GENERAL_ERROR);
             }
@@ -109,16 +101,11 @@ impl AesMacOperation {
 
         /* whole blocks */
         while data_len > AES_BLOCK_SIZE {
-            if !self
-                .op
-                .encrypt_update(
-                    &data[cursor..(cursor + AES_BLOCK_SIZE)],
-                    byte_ptr!(self.macbuf.as_ptr()),
-                    &mut outlen,
-                )
-                .is_ok()
-                || outlen != AES_BLOCK_SIZE as CK_ULONG
-            {
+            let outlen = self.op.encrypt_update(
+                &data[cursor..(cursor + AES_BLOCK_SIZE)],
+                &mut self.macbuf,
+            )?;
+            if outlen != AES_BLOCK_SIZE {
                 self.finalized = true;
                 return err_rv!(CKR_GENERAL_ERROR);
             }
@@ -149,17 +136,9 @@ impl AesMacOperation {
         if self.padlen > 0 {
             /* last full block */
             self.padbuf[self.padlen..].fill(0);
-            let mut outlen: CK_ULONG = AES_BLOCK_SIZE as CK_ULONG;
-            if !self
-                .op
-                .encrypt_update(
-                    &self.padbuf,
-                    byte_ptr!(self.macbuf.as_ptr()),
-                    &mut outlen,
-                )
-                .is_ok()
-                || outlen != AES_BLOCK_SIZE as CK_ULONG
-            {
+            let outlen =
+                self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
+            if outlen != AES_BLOCK_SIZE {
                 return err_rv!(CKR_GENERAL_ERROR);
             }
         }

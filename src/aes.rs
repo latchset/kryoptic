@@ -248,10 +248,9 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         key: &Object,
-        data: CK_BYTE_PTR,
-        data_len: CK_ULONG_PTR,
+        data: &mut [u8],
         key_template: &Box<dyn ObjectFactory>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -261,7 +260,6 @@ impl Mechanism for AesMechanism {
             wrapping_key,
             key_template.export_for_wrapping(key)?,
             data,
-            data_len,
         )
     }
 
@@ -485,12 +483,11 @@ impl Derive for AesKDFOperation<'_> {
         };
         let mut op = AesOperation::encrypt_new(&mechanism, key)?;
 
-        let keysize = op.encryption_len(self.data.len())?;
+        let keysize = op.encryption_len(self.data.len(), false)?;
 
         let mut dkm = vec![0u8; keysize];
-        let mut outsize = CK_ULONG::try_from(keysize)?;
-        op.encrypt(self.data, dkm.as_mut_ptr(), &mut outsize)?;
-        if (usize::try_from(outsize)?) != keysize {
+        let outsize = op.encrypt(self.data, &mut dkm)?;
+        if outsize != keysize {
             return err_rv!(CKR_GENERAL_ERROR);
         }
 

@@ -483,12 +483,11 @@ impl Token {
         let vlen = kek.get_attr_as_ulong(CKA_VALUE_LEN)?;
         let bs = aes::AES_BLOCK_SIZE;
         let mut buf = vec![0u8; (((vlen as usize + bs) / bs) + 1) * bs];
-        let mut blen = buf.len() as CK_ULONG;
         let aes = self.mechanisms.get(CKM_AES_GCM)?;
         let factory = self.object_factories.get_object_factory(&kek)?;
         /* need to do this or wrap_key will fail */
         kek.set_attr(attribute::from_bool(CKA_EXTRACTABLE, true))?;
-        aes.wrap_key(
+        let outlen = aes.wrap_key(
             &CK_MECHANISM {
                 mechanism: CKM_AES_GCM,
                 pParameter: &self.wrapping_params() as *const _ as *mut _,
@@ -496,11 +495,10 @@ impl Token {
             },
             wrapper,
             &kek,
-            buf.as_mut_ptr() as *mut u8,
-            &mut blen,
+            buf.as_mut_slice(),
             factory,
         )?;
-        unsafe { buf.set_len(blen as usize) };
+        buf.resize(outlen, 0);
         Ok(buf)
     }
 
@@ -981,21 +979,15 @@ impl Token {
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
             let mut op = aes.encryption_new(&mech, &kek)?;
-            let mut clen = CK_ULONG::try_from(
-                op.encryption_len(val.len())? + DEFAULT_IV_SIZE,
-            )?;
-            let mut cipher = Vec::<u8>::with_capacity(clen as usize);
-            cipher.extend_from_slice(&iv);
-            cipher.resize(clen as usize, 0);
-            clen -= iv.len() as CK_ULONG;
-            op.encrypt(
+            let clen = op.encryption_len(val.len(), false)?;
+            let mut encval = vec![0u8; iv.len() + clen];
+            encval[..iv.len()].copy_from_slice(&iv);
+            let outlen = op.encrypt(
                 val.as_slice(),
-                cipher.as_mut_slice()[DEFAULT_IV_SIZE..].as_mut_ptr(),
-                &mut clen,
+                &mut encval.as_mut_slice()[iv.len()..],
             )?;
-
-            unsafe { cipher.set_len(clen as usize + DEFAULT_IV_SIZE) };
-            return Ok(cipher);
+            encval.resize(iv.len() + outlen, 0);
+            return Ok(encval);
         } else {
             return err_rv!(CKR_GENERAL_ERROR);
         }
@@ -1034,16 +1026,16 @@ impl Token {
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
             let mut op = aes.decryption_new(&mech, &kek)?;
-            let mut plen: CK_ULONG =
-                op.decryption_len(val.len() - DEFAULT_IV_SIZE)? as CK_ULONG;
-            let mut plain = Vec::<u8>::with_capacity(plen as usize);
-            op.decrypt(
+            let mut plain =
+                vec![
+                    0u8;
+                    op.decryption_len(val.len() - DEFAULT_IV_SIZE, false)?
+                ];
+            let outlen = op.decrypt(
                 &val.as_slice()[DEFAULT_IV_SIZE..],
-                plain.as_mut_ptr(),
-                &mut plen,
+                plain.as_mut_slice(),
             )?;
-
-            unsafe { plain.set_len(plen as usize) };
+            plain.resize(outlen, 0);
             return Ok(plain);
         } else {
             return err_rv!(CKR_GENERAL_ERROR);
