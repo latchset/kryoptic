@@ -564,10 +564,9 @@ impl RsaPKCSOperation {
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         mut keydata: Vec<u8>,
-        output: CK_BYTE_PTR,
-        output_len: CK_ULONG_PTR,
+        output: &mut [u8],
         info: &CK_MECHANISM_INFO,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let mut op = match Self::encrypt_new(mech, wrapping_key, info) {
             Ok(o) => o,
             Err(e) => {
@@ -575,7 +574,7 @@ impl RsaPKCSOperation {
                 return Err(e);
             }
         };
-        let result = op.encrypt(&keydata, output, output_len);
+        let result = op.encrypt(&keydata, output);
         keydata.zeroize();
         result
     }
@@ -587,11 +586,10 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<Vec<u8>> {
         let mut op = Self::decrypt_new(mech, wrapping_key, info)?;
-        let mut len: CK_ULONG = 0;
-        op.decrypt(data, std::ptr::null_mut(), &mut len)?;
-        let mut result = vec![0u8; len as usize];
-        op.decrypt(data, result.as_mut_ptr(), &mut len)?;
-        unsafe { result.set_len(len as usize) };
+        let outlen = op.decrypt(data, &mut [])?;
+        let mut result = vec![0u8; outlen];
+        let outlen = op.decrypt(data, result.as_mut_slice())?;
+        result.resize(outlen, 0);
         Ok(result)
     }
 
@@ -731,12 +729,7 @@ impl MechOperation for RsaPKCSOperation {
 }
 
 impl Encryption for RsaPKCSOperation {
-    fn encrypt(
-        &mut self,
-        plain: &[u8],
-        cipher: CK_BYTE_PTR,
-        cipher_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+    fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
@@ -754,7 +747,7 @@ impl Encryption for RsaPKCSOperation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
 
-        let mut outlen = 0usize;
+        let mut outlen = 0;
         let outlen_ptr: *mut usize = &mut outlen;
         if unsafe {
             EVP_PKEY_encrypt(
@@ -768,16 +761,11 @@ impl Encryption for RsaPKCSOperation {
         {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        if cipher.is_null() {
-            unsafe {
-                *cipher_len = outlen as CK_ULONG;
-            }
-            return Ok(());
+        if cipher.len() == 0 {
+            return Ok(outlen);
         } else {
-            unsafe {
-                if (*cipher_len as usize) < outlen {
-                    return err_rv!(CKR_BUFFER_TOO_SMALL);
-                }
+            if cipher.len() < outlen {
+                return Err(error::Error::buf_too_small(outlen));
             }
         }
 
@@ -786,7 +774,7 @@ impl Encryption for RsaPKCSOperation {
         if unsafe {
             EVP_PKEY_encrypt(
                 ctx.as_mut_ptr(),
-                cipher,
+                cipher.as_mut_ptr(),
                 outlen_ptr,
                 plain.as_ptr(),
                 plain.len(),
@@ -795,142 +783,150 @@ impl Encryption for RsaPKCSOperation {
         {
             return err_rv!(CKR_DEVICE_ERROR);
         }
-        unsafe {
-            *cipher_len = outlen as CK_ULONG;
-        }
-        Ok(())
+        Ok(outlen)
     }
 
     fn encrypt_update(
         &mut self,
         _plain: &[u8],
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+        _cipher: &mut [u8],
+    ) -> Result<usize> {
         self.finalized = true;
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn encrypt_final(
-        &mut self,
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+    fn encrypt_final(&mut self, _cipher: &mut [u8]) -> Result<usize> {
         self.finalized = true;
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn encryption_len(&self, _data_len: usize) -> Result<usize> {
+    fn encryption_len(&mut self, _: usize, fin: bool) -> Result<usize> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if fin {
+            self.finalized = true;
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
-            _ => err_rv!(CKR_GENERAL_ERROR),
+            _ => {
+                self.finalized = true;
+                err_rv!(CKR_GENERAL_ERROR)
+            }
         }
     }
 }
 
 impl Decryption for RsaPKCSOperation {
-    fn decrypt(
-        &mut self,
-        cipher: &[u8],
-        plain: CK_BYTE_PTR,
-        plain_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+    fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         if self.in_use {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
         if self.finalized {
             return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
         }
-        unsafe {
-            let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
-            if EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            let params = self.rsa_enc_params();
-            if EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr()) != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
+        let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
+        let ret = unsafe { EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) };
+        if ret != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        let params = self.rsa_enc_params();
+        let ret = unsafe {
+            EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
+        };
+        if ret != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
 
-            let mut outlen = 0usize;
-            let outlen_ptr: *mut usize = &mut outlen;
-            if EVP_PKEY_decrypt(
+        let mut outlen = 0usize;
+        let outlen_ptr: *mut usize = &mut outlen;
+        let ret = unsafe {
+            EVP_PKEY_decrypt(
                 ctx.as_mut_ptr(),
                 std::ptr::null_mut(),
                 outlen_ptr,
                 cipher.as_ptr(),
                 cipher.len(),
-            ) != 1
-            {
-                return err_rv!(CKR_DEVICE_ERROR);
+            )
+        };
+        if ret != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
+        }
+        if plain.len() == 0 {
+            return Ok(outlen);
+        }
+        let mut tmp_plain: Option<Vec<u8>> = None;
+        let plain_ptr = if plain.len() < outlen {
+            if plain.len() < self.output_len {
+                return err_rv!(CKR_BUFFER_TOO_SMALL);
             }
-            if plain.is_null() {
-                *plain_len = outlen as CK_ULONG;
-                return Ok(());
+            /* the PKCS#11 documentation allows modules to pass
+             * in a buffer that is shorter than modulus by the
+             * amount taken by padding, while openssl requires
+             * a full modulus long buffer, so we need to use a
+             * temporary buffer here to bridge this mismatch */
+            tmp_plain = Some(vec![0u8; outlen]);
+            if let Some(ref mut p) = tmp_plain.as_mut() {
+                p.as_mut_ptr()
+            } else {
+                return err_rv!(CKR_GENERAL_ERROR);
             }
-            let mut plain_ptr = plain;
-            let mut tmp_plain: Option<Vec<u8>> = None;
-            if (*plain_len as usize) < outlen {
-                if (*plain_len as usize) < self.output_len {
-                    return err_rv!(CKR_BUFFER_TOO_SMALL);
-                }
-                /* the PKCS#11 documentation allows modules to pass
-                 * in a buffer that is shorter than modulus by the
-                 * amount taken by padding, while openssl requires
-                 * a full modulus long buffer, so we need to use a
-                 * temporary buffer here to bridge this mismatch */
-                tmp_plain = Some(vec![0u8; outlen]);
-                plain_ptr = match tmp_plain.as_mut() {
-                    Some(p) => p.as_mut_ptr(),
-                    None => return err_rv!(CKR_GENERAL_ERROR),
-                }
-            }
+        } else {
+            plain.as_mut_ptr()
+        };
 
-            self.finalized = true;
+        self.finalized = true;
 
-            if EVP_PKEY_decrypt(
+        let ret = unsafe {
+            EVP_PKEY_decrypt(
                 ctx.as_mut_ptr(),
                 plain_ptr,
                 outlen_ptr,
                 cipher.as_ptr(),
                 cipher.len(),
-            ) != 1
-            {
-                return err_rv!(CKR_DEVICE_ERROR);
-            }
-            match tmp_plain {
-                Some(p) => {
-                    std::ptr::copy_nonoverlapping(p.as_ptr(), plain, outlen)
-                }
-                None => (),
-            }
-            *plain_len = outlen as CK_ULONG;
+            )
+        };
+        if ret != 1 {
+            return err_rv!(CKR_DEVICE_ERROR);
         }
-        Ok(())
+        match tmp_plain {
+            Some(p) => {
+                plain[..outlen].copy_from_slice(&p[..outlen]);
+            }
+            None => (),
+        }
+        Ok(outlen)
     }
 
     fn decrypt_update(
         &mut self,
         _cipher: &[u8],
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+        _plain: &mut [u8],
+    ) -> Result<usize> {
         self.finalized = true;
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn decrypt_final(
-        &mut self,
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+    fn decrypt_final(&mut self, _plain: &mut [u8]) -> Result<usize> {
         self.finalized = true;
         return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
     }
 
-    fn decryption_len(&self, _data_len: usize) -> Result<usize> {
+    fn decryption_len(&mut self, _: usize, fin: bool) -> Result<usize> {
+        if self.finalized {
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
+        if fin {
+            self.finalized = true;
+            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        }
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
-            _ => err_rv!(CKR_GENERAL_ERROR),
+            _ => {
+                self.finalized = true;
+                err_rv!(CKR_GENERAL_ERROR)
+            }
         }
     }
 }

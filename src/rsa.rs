@@ -446,10 +446,9 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         key: &Object,
-        data: CK_BYTE_PTR,
-        data_len: CK_ULONG_PTR,
+        data: &mut [u8],
         key_template: &Box<dyn ObjectFactory>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return err_rv!(CKR_MECHANISM_INVALID);
         }
@@ -459,7 +458,6 @@ impl Mechanism for RsaPKCSMechanism {
             wrapping_key,
             key_template.export_for_wrapping(key)?,
             data,
-            data_len,
             &self.info,
         )
     }

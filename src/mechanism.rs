@@ -79,10 +79,9 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &CK_MECHANISM,
         _: &object::Object,
         _: &object::Object,
-        _: CK_BYTE_PTR,
-        _: CK_ULONG_PTR,
+        _: &mut [u8],
         _: &Box<dyn ObjectFactory>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         err_rv!(CKR_MECHANISM_INVALID)
     }
 
@@ -164,59 +163,47 @@ pub trait MechOperation: Debug + Send + Sync {
 }
 
 pub trait Encryption: MechOperation {
-    fn encrypt(
-        &mut self,
-        _plain: &[u8],
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+    fn encrypt(&mut self, _plain: &[u8], _cipher: &mut [u8]) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn encrypt_update(
         &mut self,
         _plain: &[u8],
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+        _cipher: &mut [u8],
+    ) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn encrypt_final(
+    fn encrypt_final(&mut self, _cipher: &mut [u8]) -> Result<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn encryption_len(
         &mut self,
-        _cipher: CK_BYTE_PTR,
-        _cipher_len: CK_ULONG_PTR,
-    ) -> Result<()> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn encryption_len(&self, _data_len: usize) -> Result<usize> {
+        _data_len: usize,
+        _final: bool,
+    ) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
 
 pub trait Decryption: MechOperation {
-    fn decrypt(
-        &mut self,
-        _cipher: &[u8],
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+    fn decrypt(&mut self, _cipher: &[u8], _plain: &mut [u8]) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
     fn decrypt_update(
         &mut self,
         _cipher: &[u8],
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG_PTR,
-    ) -> Result<()> {
+        _plain: &mut [u8],
+    ) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
-    fn decrypt_final(
+    fn decrypt_final(&mut self, _plain: &mut [u8]) -> Result<usize> {
+        err_rv!(CKR_GENERAL_ERROR)
+    }
+    fn decryption_len(
         &mut self,
-        _plain: CK_BYTE_PTR,
-        _plain_len: CK_ULONG_PTR,
-    ) -> Result<()> {
-        err_rv!(CKR_GENERAL_ERROR)
-    }
-    fn decryption_len(&self, _data_len: usize) -> Result<usize> {
+        _data_len: usize,
+        _final: bool,
+    ) -> Result<usize> {
         err_rv!(CKR_GENERAL_ERROR)
     }
 }
