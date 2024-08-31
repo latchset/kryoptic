@@ -15,6 +15,7 @@ pub struct Error {
     kind: ErrorKind,
     origin: Option<Box<dyn error::Error>>,
     errmsg: Option<String>,
+    reqsize: usize,
     ckrv: interface::CK_RV,
 }
 
@@ -25,6 +26,8 @@ pub enum ErrorKind {
     CkError,
     /* The attribute was not found, see errmsg */
     AttributeNotFound,
+    /* This error is used to indicate a provided buffer is too small */
+    BufferTooSmall,
     /* Other error, see origin */
     Nested,
 }
@@ -35,6 +38,7 @@ impl Error {
             kind: ErrorKind::CkError,
             origin: None,
             errmsg: None,
+            reqsize: 0,
             ckrv: ckrv,
         }
     }
@@ -47,6 +51,7 @@ impl Error {
             kind: ErrorKind::CkError,
             origin: Some(error.into()),
             errmsg: None,
+            reqsize: 0,
             ckrv: ckrv,
         }
     }
@@ -56,6 +61,7 @@ impl Error {
             kind: ErrorKind::CkError,
             origin: None,
             errmsg: Some(errmsg),
+            reqsize: 0,
             ckrv: ckrv,
         }
     }
@@ -65,6 +71,7 @@ impl Error {
             kind: ErrorKind::AttributeNotFound,
             origin: None,
             errmsg: Some(errmsg),
+            reqsize: 0,
             ckrv: interface::CKR_GENERAL_ERROR,
         }
     }
@@ -77,7 +84,18 @@ impl Error {
             kind: ErrorKind::Nested,
             origin: Some(error.into()),
             errmsg: None,
+            reqsize: 0,
             ckrv: interface::CKR_GENERAL_ERROR,
+        }
+    }
+
+    pub fn buf_too_small(reqsize: usize) -> Error {
+        Error {
+            kind: ErrorKind::BufferTooSmall,
+            origin: None,
+            errmsg: None,
+            reqsize: reqsize,
+            ckrv: interface::CKR_BUFFER_TOO_SMALL,
         }
     }
 
@@ -91,6 +109,10 @@ impl Error {
 
     pub fn rv(&self) -> interface::CK_RV {
         self.ckrv
+    }
+
+    pub fn reqsize(&self) -> usize {
+        self.reqsize
     }
 }
 
@@ -117,6 +139,9 @@ impl fmt::Display for Error {
                 "attribute not found: {}",
                 self.errmsg.as_ref().unwrap()
             ),
+            ErrorKind::BufferTooSmall => {
+                write!(f, "Buffer Too Small, required size: {}", self.reqsize)
+            }
             ErrorKind::Nested => self.origin.as_ref().unwrap().fmt(f),
         }
     }
