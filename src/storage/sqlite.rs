@@ -99,7 +99,8 @@ impl SqliteStorage {
                         .map_err(bad_storage)?
                     {
                         Some(n) => {
-                            attribute::from_ulong(atype, CK_ULONG::try_from(n)?)
+                            let val = Self::val_to_ulong(n)?;
+                            attribute::from_ulong(atype, val)
                         }
                         None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
                     },
@@ -169,9 +170,7 @@ impl SqliteStorage {
             search_params.push(
                 match attribute::attr_id_to_attrtype(a.type_)? {
                     AttrType::BoolType => Value::from(a.to_bool()?),
-                    AttrType::NumType => {
-                        Value::from(u32::try_from(a.to_ulong()?)?)
-                    }
+                    AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
                     AttrType::StringType => Value::from(a.to_string()?),
                     AttrType::BytesType => Value::from(a.to_buf()?),
                     AttrType::DateType => {
@@ -222,7 +221,7 @@ impl SqliteStorage {
             let col_attr = Value::from(u32::try_from(a.get_type())?);
             let col_val = match a.get_attrtype() {
                 AttrType::BoolType => Value::from(a.to_bool()?),
-                AttrType::NumType => Value::from(u32::try_from(a.to_ulong()?)?),
+                AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
                 AttrType::StringType => Value::from(a.to_string()?),
                 AttrType::BytesType => Value::from(a.to_bytes()?.clone()),
                 AttrType::DateType => Value::from(a.to_date_string()?),
@@ -252,6 +251,34 @@ impl SqliteStorage {
             stmt.execute(params![objid]).map_err(bad_storage)?;
         }
         Ok(objid)
+    }
+
+    fn num_to_val(ulong: CK_ULONG) -> error::Result<Value> {
+        /* CK_UNAVAILABLE_INFORMATION need to be special cased */
+        /* for storage compatibility CK_ULONGs can only be stored as u32
+         * values and PKCS#11 spec pay attentions to never allocate numbers
+         * bigger than what can be stored in a u32. However the value of
+         * CK_UNAVAILABLE_INFORMATION is defined as CK_ULONG::MAX which is
+         * a larger number than what we can store in a u32.
+         * Sqlite however can store i64 numbers, so we store -1 to indicate
+         * this special case to the decoding side as well */
+        let val = if ulong == CK_UNAVAILABLE_INFORMATION {
+            -1
+        } else {
+            /* we need to catch as an error any value > u32::MAX so we always
+             * try_from a u32 first to check the boundaries. */
+            i64::try_from(u32::try_from(ulong)?)?
+        };
+        Ok(Value::from(val))
+    }
+
+    fn val_to_ulong(val: i64) -> error::Result<CK_ULONG> {
+        /* we need to map back CK_UNAVAILABLE_INFORMATION's special case */
+        if val == -1 {
+            Ok(CK_UNAVAILABLE_INFORMATION)
+        } else {
+            Ok(CK_ULONG::try_from(val)?)
+        }
     }
 }
 
