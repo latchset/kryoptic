@@ -2,6 +2,7 @@
 #define FIPS_MODULE 1
 
 #include "ossl.h"
+#include "crypto/evp.h"
 #include "openssl/fips_names.h"
 #include "internal/provider.h"
 #include "internal/property.h"
