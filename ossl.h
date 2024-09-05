@@ -4,6 +4,5 @@
 #include "openssl/core_names.h"
 #include "openssl/params.h"
 #include "openssl/evp.h"
-#include "crypto/evp.h"
 #include "openssl/obj_mac.h"
 #include "openssl/kdf.h"

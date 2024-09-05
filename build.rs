@@ -31,13 +31,36 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     }
 }
 
+fn ossl_bindings(header: &str, args: &[&str]) {
+    bindgen::Builder::default()
+        .header(header)
+        .clang_args(args)
+        .derive_default(true)
+        .formatter(bindgen::Formatter::Prettyplease)
+        .allowlist_item("ossl_.*")
+        .allowlist_item("OSSL_.*")
+        .allowlist_item("openssl_.*")
+        .allowlist_item("OPENSSL_.*")
+        .allowlist_item("CRYPTO_.*")
+        .allowlist_item("c_.*")
+        .allowlist_item("EVP_.*")
+        .allowlist_item("evp_.*")
+        .allowlist_item("BN_.*")
+        .allowlist_item("LN_aes.*")
+        .generate()
+        .expect("Unable to generate bindings")
+        .write_to_file("src/ossl/bindings.rs")
+        .expect("Couldn't write bindings!");
+}
+
+#[cfg(not(feature = "dynamic"))]
 fn build_ossl() {
     let openssl_path = std::path::PathBuf::from("openssl")
         .canonicalize()
         .expect("cannot canonicalize path");
 
     #[cfg(feature = "fips")]
-    let (libpath, bldargs) = {
+    let (libpath, bldargs, header) = {
         let providers_path = openssl_path
             .join("providers")
             .canonicalize()
@@ -61,11 +84,11 @@ fn build_ossl() {
         println!("cargo:rustc-link-lib=static=fips");
         println!("cargo::rerun-if-changed={}", libfips);
 
-        (libfips, buildargs)
+        (libfips, buildargs, "fips.h")
     };
 
     #[cfg(not(feature = "fips"))]
-    let (libpath, bldargs) = {
+    let (libpath, bldargs, header) = {
         let libcrypto =
             format!("{}/libcrypto.a", openssl_path.to_string_lossy());
 
@@ -73,7 +96,7 @@ fn build_ossl() {
         println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo::rerun-if-changed={}", libcrypto);
 
-        (libcrypto, ["--debug"])
+        (libcrypto, ["--debug"], "ossl.h")
     };
 
     match std::path::Path::new(&libpath).try_exists() {
@@ -114,29 +137,21 @@ fn build_ossl() {
         .canonicalize()
         .expect("OpenSSL include path unavailable");
 
-    bindgen::Builder::default()
-        .header("fips.h")
-        .clang_arg(format!("-I{}", include_path.to_str().unwrap()))
-        .clang_arg("-std=c90") /* workaround [-Wimplicit-int] */
-        .derive_default(true)
-        .formatter(bindgen::Formatter::Prettyplease)
-        .allowlist_item("ossl_.*")
-        .allowlist_item("OSSL_.*")
-        .allowlist_item("openssl_.*")
-        .allowlist_item("OPENSSL_.*")
-        .allowlist_item("CRYPTO_.*")
-        .allowlist_item("c_.*")
-        .allowlist_item("EVP_.*")
-        .allowlist_item("evp_.*")
-        .allowlist_item("BN_.*")
-        .allowlist_item("LN_aes.*")
-        .generate()
-        .expect("Unable to generate bindings")
-        .write_to_file("src/ossl/bindings.rs")
-        .expect("Couldn't write bindings!");
+    let args = [&format!("-I{}", include_path.to_str().unwrap()), "-std=c90"];
+
+    ossl_bindings(header, &args);
+}
+
+#[cfg(feature = "dynamic")]
+fn use_system_ossl() {
+    println!("cargo:rustc-link-lib=crypto");
+    ossl_bindings("ossl.h", &["-std=c90"]);
 }
 
 fn main() {
+    #[cfg(all(feature = "dynamic", feature = "fips"))]
+    compile_error!("features `dynamic` and `fips` are mutually exclusive");
+
     /* PKCS11 Headers */
     let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
     println!("cargo::rerun-if-changed={}", pkcs11_header);
@@ -153,7 +168,15 @@ fn main() {
         .write_to_file("src/pkcs11/bindings.rs")
         .expect("Couldn't write bindings!");
 
+    #[cfg(feature = "dynamic")]
+    use_system_ossl();
+
     /* OpenSSL Cryptography */
+    #[cfg(not(feature = "dynamic"))]
     println!("cargo::rerun-if-changed={}", ".git/modules/openssl/HEAD");
+
+    #[cfg(not(feature = "dynamic"))]
     build_ossl();
+
+    println!("cargo::rerun-if-changed=build.rs");
 }
