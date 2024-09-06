@@ -640,3 +640,19 @@ pub fn extract_key_value(
     }
     Ok(value)
 }
+
+#[cfg(feature = "fips")]
+pub fn check_validation(session: CK_SESSION_HANDLE, expect: CK_FLAGS) -> bool {
+    let mut flags: CK_FLAGS = 0;
+    let _ = fn_get_session_validation_flags(
+        session,
+        CKS_LAST_VALIDATION_OK,
+        &mut flags,
+    );
+    return flags == expect;
+}
+
+#[cfg(not(feature = "fips"))]
+pub fn check_validation(_: CK_SESSION_HANDLE, _: CK_FLAGS) -> bool {
+    return true;
+}

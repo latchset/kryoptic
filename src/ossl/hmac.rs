@@ -5,6 +5,7 @@ use {super::fips, fips::*};
 
 #[derive(Debug)]
 struct HMACOperation {
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     in_use: bool,
     outputlen: usize,
@@ -17,11 +18,12 @@ struct HMACOperation {
 
 impl HMACOperation {
     fn new(
-        hash: CK_MECHANISM_TYPE,
+        mech: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
     ) -> Result<HMACOperation> {
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
+        let hash = hmac_mech_to_hash_mech(mech)?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
             name_as_char(OSSL_MAC_PARAM_DIGEST),
@@ -41,6 +43,7 @@ impl HMACOperation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
         Ok(HMACOperation {
+            mech: mech,
             finalized: false,
             in_use: false,
             outputlen: outputlen,

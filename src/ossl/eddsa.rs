@@ -34,6 +34,7 @@ struct EddsaParams {
 #[cfg(not(feature = "fips"))]
 #[derive(Debug)]
 struct EddsaOperation {
+    mech: CK_MECHANISM_TYPE,
     output_len: usize,
     public_key: Option<EvpPkey>,
     private_key: Option<EvpPkey>,
@@ -237,6 +238,7 @@ impl EddsaOperation {
     ) -> Result<EddsaOperation> {
         let is_448 = is_448_curve(key)?;
         Ok(EddsaOperation {
+            mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
             public_key: None,
             private_key: Some(object_to_ecc_private_key(key)?),
@@ -256,6 +258,7 @@ impl EddsaOperation {
     ) -> Result<EddsaOperation> {
         let is_448 = is_448_curve(key)?;
         Ok(EddsaOperation {
+            mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
             public_key: Some(object_to_ecc_public_key(key)?),
             private_key: None,
@@ -354,6 +357,10 @@ macro_rules! sig_params {
 }
 
 impl MechOperation for EddsaOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

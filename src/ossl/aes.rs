@@ -902,6 +902,10 @@ impl AesOperation {
 }
 
 impl MechOperation for AesOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }
@@ -1617,6 +1621,7 @@ impl Decryption for AesOperation {
  * parameters passed into the init functions */
 #[derive(Debug)]
 struct AesCmacOperation {
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     in_use: bool,
     _key: AesKey,
@@ -1677,6 +1682,7 @@ impl AesCmacOperation {
             return err_rv!(CKR_DEVICE_ERROR);
         }
         Ok(AesCmacOperation {
+            mech: mech.mechanism,
             finalized: false,
             in_use: false,
             _key: mackey,
@@ -1748,6 +1754,10 @@ impl AesCmacOperation {
 }
 
 impl MechOperation for AesCmacOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

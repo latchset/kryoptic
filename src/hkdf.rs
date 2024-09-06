@@ -58,6 +58,7 @@ impl Mechanism for HKDFMechanism {
 
 #[derive(Debug)]
 struct HKDFOperation {
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     extract: bool,
     expand: bool,
@@ -197,6 +198,7 @@ impl HKDFOperation {
         };
 
         Ok(HKDFOperation {
+            mech: mech.mechanism,
             finalized: false,
             extract: params.bExtract != CK_FALSE,
             expand: params.bExpand != CK_FALSE,
@@ -214,6 +216,10 @@ impl HKDFOperation {
 }
 
 impl MechOperation for HKDFOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

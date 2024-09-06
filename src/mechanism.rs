@@ -160,6 +160,9 @@ pub trait MechOperation: Debug + Send + Sync {
     fn fips_approved(&self) -> Option<bool> {
         None
     }
+    /* used only in FIPS builds, for now */
+    #[allow(dead_code)]
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE>;
 }
 
 pub trait Encryption: MechOperation {

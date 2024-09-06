@@ -177,7 +177,7 @@ impl HMACMechanism {
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         HMACOperation::new(
-            hmac_mech_to_hash_mech(mech.mechanism)?,
+            mech.mechanism,
             self.check_and_fetch_key(keyobj, op_attr)?,
             self.check_and_fetch_param(mech)?,
         )
@@ -218,6 +218,7 @@ impl Mechanism for HMACMechanism {
 #[cfg(not(feature = "fips"))]
 #[derive(Debug)]
 struct HMACOperation {
+    mech: CK_MECHANISM_TYPE,
     key: HmacKey,
     hash: CK_MECHANISM_TYPE,
     hashlen: usize,
@@ -244,13 +245,14 @@ impl Drop for HMACOperation {
 #[cfg(not(feature = "fips"))]
 impl HMACOperation {
     fn new(
-        hash: CK_MECHANISM_TYPE,
+        mech: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
     ) -> Result<HMACOperation> {
         let mut hmac = HMACOperation {
+            mech: mech,
             key: key,
-            hash: hash,
+            hash: hmac_mech_to_hash_mech(mech)?,
             hashlen: 0usize,
             blocklen: 0usize,
             outputlen: outputlen,
@@ -386,6 +388,10 @@ impl HMACOperation {
 include!("ossl/hmac.rs");
 
 impl MechOperation for HMACOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

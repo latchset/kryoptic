@@ -53,6 +53,7 @@ impl Mechanism for SSHKDFMechanism {
 
 #[derive(Debug)]
 struct SSHKDFOperation {
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     prf: CK_MECHANISM_TYPE,
     key_type: u8,
@@ -95,6 +96,7 @@ impl SSHKDFOperation {
         };
 
         Ok(SSHKDFOperation {
+            mech: mech.mechanism,
             finalized: false,
             prf: params.prfHashMechanism,
             key_type: params.derivedKeyType,
@@ -111,6 +113,10 @@ impl SSHKDFOperation {
 }
 
 impl MechOperation for SSHKDFOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

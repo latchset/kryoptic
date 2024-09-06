@@ -368,7 +368,7 @@ impl Mechanism for AesMechanism {
 
 #[derive(Debug)]
 struct AesKDFOperation<'a> {
-    prf: CK_MECHANISM_TYPE,
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     iv: &'a [u8],
     data: &'a [u8],
@@ -414,7 +414,7 @@ impl AesKDFOperation<'_> {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         Ok(AesKDFOperation {
-            prf: CKM_AES_ECB,
+            mech: CKM_AES_ECB,
             finalized: false,
             iv: &[],
             data: unsafe {
@@ -438,7 +438,7 @@ impl AesKDFOperation<'_> {
             return err_rv!(CKR_MECHANISM_PARAM_INVALID);
         }
         Ok(AesKDFOperation {
-            prf: CKM_AES_CBC,
+            mech: CKM_AES_CBC,
             finalized: false,
             iv: unsafe { std::slice::from_raw_parts(params.iv.as_ptr(), 16) },
             data: unsafe {
@@ -454,6 +454,10 @@ impl AesKDFOperation<'_> {
 }
 
 impl MechOperation for AesKDFOperation<'_> {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }
@@ -479,7 +483,7 @@ impl Derive for AesKDFOperation<'_> {
         let mut obj = factory.default_object_derive(template, key)?;
 
         let mechanism = CK_MECHANISM {
-            mechanism: self.prf,
+            mechanism: self.mech,
             pParameter: if self.iv.len() > 0 {
                 self.iv.as_ptr() as CK_VOID_PTR
             } else {
