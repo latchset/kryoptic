@@ -157,6 +157,8 @@ struct AesOperation {
     ctx: EvpCipherCtx,
     finalbuf: Vec<u8>,
     blockctr: u128,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl Drop for AesOperation {
@@ -825,6 +827,8 @@ impl AesOperation {
             ctx: EvpCipherCtx::new()?,
             finalbuf: Vec::new(),
             blockctr: 0,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -838,6 +842,8 @@ impl AesOperation {
             ctx: EvpCipherCtx::new()?,
             finalbuf: Vec::new(),
             blockctr: 0,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -898,6 +904,10 @@ impl AesOperation {
 impl MechOperation for AesOperation {
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
     }
 }
 
@@ -1132,6 +1142,12 @@ impl Encryption for AesOperation {
                 return Err(self.op_err(CKR_GENERAL_ERROR));
             }
         };
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved =
+                fips::indicators::check_cipher_fips_indicators(&mut self.ctx)?;
+        }
         self.finalized = true;
         Ok(outlen)
     }
@@ -1522,6 +1538,12 @@ impl Decryption for AesOperation {
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
             _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
         }
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved =
+                fips::indicators::check_cipher_fips_indicators(&mut self.ctx)?;
+        }
         self.finalized = true;
         Ok(outlen)
     }
@@ -1600,6 +1622,8 @@ struct AesCmacOperation {
     _key: AesKey,
     ctx: EvpMacCtx,
     maclen: usize,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl AesCmacOperation {
@@ -1658,6 +1682,8 @@ impl AesCmacOperation {
             _key: mackey,
             ctx: ctx,
             maclen: maclen,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -1711,6 +1737,12 @@ impl AesCmacOperation {
 
         output.copy_from_slice(&buf[..output.len()]);
         buf.zeroize();
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved =
+                fips::indicators::check_mac_fips_indicators(&mut self.ctx)?;
+        }
         Ok(())
     }
 }
@@ -1718,6 +1750,10 @@ impl AesCmacOperation {
 impl MechOperation for AesCmacOperation {
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
     }
 }
 

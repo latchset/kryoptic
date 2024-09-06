@@ -372,6 +372,8 @@ struct AesKDFOperation<'a> {
     finalized: bool,
     iv: &'a [u8],
     data: &'a [u8],
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl AesKDFOperation<'_> {
@@ -421,6 +423,8 @@ impl AesKDFOperation<'_> {
                     usize::try_from(params.ulLen)?,
                 )
             },
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -443,6 +447,8 @@ impl AesKDFOperation<'_> {
                     usize::try_from(params.length)?,
                 )
             },
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 }
@@ -493,6 +499,10 @@ impl Derive for AesKDFOperation<'_> {
 
         factory.as_secret_key_factory()?.set_key(&mut obj, dkm)?;
 
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = op.fips_approved();
+        }
         Ok(vec![obj])
     }
 }
