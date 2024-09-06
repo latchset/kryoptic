@@ -752,6 +752,10 @@ impl TLSKDFOperation {
 }
 
 impl MechOperation for TLSKDFOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }
@@ -796,6 +800,7 @@ static MAC_MECHANISMS: Lazy<Mechanisms> = Lazy::new(|| {
 
 #[derive(Debug)]
 struct TLSMACOperation {
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     in_use: bool,
     outputlen: usize,
@@ -824,6 +829,7 @@ impl TLSMACOperation {
         let mac = MAC_MECHANISMS.get(prf)?;
 
         Ok(TLSMACOperation {
+            mech: mech.mechanism,
             finalized: false,
             in_use: false,
             outputlen: maclen,
@@ -865,6 +871,10 @@ impl TLSMACOperation {
 }
 
 impl MechOperation for TLSMACOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

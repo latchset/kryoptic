@@ -397,6 +397,37 @@ fn find_conf() -> Result<String> {
     }
 }
 
+/* initial assessment on FIPS indicator, useful when an input key needs
+ * to be checked at operation initialization */
+#[cfg(feature = "fips")]
+fn init_fips_approval(
+    mut session: RwLockWriteGuard<'_, Session>,
+    mechanism: CK_MECHANISM_TYPE,
+    op: CK_FLAGS,
+    key: &object::Object,
+) {
+    let key_ok = fips::indicators::is_approved(mechanism, op, Some(key), None);
+    session.set_fips_indicator(key_ok);
+}
+
+/* final assemssment on FIPS indicator, after the operation is complete */
+#[cfg(feature = "fips")]
+fn finalize_fips_approval(
+    mut session: RwLockWriteGuard<'_, Session>,
+    operation_approved: Option<bool>,
+) {
+    let provisional = match session.get_fips_indicator() {
+        Some(b) => b,
+        None => true,
+    };
+    if provisional {
+        session.set_fips_indicator(match operation_approved {
+            Some(b) => b,
+            None => false,
+        });
+    }
+}
+
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut slotnum: CK_SLOT_ID = 0;
     let conf: String;
@@ -748,7 +779,16 @@ extern "C" fn fn_create_object(
     object_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
+    #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
+    #[cfg(feature = "fips")]
+    let mut session = {
+        let mut s = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        s.reset_fips_indicator();
+        s
+    };
     let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
@@ -758,13 +798,42 @@ extern "C" fn fn_create_object(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
-    let oh = match token.create_object(s_handle, tmpl) {
+    let key_handle = match token.create_object(s_handle, tmpl) {
         Ok(h) => h,
         Err(e) => return e.rv(),
     };
 
+    #[cfg(feature = "fips")]
+    {
+        let mut key = res_or_ret!(token.get_object_by_handle(key_handle));
+        /* ignore if not a key */
+        match key.get_attr_as_ulong(CKA_KEY_TYPE) {
+            /* check as if the key were generated, the same considerations
+             * as for key generation apply here, so we use the the same
+             * mechanism that would be used if this key was generated */
+            Ok(key_type) => {
+                let mechanism = match key_type {
+                    CKK_AES => CKM_AES_KEY_GEN,
+                    CKK_GENERIC_SECRET => CKM_GENERIC_SECRET_KEY_GEN,
+                    CKK_HKDF => CKM_HKDF_KEY_GEN,
+                    CKK_RSA => CKM_RSA_PKCS_KEY_PAIR_GEN,
+                    CKK_EC => CKM_EC_KEY_PAIR_GEN,
+                    CKK_EC_EDWARDS => CKM_EC_EDWARDS_KEY_PAIR_GEN,
+                    _ => CK_UNAVAILABLE_INFORMATION,
+                };
+                session.set_fips_indicator(fips::indicators::is_approved(
+                    mechanism,
+                    CKF_GENERATE,
+                    None,
+                    Some(&mut key),
+                ));
+            }
+            Err(_) => (),
+        }
+    }
+
     unsafe {
-        core::ptr::write(object_handle as *mut _, oh);
+        core::ptr::write(object_handle as *mut _, key_handle);
     }
 
     CKR_OK
@@ -989,7 +1058,12 @@ extern "C" fn fn_encrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
         let operation = res_or_ret!(mech.encryption_new(mechanism, &key));
+
         session.set_operation(Operation::Encryption(operation), false);
+
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
+
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1033,6 +1107,12 @@ extern "C" fn fn_encrypt(
     let outlen = res_or_ret!(operation.encrypt(data, encdata));
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_encrypted_data_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 extern "C" fn fn_encrypt_update(
@@ -1107,6 +1187,12 @@ extern "C" fn fn_encrypt_final(
     let outlen = res_or_ret!(operation.encrypt_final(enclast));
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_last_encrypted_part_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 
@@ -1128,6 +1214,10 @@ extern "C" fn fn_decrypt_init(
         let operation = res_or_ret!(mech.decryption_new(mechanism, &key));
         session
             .set_operation(Operation::Decryption(operation), key.always_auth());
+
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);
+
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1171,6 +1261,12 @@ extern "C" fn fn_decrypt(
     let outlen = res_or_ret!(operation.decrypt(enc, ddata));
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_data_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 extern "C" fn fn_decrypt_update(
@@ -1246,22 +1342,29 @@ extern "C" fn fn_decrypt_final(
     let outlen = res_or_ret!(operation.decrypt_final(dlast));
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_last_part_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 
 extern "C" fn fn_digest_init(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
+    mechptr: CK_MECHANISM_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    check_op_empty_or_fail!(session; Digest; mechanism);
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    check_op_empty_or_fail!(session; Digest; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let token = res_or_ret!(rstate.get_token_from_slot(session.get_slot_id()));
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
-        let operation = res_or_ret!(mech.digest_new(data));
+        let operation = res_or_ret!(mech.digest_new(mechanism));
         session.set_operation(Operation::Digest(operation), false);
+
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1309,6 +1412,12 @@ extern "C" fn fn_digest(
         unsafe {
             *pul_digest_len = dgst_len;
         }
+
+        #[cfg(feature = "fips")]
+        {
+            let approved = operation.fips_approved();
+            finalize_fips_approval(session, approved);
+        }
     }
     ret
 }
@@ -1335,7 +1444,7 @@ extern "C" fn fn_digest_update(
 }
 extern "C" fn fn_digest_key(
     s_handle: CK_SESSION_HANDLE,
-    key: CK_OBJECT_HANDLE,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
@@ -1348,15 +1457,26 @@ extern "C" fn fn_digest_key(
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    let obj = res_or_ret!(token.get_object_by_handle(key));
-    if res_or_ret!(obj.get_attr_as_ulong(CKA_CLASS)) != CKO_SECRET_KEY {
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    if res_or_ret!(key.get_attr_as_ulong(CKA_CLASS)) != CKO_SECRET_KEY {
         return CKR_KEY_HANDLE_INVALID;
     }
-    if res_or_ret!(obj.get_attr_as_ulong(CKA_KEY_TYPE)) != CKK_GENERIC_SECRET {
+    if res_or_ret!(key.get_attr_as_ulong(CKA_KEY_TYPE)) != CKK_GENERIC_SECRET {
         return CKR_KEY_INDIGESTIBLE;
     }
-    let data = res_or_ret!(obj.get_attr_as_bytes(CKA_VALUE));
-    ret_to_rv!(operation.digest_update(data))
+
+    let data = res_or_ret!(key.get_attr_as_bytes(CKA_VALUE));
+    res_or_ret!(operation.digest_update(data));
+
+    #[cfg(feature = "fips")]
+    {
+        /* need to do this last as we need to drop operation
+         * before we can pass session mutably to a caller */
+        let mech = res_or_ret!(operation.mechanism());
+        init_fips_approval(session, mech, CKF_DIGEST, &key);
+    }
+
+    CKR_OK
 }
 extern "C" fn fn_digest_final(
     s_handle: CK_SESSION_HANDLE,
@@ -1395,6 +1515,12 @@ extern "C" fn fn_digest_final(
         unsafe {
             *pul_digest_len = dgst_len;
         }
+
+        #[cfg(feature = "fips")]
+        {
+            let approved = operation.fips_approved();
+            finalize_fips_approval(session, approved);
+        }
     }
     ret
 }
@@ -1416,6 +1542,10 @@ extern "C" fn fn_sign_init(
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
         let operation = res_or_ret!(mech.sign_new(mechanism, &key));
         session.set_operation(Operation::Sign(operation), key.always_auth());
+
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_SIGN, &key);
+
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1462,6 +1592,12 @@ extern "C" fn fn_sign(
     if ret == CKR_OK {
         unsafe {
             *pul_signature_len = sig_len;
+        }
+
+        #[cfg(feature = "fips")]
+        {
+            let approved = operation.fips_approved();
+            finalize_fips_approval(session, approved);
         }
     }
     ret
@@ -1524,6 +1660,12 @@ extern "C" fn fn_sign_final(
         unsafe {
             *pul_signature_len = sig_len;
         }
+
+        #[cfg(feature = "fips")]
+        {
+            let approved = operation.fips_approved();
+            finalize_fips_approval(session, approved);
+        }
     }
     ret
 }
@@ -1560,6 +1702,10 @@ extern "C" fn fn_verify_init(
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
         let operation = res_or_ret!(mech.verify_new(mechanism, &key));
         session.set_operation(Operation::Verify(operation), false);
+
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
+
         CKR_OK
     } else {
         CKR_MECHANISM_INVALID
@@ -1593,7 +1739,15 @@ extern "C" fn fn_verify(
     let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     let signature: &[u8] =
         unsafe { std::slice::from_raw_parts(psignature, signature_len) };
-    ret_to_rv!(operation.verify(data, signature))
+    let ret = ret_to_rv!(operation.verify(data, signature));
+
+    #[cfg(feature = "fips")]
+    if ret == CKR_OK {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
+
+    ret
 }
 extern "C" fn fn_verify_update(
     s_handle: CK_SESSION_HANDLE,
@@ -1640,7 +1794,15 @@ extern "C" fn fn_verify_final(
     }
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
-    ret_to_rv!(operation.verify_final(signature))
+    let ret = ret_to_rv!(operation.verify_final(signature));
+
+    #[cfg(feature = "fips")]
+    if ret == CKR_OK {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
+
+    ret
 }
 extern "C" fn fn_verify_recover_init(
     _session: CK_SESSION_HANDLE,
@@ -1697,15 +1859,24 @@ extern "C" fn fn_decrypt_verify_update(
 
 extern "C" fn fn_generate_key(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
+    mechptr: CK_MECHANISM_PTR,
     template: CK_ATTRIBUTE_PTR,
     count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
+    #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
+    #[cfg(feature = "fips")]
+    let mut session = {
+        let mut s = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        s.reset_fips_indicator();
+        s
+    };
 
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let cnt = cast_or_ret!(usize from count);
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
@@ -1718,35 +1889,32 @@ extern "C" fn fn_generate_key(
 
     let mechanisms = token.get_mechanisms();
     let factories = token.get_object_factories();
-    let mech = res_or_ret!(mechanisms.get(data.mechanism));
+    let mech = res_or_ret!(mechanisms.get(mechanism.mechanism));
     if mech.info().flags & CKF_GENERATE != CKF_GENERATE {
         return CKR_MECHANISM_INVALID;
     }
 
     #[cfg(not(feature = "fips"))]
-    let obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
-        Ok(o) => o,
+    let key = match mech.generate_key(mechanism, tmpl, mechanisms, factories) {
+        Ok(k) => k,
         Err(e) => return e.rv(),
     };
-    #[cfg(feature = "fips")]
-    let obj = match mech.generate_key(data, tmpl, mechanisms, factories) {
-        Ok(mut key) => {
-            /* must drop here or we deadlock trying to re-acquire for writing */
-            drop(session);
 
-            let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    #[cfg(feature = "fips")]
+    let key = match mech.generate_key(mechanism, tmpl, mechanisms, factories) {
+        Ok(mut k) => {
             session.set_fips_indicator(fips::indicators::is_approved(
-                data,
+                mechanism.mechanism,
                 CKF_GENERATE,
                 None,
-                Some(&mut key),
+                Some(&mut k),
             ));
-            key
+            k
         }
         Err(e) => return e.rv(),
     };
 
-    let kh = res_or_ret!(token.insert_object(s_handle, obj));
+    let kh = res_or_ret!(token.insert_object(s_handle, key));
     unsafe {
         core::ptr::write(key_handle as *mut _, kh);
     }
@@ -1981,6 +2149,10 @@ extern "C" fn fn_derive_key(
         drop(session);
 
         let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        session.reset_fips_indicator();
+
         /* op approval, may still change later */
         let mut approval = match operation.fips_approved() {
             Some(s) => s,
@@ -1989,7 +2161,7 @@ extern "C" fn fn_derive_key(
         if approval {
             for rkey in &mut result {
                 let approved = fips::indicators::is_approved(
-                    mechanism,
+                    mechanism.mechanism,
                     CKF_DERIVE,
                     Some(&key),
                     Some(rkey),

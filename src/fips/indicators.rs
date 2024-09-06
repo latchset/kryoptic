@@ -994,7 +994,7 @@ fn check_key(
 }
 
 pub fn is_approved(
-    mech: &CK_MECHANISM,
+    mechanism: CK_MECHANISM_TYPE,
     op: CK_FLAGS,
     iobj: Option<&Object>,
     mut oobj: Option<&mut Object>,
@@ -1013,7 +1013,7 @@ pub fn is_approved(
     };
 
     for m in &FIPS_CHECKS.mechs {
-        if mech.mechanism != m.mechanism {
+        if mechanism != m.mechanism {
             continue;
         }
 
@@ -1071,7 +1071,7 @@ pub fn is_approved(
                     return true;
                 } else {
                     /* special case for HKDF which can return a DATA object */
-                    if mech.mechanism == CKM_HKDF_DATA {
+                    if mechanism == CKM_HKDF_DATA {
                         if let Ok(val) = obj.get_attr_as_bytes(CKA_VALUE) {
                             let len = val.len();
                             match size_check(len, m.restrictions[0].1) {

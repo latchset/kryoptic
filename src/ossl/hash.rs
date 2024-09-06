@@ -39,6 +39,7 @@ impl HashOperation {
             _ => return err_rv!(CKR_MECHANISM_INVALID),
         };
         Ok(HashOperation {
+            mech: mech,
             state: HashState::new(alg)?,
             finalized: false,
             in_use: false,
@@ -58,6 +59,10 @@ impl HashOperation {
 }
 
 impl MechOperation for HashOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

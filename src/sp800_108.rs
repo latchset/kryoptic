@@ -551,6 +551,10 @@ impl Sp800Operation {
 }
 
 impl MechOperation for Sp800Operation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

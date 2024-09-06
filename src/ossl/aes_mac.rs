@@ -5,6 +5,7 @@ use super::void_ptr;
 
 #[derive(Debug)]
 struct AesMacOperation {
+    mech: CK_MECHANISM_TYPE,
     finalized: bool,
     in_use: bool,
     padbuf: [u8; AES_BLOCK_SIZE],
@@ -50,6 +51,7 @@ impl AesMacOperation {
         };
         let iv = [0u8; AES_BLOCK_SIZE];
         Ok(AesMacOperation {
+            mech: mech.mechanism,
             finalized: false,
             in_use: false,
             padbuf: [0; AES_BLOCK_SIZE],
@@ -158,6 +160,10 @@ impl AesMacOperation {
 }
 
 impl MechOperation for AesMacOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

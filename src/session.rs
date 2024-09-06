@@ -113,7 +113,21 @@ impl Session {
 
     #[cfg(feature = "fips")]
     pub fn set_fips_indicator(&mut self, flag: bool) {
+        /* only allow to downgrade to false, never upgrade to true */
+        match self.fips_indicator {
+            Some(b) => {
+                if !b {
+                    return;
+                }
+            }
+            None => (),
+        }
         self.fips_indicator = Some(flag)
+    }
+
+    #[cfg(feature = "fips")]
+    pub fn get_fips_indicator(&self) -> Option<bool> {
+        self.fips_indicator
     }
 
     #[cfg(feature = "fips")]
@@ -123,6 +137,11 @@ impl Session {
         }
 
         0
+    }
+
+    #[cfg(feature = "fips")]
+    pub fn reset_fips_indicator(&mut self) {
+        self.fips_indicator = None;
     }
 
     pub fn get_slot_id(&self) -> CK_SLOT_ID {

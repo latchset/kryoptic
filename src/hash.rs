@@ -205,6 +205,7 @@ impl Mechanism for HashMechanism {
         for hs in &HASH_MECH_SET {
             if hs.key_derive == mech.mechanism {
                 return Ok(Operation::Derive(Box::new(HashKDFOperation::new(
+                    mech.mechanism,
                     hs.hash,
                 )?)));
             }
@@ -216,6 +217,7 @@ impl Mechanism for HashMechanism {
 
 #[derive(Debug)]
 struct HashOperation {
+    mech: CK_MECHANISM_TYPE,
     state: HashState,
     finalized: bool,
     in_use: bool,
@@ -223,13 +225,18 @@ struct HashOperation {
 
 #[derive(Debug)]
 struct HashKDFOperation {
+    mech: CK_MECHANISM_TYPE,
     prf: CK_MECHANISM_TYPE,
     finalized: bool,
 }
 
 impl HashKDFOperation {
-    fn new(prf: CK_MECHANISM_TYPE) -> Result<HashKDFOperation> {
+    fn new(
+        mech: CK_MECHANISM_TYPE,
+        prf: CK_MECHANISM_TYPE,
+    ) -> Result<HashKDFOperation> {
         Ok(HashKDFOperation {
+            mech: mech,
             prf: prf,
             finalized: false,
         })
@@ -237,6 +244,10 @@ impl HashKDFOperation {
 }
 
 impl MechOperation for HashKDFOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

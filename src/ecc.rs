@@ -510,6 +510,10 @@ impl ECDHOperation {
 }
 
 impl MechOperation for ECDHOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
     fn finalized(&self) -> bool {
         self.finalized
     }

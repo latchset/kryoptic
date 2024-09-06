@@ -390,6 +390,9 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
         assert_eq!(enc_len, tag_len as CK_ULONG);
 
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
+
         let dec = ret_or_panic!(decrypt(
             session,
             handle,
@@ -408,6 +411,9 @@ fn test_aes_operations() {
         ));
         assert_eq!(enc2.len(), 12);
         assert_eq!(&enc[..12], enc2.as_slice());
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
     }
 
     {
@@ -872,6 +878,13 @@ fn test_aes_macs() {
                     ulParameterLen: 0,
                 }
             )
+        );
+
+        /* test that we can get correct indicators based on inputs */
+        #[cfg(feature = "fips")]
+        assert_eq!(
+            check_validation(session, crate::fips::indicators::KRF_FIPS),
+            false,
         );
 
         /* too long */
