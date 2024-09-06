@@ -144,6 +144,11 @@ impl AesMacOperation {
         }
 
         output.copy_from_slice(&self.macbuf[..output.len()]);
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = op.fips_approved();
+        }
         Ok(())
     }
 }
