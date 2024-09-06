@@ -1088,23 +1088,48 @@ pub fn is_approved(
     false
 }
 
-pub fn check_kdf_fips_indicators(kctx: &mut EvpKdfCtx) -> Result<Option<bool>> {
-    let mut params = OsslParam::with_capacity(1);
-    params.add_owned_int(
-        name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR),
-        c_int::try_from(EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED)?,
-    )?;
-    params.finalize();
-    unsafe { EVP_KDF_CTX_get_params(kctx.as_mut_ptr(), params.as_mut_ptr()) };
+macro_rules! check_ossl_fips_indicator {
+    ($lo:ident; $up:ident; $mix:ident) => {
+        paste::paste! {
+            pub fn [<check_ $lo _fips_indicators>](
+                ctx: &mut [<Evp $mix Ctx>]
+            ) -> Result<Option<bool>> {
+                let mut params = OsslParam::with_capacity(1);
+                params.add_owned_int(
+                    name_as_char(
+                        [<OSSL_ $up _PARAM_REDHAT_FIPS_INDICATOR>]
+                    ),
+                    c_int::try_from(
+                        [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>]
+                    )?,
+                )?;
+                params.finalize();
+                unsafe {
+                    [<EVP_ $up _CTX_get_params>](
+                        ctx.as_mut_ptr(),
+                        params.as_mut_ptr()
+                    )
+                };
 
-    let indicator = c_uint::try_from(
-        params.get_int(name_as_char(OSSL_KDF_PARAM_REDHAT_FIPS_INDICATOR))?,
-    )?;
-    /* in case of error it will remain undetermined */
-    Ok(match indicator {
-        EVP_KDF_REDHAT_FIPS_INDICATOR_UNDETERMINED => None,
-        EVP_KDF_REDHAT_FIPS_INDICATOR_APPROVED => Some(true),
-        EVP_KDF_REDHAT_FIPS_INDICATOR_NOT_APPROVED => Some(false),
-        _ => return err_rv!(CKR_DEVICE_ERROR),
-    })
+                let indicator = c_uint::try_from(
+                    params.get_int(
+                        name_as_char(
+                            [<OSSL_ $up _PARAM_REDHAT_FIPS_INDICATOR>]
+                        )
+                    )?,
+                )?;
+                /* in case of error it will remain undetermined */
+                Ok(match indicator {
+                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>] => None,
+                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_APPROVED>] => Some(true),
+                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_NOT_APPROVED>] => Some(false),
+                    _ => return err_rv!(CKR_DEVICE_ERROR),
+                })
+            }
+        }
+    };
 }
+
+check_ossl_fips_indicator!(kdf; KDF; Kdf);
+check_ossl_fips_indicator!(mac; MAC; Mac);
+check_ossl_fips_indicator!(cipher; CIPHER; Cipher);

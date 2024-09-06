@@ -8,10 +8,10 @@ use interface::*;
 use std::borrow::Cow;
 
 macro_rules! ptr_wrapper_struct {
-    ($name:ident; $ossl:ident) => {
+    ($name:ident; $ctx:ident) => {
         #[derive(Debug)]
         pub struct $name {
-            ptr: *mut $ossl,
+            ptr: *mut $ctx,
         }
     };
 }
@@ -29,7 +29,7 @@ macro_rules! ptr_wrapper_returns {
 }
 
 macro_rules! ptr_wrapper_tail {
-    ($name:ident; $free:expr) => {
+    ($name:ident; $free:ident) => {
         impl Drop for $name {
             fn drop(&mut self) {
                 unsafe {
@@ -44,86 +44,94 @@ macro_rules! ptr_wrapper_tail {
 }
 
 macro_rules! ptr_wrapper {
-    (ctx; $name:ident; $ossl:ident; $newctx:ident; $free:expr) => {
-        ptr_wrapper_struct!($name; $ossl);
+    (ctx; $up:ident; $mix:ident) => {
+        paste::paste! {
+            /* EVP_XX_CTX */
+            ptr_wrapper_struct!([<Evp $mix Ctx>]; [<EVP_ $up _CTX>]);
 
-        impl $name {
-            pub fn new() -> Result<$name> {
-                let ptr = unsafe {
-                    $newctx()
-                };
-                if ptr.is_null() {
-                    return err_rv!(CKR_DEVICE_ERROR);
+            impl [<Evp $mix Ctx>] {
+                pub fn new() -> Result<[<Evp $mix Ctx>]> {
+                    let ptr = unsafe {
+                        [<EVP_ $up _CTX_new>]()
+                    };
+                    if ptr.is_null() {
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                    Ok([<Evp $mix Ctx>] { ptr: ptr })
                 }
-                Ok($name { ptr: ptr })
+
+                ptr_wrapper_returns!([<EVP_ $up _CTX>]);
             }
 
-            ptr_wrapper_returns!($ossl);
-        }
+            ptr_wrapper_tail!([<Evp $mix Ctx>]; [<EVP_ $up _CTX_free>]);
 
-        ptr_wrapper_tail!($name; $free);
+            /* EVP_XX */
+            ptr_wrapper_struct!([<Evp $mix >]; [<EVP_ $up >]);
+
+            impl [<Evp $mix >] {
+                pub fn new(name: *const c_char) -> Result<[<Evp $mix >]> {
+                    let ptr = unsafe {
+                        [<EVP_ $up _fetch>](
+                            get_libctx(), name, std::ptr::null_mut()
+                        )
+                    };
+                    if ptr.is_null() {
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                    Ok([<Evp $mix >] { ptr: ptr })
+                }
+
+                ptr_wrapper_returns!([<EVP_ $up >]);
+            }
+
+            ptr_wrapper_tail!([<Evp $mix >]; [<EVP_ $up _free>]);
+        }
     };
 
-    (ctx_from_name; $name:ident; $ossl:ident; $newctx:ident; $free:expr; $in_ossl:ident; $in_fetch:ident; $in_free:ident) => {
-        ptr_wrapper_struct!($name; $ossl);
+    (ctx_from_name; $up:ident; $mix:ident) => {
+        paste::paste! {
+            ptr_wrapper_struct!([<Evp $mix Ctx>]; [<EVP_ $up _CTX>]);
 
-        impl $name {
-            pub fn new(name: *const c_char) -> Result<$name> {
-                let arg = unsafe {
-                    $in_fetch(get_libctx(), name, std::ptr::null_mut())
-                };
-                if arg.is_null() {
-                    return err_rv!(CKR_DEVICE_ERROR);
+            impl [<Evp $mix Ctx>] {
+                pub fn new(
+                    name: *const c_char
+                ) -> Result<[<Evp $mix Ctx>]> {
+                    let arg = unsafe {
+                        [<EVP_ $up _fetch>](
+                            get_libctx(), name, std::ptr::null_mut()
+                        )
+                    };
+                    if arg.is_null() {
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                    let ptr = unsafe {
+                        /* This is safe and requires no lifetimes because
+                         * all _CTX_new() functions in OpenSSL take a
+                         * reference on the argument */
+                        [<EVP_ $up _CTX_new>](arg)
+                    };
+                    unsafe {
+                        [<EVP_ $up _free>](arg);
+                    }
+                    if ptr.is_null() {
+                        return err_rv!(CKR_DEVICE_ERROR);
+                    }
+                    Ok([<Evp $mix Ctx>] { ptr: ptr })
                 }
-                let ptr = unsafe {
-                    /* This is safe and requires no lifetimes because all _CTX_new()
-                     * functions in OpenSSL take a reference on the argument */
-                    $newctx(arg)
-                };
-                unsafe {
-                    $in_free(arg);
-                }
-                if ptr.is_null() {
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-                Ok($name { ptr: ptr })
+
+                ptr_wrapper_returns!([<EVP_ $up _CTX>]);
             }
 
-            ptr_wrapper_returns!($ossl);
+            ptr_wrapper_tail!([<Evp $mix Ctx>]; [<EVP_ $up _CTX_free>]);
         }
-
-        ptr_wrapper_tail!($name; $free);
     };
-
-    (fetch; $name:ident; $ossl:ident; $fetch:ident; $free:expr) => {
-        ptr_wrapper_struct!($name; $ossl);
-
-        impl $name {
-            pub fn new(name: *const c_char) -> Result<$name> {
-                let ptr = unsafe {
-                    $fetch(get_libctx(), name, std::ptr::null_mut())
-                };
-                if ptr.is_null() {
-                    return err_rv!(CKR_DEVICE_ERROR);
-                }
-                Ok($name { ptr: ptr })
-            }
-
-            ptr_wrapper_returns!($ossl);
-        }
-
-        ptr_wrapper_tail!($name; $free);
-    }
 }
 
-ptr_wrapper!(ctx; EvpMdCtx; EVP_MD_CTX; EVP_MD_CTX_new; EVP_MD_CTX_free);
-ptr_wrapper!(ctx; EvpCipherCtx; EVP_CIPHER_CTX; EVP_CIPHER_CTX_new; EVP_CIPHER_CTX_free);
+ptr_wrapper!(ctx; MD; Md);
+ptr_wrapper!(ctx; CIPHER; Cipher);
 
-ptr_wrapper!(ctx_from_name; EvpKdfCtx; EVP_KDF_CTX; EVP_KDF_CTX_new; EVP_KDF_CTX_free; EvpKdf; EVP_KDF_fetch; EVP_KDF_free);
-ptr_wrapper!(ctx_from_name; EvpMacCtx; EVP_MAC_CTX; EVP_MAC_CTX_new; EVP_MAC_CTX_free; EvpMac; EVP_MAC_fetch; EVP_MAC_free);
-
-ptr_wrapper!(fetch; EvpMd; EVP_MD; EVP_MD_fetch; EVP_MD_free);
-ptr_wrapper!(fetch; EvpCipher; EVP_CIPHER; EVP_CIPHER_fetch; EVP_CIPHER_free);
+ptr_wrapper!(ctx_from_name; KDF; Kdf);
+ptr_wrapper!(ctx_from_name; MAC; Mac);
 
 #[derive(Debug)]
 pub struct EvpPkeyCtx {
