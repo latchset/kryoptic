@@ -392,6 +392,10 @@ impl MechOperation for HMACOperation {
     fn reset(&mut self) -> Result<()> {
         self.reinit()
     }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
+    }
 }
 
 impl Mac for HMACOperation {

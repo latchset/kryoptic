@@ -12,6 +12,8 @@ struct AesMacOperation {
     macbuf: [u8; AES_BLOCK_SIZE],
     maclen: usize,
     op: AesOperation,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl Drop for AesMacOperation {
@@ -62,6 +64,8 @@ impl AesMacOperation {
                 },
                 key,
             )?,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -156,6 +160,10 @@ impl AesMacOperation {
 impl MechOperation for AesMacOperation {
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
     }
 }
 
