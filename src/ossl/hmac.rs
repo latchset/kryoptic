@@ -11,6 +11,8 @@ struct HMACOperation {
     maclen: usize,
     key: HmacKey,
     ctx: EvpMacCtx,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl HMACOperation {
@@ -45,6 +47,8 @@ impl HMACOperation {
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
             key: key,
             ctx: ctx,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -103,6 +107,12 @@ impl HMACOperation {
 
         output.copy_from_slice(&buf[..output.len()]);
         buf.zeroize();
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved =
+                fips::indicators::check_mac_fips_indicators(&mut self.ctx)?;
+        }
         Ok(())
     }
 
@@ -120,6 +130,10 @@ impl HMACOperation {
         }
         self.finalized = false;
         self.in_use = false;
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = None;
+        }
         Ok(())
     }
 }
