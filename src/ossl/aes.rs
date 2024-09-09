@@ -13,13 +13,17 @@ use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
-use crate::{bytes_to_vec, cast_params, map_err, void_ptr};
+use crate::{bytes_to_slice, bytes_to_vec, cast_params, map_err, void_ptr};
+
+#[cfg(not(feature = "fips"))]
+use crate::get_random_data;
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
 use zeroize::Zeroize;
 
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
+const MIN_RANDOM_IV_BITS: usize = 64;
 
 const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
 const AES_192_CBC_CTS: &[u8; 16] = b"AES-192-CBC-CTS\0";
@@ -142,8 +146,44 @@ fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
 }
 
 #[derive(Debug)]
+struct AesIvData {
+    buf: Vec<u8>,
+    fixedbits: usize,
+    gen: CK_GENERATOR_FUNCTION,
+    counter: u64,
+    maxcount: u64,
+}
+
+impl AesIvData {
+    fn none() -> Result<AesIvData> {
+        Ok(AesIvData {
+            buf: Vec::new(),
+            fixedbits: 0,
+            gen: CKG_NO_GENERATE,
+            counter: 0,
+            maxcount: 0,
+        })
+    }
+
+    fn simple(iv: Vec<u8>) -> Result<AesIvData> {
+        Ok(AesIvData {
+            buf: iv,
+            fixedbits: 0,
+            gen: CKG_NO_GENERATE,
+            counter: 0,
+            maxcount: 0,
+        })
+    }
+}
+impl Drop for AesIvData {
+    fn drop(&mut self) {
+        self.buf.zeroize();
+    }
+}
+
+#[derive(Debug)]
 struct AesParams {
-    iv: Vec<u8>,
+    iv: AesIvData,
     maxblocks: u128,
     ctsmode: u8,
     datalen: usize,
@@ -151,9 +191,18 @@ struct AesParams {
     taglen: usize,
 }
 
+#[cfg(feature = "fips")]
+impl AesParams {
+    fn zeroize(&mut self) {
+        self.iv.buf.zeroize();
+        self.aad.zeroize();
+    }
+}
+
 #[derive(Debug)]
 pub struct AesOperation {
     mech: CK_MECHANISM_TYPE,
+    op: CK_FLAGS,
     key: AesKey,
     params: AesParams,
     finalized: bool,
@@ -179,7 +228,6 @@ impl AesOperation {
             CKM_AES_CBC_PAD,
             CKM_AES_CTR,
             CKM_AES_CTS,
-            CKM_AES_GCM,
             CKM_AES_CCM,
             CKM_AES_KEY_WRAP,
             CKM_AES_KEY_WRAP_KWP,
@@ -191,6 +239,18 @@ impl AesOperation {
                 ),
             );
         }
+
+        mechs.add_mechanism(
+            CKM_AES_GCM,
+            new_mechanism(
+                CKF_ENCRYPT
+                    | CKF_DECRYPT
+                    | CKF_WRAP
+                    | CKF_UNWRAP
+                    | CKF_MESSAGE_ENCRYPT
+                    | CKF_MESSAGE_DECRYPT,
+            ),
+        );
 
         #[cfg(not(feature = "fips"))]
         for ckm in &[
@@ -229,7 +289,10 @@ impl AesOperation {
                     _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 }
                 Ok(AesParams {
-                    iv: bytes_to_vec!(params.pNonce, params.ulNonceLen),
+                    iv: AesIvData::simple(bytes_to_vec!(
+                        params.pNonce,
+                        params.ulNonceLen
+                    ))?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: map_err!(
@@ -264,7 +327,10 @@ impl AesOperation {
                     CKR_MECHANISM_PARAM_INVALID
                 )?;
                 Ok(AesParams {
-                    iv: bytes_to_vec!(params.pIv, params.ulIvLen),
+                    iv: AesIvData::simple(bytes_to_vec!(
+                        params.pIv,
+                        params.ulIvLen
+                    ))?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
@@ -313,7 +379,7 @@ impl AesOperation {
                 }
 
                 Ok(AesParams {
-                    iv: iv,
+                    iv: AesIvData::simple(iv)?,
                     maxblocks: maxblocks,
                     ctsmode: 0,
                     datalen: 0,
@@ -330,7 +396,10 @@ impl AesOperation {
                     ctsmode = 1u8;
                 }
                 Ok(AesParams {
-                    iv: bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
+                    iv: AesIvData::simple(bytes_to_vec!(
+                        mech.pParameter,
+                        mech.ulParameterLen
+                    ))?,
                     maxblocks: 0,
                     ctsmode: ctsmode,
                     datalen: 0,
@@ -339,7 +408,7 @@ impl AesOperation {
                 })
             }
             CKM_AES_ECB => Ok(AesParams {
-                iv: Vec::with_capacity(0),
+                iv: AesIvData::none()?,
                 maxblocks: 0,
                 ctsmode: 0,
                 datalen: 0,
@@ -352,7 +421,10 @@ impl AesOperation {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 Ok(AesParams {
-                    iv: bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
+                    iv: AesIvData::simple(bytes_to_vec!(
+                        mech.pParameter,
+                        mech.ulParameterLen
+                    ))?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
@@ -362,8 +434,11 @@ impl AesOperation {
             }
             CKM_AES_KEY_WRAP => {
                 let iv = match mech.ulParameterLen {
-                    0 => Vec::new(),
-                    8 => bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
+                    0 => AesIvData::none()?,
+                    8 => AesIvData::simple(bytes_to_vec!(
+                        mech.pParameter,
+                        mech.ulParameterLen
+                    ))?,
                     _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
                 Ok(AesParams {
@@ -377,8 +452,11 @@ impl AesOperation {
             }
             CKM_AES_KEY_WRAP_KWP => {
                 let iv = match mech.ulParameterLen {
-                    0 => Vec::new(),
-                    4 => bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
+                    0 => AesIvData::none()?,
+                    4 => AesIvData::simple(bytes_to_vec!(
+                        mech.pParameter,
+                        mech.ulParameterLen
+                    ))?,
                     _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
                 Ok(AesParams {
@@ -390,11 +468,27 @@ impl AesOperation {
                     taglen: 0,
                 })
             }
+            /* MessageEncrypt/Decrypt uses this at init */
+            CK_UNAVAILABLE_INFORMATION => {
+                if mech.pParameter != std::ptr::null_mut()
+                    || mech.ulParameterLen != 0
+                {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
+                Ok(AesParams {
+                    iv: AesIvData::none()?,
+                    maxblocks: 0,
+                    ctsmode: 0,
+                    datalen: 0,
+                    aad: Vec::new(),
+                    taglen: 0,
+                })
+            }
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
-    fn init_cipher(
+    fn get_cipher(
         mech: CK_MECHANISM_TYPE,
         keylen: usize,
     ) -> Result<&'static EvpCipher> {
@@ -485,8 +579,159 @@ impl AesOperation {
         })
     }
 
+    fn generate_iv(&mut self) -> Result<()> {
+        let genbits = self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
+        if self.params.iv.counter == 0 {
+            self.params.iv.maxcount = if genbits >= 64 {
+                u64::MAX
+            } else {
+                1u64 << genbits
+            }
+        }
+
+        if self.params.iv.counter >= self.params.iv.maxcount {
+            return Err(CKR_DATA_LEN_RANGE)?;
+        }
+
+        let mut genidx = self.params.iv.fixedbits / 8;
+        let mask = u8::try_from(genbits % 8)?;
+        let genbytes = (genbits + 7) / 8;
+
+        match self.params.iv.gen {
+            CKG_GENERATE | CKG_GENERATE_COUNTER => {
+                let cntbuf = self.params.iv.counter.to_be_bytes();
+                self.params.iv.buf[genidx] &= !mask;
+                if genbytes > cntbuf.len() {
+                    genidx += 1;
+                    let cntidx = self.params.iv.buf.len() - cntbuf.len();
+                    self.params.iv.buf[genidx..cntidx].fill(0);
+                    self.params.iv.buf[cntidx..].copy_from_slice(&cntbuf);
+                } else {
+                    let cntidx = cntbuf.len() - genbytes;
+                    self.params.iv.buf[genidx] |= cntbuf[cntidx] & mask;
+                    self.params.iv.buf[(genidx + 1)..]
+                        .copy_from_slice(&cntbuf[(cntidx + 1)..]);
+                }
+            }
+            CKG_GENERATE_COUNTER_XOR => {
+                let cntbuf = self.params.iv.counter.to_be_bytes();
+                if genbytes > cntbuf.len() {
+                    let cntidx = self.params.iv.buf.len() - cntbuf.len();
+                    self.params.iv.buf[cntidx..]
+                        .iter_mut()
+                        .zip(cntbuf.iter())
+                        .for_each(|(iv, cn)| *iv ^= *cn);
+                } else {
+                    let cntidx = cntbuf.len() - genbytes;
+                    self.params.iv.buf[genidx] ^= cntbuf[cntidx] & mask;
+                    self.params.iv.buf[(genidx + 1)..]
+                        .iter_mut()
+                        .zip(cntbuf[(cntidx + 1)..].iter())
+                        .for_each(|(iv, cn)| *iv ^= *cn);
+                }
+            }
+            CKG_GENERATE_RANDOM => {
+                #[cfg(not(feature = "fips"))]
+                {
+                    let mut genbuf = vec![0u8; (genbits + 7) / 8];
+                    get_random_data(&mut genbuf)?;
+                    self.params.iv.buf[genidx] ^= genbuf[0] & mask;
+                    self.params.iv.buf[(genidx + 1)..]
+                        .copy_from_slice(&genbuf[1..]);
+                }
+                /* In current FIPS code, openssl will generate this internally */
+                #[cfg(feature = "fips")]
+                ()
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        }
+
+        self.params.iv.counter += 1;
+        Ok(())
+    }
+
+    fn prep_iv(&mut self) -> Result<()> {
+        if self.params.iv.gen != CKG_NO_GENERATE {
+            self.generate_iv()?;
+        }
+
+        /* Set AEAD stuff for AEAD modes */
+        match self.mech {
+            CKM_AES_GCM => {
+                /* The IV size must be 12 in FIPS mode and if we try to
+                 * actively set it to any value (including 12) in FIPS
+                 * mode it will cause a cipher failure due to how
+                 * OpenSSL sets internal states. So avoid setting the IVLEN
+                 * when the ivsize matches the default */
+                if self.params.iv.buf.len() != 12 {
+                    let res = unsafe {
+                        EVP_CIPHER_CTX_ctrl(
+                            self.ctx.as_mut_ptr(),
+                            c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                            c_int::try_from(self.params.iv.buf.len())?,
+                            std::ptr::null_mut(),
+                        )
+                    };
+                    if res != 1 {
+                        self.finalized = true;
+                        return Err(CKR_DEVICE_ERROR)?;
+                    }
+                }
+            }
+            CKM_AES_CCM => {
+                let res = unsafe {
+                    EVP_CIPHER_CTX_ctrl(
+                        self.ctx.as_mut_ptr(),
+                        c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                        c_int::try_from(self.params.iv.buf.len())?,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if res != 1 {
+                    self.finalized = true;
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+            }
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    fn cts_params(&mut self, params: &mut OsslParam) -> Result<()> {
+        params.add_const_c_string(
+            name_as_char(OSSL_CIPHER_PARAM_CTS_MODE),
+            match self.params.ctsmode {
+                1 => name_as_char(OSSL_CIPHER_CTS_MODE_CS1),
+                2 => name_as_char(OSSL_CIPHER_CTS_MODE_CS2),
+                3 => name_as_char(OSSL_CIPHER_CTS_MODE_CS3),
+                _ => {
+                    self.finalized = true;
+                    return Err(CKR_GENERAL_ERROR)?;
+                }
+            },
+        )
+    }
+
+    fn ccm_tag_len(&mut self) -> Result<()> {
+        let res = unsafe {
+            EVP_CIPHER_CTX_ctrl(
+                self.ctx.as_mut_ptr(),
+                c_int::try_from(EVP_CTRL_AEAD_SET_TAG)?,
+                c_int::try_from(self.params.taglen)?,
+                std::ptr::null_mut(),
+            )
+        };
+        if res != 1 {
+            self.finalized = true;
+            Err(CKR_DEVICE_ERROR)?
+        } else {
+            Ok(())
+        }
+    }
+
     fn encrypt_initialize(&mut self) -> Result<()> {
-        let evpcipher = match Self::init_cipher(self.mech, self.key.raw.len()) {
+        let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
                 self.finalized = true;
@@ -511,81 +756,18 @@ impl AesOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        let mut params: Vec<OSSL_PARAM> = Vec::new();
-        match self.mech {
-            CKM_AES_GCM => {
-                /* The IV size must be 12 in FIPS mode and if we try to
-                 * actively set it to any value (including 12) in FIPS
-                 * mode it will cause a cipher failure due to how
-                 * OpenSSL sets internal states. So avoid setting the IVLEN
-                 * when the ivsize matches the default */
-                if self.params.iv.len() != 12 {
-                    let res = unsafe {
-                        EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut_ptr(),
-                            c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
-                            c_int::try_from(self.params.iv.len())?,
-                            std::ptr::null_mut(),
-                        )
-                    };
-                    if res != 1 {
-                        self.finalized = true;
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                }
-            }
-            CKM_AES_CCM => {
-                let res = unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut_ptr(),
-                        c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
-                        c_int::try_from(self.params.iv.len())?,
-                        std::ptr::null_mut(),
-                    )
-                };
-                if res != 1 {
-                    self.finalized = true;
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-                let res = unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut_ptr(),
-                        c_int::try_from(EVP_CTRL_AEAD_SET_TAG)?,
-                        c_int::try_from(self.params.taglen)?,
-                        std::ptr::null_mut(),
-                    )
-                };
-                if res != 1 {
-                    self.finalized = true;
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-            }
-            CKM_AES_CTS => unsafe {
-                params =
-                    vec![
-                        OSSL_PARAM_construct_utf8_string(
-                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
-                                as *const c_char,
-                            match self.params.ctsmode {
-                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
-                                    as *mut c_char,
-                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
-                                    as *mut c_char,
-                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
-                                    as *mut c_char,
-                                _ => {
-                                    self.finalized = true;
-                                    return Err(CKR_GENERAL_ERROR)?;
-                                }
-                            },
-                            0,
-                        ),
-                        OSSL_PARAM_construct_end(),
-                    ];
-            },
-            _ => (),
+        /* Generates IV for some AEAD modes */
+        self.prep_iv()?;
+
+        if self.mech == CKM_AES_CCM {
+            /* set tag len too */
+            self.ccm_tag_len()?;
         }
-        let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
+
+        let mut params = OsslParam::new();
+        let params_ptr = if self.mech == CKM_AES_CTS {
+            self.cts_params(&mut params)?;
+            params.finalize();
             params.as_ptr()
         } else {
             std::ptr::null()
@@ -597,8 +779,8 @@ impl AesOperation {
                 self.ctx.as_mut_ptr(),
                 std::ptr::null(),
                 self.key.raw.as_ptr(),
-                if self.params.iv.len() != 0 {
-                    self.params.iv.as_ptr()
+                if self.params.iv.buf.len() != 0 {
+                    self.params.iv.buf.as_ptr()
                 } else {
                     std::ptr::null()
                 },
@@ -656,7 +838,7 @@ impl AesOperation {
     }
 
     fn decrypt_initialize(&mut self) -> Result<()> {
-        let evpcipher = match Self::init_cipher(self.mech, self.key.raw.len()) {
+        let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
                 self.finalized = true;
@@ -664,6 +846,9 @@ impl AesOperation {
             }
         };
 
+        /* Need to initialize the cipher on the ctx first, as some modes
+         * will attempt to set parameters that require it on the context,
+         * before key and iv can be installed */
         let res = unsafe {
             EVP_DecryptInit_ex2(
                 self.ctx.as_mut_ptr(),
@@ -677,81 +862,19 @@ impl AesOperation {
             self.finalized = true;
             return Err(CKR_DEVICE_ERROR)?;
         }
-        let mut params: Vec<OSSL_PARAM> = Vec::new();
-        match self.mech {
-            CKM_AES_GCM => {
-                /* The IV size must be 12 in FIPS mode and if we try to
-                 * actively set it to any value (including 12) in FIPS
-                 * mode it will cause a cipher failure due to how
-                 * OpenSSL sets internal states. So avoid setting the IVLEN
-                 * when the ivsize matches the default */
-                if self.params.iv.len() != 12 {
-                    let res = unsafe {
-                        EVP_CIPHER_CTX_ctrl(
-                            self.ctx.as_mut_ptr(),
-                            c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
-                            c_int::try_from(self.params.iv.len())?,
-                            std::ptr::null_mut(),
-                        )
-                    };
-                    if res != 1 {
-                        self.finalized = true;
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                }
-            }
-            CKM_AES_CCM => {
-                let res = unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut_ptr(),
-                        c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
-                        c_int::try_from(self.params.iv.len())?,
-                        std::ptr::null_mut(),
-                    )
-                };
-                if res != 1 {
-                    self.finalized = true;
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-                let res = unsafe {
-                    EVP_CIPHER_CTX_ctrl(
-                        self.ctx.as_mut_ptr(),
-                        c_int::try_from(EVP_CTRL_AEAD_SET_TAG)?,
-                        c_int::try_from(self.params.taglen)?,
-                        std::ptr::null_mut(),
-                    )
-                };
-                if res != 1 {
-                    self.finalized = true;
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-            }
-            CKM_AES_CTS => unsafe {
-                params =
-                    vec![
-                        OSSL_PARAM_construct_utf8_string(
-                            OSSL_CIPHER_PARAM_CTS_MODE.as_ptr()
-                                as *const c_char,
-                            match self.params.ctsmode {
-                                1 => OSSL_CIPHER_CTS_MODE_CS1.as_ptr()
-                                    as *mut c_char,
-                                2 => OSSL_CIPHER_CTS_MODE_CS2.as_ptr()
-                                    as *mut c_char,
-                                3 => OSSL_CIPHER_CTS_MODE_CS3.as_ptr()
-                                    as *mut c_char,
-                                _ => {
-                                    self.finalized = true;
-                                    return Err(CKR_GENERAL_ERROR)?;
-                                }
-                            },
-                            0,
-                        ),
-                        OSSL_PARAM_construct_end(),
-                    ];
-            },
-            _ => (),
+
+        /* IV ctrl calls for AEAD modes */
+        self.prep_iv()?;
+
+        if self.mech == CKM_AES_CCM {
+            /* set tag len too */
+            self.ccm_tag_len()?;
         }
-        let params_ptr: *const OSSL_PARAM = if params.len() > 0 {
+
+        let mut params = OsslParam::new();
+        let params_ptr = if self.mech == CKM_AES_CTS {
+            self.cts_params(&mut params)?;
+            params.finalize();
             params.as_ptr()
         } else {
             std::ptr::null()
@@ -763,8 +886,8 @@ impl AesOperation {
                 self.ctx.as_mut_ptr(),
                 std::ptr::null(),
                 self.key.raw.as_ptr(),
-                if self.params.iv.len() != 0 {
-                    self.params.iv.as_ptr()
+                if self.params.iv.buf.len() != 0 {
+                    self.params.iv.buf.as_ptr()
                 } else {
                     std::ptr::null()
                 },
@@ -829,6 +952,7 @@ impl AesOperation {
     ) -> Result<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
+            op: CKF_ENCRYPT,
             key: object_to_raw_key(key)?,
             params: Self::init_params(mech)?,
             finalized: false,
@@ -847,6 +971,7 @@ impl AesOperation {
     ) -> Result<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
+            op: CKF_DECRYPT,
             key: object_to_raw_key(key)?,
             params: Self::init_params(mech)?,
             finalized: false,
@@ -911,6 +1036,260 @@ impl AesOperation {
         self.finalized = true;
         error::Error::ck_rv(err)
     }
+
+    /* returns pointer to IV */
+    fn init_msg_params(
+        &mut self,
+        parameter: CK_VOID_PTR,
+        parameter_len: CK_ULONG,
+        aad: &[u8],
+    ) -> Result<CK_BYTE_PTR> {
+        #[cfg(feature = "fips")]
+        {
+            self.params.iv.buf.zeroize();
+            self.params.aad.zeroize();
+        }
+        match self.mech {
+            CKM_AES_GCM => {
+                let params = cast_params!(
+                    parameter,
+                    parameter_len,
+                    CK_GCM_MESSAGE_PARAMS
+                );
+                if params.ulIvLen == 0
+                    || params.ulIvLen > CK_ULONG::try_from(u32::MAX)?
+                {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                if params.pIv == std::ptr::null_mut() {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                if params.ulTagBits > 128 {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                let tagbits = map_err!(
+                    usize::try_from(params.ulTagBits),
+                    CKR_ARGUMENTS_BAD
+                )?;
+                let ivlen = map_err!(
+                    usize::try_from(params.ulIvLen),
+                    CKR_ARGUMENTS_BAD
+                )?;
+                if aad.len() > usize::try_from(u32::MAX)? {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                if self.op == CKF_MESSAGE_ENCRYPT {
+                    if params.ulIvFixedBits > params.ulIvLen * 8 {
+                        return Err(CKR_ARGUMENTS_BAD)?;
+                    }
+                    let ivfixedbits = map_err!(
+                        usize::try_from(params.ulIvFixedBits),
+                        CKR_ARGUMENTS_BAD
+                    )?;
+                    if params.ivGenerator == CKG_GENERATE_RANDOM {
+                        if ivlen * 8 - ivfixedbits < MIN_RANDOM_IV_BITS {
+                            return Err(CKR_ARGUMENTS_BAD)?;
+                        }
+                    }
+                    if params.ivGenerator != CKG_NO_GENERATE {
+                        if ivlen * 8 - ivfixedbits == 0 {
+                            return Err(CKR_ARGUMENTS_BAD)?;
+                        }
+                    }
+                    self.params.iv = AesIvData {
+                        buf: bytes_to_vec!(params.pIv, ivlen),
+                        fixedbits: ivfixedbits,
+                        gen: params.ivGenerator,
+                        counter: 0,
+                        maxcount: 0,
+                    };
+                } else {
+                    self.params.iv = AesIvData {
+                        buf: bytes_to_vec!(params.pIv, ivlen),
+                        fixedbits: 0,
+                        gen: CKG_NO_GENERATE,
+                        counter: 0,
+                        maxcount: 0,
+                    };
+                }
+                self.params.maxblocks = 0;
+                self.params.ctsmode = 0;
+                self.params.datalen = 0;
+                self.params.aad = aad.to_vec();
+                self.params.taglen = (tagbits + 7) / 8;
+                Ok(params.pIv)
+            }
+            _ => Err(CKR_MECHANISM_INVALID)?,
+        }
+    }
+
+    /* returns pointer to tag */
+    fn check_msg_params(
+        &mut self,
+        parameter: CK_VOID_PTR,
+        parameter_len: CK_ULONG,
+    ) -> Result<CK_BYTE_PTR> {
+        match self.mech {
+            CKM_AES_GCM => {
+                let params = cast_params!(
+                    parameter,
+                    parameter_len,
+                    CK_GCM_MESSAGE_PARAMS
+                );
+                if params.pIv == std::ptr::null_mut() {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                let tagbits = map_err!(
+                    usize::try_from(params.ulTagBits),
+                    CKR_ARGUMENTS_BAD
+                )?;
+                let ivlen = map_err!(
+                    usize::try_from(params.ulIvLen),
+                    CKR_ARGUMENTS_BAD
+                )?;
+                if self.params.iv.buf.len() != ivlen {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                if self.op == CKF_MESSAGE_ENCRYPT {
+                    let ivfixedbits = map_err!(
+                        usize::try_from(params.ulIvFixedBits),
+                        CKR_ARGUMENTS_BAD
+                    )?;
+                    if self.params.iv.fixedbits != ivfixedbits {
+                        return Err(CKR_ARGUMENTS_BAD)?;
+                    }
+                    if self.params.iv.gen != params.ivGenerator {
+                        return Err(CKR_ARGUMENTS_BAD)?;
+                    }
+                }
+                if self.params.taglen != (tagbits + 7) / 8 {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                Ok(params.pTag)
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        }
+    }
+
+    pub fn msg_encrypt_init(
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<AesOperation> {
+        Ok(AesOperation {
+            mech: mech.mechanism,
+            op: CKF_MESSAGE_ENCRYPT,
+            key: object_to_raw_key(key)?,
+            /* params are not set until later */
+            params: Self::init_params(&CK_MECHANISM {
+                mechanism: CK_UNAVAILABLE_INFORMATION,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            })?,
+            finalized: false,
+            in_use: false,
+            ctx: EvpCipherCtx::new()?,
+            finalbuf: Vec::new(),
+            blockctr: 0,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
+        })
+    }
+
+    fn msg_encrypt_new(
+        &mut self,
+        parameter: CK_VOID_PTR,
+        parameter_len: CK_ULONG,
+        aad: &[u8],
+    ) -> Result<()> {
+        if self.op != CKF_MESSAGE_ENCRYPT {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if self.in_use {
+            return Err(CKR_OPERATION_ACTIVE)?;
+        }
+
+        #[cfg(feature = "fips")]
+        {
+            self.params.zeroize();
+            self.finalbuf.zeroize();
+            self.fips_approved = None;
+        }
+        self.finalized = false;
+        self.in_use = true;
+
+        let iv_ptr = self.init_msg_params(parameter, parameter_len, aad)?;
+
+        /* reset ctx */
+        let res = unsafe { EVP_CIPHER_CTX_reset(self.ctx.as_mut_ptr()) };
+        if res != 1 {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
+        self.encrypt_initialize()?;
+
+        if self.params.iv.gen != CKG_NO_GENERATE {
+            let iv = bytes_to_slice!(mut iv_ptr, self.params.iv.buf.len(), u8);
+            iv.copy_from_slice(&self.params.iv.buf);
+        }
+        Ok(())
+    }
+
+    pub fn msg_decrypt_init(
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<AesOperation> {
+        Ok(AesOperation {
+            mech: mech.mechanism,
+            op: CKF_MESSAGE_DECRYPT,
+            key: object_to_raw_key(key)?,
+            /* params are not set until later */
+            params: Self::init_params(&CK_MECHANISM {
+                mechanism: CK_UNAVAILABLE_INFORMATION,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            })?,
+            finalized: false,
+            in_use: false,
+            ctx: EvpCipherCtx::new()?,
+            finalbuf: Vec::new(),
+            blockctr: 0,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
+        })
+    }
+
+    fn msg_decrypt_new(
+        &mut self,
+        parameter: CK_VOID_PTR,
+        parameter_len: CK_ULONG,
+        aad: &[u8],
+    ) -> Result<()> {
+        if self.op != CKF_MESSAGE_DECRYPT {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if self.in_use {
+            return Err(CKR_OPERATION_ACTIVE)?;
+        }
+
+        let _ = self.init_msg_params(parameter, parameter_len, aad)?;
+
+        #[cfg(feature = "fips")]
+        {
+            self.params.zeroize();
+            self.finalbuf.zeroize();
+            self.fips_approved = None;
+        }
+        self.finalized = false;
+        self.in_use = true;
+
+        /* reset ctx */
+        let res = unsafe { EVP_CIPHER_CTX_reset(self.ctx.as_mut_ptr()) };
+        if res != 1 {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
+        self.decrypt_initialize()
+    }
 }
 
 impl MechOperation for AesOperation {
@@ -931,9 +1310,6 @@ impl Encryption for AesOperation {
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if cipher.len() == 0 {
-            return self.encrypt_update(plain, cipher);
         }
         let outl = self.encrypt_update(plain, cipher)?;
         if outl > cipher.len() {
@@ -1068,7 +1444,7 @@ impl Encryption for AesOperation {
                 }
                 let mut outl: c_int = 0;
                 let res = unsafe {
-                    /* This will normally be a noop (GCM/CCM) */
+                    /* This will normally return 0 bytes (GCM/CCM) */
                     EVP_EncryptFinal_ex(
                         self.ctx.as_mut_ptr(),
                         cipher.as_mut_ptr(),
@@ -1622,6 +1998,284 @@ impl Decryption for AesOperation {
             }
         };
         Ok(outlen)
+    }
+}
+
+impl MessageOperation for AesOperation {
+    fn busy(&self) -> bool {
+        self.in_use
+    }
+    fn finalize(&mut self) -> Result<()> {
+        if self.in_use {
+            return Err(CKR_OPERATION_ACTIVE)?;
+        }
+        self.finalized = true;
+        Ok(())
+    }
+}
+
+impl MsgEncryption for AesOperation {
+    fn msg_encrypt(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        aad: &[u8],
+        plain: &[u8],
+        cipher: &mut [u8],
+    ) -> Result<usize> {
+        self.msg_encrypt_begin(param, paramlen, aad)?;
+        self.msg_encrypt_final(param, paramlen, plain, cipher)
+    }
+
+    fn msg_encrypt_begin(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        aad: &[u8],
+    ) -> Result<()> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.msg_encrypt_new(param, paramlen, aad)
+    }
+
+    fn msg_encrypt_next(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        plain: &[u8],
+        cipher: &mut [u8],
+    ) -> Result<usize> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if !self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        let _ = self.check_msg_params(param, paramlen)?;
+        if cipher.len() < plain.len() {
+            /* This is the only, non-fatal error */
+            return Err(error::Error::buf_too_small(plain.len()));
+        }
+        let mut outl: c_int = 0;
+        if plain.len() > 0 {
+            let res = unsafe {
+                EVP_EncryptUpdate(
+                    self.ctx.as_mut_ptr(),
+                    cipher.as_mut_ptr(),
+                    &mut outl,
+                    plain.as_ptr(),
+                    c_int::try_from(plain.len())?,
+                )
+            };
+            if res != 1 {
+                return Err(self.op_err(CKR_DEVICE_ERROR));
+            }
+        }
+        Ok(usize::try_from(outl)?)
+    }
+
+    fn msg_encrypt_final(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        plain: &[u8],
+        cipher: &mut [u8],
+    ) -> Result<usize> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if !self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if cipher.len() < plain.len() {
+            /* This is the only, non-fatal error */
+            return Err(error::Error::buf_too_small(plain.len()));
+        }
+        let tag_ptr = self.check_msg_params(param, paramlen)?;
+        let outlen = if plain.len() > 0 {
+            self.msg_encrypt_next(param, paramlen, plain, cipher)?
+        } else {
+            0
+        };
+        self.in_use = false;
+
+        let mut outl: c_int = 0;
+        let res = unsafe {
+            /* This will normally return 0 bytes (GCM/CCM) */
+            EVP_EncryptFinal_ex(
+                self.ctx.as_mut_ptr(),
+                cipher.as_mut_ptr(),
+                &mut outl,
+            )
+        };
+        if res != 1 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
+        }
+        if outl != 0 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
+        }
+        let res = unsafe {
+            EVP_CIPHER_CTX_ctrl(
+                self.ctx.as_mut_ptr(),
+                EVP_CTRL_AEAD_GET_TAG as c_int,
+                self.params.taglen as c_int,
+                tag_ptr as *mut c_void,
+            )
+        };
+        if res != 1 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
+        }
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
+        }
+
+        Ok(outlen)
+    }
+
+    fn msg_encryption_len(
+        &mut self,
+        data_len: usize,
+        _fin: bool,
+    ) -> Result<usize> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        Ok(data_len)
+    }
+}
+
+impl MsgDecryption for AesOperation {
+    fn msg_decrypt(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        aad: &[u8],
+        cipher: &[u8],
+        plain: &mut [u8],
+    ) -> Result<usize> {
+        self.msg_decrypt_begin(param, paramlen, aad)?;
+        self.msg_decrypt_final(param, paramlen, cipher, plain)
+    }
+
+    fn msg_decrypt_begin(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        aad: &[u8],
+    ) -> Result<()> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.msg_decrypt_new(param, paramlen, aad)
+    }
+
+    fn msg_decrypt_next(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        cipher: &[u8],
+        plain: &mut [u8],
+    ) -> Result<usize> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if !self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        let _ = self.check_msg_params(param, paramlen)?;
+        if plain.len() < cipher.len() {
+            /* This is the only, non-fatal error */
+            return Err(error::Error::buf_too_small(cipher.len()));
+        }
+        let mut plen: c_int = 0;
+        if cipher.len() > 0 {
+            let res = unsafe {
+                EVP_DecryptUpdate(
+                    self.ctx.as_mut_ptr(),
+                    plain.as_mut_ptr(),
+                    &mut plen,
+                    cipher.as_ptr(),
+                    c_int::try_from(cipher.len())?,
+                )
+            };
+            if res != 1 {
+                return Err(self.op_err(CKR_DEVICE_ERROR));
+            }
+        }
+        Ok(usize::try_from(plen)?)
+    }
+
+    fn msg_decrypt_final(
+        &mut self,
+        param: CK_VOID_PTR,
+        paramlen: CK_ULONG,
+        cipher: &[u8],
+        plain: &mut [u8],
+    ) -> Result<usize> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if !self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if plain.len() < cipher.len() {
+            /* This is the only, non-fatal error */
+            return Err(error::Error::buf_too_small(cipher.len()));
+        }
+        let tag_ptr = self.check_msg_params(param, paramlen)?;
+        let outlen = if cipher.len() > 0 {
+            self.msg_decrypt_next(param, paramlen, cipher, plain)?
+        } else {
+            0
+        };
+        self.in_use = false;
+
+        let res = unsafe {
+            EVP_CIPHER_CTX_ctrl(
+                self.ctx.as_mut_ptr(),
+                c_int::try_from(EVP_CTRL_AEAD_SET_TAG)?,
+                c_int::try_from(self.params.taglen)?,
+                tag_ptr as *mut c_void,
+            )
+        };
+        if res != 1 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
+        }
+        let mut outl: c_int = 0;
+        let res = unsafe {
+            EVP_DecryptFinal_ex(
+                self.ctx.as_mut_ptr(),
+                std::ptr::null_mut(),
+                &mut outl,
+            )
+        };
+        if res != 1 {
+            return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
+        }
+        if outl != 0 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
+        }
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
+        }
+
+        Ok(outlen)
+    }
+
+    fn msg_decryption_len(
+        &mut self,
+        data_len: usize,
+        _fin: bool,
+    ) -> Result<usize> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        Ok(data_len)
     }
 }
 
