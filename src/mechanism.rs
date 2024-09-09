@@ -231,6 +231,8 @@ pub trait Digest: MechOperation {
 }
 
 pub trait Mac: MechOperation {
+    /* not used in FIPS builds */
+    #[allow(dead_code)]
     fn mac(&mut self, _data: &[u8], _digest: &mut [u8]) -> Result<()> {
         err_rv!(CKR_GENERAL_ERROR)
     }

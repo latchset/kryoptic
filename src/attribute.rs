@@ -539,6 +539,7 @@ impl Drop for CkAttrs<'_> {
     }
 }
 
+#[allow(dead_code)]
 impl<'a> CkAttrs<'a> {
     pub fn new() -> CkAttrs<'static> {
         Self::with_capacity(0)

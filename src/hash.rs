@@ -27,6 +27,8 @@ pub struct HashBasedOp {
     pub mac: CK_MECHANISM_TYPE,
     pub mac_general: CK_MECHANISM_TYPE,
     pub hash_size: usize,
+    /* not used in FIPS builds */
+    #[allow(dead_code)]
     pub block_size: usize,
 }
 
