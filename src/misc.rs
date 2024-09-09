@@ -69,6 +69,16 @@ macro_rules! cast_params {
         }
         unsafe { *($mech.pParameter as *const $params) }
     }};
+
+    ($param:expr, $len:expr, $params:ty) => {{
+        let Ok(len) = usize::try_from($len) else {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        };
+        if len != std::mem::size_of::<$params>() {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
+        unsafe { *($param as *const $params) }
+    }};
 }
 
 #[macro_export]
@@ -90,6 +100,19 @@ macro_rules! bytes_to_slice {
             }
         } else {
             &[]
+        }
+    };
+
+    (mut $ptr: expr, $len:expr, $typ:ty) => {
+        if $len > 0 {
+            unsafe {
+                std::slice::from_raw_parts_mut(
+                    $ptr as *mut $typ,
+                    usize::try_from($len).unwrap(),
+                )
+            }
+        } else {
+            return Err(CKR_GENERAL_ERROR)?;
         }
     };
 }
