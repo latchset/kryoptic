@@ -2494,94 +2494,452 @@ extern "C" fn fn_session_cancel(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
 extern "C" fn fn_message_encrypt_init(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _key: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; MsgEncryption; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let slot_id = session.get_slot_id();
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
+    if mech.info().flags & CKF_MESSAGE_ENCRYPT != 0 {
+        let operation = res_or_ret!(mech.msg_encryption_op(mechanism, &key));
+        session.set_operation(Operation::MsgEncryption(operation), false);
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
+
+        CKR_OK
+    } else {
+        CKR_MECHANISM_INVALID
+    }
 }
+
 extern "C" fn fn_encrypt_message(
-    _session: CK_SESSION_HANDLE,
-    _parameter: CK_VOID_PTR,
-    _parameter_len: CK_ULONG,
-    _associated_data: CK_BYTE_PTR,
-    _associated_data_len: CK_ULONG,
-    _plaintext: CK_BYTE_PTR,
-    _plaintext_len: CK_ULONG,
-    _ciphertext: CK_BYTE_PTR,
-    _pul_ciphertext_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    parameter: CK_VOID_PTR,
+    parameter_len: CK_ULONG,
+    associated_data: CK_BYTE_PTR,
+    associated_data_len: CK_ULONG,
+    plaintext: CK_BYTE_PTR,
+    plaintext_len: CK_ULONG,
+    ciphertext: CK_BYTE_PTR,
+    pul_ciphertext_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if parameter.is_null()
+        || parameter_len == 0
+        || plaintext.is_null()
+        || plaintext_len == 0
+        || pul_ciphertext_len.is_null()
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    let alen = cast_or_ret!(
+        usize from associated_data_len => CKR_ARGUMENTS_BAD
+    );
+    let plen = cast_or_ret!(usize from plaintext_len => CKR_ARGUMENTS_BAD);
+    let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
+    let clen = cast_or_ret!(usize from pclen => CKR_ARGUMENTS_BAD);
+
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgEncryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if operation.busy() {
+        return CKR_OPERATION_ACTIVE;
+    }
+
+    if ciphertext.is_null() {
+        let retlen = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.msg_encryption_len(plen, false))
+        );
+        unsafe {
+            *pul_ciphertext_len = retlen;
+        }
+        return CKR_OK;
+    }
+
+    let adata: &[u8] = if associated_data.is_null() {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+    };
+    let plain: &[u8] = unsafe { std::slice::from_raw_parts(plaintext, plen) };
+    let cipher: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(ciphertext, clen) };
+
+    let outlen = res_or_ret!(operation.msg_encrypt(
+        parameter,
+        parameter_len,
+        adata,
+        plain,
+        cipher
+    ));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_ciphertext_len = retlen };
+    CKR_OK
 }
+
 extern "C" fn fn_encrypt_message_begin(
-    _session: CK_SESSION_HANDLE,
-    _parameter: CK_VOID_PTR,
-    _parameter_len: CK_ULONG,
-    _associated_data: CK_BYTE_PTR,
-    _associated_data_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    parameter: CK_VOID_PTR,
+    parameter_len: CK_ULONG,
+    associated_data: CK_BYTE_PTR,
+    associated_data_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if parameter.is_null() || parameter_len == 0 {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    let alen = cast_or_ret!(
+        usize from associated_data_len => CKR_ARGUMENTS_BAD
+    );
+
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgEncryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if operation.busy() {
+        return CKR_OPERATION_ACTIVE;
+    }
+
+    let adata: &[u8] = if associated_data.is_null() {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+    };
+    ret_to_rv!(operation.msg_encrypt_begin(parameter, parameter_len, adata))
 }
+
 extern "C" fn fn_encrypt_message_next(
-    _session: CK_SESSION_HANDLE,
-    _parameter: CK_VOID_PTR,
-    _parameter_len: CK_ULONG,
-    _plaintext_part: CK_BYTE_PTR,
-    _plaintext_part_len: CK_ULONG,
-    _ciphertext_part: CK_BYTE_PTR,
-    _pul_ciphertext_part_len: CK_ULONG_PTR,
-    _flags: CK_FLAGS,
+    s_handle: CK_SESSION_HANDLE,
+    parameter: CK_VOID_PTR,
+    parameter_len: CK_ULONG,
+    plaintext_part: CK_BYTE_PTR,
+    plaintext_part_len: CK_ULONG,
+    ciphertext_part: CK_BYTE_PTR,
+    pul_ciphertext_part_len: CK_ULONG_PTR,
+    flags: CK_FLAGS,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if parameter.is_null()
+        || parameter_len == 0
+        || plaintext_part.is_null()
+        || plaintext_part_len == 0
+        || pul_ciphertext_part_len.is_null()
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    let plen = cast_or_ret!(usize from plaintext_part_len => CKR_ARGUMENTS_BAD);
+    let pclen = unsafe { *pul_ciphertext_part_len as CK_ULONG };
+    let clen = cast_or_ret!(usize from pclen => CKR_ARGUMENTS_BAD);
+
+    let fin = match flags {
+        CKF_END_OF_MESSAGE => true,
+        0 => false,
+        _ => return CKR_ARGUMENTS_BAD,
+    };
+
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgEncryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if !operation.busy() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+
+    if ciphertext_part.is_null() {
+        let retlen = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.msg_encryption_len(plen, fin))
+        );
+        unsafe {
+            *pul_ciphertext_part_len = retlen;
+        }
+        return CKR_OK;
+    }
+
+    let plain: &[u8] =
+        unsafe { std::slice::from_raw_parts(plaintext_part, plen) };
+    let cipher: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(ciphertext_part, clen) };
+
+    let outlen = match fin {
+        false => res_or_ret!(operation.msg_encrypt_next(
+            parameter,
+            parameter_len,
+            plain,
+            cipher
+        )),
+        true => res_or_ret!(operation.msg_encrypt_final(
+            parameter,
+            parameter_len,
+            plain,
+            cipher
+        )),
+    };
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_ciphertext_part_len = retlen };
+    CKR_OK
 }
-extern "C" fn fn_message_encrypt_final(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+
+extern "C" fn fn_message_encrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgEncryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    ret_to_rv!(operation.finalize())
 }
+
 extern "C" fn fn_message_decrypt_init(
-    _session: CK_SESSION_HANDLE,
-    _mechanism: CK_MECHANISM_PTR,
-    _key: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    mechptr: CK_MECHANISM_PTR,
+    key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; MsgDecryption; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let slot_id = session.get_slot_id();
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
+    if mech.info().flags & CKF_MESSAGE_DECRYPT != 0 {
+        let operation = res_or_ret!(mech.msg_decryption_op(mechanism, &key));
+        session.set_operation(Operation::MsgDecryption(operation), false);
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);
+
+        CKR_OK
+    } else {
+        CKR_MECHANISM_INVALID
+    }
 }
+
 extern "C" fn fn_decrypt_message(
-    _session: CK_SESSION_HANDLE,
-    _parameter: CK_VOID_PTR,
-    _parameter_len: CK_ULONG,
-    _associated_data: CK_BYTE_PTR,
-    _associated_data_len: CK_ULONG,
-    _ciphertext: CK_BYTE_PTR,
-    _ciphertext_len: CK_ULONG,
-    _plaintext: CK_BYTE_PTR,
-    _pul_plaintext_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    parameter: CK_VOID_PTR,
+    parameter_len: CK_ULONG,
+    associated_data: CK_BYTE_PTR,
+    associated_data_len: CK_ULONG,
+    ciphertext: CK_BYTE_PTR,
+    ciphertext_len: CK_ULONG,
+    plaintext: CK_BYTE_PTR,
+    pul_plaintext_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if parameter.is_null()
+        || parameter_len == 0
+        || ciphertext.is_null()
+        || ciphertext_len == 0
+        || pul_plaintext_len.is_null()
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    let alen = cast_or_ret!(
+        usize from associated_data_len => CKR_ARGUMENTS_BAD
+    );
+    let clen = cast_or_ret!(usize from ciphertext_len => CKR_ARGUMENTS_BAD);
+    let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
+    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
+
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgDecryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if operation.busy() {
+        return CKR_OPERATION_ACTIVE;
+    }
+
+    if plaintext.is_null() {
+        let retlen = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.msg_decryption_len(clen, false))
+        );
+        unsafe {
+            *pul_plaintext_len = retlen;
+        }
+        return CKR_OK;
+    }
+
+    let adata: &[u8] = if associated_data.is_null() {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+    };
+    let cipher: &[u8] = unsafe { std::slice::from_raw_parts(ciphertext, clen) };
+    let plain: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(plaintext, plen) };
+
+    let outlen = res_or_ret!(operation.msg_decrypt(
+        parameter,
+        parameter_len,
+        adata,
+        cipher,
+        plain
+    ));
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_plaintext_len = retlen };
+    CKR_OK
 }
+
 extern "C" fn fn_decrypt_message_begin(
-    _session: CK_SESSION_HANDLE,
-    _parameter: CK_VOID_PTR,
-    _parameter_len: CK_ULONG,
-    _associated_data: CK_BYTE_PTR,
-    _associated_data_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    parameter: CK_VOID_PTR,
+    parameter_len: CK_ULONG,
+    associated_data: CK_BYTE_PTR,
+    associated_data_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if parameter.is_null() || parameter_len == 0 {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    let alen = cast_or_ret!(
+        usize from associated_data_len => CKR_ARGUMENTS_BAD
+    );
+
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgDecryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if operation.busy() {
+        return CKR_OPERATION_ACTIVE;
+    }
+
+    let adata: &[u8] = if associated_data.is_null() {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+    };
+    ret_to_rv!(operation.msg_decrypt_begin(parameter, parameter_len, adata))
 }
+
 extern "C" fn fn_decrypt_message_next(
-    _session: CK_SESSION_HANDLE,
-    _parameter: CK_VOID_PTR,
-    _parameter_len: CK_ULONG,
-    _ciphertext_part: CK_BYTE_PTR,
-    _ciphertext_part_len: CK_ULONG,
-    _plaintext_part: CK_BYTE_PTR,
-    _pul_plaintext_part_len: CK_ULONG_PTR,
-    _flags: CK_FLAGS,
+    s_handle: CK_SESSION_HANDLE,
+    parameter: CK_VOID_PTR,
+    parameter_len: CK_ULONG,
+    ciphertext_part: CK_BYTE_PTR,
+    ciphertext_part_len: CK_ULONG,
+    plaintext_part: CK_BYTE_PTR,
+    pul_plaintext_part_len: CK_ULONG_PTR,
+    flags: CK_FLAGS,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if parameter.is_null()
+        || parameter_len == 0
+        || ciphertext_part.is_null()
+        || ciphertext_part_len == 0
+        || pul_plaintext_part_len.is_null()
+    {
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    let clen =
+        cast_or_ret!(usize from ciphertext_part_len => CKR_ARGUMENTS_BAD);
+    let pplen = unsafe { *pul_plaintext_part_len as CK_ULONG };
+    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
+
+    let fin = match flags {
+        CKF_END_OF_MESSAGE => true,
+        0 => false,
+        _ => return CKR_ARGUMENTS_BAD,
+    };
+
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgDecryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    if !operation.busy() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+
+    if plaintext_part.is_null() {
+        let retlen = cast_or_ret!(
+            CK_ULONG from res_or_ret!(operation.msg_decryption_len(clen, fin))
+        );
+        unsafe {
+            *pul_plaintext_part_len = retlen;
+        }
+        return CKR_OK;
+    }
+
+    let cipher: &[u8] =
+        unsafe { std::slice::from_raw_parts(ciphertext_part, clen) };
+    let plain: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(plaintext_part, plen) };
+
+    let outlen = match fin {
+        false => res_or_ret!(operation.msg_decrypt_next(
+            parameter,
+            parameter_len,
+            cipher,
+            plain
+        )),
+        true => res_or_ret!(operation.msg_decrypt_final(
+            parameter,
+            parameter_len,
+            cipher,
+            plain
+        )),
+    };
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+    unsafe { *pul_plaintext_part_len = retlen };
+    CKR_OK
 }
-extern "C" fn fn_message_decrypt_final(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+
+extern "C" fn fn_message_decrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = match res_or_ret!(session.get_operation_mut()) {
+        Operation::MsgDecryption(op) => op,
+        _ => return CKR_OPERATION_NOT_INITIALIZED,
+    };
+    if operation.finalized() {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    ret_to_rv!(operation.finalize())
 }
+
 extern "C" fn fn_message_sign_init(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
