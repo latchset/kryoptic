@@ -32,4 +32,9 @@ impl RNG {
         let noaddtl: [u8; 0] = [];
         self.drbg.generate(&noaddtl, buffer)
     }
+
+    pub fn add_seed(&mut self, buffer: &[u8]) -> Result<()> {
+        let noaddtl: [u8; 0] = [];
+        self.drbg.reseed(buffer, &noaddtl)
+    }
 }

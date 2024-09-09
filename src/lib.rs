@@ -111,6 +111,10 @@ pub fn get_random_data(data: &mut [u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().generate_random(data))
 }
 
+pub fn random_add_seed(data: &[u8]) -> Result<()> {
+    CSPRNG.with(|rng| rng.borrow_mut().add_seed(data))
+}
+
 struct State {
     slots: HashMap<CK_SLOT_ID, Slot>,
     sessionmap: HashMap<CK_SESSION_HANDLE, CK_SLOT_ID>,
@@ -2105,12 +2109,17 @@ extern "C" fn fn_derive_key(
 }
 
 extern "C" fn fn_seed_random(
-    _session: CK_SESSION_HANDLE,
-    _seed: CK_BYTE_PTR,
-    _seed_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    seed: CK_BYTE_PTR,
+    seed_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    /* check session is valid */
+    drop(global_rlock!(STATE).get_session(s_handle));
+    let len = cast_or_ret!(usize from seed_len);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
+    ret_to_rv!(random_add_seed(data))
 }
+
 extern "C" fn fn_generate_random(
     s_handle: CK_SESSION_HANDLE,
     random_data: CK_BYTE_PTR,
