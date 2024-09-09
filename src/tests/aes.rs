@@ -746,6 +746,218 @@ fn test_aes_operations() {
         assert_eq!(value, data);
     }
 
+    {
+        /* GCM via AEAD MessageEncrypt/MessageDecrypt API */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* IV needs to be of size 12 for the test to work in FIPS mode as well */
+        let iv = "BA0987654321";
+        let aad = "AUTH ME";
+        let mut tag = [0u8; 4];
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvFixedBits: 0,
+            ivGenerator: CKG_NO_GENERATE,
+            pTag: tag.as_mut_ptr(),
+            ulTagBits: (tag.len() * 8) as CK_ULONG,
+        };
+
+        let ret = fn_encrypt_message_begin(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let data = "01234567";
+        let enc: [u8; 8] = [0; 8];
+        let mut enc_len = enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            data.as_ptr() as *mut CK_BYTE,
+            (data.len() - 1) as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+            0,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len() - 1);
+
+        enc_len = 1 as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            unsafe { data.as_ptr().offset(7) } as *mut CK_BYTE,
+            1 as CK_ULONG,
+            unsafe { enc.as_ptr().offset(7) } as *mut _,
+            &mut enc_len,
+            CKF_END_OF_MESSAGE,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 1);
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
+
+        let ret = fn_message_encrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut dec: [u8; 8] = [0; 8];
+        let mut dec_len = dec.len() as CK_ULONG;
+
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+            byte_ptr!(enc.as_ptr()),
+            enc.len() as CK_ULONG,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
+
+        let ret = fn_message_decrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        let testname = "gcmDecrypt128 96,104,128,128 0";
+        let key_handle =
+            match get_test_key_handle(session, testname, CKO_SECRET_KEY) {
+                Ok(k) => k,
+                Err(e) => panic!("{}", e),
+            };
+        let iv = match get_test_data(session, testname, "IV") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let aad = match get_test_data(session, testname, "AAD") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let tag = match get_test_data(session, testname, "Tag") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let ct = match get_test_data(session, testname, "CT") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+        let plaintext = match get_test_data(session, testname, "PT") {
+            Ok(vec) => vec,
+            Err(ret) => return assert_eq!(ret, CKR_OK),
+        };
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: byte_ptr!(iv.as_ptr()),
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvFixedBits: 0,
+            ivGenerator: CKG_NO_GENERATE,
+            pTag: byte_ptr!(tag.as_ptr()),
+            ulTagBits: (tag.len() * 8) as CK_ULONG,
+        };
+
+        let ret = fn_decrypt_message_begin(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let mut dec = vec![0u8; plaintext.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+
+        let ret = fn_decrypt_message_next(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            byte_ptr!(ct.as_ptr()),
+            ct.len() as CK_ULONG,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+            CKF_END_OF_MESSAGE,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, plaintext);
+
+        let ret = fn_message_decrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        /* once more but FIPS compliant */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* IV needs to be of size 12 for the test to work in FIPS mode as well */
+        let mut iv = [0u8; 12];
+        let aad = "AUTH ME FIPS";
+        let mut tag = [0u8; 16];
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv.as_mut_ptr(),
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvFixedBits: 0,
+            ivGenerator: CKG_GENERATE_RANDOM,
+            pTag: tag.as_mut_ptr(),
+            ulTagBits: (tag.len() * 8) as CK_ULONG,
+        };
+
+        let data = "01234567";
+        let enc: [u8; 8] = [0; 8];
+        let mut enc_len = enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_ne!(iv, [0u8; 12]);
+        assert_eq!(enc_len as usize, data.len());
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 1), true);
+
+        let ret = fn_message_encrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+    }
+
     testtokn.finalize();
 }
 

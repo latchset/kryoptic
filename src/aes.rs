@@ -375,6 +375,36 @@ impl Mechanism for AesMechanism {
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
+
+    fn msg_encryption_op(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<Box<dyn MsgEncryption>> {
+        if self.info.flags & CKF_MESSAGE_ENCRYPT == 0 {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_ENCRYPT) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(AesOperation::msg_encrypt_init(mech, key)?))
+    }
+
+    fn msg_decryption_op(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<Box<dyn MsgDecryption>> {
+        if self.info.flags & CKF_MESSAGE_DECRYPT == 0 {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DECRYPT) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(AesOperation::msg_decrypt_init(mech, key)?))
+    }
 }
 
 #[derive(Debug)]
