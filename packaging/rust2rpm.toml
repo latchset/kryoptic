@@ -1,0 +1,11 @@
+[package]
+source-url = "https://github.com/latchset/kryoptic/archive/%{revision}.zip"
+cargo-install-lib = true
+cargo-install-bin = false
+
+[features]
+enable = ["dynamic"]
+
+[requires]
+build = ["openssl-devel"]
+lib = ["openssl-libs"]
