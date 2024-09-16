@@ -412,7 +412,7 @@ impl<'a> OsslParam<'a> {
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
                 key,
-                void_ptr!(v.as_ptr()) as *mut i8,
+                void_ptr!(v.as_ptr()) as *mut c_char,
                 0,
             )
         };
@@ -436,7 +436,7 @@ impl<'a> OsslParam<'a> {
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
                 key,
-                void_ptr!(v.as_ptr()) as *mut i8,
+                void_ptr!(v.as_ptr()) as *mut c_char,
                 0,
             )
         };
@@ -458,8 +458,9 @@ impl<'a> OsslParam<'a> {
             return Err(CKR_GENERAL_ERROR)?;
         }
 
-        let param =
-            unsafe { OSSL_PARAM_construct_utf8_string(key, val as *mut i8, 0) };
+        let param = unsafe {
+            OSSL_PARAM_construct_utf8_string(key, val as *mut c_char, 0)
+        };
         self.p.to_mut().push(param);
         Ok(())
     }

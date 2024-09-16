@@ -4,6 +4,7 @@ use super::mechanism;
 use error::Result;
 use interface::*;
 use mechanism::*;
+use std::ffi::c_char;
 use std::fmt::Debug;
 
 #[cfg(feature = "fips")]
@@ -32,7 +33,7 @@ impl HmacSha256Drbg {
             let rng_spec: &[u8; 10] = b"HMAC-DRBG\0";
             let rand = EVP_RAND_fetch(
                 get_libctx(),
-                rng_spec.as_ptr() as *const i8,
+                rng_spec.as_ptr() as *const c_char,
                 std::ptr::null(),
             );
 
@@ -61,13 +62,13 @@ impl DRBG for HmacSha256Drbg {
             let rng_digest = b"SHA256\0";
             let params = [
                 OSSL_PARAM_construct_utf8_string(
-                    OSSL_DRBG_PARAM_MAC.as_ptr() as *const i8,
-                    rng_mac.as_ptr() as *mut i8,
+                    OSSL_DRBG_PARAM_MAC.as_ptr() as *const c_char,
+                    rng_mac.as_ptr() as *mut c_char,
                     rng_mac.len() - 1,
                 ),
                 OSSL_PARAM_construct_utf8_string(
-                    OSSL_DRBG_PARAM_DIGEST.as_ptr() as *const i8,
-                    rng_digest.as_ptr() as *mut i8,
+                    OSSL_DRBG_PARAM_DIGEST.as_ptr() as *const c_char,
+                    rng_digest.as_ptr() as *mut c_char,
                     rng_digest.len() - 1,
                 ),
                 OSSL_PARAM_construct_end(),
@@ -152,7 +153,7 @@ impl HmacSha512Drbg {
             let rng_spec = b"HMAC-DRBG\0";
             let rand = EVP_RAND_fetch(
                 get_libctx(),
-                rng_spec.as_ptr() as *const i8,
+                rng_spec.as_ptr() as *const c_char,
                 std::ptr::null(),
             );
 
@@ -181,13 +182,13 @@ impl DRBG for HmacSha512Drbg {
             let rng_digest = b"SHA512\0";
             let params = [
                 OSSL_PARAM_construct_utf8_string(
-                    OSSL_DRBG_PARAM_MAC.as_ptr() as *const i8,
-                    rng_mac.as_ptr() as *mut i8,
+                    OSSL_DRBG_PARAM_MAC.as_ptr() as *const c_char,
+                    rng_mac.as_ptr() as *mut c_char,
                     rng_mac.len() - 1,
                 ),
                 OSSL_PARAM_construct_utf8_string(
-                    OSSL_DRBG_PARAM_DIGEST.as_ptr() as *const i8,
-                    rng_digest.as_ptr() as *mut i8,
+                    OSSL_DRBG_PARAM_DIGEST.as_ptr() as *const c_char,
+                    rng_digest.as_ptr() as *mut c_char,
                     rng_digest.len() - 1,
                 ),
                 OSSL_PARAM_construct_end(),
