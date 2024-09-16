@@ -12,7 +12,7 @@ use super::{cast_params, some_or_err};
 
 use mechanism::*;
 
-use std::ffi::c_int;
+use std::ffi::{c_char, c_int};
 
 // TODO could probably reuse the ECC one as its the same?
 pub fn eddsa_import(obj: &mut Object) -> Result<()> {
@@ -144,7 +144,7 @@ fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
     params.finalize();
 
     EvpPkey::fromdata(
-        get_ossl_name_from_obj(key)?.as_ptr() as *const i8,
+        get_ossl_name_from_obj(key)?.as_ptr() as *const c_char,
         EVP_PKEY_PUBLIC_KEY,
         &params,
     )
@@ -168,7 +168,7 @@ fn object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
     params.finalize();
 
     EvpPkey::fromdata(
-        get_ossl_name_from_obj(key)?.as_ptr() as *const i8,
+        get_ossl_name_from_obj(key)?.as_ptr() as *const c_char,
         EVP_PKEY_PRIVATE_KEY,
         &params,
     )
@@ -276,7 +276,7 @@ impl EddsaOperation {
         privkey: &mut Object,
     ) -> Result<()> {
         let evp_pkey = EvpPkey::generate(
-            get_ossl_name_from_obj(pubkey)?.as_ptr() as *const i8,
+            get_ossl_name_from_obj(pubkey)?.as_ptr() as *const c_char,
             &OsslParam::empty(),
         )?;
 

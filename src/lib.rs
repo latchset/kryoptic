@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
-use std::ffi::CStr;
+use std::ffi::{c_char, CStr};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -2885,8 +2885,8 @@ pub extern "C" fn C_GetInterface(
 
     for intf in &INTERFACE_SET {
         let found: bool = unsafe {
-            let name = (*intf.interface).pInterfaceName as *const i8;
-            libc::strcmp(request_name as *const i8, name) == 0
+            let name = (*intf.interface).pInterfaceName as *const c_char;
+            libc::strcmp(request_name as *const c_char, name) == 0
         };
 
         if found {

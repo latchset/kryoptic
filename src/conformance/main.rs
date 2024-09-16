@@ -3,7 +3,7 @@
 
 use libc;
 use std::env;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::PathBuf;
 
 mod interface {
@@ -111,7 +111,7 @@ fn main() {
         .into_os_string();
     let lib_handle = unsafe {
         libc::dlopen(
-            filename.as_encoded_bytes().as_ptr() as *const i8,
+            filename.as_encoded_bytes().as_ptr() as *const c_char,
             rtld_flags,
         )
     };
