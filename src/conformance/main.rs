@@ -15,7 +15,7 @@ mod interface {
 }
 
 use interface::{
-    CK_C_GetFunctionList, CKR_OK, CK_C_INITIALIZE_ARGS, CK_FUNCTION_LIST,
+    CK_C_GetFunctionList, CKR_OK, CK_C_INITIALIZE_ARGS, CK_FUNCTION_LIST, CK_RV,
 };
 
 fn dl_error() -> String {
@@ -46,7 +46,7 @@ impl FuncList {
             } else {
                 Some(std::mem::transmute::<
                     *mut c_void,
-                    unsafe extern "C" fn(*mut *mut CK_FUNCTION_LIST) -> u64,
+                    unsafe extern "C" fn(*mut *mut CK_FUNCTION_LIST) -> CK_RV,
                 >(ptr))
             }
         };

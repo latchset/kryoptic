@@ -92,7 +92,7 @@ impl JsonToken {
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::NumType => match val.as_u64() {
-                        Some(n) => attribute::from_ulong(id, n),
+                        Some(n) => attribute::from_u64(id, n),
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::StringType => match val.as_str() {

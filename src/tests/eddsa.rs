@@ -62,7 +62,7 @@ fn test_create_eddsa_objects() {
     let params: CK_EDDSA_PARAMS = CK_EDDSA_PARAMS {
         phFlag: CK_FALSE,
         pContextData: ctx.as_ptr() as *mut CK_BYTE,
-        ulContextDataLen: ctx.len() as u64,
+        ulContextDataLen: ctx.len() as CK_ULONG,
     };
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_EDDSA,
@@ -520,7 +520,7 @@ fn test_eddsa_units(session: CK_SESSION_HANDLE, test_data: Vec<EddsaTestUnit>) {
         }
 
         let sign: [u8; 120] = [0; 120]; /* large enough */
-        let mut sign_len: CK_ULONG = unit.signature.len() as u64;
+        let mut sign_len: CK_ULONG = unit.signature.len() as CK_ULONG;
         let ret = fn_sign(
             session,
             unit.message.as_ptr() as *mut u8,

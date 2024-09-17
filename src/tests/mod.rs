@@ -31,7 +31,7 @@ fn test_finalizer() -> Option<RwLockWriteGuard<'static, u64>> {
 }
 
 struct Slots {
-    id: u64,
+    id: CK_ULONG,
 }
 
 static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
