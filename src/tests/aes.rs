@@ -958,6 +958,108 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
     }
 
+    {
+        /* CCM via AEAD MessageEncrypt/MessageDecrypt API */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        /* Data Len needs to be known in advance for CCM */
+        let data = "01234567";
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* IV needs to be of size 12 for the test to work in FIPS mode as well */
+        let iv = "BA0987654321";
+        let aad = "AUTH ME";
+        let mut tag = [0u8; 4];
+        let mut param = CK_CCM_MESSAGE_PARAMS {
+            ulDataLen: data.len() as CK_ULONG,
+            pNonce: iv.as_ptr() as *mut CK_BYTE,
+            ulNonceLen: iv.len() as CK_ULONG,
+            ulNonceFixedBits: 0,
+            nonceGenerator: CKG_NO_GENERATE,
+            pMAC: tag.as_mut_ptr(),
+            ulMACLen: tag.len() as CK_ULONG,
+        };
+
+        let ret = fn_encrypt_message_begin(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        /* Stream mode, so arbitrary data size and matching output */
+        let mut enc: [u8; 8] = [0; 8];
+        let mut enc_len = enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            data.as_ptr() as *mut CK_BYTE,
+            (data.len() - 1) as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+            0,
+        );
+        assert_eq!(ret, CKR_OK);
+        /* CCM is one shot, and returns nothing until the final */
+        assert_eq!(enc_len as usize, 0);
+
+        let mut enc_len = enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            unsafe { data.as_ptr().offset(7) } as *mut CK_BYTE,
+            1 as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+            CKF_END_OF_MESSAGE,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, enc.len() as CK_ULONG);
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
+
+        let ret = fn_message_encrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut dec: [u8; 8] = [0; 8];
+        let mut dec_len = dec.len() as CK_ULONG;
+
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+            byte_ptr!(enc.as_ptr()),
+            enc.len() as CK_ULONG,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec.len(), data.len());
+        assert_eq!(data.as_bytes(), dec.as_slice());
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
+
+        let ret = fn_message_decrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+    }
+
     testtokn.finalize();
 }
 
