@@ -25,8 +25,19 @@ use {super::fips, fips::*};
 macro_rules! maxsize {
     ($size: expr) => {
         match $size {
-            8 | 16 | 24 | 32 | 40 | 48 | 56 => (1 << $size) - 1,
-            64 => usize::try_from(u64::MAX)?,
+            8 | 16 | 24 | 32 | 40 | 48 | 56 => (1u64 << $size) - 1,
+            64 => u64::MAX,
+            _ => panic!("Invalid size"),
+        }
+    };
+}
+
+#[cfg(not(feature = "fips"))]
+macro_rules! maxsize32 {
+    ($size: expr) => {
+        match $size {
+            8 | 16 | 24 => (1usize << $size) - 1,
+            32 => usize::try_from(u32::MAX)?,
             _ => panic!("Invalid size"),
         }
     };
@@ -318,7 +329,7 @@ impl Sp800Operation {
         ((key + segment - 1) / segment) * segment
     }
 
-    /* NOTE: In this function the ctr is intnetionally truncated by
+    /* NOTE: In this function the ctr is intentionally truncated by
      * casting, do not convert with try_from() */
     #[cfg(not(feature = "fips"))]
     fn ctr_update(
@@ -331,13 +342,13 @@ impl Sp800Operation {
         }
         match param.bits {
             8 => {
-                if ctr > maxsize!(8) {
+                if ctr > maxsize32!(8) {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 op.mac_update(&[ctr as u8])
             }
             16 => {
-                if ctr > maxsize!(16) {
+                if ctr > maxsize32!(16) {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let data = if param.le {
@@ -348,7 +359,7 @@ impl Sp800Operation {
                 op.mac_update(&data)
             }
             24 => {
-                if ctr > maxsize!(24) {
+                if ctr > maxsize32!(24) {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let (data, s, e) = if param.le {
@@ -359,7 +370,7 @@ impl Sp800Operation {
                 op.mac_update(&data[s..e])
             }
             32 => {
-                if ctr > maxsize!(32) {
+                if ctr > maxsize32!(32) {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let data = if param.le {
@@ -386,7 +397,7 @@ impl Sp800Operation {
             CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS => slen,
             CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS => klen,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-        };
+        } as u64;
         /* up to 64 bits */
         match param.bits {
             8 => {

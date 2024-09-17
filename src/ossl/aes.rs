@@ -241,10 +241,12 @@ impl AesOperation {
             }
             CKM_AES_GCM => {
                 let params = cast_params!(mech, CK_GCM_PARAMS);
-                if params.ulIvLen == 0 || params.ulIvLen > (1 << 32) - 1 {
+                if params.ulIvLen == 0
+                    || params.ulIvLen > CK_ULONG::try_from(u32::MAX)?
+                {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                if params.ulAADLen > (1 << 32) - 1 {
+                if params.ulAADLen > CK_ULONG::try_from(u32::MAX)? {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if params.ulTagBits > 128 {

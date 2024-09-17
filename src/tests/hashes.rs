@@ -38,7 +38,7 @@ fn test_hashes_digest() {
         session,
         handle,
         template.as_mut_ptr(),
-        template.len() as u64,
+        template.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
 
@@ -107,7 +107,7 @@ fn test_hashes_digest() {
         session,
         handle,
         template.as_mut_ptr(),
-        template.len() as u64,
+        template.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
 
@@ -159,7 +159,7 @@ fn test_hashes_digest() {
         session,
         handle,
         template.as_mut_ptr(),
-        template.len() as u64,
+        template.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
 
@@ -211,7 +211,7 @@ fn test_hashes_digest() {
         session,
         handle,
         template.as_mut_ptr(),
-        template.len() as u64,
+        template.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
 

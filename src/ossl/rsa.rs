@@ -350,7 +350,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
@@ -383,7 +383,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
@@ -416,7 +416,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
@@ -456,7 +456,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: u64 = modulus.len() as u64 * 8;
+        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
