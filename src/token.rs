@@ -24,7 +24,7 @@ use super::sshkdf;
 use super::storage;
 use super::tlskdf;
 
-use super::{err_rv, get_random_data, sizeof, to_rv};
+use super::{get_random_data, sizeof};
 use error::Result;
 use interface::*;
 use mechanism::Mechanisms;
@@ -291,27 +291,27 @@ impl Token {
             }
         };
         if obj.get_attr_as_ulong(CKA_CLASS)? != KRO_TOKEN_DATA {
-            return err_rv!(CKR_TOKEN_NOT_RECOGNIZED);
+            return Err(CKR_TOKEN_NOT_RECOGNIZED)?;
         }
         let label = obj
             .get_attr_as_string(CKA_LABEL)
-            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
         copy_sized_string(label.as_bytes(), &mut self.info.label);
         let issuer = obj
             .get_attr_as_string(KRA_MANUFACTURER_ID)
-            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
         copy_sized_string(issuer.as_bytes(), &mut self.info.manufacturerID);
         let model = obj
             .get_attr_as_string(KRA_MODEL)
-            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
         copy_sized_string(model.as_bytes(), &mut self.info.model);
         let serial = obj
             .get_attr_as_string(KRA_SERIAL_NUMBER)
-            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
         copy_sized_string(serial.as_bytes(), &mut self.info.serialNumber);
         self.info.flags = obj
             .get_attr_as_ulong(KRA_FLAGS)
-            .map_err(|_| to_rv!(CKR_TOKEN_NOT_RECOGNIZED))?;
+            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
 
         Ok(())
     }
@@ -355,17 +355,17 @@ impl Token {
             Ok(o) => o,
             Err(e) => {
                 if e.attr_not_found() {
-                    return err_rv!(CKR_USER_PIN_NOT_INITIALIZED);
+                    return Err(CKR_USER_PIN_NOT_INITIALIZED)?;
                 } else {
                     return Err(e);
                 }
             }
         };
         if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         Ok(obj)
     }
@@ -413,13 +413,13 @@ impl Token {
     fn parse_pin_label(&self, label: &str) -> Result<(String, usize)> {
         let parts: Vec<_> = label.split(":").collect();
         if parts.len() != 2 {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         Ok((
             parts[0].to_string(),
             match parts[1].parse() {
                 Ok(u) => u,
-                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                Err(_) => return Err(CKR_GENERAL_ERROR)?,
             },
         ))
     }
@@ -533,7 +533,7 @@ impl Token {
         let is_so = match uid.as_str() {
             SO_PIN_UID => true,
             USER_PIN_UID => false,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
         let attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
@@ -643,7 +643,7 @@ impl Token {
             }
             CKU_USER => CKU_USER,
             CKU_SO => CKU_SO,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
 
         match utype {
@@ -698,7 +698,7 @@ impl Token {
                     value.clone(),
                 )?;
             }
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         }
         Ok(())
     }
@@ -732,7 +732,7 @@ impl Token {
 
         #[cfg(feature = "fips")]
         if fips::token_init(self).is_err() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         self.info.flags |= CKF_TOKEN_INITIALIZED;
@@ -756,7 +756,7 @@ impl Token {
         let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
         let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
         if stored_attempts >= max {
-            return err_rv!(CKR_PIN_LOCKED);
+            return Err(CKR_PIN_LOCKED)?;
         }
 
         let label = obj.get_attr_as_string(CKA_LABEL)?;
@@ -786,9 +786,9 @@ impl Token {
             return Ok(());
         }
         if self.info.flags & CKF_SO_PIN_LOCKED != 0 {
-            return err_rv!(CKR_PIN_LOCKED);
+            return Err(CKR_PIN_LOCKED)?;
         }
-        return err_rv!(CKR_PIN_INCORRECT);
+        return Err(CKR_PIN_INCORRECT)?;
     }
 
     fn check_user_login(&mut self, pin: &Vec<u8>) -> Result<Object> {
@@ -797,7 +797,7 @@ impl Token {
         let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
         let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
         if stored_attempts >= max {
-            return err_rv!(CKR_PIN_LOCKED);
+            return Err(CKR_PIN_LOCKED)?;
         }
 
         let label = obj.get_attr_as_string(CKA_LABEL)?;
@@ -832,9 +832,9 @@ impl Token {
             return Ok(kek.unwrap());
         }
         if self.info.flags & CKF_USER_PIN_LOCKED != 0 {
-            return err_rv!(CKR_PIN_LOCKED);
+            return Err(CKR_PIN_LOCKED)?;
         }
-        return err_rv!(CKR_PIN_INCORRECT);
+        return Err(CKR_PIN_INCORRECT)?;
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
@@ -989,7 +989,7 @@ impl Token {
             encval.resize(iv.len() + outlen, 0);
             return Ok(encval);
         } else {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
     }
 
@@ -1038,7 +1038,7 @@ impl Token {
             plain.resize(outlen, 0);
             return Ok(plain);
         } else {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
     }
 
@@ -1074,10 +1074,10 @@ impl Token {
                     self.object_from_storage(s, true)?
                 }
             }
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
         };
         if !is_logged_in && obj.is_token() && obj.is_private() {
-            return err_rv!(CKR_USER_NOT_LOGGED_IN);
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
         if obj.is_sensitive() {
             obj.set_zeroize()
@@ -1094,7 +1094,7 @@ impl Token {
         let is_token = obj.is_token();
         if is_token {
             if !self.is_logged_in(KRY_UNSPEC) {
-                return err_rv!(CKR_USER_NOT_LOGGED_IN);
+                return Err(CKR_USER_NOT_LOGGED_IN)?;
             }
         } else {
             obj.set_session(s_handle);
@@ -1123,18 +1123,18 @@ impl Token {
         match self.session_objects.get(&o_handle) {
             Some(obj) => {
                 if !obj.is_destroyable() {
-                    return err_rv!(CKR_ACTION_PROHIBITED);
+                    return Err(CKR_ACTION_PROHIBITED)?;
                 }
                 let _ = self.session_objects.remove(&o_handle);
             }
             None => {
                 let uid = match self.handles.get(o_handle) {
                     Some(u) => u,
-                    None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+                    None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
                 };
                 let obj = self.object_from_storage(uid, false)?;
                 if !obj.is_destroyable() {
-                    return err_rv!(CKR_ACTION_PROHIBITED);
+                    return Err(CKR_ACTION_PROHIBITED)?;
                 }
                 let _ = self.storage.remove_by_uid(&uid);
             }
@@ -1161,11 +1161,11 @@ impl Token {
                     Cow::Owned(self.object_from_storage(uid, false)?)
                 }
             }
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
         };
         if !is_logged && obj.is_token() && obj.is_private() {
             /* do not reveal if the object exists or not */
-            return err_rv!(CKR_OBJECT_HANDLE_INVALID);
+            return Err(CKR_OBJECT_HANDLE_INVALID)?;
         }
         self.object_factories.get_object_attributes(&obj, template)
     }
@@ -1177,7 +1177,7 @@ impl Token {
     ) -> Result<()> {
         let uid = match self.handles.get(o_handle) {
             Some(u) => u,
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
         };
         if let Some(mut obj) = self.session_objects.get_mut(&o_handle) {
             return self
@@ -1211,7 +1211,7 @@ impl Token {
     ) -> Result<&CK_MECHANISM_INFO> {
         match self.mechanisms.info(typ) {
             Some(m) => Ok(m),
-            None => err_rv!(CKR_MECHANISM_INVALID),
+            None => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
@@ -1224,7 +1224,7 @@ impl Token {
                     self.object_from_storage(s, false)?.rough_size()
                 }
             }
-            None => err_rv!(CKR_OBJECT_HANDLE_INVALID),
+            None => Err(CKR_OBJECT_HANDLE_INVALID)?,
         }
     }
 
@@ -1243,10 +1243,10 @@ impl Token {
                     Cow::Owned(self.object_from_storage(uid, true)?)
                 }
             }
-            None => return err_rv!(CKR_OBJECT_HANDLE_INVALID),
+            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
         };
         if !is_logged_in && obj.is_token() && obj.is_private() {
-            return err_rv!(CKR_USER_NOT_LOGGED_IN);
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
         let newobj = self.object_factories.copy(&obj, template)?;
         self.insert_object(s_handle, newobj)
@@ -1288,7 +1288,7 @@ impl Token {
 
             let uid = match o.get_attr_as_string(CKA_UNIQUE_ID) {
                 Ok(s) => s,
-                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                Err(_) => return Err(CKR_GENERAL_ERROR)?,
             };
             let handle = match self.handles.get_by_uid(&uid) {
                 Some(h) => *h,

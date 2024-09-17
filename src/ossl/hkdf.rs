@@ -13,7 +13,7 @@ impl Derive for HKDFOperation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -21,8 +21,8 @@ impl Derive for HKDFOperation {
 
         if self.salt.len() == 0 {
             match self.salt_type {
-                CKF_HKDF_SALT_KEY => return err_rv!(CKR_GENERAL_ERROR),
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                CKF_HKDF_SALT_KEY => return Err(CKR_GENERAL_ERROR)?,
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             }
         }
 
@@ -38,10 +38,10 @@ impl Derive for HKDFOperation {
         }?;
 
         if !self.expand && keysize != self.prflen {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if keysize == 0 || keysize > usize::try_from(u32::MAX)? {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
         let mode = if self.extract {
@@ -92,7 +92,7 @@ impl Derive for HKDFOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         #[cfg(feature = "fips")]

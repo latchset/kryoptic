@@ -171,41 +171,26 @@ impl From<std::convert::Infallible> for Error {
     }
 }
 
+impl From<interface::CK_RV> for Error {
+    fn from(error: interface::CK_RV) -> Error {
+        Error::ck_rv(error)
+    }
+}
+
 #[macro_export]
 macro_rules! some_or_err {
     ($action:expr) => {
         if let Some(ref x) = $action {
             x
         } else {
-            return Err(error::Error::ck_rv(interface::CKR_GENERAL_ERROR));
+            return Err(interface::CKR_GENERAL_ERROR)?;
         }
     };
     (mut $action:expr) => {
         if let Some(ref mut x) = $action {
             x
         } else {
-            return Err(error::Error::ck_rv(interface::CKR_GENERAL_ERROR));
+            return Err(interface::CKR_GENERAL_ERROR)?;
         }
-    };
-}
-
-#[macro_export]
-macro_rules! err_rv {
-    ($ck_err:expr) => {
-        Err(error::Error::ck_rv($ck_err))
-    };
-}
-
-#[macro_export]
-macro_rules! err_not_found {
-    ($err_str:expr) => {
-        Err(error::Error::not_found($err_str))
-    };
-}
-
-#[macro_export]
-macro_rules! to_rv {
-    ($ck_err:expr) => {
-        error::Error::ck_rv($ck_err)
     };
 }

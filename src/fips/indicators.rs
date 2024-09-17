@@ -218,7 +218,7 @@ fn flag_to_op(flag: CK_FLAGS) -> Result<CK_ATTRIBUTE_TYPE> {
         CKF_WRAP => CKA_WRAP,
         CKF_UNWRAP => CKA_UNWRAP,
         CKF_DERIVE => CKA_DERIVE,
-        _ => return err_rv!(CKR_GENERAL_ERROR),
+        _ => return Err(CKR_GENERAL_ERROR)?,
     })
 }
 
@@ -1123,7 +1123,7 @@ macro_rules! check_ossl_fips_indicator {
                     [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>] => None,
                     [<EVP_ $up _REDHAT_FIPS_INDICATOR_APPROVED>] => Some(true),
                     [<EVP_ $up _REDHAT_FIPS_INDICATOR_NOT_APPROVED>] => Some(false),
-                    _ => return err_rv!(CKR_DEVICE_ERROR),
+                    _ => return Err(CKR_DEVICE_ERROR)?,
                 })
             }
         }

@@ -9,7 +9,6 @@ use super::interface;
 use super::session::Session;
 use super::token::Token;
 
-use super::err_rv;
 use error::Result;
 use interface::*;
 
@@ -57,10 +56,10 @@ impl Slot {
                 } else {
                     /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
                      * available error, we should rreturn that instead */
-                    err_rv!(KRR_TOKEN_NOT_INITIALIZED)
+                    Err(KRR_TOKEN_NOT_INITIALIZED)?
                 }
             }
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
@@ -77,10 +76,10 @@ impl Slot {
                 } else {
                     /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
                      * available error, we should rreturn that instead */
-                    err_rv!(KRR_TOKEN_NOT_INITIALIZED)
+                    Err(KRR_TOKEN_NOT_INITIALIZED)?
                 }
             }
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
@@ -95,9 +94,9 @@ impl Slot {
         match self.sessions.get(&handle) {
             Some(s) => match s.read() {
                 Ok(sess) => Ok(sess),
-                Err(_) => err_rv!(CKR_GENERAL_ERROR),
+                Err(_) => Err(CKR_GENERAL_ERROR)?,
             },
-            None => err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => Err(CKR_SESSION_HANDLE_INVALID)?,
         }
     }
 
@@ -108,9 +107,9 @@ impl Slot {
         match self.sessions.get(&handle) {
             Some(s) => match s.write() {
                 Ok(sess) => Ok(sess),
-                Err(_) => err_rv!(CKR_GENERAL_ERROR),
+                Err(_) => Err(CKR_GENERAL_ERROR)?,
             },
-            None => err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => Err(CKR_SESSION_HANDLE_INVALID)?,
         }
     }
 
@@ -132,7 +131,7 @@ impl Slot {
         for (_key, val) in self.sessions.iter() {
             let ret = val.write().unwrap().change_session_state(user_type);
             if ret != CKR_OK {
-                return err_rv!(ret);
+                return Err(ret)?;
             }
         }
         Ok(())

@@ -4,8 +4,8 @@
 use super::error;
 use super::interface;
 
-use super::{bytes_to_vec, err_not_found, err_rv, sizeof, void_ptr};
-use error::Result;
+use super::{bytes_to_vec, sizeof, void_ptr};
+use error::{Error, Result};
 use interface::*;
 
 use std::borrow::Cow;
@@ -230,7 +230,7 @@ impl Attribute {
 
     pub fn to_bool(&self) -> Result<bool> {
         if self.value.len() != 1 {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         if self.value[0] == 0 {
             return Ok(false);
@@ -239,7 +239,7 @@ impl Attribute {
     }
     pub fn to_ulong(&self) -> Result<CK_ULONG> {
         if self.value.len() != 8 {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         Ok(CK_ULONG::from_ne_bytes(
             self.value.as_slice().try_into().unwrap(),
@@ -249,7 +249,7 @@ impl Attribute {
     pub fn to_string(&self) -> Result<String> {
         match std::str::from_utf8(&self.value) {
             Ok(s) => Ok(s.to_string()),
-            Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+            Err(_) => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         }
     }
 
@@ -259,7 +259,7 @@ impl Attribute {
 
     pub fn to_date_string(&self) -> Result<String> {
         if self.value.len() != 8 {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         let chars: [char; 10] = [
             char::from(self.value[0]),
@@ -299,10 +299,10 @@ macro_rules! conversion_from_type {
                     if a.atype == AttrType::$atype {
                         return Ok($fn1(t, val));
                     }
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
-            err_not_found!(t.to_string())
+            Err(Error::not_found((t.to_string())))
         }
 
         #[allow(dead_code)]
@@ -312,10 +312,10 @@ macro_rules! conversion_from_type {
                     if a.atype == AttrType::$atype {
                         return Ok($fn1(a.id, val));
                     }
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
-            err_not_found!(s)
+            Err(Error::not_found((s)))
         }
     };
 }
@@ -388,11 +388,11 @@ const MAX_ASCII_DIGIT: u8 = 0x39;
 
 fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE> {
     if val.len() != 8 {
-        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
     }
     for n in val.iter() {
         if *n < MIN_ASCII_DIGIT || *n > MAX_ASCII_DIGIT {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
     }
     Ok(vec_to_date(val))
@@ -401,10 +401,10 @@ fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE> {
 pub fn string_to_ck_date(date: &str) -> Result<CK_DATE> {
     let s = date.as_bytes().to_vec();
     if s.len() != 10 {
-        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
     }
     if s[4] != ASCII_DASH || s[7] != ASCII_DASH {
-        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
     }
     let mut buf = Vec::with_capacity(8);
     buf[0] = s[0];
@@ -440,7 +440,7 @@ pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
             return Ok((a.id, a.atype));
         }
     }
-    err_not_found!(s.clone())
+    Err(Error::not_found(s.clone()))
 }
 
 pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
@@ -449,19 +449,19 @@ pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
             return Ok(a.atype);
         }
     }
-    return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+    return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
 }
 
 impl CK_ATTRIBUTE {
     pub fn to_ulong(&self) -> Result<CK_ULONG> {
         if self.ulValueLen != sizeof!(CK_ULONG) {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
     }
     pub fn to_bool(self) -> Result<bool> {
         if self.ulValueLen != sizeof!(CK_BBOOL) {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
         if val == 0 {
@@ -479,7 +479,7 @@ impl CK_ATTRIBUTE {
         };
         match std::str::from_utf8(buf) {
             Ok(s) => Ok(s.to_string()),
-            Err(_) => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+            Err(_) => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         }
     }
     pub fn to_slice(&self) -> Result<&[u8]> {
@@ -495,7 +495,7 @@ impl CK_ATTRIBUTE {
     }
     pub fn to_date(&self) -> Result<CK_DATE> {
         if self.ulValueLen != 8 {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
@@ -516,7 +516,7 @@ impl CK_ATTRIBUTE {
             }
             AttrType::BytesType => Ok(from_bytes(self.type_, self.to_buf()?)),
             AttrType::DateType => Ok(from_date(self.type_, self.to_date()?)),
-            AttrType::DenyType => err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+            AttrType::DenyType => Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
             AttrType::IgnoreType => Ok(from_ignore(self.type_, None)),
         }
     }
@@ -558,7 +558,7 @@ impl<'a> CkAttrs<'a> {
         l: CK_ULONG,
     ) -> Result<CkAttrs<'static>> {
         if a.is_null() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
+            return Err(CKR_ARGUMENTS_BAD)?;
         }
         Ok(CkAttrs {
             v: Vec::new(),
@@ -585,7 +585,7 @@ impl<'a> CkAttrs<'a> {
                 ulValueLen: CK_ULONG::try_from(r.len())?,
             })
         } else {
-            err_rv!(CKR_GENERAL_ERROR)
+            Err(CKR_GENERAL_ERROR)?
         }
     }
 

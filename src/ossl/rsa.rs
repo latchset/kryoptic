@@ -38,10 +38,10 @@ static RSA_NAME: &[u8; 4] = b"RSA\0";
 pub fn rsa_import(obj: &mut Object) -> Result<()> {
     let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
         Ok(m) => m,
-        Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+        Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     };
     match obj.get_attr_as_ulong(CKA_MODULUS_BITS) {
-        Ok(_) => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+        Ok(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         Err(e) => {
             if !e.attr_not_found() {
                 return Err(e);
@@ -49,7 +49,7 @@ pub fn rsa_import(obj: &mut Object) -> Result<()> {
         }
     }
     if modulus.len() < MIN_RSA_SIZE_BYTES {
-        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
     }
     match obj.get_attr_as_ulong(CKA_CLASS) {
         Ok(c) => match c {
@@ -61,9 +61,9 @@ pub fn rsa_import(obj: &mut Object) -> Result<()> {
                 bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
                 /* The FIPS module can handle missing p,q,a,b,c */
             }
-            _ => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         },
-        Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+        Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     }
 
     Ok(())
@@ -183,7 +183,7 @@ fn parse_pss_params(mech: &CK_MECHANISM) -> Result<RsaPssParams> {
             if mech.mechanism != CKM_RSA_PKCS_PSS {
                 let mdname = mech_type_to_digest_name(params.hashAlg);
                 if mech_type_to_digest_name(mech.mechanism) != mdname {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
+                    return Err(CKR_ARGUMENTS_BAD)?;
                 }
             }
             Ok(RsaPssParams {
@@ -219,7 +219,7 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> Result<RsaOaepParams> {
     let source = match params.source {
         0 => {
             if params.ulSourceDataLen != 0 {
-                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
             None
         }
@@ -229,7 +229,7 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> Result<RsaOaepParams> {
                 Some(bytes_to_vec!(params.pSourceData, params.ulSourceDataLen))
             }
         },
-        _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     };
 
     Ok(RsaOaepParams {
@@ -324,7 +324,7 @@ impl RsaPKCSOperation {
 
     fn hash_len(hash: CK_MECHANISM_TYPE) -> Result<usize> {
         match hash_size(hash) {
-            INVALID_HASH_SIZE => err_rv!(CKR_MECHANISM_INVALID),
+            INVALID_HASH_SIZE => Err(CKR_MECHANISM_INVALID)?,
             x => Ok(x),
         }
     }
@@ -340,7 +340,7 @@ impl RsaPKCSOperation {
                 let hs = Self::hash_len(hash)?;
                 Ok(modulus - 2 * hs - 2)
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
@@ -354,7 +354,7 @@ impl RsaPKCSOperation {
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
         let oaep_params = parse_oaep_params(mech)?;
         Ok(RsaPKCSOperation {
@@ -387,7 +387,7 @@ impl RsaPKCSOperation {
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
         let oaep_params = parse_oaep_params(mech)?;
         Ok(RsaPKCSOperation {
@@ -420,7 +420,7 @@ impl RsaPKCSOperation {
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
         let pss_params = parse_pss_params(mech)?;
@@ -460,7 +460,7 @@ impl RsaPKCSOperation {
         if modulus_bits < info.ulMinKeySize
             || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
         {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
         let pss_params = parse_pss_params(mech)?;
@@ -496,7 +496,7 @@ impl RsaPKCSOperation {
         privkey: &mut Object,
     ) -> Result<()> {
         if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         let c_bits = bits as c_uint;
         let mut params = OsslParam::with_capacity(2);
@@ -515,7 +515,7 @@ impl RsaPKCSOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key (has E already set) */
@@ -735,20 +735,20 @@ impl MechOperation for RsaPKCSOperation {
 impl Encryption for RsaPKCSOperation {
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
         if unsafe { EVP_PKEY_encrypt_init(ctx.as_mut_ptr()) } != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let params = self.rsa_enc_params();
         if unsafe { EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr()) }
             != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let mut outlen = 0;
@@ -763,7 +763,7 @@ impl Encryption for RsaPKCSOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         if cipher.len() == 0 {
             return Ok(outlen);
@@ -785,7 +785,7 @@ impl Encryption for RsaPKCSOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(outlen)
     }
@@ -796,27 +796,27 @@ impl Encryption for RsaPKCSOperation {
         _cipher: &mut [u8],
     ) -> Result<usize> {
         self.finalized = true;
-        return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
     fn encrypt_final(&mut self, _cipher: &mut [u8]) -> Result<usize> {
         self.finalized = true;
-        return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
     fn encryption_len(&mut self, _: usize, fin: bool) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if fin {
             self.finalized = true;
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
             _ => {
                 self.finalized = true;
-                err_rv!(CKR_GENERAL_ERROR)
+                Err(CKR_GENERAL_ERROR)?
             }
         }
     }
@@ -825,22 +825,22 @@ impl Encryption for RsaPKCSOperation {
 impl Decryption for RsaPKCSOperation {
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
         let ret = unsafe { EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) };
         if ret != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let params = self.rsa_enc_params();
         let ret = unsafe {
             EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
         };
         if ret != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let mut outlen = 0usize;
@@ -855,7 +855,7 @@ impl Decryption for RsaPKCSOperation {
             )
         };
         if ret != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         if plain.len() == 0 {
             return Ok(outlen);
@@ -863,7 +863,7 @@ impl Decryption for RsaPKCSOperation {
         let mut tmp_plain: Option<Vec<u8>> = None;
         let plain_ptr = if plain.len() < outlen {
             if plain.len() < self.output_len {
-                return err_rv!(CKR_BUFFER_TOO_SMALL);
+                return Err(CKR_BUFFER_TOO_SMALL)?;
             }
             /* the PKCS#11 documentation allows modules to pass
              * in a buffer that is shorter than modulus by the
@@ -874,7 +874,7 @@ impl Decryption for RsaPKCSOperation {
             if let Some(ref mut p) = tmp_plain.as_mut() {
                 p.as_mut_ptr()
             } else {
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
         } else {
             plain.as_mut_ptr()
@@ -892,7 +892,7 @@ impl Decryption for RsaPKCSOperation {
             )
         };
         if ret != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         match tmp_plain {
             Some(p) => {
@@ -909,27 +909,27 @@ impl Decryption for RsaPKCSOperation {
         _plain: &mut [u8],
     ) -> Result<usize> {
         self.finalized = true;
-        return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
     fn decrypt_final(&mut self, _plain: &mut [u8]) -> Result<usize> {
         self.finalized = true;
-        return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
     fn decryption_len(&mut self, _: usize, fin: bool) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if fin {
             self.finalized = true;
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
             _ => {
                 self.finalized = true;
-                err_rv!(CKR_GENERAL_ERROR)
+                Err(CKR_GENERAL_ERROR)?
             }
         }
     }
@@ -938,10 +938,10 @@ impl Decryption for RsaPKCSOperation {
 impl Sign for RsaPKCSOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
@@ -949,24 +949,24 @@ impl Sign for RsaPKCSOperation {
                 if match self.mech {
                     CKM_RSA_PKCS => data.len() > self.max_input,
                     CKM_RSA_PKCS_PSS => data.len() != self.max_input,
-                    _ => return err_rv!(CKR_GENERAL_ERROR),
+                    _ => return Err(CKR_GENERAL_ERROR)?,
                 } {
-                    return err_rv!(CKR_DATA_LEN_RANGE);
+                    return Err(CKR_DATA_LEN_RANGE)?;
                 }
                 if signature.len() != self.output_len {
-                    return err_rv!(CKR_GENERAL_ERROR);
+                    return Err(CKR_GENERAL_ERROR)?;
                 }
                 let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
                 let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
                 if res != 1 {
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
                 let params = self.rsa_sig_params();
                 let res = unsafe {
                     EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
                 };
                 if res != 1 {
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
 
                 self.finalized = true;
@@ -983,10 +983,10 @@ impl Sign for RsaPKCSOperation {
                     )
                 };
                 if res != 1 {
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
                 if signature.len() != siglen {
-                    return err_rv!(CKR_GENERAL_ERROR);
+                    return Err(CKR_GENERAL_ERROR)?;
                 }
 
                 let res = unsafe {
@@ -999,7 +999,7 @@ impl Sign for RsaPKCSOperation {
                     )
                 };
                 if res != 1 {
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
 
                 Ok(())
@@ -1013,11 +1013,11 @@ impl Sign for RsaPKCSOperation {
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             if self.mech == CKM_RSA_PKCS || self.mech == CKM_RSA_PKCS_PSS {
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
             }
             self.in_use = true;
 
@@ -1041,7 +1041,7 @@ impl Sign for RsaPKCSOperation {
                     params.as_ptr(),
                 );
                 if res != 1 {
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
             }
         }
@@ -1058,7 +1058,7 @@ impl Sign for RsaPKCSOperation {
                 data.len(),
             );
             if res != 1 {
-                err_rv!(CKR_DEVICE_ERROR)
+                Err(CKR_DEVICE_ERROR)?
             } else {
                 Ok(())
             }
@@ -1067,10 +1067,10 @@ impl Sign for RsaPKCSOperation {
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -1079,12 +1079,12 @@ impl Sign for RsaPKCSOperation {
             match self.sigctx.as_mut().unwrap().digest_sign_final(signature) {
                 Ok(siglen) => {
                     if siglen != signature.len() {
-                        err_rv!(CKR_DEVICE_ERROR)
+                        Err(CKR_DEVICE_ERROR)?
                     } else {
                         Ok(())
                     }
                 }
-                Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+                Err(_) => return Err(CKR_DEVICE_ERROR)?,
             }
         }
         #[cfg(not(feature = "fips"))]
@@ -1098,7 +1098,7 @@ impl Sign for RsaPKCSOperation {
                 siglen_ptr,
             );
             if res != 1 {
-                err_rv!(CKR_DEVICE_ERROR)
+                Err(CKR_DEVICE_ERROR)?
             } else {
                 Ok(())
             }
@@ -1113,30 +1113,30 @@ impl Sign for RsaPKCSOperation {
 impl Verify for RsaPKCSOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_RSA_PKCS {
             self.finalized = true;
             if data.len() > self.max_input {
-                return err_rv!(CKR_DATA_LEN_RANGE);
+                return Err(CKR_DATA_LEN_RANGE)?;
             }
             if signature.len() != self.output_len {
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
             let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             let params = self.rsa_sig_params();
             let res = unsafe {
                 EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
 
             let res = unsafe {
@@ -1149,7 +1149,7 @@ impl Verify for RsaPKCSOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_SIGNATURE_INVALID);
+                return Err(CKR_SIGNATURE_INVALID)?;
             }
             return Ok(());
         }
@@ -1159,11 +1159,11 @@ impl Verify for RsaPKCSOperation {
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             if self.mech == CKM_RSA_PKCS {
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
             }
             self.in_use = true;
 
@@ -1187,7 +1187,7 @@ impl Verify for RsaPKCSOperation {
                     params.as_ptr(),
                 );
                 if res != 1 {
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
             }
         }
@@ -1204,7 +1204,7 @@ impl Verify for RsaPKCSOperation {
                 data.len(),
             );
             if res != 1 {
-                err_rv!(CKR_DEVICE_ERROR)
+                Err(CKR_DEVICE_ERROR)?
             } else {
                 Ok(())
             }
@@ -1213,10 +1213,10 @@ impl Verify for RsaPKCSOperation {
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -1232,7 +1232,7 @@ impl Verify for RsaPKCSOperation {
                 signature.len(),
             );
             if res != 1 {
-                err_rv!(CKR_SIGNATURE_INVALID)
+                Err(CKR_SIGNATURE_INVALID)?
             } else {
                 Ok(())
             }

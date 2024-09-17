@@ -6,9 +6,7 @@ use super::error;
 use super::interface;
 use super::kasn1;
 use super::object;
-use super::{
-    attr_element, bytes_attr_not_empty, bytes_to_vec, cast_params, err_rv,
-};
+use super::{attr_element, bytes_attr_not_empty, bytes_to_vec, cast_params};
 
 use attribute::{from_bool, from_bytes};
 use error::Result;
@@ -56,7 +54,7 @@ fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> Result<&'static str> {
         OID_SECP256R1 => Ok(NAME_SECP256R1),
         OID_SECP384R1 => Ok(NAME_SECP384R1),
         OID_SECP521R1 => Ok(NAME_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -66,7 +64,7 @@ pub fn curve_name_to_ec_params(name: &'static str) -> Result<&'static [u8]> {
         NAME_SECP256R1 => Ok(STRING_SECP256R1),
         NAME_SECP384R1 => Ok(STRING_SECP384R1),
         NAME_SECP521R1 => Ok(STRING_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -76,7 +74,7 @@ pub fn name_to_bits(name: &'static str) -> Result<usize> {
         NAME_SECP256R1 => Ok(BITS_SECP256R1),
         NAME_SECP384R1 => Ok(BITS_SECP384R1),
         NAME_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -85,20 +83,20 @@ fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
         OID_SECP256R1 => Ok(BITS_SECP256R1),
         OID_SECP384R1 => Ok(BITS_SECP384R1),
         OID_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
 fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     match asn1_name.as_slice() {
         STRING_SECP256R1 => Ok(BITS_SECP256R1),
         STRING_SECP384R1 => Ok(BITS_SECP384R1),
         STRING_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -107,13 +105,13 @@ fn curve_name_to_oid(
 ) -> Result<asn1::ObjectIdentifier> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     Ok(match asn1_name.as_slice() {
         STRING_SECP256R1 => OID_SECP256R1,
         STRING_SECP384R1 => OID_SECP384R1,
         STRING_SECP521R1 => OID_SECP521R1,
-        _ => return err_rv!(CKR_GENERAL_ERROR),
+        _ => return Err(CKR_GENERAL_ERROR)?,
     })
 }
 
@@ -121,15 +119,15 @@ fn curve_name_to_oid(
 pub fn ec_key_curve_size(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     match asn1::parse_single::<ECParameters>(x) {
         Ok(a) => match a {
             ECParameters::OId(o) => oid_to_bits(o),
             ECParameters::CurveName(c) => curve_name_to_bits(c),
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         },
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -237,15 +235,15 @@ impl ObjectFactory for ECCPrivFactory {
 fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     match asn1::parse_single::<ECParameters>(x) {
         Ok(a) => match a {
             ECParameters::OId(o) => Ok(o),
             ECParameters::CurveName(c) => curve_name_to_oid(c),
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         },
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -257,20 +255,20 @@ impl PrivKeyFactory for ECCPrivFactory {
 
         let oid = match get_oid_from_obj(key) {
             Ok(o) => o,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let ecpkey_asn1 = match asn1::write_single(&ECPrivateKey::new_owned(
             key.get_attr_as_bytes(CKA_VALUE)?,
         )?) {
             Ok(p) => p,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let pkeyinfo =
             kasn1::PrivateKeyInfo::new(&ecpkey_asn1.as_slice(), oid)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
@@ -285,57 +283,57 @@ impl PrivKeyFactory for ECCPrivFactory {
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_EC))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let (tlv, extra) = match asn1::strip_tlv(&data) {
             Ok(x) => x,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
         /* Some Key Wrapping algorithms may 0 pad to match block size */
         if !extra.iter().all(|b| *b == 0) {
-            return err_rv!(CKR_WRAPPED_KEY_INVALID);
+            return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
         let pkeyinfo = match tlv.parse::<kasn1::PrivateKeyInfo>() {
             Ok(k) => k,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
         /* filter out unknown OIDs */
         let oid = match pkeyinfo.get_oid() {
             &OID_SECP521R1 => OID_SECP256R1,
             &OID_SECP384R1 => OID_SECP384R1,
             &OID_SECP256R1 => OID_SECP521R1,
-            _ => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            _ => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
         let oid_encoded = match asn1::write_single(&oid) {
             Ok(b) => b,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
 
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_EC_PARAMS,
             oid_encoded.to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let ecpkey = match asn1::parse_single::<ECPrivateKey>(
             pkeyinfo.get_private_key(),
         ) {
             Ok(k) => k,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
 
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_VALUE,
             ecpkey.private_key.as_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         Ok(key)
@@ -364,7 +362,7 @@ impl Mechanism for EccMechanism {
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_SIGN) {
             Ok(_) => (),
@@ -378,7 +376,7 @@ impl Mechanism for EccMechanism {
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC, CKA_VERIFY) {
             Ok(_) => (),
@@ -389,14 +387,14 @@ impl Mechanism for EccMechanism {
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         let kdf = match mech.mechanism {
             CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => {
                 let params = cast_params!(mech, CK_ECDH1_DERIVE_PARAMS);
                 ECDHOperation::derive_new(mech.mechanism, params)?
             }
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         Ok(Operation::Derive(Box::new(kdf)))
     }
@@ -413,12 +411,12 @@ impl Mechanism for EccMechanism {
             CKA_CLASS,
             CKO_PUBLIC_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !pubkey
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_EC))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let mut privkey =
@@ -427,25 +425,25 @@ impl Mechanism for EccMechanism {
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !privkey
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_EC))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let ec_params = match pubkey.get_attr_as_bytes(CKA_EC_PARAMS) {
             Ok(a) => a.clone(),
             Err(_) => {
-                return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
             }
         };
         if !privkey.check_or_set_attr(attribute::from_bytes(
             CKA_EC_PARAMS,
             ec_params,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         EccOperation::generate_keypair(&mut pubkey, &mut privkey)?;
@@ -490,13 +488,13 @@ impl ECDHOperation {
             if params.pSharedData != std::ptr::null_mut()
                 || params.ulSharedDataLen != 0
             {
-                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
         }
         if params.pPublicData == std::ptr::null_mut()
             || params.ulPublicDataLen == 0
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         Ok(ECDHOperation {

@@ -1,4 +1,3 @@
-use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
@@ -83,7 +82,7 @@ impl DRBG for HmacSha256Drbg {
                 params.as_ptr(),
             );
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
         self.initialized = true;
@@ -91,7 +90,7 @@ impl DRBG for HmacSha256Drbg {
     }
     fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> Result<()> {
         if !self.initialized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         unsafe {
             let res = EVP_RAND_reseed(
@@ -103,14 +102,14 @@ impl DRBG for HmacSha256Drbg {
                 addtl.len(),
             );
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
         Ok(())
     }
     fn generate(&mut self, addtl: &[u8], output: &mut [u8]) -> Result<()> {
         if !self.initialized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let res = unsafe {
             EVP_RAND_generate(
@@ -124,7 +123,7 @@ impl DRBG for HmacSha256Drbg {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(())
     }
@@ -203,7 +202,7 @@ impl DRBG for HmacSha512Drbg {
                 params.as_ptr(),
             );
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
         self.initialized = true;
@@ -211,7 +210,7 @@ impl DRBG for HmacSha512Drbg {
     }
     fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> Result<()> {
         if !self.initialized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         unsafe {
             let res = EVP_RAND_reseed(
@@ -223,14 +222,14 @@ impl DRBG for HmacSha512Drbg {
                 addtl.len(),
             );
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
         Ok(())
     }
     fn generate(&mut self, addtl: &[u8], output: &mut [u8]) -> Result<()> {
         if !self.initialized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let res = unsafe {
             EVP_RAND_generate(
@@ -244,7 +243,7 @@ impl DRBG for HmacSha512Drbg {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(())
     }

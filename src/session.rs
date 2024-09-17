@@ -8,7 +8,6 @@ use super::interface;
 use super::mechanism;
 use super::token;
 
-use super::err_rv;
 use error::Result;
 use interface::*;
 use mechanism::{Operation, SearchOperation};
@@ -26,7 +25,7 @@ pub struct SessionSearch {
 impl SearchOperation for SessionSearch {
     fn results(&mut self, max: usize) -> Result<Vec<CK_OBJECT_HANDLE>> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let mut amount = self.handles.len();
         if max < amount {
@@ -65,7 +64,7 @@ impl Session {
         flags: CK_FLAGS,
     ) -> Result<Session> {
         if flags & CKF_SERIAL_SESSION != CKF_SERIAL_SESSION {
-            return err_rv!(CKR_ARGUMENTS_BAD);
+            return Err(CKR_ARGUMENTS_BAD)?;
         }
         let rw = flags & CKF_RW_SESSION == CKF_RW_SESSION;
 
@@ -91,10 +90,10 @@ impl Session {
                         if rw {
                             CKS_RW_USER_FUNCTIONS
                         } else {
-                            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
                         }
                     }
-                    _ => return err_rv!(CKR_GENERAL_ERROR),
+                    _ => return Err(CKR_GENERAL_ERROR)?,
                 },
                 flags: flags,
                 ulDeviceError: 0,
@@ -218,7 +217,7 @@ impl Session {
         template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
         if !self.operation.finalized() {
-            return err_rv!(CKR_OPERATION_ACTIVE);
+            return Err(CKR_OPERATION_ACTIVE)?;
         }
         self.operation = Operation::Search(Box::new(SessionSearch {
             handles: token.search_objects(template)?,
@@ -235,18 +234,18 @@ impl Session {
 
     pub fn get_operation(&self) -> Result<&Operation> {
         match self.login_status {
-            OpLoginStatus::NotInitialized => err_rv!(CKR_GENERAL_ERROR),
+            OpLoginStatus::NotInitialized => Err(CKR_GENERAL_ERROR)?,
             OpLoginStatus::NotRequired => Ok(&self.operation),
-            OpLoginStatus::Required => err_rv!(CKR_USER_NOT_LOGGED_IN),
+            OpLoginStatus::Required => Err(CKR_USER_NOT_LOGGED_IN)?,
             OpLoginStatus::LoginOk => Ok(&self.operation),
         }
     }
 
     pub fn get_operation_mut(&mut self) -> Result<&mut Operation> {
         match self.login_status {
-            OpLoginStatus::NotInitialized => err_rv!(CKR_GENERAL_ERROR),
+            OpLoginStatus::NotInitialized => Err(CKR_GENERAL_ERROR)?,
             OpLoginStatus::NotRequired => Ok(&mut self.operation),
-            OpLoginStatus::Required => err_rv!(CKR_USER_NOT_LOGGED_IN),
+            OpLoginStatus::Required => Err(CKR_USER_NOT_LOGGED_IN)?,
             OpLoginStatus::LoginOk => Ok(&mut self.operation),
         }
     }

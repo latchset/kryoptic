@@ -56,15 +56,15 @@ struct EccOperation {
 fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     let bits = match asn1::parse_single::<ECParameters>(x) {
         Ok(a) => match a {
             ECParameters::OId(o) => oid_to_bits(o)?,
             ECParameters::CurveName(c) => curve_name_to_bits(c)?,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         },
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     Ok(bits)
 }
@@ -72,7 +72,7 @@ fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
 fn make_output_length_from_obj(key: &Object) -> Result<usize> {
     let bits = match make_bits_from_ec_params(key) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     Ok(2 * ((bits + 7) / 8))
 }
@@ -80,15 +80,15 @@ fn make_output_length_from_obj(key: &Object) -> Result<usize> {
 fn get_curve_name_from_obj(key: &Object) -> Result<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     let name = match asn1::parse_single::<ECParameters>(x) {
         Ok(a) => match a {
             ECParameters::OId(o) => oid_to_curve_name(o)?,
             ECParameters::CurveName(c) => c.as_str(),
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         },
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     let mut curve_name = Vec::with_capacity(name.len() + 1);
     curve_name.extend_from_slice(name.as_bytes());
@@ -100,13 +100,13 @@ fn get_curve_name_from_obj(key: &Object) -> Result<Vec<u8>> {
 fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     let x = match key.get_attr_as_bytes(CKA_EC_POINT) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
 
     /* [u8] is an octet string for the asn1 library */
     let octet = match asn1::parse_single::<&[u8]>(x) {
         Ok(a) => a,
-        Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+        Err(_) => return Err(CKR_DEVICE_ERROR)?,
     };
     Ok(octet.to_vec())
 }
@@ -170,7 +170,7 @@ fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> Result<()> {
             len -= 1;
         }
         if len == 0 || len > hout.len() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
     }
     let ipad = hin.len() - len;
@@ -196,7 +196,7 @@ fn ossl_to_pkcs11_signature(
 ) -> Result<()> {
     let sig = match asn1::parse_single::<EcdsaSignature>(ossl_sign.as_slice()) {
         Ok(a) => a,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     let bn_len = signature.len() / 2;
     slice_to_sig_half(sig.r.as_bytes(), &mut signature[..bn_len])?;
@@ -216,7 +216,7 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
     };
     let ossl_sign = match asn1::write_single(&sig) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     Ok(ossl_sign)
 }
@@ -327,7 +327,7 @@ impl EccOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
@@ -335,7 +335,7 @@ impl EccOperation {
             &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
         ) {
             Ok(b) => b,
-            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
         };
         pubkey.set_attr(attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
@@ -361,20 +361,20 @@ impl MechOperation for EccOperation {
 impl Sign for EccOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_ECDSA {
             self.finalized = true;
             if signature.len() != self.output_len {
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
             let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
 
             let mut siglen = 0usize;
@@ -389,7 +389,7 @@ impl Sign for EccOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
 
             let mut ossl_sign: Vec<u8> = Vec::with_capacity(siglen);
@@ -404,7 +404,7 @@ impl Sign for EccOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             ossl_sign.resize(siglen, 0);
             let ret = ossl_to_pkcs11_signature(&ossl_sign, signature);
@@ -417,11 +417,11 @@ impl Sign for EccOperation {
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             if self.mech == CKM_ECDSA {
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
             }
             self.in_use = true;
 
@@ -438,7 +438,7 @@ impl Sign for EccOperation {
                 )
             } != 1
             {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
@@ -458,7 +458,7 @@ impl Sign for EccOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             Ok(())
         }
@@ -468,10 +468,10 @@ impl Sign for EccOperation {
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -489,7 +489,7 @@ impl Sign for EccOperation {
                 )
             } != 1
             {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
 
@@ -502,7 +502,7 @@ impl Sign for EccOperation {
                 .digest_sign_final(&mut ossl_sign)?;
         }
         if siglen > ossl_sign.len() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         /* can only shrink */
@@ -523,19 +523,19 @@ impl Sign for EccOperation {
 impl Verify for EccOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_ECDSA {
             if signature.len() != self.output_len {
-                return err_rv!(CKR_GENERAL_ERROR); // already checked in fn_verify
+                return Err(CKR_GENERAL_ERROR)?; // already checked in fn_verify
             }
             let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
 
             // convert PKCS #11 signature to OpenSSL format
@@ -553,7 +553,7 @@ impl Verify for EccOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_SIGNATURE_INVALID);
+                return Err(CKR_SIGNATURE_INVALID)?;
             }
             ossl_sign.zeroize();
             return Ok(());
@@ -564,11 +564,11 @@ impl Verify for EccOperation {
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             if self.mech == CKM_ECDSA {
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
             }
             self.in_use = true;
 
@@ -585,7 +585,7 @@ impl Verify for EccOperation {
                 )
             } != 1
             {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
@@ -605,7 +605,7 @@ impl Verify for EccOperation {
                 )
             };
             if res != 1 {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             Ok(())
         }
@@ -616,10 +616,10 @@ impl Verify for EccOperation {
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
         // convert PKCS #11 signature to OpenSSL format
@@ -636,7 +636,7 @@ impl Verify for EccOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_SIGNATURE_INVALID);
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
 
         #[cfg(feature = "fips")]
@@ -665,7 +665,7 @@ fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
         CKD_SHA3_256_KDF => Ok(CKM_SHA3_256),
         CKD_SHA3_384_KDF => Ok(CKM_SHA3_384),
         CKD_SHA3_512_KDF => Ok(CKM_SHA3_512),
-        _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     }
 }
 
@@ -678,7 +678,7 @@ impl Derive for ECDHOperation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -705,21 +705,21 @@ impl Derive for ECDHOperation {
             Some(a) => {
                 let value_len = usize::try_from(a.to_ulong()?)?;
                 if self.kdf == CKD_NULL && value_len > raw_max {
-                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
                 }
                 value_len
             }
             None => {
                 /* X9.63 does not have any maximum size */
                 if self.kdf != CKD_NULL {
-                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
                 }
                 match factory
                     .as_secret_key_factory()?
                     .recommend_key_size(raw_max)
                 {
                     Ok(len) => len,
-                    Err(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
                 }
             }
         };
@@ -749,7 +749,7 @@ impl Derive for ECDHOperation {
                 )?;
             }
             CKD_NULL => (),
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
 
         params.finalize();
@@ -760,7 +760,7 @@ impl Derive for ECDHOperation {
             EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let ec_point = {
@@ -769,7 +769,7 @@ impl Derive for ECDHOperation {
                 /* try to see if it is a DER encoded point */
                 match asn1::parse_single::<&[u8]>(self.public.as_slice()) {
                     Ok(pt) => Cow::Owned(pt.to_vec()),
-                    Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                    Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 }
             } else {
                 Cow::Borrowed(&self.public)
@@ -784,7 +784,7 @@ impl Derive for ECDHOperation {
             EVP_PKEY_derive_set_peer(ctx.as_mut_ptr(), peer.as_mut_ptr())
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let mut secret_len = 0usize;
@@ -796,10 +796,10 @@ impl Derive for ECDHOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         if secret_len < keylen {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         let mut secret = vec![0u8; secret_len];
         let res = unsafe {
@@ -810,7 +810,7 @@ impl Derive for ECDHOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let mut tmpl = CkAttrs::from(template);

@@ -8,8 +8,7 @@ use std::collections::HashMap;
 
 use super::Storage;
 
-use super::super::{err_not_found, err_rv};
-use error::Result;
+use error::{Error, Result};
 use interface::*;
 use object::Object;
 
@@ -22,7 +21,7 @@ struct MemoryStorage {
 
 impl Storage for MemoryStorage {
     fn open(&mut self, _filename: &String) -> Result<()> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
     fn reinit(&mut self) -> Result<()> {
         self.objects.clear();
@@ -34,7 +33,7 @@ impl Storage for MemoryStorage {
     fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
         match self.objects.get(uid) {
             Some(o) => Ok(o.clone()),
-            None => err_not_found! {uid.clone()},
+            None => Err(Error::not_found(uid.clone())),
         }
     }
     fn store(&mut self, uid: &String, obj: Object) -> Result<()> {

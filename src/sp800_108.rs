@@ -6,7 +6,7 @@ use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::{err_rv, map_err, sizeof};
+use super::{map_err, sizeof};
 
 use attribute::from_bytes;
 use error::Result;
@@ -44,7 +44,7 @@ impl Mechanism for Sp800KDFMechanism {
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         let kdf = match mech.mechanism {
@@ -58,9 +58,9 @@ impl Mechanism for Sp800KDFMechanism {
                 Sp800Operation::feedback_kdf_new(kdf_params)?
             }
             CKM_SP800_108_DOUBLE_PIPELINE_KDF => {
-                return err_rv!(CKR_MECHANISM_INVALID);
+                return Err(CKR_MECHANISM_INVALID)?;
             }
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         Ok(Operation::Derive(Box::new(kdf)))
     }
@@ -138,7 +138,7 @@ impl Sp800Operation {
             });
         }
         if p.ulValueLen != sizeof!(CK_SP800_108_COUNTER_FORMAT) {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         let cf = unsafe { *(p.pValue as *const CK_SP800_108_COUNTER_FORMAT) };
         Ok(Sp800CounterFormat {
@@ -146,28 +146,28 @@ impl Sp800Operation {
             le: match cf.bLittleEndian {
                 0 => false,
                 1 => true,
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             bits: match cf.ulWidthInBits {
                 8 | 16 | 24 | 32 => map_err!(
                     usize::try_from(cf.ulWidthInBits),
                     CKR_MECHANISM_PARAM_INVALID
                 )?,
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
         })
     }
 
     fn parse_byte_array(p: &CK_PRF_DATA_PARAM) -> Result<Vec<u8>> {
         if p.ulValueLen == 0 || p.pValue == std::ptr::null_mut() {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(bytes_to_vec!(p.pValue, p.ulValueLen))
     }
 
     fn parse_dkm_length(p: &CK_PRF_DATA_PARAM) -> Result<Sp800DKMLengthFormat> {
         if p.ulValueLen != sizeof!(CK_SP800_108_DKM_LENGTH_FORMAT) {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         let dkm =
             unsafe { *(p.pValue as *const CK_SP800_108_DKM_LENGTH_FORMAT) };
@@ -177,19 +177,19 @@ impl Sp800Operation {
                 | CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS => {
                     dkm.dkmLengthMethod
                 }
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             le: match dkm.bLittleEndian {
                 0 => false,
                 1 => true,
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             bits: match dkm.ulWidthInBits {
                 8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 => map_err!(
                     usize::try_from(dkm.ulWidthInBits),
                     CKR_MECHANISM_PARAM_INVALID
                 )?,
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
         })
     }
@@ -217,7 +217,7 @@ impl Sp800Operation {
                     let e = Self::parse_dkm_length(p)?;
                     result.push(Sp800Params::DKMLength(e));
                 }
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             }
         }
 
@@ -252,7 +252,7 @@ impl Sp800Operation {
             CKM_SHA3_384_HMAC => Self::check_key_op(key, CKK_SHA3_384_HMAC),
             CKM_SHA3_512_HMAC => Self::check_key_op(key, CKK_SHA3_512_HMAC),
             CKM_AES_CMAC => Self::check_key_op(key, CKK_AES),
-            _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
+            _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
         }
     }
 
@@ -299,7 +299,7 @@ impl Sp800Operation {
         } else if params.pIV == std::ptr::null_mut() && params.ulIVLen == 0 {
             Vec::new()
         } else {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         };
         Ok(Sp800Operation {
             mech: CKM_SP800_108_FEEDBACK_KDF,
@@ -327,18 +327,18 @@ impl Sp800Operation {
         op: &mut Box<dyn Mac>,
     ) -> Result<()> {
         if !param.defined {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         match param.bits {
             8 => {
                 if ctr > maxsize!(8) {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 op.mac_update(&[ctr as u8])
             }
             16 => {
                 if ctr > maxsize!(16) {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let data = if param.le {
                     (ctr as u16).to_le_bytes()
@@ -349,7 +349,7 @@ impl Sp800Operation {
             }
             24 => {
                 if ctr > maxsize!(24) {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let (data, s, e) = if param.le {
                     ((ctr as u32).to_le_bytes(), 0, 3)
@@ -360,7 +360,7 @@ impl Sp800Operation {
             }
             32 => {
                 if ctr > maxsize!(32) {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let data = if param.le {
                     (ctr as u32).to_le_bytes()
@@ -369,7 +369,7 @@ impl Sp800Operation {
                 };
                 op.mac_update(&data)
             }
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
     }
 
@@ -385,7 +385,7 @@ impl Sp800Operation {
         let mut len = match param.method {
             CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS => slen,
             CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS => klen,
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
         /* up to 64 bits */
         match param.bits {
@@ -456,7 +456,7 @@ impl Sp800Operation {
                 };
                 op.mac_update(&data)
             }
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
     }
 
@@ -474,20 +474,20 @@ impl Sp800Operation {
             match p {
                 Sp800Params::Iteration(param) => {
                     if seen_iter {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     seen_iter = true;
                     Self::ctr_update(param, ctr, op)?;
                 }
                 Sp800Params::Counter(_) => {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 Sp800Params::ByteArray(param) => {
                     op.mac_update(param.as_slice())?;
                 }
                 Sp800Params::DKMLength(param) => {
                     if seen_dkmlen {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     seen_dkmlen = true;
                     Self::dkm_update(param, dkmklen, dkmslen, op)?;
@@ -495,7 +495,7 @@ impl Sp800Operation {
             }
         }
         if !seen_iter {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(())
     }
@@ -516,17 +516,17 @@ impl Sp800Operation {
             match p {
                 Sp800Params::Iteration(param) => {
                     if seen_iter {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     if param.defined {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     seen_iter = true;
                     op.mac_update(iv)?;
                 }
                 Sp800Params::Counter(param) => {
                     if seen_counter {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     seen_counter = true;
                     Self::ctr_update(param, ctr, op)?;
@@ -536,7 +536,7 @@ impl Sp800Operation {
                 }
                 Sp800Params::DKMLength(param) => {
                     if seen_dkmlen {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     seen_dkmlen = true;
                     Self::dkm_update(param, dkmklen, dkmslen, op)?;
@@ -544,7 +544,7 @@ impl Sp800Operation {
             }
         }
         if !seen_iter {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(())
     }
@@ -574,7 +574,7 @@ impl Derive for Sp800Operation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -600,10 +600,10 @@ impl Derive for Sp800Operation {
         let obj = objfactories.derive_key_from_template(key, template)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(size) => usize::try_from(size)?,
-            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+            Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
         if keysize == 0 || keysize > usize::try_from(u32::MAX)? {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
         let mut keys =
@@ -636,10 +636,10 @@ impl Derive for Sp800Operation {
             };
             let aksize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
                 Ok(size) => usize::try_from(size)?,
-                Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
             };
             if aksize == 0 || aksize > usize::try_from(u32::MAX)? {
-                return err_rv!(CKR_KEY_SIZE_RANGE);
+                return Err(CKR_KEY_SIZE_RANGE)?;
             }
             klen += aksize;
             slen += Self::key_to_segment_size(aksize, segment);
@@ -679,7 +679,7 @@ impl Derive for Sp800Operation {
                         slen,
                     )?;
                 }
-                _ => return err_rv!(CKR_GENERAL_ERROR),
+                _ => return Err(CKR_GENERAL_ERROR)?,
             }
             op.mac_final(&mut dkm[cursor..(cursor + segment)])?;
             cursor += segment;

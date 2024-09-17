@@ -155,21 +155,21 @@ impl State {
 
     fn get_slot(&self, slot_id: CK_SLOT_ID) -> Result<&Slot> {
         if !self.is_initialized() {
-            return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED);
+            return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
         }
         match self.slots.get(&slot_id) {
             Some(ref s) => Ok(s),
-            None => err_rv!(CKR_SLOT_ID_INVALID),
+            None => Err(CKR_SLOT_ID_INVALID)?,
         }
     }
 
     fn get_slot_mut(&mut self, slot_id: CK_SLOT_ID) -> Result<&mut Slot> {
         if !self.is_initialized() {
-            return err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED);
+            return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
         }
         match self.slots.get_mut(&slot_id) {
             Some(s) => Ok(s),
-            None => err_rv!(CKR_SLOT_ID_INVALID),
+            None => Err(CKR_SLOT_ID_INVALID)?,
         }
     }
 
@@ -196,7 +196,7 @@ impl State {
     ) -> Result<RwLockReadGuard<'_, Session>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
-            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => return Err(CKR_SESSION_HANDLE_INVALID)?,
         };
         self.get_slot(slot_id)?.get_session(handle)
     }
@@ -207,7 +207,7 @@ impl State {
     ) -> Result<RwLockWriteGuard<'_, Session>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
-            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => return Err(CKR_SESSION_HANDLE_INVALID)?,
         };
         self.get_slot(slot_id)?.get_session_mut(handle)
     }
@@ -250,7 +250,7 @@ impl State {
     fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> Result<()> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
-            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => return Err(CKR_SESSION_HANDLE_INVALID)?,
         };
         self.get_slot_mut(slot_id)?.drop_session(handle);
         self.sessionmap.remove(&handle);
@@ -292,7 +292,7 @@ impl State {
     ) -> Result<RwLockReadGuard<'_, Token>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
-            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => return Err(CKR_SESSION_HANDLE_INVALID)?,
         };
         self.get_slot(slot_id)?.get_token()
     }
@@ -303,7 +303,7 @@ impl State {
     ) -> Result<RwLockWriteGuard<'_, Token>> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
-            None => return err_rv!(CKR_SESSION_HANDLE_INVALID),
+            None => return Err(CKR_SESSION_HANDLE_INVALID)?,
         };
         self.get_slot(slot_id)?.get_token_mut(false)
     }
@@ -393,7 +393,7 @@ fn find_conf() -> Result<String> {
     if Path::new(&datafile).is_file() {
         Ok(datafile)
     } else {
-        err_rv!(CKR_ARGUMENTS_BAD)
+        Err(CKR_ARGUMENTS_BAD)?
     }
 }
 

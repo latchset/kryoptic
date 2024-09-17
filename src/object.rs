@@ -8,7 +8,6 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::mechanism;
-use super::{err_not_found, err_rv};
 use attribute::{
     from_bool, from_bytes, from_date_bytes, from_ignore, from_string,
     from_ulong, AttrType, Attribute,
@@ -43,12 +42,12 @@ macro_rules! attr_as_type {
             for attr in &self.attributes {
                 if attr.get_type() == t {
                     if attr.get_attrtype() != AttrType::$atype {
-                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
                     return attr.$conv();
                 }
             }
-            err_not_found!(t.to_string())
+            Err(Error::not_found(t.to_string()))
         }
     };
 }
@@ -201,18 +200,18 @@ impl Object {
         op: CK_ATTRIBUTE_TYPE,
     ) -> Result<()> {
         if self.get_attr_as_ulong(CKA_CLASS)? != class {
-            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
         if ktype != CK_UNAVAILABLE_INFORMATION {
             let kt = self.get_attr_as_ulong(CKA_KEY_TYPE)?;
             if kt != ktype {
-                return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+                return Err(CKR_KEY_TYPE_INCONSISTENT)?;
             }
         }
         if self.get_attr_as_bool(op).or::<Error>(Ok(false))? {
             return Ok(());
         }
-        return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
+        return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
     }
 
     pub fn rough_size(&self) -> Result<usize> {
@@ -317,12 +316,12 @@ macro_rules! bytes_attr_not_empty {
         match $obj.get_attr_as_bytes($id) {
             Ok(e) => {
                 if e.len() == 0 {
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
             Err(e) => {
                 if e.attr_not_found() {
-                    return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                    return Err(CKR_TEMPLATE_INCOMPLETE)?;
                 } else {
                     return Err(e);
                 }
@@ -333,7 +332,7 @@ macro_rules! bytes_attr_not_empty {
 
 pub trait ObjectFactory: Debug + Send + Sync {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
 
     fn copy(&self, obj: &Object, template: &[CK_ATTRIBUTE]) -> Result<Object> {
@@ -458,11 +457,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
                     if attr.is(unacceptable_flags)
                         || attr.is(OAFlags::NeverSettable)
                     {
-                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID);
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
                     /* duplicate? */
                     match obj.get_attr(ck_attr.type_) {
-                        Some(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                        Some(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
                         None => (),
                     }
                     if !attr.is(OAFlags::Ignored) {
@@ -470,7 +469,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
                     }
                 }
                 None => {
-                    return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
         }
@@ -483,7 +482,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
                     } else if attr.is(required_flags)
                         || attr.is(OAFlags::AlwaysRequired)
                     {
-                        return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                        return Err(CKR_TEMPLATE_INCOMPLETE)?;
                     }
                 }
             }
@@ -511,18 +510,18 @@ pub trait ObjectFactory: Debug + Send + Sync {
                                     Err(_) => false,
                                 };
                             if val && !attr.is(OAFlags::ChangeToFalse) {
-                                return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                                return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                             }
                             if !val && !attr.is(OAFlags::ChangeToTrue) {
-                                return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                                return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                             }
                         }
                         if !attr.is(OAFlags::ChangeOnCopy) {
-                            return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                            return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                         }
                     }
                 }
-                None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                None => return Err(CKR_TEMPLATE_INCONSISTENT)?,
             }
         }
 
@@ -565,7 +564,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     }
 
     fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
 
     fn import_from_wrapped(
@@ -573,11 +572,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
         mut _data: Vec<u8>,
         _template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
 
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
-        err_rv!(CKR_GENERAL_ERROR)
+        Err(CKR_GENERAL_ERROR)?
     }
 }
 
@@ -697,36 +696,36 @@ impl ObjectFactory for X509Factory {
 
         let ret = self.basic_cert_object_create_checks(&mut obj);
         if ret != CKR_OK {
-            return err_rv!(ret);
+            return Err(ret)?;
         }
 
         let value = match obj.get_attr_as_bytes(CKA_VALUE) {
             Ok(v) => v,
-            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+            Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
         let url = match obj.get_attr_as_string(CKA_URL) {
             Ok(u) => u,
             Err(_) => String::new(),
         };
         if value.len() == 0 && url.len() == 0 {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         if url.len() > 0 {
             match obj.get_attr_as_bytes(CKA_HASH_OF_SUBJECT_PUBLIC_KEY) {
                 Ok(h) => {
                     if h.len() == 0 {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
-                Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
             }
             match obj.get_attr_as_bytes(CKA_HASH_OF_SUBJECT_PUBLIC_KEY) {
                 Ok(h) => {
                     if h.len() == 0 {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
-                Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
             }
         }
         match obj.get_attr_as_ulong(CKA_JAVA_MIDP_SECURITY_DOMAIN) {
@@ -735,7 +734,7 @@ impl ObjectFactory for X509Factory {
                 CK_SECURITY_DOMAIN_MANUFACTURER => (),
                 CK_SECURITY_DOMAIN_OPERATOR => (),
                 CK_SECURITY_DOMAIN_THIRD_PARTY => (),
-                _ => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
             },
             Err(_) => (),
         }
@@ -807,7 +806,7 @@ pub trait PrivKeyFactory {
     }
 
     fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
 
     fn import_from_wrapped(
@@ -815,7 +814,7 @@ pub trait PrivKeyFactory {
         mut _data: Vec<u8>,
         _template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
 }
 
@@ -856,11 +855,11 @@ pub trait SecretKeyFactory {
 
     fn export_for_wrapping(&self, obj: &Object) -> Result<Vec<u8>> {
         if !obj.is_extractable() {
-            return err_rv!(CKR_KEY_UNEXTRACTABLE);
+            return Err(CKR_KEY_UNEXTRACTABLE)?;
         }
         match obj.get_attr_as_bytes(CKA_VALUE) {
             Ok(v) => Ok(v.clone()),
-            Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+            Err(_) => return Err(CKR_DEVICE_ERROR)?,
         }
     }
 
@@ -901,7 +900,7 @@ pub trait SecretKeyFactory {
         match self.get_key_buffer_len(obj) {
             Ok(blen) => {
                 if len != blen {
-                    return err_rv!(CKR_GENERAL_ERROR);
+                    return Err(CKR_GENERAL_ERROR)?;
                 }
             }
             Err(_) => (),
@@ -915,7 +914,7 @@ pub trait SecretKeyFactory {
         {
             Ok(())
         } else {
-            err_rv!(CKR_GENERAL_ERROR)
+            Err(CKR_GENERAL_ERROR)?
         }
     }
 
@@ -927,7 +926,7 @@ pub trait SecretKeyFactory {
     }
 
     fn recommend_key_size(&self, _: usize) -> Result<usize> {
-        return err_rv!(CKR_GENERAL_ERROR);
+        return Err(CKR_GENERAL_ERROR)?;
     }
 }
 
@@ -979,14 +978,14 @@ impl ObjectFactory for GenericSecretKeyFactory {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         if self.keysize != 0 && len != self.keysize {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         let len = CK_ULONG::try_from(len)?;
         if !obj.check_or_set_attr(from_ulong(CKA_VALUE_LEN, len))? {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
 
         Ok(obj)
@@ -1109,13 +1108,13 @@ impl Mechanism for GenericSecretKeyMechanism {
             CKA_CLASS,
             CKO_SECRET_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_ulong(
             CKA_KEY_TYPE,
             self.keytype(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         default_secret_key_generate(&mut key)?;
@@ -1165,14 +1164,14 @@ impl ObjectFactories {
     ) -> Result<&Box<dyn ObjectFactory>> {
         match self.factories.get(&otype) {
             Some(b) => Ok(b),
-            None => err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+            None => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         }
     }
 
     pub fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let class = match template.iter().find(|a| a.type_ == CKA_CLASS) {
             Some(c) => c.to_ulong()?,
-            None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+            None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
         let type_ = match class {
             CKO_DATA => 0,
@@ -1180,25 +1179,25 @@ impl ObjectFactories {
                 match template.iter().find(|a| a.type_ == CKA_CERTIFICATE_TYPE)
                 {
                     Some(c) => c.to_ulong()?,
-                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                    None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
                 }
             }
             CKO_PUBLIC_KEY => {
                 match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
                     Some(k) => k.to_ulong()?,
-                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                    None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
                 }
             }
             CKO_PRIVATE_KEY => {
                 match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
                     Some(k) => k.to_ulong()?,
-                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                    None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
                 }
             }
             CKO_SECRET_KEY => {
                 match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
                     Some(k) => k.to_ulong()?,
-                    None => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                    None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
                 }
             }
             /* TODO:
@@ -1206,7 +1205,7 @@ impl ObjectFactories {
              *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
              *  CKO_VENDOR_DEFINED
              */
-            _ => return err_rv!(CKR_DEVICE_ERROR),
+            _ => return Err(CKR_DEVICE_ERROR)?,
         };
         self.get_factory(ObjectType::new(class, type_))?
             .create(template)
@@ -1235,10 +1234,10 @@ impl ObjectFactories {
         let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template {
             match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
-                None => return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+                None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
                 Some(attr) => {
                     if attr.is(OAFlags::Sensitive) {
-                        return err_rv!(CKR_ATTRIBUTE_SENSITIVE);
+                        return Err(CKR_ATTRIBUTE_SENSITIVE)?;
                     }
                 }
             }
@@ -1329,7 +1328,7 @@ impl ObjectFactories {
         if result == CKR_OK {
             Ok(())
         } else {
-            err_rv!(result)
+            Err(result)?
         }
     }
 
@@ -1339,14 +1338,14 @@ impl ObjectFactories {
         template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
         if !obj.is_modifiable() {
-            return err_rv!(CKR_ACTION_PROHIBITED);
+            return Err(CKR_ACTION_PROHIBITED)?;
         }
 
         /* first check that all attributes can be changed */
         let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template {
             match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
-                None => return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID),
+                None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
                 Some(attr) => {
                     if attr.is(OAFlags::Unchangeable) {
                         if attr.attribute.get_attrtype() == AttrType::BoolType {
@@ -1356,23 +1355,21 @@ impl ObjectFactories {
                                     if attr.has_default() {
                                         attr.attribute.to_bool()?
                                     } else {
-                                        return err_rv!(
-                                            CKR_ATTRIBUTE_READ_ONLY
-                                        );
+                                        return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                                     }
                                 }
                             };
                             if val {
                                 if !attr.is(OAFlags::ChangeToFalse) {
-                                    return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                                    return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                                 }
                             } else {
                                 if !attr.is(OAFlags::ChangeToTrue) {
-                                    return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                                    return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                                 }
                             }
                         } else {
-                            return err_rv!(CKR_ATTRIBUTE_READ_ONLY);
+                            return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                         }
                     }
                 }
@@ -1393,7 +1390,7 @@ impl ObjectFactories {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         if !obj.is_copyable() {
-            return err_rv!(CKR_ACTION_PROHIBITED);
+            return Err(CKR_ACTION_PROHIBITED)?;
         }
         self.get_object_factory(obj)?.copy(obj, template)
     }
@@ -1404,12 +1401,12 @@ impl ObjectFactories {
     ) -> Result<&Box<dyn ObjectFactory>> {
         let class = match template.iter().position(|x| x.type_ == CKA_CLASS) {
             Some(idx) => template[idx].to_ulong()?,
-            None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+            None => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };
         let key_type =
             match template.iter().position(|x| x.type_ == CKA_KEY_TYPE) {
                 Some(idx) => template[idx].to_ulong()?,
-                None => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                None => return Err(CKR_TEMPLATE_INCONSISTENT)?,
             };
         self.get_factory(ObjectType::new(class, key_type))
     }

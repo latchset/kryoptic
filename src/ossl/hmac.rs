@@ -40,7 +40,7 @@ impl HMACOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(HMACOperation {
             mech: mech,
@@ -57,14 +57,14 @@ impl HMACOperation {
 
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
     }
 
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.in_use = true;
 
@@ -72,7 +72,7 @@ impl HMACOperation {
             EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         Ok(())
@@ -80,14 +80,14 @@ impl HMACOperation {
 
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         /* It is valid to finalize without any update */
         self.in_use = true;
         self.finalized = true;
 
         if output.len() != self.outputlen {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let mut buf = vec![0u8; self.maclen];
@@ -101,11 +101,11 @@ impl HMACOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         if outlen != self.maclen {
             buf.zeroize();
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         output.copy_from_slice(&buf[..output.len()]);
@@ -129,7 +129,7 @@ impl HMACOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         self.finalized = false;
         self.in_use = false;

@@ -2,12 +2,12 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
+use super::cast_params;
 use super::error;
 use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::{cast_params, err_rv};
 
 use attribute::{from_bool, from_bytes, from_ulong, CkAttrs};
 use error::Result;
@@ -73,10 +73,10 @@ impl Mechanism for PBKDF2Mechanism {
         objfactories: &ObjectFactories,
     ) -> Result<Object> {
         if self.info.flags & CKF_GENERATE != CKF_GENERATE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         if mech.mechanism != CKM_PKCS5_PBKD2 {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         let params = cast_params!(mech, CK_PKCS5_PBKD2_PARAMS2);
@@ -84,7 +84,7 @@ impl Mechanism for PBKDF2Mechanism {
         /* all the mechanism we support require this,
          * if we ever add GOST support we'll have to add data */
         if params.pPrfData != std::ptr::null_mut() || params.ulPrfDataLen != 0 {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let pbkdf2 = PBKDF2 {
@@ -94,7 +94,7 @@ impl Mechanism for PBKDF2Mechanism {
                 CKP_PKCS5_PBKD2_HMAC_SHA256 => CKM_SHA256_HMAC,
                 CKP_PKCS5_PBKD2_HMAC_SHA384 => CKM_SHA384_HMAC,
                 CKP_PKCS5_PBKD2_HMAC_SHA512 => CKM_SHA512_HMAC,
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             pass: self.mock_password_object(bytes_to_vec!(
                 params.pPassword,
@@ -105,14 +105,14 @@ impl Mechanism for PBKDF2Mechanism {
                     if params.pSaltSourceData == std::ptr::null_mut()
                         || params.ulSaltSourceDataLen == 0
                     {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                     bytes_to_vec!(
                         params.pSaltSourceData,
                         params.ulSaltSourceDataLen
                     )
                 }
-                _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             iter: usize::try_from(params.iterations)?,
         };
@@ -126,11 +126,11 @@ impl Mechanism for PBKDF2Mechanism {
             None => {
                 let max = hmac::hmac_size(pbkdf2.prf);
                 if max == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
-                    return err_rv!(CKR_MECHANISM_INVALID);
+                    return Err(CKR_MECHANISM_INVALID)?;
                 }
                 match factory.as_secret_key_factory()?.recommend_key_size(max) {
                     Ok(len) => len,
-                    Err(_) => return err_rv!(CKR_TEMPLATE_INCONSISTENT),
+                    Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
                 }
             }
         };
@@ -190,11 +190,11 @@ impl PBKDF2 {
     fn derive(&self, mechanisms: &Mechanisms, dklen: usize) -> Result<Vec<u8>> {
         let hlen = hmac::hmac_size(self.prf);
         if hlen == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         if dklen > (hlen * usize::try_from(u32::MAX)?) {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
         let l = (dklen + hlen - 1) / hlen;

@@ -36,7 +36,7 @@ impl HashOperation {
             CKM_SHA3_256 => OSSL_DIGEST_NAME_SHA3_256,
             CKM_SHA3_384 => OSSL_DIGEST_NAME_SHA3_384,
             CKM_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512,
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         Ok(HashOperation {
             mech: mech,
@@ -52,7 +52,7 @@ impl HashOperation {
                 self.state.md.as_ptr(),
             ) {
                 1 => Ok(()),
-                _ => err_rv!(CKR_DEVICE_ERROR),
+                _ => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -76,10 +76,10 @@ impl MechOperation for HashOperation {
 impl Digest for HashOperation {
     fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> Result<()> {
         if self.in_use || self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if digest.len() != self.digest_len()? {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         self.finalized = true;
         /* NOTE: It is ok if data and digest point to the same buffer*/
@@ -95,14 +95,14 @@ impl Digest for HashOperation {
             )
         };
         if r != 1 || usize::try_from(digest_len)? != digest.len() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         Ok(())
     }
 
     fn digest_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             self.digest_init()?;
@@ -119,20 +119,20 @@ impl Digest for HashOperation {
             1 => Ok(()),
             _ => {
                 self.finalized = true;
-                err_rv!(CKR_DEVICE_ERROR)
+                Err(CKR_DEVICE_ERROR)?
             }
         }
     }
 
     fn digest_final(&mut self, digest: &mut [u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if digest.len() != self.digest_len()? {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         self.finalized = true;
         let mut digest_len = c_uint::try_from(self.digest_len()?)?;
@@ -144,7 +144,7 @@ impl Digest for HashOperation {
             )
         };
         if r != 1 || usize::try_from(digest_len)? != digest.len() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         Ok(())
     }

@@ -127,7 +127,7 @@ pub fn decrypt(
         key,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let mut dec_len: CK_ULONG = 0;
@@ -139,7 +139,7 @@ pub fn decrypt(
         &mut dec_len,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let mut dec = vec![0u8; dec_len as usize];
@@ -151,7 +151,7 @@ pub fn decrypt(
         &mut dec_len,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     dec.resize(dec_len as usize, 0);
 
@@ -170,7 +170,7 @@ pub fn encrypt(
         key,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let mut enc_len: CK_ULONG = 0;
@@ -182,7 +182,7 @@ pub fn encrypt(
         &mut enc_len,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let mut enc = vec![0u8; enc_len as usize];
@@ -194,7 +194,7 @@ pub fn encrypt(
         &mut enc_len,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     enc.resize(enc_len as usize, 0);
 
@@ -219,19 +219,19 @@ pub fn get_test_key_handle(
     ];
     let ret = fn_find_objects_init(session, template.as_mut_ptr(), 2);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     if count != 1 {
-        return err_not_found!(format!("count {} != 1", count));
+        return Err(error::Error::not_found(format!("count {} != 1", count)));
     }
     let ret = fn_find_objects_final(session);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     Ok(handle)
@@ -268,7 +268,7 @@ pub fn sig_gen(
     let ret =
         fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     /* get signature length */
@@ -281,7 +281,7 @@ pub fn sig_gen(
         &mut siglen,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let mut signature: Vec<u8> = vec![0; siglen as usize];
@@ -293,7 +293,7 @@ pub fn sig_gen(
         &mut siglen,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     signature.resize(siglen as usize, 0);
 
@@ -309,7 +309,7 @@ pub fn sig_gen_multipart(
     let ret =
         fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let half_len = data.len() / 2;
@@ -317,7 +317,7 @@ pub fn sig_gen_multipart(
     let ret =
         fn_sign_update(session, data.as_ptr() as *mut u8, half_len as CK_ULONG);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     let ret = fn_sign_update(
         session,
@@ -325,19 +325,19 @@ pub fn sig_gen_multipart(
         (data.len() - half_len) as CK_ULONG,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     let mut siglen: CK_ULONG = 0;
     let ret = fn_sign_final(session, std::ptr::null_mut(), &mut siglen);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
 
     let mut signature: Vec<u8> = vec![0; siglen as usize];
     let ret =
         fn_sign_final(session, signature.as_ptr() as *mut u8, &mut siglen);
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     signature.resize(siglen as usize, 0);
 
@@ -433,7 +433,7 @@ pub fn import_object(
     );
 
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     Ok(handle)
 }
@@ -471,7 +471,7 @@ pub fn generate_key(
     );
 
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     Ok(handle)
 }
@@ -509,7 +509,7 @@ pub fn generate_key_pair(
     );
 
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     Ok((pub_key, pri_key))
 }
@@ -636,7 +636,7 @@ pub fn extract_key_value(
         extract_template.len() as CK_ULONG,
     );
     if ret != CKR_OK {
-        return err_rv!(ret);
+        return Err(ret)?;
     }
     Ok(value)
 }

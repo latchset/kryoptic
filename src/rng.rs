@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use super::drbg;
-use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
@@ -24,7 +23,7 @@ impl RNG {
             "HMAC DRBG SHA512" => Ok(RNG {
                 drbg: Box::new(drbg::HmacSha512Drbg::new()?),
             }),
-            _ => err_rv!(CKR_RANDOM_NO_RNG),
+            _ => Err(CKR_RANDOM_NO_RNG)?,
         }
     }
 

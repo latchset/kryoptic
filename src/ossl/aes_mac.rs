@@ -37,17 +37,17 @@ impl AesMacOperation {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
                 let val = params as usize;
                 if val > AES_BLOCK_SIZE {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 val
             }
             CKM_AES_MAC => {
                 if mech.ulParameterLen != 0 {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
+                    return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 AES_BLOCK_SIZE / 2
             }
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         let iv = [0u8; AES_BLOCK_SIZE];
         Ok(AesMacOperation {
@@ -73,14 +73,14 @@ impl AesMacOperation {
 
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
     }
 
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.in_use = true;
 
@@ -100,7 +100,7 @@ impl AesMacOperation {
                 self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
             if outlen != AES_BLOCK_SIZE {
                 self.finalized = true;
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
             data_len -= AES_BLOCK_SIZE;
         }
@@ -113,7 +113,7 @@ impl AesMacOperation {
             )?;
             if outlen != AES_BLOCK_SIZE {
                 self.finalized = true;
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
             cursor += AES_BLOCK_SIZE;
             data_len -= AES_BLOCK_SIZE;
@@ -128,15 +128,15 @@ impl AesMacOperation {
 
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
         if output.len() != self.maclen {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if self.padlen > 0 {
@@ -145,7 +145,7 @@ impl AesMacOperation {
             let outlen =
                 self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
             if outlen != AES_BLOCK_SIZE {
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
         }
 
@@ -208,7 +208,7 @@ impl Verify for AesMacOperation {
         let mut verify: Vec<u8> = vec![0; self.maclen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
-            return err_rv!(CKR_SIGNATURE_INVALID);
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
         Ok(())
     }

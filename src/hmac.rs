@@ -6,7 +6,7 @@ use super::hash;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::{err_rv, sizeof};
+use super::sizeof;
 
 use error::{Error, Result};
 use interface::*;
@@ -53,7 +53,7 @@ pub fn hmac_mech_to_hash_mech(
         CKM_SHA3_256_HMAC | CKM_SHA3_256_HMAC_GENERAL => CKM_SHA3_256,
         CKM_SHA3_384_HMAC | CKM_SHA3_384_HMAC_GENERAL => CKM_SHA3_384,
         CKM_SHA3_512_HMAC | CKM_SHA3_512_HMAC_GENERAL => CKM_SHA3_512,
-        _ => return err_rv!(CKR_MECHANISM_INVALID),
+        _ => return Err(CKR_MECHANISM_INVALID)?,
     })
 }
 
@@ -68,7 +68,7 @@ pub fn hash_to_hmac_mech(mech: CK_MECHANISM_TYPE) -> Result<CK_MECHANISM_TYPE> {
         CKM_SHA3_256 => CKM_SHA3_256_HMAC,
         CKM_SHA3_384 => CKM_SHA3_384_HMAC,
         CKM_SHA3_512 => CKM_SHA3_512_HMAC,
-        _ => return err_rv!(CKR_MECHANISM_INVALID),
+        _ => return Err(CKR_MECHANISM_INVALID)?,
     })
 }
 
@@ -118,14 +118,14 @@ impl HMACMechanism {
         op: CK_ATTRIBUTE_TYPE,
     ) -> Result<HmacKey> {
         if key.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
-            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
         let t = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
         if t != CKK_GENERIC_SECRET && t != self.keytype {
-            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
         if !key.get_attr_as_bool(op).or::<Error>(Ok(false))? {
-            return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+            return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
         Ok(HmacKey {
             raw: key.get_attr_as_bytes(CKA_VALUE)?.clone(),
@@ -135,18 +135,18 @@ impl HMACMechanism {
     fn check_and_fetch_param(&self, mech: &CK_MECHANISM) -> Result<usize> {
         if self.minlen == self.maxlen {
             if mech.ulParameterLen != 0 {
-                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
             return Ok(self.maxlen);
         }
         if mech.ulParameterLen != sizeof!(CK_ULONG) {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         let genlen = usize::try_from(unsafe {
             std::slice::from_raw_parts(mech.pParameter as *const CK_ULONG, 1)[0]
         })?;
         if genlen < self.minlen || genlen > self.maxlen {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(genlen)
     }
@@ -163,18 +163,18 @@ impl HMACMechanism {
         let op_attr = match op_type {
             CKF_SIGN => {
                 if self.info.flags & CKF_SIGN != CKF_SIGN {
-                    return err_rv!(CKR_MECHANISM_INVALID);
+                    return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_SIGN
             }
             CKF_VERIFY => {
                 if self.info.flags & CKF_SIGN != CKF_SIGN {
-                    return err_rv!(CKR_MECHANISM_INVALID);
+                    return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_VERIFY
             }
             CKF_DERIVE => CKA_DERIVE,
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         HMACOperation::new(
             mech.mechanism,
@@ -285,7 +285,7 @@ impl HMACOperation {
                     self.key.raw.as_slice(),
                     self.state.as_mut_slice(),
                 )?,
-                _ => return err_rv!(CKR_GENERAL_ERROR),
+                _ => return Err(CKR_GENERAL_ERROR)?,
             }
         }
         self.state.resize(self.blocklen, 0);
@@ -307,28 +307,28 @@ impl HMACOperation {
                 op.reset()?;
                 op.digest_update(self.ipad.as_slice())?;
             }
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         }
         Ok(())
     }
 
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
     }
 
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.in_use = true;
 
         /* H( .. || text ..) */
         let ret = match &mut self.inner {
             Operation::Digest(op) => op.digest_update(data),
-            _ => err_rv!(CKR_GENERAL_ERROR),
+            _ => Err(CKR_GENERAL_ERROR)?,
         };
         if ret.is_err() {
             self.finalized = true;
@@ -338,14 +338,14 @@ impl HMACOperation {
 
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         /* It is valid to finalize without any update */
         self.in_use = true;
         self.finalized = true;
 
         if output.len() != self.outputlen {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         self.state.resize(self.hashlen, 0);
@@ -354,7 +354,7 @@ impl HMACOperation {
             Operation::Digest(op) => {
                 op.digest_final(self.state.as_mut_slice())?;
             }
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         }
         /* state = H((K0 ^ opad) || H((K0 ^ ipad) || text)) */
         match &mut self.inner {
@@ -364,7 +364,7 @@ impl HMACOperation {
                 op.digest_update(self.state.as_slice())?;
                 op.digest_final(self.state.as_mut_slice())?;
             }
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         }
         /* state -> output */
         output.copy_from_slice(&self.state[..output.len()]);
@@ -459,7 +459,7 @@ impl Verify for HMACOperation {
         let mut verify: Vec<u8> = vec![0; self.outputlen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
-            return err_rv!(CKR_SIGNATURE_INVALID);
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
         Ok(())
     }

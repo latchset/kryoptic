@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 // Helper routines to use with rust/asn1
-use super::err_rv;
 use super::error;
 use super::interface;
 
@@ -45,7 +44,7 @@ impl<'a> DerEncBigUint<'a> {
         /* check it works */
         match asn1::BigUint::new(&de.data) {
             Some(_) => Ok(de),
-            None => err_rv!(CKR_GENERAL_ERROR),
+            None => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
