@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
@@ -192,14 +191,14 @@ impl Mechanism for HashMechanism {
 
     fn digest_new(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Digest>> {
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         Ok(Box::new(HashOperation::new(mech.mechanism)?))
     }
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         for hs in &HASH_MECH_SET {
@@ -211,7 +210,7 @@ impl Mechanism for HashMechanism {
             }
         }
 
-        err_rv!(CKR_MECHANISM_INVALID)
+        Err(CKR_MECHANISM_INVALID)?
     }
 }
 
@@ -262,7 +261,7 @@ impl Derive for HashKDFOperation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -292,7 +291,7 @@ impl Derive for HashKDFOperation {
             Some(a) => {
                 let size = a.to_ulong()?;
                 if size > keysize {
-                    return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
                 }
                 keysize = size;
             }

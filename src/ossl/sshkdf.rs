@@ -10,7 +10,7 @@ impl Derive for SSHKDFOperation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -22,7 +22,7 @@ impl Derive for SSHKDFOperation {
             misc::common_derive_key_object(key, template, objfactories, 0)
         }?;
         if value_len == 0 || value_len > usize::try_from(u32::MAX)? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let sshkdf_type = vec![self.key_type, 0u8];
@@ -61,7 +61,7 @@ impl Derive for SSHKDFOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         self.fips_approved =

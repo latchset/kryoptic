@@ -5,7 +5,7 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::object;
-use super::{attr_element, cast_params, err_rv};
+use super::{attr_element, cast_params};
 
 use attribute::{from_bool, from_bytes, from_ulong};
 use error::Result;
@@ -29,7 +29,7 @@ pub const AES_BLOCK_SIZE: usize = 16;
 fn check_key_len(len: usize) -> Result<()> {
     match len {
         16 | 24 | 32 => Ok(()),
-        _ => err_rv!(CKR_KEY_SIZE_RANGE),
+        _ => Err(CKR_KEY_SIZE_RANGE)?,
     }
 }
 
@@ -76,7 +76,7 @@ impl ObjectFactory for AesKeyFactory {
             CKA_VALUE_LEN,
             CK_ULONG::try_from(len)?,
         ))? {
-            return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
 
         Ok(obj)
@@ -102,7 +102,7 @@ impl ObjectFactory for AesKeyFactory {
                 let len = usize::try_from(template[idx].to_ulong()?)?;
                 if len > data.len() {
                     data.zeroize();
-                    return err_rv!(CKR_KEY_SIZE_RANGE);
+                    return Err(CKR_KEY_SIZE_RANGE)?;
                 }
                 if len < data.len() {
                     unsafe { data.set_len(len) };
@@ -130,7 +130,7 @@ impl ObjectFactory for AesKeyFactory {
         let key_len = self.get_key_len(&obj);
         if key_len != 0 {
             if check_key_len(key_len).is_err() {
-                return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
             }
         }
         Ok(obj)
@@ -167,7 +167,7 @@ impl SecretKeyFactory for AesKeyFactory {
         } else if max > MIN_AES_SIZE_BYTES {
             Ok(MIN_AES_SIZE_BYTES)
         } else {
-            err_rv!(CKR_KEY_SIZE_RANGE)
+            Err(CKR_KEY_SIZE_RANGE)?
         }
     }
 }
@@ -191,7 +191,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
     ) -> Result<Box<dyn Encryption>> {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_ENCRYPT) {
             Ok(_) => (),
@@ -206,7 +206,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
     ) -> Result<Box<dyn Decryption>> {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DECRYPT) {
             Ok(_) => (),
@@ -223,19 +223,19 @@ impl Mechanism for AesMechanism {
         _: &ObjectFactories,
     ) -> Result<Object> {
         if mech.mechanism != CKM_AES_KEY_GEN {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         let mut key = AES_KEY_FACTORY.default_object_generate(template)?;
         if !key.check_or_set_attr(attribute::from_ulong(
             CKA_CLASS,
             CKO_SECRET_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         object::default_secret_key_generate(&mut key)?;
@@ -252,7 +252,7 @@ impl Mechanism for AesMechanism {
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<usize> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         AesOperation::wrap(
@@ -272,7 +272,7 @@ impl Mechanism for AesMechanism {
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<Object> {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         let keydata = AesOperation::unwrap(mech, wrapping_key, data)?;
         key_template.import_from_wrapped(keydata, template)
@@ -280,7 +280,7 @@ impl Mechanism for AesMechanism {
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         let kdf = match mech.mechanism {
@@ -292,7 +292,7 @@ impl Mechanism for AesMechanism {
                 let params = cast_params!(mech, CK_AES_CBC_ENCRYPT_DATA_PARAMS);
                 AesKDFOperation::aes_cbc_new(params)?
             }
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         Ok(Operation::Derive(Box::new(kdf)))
     }
@@ -307,13 +307,13 @@ impl Mechanism for AesMechanism {
          * DERIVE is a mediated operation so it is not advertised
          * and we do not check it against self.info nor the key */
         if op_type != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match mech.mechanism {
             CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
                 Ok(Box::new(AesCmacOperation::init(mech, key)?))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
@@ -323,7 +323,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_SIGN) {
             Ok(_) => (),
@@ -337,7 +337,7 @@ impl Mechanism for AesMechanism {
             CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
                 Ok(Box::new(AesCmacOperation::init(mech, key)?))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
@@ -347,7 +347,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_VERIFY) {
             Ok(_) => (),
@@ -361,7 +361,7 @@ impl Mechanism for AesMechanism {
             CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
                 Ok(Box::new(AesCmacOperation::init(mech, key)?))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 }
@@ -411,7 +411,7 @@ impl AesKDFOperation<'_> {
             || params.ulLen == 0
             || params.ulLen % 16 != 0
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(AesKDFOperation {
             mech: CKM_AES_ECB,
@@ -435,7 +435,7 @@ impl AesKDFOperation<'_> {
             || params.length == 0
             || params.length % 16 != 0
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(AesKDFOperation {
             mech: CKM_AES_CBC,
@@ -472,7 +472,7 @@ impl Derive for AesKDFOperation<'_> {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -498,7 +498,7 @@ impl Derive for AesKDFOperation<'_> {
         let mut dkm = vec![0u8; keysize];
         let outsize = op.encrypt(self.data, &mut dkm)?;
         if outsize != keysize {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         factory.as_secret_key_factory()?.set_key(&mut obj, dkm)?;

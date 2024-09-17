@@ -9,7 +9,6 @@ include!("ossl/bindings.rs");
 
 use once_cell::sync::Lazy;
 
-use super::err_rv;
 use super::error;
 use super::interface;
 use error::Result;

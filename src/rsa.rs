@@ -6,7 +6,7 @@ use super::error;
 use super::interface;
 use super::kasn1;
 use super::object;
-use super::{attr_element, bytes_attr_not_empty, err_rv};
+use super::{attr_element, bytes_attr_not_empty};
 
 use attribute::{from_bool, from_bytes, from_ulong};
 use error::Result;
@@ -197,14 +197,14 @@ impl PrivKeyFactory for RSAPrivFactory {
             key.get_attr_as_bytes(CKA_COEFFICIENT)?,
         )?) {
             Ok(p) => p,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let pkeyinfo =
             kasn1::PrivateKeyInfo::new(&pkey.as_slice(), OID_RSA_ENCRYPTION)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
-            Err(_) => err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
@@ -219,83 +219,83 @@ impl PrivKeyFactory for RSAPrivFactory {
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let (tlv, extra) = match asn1::strip_tlv(&data) {
             Ok(x) => x,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
         /* Some Key Wrapping algorithms may 0 pad to match block size */
         if !extra.iter().all(|b| *b == 0) {
-            return err_rv!(CKR_WRAPPED_KEY_INVALID);
+            return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
         let pkeyinfo = match tlv.parse::<kasn1::PrivateKeyInfo>() {
             Ok(k) => k,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
         if pkeyinfo.get_oid() != &OID_RSA_ENCRYPTION {
-            return err_rv!(CKR_WRAPPED_KEY_INVALID);
+            return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
         let rsapkey = match asn1::parse_single::<RSAPrivateKey>(
             pkeyinfo.get_private_key(),
         ) {
             Ok(k) => k,
-            Err(_) => return err_rv!(CKR_WRAPPED_KEY_INVALID),
+            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
 
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_MODULUS,
             rsapkey.modulus.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PUBLIC_EXPONENT,
             rsapkey.public_exponent.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PRIVATE_EXPONENT,
             rsapkey.private_exponent.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PRIME_1,
             rsapkey.prime1.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_PRIME_2,
             rsapkey.prime2.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_EXPONENT_1,
             rsapkey.exponent1.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_EXPONENT_2,
             rsapkey.exponent2.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key.check_or_set_attr(attribute::from_bytes(
             CKA_COEFFICIENT,
             rsapkey.coefficient.as_nopad_bytes().to_vec(),
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         Ok(key)
@@ -324,7 +324,7 @@ impl Mechanism for RsaPKCSMechanism {
         key: &Object,
     ) -> Result<Box<dyn Encryption>> {
         if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_ENCRYPT) {
             Ok(_) => (),
@@ -341,7 +341,7 @@ impl Mechanism for RsaPKCSMechanism {
         key: &Object,
     ) -> Result<Box<dyn Decryption>> {
         if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_DECRYPT) {
             Ok(_) => (),
@@ -357,7 +357,7 @@ impl Mechanism for RsaPKCSMechanism {
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_SIGN) {
             Ok(_) => (),
@@ -371,7 +371,7 @@ impl Mechanism for RsaPKCSMechanism {
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_VERIFY) {
             Ok(_) => (),
@@ -394,12 +394,12 @@ impl Mechanism for RsaPKCSMechanism {
             CKA_CLASS,
             CKO_PUBLIC_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !pubkey
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let bits =
@@ -421,12 +421,12 @@ impl Mechanism for RsaPKCSMechanism {
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !privkey
             .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
         {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         RsaPKCSOperation::generate_keypair(
@@ -450,7 +450,7 @@ impl Mechanism for RsaPKCSMechanism {
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<usize> {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         RsaPKCSOperation::wrap(
@@ -471,7 +471,7 @@ impl Mechanism for RsaPKCSMechanism {
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<Object> {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         let keydata =
             RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info)?;

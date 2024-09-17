@@ -3,7 +3,6 @@
 
 /* misc utilities that do not really belong in any module */
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::interface;
 use super::object;
@@ -57,10 +56,10 @@ macro_rules! byte_ptr {
 macro_rules! cast_params {
     ($mech:expr, $params:ty) => {{
         let Ok(len) = usize::try_from($mech.ulParameterLen) else {
-            return err_rv!(CKR_ARGUMENTS_BAD);
+            return Err(CKR_ARGUMENTS_BAD)?;
         };
         if len != std::mem::size_of::<$params>() {
-            return err_rv!(CKR_ARGUMENTS_BAD);
+            return Err(CKR_ARGUMENTS_BAD)?;
         }
         unsafe { *($mech.pParameter as *const $params) }
     }};
@@ -113,7 +112,7 @@ pub fn common_derive_data_object(
         Some(val) => usize::try_from(val)?,
         None => {
             if default_len == 0 {
-                return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                return Err(CKR_TEMPLATE_INCOMPLETE)?;
             }
             default_len
         }
@@ -121,7 +120,7 @@ pub fn common_derive_data_object(
     let obj =
         match objfactories.get_factory(object::ObjectType::new(CKO_DATA, 0)) {
             Ok(f) => f.create(tmpl.as_slice())?,
-            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
         };
     Ok((obj, value_len))
 }
@@ -141,7 +140,7 @@ pub fn common_derive_key_object(
         Ok(val) => usize::try_from(val)?,
         Err(_) => {
             if default_len == 0 {
-                return err_rv!(CKR_TEMPLATE_INCOMPLETE);
+                return Err(CKR_TEMPLATE_INCOMPLETE)?;
             }
             obj.set_attr(from_ulong(
                 CKA_VALUE_LEN,

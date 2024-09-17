@@ -8,12 +8,11 @@ use super::super::attribute;
 use super::super::error;
 use super::super::interface;
 use super::super::object;
-use super::super::{err_not_found, err_rv};
 
 use super::Storage;
 
 use attribute::AttrType;
-use error::Result;
+use error::{Error, Result};
 use interface::*;
 use object::Object;
 
@@ -57,8 +56,8 @@ impl SqliteStorage {
             .map_err(bad_storage)?;
         match result {
             1 => Ok(()),
-            0 => err_rv!(CKR_CRYPTOKI_NOT_INITIALIZED),
-            _ => err_rv!(CKR_DEVICE_MEMORY),
+            0 => Err(CKR_CRYPTOKI_NOT_INITIALIZED)?,
+            _ => Err(CKR_DEVICE_MEMORY)?,
         }
     }
 
@@ -87,29 +86,27 @@ impl SqliteStorage {
             if let Some(obj) = objects.last_mut() {
                 let attrtype = attribute::attr_id_to_attrtype(atype)?;
                 let attr = match attrtype {
-                    AttrType::BoolType => match val
-                        .as_i64_or_null()
-                        .map_err(bad_storage)?
-                    {
-                        Some(b) => attribute::from_bool(atype, b != 0),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    },
-                    AttrType::NumType => match val
-                        .as_i64_or_null()
-                        .map_err(bad_storage)?
-                    {
-                        Some(n) => {
-                            let val = Self::val_to_ulong(n)?;
-                            attribute::from_ulong(atype, val)
+                    AttrType::BoolType => {
+                        match val.as_i64_or_null().map_err(bad_storage)? {
+                            Some(b) => attribute::from_bool(atype, b != 0),
+                            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                         }
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    },
+                    }
+                    AttrType::NumType => {
+                        match val.as_i64_or_null().map_err(bad_storage)? {
+                            Some(n) => {
+                                let val = Self::val_to_ulong(n)?;
+                                attribute::from_ulong(atype, val)
+                            }
+                            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                        }
+                    }
                     AttrType::StringType => match val
                         .as_str_or_null()
                         .map_err(bad_storage)?
                     {
                         Some(s) => attribute::from_string(atype, s.to_string()),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::BytesType => {
                         match val.as_blob_or_null().map_err(bad_storage)? {
@@ -117,23 +114,22 @@ impl SqliteStorage {
                             None => attribute::from_bytes(atype, Vec::new()),
                         }
                     }
-                    AttrType::DateType => match val
-                        .as_str_or_null()
-                        .map_err(bad_storage)?
-                    {
-                        Some(s) => attribute::from_date(
-                            atype,
-                            attribute::string_to_ck_date(s)?,
-                        ),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
-                    },
+                    AttrType::DateType => {
+                        match val.as_str_or_null().map_err(bad_storage)? {
+                            Some(s) => attribute::from_date(
+                                atype,
+                                attribute::string_to_ck_date(s)?,
+                            ),
+                            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                        }
+                    }
                     AttrType::DenyType | AttrType::IgnoreType => {
-                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID)
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
                     }
                 };
                 obj.set_attr(attr)?;
             } else {
-                return err_rv!(CKR_GENERAL_ERROR);
+                return Err(CKR_GENERAL_ERROR)?;
             }
         }
         Ok(objects)
@@ -144,9 +140,9 @@ impl SqliteStorage {
         let rows = stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?;
         let mut objects = Self::rows_to_objects(rows)?;
         match objects.len() {
-            0 => err_not_found!(uid.clone()),
+            0 => Err(Error::not_found(uid.clone())),
             1 => Ok(objects.pop().unwrap()),
-            _ => err_rv!(CKR_GENERAL_ERROR),
+            _ => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
@@ -177,7 +173,7 @@ impl SqliteStorage {
                         Value::from(a.to_attribute()?.to_date_string()?)
                     }
                     AttrType::DenyType | AttrType::IgnoreType => {
-                        return err_rv!(CKR_ATTRIBUTE_TYPE_INVALID)
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
                     }
                 },
             );
@@ -242,7 +238,7 @@ impl SqliteStorage {
             Ok(r) => r,
             Err(e) => match e {
                 rusqlite::Error::QueryReturnedNoRows => 0,
-                _ => return err_rv!(CKR_DEVICE_MEMORY),
+                _ => return Err(CKR_DEVICE_MEMORY)?,
             },
         };
         /* remove old object */
@@ -287,7 +283,7 @@ impl Storage for SqliteStorage {
         self.filename = filename.clone();
         self.conn = match Connection::open(&self.filename) {
             Ok(c) => Arc::new(Mutex::from(c)),
-            Err(_) => return err_rv!(CKR_TOKEN_NOT_PRESENT),
+            Err(_) => return Err(CKR_TOKEN_NOT_PRESENT)?,
         };
         self.is_initialized()
     }

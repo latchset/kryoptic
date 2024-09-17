@@ -55,7 +55,7 @@ macro_rules! ptr_wrapper {
                         [<EVP_ $up _CTX_new>]()
                     };
                     if ptr.is_null() {
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                     Ok([<Evp $mix Ctx>] { ptr: ptr })
                 }
@@ -76,7 +76,7 @@ macro_rules! ptr_wrapper {
                         )
                     };
                     if ptr.is_null() {
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                     Ok([<Evp $mix >] { ptr: ptr })
                 }
@@ -102,7 +102,7 @@ macro_rules! ptr_wrapper {
                         )
                     };
                     if arg.is_null() {
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                     let ptr = unsafe {
                         /* This is safe and requires no lifetimes because
@@ -114,7 +114,7 @@ macro_rules! ptr_wrapper {
                         [<EVP_ $up _free>](arg);
                     }
                     if ptr.is_null() {
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                     Ok([<Evp $mix Ctx>] { ptr: ptr })
                 }
@@ -144,14 +144,14 @@ impl EvpPkeyCtx {
             EVP_PKEY_CTX_new_from_name(get_libctx(), name, std::ptr::null())
         };
         if ptr.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkeyCtx { ptr: ptr })
     }
 
     pub unsafe fn from_ptr(ptr: *mut EVP_PKEY_CTX) -> Result<EvpPkeyCtx> {
         if ptr.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkeyCtx { ptr: ptr })
     }
@@ -190,7 +190,7 @@ impl EvpPkey {
         let mut ctx = EvpPkeyCtx::new(pkey_name)?;
         let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
         let res = unsafe {
@@ -202,7 +202,7 @@ impl EvpPkey {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkey { ptr: pkey })
     }
@@ -214,18 +214,18 @@ impl EvpPkey {
         let mut ctx = EvpPkeyCtx::new(pkey_name)?;
         let res = unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let res = unsafe {
             EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
         let res = unsafe { EVP_PKEY_generate(ctx.as_mut_ptr(), &mut pkey) };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkey { ptr: pkey })
     }
@@ -315,7 +315,7 @@ impl<'a> OsslParam<'a> {
 
     pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>> {
         if ptr.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         /* get num of elements */
         let mut nelem = 0;
@@ -350,11 +350,11 @@ impl<'a> OsslParam<'a> {
 
     pub fn add_bn(&mut self, key: *const c_char, v: &Vec<u8>) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         /* need to go through all these functions because,
@@ -371,7 +371,7 @@ impl<'a> OsslParam<'a> {
             )
         };
         if bn.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let mut size = usize::try_from((unsafe { BN_num_bits(bn) } + 7) / 8)?;
         if size == 0 {
@@ -386,7 +386,7 @@ impl<'a> OsslParam<'a> {
             )
         } < 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let param = unsafe {
             OSSL_PARAM_construct_BN(
@@ -406,7 +406,7 @@ impl<'a> OsslParam<'a> {
         v: &'a Vec<u8>,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param = unsafe {
@@ -426,11 +426,11 @@ impl<'a> OsslParam<'a> {
         v: Vec<u8>,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param = unsafe {
@@ -451,11 +451,11 @@ impl<'a> OsslParam<'a> {
         val: *const c_char,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() || val == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param =
@@ -470,11 +470,11 @@ impl<'a> OsslParam<'a> {
         v: &'a Vec<u8>,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param = unsafe {
@@ -494,11 +494,11 @@ impl<'a> OsslParam<'a> {
         val: &'a usize,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param = unsafe {
@@ -514,11 +514,11 @@ impl<'a> OsslParam<'a> {
         val: &'a c_uint,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param = unsafe {
@@ -534,11 +534,11 @@ impl<'a> OsslParam<'a> {
         val: &'a c_int,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let param = unsafe {
@@ -554,11 +554,11 @@ impl<'a> OsslParam<'a> {
         val: c_uint,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let v = val.to_ne_bytes().to_vec();
@@ -580,11 +580,11 @@ impl<'a> OsslParam<'a> {
         val: c_int,
     ) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         if key == std::ptr::null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let v = val.to_ne_bytes().to_vec();
@@ -620,35 +620,35 @@ impl<'a> OsslParam<'a> {
 
     pub fn get_int(&self, key: *const c_char) -> Result<c_int> {
         if !self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let p = unsafe {
             OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
         };
         if p.is_null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let mut val: c_int = 0;
         let res = unsafe { OSSL_PARAM_get_int(p, &mut val) };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(val)
     }
 
     pub fn get_bn(&self, key: *const c_char) -> Result<Vec<u8>> {
         if !self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let p = unsafe {
             OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
         };
         if p.is_null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let mut bn: *mut BIGNUM = std::ptr::null_mut();
         if unsafe { OSSL_PARAM_get_BN(p, &mut bn) } != 1 {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let len = bn_num_bytes(bn as *const BIGNUM);
         let mut vec = Vec::<u8>::with_capacity(len);
@@ -660,7 +660,7 @@ impl<'a> OsslParam<'a> {
                 )
             })?
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         unsafe {
             vec.set_len(len);
@@ -670,13 +670,13 @@ impl<'a> OsslParam<'a> {
 
     pub fn get_octet_string(&self, key: *const c_char) -> Result<&'a [u8]> {
         if !self.finalized {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let p = unsafe {
             OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
         };
         if p.is_null() {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         let mut buf: *const c_void = std::ptr::null_mut();
         let mut buf_len: usize = 0;
@@ -684,7 +684,7 @@ impl<'a> OsslParam<'a> {
             OSSL_PARAM_get_octet_string_ptr(p, &mut buf, &mut buf_len)
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let octet =
             unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) };

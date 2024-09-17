@@ -5,7 +5,7 @@ use super::attribute;
 use super::error;
 use super::interface;
 use super::object;
-use super::{attr_element, bytes_attr_not_empty, bytes_to_vec, err_rv};
+use super::{attr_element, bytes_attr_not_empty, bytes_to_vec};
 
 use attribute::{from_bool, from_bytes};
 use error::Result;
@@ -43,19 +43,19 @@ fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         OID_ED25519 => Ok(BITS_ED25519),
         OID_ED448 => Ok(BITS_ED448),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
 fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     match asn1_name.as_slice() {
         STRING_ED25519 => Ok(BITS_ED25519),
         STRING_ED448 => Ok(BITS_ED448),
-        _ => err_rv!(CKR_GENERAL_ERROR),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -186,7 +186,7 @@ impl Mechanism for EddsaMechanism {
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC_EDWARDS, CKA_SIGN) {
             Ok(_) => (),
@@ -200,7 +200,7 @@ impl Mechanism for EddsaMechanism {
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC_EDWARDS, CKA_VERIFY) {
             Ok(_) => (),
@@ -221,13 +221,13 @@ impl Mechanism for EddsaMechanism {
             CKA_CLASS,
             CKO_PUBLIC_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !pubkey.check_or_set_attr(attribute::from_ulong(
             CKA_KEY_TYPE,
             CKK_EC_EDWARDS,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let mut privkey =
@@ -236,26 +236,26 @@ impl Mechanism for EddsaMechanism {
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !privkey.check_or_set_attr(attribute::from_ulong(
             CKA_KEY_TYPE,
             CKK_EC_EDWARDS,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let ec_params = match pubkey.get_attr_as_bytes(CKA_EC_PARAMS) {
             Ok(a) => a.clone(),
             Err(_) => {
-                return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
             }
         };
         if !privkey.check_or_set_attr(attribute::from_bytes(
             CKA_EC_PARAMS,
             ec_params,
         ))? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         EddsaOperation::generate_keypair(&mut pubkey, &mut privkey)?;

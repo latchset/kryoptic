@@ -11,25 +11,25 @@ fn prep_counter_kdf<'a>(
     params: &mut OsslParam<'a>,
 ) -> Result<()> {
     if sparams.len() < 1 {
-        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        return Err(CKR_MECHANISM_PARAM_INVALID)?;
     }
 
     /* Key, counter, [Label], [0x00], [Context], [Len] */
     match &sparams[0] {
         Sp800Params::Iteration(i) => {
             if !i.defined {
-                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
             if i.le {
                 /* OpenSSL limitations */
-                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
             params.add_owned_int(
                 name_as_char(OSSL_KDF_PARAM_KBKDF_R),
                 c_int::try_from(i.bits)?,
             )?;
         }
-        _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     }
 
     let mut label = false;
@@ -42,7 +42,7 @@ fn prep_counter_kdf<'a>(
             Sp800Params::ByteArray(v) => {
                 if context {
                     /* already set, bail out */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if separator {
                     /* separator set, this is a Context */
@@ -80,14 +80,14 @@ fn prep_counter_kdf<'a>(
             Sp800Params::DKMLength(v) => {
                 if dkmlen {
                     /* already set, bail out */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if v.le
                     || v.bits != 32
                     || v.method != CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS
                 {
                     /* OpenSSL limitations */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 params.add_owned_int(
                     name_as_char(OSSL_KDF_PARAM_KBKDF_USE_L),
@@ -100,7 +100,7 @@ fn prep_counter_kdf<'a>(
                  * are allowed */
                 context = true;
             }
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
     }
     if !separator {
@@ -121,7 +121,7 @@ fn prep_feedback_kdf<'a>(
     params: &mut OsslParam<'a>,
 ) -> Result<()> {
     if sparams.len() < 1 {
-        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+        return Err(CKR_MECHANISM_PARAM_INVALID)?;
     }
 
     /* Key, iter, [counter], [Label], [0x00], [Context], [Len] */
@@ -129,10 +129,10 @@ fn prep_feedback_kdf<'a>(
         Sp800Params::Iteration(c) => {
             if c.defined {
                 /* Spec says param must be null for feedback mode */
-                return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
         }
-        _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     }
 
     let mut counter = false;
@@ -146,11 +146,11 @@ fn prep_feedback_kdf<'a>(
             Sp800Params::Counter(c) => {
                 if counter {
                     /* already set, bail out */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if c.le {
                     /* OpenSSL limitations */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 params.add_owned_int(
                     name_as_char(OSSL_KDF_PARAM_KBKDF_R),
@@ -164,7 +164,7 @@ fn prep_feedback_kdf<'a>(
                 counter = true;
                 if context {
                     /* already set, bail out */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if separator {
                     /* separator set, this is a Context */
@@ -202,14 +202,14 @@ fn prep_feedback_kdf<'a>(
             Sp800Params::DKMLength(v) => {
                 if dkmlen {
                     /* already set, bail out */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if v.le
                     || v.bits != 32
                     || v.method != CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS
                 {
                     /* OpenSSL limitations */
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 params.add_owned_int(
                     name_as_char(OSSL_KDF_PARAM_KBKDF_USE_L),
@@ -223,7 +223,7 @@ fn prep_feedback_kdf<'a>(
                 counter = true;
                 context = true;
             }
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
     }
     if !separator {
@@ -254,7 +254,7 @@ fn get_segment_size(
             CKM_SHA3_256_HMAC => CKM_SHA3_256,
             CKM_SHA3_384_HMAC => CKM_SHA3_384,
             CKM_SHA3_512_HMAC => CKM_SHA3_512,
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         },
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
@@ -279,7 +279,7 @@ impl Derive for Sp800Operation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -324,10 +324,10 @@ impl Derive for Sp800Operation {
                     16 => name_as_char(CIPHER_NAME_AES128),
                     24 => name_as_char(CIPHER_NAME_AES192),
                     32 => name_as_char(CIPHER_NAME_AES256),
-                    _ => return err_rv!(CKR_KEY_INDIGESTIBLE),
+                    _ => return Err(CKR_KEY_INDIGESTIBLE)?,
                 },
             ),
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         let mut params = OsslParam::with_capacity(10);
@@ -363,7 +363,7 @@ impl Derive for Sp800Operation {
                 }
                 prep_feedback_kdf(&self.params, &mut params)?;
             }
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         }
 
         let mut segment = 1;
@@ -382,10 +382,10 @@ impl Derive for Sp800Operation {
         let obj = objfactories.derive_key_from_template(key, template)?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(size) => usize::try_from(size)?,
-            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+            Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
         if keysize == 0 || keysize > usize::try_from(u32::MAX)? {
-            return err_rv!(CKR_KEY_SIZE_RANGE);
+            return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
         let mut keys =
@@ -417,10 +417,10 @@ impl Derive for Sp800Operation {
             };
             let aksize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
                 Ok(n) => usize::try_from(n)?,
-                Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+                Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
             };
             if aksize == 0 || aksize > usize::try_from(u32::MAX)? {
-                return err_rv!(CKR_KEY_SIZE_RANGE);
+                return Err(CKR_KEY_SIZE_RANGE)?;
             }
             /* increment size in segment steps */
             slen += key_to_segment_size(aksize, segment);
@@ -438,7 +438,7 @@ impl Derive for Sp800Operation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         self.fips_approved =

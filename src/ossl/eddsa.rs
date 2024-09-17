@@ -67,22 +67,22 @@ fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
     match make_bits_from_ec_params(key) {
         Ok(BITS_ED25519) => Ok(OSSL_ED25519),
         Ok(BITS_ED448) => Ok(OSSL_ED448),
-        _ => return err_rv!(CKR_GENERAL_ERROR),
+        _ => return Err(CKR_GENERAL_ERROR)?,
     }
 }
 
 fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
         Ok(b) => b,
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     let bits = match asn1::parse_single::<ECParameters>(x) {
         Ok(a) => match a {
             ECParameters::OId(o) => oid_to_bits(o)?,
             ECParameters::CurveName(c) => curve_name_to_bits(c)?,
-            _ => return err_rv!(CKR_GENERAL_ERROR),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         },
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     Ok(bits)
 }
@@ -91,18 +91,18 @@ fn make_output_length_from_obj(key: &Object) -> Result<usize> {
     match make_bits_from_ec_params(key) {
         Ok(255) => Ok(64),
         Ok(448) => Ok(114),
-        _ => return err_rv!(CKR_GENERAL_ERROR),
+        _ => return Err(CKR_GENERAL_ERROR)?,
     }
 }
 
 fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> Result<EddsaParams> {
     if mech.mechanism != CKM_EDDSA {
-        return err_rv!(CKR_MECHANISM_INVALID);
+        return Err(CKR_MECHANISM_INVALID)?;
     }
     match mech.ulParameterLen {
         0 => {
             if is_448 {
-                err_rv!(CKR_MECHANISM_PARAM_INVALID)
+                Err(CKR_MECHANISM_PARAM_INVALID)?
             } else {
                 Ok(no_params())
             }
@@ -131,12 +131,12 @@ fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> Result<EddsaParams> {
 fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
     let ec_point = match key.get_attr_as_bytes(CKA_EC_POINT) {
         Ok(v) => v,
-        Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+        Err(_) => return Err(CKR_DEVICE_ERROR)?,
     };
     /* The CKA_EC_POINT should be DER encoded */
     let octet = match asn1::parse_single::<&[u8]>(ec_point) {
         Ok(a) => a.to_vec(),
-        Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     let mut params = OsslParam::with_capacity(1);
     params.zeroize = true;
@@ -154,7 +154,7 @@ fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
 fn object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
     let priv_key = match key.get_attr_as_bytes(CKA_VALUE) {
         Ok(v) => v,
-        Err(_) => return err_rv!(CKR_DEVICE_ERROR),
+        Err(_) => return Err(CKR_DEVICE_ERROR)?,
     };
     let mut priv_key_octet: Vec<u8> = Vec::with_capacity(priv_key.len() + 2);
     priv_key_octet.push(4); /* tag octet string */
@@ -185,7 +185,7 @@ fn is_448_curve(key: &Object) -> Result<bool> {
     match make_bits_from_ec_params(key) {
         Ok(BITS_ED25519) => Ok(false),
         Ok(BITS_ED448) => Ok(true),
-        _ => return err_rv!(CKR_GENERAL_ERROR),
+        _ => return Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -289,7 +289,7 @@ impl EddsaOperation {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
@@ -297,7 +297,7 @@ impl EddsaOperation {
             &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
         ) {
             Ok(b) => b,
-            Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
         };
         pubkey.set_attr(attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
@@ -327,7 +327,7 @@ macro_rules! sig_params {
         let instance = match $op.params.ph_flag {
             None => {
                 if $op.is448 {
-                    return err_rv!(CKR_GENERAL_ERROR);
+                    return Err(CKR_GENERAL_ERROR)?;
                 } else {
                     b"Ed25519\0".to_vec()
                 }
@@ -369,10 +369,10 @@ impl MechOperation for EddsaOperation {
 impl Sign for EddsaOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.sign_update(data)?;
         self.sign_final(signature)
@@ -380,7 +380,7 @@ impl Sign for EddsaOperation {
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             self.in_use = true;
@@ -400,7 +400,7 @@ impl Sign for EddsaOperation {
                 )
             } != 1
             {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
@@ -418,10 +418,10 @@ impl Sign for EddsaOperation {
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -441,7 +441,7 @@ impl Sign for EddsaOperation {
                 )
             } != 1
             {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             siglen = slen;
         }
@@ -455,7 +455,7 @@ impl Sign for EddsaOperation {
                 .digest_sign(signature, &mut self.data.as_slice())?;
         }
         if siglen != signature.len() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         Ok(())
@@ -469,10 +469,10 @@ impl Sign for EddsaOperation {
 impl Verify for EddsaOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.verify_update(data)?;
         self.verify_final(signature)
@@ -480,7 +480,7 @@ impl Verify for EddsaOperation {
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             self.in_use = true;
@@ -500,7 +500,7 @@ impl Verify for EddsaOperation {
                 )
             } != 1
             {
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
@@ -518,10 +518,10 @@ impl Verify for EddsaOperation {
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
         self.finalized = true;
@@ -537,7 +537,7 @@ impl Verify for EddsaOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_SIGNATURE_INVALID);
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
 
         #[cfg(feature = "fips")]

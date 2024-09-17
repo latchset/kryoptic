@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, Map, Number, Value};
 
 use super::super::attribute;
-use super::super::err_rv;
 use super::super::error;
 use super::super::interface;
 use super::super::object;
@@ -90,31 +89,31 @@ impl JsonToken {
                 let attr = match atype {
                     AttrType::BoolType => match val.as_bool() {
                         Some(b) => attribute::from_bool(id, b),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::NumType => match val.as_u64() {
                         Some(n) => attribute::from_ulong(id, n),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::StringType => match val.as_str() {
                         Some(s) => attribute::from_string(id, s.to_string()),
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::BytesType => match val.as_str() {
                         Some(s) => {
                             let len = match BASE64.decode_len(s.len()) {
                                 Ok(l) => l,
-                                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                                Err(_) => return Err(CKR_GENERAL_ERROR)?,
                             };
                             let mut v = vec![0; len];
                             match BASE64.decode_mut(s.as_bytes(), &mut v) {
                                 Ok(l) => {
                                     attribute::from_bytes(id, v[0..l].to_vec())
                                 }
-                                Err(_) => return err_rv!(CKR_GENERAL_ERROR),
+                                Err(_) => return Err(CKR_GENERAL_ERROR)?,
                             }
                         }
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::DateType => match val.as_str() {
                         Some(s) => {
@@ -128,7 +127,7 @@ impl JsonToken {
                                 )
                             }
                         }
-                        None => return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID),
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::DenyType => continue,
                     AttrType::IgnoreType => continue,
@@ -138,13 +137,13 @@ impl JsonToken {
                 if key == "CKA_UNIQUE_ID" {
                     uid = match val.as_str() {
                         Some(s) => Some(s.to_string()),
-                        None => return err_rv!(CKR_DEVICE_ERROR),
+                        None => return Err(CKR_DEVICE_ERROR)?,
                     }
                 }
             }
             match uid {
                 Some(u) => cache.store(&u, obj)?,
-                None => return err_rv!(CKR_DEVICE_ERROR),
+                None => return Err(CKR_DEVICE_ERROR)?,
             }
         }
         Ok(())

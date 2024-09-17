@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::hmac;
 use super::interface;
@@ -31,7 +30,7 @@ macro_rules! as_ck_bbool {
                 if let Some(b) = $def {
                     b
                 } else {
-                    return err_rv!(CKR_GENERAL_ERROR);
+                    return Err(CKR_GENERAL_ERROR)?;
                 }
             }
         };
@@ -215,7 +214,7 @@ impl Mechanism for TLSPRFMechanism {
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         match mech.mechanism {
@@ -226,7 +225,7 @@ impl Mechanism for TLSPRFMechanism {
             | CKM_TLS_KDF => {
                 Ok(Operation::Derive(Box::new(TLSKDFOperation::new(mech)?)))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
     fn sign_new(
@@ -235,13 +234,13 @@ impl Mechanism for TLSPRFMechanism {
         key: &object::Object,
     ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match mech.mechanism {
             CKM_TLS_MAC | CKM_TLS12_MAC => {
                 Ok(Box::new(TLSMACOperation::new(mech, key)?))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
     fn verify_new(
@@ -250,13 +249,13 @@ impl Mechanism for TLSPRFMechanism {
         key: &object::Object,
     ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
         match mech.mechanism {
             CKM_TLS_MAC | CKM_TLS12_MAC => {
                 Ok(Box::new(TLSMACOperation::new(mech, key)?))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 }
@@ -288,7 +287,7 @@ impl TLSKDFOperation {
             CKM_TLS12_KEY_SAFE_DERIVE => Self::new_tls12_keymac_derive(mech),
             CKM_TLS12_KDF => Self::new_tls_generic_key_derive(mech),
             CKM_TLS_KDF => Self::new_tls_generic_key_derive(mech),
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
@@ -307,12 +306,12 @@ impl TLSKDFOperation {
         if clirand.len() != TLS_RANDOM_SEED_SIZE
             || srvrand.len() != TLS_RANDOM_SEED_SIZE
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
-            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         let version = if params.pVersion.is_null() {
@@ -349,7 +348,7 @@ impl TLSKDFOperation {
         };
 
         if params.bIsExport != CK_FALSE {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let clirand = bytes_to_vec!(
@@ -364,16 +363,16 @@ impl TLSKDFOperation {
         if clirand.len() != TLS_RANDOM_SEED_SIZE
             || srvrand.len() != TLS_RANDOM_SEED_SIZE
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
-            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         if params.pReturnedKeyMaterial.is_null() {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         Ok(TLSKDFOperation {
@@ -402,7 +401,7 @@ impl TLSKDFOperation {
         let params = cast_params!(mech, CK_TLS_KDF_PARAMS);
 
         if params.ulLabelLength == 0 {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let clirand = bytes_to_vec!(
@@ -417,12 +416,12 @@ impl TLSKDFOperation {
         if clirand.len() != TLS_RANDOM_SEED_SIZE
             || srvrand.len() != TLS_RANDOM_SEED_SIZE
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let prf = match hmac::hash_to_hmac_mech(params.prfMechanism) {
             Ok(h) => h,
-            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         Ok(TLSKDFOperation {
@@ -451,13 +450,13 @@ impl TLSKDFOperation {
             Some(a) => match a.to_ulong() {
                 Ok(l) => {
                     if l != TLS_MASTER_SECRET_SIZE {
-                        return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED);
+                        return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
                     }
                     Ok(())
                 }
-                Err(_) => return err_rv!(CKR_KEY_FUNCTION_NOT_PERMITTED),
+                Err(_) => return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?,
             },
-            None => return err_rv!(CKR_GENERAL_ERROR),
+            None => return Err(CKR_GENERAL_ERROR)?,
         }
     }
 
@@ -484,25 +483,25 @@ impl TLSKDFOperation {
                 CKA_CLASS => {
                     let val = attr.to_ulong()?;
                     if val != CKO_SECRET_KEY {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 CKA_KEY_TYPE => {
                     let val = attr.to_ulong()?;
                     if val != CKK_GENERIC_SECRET {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 CKA_VALUE_LEN => {
                     let val = attr.to_ulong()?;
                     if val != TLS_MASTER_SECRET_SIZE {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 CKA_ALLOWED_MECHANISMS => {
                     let val = attr.to_slice()?;
                     if val != allowed {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 _ => (),
@@ -562,7 +561,7 @@ impl TLSKDFOperation {
              * returning bytes from a long term stored token key */
             if !key.is_token() {
                 let secret = match key.get_attr(CKA_VALUE) {
-                    None => return err_rv!(CKR_GENERAL_ERROR),
+                    None => return Err(CKR_GENERAL_ERROR)?,
                     Some(val) => val.to_bytes()?,
                 };
                 maj = secret[0];
@@ -608,19 +607,19 @@ impl TLSKDFOperation {
                 CKA_VALUE_LEN => {
                     let val = attr.to_ulong()?;
                     if val != self.keylen {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 CKA_SENSITIVE => {
                     let val = attr.to_bool()?;
                     if val != is_sensitive {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 CKA_EXTRACTABLE => {
                     let val = attr.to_bool()?;
                     if val != is_extractable {
-                        return err_rv!(CKR_ATTRIBUTE_VALUE_INVALID);
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
                 _ => (),
@@ -705,7 +704,7 @@ impl TLSKDFOperation {
             let ivlen = self.ivlen as usize;
             let mat_out = match self.mat_out {
                 Some(mo) => mo,
-                None => return err_rv!(CKR_GENERAL_ERROR),
+                None => return Err(CKR_GENERAL_ERROR)?,
             };
             let cliiv = unsafe {
                 core::slice::from_raw_parts_mut((*mat_out).pIVClient, ivlen)
@@ -738,7 +737,7 @@ impl TLSKDFOperation {
         let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
         let dkmlen = match dkey.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
-            Err(_) => return err_rv!(CKR_TEMPLATE_INCOMPLETE),
+            Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
 
         let mech = mechanisms.get(self.prf)?;
@@ -770,7 +769,7 @@ impl Derive for TLSKDFOperation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -787,7 +786,7 @@ impl Derive for TLSKDFOperation {
             CKM_TLS12_KDF | CKM_TLS_KDF => {
                 self.derive_generic_key(key, template, mechanisms, objfactories)
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 }
@@ -812,18 +811,18 @@ impl TLSMACOperation {
     fn new(mech: &CK_MECHANISM, key: &Object) -> Result<TLSMACOperation> {
         match mech.mechanism {
             CKM_TLS_MAC | CKM_TLS12_MAC => (),
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         }
         let params = cast_params!(mech, CK_TLS_MAC_PARAMS);
         let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
-            Err(_) => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
         let maclen = params.ulMacLength as usize;
         let label = match params.ulServerOrClient {
             1 => TLS_SERVER_FINISHED,
             2 => TLS_CLIENT_FINISHED,
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         let mac = MAC_MECHANISMS.get(prf)?;
@@ -840,13 +839,13 @@ impl TLSMACOperation {
 
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
     }
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.in_use = true;
         self.seed.extend_from_slice(data);
@@ -854,14 +853,14 @@ impl TLSMACOperation {
     }
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
         if output.len() != self.outputlen {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         let out = self.tlsprf.finish(&self.seed, self.outputlen)?;
@@ -915,7 +914,7 @@ impl Verify for TLSMACOperation {
         let mut verify: Vec<u8> = vec![0; self.outputlen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
-            return err_rv!(CKR_SIGNATURE_INVALID);
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
         Ok(())
     }

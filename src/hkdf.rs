@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::hash;
 use super::hmac;
@@ -44,14 +43,14 @@ impl Mechanism for HKDFMechanism {
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         match mech.mechanism {
             CKM_HKDF_DERIVE | CKM_HKDF_DATA => {
                 Ok(Operation::Derive(Box::new(HKDFOperation::new(mech)?)))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 }
@@ -113,10 +112,10 @@ impl HKDFOperation {
                                     CK_UNAVAILABLE_INFORMATION,
                                     CKA_DERIVE,
                                 )?,
-                            _ => return err_rv!(CKR_KEY_TYPE_INCONSISTENT),
+                            _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
                         }
                     } else {
-                        return err_rv!(CKR_KEY_TYPE_INCONSISTENT);
+                        return Err(CKR_KEY_TYPE_INCONSISTENT)?;
                     }
                 }
                 CKO_DATA => {
@@ -125,13 +124,13 @@ impl HKDFOperation {
                         || self.salt_type == CKF_HKDF_SALT_NULL
                         || self.salt.len() == 0
                     {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                 }
-                _ => return err_rv!(CKR_KEY_HANDLE_INVALID),
+                _ => return Err(CKR_KEY_HANDLE_INVALID)?,
             }
         } else {
-            return err_rv!(CKR_KEY_HANDLE_INVALID);
+            return Err(CKR_KEY_HANDLE_INVALID)?;
         }
 
         if matchlen > 0 {
@@ -143,7 +142,7 @@ impl HKDFOperation {
                 },
             };
             if keylen == 0 {
-                return err_rv!(CKR_KEY_SIZE_RANGE);
+                return Err(CKR_KEY_SIZE_RANGE)?;
             }
         }
 
@@ -153,29 +152,29 @@ impl HKDFOperation {
     fn new(mech: &CK_MECHANISM) -> Result<HKDFOperation> {
         let params = cast_params!(mech, CK_HKDF_PARAMS);
         if params.bExtract == CK_FALSE && params.bExpand == CK_FALSE {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         if params.bExtract != CK_FALSE
             && params.ulSaltLen > 0
             && params.pSalt == std::ptr::null_mut()
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         if params.bExpand != CK_FALSE
             && params.ulInfoLen > 0
             && params.pInfo == std::ptr::null_mut()
         {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         let hmaclen = match hmac_size(params.prfHashMechanism) {
-            INVALID_HASH_SIZE => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            INVALID_HASH_SIZE => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             x => x,
         };
         let salt = match params.ulSaltType {
             CKF_HKDF_SALT_NULL => {
                 if params.ulSaltLen > 0 || params.pSalt != std::ptr::null_mut()
                 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 } else {
                     vec![0u8; hmaclen]
                 }
@@ -183,7 +182,7 @@ impl HKDFOperation {
             CKF_HKDF_SALT_DATA => {
                 if params.ulSaltLen == 0 || params.pSalt == std::ptr::null_mut()
                 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 } else {
                     bytes_to_slice!(params.pSalt, params.ulSaltLen, u8).to_vec()
                 }
@@ -194,7 +193,7 @@ impl HKDFOperation {
                  * if not derive() will error */
                 Vec::new()
             }
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         Ok(HKDFOperation {
@@ -232,19 +231,19 @@ impl MechOperation for HKDFOperation {
             return Ok(&self.salt_key);
         } else {
             /* we are good, no need to even send a vector */
-            return err_rv!(CKR_OK);
+            return Err(CKR_OK)?;
         }
     }
     fn receives_objects(&mut self, objs: &[&Object]) -> Result<()> {
         if objs.len() != 1 {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
         self.verify_key(objs[0], 0)?;
         if let Ok(salt) = objs[0].get_attr_as_bytes(CKA_VALUE) {
             self.salt.clone_from(salt);
             Ok(())
         } else {
-            err_rv!(CKR_KEY_HANDLE_INVALID)
+            Err(CKR_KEY_HANDLE_INVALID)?
         }
     }
 }

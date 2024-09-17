@@ -46,7 +46,7 @@ impl AesCipher {
         if let Some(ref ec) = self.cipher {
             Ok(ec)
         } else {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
     }
 }
@@ -207,7 +207,7 @@ impl AesOperation {
             CKM_AES_CCM => {
                 let params = cast_params!(mech, CK_CCM_PARAMS);
                 if params.ulNonceLen < 7 || params.ulNonceLen > 13 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let l = 15 - params.ulNonceLen;
                 if params.ulDataLen == 0
@@ -215,14 +215,14 @@ impl AesOperation {
                     || (params.ulDataLen + params.ulMACLen)
                         > CK_ULONG::try_from(u64::MAX)?
                 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if params.ulAADLen > CK_ULONG::try_from(u32::MAX - 1)? {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 match params.ulMACLen {
                     4 | 6 | 8 | 10 | 12 | 14 | 16 => (),
-                    _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+                    _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 }
                 Ok(AesParams {
                     iv: bytes_to_vec!(params.pNonce, params.ulNonceLen),
@@ -242,16 +242,16 @@ impl AesOperation {
             CKM_AES_GCM => {
                 let params = cast_params!(mech, CK_GCM_PARAMS);
                 if params.ulIvLen == 0 || params.ulIvLen > (1 << 32) - 1 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if params.ulAADLen > (1 << 32) - 1 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if params.ulTagBits > 128 {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 if params.ulIvLen < 1 || params.pIv == std::ptr::null_mut() {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let tagbits = map_err!(
                     usize::try_from(params.ulTagBits),
@@ -300,10 +300,10 @@ impl AesOperation {
                             (u128::try_from(iv[15 - idx])? & part) << (idx * 8);
                     }
                     if maxblocks == 0 {
-                        return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
                     }
                 } else if ctrbits > (AES_BLOCK_SIZE * 8) {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
 
                 Ok(AesParams {
@@ -317,7 +317,7 @@ impl AesOperation {
             }
             CKM_AES_CTS | CKM_AES_CBC | CKM_AES_CBC_PAD => {
                 if mech.ulParameterLen != CK_ULONG::try_from(AES_BLOCK_SIZE)? {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
+                    return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 let mut ctsmode = 0u8;
                 if mech.mechanism == CKM_AES_CTS {
@@ -343,7 +343,7 @@ impl AesOperation {
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                 if mech.ulParameterLen != CK_ULONG::try_from(AES_BLOCK_SIZE)? {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
+                    return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 Ok(AesParams {
                     iv: bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
@@ -358,7 +358,7 @@ impl AesOperation {
                 let iv = match mech.ulParameterLen {
                     0 => Vec::new(),
                     8 => bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
-                    _ => return err_rv!(CKR_ARGUMENTS_BAD),
+                    _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
                 Ok(AesParams {
                     iv: iv,
@@ -373,7 +373,7 @@ impl AesOperation {
                 let iv = match mech.ulParameterLen {
                     0 => Vec::new(),
                     4 => bytes_to_vec!(mech.pParameter, mech.ulParameterLen),
-                    _ => return err_rv!(CKR_ARGUMENTS_BAD),
+                    _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
                 Ok(AesParams {
                     iv: iv,
@@ -384,7 +384,7 @@ impl AesOperation {
                     taglen: 0,
                 })
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 
@@ -397,85 +397,85 @@ impl AesOperation {
                 16 => AES_128_CCM.get_cipher()?,
                 24 => AES_192_CCM.get_cipher()?,
                 32 => AES_256_CCM.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_GCM => match keylen {
                 16 => AES_128_GCM.get_cipher()?,
                 24 => AES_192_GCM.get_cipher()?,
                 32 => AES_256_GCM.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_CTS => match keylen {
                 16 => AES_128_CTS.get_cipher()?,
                 24 => AES_192_CTS.get_cipher()?,
                 32 => AES_256_CTS.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_CTR => match keylen {
                 16 => AES_128_CTR.get_cipher()?,
                 24 => AES_192_CTR.get_cipher()?,
                 32 => AES_256_CTR.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_CBC => match keylen {
                 16 => AES_128_CBC.get_cipher()?,
                 24 => AES_192_CBC.get_cipher()?,
                 32 => AES_256_CBC.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_CBC_PAD => match keylen {
                 16 => AES_128_CBC.get_cipher()?,
                 24 => AES_192_CBC.get_cipher()?,
                 32 => AES_256_CBC.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_ECB => match keylen {
                 16 => AES_128_ECB.get_cipher()?,
                 24 => AES_192_ECB.get_cipher()?,
                 32 => AES_256_ECB.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 => match keylen {
                 16 => AES_128_CFB8.get_cipher()?,
                 24 => AES_192_CFB8.get_cipher()?,
                 32 => AES_256_CFB8.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB1 => match keylen {
                 16 => AES_128_CFB1.get_cipher()?,
                 24 => AES_192_CFB1.get_cipher()?,
                 32 => AES_256_CFB1.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB128 => match keylen {
                 16 => AES_128_CFB128.get_cipher()?,
                 24 => AES_192_CFB128.get_cipher()?,
                 32 => AES_256_CFB128.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             #[cfg(not(feature = "fips"))]
             CKM_AES_OFB => match keylen {
                 16 => AES_128_OFB.get_cipher()?,
                 24 => AES_192_OFB.get_cipher()?,
                 32 => AES_256_OFB.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_KEY_WRAP => match keylen {
                 16 => AES_128_WRAP.get_cipher()?,
                 24 => AES_192_WRAP.get_cipher()?,
                 32 => AES_256_WRAP.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
             CKM_AES_KEY_WRAP_KWP => match keylen {
                 16 => AES_128_WRAP_PAD.get_cipher()?,
                 24 => AES_192_WRAP_PAD.get_cipher()?,
                 32 => AES_256_WRAP_PAD.get_cipher()?,
-                _ => return err_rv!(CKR_MECHANISM_INVALID),
+                _ => return Err(CKR_MECHANISM_INVALID)?,
             },
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         })
     }
 
@@ -502,7 +502,7 @@ impl AesOperation {
         };
         if res != 1 {
             self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let mut params: Vec<OSSL_PARAM> = Vec::new();
@@ -524,7 +524,7 @@ impl AesOperation {
                     };
                     if res != 1 {
                         self.finalized = true;
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                 }
             }
@@ -539,7 +539,7 @@ impl AesOperation {
                 };
                 if res != 1 {
                     self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
@@ -551,7 +551,7 @@ impl AesOperation {
                 };
                 if res != 1 {
                     self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
             }
             CKM_AES_CTS => unsafe {
@@ -569,7 +569,7 @@ impl AesOperation {
                                     as *mut c_char,
                                 _ => {
                                     self.finalized = true;
-                                    return err_rv!(CKR_GENERAL_ERROR);
+                                    return Err(CKR_GENERAL_ERROR)?;
                                 }
                             },
                             0,
@@ -601,14 +601,14 @@ impl AesOperation {
         };
         if res != 1 {
             self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         if self.mech == CKM_AES_CBC_PAD {
             let res =
                 unsafe { EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1) };
             if res != 1 {
                 self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
 
@@ -625,7 +625,7 @@ impl AesOperation {
             };
             if res != 1 {
                 self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
 
@@ -642,7 +642,7 @@ impl AesOperation {
             };
             if res != 1 {
                 self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
 
@@ -669,7 +669,7 @@ impl AesOperation {
         };
         if res != 1 {
             self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let mut params: Vec<OSSL_PARAM> = Vec::new();
         match self.mech {
@@ -690,7 +690,7 @@ impl AesOperation {
                     };
                     if res != 1 {
                         self.finalized = true;
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                 }
             }
@@ -705,7 +705,7 @@ impl AesOperation {
                 };
                 if res != 1 {
                     self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
                 let res = unsafe {
                     EVP_CIPHER_CTX_ctrl(
@@ -717,7 +717,7 @@ impl AesOperation {
                 };
                 if res != 1 {
                     self.finalized = true;
-                    return err_rv!(CKR_DEVICE_ERROR);
+                    return Err(CKR_DEVICE_ERROR)?;
                 }
             }
             CKM_AES_CTS => unsafe {
@@ -735,7 +735,7 @@ impl AesOperation {
                                     as *mut c_char,
                                 _ => {
                                     self.finalized = true;
-                                    return err_rv!(CKR_GENERAL_ERROR);
+                                    return Err(CKR_GENERAL_ERROR)?;
                                 }
                             },
                             0,
@@ -767,7 +767,7 @@ impl AesOperation {
         };
         if res != 1 {
             self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         let res = unsafe {
             EVP_CIPHER_CTX_set_padding(
@@ -777,7 +777,7 @@ impl AesOperation {
         };
         if res != 1 {
             self.finalized = true;
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         if self.mech == CKM_AES_CCM {
@@ -793,7 +793,7 @@ impl AesOperation {
             };
             if res != 1 {
                 self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
 
@@ -810,7 +810,7 @@ impl AesOperation {
             };
             if res != 1 {
                 self.finalized = true;
-                return err_rv!(CKR_DEVICE_ERROR);
+                return Err(CKR_DEVICE_ERROR)?;
             }
         }
 
@@ -873,7 +873,7 @@ impl AesOperation {
                 /* Check the data length in CCM matches the provided data -- this is one-shot
                  * operation only */
                 if op.params.datalen != keydata.len() {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
             }
             _ => (),
@@ -918,7 +918,7 @@ impl MechOperation for AesOperation {
 impl Encryption for AesOperation {
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if cipher.len() == 0 {
             return self.encrypt_update(plain, cipher);
@@ -936,7 +936,7 @@ impl Encryption for AesOperation {
         cipher: &mut [u8],
     ) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
             self.in_use = true;
@@ -1039,10 +1039,10 @@ impl Encryption for AesOperation {
 
     fn encrypt_final(&mut self, cipher: &mut [u8]) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
         let mut outlen = 0;
@@ -1158,11 +1158,11 @@ impl Encryption for AesOperation {
 
     fn encryption_len(&mut self, data_len: usize, fin: bool) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let outlen = if fin {
             if !self.in_use {
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
             }
             match self.mech {
                 CKM_AES_CCM | CKM_AES_GCM => {
@@ -1220,7 +1220,7 @@ impl Encryption for AesOperation {
 impl Decryption for AesOperation {
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if plain.len() == 0 {
             match self.mech {
@@ -1242,7 +1242,7 @@ impl Decryption for AesOperation {
         plain: &mut [u8],
     ) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let mut cipher_buf = cipher.as_ptr();
         match self.mech {
@@ -1437,10 +1437,10 @@ impl Decryption for AesOperation {
 
     fn decrypt_final(&mut self, plain: &mut [u8]) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
         let mut outlen = 0;
@@ -1554,11 +1554,11 @@ impl Decryption for AesOperation {
 
     fn decryption_len(&mut self, data_len: usize, fin: bool) -> Result<usize> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let outlen = if fin {
             if !self.in_use {
-                return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
             }
             match self.mech {
                 CKM_AES_GCM => {
@@ -1644,17 +1644,17 @@ impl AesCmacOperation {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
                 let val = params as usize;
                 if val > AES_BLOCK_SIZE {
-                    return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 val
             }
             CKM_AES_CMAC => {
                 if mech.ulParameterLen != 0 {
-                    return err_rv!(CKR_ARGUMENTS_BAD);
+                    return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 AES_BLOCK_SIZE
             }
-            _ => return err_rv!(CKR_MECHANISM_INVALID),
+            _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         let mackey = object_to_raw_key(key)?;
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_CMAC))?;
@@ -1665,7 +1665,7 @@ impl AesCmacOperation {
                 16 => name_as_char(CIPHER_NAME_AES128),
                 24 => name_as_char(CIPHER_NAME_AES192),
                 32 => name_as_char(CIPHER_NAME_AES256),
-                _ => return err_rv!(CKR_KEY_INDIGESTIBLE),
+                _ => return Err(CKR_KEY_INDIGESTIBLE)?,
             },
         )?;
         params.finalize();
@@ -1679,7 +1679,7 @@ impl AesCmacOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(AesCmacOperation {
             mech: mech.mechanism,
@@ -1695,14 +1695,14 @@ impl AesCmacOperation {
 
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
     }
 
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.in_use = true;
 
@@ -1710,7 +1710,7 @@ impl AesCmacOperation {
             EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         Ok(())
@@ -1718,7 +1718,7 @@ impl AesCmacOperation {
 
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         /* It is valid to finalize without any update */
         self.in_use = true;
@@ -1735,10 +1735,10 @@ impl AesCmacOperation {
             )
         } != 1
         {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
         if outlen != AES_BLOCK_SIZE {
-            return err_rv!(CKR_GENERAL_ERROR);
+            return Err(CKR_GENERAL_ERROR)?;
         }
 
         output.copy_from_slice(&buf[..output.len()]);
@@ -1828,7 +1828,7 @@ impl Verify for AesCmacOperation {
         let mut verify: Vec<u8> = vec![0; self.maclen];
         self.finalize(verify.as_mut_slice())?;
         if !constant_time_eq(&verify, signature) {
-            return err_rv!(CKR_SIGNATURE_INVALID);
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
         Ok(())
     }

@@ -22,7 +22,6 @@ use zeroize::Zeroize;
 
 use super::attr_element;
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::interface;
 use super::mechanism;
@@ -695,7 +694,7 @@ macro_rules! res_to_err {
         if $res == 1 {
             Ok(())
         } else {
-            err_rv!(CKR_DEVICE_ERROR)
+            Err(CKR_DEVICE_ERROR)?
         }
     };
 }
@@ -711,7 +710,7 @@ impl ProviderSignatureCtx {
         let sigtable =
             unsafe { EVP_SIGNATURE_fetch(get_libctx(), alg, std::ptr::null()) };
         if sigtable.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let ctx = unsafe {
@@ -719,11 +718,11 @@ impl ProviderSignatureCtx {
                 Some(f) => {
                     f(FIPS_PROVIDER.provider as *mut c_void, std::ptr::null())
                 }
-                None => return err_rv!(CKR_DEVICE_ERROR),
+                None => return Err(CKR_DEVICE_ERROR)?,
             }
         };
         if ctx.is_null() {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         Ok(ProviderSignatureCtx {
@@ -746,7 +745,7 @@ impl ProviderSignatureCtx {
                     (*pkey.as_ptr()).keydata as *mut c_void,
                     params
                 )),
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -759,7 +758,7 @@ impl ProviderSignatureCtx {
                     data.as_ptr() as *const c_uchar,
                     data.len()
                 )),
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -777,11 +776,11 @@ impl ProviderSignatureCtx {
                         signature.len(),
                     );
                     if res != 1 {
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                     Ok(siglen)
                 }
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -805,11 +804,11 @@ impl ProviderSignatureCtx {
                         tbs.len(),
                     );
                     if res != 1 {
-                        return err_rv!(CKR_DEVICE_ERROR);
+                        return Err(CKR_DEVICE_ERROR)?;
                     }
                     Ok(siglen)
                 }
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -828,7 +827,7 @@ impl ProviderSignatureCtx {
                     (*pkey.as_ptr()).keydata as *mut c_void,
                     params
                 )),
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -841,7 +840,7 @@ impl ProviderSignatureCtx {
                     data.as_ptr() as *const c_uchar,
                     data.len()
                 )),
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -854,7 +853,7 @@ impl ProviderSignatureCtx {
                     signature.as_ptr() as *const c_uchar,
                     signature.len()
                 )),
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }
@@ -873,7 +872,7 @@ impl ProviderSignatureCtx {
                     tbs.as_ptr() as *const c_uchar,
                     tbs.len()
                 )),
-                None => err_rv!(CKR_DEVICE_ERROR),
+                None => Err(CKR_DEVICE_ERROR)?,
             }
         }
     }

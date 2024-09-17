@@ -36,7 +36,7 @@ impl PBKDF2 {
             )
         };
         if res != 1 {
-            return err_rv!(CKR_DEVICE_ERROR);
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         Ok(dkm)

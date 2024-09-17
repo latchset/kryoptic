@@ -2,7 +2,6 @@
 // See LICENSE.txt file for terms
 
 use super::attribute;
-use super::err_rv;
 use super::error;
 use super::hash;
 use super::interface;
@@ -39,14 +38,14 @@ impl Mechanism for SSHKDFMechanism {
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return err_rv!(CKR_MECHANISM_INVALID);
+            return Err(CKR_MECHANISM_INVALID)?;
         }
 
         match mech.mechanism {
             KRM_SSHKDF_DERIVE => {
                 Ok(Operation::Derive(Box::new(SSHKDFOperation::new(mech)?)))
             }
-            _ => err_rv!(CKR_MECHANISM_INVALID),
+            _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
 }
@@ -82,7 +81,7 @@ impl SSHKDFOperation {
         let params = cast_params!(mech, KR_SSHKDF_PARAMS);
 
         if !hash::is_valid_hash(params.prfHashMechanism) {
-            return err_rv!(CKR_MECHANISM_PARAM_INVALID);
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
         let is_data = match params.derivedKeyType {
@@ -92,7 +91,7 @@ impl SSHKDFOperation {
             0x44 => false, /* D */
             0x45 => false, /* E */
             0x46 => false, /* F */
-            _ => return err_rv!(CKR_MECHANISM_PARAM_INVALID),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
         Ok(SSHKDFOperation {
@@ -136,7 +135,7 @@ impl Derive for SSHKDFOperation {
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
-            return err_rv!(CKR_OPERATION_NOT_INITIALIZED);
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
 
@@ -157,7 +156,7 @@ impl Derive for SSHKDFOperation {
             misc::common_derive_key_object(key, template, objfactories, 0)
         }?;
         if value_len == 0 || value_len > usize::try_from(u32::MAX)? {
-            return err_rv!(CKR_TEMPLATE_INCONSISTENT);
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
         let keyval = key.get_attr_as_bytes(CKA_VALUE)?;
