@@ -2589,6 +2589,12 @@ extern "C" fn fn_encrypt_message(
     ));
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_ciphertext_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 
@@ -2609,6 +2615,10 @@ extern "C" fn fn_encrypt_message_begin(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+
+    #[cfg(feature = "fips")]
+    session.reset_fips_indicator();
+
     let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::MsgEncryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -2701,6 +2711,12 @@ extern "C" fn fn_encrypt_message_next(
     };
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_ciphertext_part_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 
@@ -2811,6 +2827,12 @@ extern "C" fn fn_decrypt_message(
     ));
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_plaintext_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 
@@ -2831,6 +2853,10 @@ extern "C" fn fn_decrypt_message_begin(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+
+    #[cfg(feature = "fips")]
+    session.reset_fips_indicator();
+
     let operation = match res_or_ret!(session.get_operation_mut()) {
         Operation::MsgDecryption(op) => op,
         _ => return CKR_OPERATION_NOT_INITIALIZED,
@@ -2924,6 +2950,12 @@ extern "C" fn fn_decrypt_message_next(
     };
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_plaintext_part_len = retlen };
+
+    #[cfg(feature = "fips")]
+    {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
     CKR_OK
 }
 
