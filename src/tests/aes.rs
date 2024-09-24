@@ -838,7 +838,7 @@ fn test_aes_operations() {
         assert_eq!(data.as_bytes(), dec.as_slice());
 
         /* test that we can get correct indicators based on inputs */
-        assert_eq!(check_validation(session, 0), true);
+        assert_eq!(check_validation(session, 1), true);
 
         let ret = fn_message_decrypt_final(session);
         assert_eq!(ret, CKR_OK);
@@ -1194,11 +1194,7 @@ fn test_aes_macs() {
         );
 
         /* test that we can get correct indicators based on inputs */
-        #[cfg(feature = "fips")]
-        assert_eq!(
-            check_validation(session, crate::fips::indicators::KRF_FIPS),
-            false,
-        );
+        assert_eq!(check_validation(session, 0), true);
 
         /* too long */
         let size: CK_ULONG = (AES_BLOCK_SIZE + 1) as CK_ULONG;
