@@ -15,7 +15,6 @@ use crate::ossl::common::*;
 use crate::ossl::fips::*;
 use crate::{bytes_to_slice, bytes_to_vec, cast_params, map_err, void_ptr};
 
-#[cfg(not(feature = "fips"))]
 use crate::get_random_data;
 
 use constant_time_eq::constant_time_eq;
@@ -591,7 +590,7 @@ impl AesOperation {
         }
 
         if self.params.iv.counter >= self.params.iv.maxcount {
-            return Err(CKR_DATA_LEN_RANGE)?;
+            return Err(self.op_err(CKR_DATA_LEN_RANGE));
         }
 
         let mut genidx = self.params.iv.fixedbits / 8;
@@ -632,19 +631,13 @@ impl AesOperation {
                 }
             }
             CKG_GENERATE_RANDOM => {
-                #[cfg(not(feature = "fips"))]
-                {
-                    let mut genbuf = vec![0u8; (genbits + 7) / 8];
-                    get_random_data(&mut genbuf)?;
-                    self.params.iv.buf[genidx] ^= genbuf[0] & mask;
-                    self.params.iv.buf[(genidx + 1)..]
-                        .copy_from_slice(&genbuf[1..]);
-                }
-                /* In current FIPS code, openssl will generate this internally */
-                #[cfg(feature = "fips")]
-                ()
+                let mut genbuf = vec![0u8; (genbits + 7) / 8];
+                get_random_data(&mut genbuf)?;
+                self.params.iv.buf[genidx] ^= genbuf[0] & mask;
+                self.params.iv.buf[(genidx + 1)..]
+                    .copy_from_slice(&genbuf[1..]);
             }
-            _ => return Err(CKR_GENERAL_ERROR)?,
+            _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
         }
 
         self.params.iv.counter += 1;
@@ -656,27 +649,16 @@ impl AesOperation {
             self.generate_iv()?;
         }
 
-        /* Set AEAD stuff for AEAD modes */
-        /* The IV size must be 12 for GCM in FIPS mode and if we try to
-         * actively set it to any value (including 12) in FIPS
-         * mode it will cause a cipher failure due to how
-         * OpenSSL sets internal states. So avoid setting the IVLEN
-         * when the ivsize matches the default */
-        if (self.mech == CKM_AES_GCM && self.params.iv.buf.len() != 12)
-            || self.mech == CKM_AES_CCM
-        {
-            let res = unsafe {
-                EVP_CIPHER_CTX_ctrl(
-                    self.ctx.as_mut_ptr(),
-                    c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
-                    c_int::try_from(self.params.iv.buf.len())?,
-                    std::ptr::null_mut(),
-                )
-            };
-            if res != 1 {
-                self.finalized = true;
-                return Err(CKR_DEVICE_ERROR)?;
-            }
+        let res = unsafe {
+            EVP_CIPHER_CTX_ctrl(
+                self.ctx.as_mut_ptr(),
+                c_int::try_from(EVP_CTRL_AEAD_SET_IVLEN)?,
+                c_int::try_from(self.params.iv.buf.len())?,
+                std::ptr::null_mut(),
+            )
+        };
+        if res != 1 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
         Ok(())
@@ -689,10 +671,7 @@ impl AesOperation {
                 1 => name_as_char(OSSL_CIPHER_CTS_MODE_CS1),
                 2 => name_as_char(OSSL_CIPHER_CTS_MODE_CS2),
                 3 => name_as_char(OSSL_CIPHER_CTS_MODE_CS3),
-                _ => {
-                    self.finalized = true;
-                    return Err(CKR_GENERAL_ERROR)?;
-                }
+                _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             },
         )
     }
@@ -707,8 +686,7 @@ impl AesOperation {
             )
         };
         if res != 1 {
-            self.finalized = true;
-            Err(CKR_DEVICE_ERROR)?
+            Err(self.op_err(CKR_DEVICE_ERROR))
         } else {
             Ok(())
         }
@@ -718,8 +696,7 @@ impl AesOperation {
         let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
-                self.finalized = true;
-                return Err(e);
+                return Err(self.op_err(e.rv()));
             }
         };
 
@@ -736,8 +713,7 @@ impl AesOperation {
             )
         };
         if res != 1 {
-            self.finalized = true;
-            return Err(CKR_DEVICE_ERROR)?;
+            return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
         /* Generates IV for some AEAD modes */
@@ -772,15 +748,13 @@ impl AesOperation {
             )
         };
         if res != 1 {
-            self.finalized = true;
-            return Err(CKR_DEVICE_ERROR)?;
+            return Err(self.op_err(CKR_DEVICE_ERROR))?;
         }
         if self.mech == CKM_AES_CBC_PAD {
             let res =
                 unsafe { EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1) };
             if res != 1 {
-                self.finalized = true;
-                return Err(CKR_DEVICE_ERROR)?;
+                return Err(self.op_err(CKR_DEVICE_ERROR));
             }
         }
 
@@ -796,8 +770,7 @@ impl AesOperation {
                 )
             };
             if res != 1 {
-                self.finalized = true;
-                return Err(CKR_DEVICE_ERROR)?;
+                return Err(self.op_err(CKR_DEVICE_ERROR));
             }
         }
 
@@ -813,8 +786,7 @@ impl AesOperation {
                 )
             };
             if res != 1 {
-                self.finalized = true;
-                return Err(CKR_DEVICE_ERROR)?;
+                return Err(self.op_err(CKR_DEVICE_ERROR));
             }
         }
 
@@ -825,8 +797,7 @@ impl AesOperation {
         let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
-                self.finalized = true;
-                return Err(e);
+                return Err(self.op_err(e.rv()));
             }
         };
 
@@ -843,8 +814,7 @@ impl AesOperation {
             )
         };
         if res != 1 {
-            self.finalized = true;
-            return Err(CKR_DEVICE_ERROR)?;
+            return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
         /* IV ctrl calls for AEAD modes */
@@ -879,8 +849,7 @@ impl AesOperation {
             )
         };
         if res != 1 {
-            self.finalized = true;
-            return Err(CKR_DEVICE_ERROR)?;
+            return Err(self.op_err(CKR_DEVICE_ERROR))?;
         }
         let res = unsafe {
             EVP_CIPHER_CTX_set_padding(
@@ -889,8 +858,7 @@ impl AesOperation {
             )
         };
         if res != 1 {
-            self.finalized = true;
-            return Err(CKR_DEVICE_ERROR)?;
+            return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
         if self.mech == CKM_AES_CCM {
@@ -1312,7 +1280,6 @@ impl AesOperation {
         {
             self.params.zeroize();
             self.finalbuf.zeroize();
-            self.fips_approved = None;
         }
         self.finalized = false;
         self.in_use = true;
@@ -1331,6 +1298,10 @@ impl AesOperation {
             let iv = bytes_to_slice!(mut iv_ptr, self.params.iv.buf.len(), u8);
             iv.copy_from_slice(&self.params.iv.buf);
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval_aead()?;
+
         Ok(())
     }
 
@@ -1371,16 +1342,15 @@ impl AesOperation {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
-        let _ = self.init_msg_params(parameter, parameter_len, aad)?;
-
         #[cfg(feature = "fips")]
         {
             self.params.zeroize();
             self.finalbuf.zeroize();
-            self.fips_approved = None;
         }
         self.finalized = false;
         self.in_use = true;
+
+        let _ = self.init_msg_params(parameter, parameter_len, aad)?;
 
         /* reset ctx */
         let res = unsafe { EVP_CIPHER_CTX_reset(self.ctx.as_mut_ptr()) };
@@ -1388,7 +1358,45 @@ impl AesOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        self.decrypt_initialize()
+        self.decrypt_initialize()?;
+
+        #[cfg(feature = "fips")]
+        self.fips_approval_aead()?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "fips")]
+    fn fips_approval_aead(&mut self) -> Result<()> {
+        /* For AEAD we handle indicators directly because OpenSSL has an
+         * inflexible API that provides incorrect answers when we
+         * generate the IV outside of that code */
+
+        /* The IV size must be 12 in FIPS mode */
+        if self.params.iv.buf.len() != 12 {
+            self.fips_approved = Some(false);
+            return Ok(());
+        }
+
+        /* The IV must be generated in FIPS mode */
+        self.fips_approved = match self.params.iv.gen {
+            CKG_NO_GENERATE => match self.op {
+                CKF_MESSAGE_ENCRYPT => Some(false),
+                CKF_MESSAGE_DECRYPT => Some(true),
+                _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
+            },
+            CKG_GENERATE_RANDOM => Some(true),
+            CKG_GENERATE | CKG_GENERATE_COUNTER | CKG_GENERATE_COUNTER_XOR => {
+                if self.params.iv.fixedbits < 32 {
+                    Some(false)
+                } else {
+                    Some(true)
+                }
+            }
+            _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
+        };
+
+        Ok(())
     }
 }
 
@@ -2279,11 +2287,6 @@ impl MsgEncryption for AesOperation {
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
-        #[cfg(feature = "fips")]
-        {
-            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
-        }
-
         Ok(outlen)
     }
 
@@ -2473,12 +2476,6 @@ impl MsgDecryption for AesOperation {
         };
 
         self.in_use = false;
-
-        #[cfg(feature = "fips")]
-        {
-            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
-        }
-
         Ok(outlen)
     }
 
