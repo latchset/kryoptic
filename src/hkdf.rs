@@ -193,7 +193,13 @@ impl HKDFOperation {
                  * if not derive() will error */
                 Vec::new()
             }
-            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+            _ => {
+                if params.bExtract != CK_FALSE {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                } else {
+                    Vec::new()
+                }
+            }
         };
 
         Ok(HKDFOperation {
