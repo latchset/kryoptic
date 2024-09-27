@@ -19,7 +19,7 @@ impl Derive for HKDFOperation {
 
         self.verify_key(key, self.prflen)?;
 
-        if self.salt.len() == 0 {
+        if self.salt.len() == 0 && self.extract {
             match self.salt_type {
                 CKF_HKDF_SALT_KEY => return Err(CKR_GENERAL_ERROR)?,
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
@@ -66,7 +66,7 @@ impl Derive for HKDFOperation {
         )?;
         params.add_int(name_as_char(OSSL_KDF_PARAM_MODE), &mode)?;
 
-        if self.salt.len() > 0 {
+        if self.extract && self.salt.len() > 0 {
             params.add_octet_string(
                 name_as_char(OSSL_KDF_PARAM_SALT),
                 &self.salt,
