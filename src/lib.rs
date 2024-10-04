@@ -3,10 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::env;
 use std::ffi::{c_char, CStr};
-use std::path::Path;
-use std::str::FromStr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use once_cell::sync::Lazy;
@@ -20,6 +17,7 @@ mod interface {
 }
 
 mod attribute;
+mod config;
 mod error;
 mod mechanism;
 mod object;
@@ -29,6 +27,7 @@ mod slot;
 mod storage;
 mod token;
 
+use config::Config;
 use error::Result;
 use interface::*;
 use mechanism::Operation;
@@ -169,12 +168,12 @@ impl State {
         slotids
     }
 
-    fn add_slot(&mut self, slot_id: CK_SLOT_ID, slot: Slot) -> CK_RV {
+    fn add_slot(&mut self, slot_id: CK_SLOT_ID, slot: Slot) -> Result<()> {
         if self.slots.contains_key(&slot_id) {
-            return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+            return Err(CKR_CRYPTOKI_ALREADY_INITIALIZED)?;
         }
         self.slots.insert(slot_id, slot);
-        CKR_OK
+        Ok(())
     }
 
     fn get_session(
@@ -356,34 +355,6 @@ pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
     }
 }
 
-pub const DEFAULT_CONF_NAME: &str = "token.sql";
-
-fn find_conf() -> Result<String> {
-    /* First check for our own env var,
-     * this has the highest precedence */
-    match env::var("KRYOPTIC_CONF") {
-        Ok(var) => return Ok(var),
-        Err(_) => (),
-    }
-    /* Freedesktop specification for data dirs first
-     * then fallback to use $HOME/.local/share, if that is also not
-     * available see if we have access to a system store */
-    let datafile = match env::var("XDG_DATA_HOME") {
-        Ok(xdg) => format!("{}/kryoptic/{}", xdg, DEFAULT_CONF_NAME),
-        Err(_) => match env::var("HOME") {
-            Ok(home) => {
-                format!("{}/.local/share/kryoptic/{}", home, DEFAULT_CONF_NAME)
-            }
-            Err(_) => format!("/var/kryoptic/public/{}", DEFAULT_CONF_NAME),
-        },
-    };
-    if Path::new(&datafile).is_file() {
-        Ok(datafile)
-    } else {
-        Err(CKR_ARGUMENTS_BAD)?
-    }
-}
-
 /* initial assessment on FIPS indicator, useful when an input key needs
  * to be checked at operation initialization */
 #[cfg(feature = "fips")]
@@ -415,83 +386,94 @@ fn finalize_fips_approval(
     }
 }
 
-extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
-    let mut slotnum: CK_SLOT_ID = 0;
-    let conf: String;
+struct GlobalConfig {
+    conf: Config,
+}
 
-    if _init_args.is_null() {
-        conf = res_or_ret!(find_conf());
-    } else {
-        let args = _init_args as *const CK_C_INITIALIZE_ARGS;
-        if unsafe { (*args).pReserved.is_null() } {
-            conf = res_or_ret!(find_conf());
-        } else {
-            let c_str =
-                unsafe { CStr::from_ptr((*args).pReserved as *const _) };
-            if let Ok(s) = c_str.to_str() {
-                conf = s.to_string();
-            } else {
-                return CKR_ARGUMENTS_BAD;
-            }
+impl GlobalConfig {
+    fn empty_config() -> GlobalConfig {
+        GlobalConfig {
+            conf: Config::new(),
         }
     }
 
-    let v: Vec<&str> = conf.split(':').collect();
-    if v.len() > 1 {
-        slotnum = match CK_SLOT_ID::from_str(v[1]) {
-            Ok(n) => n,
-            Err(_) => return CKR_ARGUMENTS_BAD,
+    fn default_config() -> GlobalConfig {
+        /* if there is no config file we get an empty config */
+        let filename = match Config::find_conf() {
+            Ok(f) => f,
+            Err(_) => return Self::empty_config(),
         };
+        /* if the file is not accessible or malformed we set an empty config,
+         * an error will be returned later at fn_initialize() time */
+        let conf = if let Ok(c) = Config::from_file(&filename) {
+            c
+        } else if let Ok(c) = Config::from_legacy_conf_string(&filename) {
+            c
+        } else {
+            return Self::empty_config();
+        };
+
+        GlobalConfig { conf: conf }
     }
-    let filename = v[0].to_string();
+}
+
+static CONFIG: Lazy<RwLock<GlobalConfig>> =
+    Lazy::new(|| RwLock::new(GlobalConfig::default_config()));
+
+extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
+    let mut gconf = global_wlock!(noinitcheck CONFIG);
+
+    if !_init_args.is_null() {
+        let args = unsafe { *(_init_args as *const CK_C_INITIALIZE_ARGS) };
+
+        if !args.pReserved.is_null() {
+            let reserved =
+                unsafe { CStr::from_ptr(args.pReserved as *const _) };
+            let init_arg = match reserved.to_str() {
+                Ok(s) => s,
+                Err(_) => return CKR_ARGUMENTS_BAD,
+            };
+            res_or_ret!(gconf.conf.from_init_args(init_arg));
+        }
+    }
 
     let mut wstate = global_wlock!(noinitcheck STATE);
     if !wstate.is_initialized() {
         wstate.initialize();
     }
 
-    /* if a slot num was not specified, pick the first free one,
-     * but ensure that the same file is not already open on an
-     * existing slot */
-    if v.len() == 1 {
-        let mut slot_high: i64 = -1;
-        let slots = wstate.get_slots_ids();
-        for s in &slots {
-            let sn = cast_or_ret!(i64 from *s);
-            if sn > slot_high {
-                slot_high = sn;
-            }
-            match wstate.get_token_from_slot(*s) {
-                Ok(t) => {
-                    if filename.eq(t.get_filename()) {
-                        return CKR_CRYPTOKI_ALREADY_INITIALIZED;
-                    }
+    /* create slots for any new slot specified in the configuration
+     * that has not been created yet, new slots can be added via
+     * init args so we check this every time */
+    for slot in &gconf.conf.slots {
+        let slotnum = cast_or_ret!(CK_SLOT_ID from slot.slot);
+        match wstate.add_slot(slotnum, res_or_ret!(Slot::new(slot))) {
+            Ok(_) => (),
+            Err(e) => {
+                let ret = e.rv();
+                if ret != CKR_CRYPTOKI_ALREADY_INITIALIZED {
+                    return ret;
                 }
-                Err(_) => return CKR_GENERAL_ERROR,
             }
         }
-        slotnum = cast_or_ret!(CK_SLOT_ID from slot_high + 1);
     }
 
-    /* check that this slot was not already initialized with a different db */
-    match wstate.get_token_from_slot(slotnum) {
-        Ok(token) => {
-            if filename.eq(token.get_filename()) {
-                return CKR_CRYPTOKI_ALREADY_INITIALIZED;
-            } else {
-                return CKR_ARGUMENTS_BAD;
-            }
-        }
-        Err(e) => match e.rv() {
-            CKR_SLOT_ID_INVALID => (),
-            CKR_CRYPTOKI_NOT_INITIALIZED => (),
-            x => return x,
-        },
-    }
-
-    /* will initialize a memory only token if filename is empty */
-    wstate.add_slot(slotnum, res_or_ret!(Slot::new(filename)))
+    CKR_OK
 }
+
+#[cfg(test)]
+fn force_load_config() -> CK_RV {
+    let testconf = GlobalConfig::default_config();
+    if testconf.conf.slots.len() == 0 {
+        return CKR_GENERAL_ERROR;
+    }
+    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    for slot in testconf.conf.slots {
+        res_or_ret!(gconf.conf.add_slot(slot));
+    }
+    return CKR_OK;
+}
+
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     global_wlock!(STATE).finalize()
 }

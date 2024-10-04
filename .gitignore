@@ -1,4 +1,5 @@
 /target
+/test
 /Cargo.lock
 /src/pkcs11/bindings.rs
 /src/ossl/bindings.rs
