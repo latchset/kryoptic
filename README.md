@@ -15,7 +15,7 @@ First after cloning, we need to pull and update openssl submodule:
 
 Build the rust project:
 
-    $ cargo build
+    $ CONFDIR=/etc cargo build
 
 For FIPS module, you need to generate hmac checksum:
 
