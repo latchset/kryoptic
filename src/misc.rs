@@ -171,3 +171,23 @@ pub fn common_derive_key_object(
     };
     Ok((obj, value_len))
 }
+
+pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
+    let slen;
+    match s.last() {
+        None => return,
+        Some(c) => {
+            if *c == b'\0' {
+                slen = s.len() - 1;
+            } else {
+                slen = s.len();
+            }
+        }
+    }
+    if slen >= d.len() {
+        d.copy_from_slice(&s[..d.len()]);
+    } else {
+        d[..slen].copy_from_slice(&s[..slen]);
+        d[slen..].fill(0x20); /* space in ASCII/UTF8 */
+    }
+}

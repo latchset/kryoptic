@@ -47,7 +47,7 @@ A PKCS #11 software token written in Rust.}
 %cargo_generate_buildrequires -f dynamic
 
 %build
-%cargo_build -f dynamic
+CONFDIR=%{_sysconfdir} %cargo_build -f dynamic
 %{cargo_license_summary -f dynamic}
 %{cargo_license -f dynamic} > LICENSE.dependencies
 

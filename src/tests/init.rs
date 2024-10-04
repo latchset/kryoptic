@@ -10,9 +10,10 @@ use serial_test::{parallel, serial};
 #[test]
 #[parallel]
 fn test_init_token() {
-    let mut testtokn = TestToken::new("test_init_token.sql", true);
+    let dbpath = format!("{}/{}", TESTDIR, "test_init_token.sql");
+    let mut testtokn = TestToken::new(dbpath, true);
 
-    let mut args = testtokn.make_init_args();
+    let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -247,10 +248,10 @@ fn test_init_token() {
     testtokn.finalize();
 }
 
-fn test_re_init_token_common(db: &str) {
+fn test_re_init_token_common(db: String) {
     let mut testtokn = TestToken::new(db, true);
 
-    let mut args = testtokn.make_init_args();
+    let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -277,11 +278,13 @@ fn test_re_init_token_common(db: &str) {
 #[test]
 #[serial]
 fn test_re_init_token_json() {
-    test_re_init_token_common("test_reinit_token.json")
+    let dbpath = format!("{}/{}", TESTDIR, "test_reinit_token.json");
+    test_re_init_token_common(dbpath)
 }
 
 #[test]
 #[serial]
 fn test_re_init_token_sql() {
-    test_re_init_token_common("test_reinit_token.sql")
+    let dbpath = format!("{}/{}", TESTDIR, "test_reinit_token.sql");
+    test_re_init_token_common(dbpath)
 }

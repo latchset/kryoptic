@@ -12,8 +12,9 @@ use crate::error::Result;
 use crate::fips;
 use crate::interface::*;
 use crate::mechanism::Mechanisms;
+use crate::misc::copy_sized_string;
 use crate::object::{Object, ObjectFactories};
-use crate::storage::{json, memory, sqlite, Storage};
+use crate::storage::*;
 use crate::{get_random_data, register_all, sizeof, void_ptr};
 
 use hex;
@@ -49,24 +50,6 @@ fn default_password() -> Vec<u8> {
 #[cfg(not(feature = "fips"))]
 fn default_password() -> Vec<u8> {
     vec![0u8; 0]
-}
-
-fn copy_sized_string(s: &[u8], d: &mut [u8]) {
-    let mut slen = s.len();
-    match s.last() {
-        None => return,
-        Some(c) => {
-            if *c == b'\0' {
-                slen -= 1;
-            }
-        }
-    }
-    if slen >= d.len() {
-        d.copy_from_slice(&s[..d.len()]);
-    } else {
-        d[..slen].copy_from_slice(&s[..slen]);
-        d[slen..].fill(0x20); /* space in ASCII/UTF8 */
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -124,7 +107,7 @@ impl Handles {
 #[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
-    filename: String,
+    filename: Option<String>,
     object_factories: ObjectFactories,
     mechanisms: Mechanisms,
     storage: Box<dyn Storage>,
@@ -135,15 +118,14 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(filename: String) -> Result<Token> {
+    pub fn new(dbtype: &str, dbpath: Option<String>) -> Result<Token> {
         /* when no filename is provided we assume a memory only
          * token that has no backing store */
-        let store = if filename.ends_with(".json") {
-            json::json()
-        } else if filename.ends_with(".sql") {
-            sqlite::sqlite()
-        } else {
-            memory::memory()
+        let store = match dbtype {
+            SQLITEDB => sqlite::sqlite(),
+            JSONDB => json::json(),
+            MEMORYDB => memory::memory(),
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
 
         let mut token: Token = Token {
@@ -167,7 +149,10 @@ impl Token {
                 firmwareVersion: CK_VERSION { major: 0, minor: 0 },
                 utcTime: *b"0000000000000000",
             },
-            filename: filename,
+            filename: match dbpath {
+                Some(s) => Some(s.clone()),
+                None => None,
+            },
             object_factories: ObjectFactories::new(),
             mechanisms: Mechanisms::new(),
             storage: store,
@@ -188,8 +173,8 @@ impl Token {
         /* register mechanisms and factories */
         register_all(&mut token.mechanisms, &mut token.object_factories);
 
-        if token.filename.len() > 0 {
-            match token.storage.open(&token.filename) {
+        if let Some(ref filename) = token.filename {
+            match token.storage.open(filename) {
                 Ok(()) => {
                     token.load_token_info()?;
                     token.info.flags |= CKF_TOKEN_INITIALIZED;
@@ -228,10 +213,6 @@ impl Token {
         } else {
             self.info.flags &= !CKF_RESTORE_KEY_NOT_NEEDED;
         }
-    }
-
-    pub fn get_filename(&self) -> &String {
-        &self.filename
     }
 
     pub fn is_initialized(&self) -> bool {
