@@ -183,14 +183,14 @@ macro_rules! some_or_err {
         if let Some(ref x) = $action {
             x
         } else {
-            return Err(interface::CKR_GENERAL_ERROR)?;
+            return Err(CKR_GENERAL_ERROR)?;
         }
     };
     (mut $action:expr) => {
         if let Some(ref mut x) = $action {
             x
         } else {
-            return Err(interface::CKR_GENERAL_ERROR)?;
+            return Err(CKR_GENERAL_ERROR)?;
         }
     };
 }

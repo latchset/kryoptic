@@ -1,26 +1,22 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::cast_params;
-use super::error;
-use super::hmac;
-use super::interface;
-use super::mechanism;
-use super::object;
-
-use attribute::{from_bool, from_bytes, from_ulong, CkAttrs};
-use error::Result;
-use interface::*;
-use mechanism::*;
-use object::{Object, ObjectFactories};
-
-use super::bytes_to_vec;
-
 use std::fmt::Debug;
 
+use crate::attribute::{from_bool, from_bytes, from_ulong, CkAttrs};
+use crate::error::Result;
+use crate::hmac;
+use crate::interface::*;
+use crate::mechanism::{Mechanism, Mechanisms};
+use crate::object::{default_key_attributes, Object, ObjectFactories};
+
+use crate::{bytes_to_vec, cast_params};
+
 #[cfg(not(feature = "fips"))]
-use std::mem::swap;
+use crate::native::pbkdf2::pbkdf2_derive;
+
+#[cfg(feature = "fips")]
+use crate::ossl::pbkdf2::pbkdf2_derive;
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     PBKDF2Mechanism::register_mechanisms(mechs);
@@ -60,6 +56,14 @@ impl PBKDF2Mechanism {
     }
 }
 
+/* PKCS#11 in their infinite wisdom decided to implement this
+ * derivation as a mechanism key gen operation.
+ * Key Gen in Kryoptic does not go through an Operation trait,
+ * but we still want to be able to do both openssl and native
+ * backends, so we encapsulate the derivation function in a
+ * small function and make implementations in the relevant
+ * files for FIPS/non-FIPS */
+
 impl Mechanism for PBKDF2Mechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
@@ -87,35 +91,33 @@ impl Mechanism for PBKDF2Mechanism {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let pbkdf2 = PBKDF2 {
-            prf: match params.prf {
-                CKP_PKCS5_PBKD2_HMAC_SHA1 => CKM_SHA_1_HMAC,
-                CKP_PKCS5_PBKD2_HMAC_SHA224 => CKM_SHA224_HMAC,
-                CKP_PKCS5_PBKD2_HMAC_SHA256 => CKM_SHA256_HMAC,
-                CKP_PKCS5_PBKD2_HMAC_SHA384 => CKM_SHA384_HMAC,
-                CKP_PKCS5_PBKD2_HMAC_SHA512 => CKM_SHA512_HMAC,
-                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-            },
-            pass: self.mock_password_object(bytes_to_vec!(
-                params.pPassword,
-                params.ulPasswordLen
-            ))?,
-            salt: match params.saltSource {
-                CKZ_SALT_SPECIFIED => {
-                    if params.pSaltSourceData == std::ptr::null_mut()
-                        || params.ulSaltSourceDataLen == 0
-                    {
-                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
-                    }
-                    bytes_to_vec!(
-                        params.pSaltSourceData,
-                        params.ulSaltSourceDataLen
-                    )
-                }
-                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-            },
-            iter: usize::try_from(params.iterations)?,
+        let prf = match params.prf {
+            CKP_PKCS5_PBKD2_HMAC_SHA1 => CKM_SHA_1_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA224 => CKM_SHA224_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA256 => CKM_SHA256_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA384 => CKM_SHA384_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA512 => CKM_SHA512_HMAC,
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
+        let pass = self.mock_password_object(bytes_to_vec!(
+            params.pPassword,
+            params.ulPasswordLen
+        ))?;
+        let salt = match params.saltSource {
+            CKZ_SALT_SPECIFIED => {
+                if params.pSaltSourceData == std::ptr::null_mut()
+                    || params.ulSaltSourceDataLen == 0
+                {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
+                bytes_to_vec!(
+                    params.pSaltSourceData,
+                    params.ulSaltSourceDataLen
+                )
+            }
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+        };
+        let iter = usize::try_from(params.iterations)?;
 
         /* check early that we have key class and type defined */
         let factory =
@@ -124,7 +126,7 @@ impl Mechanism for PBKDF2Mechanism {
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => usize::try_from(a.to_ulong()?)?,
             None => {
-                let max = hmac::hmac_size(pbkdf2.prf);
+                let max = hmac::hmac_size(prf);
                 if max == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
                     return Err(CKR_MECHANISM_INVALID)?;
                 }
@@ -135,98 +137,14 @@ impl Mechanism for PBKDF2Mechanism {
             }
         };
 
-        let dkm = pbkdf2.derive(mechanisms, keylen)?;
+        let dkm = pbkdf2_derive(mechanisms, prf, &pass, &salt, iter, keylen)?;
 
         let mut tmpl = CkAttrs::from(template);
         tmpl.add_vec(CKA_VALUE, dkm)?;
         tmpl.zeroize = true;
 
         let mut key = factory.create(tmpl.as_slice())?;
-        object::default_key_attributes(&mut key, mech.mechanism)?;
+        default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
-    }
-}
-
-/* PKCS#11 in their infinite wisdom decided to implement this
- * derivation as a mechanism key gen operation.
- * Key Gen in Kryoptic does not go through an Operation trait,
- * but we still want to be able to do both openssl and native
- * backends, so we encapsulate the derivation function in a
- * small structure and make implementations of the object in
- * the relevant files for FIPS/non-FIPS */
-
-#[derive(Debug)]
-struct PBKDF2 {
-    prf: CK_MECHANISM_TYPE,
-    pass: Object,
-    salt: Vec<u8>,
-    iter: usize,
-}
-
-#[cfg(feature = "fips")]
-include!("ossl/pbkdf2.rs");
-
-/* https://www.rfc-editor.org/rfc/rfc8018#section-5.2 */
-#[cfg(not(feature = "fips"))]
-impl PBKDF2 {
-    fn prf_fn(
-        &self,
-        mech: &Box<dyn Mechanism>,
-        i: &[u8],
-        o: &mut [u8],
-    ) -> Result<()> {
-        mech.mac_new(
-            &CK_MECHANISM {
-                mechanism: self.prf,
-                pParameter: std::ptr::null_mut(),
-                ulParameterLen: 0,
-            },
-            &self.pass,
-            CKF_DERIVE,
-        )?
-        .mac(i, o)
-    }
-
-    fn derive(&self, mechanisms: &Mechanisms, dklen: usize) -> Result<Vec<u8>> {
-        let hlen = hmac::hmac_size(self.prf);
-        if hlen == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
-            return Err(CKR_MECHANISM_INVALID)?;
-        }
-
-        if dklen > (hlen * usize::try_from(u32::MAX)?) {
-            return Err(CKR_KEY_SIZE_RANGE)?;
-        }
-
-        let l = (dklen + hlen - 1) / hlen;
-
-        let mut dkm = vec![0u8; dklen];
-
-        let mech = mechanisms.get(self.prf)?;
-
-        for b in 0..l {
-            let i = u32::try_from(b + 1)?;
-            let mut t_i = vec![0u8; hlen];
-            let mut u_out = vec![0u8; hlen];
-            let mut u_in = self.salt.clone();
-            u_in.extend_from_slice(&i.to_be_bytes());
-
-            for _ in 0..self.iter {
-                self.prf_fn(mech, u_in.as_slice(), u_out.as_mut_slice())?;
-                t_i.iter_mut().zip(u_out.iter()).for_each(|(a, b)| *a ^= *b);
-                if u_in.len() != u_out.len() {
-                    u_in.resize(u_out.len(), 0);
-                }
-                swap(&mut u_in, &mut u_out);
-            }
-
-            let t = b * hlen;
-            let mut r = dklen - t;
-            if r > hlen {
-                r = hlen
-            };
-            dkm[t..(t + r)].copy_from_slice(&t_i[0..r])
-        }
-
-        Ok(dkm)
     }
 }

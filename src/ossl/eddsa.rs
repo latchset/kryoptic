@@ -1,73 +1,64 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-#[cfg(feature = "fips")]
-use {super::fips, fips::*};
-
-#[cfg(not(feature = "fips"))]
-use {super::ossl, ossl::*};
-
-use super::mechanism;
-use super::{cast_params, some_or_err};
-
-use mechanism::*;
-
 use std::ffi::{c_char, c_int};
 
-// TODO could probably reuse the ECC one as its the same?
-pub fn eddsa_import(obj: &mut Object) -> Result<()> {
-    bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
-    bytes_attr_not_empty!(obj; CKA_VALUE);
-    Ok(())
-}
+use crate::attribute;
+use crate::ecc_misc::*;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::object::Object;
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
+use crate::{bytes_to_vec, cast_params, some_or_err};
+
+#[cfg(feature = "fips")]
+use crate::ossl::fips::*;
+
+#[cfg(not(feature = "fips"))]
+use crate::ossl::get_libctx;
 
 /* confusingly enough, this is not EC for FIPS-level operations  */
 #[cfg(feature = "fips")]
 static ECDSA_NAME: &[u8; 6] = b"EDDSA\0";
 
-#[derive(Debug)]
-struct EddsaParams {
-    ph_flag: Option<bool>,
-    context_data: Option<Vec<u8>>,
-}
-
-#[cfg(not(feature = "fips"))]
-#[derive(Debug)]
-struct EddsaOperation {
-    mech: CK_MECHANISM_TYPE,
-    output_len: usize,
-    public_key: Option<EvpPkey>,
-    private_key: Option<EvpPkey>,
-    params: EddsaParams,
-    is448: bool,
-    data: Vec<u8>,
-    finalized: bool,
-    in_use: bool,
-    sigctx: Option<EvpMdCtx>,
-}
-
-#[cfg(feature = "fips")]
-#[derive(Debug)]
-struct EddsaOperation {
-    output_len: usize,
-    public_key: Option<EvpPkey>,
-    private_key: Option<EvpPkey>,
-    params: EddsaParams,
-    is448: bool,
-    data: Vec<u8>,
-    finalized: bool,
-    in_use: bool,
-    sigctx: Option<ProviderSignatureCtx>,
-}
-
 static OSSL_ED25519: &[u8; 8] = b"ED25519\0";
 static OSSL_ED448: &[u8; 6] = b"ED448\0";
 
-fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
-    match make_bits_from_ec_params(key) {
-        Ok(BITS_ED25519) => Ok(OSSL_ED25519),
-        Ok(BITS_ED448) => Ok(OSSL_ED448),
-        _ => return Err(CKR_GENERAL_ERROR)?,
+pub const BITS_ED25519: usize = 255;
+pub const BITS_ED448: usize = 448;
+
+// ASN.1 encoding of the OID
+const OID_ED25519: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 112);
+const OID_ED448: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 113);
+
+// ASN.1 encoding of the curve name
+const STRING_ED25519: &[u8] = &[
+    0x13, 0x0c, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x32, 0x35, 0x35,
+    0x31, 0x39,
+];
+const STRING_ED448: &[u8] = &[
+    0x13, 0x0a, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x34, 0x34, 0x38,
+];
+
+fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
+    match oid {
+        OID_ED25519 => Ok(BITS_ED25519),
+        OID_ED448 => Ok(BITS_ED448),
+        _ => Err(CKR_GENERAL_ERROR)?,
+    }
+}
+
+fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
+    let asn1_name = match asn1::write_single(&name) {
+        Ok(r) => r,
+        Err(_) => return Err(CKR_GENERAL_ERROR)?,
+    };
+    match asn1_name.as_slice() {
+        STRING_ED25519 => Ok(BITS_ED25519),
+        STRING_ED448 => Ok(BITS_ED448),
+        _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
 
@@ -85,6 +76,14 @@ fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
         Err(_) => return Err(CKR_GENERAL_ERROR)?,
     };
     Ok(bits)
+}
+
+fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
+    match make_bits_from_ec_params(key) {
+        Ok(BITS_ED25519) => Ok(OSSL_ED25519),
+        Ok(BITS_ED448) => Ok(OSSL_ED448),
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    }
 }
 
 fn make_output_length_from_obj(key: &Object) -> Result<usize> {
@@ -202,36 +201,31 @@ macro_rules! get_sig_ctx {
     };
 }
 
+#[derive(Debug)]
+struct EddsaParams {
+    ph_flag: Option<bool>,
+    context_data: Option<Vec<u8>>,
+}
+
+#[derive(Debug)]
+pub struct EddsaOperation {
+    mech: CK_MECHANISM_TYPE,
+    output_len: usize,
+    public_key: Option<EvpPkey>,
+    private_key: Option<EvpPkey>,
+    params: EddsaParams,
+    is448: bool,
+    data: Vec<u8>,
+    finalized: bool,
+    in_use: bool,
+    #[cfg(not(feature = "fips"))]
+    sigctx: Option<EvpMdCtx>,
+    #[cfg(feature = "fips")]
+    sigctx: Option<ProviderSignatureCtx>,
+}
+
 impl EddsaOperation {
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_EDDSA,
-            Box::new(EddsaMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-
-        mechs.add_mechanism(
-            CKM_EC_EDWARDS_KEY_PAIR_GEN,
-            Box::new(EddsaMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    flags: CKF_GENERATE_KEY_PAIR,
-                },
-            }),
-        );
-    }
-
-    fn sign_new(
+    pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
@@ -251,7 +245,7 @@ impl EddsaOperation {
         })
     }
 
-    fn verify_new(
+    pub fn verify_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
@@ -271,7 +265,7 @@ impl EddsaOperation {
         })
     }
 
-    fn generate_keypair(
+    pub fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {

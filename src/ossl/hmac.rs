@@ -1,10 +1,21 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use {super::fips, fips::*};
+use std::fmt::Debug;
+
+use crate::error::Result;
+use crate::hmac::*;
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
+use crate::ossl::fips::*;
+
+use constant_time_eq::constant_time_eq;
+use zeroize::Zeroize;
 
 #[derive(Debug)]
-struct HMACOperation {
+pub struct HMACOperation {
     mech: CK_MECHANISM_TYPE,
     finalized: bool,
     in_use: bool,
@@ -12,12 +23,11 @@ struct HMACOperation {
     maclen: usize,
     key: HmacKey,
     ctx: EvpMacCtx,
-    #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
 
 impl HMACOperation {
-    fn new(
+    pub fn new(
         mech: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
@@ -50,7 +60,6 @@ impl HMACOperation {
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
             key: key,
             ctx: ctx,
-            #[cfg(feature = "fips")]
             fips_approved: None,
         })
     }
@@ -111,11 +120,7 @@ impl HMACOperation {
         output.copy_from_slice(&buf[..output.len()]);
         buf.zeroize();
 
-        #[cfg(feature = "fips")]
-        {
-            self.fips_approved =
-                fips::indicators::check_mac_fips_indicators(&mut self.ctx)?;
-        }
+        self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
         Ok(())
     }
 
@@ -133,10 +138,88 @@ impl HMACOperation {
         }
         self.finalized = false;
         self.in_use = false;
-        #[cfg(feature = "fips")]
-        {
-            self.fips_approved = None;
+        self.fips_approved = None;
+        Ok(())
+    }
+}
+
+impl MechOperation for HMACOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+    fn reset(&mut self) -> Result<()> {
+        self.reinit()
+    }
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
+    }
+}
+
+impl Mac for HMACOperation {
+    fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.finalize(mac)
+    }
+
+    fn mac_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn mac_final(&mut self, mac: &mut [u8]) -> Result<()> {
+        self.finalize(mac)
+    }
+
+    fn mac_len(&self) -> Result<usize> {
+        Ok(self.outputlen)
+    }
+}
+
+impl Sign for HMACOperation {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.finalize(signature)
+    }
+
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
+        self.finalize(signature)
+    }
+
+    fn signature_len(&self) -> Result<usize> {
+        Ok(self.outputlen)
+    }
+}
+
+impl Verify for HMACOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.verify_final(signature)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+        let mut verify: Vec<u8> = vec![0; self.outputlen];
+        self.finalize(verify.as_mut_slice())?;
+        if !constant_time_eq(&verify, signature) {
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
         Ok(())
+    }
+
+    fn signature_len(&self) -> Result<usize> {
+        Ok(self.outputlen)
     }
 }

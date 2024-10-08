@@ -1,17 +1,18 @@
-use super::error;
-use super::interface;
-use super::mechanism;
-use error::Result;
-use interface::*;
-use mechanism::*;
-use std::ffi::c_char;
-use std::fmt::Debug;
+// Copyright 2024 Simo Sorce
+// See LICENSE.txt file for terms
 
-#[cfg(feature = "fips")]
-use {super::fips, fips::*};
+use std::ffi::c_char;
+
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::DRBG;
+use crate::ossl::bindings::*;
 
 #[cfg(not(feature = "fips"))]
-use {super::ossl, ossl::*};
+use crate::ossl::get_libctx;
+
+#[cfg(feature = "fips")]
+use crate::ossl::fips::*;
 
 #[derive(Debug)]
 pub struct HmacSha256Drbg {

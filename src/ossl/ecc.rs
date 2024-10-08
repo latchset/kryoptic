@@ -1,57 +1,34 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-#[cfg(feature = "fips")]
-use {super::fips, fips::*};
-
-#[cfg(not(feature = "fips"))]
-use {super::ossl, ossl::*};
-
-use super::mechanism;
-use super::some_or_err;
-
-use attribute::CkAttrs;
-use kasn1::DerEncBigUint;
-use mechanism::*;
-
 use core::ffi::{c_char, c_int, c_uint};
 use std::borrow::Cow;
-use zeroize::Zeroize;
 
-pub fn ecc_import(obj: &mut Object) -> Result<()> {
-    bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
-    bytes_attr_not_empty!(obj; CKA_VALUE);
-    Ok(())
-}
+use crate::attribute;
+use crate::attribute::CkAttrs;
+use crate::ecc::*;
+use crate::ecc_misc::*;
+use crate::error::Result;
+use crate::interface::*;
+use crate::kasn1::DerEncBigUint;
+use crate::mechanism::*;
+use crate::object::{default_key_attributes, Object, ObjectFactories};
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
+use crate::{bytes_to_vec, some_or_err};
+
+#[cfg(feature = "fips")]
+use crate::ossl::fips::*;
+
+#[cfg(not(feature = "fips"))]
+use crate::ossl::get_libctx;
+
+use zeroize::Zeroize;
 
 /* confusingly enough, this is not EC for FIPS-level operations  */
 #[cfg(feature = "fips")]
 static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
 static EC_NAME: &[u8; 3] = b"EC\0";
-
-#[cfg(not(feature = "fips"))]
-#[derive(Debug)]
-struct EccOperation {
-    mech: CK_MECHANISM_TYPE,
-    output_len: usize,
-    public_key: Option<EvpPkey>,
-    private_key: Option<EvpPkey>,
-    finalized: bool,
-    in_use: bool,
-    sigctx: Option<EvpMdCtx>,
-}
-
-#[cfg(feature = "fips")]
-#[derive(Debug)]
-struct EccOperation {
-    mech: CK_MECHANISM_TYPE,
-    output_len: usize,
-    public_key: Option<EvpPkey>,
-    private_key: Option<EvpPkey>,
-    finalized: bool,
-    in_use: bool,
-    sigctx: Option<ProviderSignatureCtx>,
-}
 
 fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
@@ -221,18 +198,30 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
     Ok(ossl_sign)
 }
 
+#[derive(Debug)]
+pub struct EccOperation {
+    mech: CK_MECHANISM_TYPE,
+    output_len: usize,
+    public_key: Option<EvpPkey>,
+    private_key: Option<EvpPkey>,
+    finalized: bool,
+    in_use: bool,
+    #[cfg(not(feature = "fips"))]
+    sigctx: Option<EvpMdCtx>,
+    #[cfg(feature = "fips")]
+    sigctx: Option<ProviderSignatureCtx>,
+}
+
 impl EccOperation {
     fn new_mechanism() -> Box<dyn Mechanism> {
-        Box::new(EccMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-        })
+        Box::new(EccMechanism::new(
+            CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+            CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
+            CKF_SIGN | CKF_VERIFY,
+        ))
     }
 
-    fn register_mechanisms(mechs: &mut Mechanisms) {
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[
             CKM_ECDSA,
             CKM_ECDSA_SHA1,
@@ -250,17 +239,15 @@ impl EccOperation {
 
         mechs.add_mechanism(
             CKM_EC_KEY_PAIR_GEN,
-            Box::new(EccMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                    flags: CKF_GENERATE_KEY_PAIR,
-                },
-            }),
+            Box::new(EccMechanism::new(
+                CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+                CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
+                CKF_GENERATE_KEY_PAIR,
+            )),
         );
     }
 
-    fn sign_new(
+    pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
@@ -282,7 +269,7 @@ impl EccOperation {
         })
     }
 
-    fn verify_new(
+    pub fn verify_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
@@ -304,7 +291,7 @@ impl EccOperation {
         })
     }
 
-    fn generate_keypair(
+    pub fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
@@ -669,6 +656,67 @@ fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     }
 }
 
+#[derive(Debug)]
+pub struct ECDHOperation {
+    mech: CK_MECHANISM_TYPE,
+    kdf: CK_EC_KDF_TYPE,
+    public: Vec<u8>,
+    shared: Vec<u8>,
+    finalized: bool,
+}
+
+impl ECDHOperation {
+    fn new_mechanism() -> Box<dyn Mechanism> {
+        Box::new(EccMechanism::new(
+            CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+            CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
+            CKF_DERIVE,
+        ))
+    }
+
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
+        for ckm in &[CKM_ECDH1_DERIVE, CKM_ECDH1_COFACTOR_DERIVE] {
+            mechs.add_mechanism(*ckm, Self::new_mechanism());
+        }
+    }
+
+    pub fn derive_new<'a>(
+        mechanism: CK_MECHANISM_TYPE,
+        params: CK_ECDH1_DERIVE_PARAMS,
+    ) -> Result<ECDHOperation> {
+        if params.kdf == CKD_NULL {
+            if params.pSharedData != std::ptr::null_mut()
+                || params.ulSharedDataLen != 0
+            {
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+            }
+        }
+        if params.pPublicData == std::ptr::null_mut()
+            || params.ulPublicDataLen == 0
+        {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+
+        Ok(ECDHOperation {
+            finalized: false,
+            mech: mechanism,
+            kdf: params.kdf,
+            shared: bytes_to_vec!(params.pSharedData, params.ulSharedDataLen),
+            public: bytes_to_vec!(params.pPublicData, params.ulPublicDataLen),
+        })
+    }
+}
+
+impl MechOperation for ECDHOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+}
+
 impl Derive for ECDHOperation {
     fn derive(
         &mut self,
@@ -818,7 +866,7 @@ impl Derive for ECDHOperation {
         tmpl.zeroize = true;
         let mut obj = factory.create(tmpl.as_slice())?;
 
-        object::default_key_attributes(&mut obj, self.mech)?;
+        default_key_attributes(&mut obj, self.mech)?;
         Ok(vec![obj])
     }
 }

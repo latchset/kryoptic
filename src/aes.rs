@@ -1,32 +1,27 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::error;
-use super::interface;
-use super::object;
-use super::{attr_element, cast_params};
+use std::fmt::Debug;
 
-use attribute::{from_bool, from_bytes, from_ulong};
-use error::Result;
-use interface::*;
-use object::{
-    CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
-    ObjectFactory, ObjectType, SecretKeyFactory,
-};
-
-use super::mechanism;
-use mechanism::*;
+use crate::attribute;
+use crate::attribute::{from_bool, from_bytes, from_ulong};
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::object::*;
+use crate::ossl::aes::*;
+use crate::{attr_element, cast_params};
 
 use once_cell::sync::Lazy;
-use std::fmt::Debug;
+
+use zeroize::Zeroize;
 
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
 pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
 pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
 pub const AES_BLOCK_SIZE: usize = 16;
 
-fn check_key_len(len: usize) -> Result<()> {
+pub(crate) fn check_key_len(len: usize) -> Result<()> {
     match len {
         16 | 24 | 32 => Ok(()),
         _ => Err(CKR_KEY_SIZE_RANGE)?,
@@ -176,8 +171,20 @@ static AES_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(AesKeyFactory::new()));
 
 #[derive(Debug)]
-struct AesMechanism {
+pub(crate) struct AesMechanism {
     info: CK_MECHANISM_INFO,
+}
+
+impl AesMechanism {
+    pub fn new(min: CK_ULONG, max: CK_ULONG, flags: CK_FLAGS) -> AesMechanism {
+        AesMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: min,
+                ulMaxKeySize: max,
+                flags: flags,
+            },
+        }
+    }
 }
 
 impl Mechanism for AesMechanism {
@@ -238,8 +245,8 @@ impl Mechanism for AesMechanism {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
-        object::default_secret_key_generate(&mut key)?;
-        object::default_key_attributes(&mut key, mech.mechanism)?;
+        default_secret_key_generate(&mut key)?;
+        default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
     }
 
@@ -381,25 +388,21 @@ impl AesKDFOperation<'_> {
         if mechs.get(CKM_AES_ECB).is_ok() {
             mechs.add_mechanism(
                 CKM_AES_ECB_ENCRYPT_DATA,
-                Box::new(AesMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: MIN_AES_SIZE_BYTES as CK_ULONG,
-                        ulMaxKeySize: MAX_AES_SIZE_BYTES as CK_ULONG,
-                        flags: CKF_DERIVE,
-                    },
-                }),
+                Box::new(AesMechanism::new(
+                    CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
+                    CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
+                    CKF_DERIVE,
+                )),
             );
         }
         if mechs.get(CKM_AES_CBC).is_ok() {
             mechs.add_mechanism(
                 CKM_AES_CBC_ENCRYPT_DATA,
-                Box::new(AesMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: MIN_AES_SIZE_BYTES as CK_ULONG,
-                        ulMaxKeySize: MAX_AES_SIZE_BYTES as CK_ULONG,
-                        flags: CKF_DERIVE,
-                    },
-                }),
+                Box::new(AesMechanism::new(
+                    CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
+                    CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
+                    CKF_DERIVE,
+                )),
             );
         }
     }
@@ -520,5 +523,3 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     ot.add_factory(ObjectType::new(CKO_SECRET_KEY, CKK_AES), &AES_KEY_FACTORY);
 }
-
-include!("ossl/aes.rs");

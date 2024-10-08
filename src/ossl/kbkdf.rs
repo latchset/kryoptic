@@ -3,8 +3,22 @@
 
 use std::ffi::c_int;
 
+use crate::attribute::from_bytes;
+use crate::error;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::{Derive, MechOperation, Mechanisms};
+use crate::object::{Object, ObjectFactories};
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
+use crate::ossl::fips::*;
+use crate::sp800_108::*;
+use crate::{bytes_to_slice, bytes_to_vec, map_err};
+
 const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
 const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";
+const MAC_NAME_CMAC: &[u8; 5] = b"CMAC\0";
+const MAC_NAME_HMAC: &[u8; 5] = b"HMAC\0";
 
 fn prep_counter_kdf<'a>(
     sparams: &'a Vec<Sp800Params>,
@@ -270,6 +284,89 @@ fn key_to_segment_size(key: usize, segment: usize) -> usize {
     ((key + segment - 1) / segment) * segment
 }
 
+#[derive(Debug)]
+pub struct Sp800Operation {
+    mech: CK_MECHANISM_TYPE,
+    prf: CK_MECHANISM_TYPE,
+    finalized: bool,
+    params: Vec<Sp800Params>,
+    iv: Vec<u8>,
+    addl_drv_keys: Vec<CK_DERIVED_KEY>,
+    fips_approved: Option<bool>,
+}
+
+unsafe impl Send for Sp800Operation {}
+unsafe impl Sync for Sp800Operation {}
+
+impl Sp800Operation {
+    pub fn counter_kdf_new(
+        params: CK_SP800_108_KDF_PARAMS,
+    ) -> Result<Sp800Operation> {
+        let data_params = bytes_to_slice!(
+            params.pDataParams,
+            params.ulNumberOfDataParams,
+            CK_PRF_DATA_PARAM
+        );
+        let addl_drv_keys = bytes_to_slice!(
+            params.pAdditionalDerivedKeys,
+            params.ulAdditionalDerivedKeys,
+            CK_DERIVED_KEY
+        );
+        Ok(Sp800Operation {
+            mech: CKM_SP800_108_COUNTER_KDF,
+            prf: params.prfType,
+            finalized: false,
+            params: Sp800Params::parse_data_params(&data_params)?,
+            iv: Vec::new(),
+            addl_drv_keys: addl_drv_keys.to_vec(),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
+        })
+    }
+
+    pub fn feedback_kdf_new(
+        params: CK_SP800_108_FEEDBACK_KDF_PARAMS,
+    ) -> Result<Sp800Operation> {
+        let data_params = bytes_to_slice!(
+            params.pDataParams,
+            params.ulNumberOfDataParams,
+            CK_PRF_DATA_PARAM
+        );
+        let addl_drv_keys = bytes_to_slice!(
+            params.pAdditionalDerivedKeys,
+            params.ulAdditionalDerivedKeys,
+            CK_DERIVED_KEY
+        );
+        let iv = if params.pIV != std::ptr::null_mut() && params.ulIVLen != 0 {
+            bytes_to_vec!(params.pIV, params.ulIVLen)
+        } else if params.pIV == std::ptr::null_mut() && params.ulIVLen == 0 {
+            Vec::new()
+        } else {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        };
+        Ok(Sp800Operation {
+            mech: CKM_SP800_108_FEEDBACK_KDF,
+            prf: params.prfType,
+            finalized: false,
+            params: Sp800Params::parse_data_params(&data_params)?,
+            iv: iv,
+            addl_drv_keys: addl_drv_keys.to_vec(),
+            #[cfg(feature = "fips")]
+            fips_approved: None,
+        })
+    }
+}
+
+impl MechOperation for Sp800Operation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+}
+
 impl Derive for Sp800Operation {
     fn derive(
         &mut self,
@@ -283,7 +380,7 @@ impl Derive for Sp800Operation {
         }
         self.finalized = true;
 
-        Self::verify_prf_key(self.prf, key)?;
+        verify_prf_key(self.prf, key)?;
 
         /* Ok so this stuff in the PKCS#11 spec has an insane level
          * of flexibility, fundamentally each parameter correspond to
@@ -441,8 +538,7 @@ impl Derive for Sp800Operation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        self.fips_approved =
-            fips::indicators::check_kdf_fips_indicators(&mut kctx)?;
+        self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
 
         let mut cursor = 0;
         for key in &mut keys {

@@ -1,28 +1,24 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-#[cfg(feature = "fips")]
-use super::fips;
+use core::ffi::{c_char, c_int, c_uint};
 
-use super::hash;
-use super::mechanism;
-use super::{bytes_to_vec, cast_params, some_or_err};
-
-#[cfg(not(feature = "fips"))]
-use super::ossl;
-
-#[cfg(feature = "fips")]
-use fips::*;
-
-use hash::{hash_size, INVALID_HASH_SIZE};
-use mechanism::*;
+use crate::attribute;
+use crate::error::{Error, Result};
+use crate::hash::{hash_size, INVALID_HASH_SIZE};
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::object::Object;
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
+use crate::{bytes_to_vec, cast_params, some_or_err};
 
 #[cfg(not(feature = "fips"))]
-use ossl::*;
+use crate::ossl::get_libctx;
 
-use std::os::raw::c_char;
-use std::os::raw::c_int;
-use std::os::raw::c_uint;
+#[cfg(feature = "fips")]
+use crate::ossl::fips::*;
+
 use zeroize::Zeroize;
 
 #[cfg(not(feature = "fips"))]
@@ -34,40 +30,6 @@ pub const MAX_RSA_SIZE_BITS: usize = 16536;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
 static RSA_NAME: &[u8; 4] = b"RSA\0";
-
-pub fn rsa_import(obj: &mut Object) -> Result<()> {
-    let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
-        Ok(m) => m,
-        Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
-    };
-    match obj.get_attr_as_ulong(CKA_MODULUS_BITS) {
-        Ok(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-        Err(e) => {
-            if !e.attr_not_found() {
-                return Err(e);
-            }
-        }
-    }
-    if modulus.len() < MIN_RSA_SIZE_BYTES {
-        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-    }
-    match obj.get_attr_as_ulong(CKA_CLASS) {
-        Ok(c) => match c {
-            CKO_PUBLIC_KEY => {
-                bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
-            }
-            CKO_PRIVATE_KEY => {
-                bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
-                bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
-                /* The FIPS module can handle missing p,q,a,b,c */
-            }
-            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-        },
-        Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
-    }
-
-    Ok(())
-}
 
 fn object_to_rsa_public_key(key: &Object) -> Result<EvpPkey> {
     let mut params = OsslParam::with_capacity(2);
@@ -240,7 +202,7 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> Result<RsaOaepParams> {
 }
 
 #[derive(Debug)]
-struct RsaPKCSOperation {
+pub struct RsaPKCSOperation {
     mech: CK_MECHANISM_TYPE,
     max_input: usize,
     output_len: usize,
@@ -259,69 +221,6 @@ struct RsaPKCSOperation {
 }
 
 impl RsaPKCSOperation {
-    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-        Box::new(RsaPKCSMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
-                flags: flags,
-            },
-        })
-    }
-
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_RSA_PKCS,
-            Self::new_mechanism(
-                CKF_ENCRYPT
-                    | CKF_DECRYPT
-                    | CKF_SIGN
-                    | CKF_VERIFY
-                    | CKF_WRAP
-                    | CKF_UNWRAP,
-            ),
-        );
-
-        for ckm in &[
-            CKM_SHA1_RSA_PKCS,
-            CKM_SHA224_RSA_PKCS,
-            CKM_SHA256_RSA_PKCS,
-            CKM_SHA384_RSA_PKCS,
-            CKM_SHA512_RSA_PKCS,
-            CKM_SHA3_224_RSA_PKCS,
-            CKM_SHA3_256_RSA_PKCS,
-            CKM_SHA3_384_RSA_PKCS,
-            CKM_SHA3_512_RSA_PKCS,
-            CKM_RSA_PKCS_PSS,
-            CKM_SHA1_RSA_PKCS_PSS,
-            CKM_SHA224_RSA_PKCS_PSS,
-            CKM_SHA256_RSA_PKCS_PSS,
-            CKM_SHA384_RSA_PKCS_PSS,
-            CKM_SHA512_RSA_PKCS_PSS,
-            CKM_SHA3_224_RSA_PKCS_PSS,
-            CKM_SHA3_256_RSA_PKCS_PSS,
-            CKM_SHA3_384_RSA_PKCS_PSS,
-            CKM_SHA3_512_RSA_PKCS_PSS,
-        ] {
-            mechs.add_mechanism(
-                *ckm,
-                Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
-            );
-        }
-
-        mechs.add_mechanism(
-            CKM_RSA_PKCS_KEY_PAIR_GEN,
-            Self::new_mechanism(CKF_GENERATE_KEY_PAIR),
-        );
-
-        mechs.add_mechanism(
-            CKM_RSA_PKCS_OAEP,
-            Self::new_mechanism(
-                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-            ),
-        );
-    }
-
     fn hash_len(hash: CK_MECHANISM_TYPE) -> Result<usize> {
         match hash_size(hash) {
             INVALID_HASH_SIZE => Err(CKR_MECHANISM_INVALID)?,
@@ -344,7 +243,7 @@ impl RsaPKCSOperation {
         }
     }
 
-    fn encrypt_new(
+    pub fn encrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
         info: &CK_MECHANISM_INFO,
@@ -377,7 +276,7 @@ impl RsaPKCSOperation {
         })
     }
 
-    fn decrypt_new(
+    pub fn decrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
         info: &CK_MECHANISM_INFO,
@@ -410,7 +309,7 @@ impl RsaPKCSOperation {
         })
     }
 
-    fn sign_new(
+    pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
         info: &CK_MECHANISM_INFO,
@@ -450,7 +349,7 @@ impl RsaPKCSOperation {
         })
     }
 
-    fn verify_new(
+    pub fn verify_new(
         mech: &CK_MECHANISM,
         key: &Object,
         info: &CK_MECHANISM_INFO,
@@ -489,7 +388,7 @@ impl RsaPKCSOperation {
         })
     }
 
-    fn generate_keypair(
+    pub fn generate_keypair(
         exponent: Vec<u8>,
         bits: usize,
         pubkey: &mut Object,
@@ -560,7 +459,7 @@ impl RsaPKCSOperation {
         Ok(())
     }
 
-    fn wrap(
+    pub fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         mut keydata: Vec<u8>,
@@ -579,7 +478,7 @@ impl RsaPKCSOperation {
         result
     }
 
-    fn unwrap(
+    pub fn unwrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         data: &[u8],
@@ -769,7 +668,7 @@ impl Encryption for RsaPKCSOperation {
             return Ok(outlen);
         } else {
             if cipher.len() < outlen {
-                return Err(error::Error::buf_too_small(outlen));
+                return Err(Error::buf_too_small(outlen));
             }
         }
 

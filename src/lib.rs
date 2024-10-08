@@ -40,12 +40,10 @@ use token::Token;
 /* algorithms and ciphers */
 #[cfg(feature = "fips")]
 mod fips;
-
-#[cfg(not(feature = "fips"))]
+mod native;
 mod ossl;
 
 mod aes;
-mod drbg;
 mod ecc;
 mod ecc_misc;
 #[cfg(not(feature = "fips"))]
@@ -124,7 +122,7 @@ struct State {
 impl State {
     fn initialize(&mut self) {
         #[cfg(feature = "fips")]
-        fips::init();
+        ossl::fips::init();
 
         self.slots.clear();
         self.sessionmap.clear();
@@ -2907,12 +2905,12 @@ pub extern "C" fn C_GetInterface(
 #[cfg(feature = "fips")]
 #[no_mangle]
 pub extern "C" fn OSSL_provider_init(
-    handle: *const fips::OSSL_CORE_HANDLE,
-    in_: *const fips::OSSL_DISPATCH,
-    out: *mut *const fips::OSSL_DISPATCH,
-    provctx: *mut *mut ::std::os::raw::c_void,
-) -> ::std::os::raw::c_int {
-    unsafe { fips::OSSL_provider_init_int(handle, in_, out, provctx) }
+    handle: *const ossl::bindings::OSSL_CORE_HANDLE,
+    in_: *const ossl::bindings::OSSL_DISPATCH,
+    out: *mut *const ossl::bindings::OSSL_DISPATCH,
+    provctx: *mut *mut ::std::ffi::c_void,
+) -> ::std::ffi::c_int {
+    unsafe { ossl::bindings::OSSL_provider_init_int(handle, in_, out, provctx) }
 }
 
 #[cfg(test)]

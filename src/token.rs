@@ -34,7 +34,7 @@ use storage::Storage;
 use hex;
 
 #[cfg(feature = "fips")]
-use super::fips;
+use crate::ossl::fips;
 
 #[cfg(feature = "fips")]
 const TOKEN_LABEL: &str = "Kryoptic FIPS Token";

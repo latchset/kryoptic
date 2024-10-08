@@ -1,12 +1,16 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::*;
+use crate::attr_element;
+use crate::attribute;
+use crate::attribute::{from_bytes, from_string, from_ulong};
+use crate::ecc::ec_key_curve_size;
+use crate::error::Result;
+use crate::interface::*;
+use crate::object::{OAFlags, Object, ObjectAttr, ObjectFactory};
+use crate::Token;
 
-use super::super::ecc::ec_key_curve_size;
-use attribute::{from_bytes, from_string, from_ulong};
-use interface::*;
-use object::{OAFlags, Object, ObjectAttr, ObjectFactory};
+use once_cell::sync::Lazy;
 
 /* The CKA_VALIDATION_FLAG used to define the validation is always
  * vendor specific and have no fixed value in the spec.
@@ -1087,49 +1091,3 @@ pub fn is_approved(
 
     false
 }
-
-macro_rules! check_ossl_fips_indicator {
-    ($lo:ident; $up:ident; $mix:ident) => {
-        paste::paste! {
-            pub fn [<check_ $lo _fips_indicators>](
-                ctx: &mut [<Evp $mix Ctx>]
-            ) -> Result<Option<bool>> {
-                let mut params = OsslParam::with_capacity(1);
-                params.add_owned_int(
-                    name_as_char(
-                        [<OSSL_ $up _PARAM_REDHAT_FIPS_INDICATOR>]
-                    ),
-                    c_int::try_from(
-                        [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>]
-                    )?,
-                )?;
-                params.finalize();
-                unsafe {
-                    [<EVP_ $up _CTX_get_params>](
-                        ctx.as_mut_ptr(),
-                        params.as_mut_ptr()
-                    )
-                };
-
-                let indicator = c_uint::try_from(
-                    params.get_int(
-                        name_as_char(
-                            [<OSSL_ $up _PARAM_REDHAT_FIPS_INDICATOR>]
-                        )
-                    )?,
-                )?;
-                /* in case of error it will remain undetermined */
-                Ok(match indicator {
-                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>] => None,
-                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_APPROVED>] => Some(true),
-                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_NOT_APPROVED>] => Some(false),
-                    _ => return Err(CKR_DEVICE_ERROR)?,
-                })
-            }
-        }
-    };
-}
-
-check_ossl_fips_indicator!(kdf; KDF; Kdf);
-check_ossl_fips_indicator!(mac; MAC; Mac);
-check_ossl_fips_indicator!(cipher; CIPHER; Cipher);

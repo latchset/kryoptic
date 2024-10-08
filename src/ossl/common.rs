@@ -1,11 +1,17 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::{byte_ptr, void_ptr};
-
-use interface::*;
-
 use std::borrow::Cow;
+use std::ffi::{c_char, c_int, c_uint, c_void};
+
+use super::super::interface::*;
+use super::super::{byte_ptr, void_ptr};
+use crate::error::Result;
+
+use zeroize::Zeroize;
+
+use super::bindings::*;
+use super::get_libctx;
 
 macro_rules! ptr_wrapper_struct {
     ($name:ident; $ctx:ident) => {
@@ -18,10 +24,12 @@ macro_rules! ptr_wrapper_struct {
 
 macro_rules! ptr_wrapper_returns {
     ($ossl:ident) => {
+        #[allow(dead_code)]
         pub unsafe fn as_ptr(&self) -> *const $ossl {
             self.ptr
         }
 
+        #[allow(dead_code)]
         pub unsafe fn as_mut_ptr(&mut self) -> *mut $ossl {
             self.ptr
         }
@@ -156,6 +164,7 @@ impl EvpPkeyCtx {
         Ok(EvpPkeyCtx { ptr: ptr })
     }
 
+    #[allow(dead_code)]
     pub fn as_ptr(&self) -> *const EVP_PKEY_CTX {
         self.ptr
     }
@@ -269,8 +278,6 @@ unsafe impl Sync for EvpPkey {}
 pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
 pub const CIPHER_NAME_AES192: &[u8; 7] = b"AES192\0";
 pub const CIPHER_NAME_AES256: &[u8; 7] = b"AES256\0";
-pub const MAC_NAME_CMAC: &[u8; 5] = b"CMAC\0";
-pub const MAC_NAME_HMAC: &[u8; 5] = b"HMAC\0";
 
 pub fn name_as_char(name: &[u8]) -> *const c_char {
     name.as_ptr() as *const c_char
@@ -300,6 +307,7 @@ impl Drop for OsslParam<'_> {
 }
 
 impl<'a> OsslParam<'a> {
+    #[allow(dead_code)]
     pub fn new() -> OsslParam<'static> {
         Self::with_capacity(0)
     }
@@ -337,6 +345,7 @@ impl<'a> OsslParam<'a> {
         })
     }
 
+    #[allow(dead_code)]
     pub fn empty() -> OsslParam<'static> {
         let mut p = OsslParam {
             v: Vec::new(),
@@ -420,6 +429,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_owned_utf8_string(
         &mut self,
         key: *const c_char,
@@ -489,6 +499,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_size_t(
         &mut self,
         key: *const c_char,
@@ -549,6 +560,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_owned_uint(
         &mut self,
         key: *const c_char,
@@ -575,6 +587,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_owned_int(
         &mut self,
         key: *const c_char,
@@ -619,6 +632,7 @@ impl<'a> OsslParam<'a> {
         self.p.to_mut().as_mut_ptr()
     }
 
+    #[allow(dead_code)]
     pub fn get_int(&self, key: *const c_char) -> Result<c_int> {
         if !self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
