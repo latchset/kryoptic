@@ -1,17 +1,12 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::error;
-use super::interface;
-use super::mechanism;
-use super::object;
-
-use attribute::CkAttrs;
-use error::Result;
-use interface::*;
-use mechanism::*;
-use object::{Object, ObjectFactories};
+use crate::attribute::CkAttrs;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::object::{Object, ObjectFactories};
+use crate::ossl::hash::HashOperation;
 
 use std::fmt::Debug;
 
@@ -215,14 +210,6 @@ impl Mechanism for HashMechanism {
 }
 
 #[derive(Debug)]
-struct HashOperation {
-    mech: CK_MECHANISM_TYPE,
-    state: HashState,
-    finalized: bool,
-    in_use: bool,
-}
-
-#[derive(Debug)]
 struct HashKDFOperation {
     mech: CK_MECHANISM_TYPE,
     prf: CK_MECHANISM_TYPE,
@@ -327,8 +314,6 @@ pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
 }
 
-pub fn register(mechs: &mut Mechanisms, _: &mut object::ObjectFactories) {
+pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     HashMechanism::register_mechanisms(mechs);
 }
-
-include!("ossl/hash.rs");

@@ -1,10 +1,21 @@
-#[cfg(feature = "fips")]
-use {super::fips, fips::*};
-
-#[cfg(not(feature = "fips"))]
-use {super::ossl, ossl::*};
+// Copyright 2024 Simo Sorce
+// See LICENSE.txt file for terms
 
 use std::os::raw::*;
+
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::{Digest, MechOperation};
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
+
+#[derive(Debug)]
+pub struct HashOperation {
+    mech: CK_MECHANISM_TYPE,
+    state: HashState,
+    finalized: bool,
+    in_use: bool,
+}
 
 #[derive(Debug)]
 pub struct HashState {

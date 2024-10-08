@@ -1,25 +1,21 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::error;
-use super::interface;
-use super::kasn1;
-use super::object;
-use super::{attr_element, bytes_attr_not_empty, bytes_to_vec, cast_params};
-
-use attribute::{from_bool, from_bytes};
-use error::Result;
-use interface::*;
-use object::{
-    CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
-    ObjectFactory, ObjectType, PrivKeyFactory, PubKeyFactory,
-};
-
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
+use crate::attribute;
+use crate::attribute::{from_bool, from_bytes};
 use crate::ecc_misc::*;
+use crate::error::Result;
+use crate::interface::*;
+use crate::kasn1::PrivateKeyInfo;
+use crate::mechanism::*;
+use crate::object::*;
+use crate::ossl::ecc::{ECDHOperation, EccOperation};
+use crate::{attr_element, bytes_attr_not_empty, cast_params};
+
+use asn1;
+use once_cell::sync::Lazy;
 
 pub const MIN_EC_SIZE_BITS: usize = 256;
 pub const MAX_EC_SIZE_BITS: usize = 521;
@@ -49,7 +45,7 @@ const BITS_SECP256R1: usize = 256;
 const BITS_SECP384R1: usize = 384;
 const BITS_SECP521R1: usize = 521;
 
-fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> Result<&'static str> {
+pub fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> Result<&'static str> {
     match oid {
         OID_SECP256R1 => Ok(NAME_SECP256R1),
         OID_SECP384R1 => Ok(NAME_SECP384R1),
@@ -78,7 +74,7 @@ pub fn name_to_bits(name: &'static str) -> Result<usize> {
     }
 }
 
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
+pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         OID_SECP256R1 => Ok(BITS_SECP256R1),
         OID_SECP384R1 => Ok(BITS_SECP384R1),
@@ -87,7 +83,7 @@ fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
-fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
+pub fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
     let asn1_name = match asn1::write_single(&name) {
         Ok(r) => r,
         Err(_) => return Err(CKR_GENERAL_ERROR)?,
@@ -100,7 +96,7 @@ fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
     }
 }
 
-fn curve_name_to_oid(
+pub fn curve_name_to_oid(
     name: asn1::PrintableString,
 ) -> Result<asn1::ObjectIdentifier> {
     let asn1_name = match asn1::write_single(&name) {
@@ -210,7 +206,7 @@ impl ObjectFactory for ECCPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
-        ecc_import(&mut obj)?;
+        ec_key_check_import(&mut obj)?;
 
         Ok(obj)
     }
@@ -263,8 +259,7 @@ impl PrivKeyFactory for ECCPrivFactory {
             Ok(p) => p,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
-        let pkeyinfo =
-            kasn1::PrivateKeyInfo::new(&ecpkey_asn1.as_slice(), oid)?;
+        let pkeyinfo = PrivateKeyInfo::new(&ecpkey_asn1.as_slice(), oid)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -299,7 +294,7 @@ impl PrivKeyFactory for ECCPrivFactory {
         if !extra.iter().all(|b| *b == 0) {
             return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
-        let pkeyinfo = match tlv.parse::<kasn1::PrivateKeyInfo>() {
+        let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
             Ok(k) => k,
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
@@ -347,8 +342,20 @@ static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECCPrivFactory::new()));
 
 #[derive(Debug)]
-struct EccMechanism {
+pub struct EccMechanism {
     info: CK_MECHANISM_INFO,
+}
+
+impl EccMechanism {
+    pub fn new(min: CK_ULONG, max: CK_ULONG, flags: CK_FLAGS) -> EccMechanism {
+        EccMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: min,
+                ulMaxKeySize: max,
+                flags: flags,
+            },
+        }
+    }
 }
 
 impl Mechanism for EccMechanism {
@@ -447,73 +454,10 @@ impl Mechanism for EccMechanism {
         }
 
         EccOperation::generate_keypair(&mut pubkey, &mut privkey)?;
-        object::default_key_attributes(&mut privkey, mech.mechanism)?;
-        object::default_key_attributes(&mut pubkey, mech.mechanism)?;
+        default_key_attributes(&mut privkey, mech.mechanism)?;
+        default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         Ok((pubkey, privkey))
-    }
-}
-
-#[derive(Debug)]
-struct ECDHOperation {
-    mech: CK_MECHANISM_TYPE,
-    kdf: CK_EC_KDF_TYPE,
-    public: Vec<u8>,
-    shared: Vec<u8>,
-    finalized: bool,
-}
-
-impl ECDHOperation {
-    fn new_mechanism() -> Box<dyn Mechanism> {
-        Box::new(EccMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_DERIVE,
-            },
-        })
-    }
-
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[CKM_ECDH1_DERIVE, CKM_ECDH1_COFACTOR_DERIVE] {
-            mechs.add_mechanism(*ckm, Self::new_mechanism());
-        }
-    }
-
-    fn derive_new<'a>(
-        mechanism: CK_MECHANISM_TYPE,
-        params: CK_ECDH1_DERIVE_PARAMS,
-    ) -> Result<ECDHOperation> {
-        if params.kdf == CKD_NULL {
-            if params.pSharedData != std::ptr::null_mut()
-                || params.ulSharedDataLen != 0
-            {
-                return Err(CKR_MECHANISM_PARAM_INVALID)?;
-            }
-        }
-        if params.pPublicData == std::ptr::null_mut()
-            || params.ulPublicDataLen == 0
-        {
-            return Err(CKR_MECHANISM_PARAM_INVALID)?;
-        }
-
-        Ok(ECDHOperation {
-            finalized: false,
-            mech: mechanism,
-            kdf: params.kdf,
-            shared: bytes_to_vec!(params.pSharedData, params.ulSharedDataLen),
-            public: bytes_to_vec!(params.pPublicData, params.ulPublicDataLen),
-        })
-    }
-}
-
-impl MechOperation for ECDHOperation {
-    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
-        Ok(self.mech)
-    }
-
-    fn finalized(&self) -> bool {
-        self.finalized
     }
 }
 
@@ -530,5 +474,3 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         &PRIVATE_KEY_FACTORY,
     );
 }
-
-include!("ossl/ecc.rs");

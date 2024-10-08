@@ -1,28 +1,57 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::error;
-use super::interface;
-use super::kasn1;
-use super::object;
-use super::{attr_element, bytes_attr_not_empty};
+use std::fmt::Debug;
 
-use attribute::{from_bool, from_bytes, from_ulong};
-use error::Result;
-use interface::*;
-use kasn1::DerEncBigUint;
-use object::{
-    CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
-    ObjectFactory, ObjectType, PrivKeyFactory, PubKeyFactory,
-};
+use crate::attribute;
+use crate::attribute::{from_bool, from_bytes, from_ulong};
+use crate::error::Result;
+use crate::interface::*;
+use crate::kasn1::{DerEncBigUint, PrivateKeyInfo};
+use crate::mechanism::*;
+use crate::object::*;
+use crate::ossl::rsa::*;
+use crate::{attr_element, bytes_attr_not_empty};
 
 use asn1;
 use once_cell::sync::Lazy;
-use std::fmt::Debug;
 
 pub const OID_RSA_ENCRYPTION: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 1, 1);
+
+fn rsa_check_import(obj: &Object) -> Result<()> {
+    let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
+        Ok(m) => m,
+        Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
+    };
+    match obj.get_attr_as_ulong(CKA_MODULUS_BITS) {
+        Ok(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        Err(e) => {
+            if !e.attr_not_found() {
+                return Err(e);
+            }
+        }
+    }
+    if modulus.len() < MIN_RSA_SIZE_BYTES {
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+    }
+    match obj.get_attr_as_ulong(CKA_CLASS) {
+        Ok(c) => match c {
+            CKO_PUBLIC_KEY => {
+                bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
+            }
+            CKO_PRIVATE_KEY => {
+                bytes_attr_not_empty!(obj; CKA_PUBLIC_EXPONENT);
+                bytes_attr_not_empty!(obj; CKA_PRIVATE_EXPONENT);
+                /* The FIPS module can handle missing p,q,a,b,c */
+            }
+            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        },
+        Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
+    }
+
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct RSAPubFactory {
@@ -51,7 +80,7 @@ impl ObjectFactory for RSAPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
-        rsa_import(&mut obj)?;
+        rsa_check_import(&mut obj)?;
 
         Ok(obj)
     }
@@ -158,7 +187,7 @@ impl ObjectFactory for RSAPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
-        rsa_import(&mut obj)?;
+        rsa_check_import(&mut obj)?;
 
         Ok(obj)
     }
@@ -200,7 +229,7 @@ impl PrivKeyFactory for RSAPrivFactory {
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let pkeyinfo =
-            kasn1::PrivateKeyInfo::new(&pkey.as_slice(), OID_RSA_ENCRYPTION)?;
+            PrivateKeyInfo::new(&pkey.as_slice(), OID_RSA_ENCRYPTION)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -235,7 +264,7 @@ impl PrivKeyFactory for RSAPrivFactory {
         if !extra.iter().all(|b| *b == 0) {
             return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
-        let pkeyinfo = match tlv.parse::<kasn1::PrivateKeyInfo>() {
+        let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
             Ok(k) => k,
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
@@ -311,6 +340,71 @@ static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
 #[derive(Debug)]
 struct RsaPKCSMechanism {
     info: CK_MECHANISM_INFO,
+}
+
+impl RsaPKCSMechanism {
+    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
+                flags: flags,
+            },
+        })
+    }
+
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
+        mechs.add_mechanism(
+            CKM_RSA_PKCS,
+            Self::new_mechanism(
+                CKF_ENCRYPT
+                    | CKF_DECRYPT
+                    | CKF_SIGN
+                    | CKF_VERIFY
+                    | CKF_WRAP
+                    | CKF_UNWRAP,
+            ),
+        );
+
+        for ckm in &[
+            CKM_SHA1_RSA_PKCS,
+            CKM_SHA224_RSA_PKCS,
+            CKM_SHA256_RSA_PKCS,
+            CKM_SHA384_RSA_PKCS,
+            CKM_SHA512_RSA_PKCS,
+            CKM_SHA3_224_RSA_PKCS,
+            CKM_SHA3_256_RSA_PKCS,
+            CKM_SHA3_384_RSA_PKCS,
+            CKM_SHA3_512_RSA_PKCS,
+            CKM_RSA_PKCS_PSS,
+            CKM_SHA1_RSA_PKCS_PSS,
+            CKM_SHA224_RSA_PKCS_PSS,
+            CKM_SHA256_RSA_PKCS_PSS,
+            CKM_SHA384_RSA_PKCS_PSS,
+            CKM_SHA512_RSA_PKCS_PSS,
+            CKM_SHA3_224_RSA_PKCS_PSS,
+            CKM_SHA3_256_RSA_PKCS_PSS,
+            CKM_SHA3_384_RSA_PKCS_PSS,
+            CKM_SHA3_512_RSA_PKCS_PSS,
+        ] {
+            mechs.add_mechanism(
+                *ckm,
+                Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
+            );
+        }
+
+        mechs.add_mechanism(
+            CKM_RSA_PKCS_KEY_PAIR_GEN,
+            Self::new_mechanism(CKF_GENERATE_KEY_PAIR),
+        );
+
+        mechs.add_mechanism(
+            CKM_RSA_PKCS_OAEP,
+            Self::new_mechanism(
+                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            ),
+        );
+    }
 }
 
 impl Mechanism for RsaPKCSMechanism {
@@ -435,8 +529,8 @@ impl Mechanism for RsaPKCSMechanism {
             &mut pubkey,
             &mut privkey,
         )?;
-        object::default_key_attributes(&mut privkey, mech.mechanism)?;
-        object::default_key_attributes(&mut pubkey, mech.mechanism)?;
+        default_key_attributes(&mut privkey, mech.mechanism)?;
+        default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         Ok((pubkey, privkey))
     }
@@ -480,7 +574,7 @@ impl Mechanism for RsaPKCSMechanism {
 }
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    RsaPKCSOperation::register_mechanisms(mechs);
+    RsaPKCSMechanism::register_mechanisms(mechs);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
@@ -491,5 +585,3 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         &PRIVATE_KEY_FACTORY,
     );
 }
-
-include!("ossl/rsa.rs");

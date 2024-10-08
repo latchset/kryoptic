@@ -1,6 +1,8 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::fmt::Debug;
+
 use crate::attribute::from_bytes;
 use crate::error::Result;
 use crate::hash;
@@ -8,9 +10,6 @@ use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::bindings::*;
-use crate::ossl::common::*;
-use crate::ossl::fips::*;
 use crate::{bytes_to_vec, cast_params};
 
 #[derive(Debug)]
@@ -21,7 +20,6 @@ pub struct SSHKDFOperation {
     key_type: u8,
     exchange_hash: Vec<u8>,
     session_id: Vec<u8>,
-    fips_approved: Option<bool>,
     is_data: bool,
 }
 
@@ -53,8 +51,6 @@ impl SSHKDFOperation {
                 params.ulExchangeHashLen
             ),
             session_id: bytes_to_vec!(params.pSessionId, params.ulSessionIdLen),
-            #[cfg(feature = "fips")]
-            fips_approved: None,
             is_data: is_data,
         })
     }
@@ -68,10 +64,6 @@ impl MechOperation for SSHKDFOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
-    #[cfg(feature = "fips")]
-    fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
-    }
 }
 
 impl Derive for SSHKDFOperation {
@@ -79,7 +71,7 @@ impl Derive for SSHKDFOperation {
         &mut self,
         key: &Object,
         template: &[CK_ATTRIBUTE],
-        _mechanisms: &Mechanisms,
+        mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
         if self.finalized {
@@ -88,6 +80,15 @@ impl Derive for SSHKDFOperation {
         self.finalized = true;
 
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
+
+        let mechanism = CK_MECHANISM {
+            mechanism: self.prf,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let mech = mechanisms.get(self.prf)?;
+        let mut op = mech.digest_new(&mechanism)?;
+        let segment = op.digest_len()?;
 
         let (mut dobj, value_len) = if self.is_data {
             misc::common_derive_data_object(template, objfactories, 0)
@@ -98,46 +99,35 @@ impl Derive for SSHKDFOperation {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
-        let sshkdf_type = vec![self.key_type, 0u8];
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params.add_const_c_string(
-            name_as_char(OSSL_ALG_PARAM_DIGEST),
-            mech_type_to_digest_name(self.prf),
-        )?;
-        params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_KEY),
-            key.get_attr_as_bytes(CKA_VALUE)?,
-        )?;
-        params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
-            &self.exchange_hash,
-        )?;
-        params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
-            &self.session_id,
-        )?;
-        params.add_utf8_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_TYPE),
-            &sshkdf_type,
-        )?;
-        params.finalize();
-
-        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_SSHKDF))?;
+        let keyval = key.get_attr_as_bytes(CKA_VALUE)?;
         let mut dkm = vec![0u8; value_len];
-        let res = unsafe {
-            EVP_KDF_derive(
-                kctx.as_mut_ptr(),
-                dkm.as_mut_ptr(),
-                dkm.len(),
-                params.as_ptr(),
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
 
-        self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
+        /* for each segment */
+        let mut buffer = vec![0u8; segment];
+        let mut curlen = 0;
+        for ctr in 0..((value_len + segment - 1) / segment) {
+            let len = if curlen + segment > value_len {
+                value_len - curlen
+            } else {
+                segment
+            };
+            if ctr != 0 {
+                op.reset()?;
+            }
+            /* Key */
+            op.digest_update(keyval.as_slice())?;
+            /* Exchange Hash */
+            op.digest_update(self.exchange_hash.as_slice())?;
+            if ctr == 0 {
+                op.digest_update(&[self.key_type])?;
+                op.digest_update(self.session_id.as_slice())?;
+            } else {
+                op.digest_update(&dkm[0..curlen])?;
+            }
+            op.digest_final(buffer.as_mut_slice())?;
+            dkm[curlen..(curlen + len)].copy_from_slice(&buffer[0..len]);
+            curlen += len;
+        }
 
         dobj.set_attr(from_bytes(CKA_VALUE, dkm))?;
         Ok(vec![dobj])

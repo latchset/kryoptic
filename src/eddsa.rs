@@ -1,63 +1,22 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::error;
-use super::interface;
-use super::object;
-use super::{attr_element, bytes_attr_not_empty, bytes_to_vec};
-
-use attribute::{from_bool, from_bytes};
-use error::Result;
-use interface::*;
-use object::{
-    CommonKeyFactory, OAFlags, Object, ObjectAttr, ObjectFactories,
-    ObjectFactory, ObjectType, PrivKeyFactory, PubKeyFactory,
-};
-
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
+use crate::attribute;
+use crate::attribute::{from_bool, from_bytes};
 use crate::ecc_misc::*;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::object::*;
+use crate::ossl::eddsa::*;
+use crate::{attr_element, bytes_attr_not_empty};
 
-const BITS_ED25519: usize = 255;
-const BITS_ED448: usize = 448;
+use once_cell::sync::Lazy;
 
 pub const MIN_EDDSA_SIZE_BITS: usize = BITS_ED25519;
 pub const MAX_EDDSA_SIZE_BITS: usize = BITS_ED448;
-
-// ASN.1 encoding of the OID
-const OID_ED25519: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 112);
-const OID_ED448: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 113);
-
-// ASN.1 encoding of the curve name
-const STRING_ED25519: &[u8] = &[
-    0x13, 0x0c, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x32, 0x35, 0x35,
-    0x31, 0x39,
-];
-const STRING_ED448: &[u8] = &[
-    0x13, 0x0a, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x34, 0x34, 0x38,
-];
-
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
-    match oid {
-        OID_ED25519 => Ok(BITS_ED25519),
-        OID_ED448 => Ok(BITS_ED448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
-    let asn1_name = match asn1::write_single(&name) {
-        Ok(r) => r,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    match asn1_name.as_slice() {
-        STRING_ED25519 => Ok(BITS_ED25519),
-        STRING_ED448 => Ok(BITS_ED448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
 
 #[derive(Debug)]
 pub struct EDDSAPubFactory {
@@ -138,7 +97,7 @@ impl ObjectFactory for EDDSAPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
-        eddsa_import(&mut obj)?;
+        ec_key_check_import(&mut obj)?;
 
         Ok(obj)
     }
@@ -173,6 +132,36 @@ static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
 #[derive(Debug)]
 struct EddsaMechanism {
     info: CK_MECHANISM_INFO,
+}
+
+impl EddsaMechanism {
+    fn register_mechanisms(mechs: &mut Mechanisms) {
+        mechs.add_mechanism(
+            CKM_EDDSA,
+            Box::new(EddsaMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
+                        .unwrap(),
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+        );
+
+        mechs.add_mechanism(
+            CKM_EC_EDWARDS_KEY_PAIR_GEN,
+            Box::new(EddsaMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
+                        .unwrap(),
+                    flags: CKF_GENERATE_KEY_PAIR,
+                },
+            }),
+        );
+    }
 }
 
 impl Mechanism for EddsaMechanism {
@@ -259,15 +248,15 @@ impl Mechanism for EddsaMechanism {
         }
 
         EddsaOperation::generate_keypair(&mut pubkey, &mut privkey)?;
-        object::default_key_attributes(&mut privkey, mech.mechanism)?;
-        object::default_key_attributes(&mut pubkey, mech.mechanism)?;
+        default_key_attributes(&mut privkey, mech.mechanism)?;
+        default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         Ok((pubkey, privkey))
     }
 }
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    EddsaOperation::register_mechanisms(mechs);
+    EddsaMechanism::register_mechanisms(mechs);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_EDWARDS),
@@ -278,5 +267,3 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         &PRIVATE_KEY_FACTORY,
     );
 }
-
-include!("ossl/eddsa.rs");

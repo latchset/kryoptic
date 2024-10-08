@@ -1,13 +1,10 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::drbg;
-use super::error;
-use super::interface;
-use super::mechanism;
-
-use error::Result;
-use interface::*;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism;
+use crate::ossl::drbg;
 
 #[derive(Debug)]
 pub struct RNG {

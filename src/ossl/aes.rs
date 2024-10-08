@@ -1,16 +1,22 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::ffi::{c_char, c_int, c_void};
+
+use crate::aes::*;
+use crate::error;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::object::Object;
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
 #[cfg(feature = "fips")]
-use {super::fips, fips::*};
-
-#[cfg(not(feature = "fips"))]
-use {super::ossl, ossl::*};
-
-use super::{bytes_to_vec, map_err};
+use crate::ossl::fips::*;
+use crate::{bytes_to_vec, cast_params, map_err, void_ptr};
 
 use constant_time_eq::constant_time_eq;
-use std::ffi::{c_char, c_int, c_void};
+use once_cell::sync::Lazy;
 use zeroize::Zeroize;
 
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
@@ -128,13 +134,11 @@ fn object_to_raw_key(key: &Object) -> Result<AesKey> {
 }
 
 fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-    Box::new(AesMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
-            ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
-            flags: flags,
-        },
-    })
+    Box::new(AesMechanism::new(
+        CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
+        CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
+        flags,
+    ))
 }
 
 #[derive(Debug)]
@@ -148,7 +152,7 @@ struct AesParams {
 }
 
 #[derive(Debug)]
-struct AesOperation {
+pub struct AesOperation {
     mech: CK_MECHANISM_TYPE,
     key: AesKey,
     params: AesParams,
@@ -168,7 +172,7 @@ impl Drop for AesOperation {
 }
 
 impl AesOperation {
-    fn register_mechanisms(mechs: &mut Mechanisms) {
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[
             CKM_AES_ECB,
             CKM_AES_CBC,
@@ -819,7 +823,10 @@ impl AesOperation {
         Ok(())
     }
 
-    fn encrypt_new(mech: &CK_MECHANISM, key: &Object) -> Result<AesOperation> {
+    pub fn encrypt_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
             key: object_to_raw_key(key)?,
@@ -834,7 +841,10 @@ impl AesOperation {
         })
     }
 
-    fn decrypt_new(mech: &CK_MECHANISM, key: &Object) -> Result<AesOperation> {
+    pub fn decrypt_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<AesOperation> {
         Ok(AesOperation {
             mech: mech.mechanism,
             key: object_to_raw_key(key)?,
@@ -849,7 +859,7 @@ impl AesOperation {
         })
     }
 
-    fn wrap(
+    pub fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         mut keydata: Vec<u8>,
@@ -885,7 +895,7 @@ impl AesOperation {
         result
     }
 
-    fn unwrap(
+    pub fn unwrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         data: &[u8],
@@ -1151,8 +1161,7 @@ impl Encryption for AesOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.fips_approved =
-                fips::indicators::check_cipher_fips_indicators(&mut self.ctx)?;
+            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
         }
         self.finalized = true;
         Ok(outlen)
@@ -1547,8 +1556,7 @@ impl Decryption for AesOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.fips_approved =
-                fips::indicators::check_cipher_fips_indicators(&mut self.ctx)?;
+            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
         }
         self.finalized = true;
         Ok(outlen)
@@ -1622,7 +1630,7 @@ impl Decryption for AesOperation {
  * can't be sure openssl is not holding live pointers to the
  * parameters passed into the init functions */
 #[derive(Debug)]
-struct AesCmacOperation {
+pub struct AesCmacOperation {
     mech: CK_MECHANISM_TYPE,
     finalized: bool,
     in_use: bool,
@@ -1634,13 +1642,13 @@ struct AesCmacOperation {
 }
 
 impl AesCmacOperation {
-    fn register_mechanisms(mechs: &mut Mechanisms) {
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[CKM_AES_CMAC, CKM_AES_CMAC_GENERAL] {
             mechs.add_mechanism(*ckm, new_mechanism(CKF_SIGN | CKF_VERIFY));
         }
     }
 
-    fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesCmacOperation> {
+    pub fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesCmacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_CMAC_GENERAL => {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
@@ -1748,8 +1756,7 @@ impl AesCmacOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.fips_approved =
-                fips::indicators::check_mac_fips_indicators(&mut self.ctx)?;
+            self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
         }
         Ok(())
     }
@@ -1840,5 +1847,218 @@ impl Verify for AesCmacOperation {
     }
 }
 
-#[cfg(not(feature = "fips"))]
-include!("aes_mac.rs");
+#[derive(Debug)]
+pub struct AesMacOperation {
+    mech: CK_MECHANISM_TYPE,
+    finalized: bool,
+    in_use: bool,
+    padbuf: [u8; AES_BLOCK_SIZE],
+    padlen: usize,
+    macbuf: [u8; AES_BLOCK_SIZE],
+    maclen: usize,
+    op: AesOperation,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
+}
+
+impl Drop for AesMacOperation {
+    fn drop(&mut self) {
+        self.padbuf.zeroize();
+        self.macbuf.zeroize();
+    }
+}
+
+#[allow(dead_code)]
+impl AesMacOperation {
+    pub fn register_mechanisms(mechs: &mut Mechanisms) {
+        for ckm in &[CKM_AES_MAC, CKM_AES_MAC_GENERAL] {
+            mechs.add_mechanism(*ckm, new_mechanism(CKF_SIGN | CKF_VERIFY));
+        }
+    }
+
+    pub fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesMacOperation> {
+        let maclen = match mech.mechanism {
+            CKM_AES_MAC_GENERAL => {
+                let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
+                let val = params as usize;
+                if val > AES_BLOCK_SIZE {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
+                val
+            }
+            CKM_AES_MAC => {
+                if mech.ulParameterLen != 0 {
+                    return Err(CKR_ARGUMENTS_BAD)?;
+                }
+                AES_BLOCK_SIZE / 2
+            }
+            _ => return Err(CKR_MECHANISM_INVALID)?,
+        };
+        let iv = [0u8; AES_BLOCK_SIZE];
+        Ok(AesMacOperation {
+            mech: mech.mechanism,
+            finalized: false,
+            in_use: false,
+            padbuf: [0; AES_BLOCK_SIZE],
+            padlen: 0,
+            macbuf: [0; AES_BLOCK_SIZE],
+            maclen: maclen,
+            op: AesOperation::encrypt_new(
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CBC,
+                    pParameter: void_ptr!(iv.as_ptr()),
+                    ulParameterLen: iv.len() as CK_ULONG,
+                },
+                key,
+            )?,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
+        })
+    }
+
+    fn begin(&mut self) -> Result<()> {
+        if self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        Ok(())
+    }
+
+    fn update(&mut self, data: &[u8]) -> Result<()> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.in_use = true;
+
+        let mut data_len = self.padlen + data.len();
+        let mut cursor = 0;
+
+        if data_len < AES_BLOCK_SIZE {
+            self.padbuf[self.padlen..data_len].copy_from_slice(data);
+            self.padlen = data_len;
+            return Ok(());
+        }
+        if self.padlen > 0 {
+            /* first full block */
+            cursor = AES_BLOCK_SIZE - self.padlen;
+            self.padbuf[self.padlen..].copy_from_slice(&data[..cursor]);
+            let outlen =
+                self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
+            if outlen != AES_BLOCK_SIZE {
+                self.finalized = true;
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+            data_len -= AES_BLOCK_SIZE;
+        }
+
+        /* whole blocks */
+        while data_len > AES_BLOCK_SIZE {
+            let outlen = self.op.encrypt_update(
+                &data[cursor..(cursor + AES_BLOCK_SIZE)],
+                &mut self.macbuf,
+            )?;
+            if outlen != AES_BLOCK_SIZE {
+                self.finalized = true;
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+            cursor += AES_BLOCK_SIZE;
+            data_len -= AES_BLOCK_SIZE;
+        }
+
+        if data_len > 0 {
+            self.padbuf[..data_len].copy_from_slice(&data[cursor..]);
+        }
+        self.padlen = data_len;
+        Ok(())
+    }
+
+    fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
+        if !self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.finalized = true;
+
+        if output.len() != self.maclen {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+
+        if self.padlen > 0 {
+            /* last full block */
+            self.padbuf[self.padlen..].fill(0);
+            let outlen =
+                self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
+            if outlen != AES_BLOCK_SIZE {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+        }
+
+        output.copy_from_slice(&self.macbuf[..output.len()]);
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = self.op.fips_approved();
+        }
+        Ok(())
+    }
+}
+
+impl MechOperation for AesMacOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(self.mech)
+    }
+
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
+    }
+}
+
+impl Sign for AesMacOperation {
+    fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.finalize(signature)
+    }
+
+    fn sign_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
+        self.finalize(signature)
+    }
+
+    fn signature_len(&self) -> Result<usize> {
+        Ok(self.maclen)
+    }
+}
+
+impl Verify for AesMacOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        self.verify_final(signature)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+        let mut verify: Vec<u8> = vec![0; self.maclen];
+        self.finalize(verify.as_mut_slice())?;
+        if !constant_time_eq(&verify, signature) {
+            return Err(CKR_SIGNATURE_INVALID)?;
+        }
+        Ok(())
+    }
+
+    fn signature_len(&self) -> Result<usize> {
+        Ok(self.maclen)
+    }
+}
