@@ -45,6 +45,27 @@ uuid = { version = "1.4.1", features = ["v4"] }
 zeroize = "1.6.0"
 
 [features]
-dynamic = [] # Builds against system libcrypto.so
-fips = ["rusqlite/bundled"]
+aes = []
+ecc = []
+eddsa = []
+hash = []
+hkdf = []
+hmac = ["hash"]
+pbkdf2 = []
+rsa = []
+sp800_108 = []
+sshkdf = []
+tlskdf = []
+
+# tese are always required, so easier to specify this way
+basic = [ "aes", "hmac", "pbkdf2" ]
+
+#select everythign by default
+# Use --no-default-features --features basic, xxx for custom selections
+default = [ "basic", "ecc", "eddsa", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+
+fips = [ "rusqlite/bundled", "basic", "ecc", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+
+dynamic = [ ] # Builds against system libcrypto.so
+
 slow = [] # Enables slow tests

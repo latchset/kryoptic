@@ -15,11 +15,7 @@ use std::slice;
 use zeroize::Zeroize;
 
 use crate::error::Result;
-use crate::fips::indicators;
 use crate::interface::*;
-use crate::mechanism::Mechanisms;
-use crate::object::{ObjectFactories, ObjectType};
-use crate::token::Token;
 
 use super::bindings::*;
 use super::common::*;
@@ -661,17 +657,6 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
 
 pub fn init() {
     assert!(FIPS_PROVIDER.provider != std::ptr::null_mut());
-}
-
-pub fn token_init(token: &mut Token) -> Result<()> {
-    indicators::insert_fips_validation(token)
-}
-
-pub fn register(_: &mut Mechanisms, ot: &mut ObjectFactories) {
-    ot.add_factory(
-        ObjectType::new(CKO_VALIDATION, 0),
-        &indicators::VALIDATION_FACTORY,
-    );
 }
 
 pub fn get_libctx() -> *mut OSSL_LIB_CTX {

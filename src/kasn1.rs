@@ -53,6 +53,7 @@ impl<'a> DerEncBigUint<'a> {
     }
 
     /// Get the BN bytes without possible leading NULL bytes.
+    #[allow(dead_code)]
     pub fn as_nopad_bytes(&self) -> &[u8] {
         let mut skip = 0;
         for val in self.data.as_ref() {
@@ -154,6 +155,7 @@ pub struct PrivateKeyInfo<'a> {
     attributes: Option<Attributes<'a>>,
 }
 
+#[allow(dead_code)]
 impl PrivateKeyInfo<'_> {
     pub fn new<'a>(
         private_key_asn1: &'a [u8],

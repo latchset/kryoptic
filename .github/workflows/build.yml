@@ -83,7 +83,7 @@ jobs:
             cargo build -vv --release
           fi
           if [ "${{ matrix.name }}" = "dynamic" ]; then
-            cargo build -vv --features dynamic
+            cargo build -vv --release --features dynamic
           fi
 
       - name: Test
@@ -98,7 +98,7 @@ jobs:
             cargo test --release
           fi
           if [ "${{ matrix.name }}" = "dynamic" ]; then
-            cargo test --features dynamic
+            cargo test --release --features dynamic
           fi
 
       - uses: actions/upload-artifact@v3

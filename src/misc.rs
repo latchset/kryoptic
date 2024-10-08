@@ -9,9 +9,10 @@ use super::object;
 
 use attribute::{from_ulong, CkAttrs};
 use error::Result;
+
 use interface::*;
 
-pub const CK_ULONG_SIZE: usize = std::mem::size_of::<interface::CK_ULONG>();
+pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 
 #[macro_export]
 macro_rules! map_err {
@@ -98,6 +99,7 @@ macro_rules! bytes_to_slice {
     };
 }
 
+#[allow(dead_code)]
 pub fn common_derive_data_object(
     template: &[CK_ATTRIBUTE],
     objfactories: &object::ObjectFactories,
@@ -125,6 +127,7 @@ pub fn common_derive_data_object(
     Ok((obj, value_len))
 }
 
+#[allow(dead_code)]
 pub fn common_derive_key_object(
     key: &object::Object,
     template: &[CK_ATTRIBUTE],

@@ -7,22 +7,11 @@ use std::vec::Vec;
 
 use super::aes;
 use super::attribute;
-use super::ecc;
-#[cfg(not(feature = "fips"))]
-use super::eddsa;
 use super::error;
-use super::hash;
-use super::hkdf;
-use super::hmac;
 use super::interface;
 use super::mechanism;
 use super::object;
-use super::pbkdf2;
-use super::rsa;
-use super::sp800_108;
-use super::sshkdf;
 use super::storage;
-use super::tlskdf;
 
 use super::{get_random_data, sizeof};
 use error::Result;
@@ -34,7 +23,7 @@ use storage::Storage;
 use hex;
 
 #[cfg(feature = "fips")]
-use crate::ossl::fips;
+use crate::fips;
 
 #[cfg(feature = "fips")]
 const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
@@ -205,22 +194,7 @@ impl Token {
         copy_sized_string(TOKEN_MODEL.as_bytes(), &mut token.info.model);
 
         /* register mechanisms and factories */
-        object::register(&mut token.mechanisms, &mut token.object_factories);
-        aes::register(&mut token.mechanisms, &mut token.object_factories);
-        rsa::register(&mut token.mechanisms, &mut token.object_factories);
-        ecc::register(&mut token.mechanisms, &mut token.object_factories);
-        #[cfg(not(feature = "fips"))]
-        eddsa::register(&mut token.mechanisms, &mut token.object_factories);
-        hash::register(&mut token.mechanisms, &mut token.object_factories);
-        hmac::register(&mut token.mechanisms, &mut token.object_factories);
-        hkdf::register(&mut token.mechanisms, &mut token.object_factories);
-        pbkdf2::register(&mut token.mechanisms, &mut token.object_factories);
-        sp800_108::register(&mut token.mechanisms, &mut token.object_factories);
-        sshkdf::register(&mut token.mechanisms, &mut token.object_factories);
-        tlskdf::register(&mut token.mechanisms, &mut token.object_factories);
-
-        #[cfg(feature = "fips")]
-        fips::register(&mut token.mechanisms, &mut token.object_factories);
+        super::register_all(&mut token.mechanisms, &mut token.object_factories);
 
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {
