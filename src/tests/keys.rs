@@ -8,8 +8,8 @@ use serial_test::parallel;
 
 #[test]
 #[parallel]
-fn test_key() {
-    let mut testtokn = TestToken::initialized("test_key.sql", None);
+fn test_secret_key() {
+    let mut testtokn = TestToken::initialized("test_secret_key.sql", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -40,6 +40,55 @@ fn test_key() {
     ) {
         panic!("{}", err);
     }
+
+    /* Test CKA_ALLOWED_MECHANISMS */
+
+    let allowed = CKM_AES_ECB.to_ne_bytes();
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16),],
+        &[(CKA_ALLOWED_MECHANISMS, &allowed)],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    /* Test disallowed mech fails */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CBC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_MECHANISM_INVALID);
+
+    /* Now check that init with allowed mech succeeds */
+    let data = "0123456789ABCDEF";
+    let _ = ret_or_panic!(encrypt(
+        session,
+        handle,
+        data.as_bytes(),
+        &CK_MECHANISM {
+            mechanism: CKM_AES_ECB,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        },
+    ));
+
+    testtokn.finalize();
+}
+
+#[cfg(feature = "rsa")]
+#[test]
+#[parallel]
+fn test_rsa_key() {
+    let mut testtokn = TestToken::initialized("test_rsa_key.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
 
     /* RSA key pair */
     let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
@@ -90,6 +139,20 @@ fn test_key() {
     );
 
     /* Wrap RSA key in AES */
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
+        &[],
+        &[
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_AES_ECB,
         pParameter: std::ptr::null_mut(),
@@ -275,6 +338,19 @@ fn test_key() {
         )
     );
 
+    testtokn.finalize();
+}
+
+#[cfg(feature = "ecc")]
+#[test]
+#[parallel]
+fn test_ecc_key() {
+    let mut testtokn = TestToken::initialized("test_ecc_key.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
     /* EC key pair */
     let ec_params = hex::decode(
         "06052B81040022", // secp384r1
@@ -327,6 +403,20 @@ fn test_key() {
     );
 
     /* Wrap EC key in AES */
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
+        &[],
+        &[
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_AES_ECB,
         pParameter: std::ptr::null_mut(),
@@ -336,7 +426,7 @@ fn test_key() {
     let mut wrapped = vec![0u8; 65536];
     let mut wrapped_len = wrapped.len() as CK_ULONG;
 
-    ret = fn_wrap_key(
+    let mut ret = fn_wrap_key(
         session,
         &mut mechanism,
         handle,
@@ -514,93 +604,69 @@ fn test_key() {
     );
     assert_eq!(ret, CKR_OK);
 
-    /* Test CKA_ALLOWED_MECHANISMS */
+    testtokn.finalize();
+}
 
-    let allowed = CKM_AES_ECB.to_ne_bytes();
-    let handle = ret_or_panic!(generate_key(
+#[cfg(all(feature = "eddsa", not(feature = "fips")))]
+#[test]
+#[parallel]
+fn test_eddsa_key() {
+    let mut testtokn = TestToken::initialized("test_eddsa_key.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* Ed25519 key pair */
+    let ec_params = hex::decode(
+        "130c656477617264733235353139", // edwards25519
+    )
+    .expect("Failed to decode hex ec_params");
+
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
         session,
-        CKM_AES_KEY_GEN,
-        std::ptr::null_mut(),
-        0,
-        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16),],
-        &[(CKA_ALLOWED_MECHANISMS, &allowed)],
-        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+        CKM_EC_EDWARDS_KEY_PAIR_GEN,
+        &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_EC_EDWARDS),],
+        &[(CKA_EC_PARAMS, ec_params.as_slice())],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC_EDWARDS),],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_SIGN, true),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
-    /* Test disallowed mech fails */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_AES_CBC,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    let ret = fn_encrypt_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_MECHANISM_INVALID);
-
-    /* Now check that init with allowed mech succeeds */
-    let data = "0123456789ABCDEF";
-    let _ = ret_or_panic!(encrypt(
+    let data = "plaintext";
+    let sig = ret_or_panic!(sig_gen(
         session,
-        handle,
+        prikey,
         data.as_bytes(),
         &CK_MECHANISM {
-            mechanism: CKM_AES_ECB,
+            mechanism: CKM_EDDSA,
             pParameter: std::ptr::null_mut(),
             ulParameterLen: 0,
         },
     ));
+    assert_eq!(sig.len(), 64);
 
-    #[cfg(not(feature = "fips"))]
-    {
-        /* Ed25519 key pair */
-        let ec_params = hex::decode(
-            "130c656477617264733235353139", // edwards25519
-        )
-        .expect("Failed to decode hex ec_params");
-
-        let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
+    assert_eq!(
+        CKR_OK,
+        sig_verify(
             session,
-            CKM_EC_EDWARDS_KEY_PAIR_GEN,
-            &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_EC_EDWARDS),],
-            &[(CKA_EC_PARAMS, ec_params.as_slice())],
-            &[(CKA_VERIFY, true)],
-            &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC_EDWARDS),],
-            &[],
-            &[
-                (CKA_PRIVATE, true),
-                (CKA_SENSITIVE, true),
-                (CKA_TOKEN, true),
-                (CKA_SIGN, true),
-                (CKA_EXTRACTABLE, true),
-            ],
-        ));
-
-        let data = "plaintext";
-        let sig = ret_or_panic!(sig_gen(
-            session,
-            prikey,
+            pubkey,
             data.as_bytes(),
+            sig.as_slice(),
             &CK_MECHANISM {
                 mechanism: CKM_EDDSA,
                 pParameter: std::ptr::null_mut(),
                 ulParameterLen: 0,
             },
-        ));
-        assert_eq!(sig.len(), 64);
+        )
+    );
 
-        assert_eq!(
-            CKR_OK,
-            sig_verify(
-                session,
-                pubkey,
-                data.as_bytes(),
-                sig.as_slice(),
-                &CK_MECHANISM {
-                    mechanism: CKM_EDDSA,
-                    pParameter: std::ptr::null_mut(),
-                    ulParameterLen: 0,
-                },
-            )
-        );
-    }
+    testtokn.finalize();
 }

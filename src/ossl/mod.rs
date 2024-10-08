@@ -31,9 +31,11 @@ pub fn get_libctx() -> *mut bindings::OSSL_LIB_CTX {
 pub mod aes;
 pub mod common;
 pub mod drbg;
+
+#[cfg(feature = "ecc")]
 pub mod ecc;
 
-#[cfg(not(feature = "fips"))]
+#[cfg(all(feature = "eddsa", not(feature = "fips")))]
 pub mod eddsa;
 
 #[cfg(feature = "fips")]
@@ -42,16 +44,16 @@ pub mod fips;
 pub mod hash;
 pub mod hkdf;
 
-#[cfg(feature = "fips")]
+#[cfg(all(feature = "hmac", feature = "fips"))]
 pub mod hmac;
 
-#[cfg(feature = "fips")]
+#[cfg(all(feature = "sp800_108", feature = "fips"))]
 pub mod kbkdf;
 
-#[cfg(feature = "fips")]
+#[cfg(all(feature = "pbkdf2", feature = "fips"))]
 pub mod pbkdf2;
 
 pub mod rsa;
 
-#[cfg(feature = "fips")]
+#[cfg(all(feature = "sshkdf", feature = "fips"))]
 pub mod sshkdf;

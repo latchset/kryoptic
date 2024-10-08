@@ -37,25 +37,14 @@ use session::Session;
 use slot::Slot;
 use token::Token;
 
-/* algorithms and ciphers */
-#[cfg(feature = "fips")]
-mod fips;
 mod native;
 mod ossl;
 
-mod aes;
-mod ecc;
-mod ecc_misc;
-#[cfg(not(feature = "fips"))]
-mod eddsa;
-mod hash;
-mod hkdf;
-mod hmac;
-mod pbkdf2;
-mod rsa;
-mod sp800_108;
-mod sshkdf;
-mod tlskdf;
+#[cfg(feature = "fips")]
+mod fips;
+
+/* Include algorithms based on selected features */
+include!("enabled.rs");
 
 /* Helper code */
 mod kasn1;

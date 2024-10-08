@@ -769,6 +769,7 @@ pub trait CommonKeyFactory {
 }
 
 /* pkcs11-spec-v3.1 4.8 Public key objects */
+#[allow(dead_code)]
 pub trait PubKeyFactory {
     fn init_common_public_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
@@ -785,6 +786,7 @@ pub trait PubKeyFactory {
 }
 
 /* pkcs11-spec-v3.1 4.9 Private key objects */
+#[allow(dead_code)]
 pub trait PrivKeyFactory {
     fn init_common_private_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![

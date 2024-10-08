@@ -7,6 +7,7 @@ use tests::*;
 
 use serial_test::parallel;
 
+#[cfg(feature = "sp800_108")]
 #[test]
 #[parallel]
 fn test_sp800_kdf() {
@@ -212,6 +213,7 @@ fn test_sp800_kdf() {
     assert_eq!(ret, CKR_OK);
 }
 
+#[cfg(feature = "aes")]
 #[test]
 #[parallel]
 fn test_aes_enc_kdf() {
@@ -286,6 +288,7 @@ fn test_aes_enc_kdf() {
     assert_eq!(ret, CKR_OK);
 }
 
+#[cfg(feature = "hash")]
 #[test]
 #[parallel]
 fn test_hash_kdf() {
@@ -508,6 +511,7 @@ fn test_hash_kdf() {
     testtokn.finalize();
 }
 
+#[cfg(feature = "hkdf")]
 #[test]
 #[parallel]
 fn test_hkdf() {
@@ -785,6 +789,7 @@ fn test_hkdf() {
     testtokn.finalize();
 }
 
+#[cfg(feature = "pbkdf2")]
 #[test]
 #[parallel]
 fn test_pbkdf2() {
@@ -900,6 +905,7 @@ fn test_pbkdf2() {
     testtokn.finalize();
 }
 
+#[cfg(feature = "sshkdf")]
 #[test]
 #[parallel]
 fn test_sshkdf() {

@@ -221,33 +221,43 @@ mod init;
 
 mod mechs;
 
+#[cfg(feature = "aes")]
 mod aes;
 
+#[cfg(feature = "rsa")]
 mod rsa;
 
 mod session;
 
+#[cfg(feature = "ecc")]
 mod ecc;
 
+#[cfg(feature = "ecc")]
 mod ecdh;
 
+#[cfg(feature = "ecc")]
 mod ecdh_vectors;
 
-#[cfg(not(feature = "fips"))]
+#[cfg(all(feature = "eddsa", not(feature = "fips")))]
 mod eddsa;
 
+#[cfg(feature = "hash")]
 mod hashes;
 
 mod signatures;
 
 mod keys;
 
+#[cfg(feature = "sp800_108")]
 mod kdf_vectors;
 
 mod kdfs;
 
+#[cfg(feature = "hmac")]
 mod mac_vectors;
 
+#[cfg(feature = "aes")]
 mod aes_kw_vectors;
 
+#[cfg(feature = "tlskdf")]
 mod tls;

@@ -168,10 +168,10 @@ fn main() {
         .write_to_file("src/pkcs11/bindings.rs")
         .expect("Couldn't write bindings!");
 
+    /* OpenSSL Cryptography */
     #[cfg(feature = "dynamic")]
     use_system_ossl();
 
-    /* OpenSSL Cryptography */
     #[cfg(not(feature = "dynamic"))]
     println!("cargo::rerun-if-changed={}", ".git/modules/openssl/HEAD");
 

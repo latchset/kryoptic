@@ -56,6 +56,7 @@ pub fn hmac_mech_to_hash_mech(
     })
 }
 
+#[cfg(feature = "tlskdf")]
 pub fn hash_to_hmac_mech(mech: CK_MECHANISM_TYPE) -> Result<CK_MECHANISM_TYPE> {
     Ok(match mech {
         CKM_SHA_1 => CKM_SHA_1_HMAC,
@@ -229,6 +230,7 @@ static HMAC_SECRET_KEY_FACTORIES: Lazy<
     v
 });
 
+#[cfg(feature = "tlskdf")]
 pub fn register_mechs_only(mechs: &mut Mechanisms) {
     HMACMechanism::register_mechanisms(mechs);
 }

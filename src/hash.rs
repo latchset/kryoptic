@@ -119,6 +119,7 @@ pub static HASH_MECH_SET: [HashBasedOp; 9] = [
     },
 ];
 
+#[cfg(feature = "sshkdf")]
 pub fn is_valid_hash(hash: CK_MECHANISM_TYPE) -> bool {
     for hs in &HASH_MECH_SET {
         if hs.hash == hash {
