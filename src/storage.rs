@@ -11,6 +11,10 @@ use object::Object;
 
 use std::fmt::Debug;
 
+pub const SQLITEDB: &str = "sqlite";
+pub const JSONDB: &str = "json";
+pub const MEMORYDB: &str = "memory";
+
 pub trait Storage: Debug + Send + Sync {
     fn open(&mut self, filename: &String) -> Result<()>;
     fn reinit(&mut self) -> Result<()>;
@@ -24,3 +28,13 @@ pub trait Storage: Debug + Send + Sync {
 pub mod json;
 pub mod memory;
 pub mod sqlite;
+
+pub fn name_to_type(name: &str) -> Result<&'static str> {
+    if name.ends_with(".sql") {
+        Ok(SQLITEDB)
+    } else if name.ends_with(".json") {
+        Ok(JSONDB)
+    } else {
+        Err(interface::CKR_TOKEN_NOT_RECOGNIZED)?
+    }
+}

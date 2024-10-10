@@ -4,8 +4,10 @@
 use std::collections::HashMap;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use super::config;
 use super::error;
 use super::interface;
+use super::misc;
 use super::session::Session;
 use super::token::Token;
 
@@ -25,18 +27,47 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn new(filename: String) -> Result<Slot> {
-        Ok(Slot {
+    pub fn new(config: &config::Slot) -> Result<Slot> {
+        let dbtype: &str;
+        let dbpath: Option<String>;
+
+        match &config.dbtype {
+            Some(t) => dbtype = t.as_str(),
+            None => return Err(CKR_GENERAL_ERROR)?,
+        }
+        match &config.dbpath {
+            Some(p) => dbpath = Some(p.clone()),
+            None => dbpath = None,
+        }
+
+        let mut slot = Slot {
             slot_info: CK_SLOT_INFO {
-                slotDescription: SLOT_DESCRIPTION,
-                manufacturerID: MANUFACTURER_ID,
+                slotDescription: [0; 64],
+                manufacturerID: [0; 32],
                 flags: CKF_TOKEN_PRESENT,
                 hardwareVersion: CK_VERSION { major: 0, minor: 0 },
                 firmwareVersion: CK_VERSION { major: 0, minor: 0 },
             },
-            token: RwLock::new(Token::new(filename)?),
+            token: RwLock::new(Token::new(dbtype, dbpath)?),
             sessions: HashMap::new(),
-        })
+        };
+
+        /* fill strings */
+        misc::copy_sized_string(
+            match &config.description {
+                Some(d) => d.as_bytes(),
+                None => &SLOT_DESCRIPTION,
+            },
+            &mut slot.slot_info.slotDescription,
+        );
+        misc::copy_sized_string(
+            match &config.manufacturer {
+                Some(m) => m.as_bytes(),
+                None => &MANUFACTURER_ID,
+            },
+            &mut slot.slot_info.manufacturerID,
+        );
+        Ok(slot)
     }
 
     pub fn get_slot_info(&self) -> &CK_SLOT_INFO {
