@@ -91,6 +91,22 @@ pub trait Mechanism: Debug + Send + Sync {
     fn derive_operation(&self, _: &CK_MECHANISM) -> Result<Operation> {
         Err(CKR_MECHANISM_INVALID)?
     }
+
+    fn msg_encryption_op(
+        &self,
+        _: &CK_MECHANISM,
+        _: &Object,
+    ) -> Result<Box<dyn MsgEncryption>> {
+        Err(CKR_MECHANISM_INVALID)?
+    }
+
+    fn msg_decryption_op(
+        &self,
+        _: &CK_MECHANISM,
+        _: &Object,
+    ) -> Result<Box<dyn MsgDecryption>> {
+        Err(CKR_MECHANISM_INVALID)?
+    }
 }
 
 #[derive(Debug)]
@@ -285,6 +301,113 @@ pub trait Derive: MechOperation {
     }
 }
 
+pub trait MessageOperation: MechOperation {
+    fn busy(&self) -> bool;
+    fn finalize(&mut self) -> Result<()> {
+        Err(CKR_OPERATION_NOT_INITIALIZED)?
+    }
+}
+
+pub trait MsgEncryption: MessageOperation {
+    fn msg_encrypt(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _adata: &[u8],
+        _plain: &[u8],
+        _cipher: &mut [u8],
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_encrypt_begin(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _aad: &[u8],
+    ) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_encrypt_next(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _plain: &[u8],
+        _cipher: &mut [u8],
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_encrypt_final(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _plain: &[u8],
+        _cipher: &mut [u8],
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_encryption_len(
+        &mut self,
+        _data_len: usize,
+        _final: bool,
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+}
+
+pub trait MsgDecryption: MessageOperation {
+    fn msg_decrypt(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _adata: &[u8],
+        _cipher: &[u8],
+        _plain: &mut [u8],
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_decrypt_begin(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _aad: &[u8],
+    ) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_decrypt_next(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _cipher: &[u8],
+        _plain: &mut [u8],
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_decrypt_final(
+        &mut self,
+        _param: CK_VOID_PTR,
+        _paramlen: CK_ULONG,
+        _cipher: &[u8],
+        _plain: &mut [u8],
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
+    fn msg_decryption_len(
+        &mut self,
+        _data_len: usize,
+        _final: bool,
+    ) -> Result<usize> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+}
+
 #[derive(Debug)]
 pub enum Operation {
     Empty,
@@ -295,6 +418,8 @@ pub enum Operation {
     Sign(Box<dyn Sign>),
     Verify(Box<dyn Verify>),
     Derive(Box<dyn Derive>),
+    MsgEncryption(Box<dyn MsgEncryption>),
+    MsgDecryption(Box<dyn MsgDecryption>),
 }
 
 impl Operation {
@@ -308,6 +433,8 @@ impl Operation {
             Operation::Sign(op) => op.finalized(),
             Operation::Verify(op) => op.finalized(),
             Operation::Derive(op) => op.finalized(),
+            Operation::MsgEncryption(op) => op.finalized(),
+            Operation::MsgDecryption(op) => op.finalized(),
         }
     }
 }

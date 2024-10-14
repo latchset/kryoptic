@@ -14,7 +14,7 @@ use crate::interface::*;
 use crate::mechanism::Mechanisms;
 use crate::object::{Object, ObjectFactories};
 use crate::storage::{json, memory, sqlite, Storage};
-use crate::{get_random_data, register_all, sizeof};
+use crate::{get_random_data, register_all, sizeof, void_ptr};
 
 use hex;
 
@@ -36,8 +36,7 @@ const TOKEN_INFO_UID: &str = "2";
 
 const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 
-const USER_PIN_IV: &str = "USRPIN IV UNWRAP";
-const USER_PIN_AAD: &str = "USRPIN AUTH_DATA";
+const USER_PIN_IV: &str = "UPIN";
 const DEFPIN_SALT: &str = "DEFAULT SALT DATA"; /* at least 16 bytes for FIPS */
 const DEFPIN_ITER: usize = 1000;
 const DEFAULT_IV_SIZE: usize = 12; /* 96 bits as required by FIPS for AES GCM */
@@ -431,17 +430,6 @@ impl Token {
         )
     }
 
-    fn wrapping_params(&self) -> CK_GCM_PARAMS {
-        CK_GCM_PARAMS {
-            pIv: USER_PIN_IV.as_ptr() as *mut CK_BYTE,
-            ulIvLen: USER_PIN_IV.len() as CK_ULONG,
-            ulIvBits: (USER_PIN_IV.len() * 8) as CK_ULONG,
-            pAAD: USER_PIN_AAD.as_ptr() as *mut CK_BYTE,
-            ulAADLen: USER_PIN_AAD.len() as CK_ULONG,
-            ulTagBits: 64 as CK_ULONG,
-        }
-    }
-
     fn wrap_kek(
         &mut self,
         wrapper: &Object,
@@ -456,9 +444,9 @@ impl Token {
         kek.set_attr(Attribute::from_bool(CKA_EXTRACTABLE, true))?;
         let outlen = aes.wrap_key(
             &CK_MECHANISM {
-                mechanism: CKM_AES_GCM,
-                pParameter: &self.wrapping_params() as *const _ as *mut _,
-                ulParameterLen: sizeof!(CK_GCM_PARAMS),
+                mechanism: CKM_AES_KEY_WRAP_KWP,
+                pParameter: void_ptr!(USER_PIN_IV.as_ptr()),
+                ulParameterLen: USER_PIN_IV.len() as CK_ULONG,
             },
             wrapper,
             &kek,
@@ -483,9 +471,9 @@ impl Token {
         let aes = self.mechanisms.get(CKM_AES_GCM)?;
         Ok(aes.unwrap_key(
             &CK_MECHANISM {
-                mechanism: CKM_AES_GCM,
-                pParameter: &self.wrapping_params() as *const _ as *mut _,
-                ulParameterLen: sizeof!(CK_GCM_PARAMS),
+                mechanism: CKM_AES_KEY_WRAP_KWP,
+                pParameter: void_ptr!(USER_PIN_IV.as_ptr()),
+                ulParameterLen: USER_PIN_IV.len() as CK_ULONG,
             },
             wrapper,
             wrapped,
