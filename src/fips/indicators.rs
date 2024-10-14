@@ -2,8 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::attr_element;
-use crate::attribute;
-use crate::attribute::{from_bytes, from_string, from_ulong};
+use crate::attribute::Attribute;
 use crate::ecc::ec_key_curve_size;
 use crate::error::Result;
 use crate::interface::*;
@@ -36,49 +35,49 @@ impl ValidationFactory {
         data.attributes
             .append(&mut data.init_common_storage_attrs());
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_TYPE;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_ulong; val 0));
+                CKA_VALIDATION_TYPE; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_ulong; val 0));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_VERSION;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+                CKA_VALIDATION_VERSION; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_bytes; val Vec::new()));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_LEVEL;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_ulong; val 0));
+                CKA_VALIDATION_LEVEL; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_ulong; val 0));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_MODULE_ID;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_string; val String::new()));
+                CKA_VALIDATION_MODULE_ID; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_string; val String::new()));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_FLAG;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_ulong; val 0));
+                CKA_VALIDATION_FLAG; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_ulong; val 0));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_AUTHORITY_TYPE;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_ulong; val 0));
+                CKA_VALIDATION_AUTHORITY_TYPE; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_ulong; val 0));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_COUNTRY;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_string; val String::new()));
+                CKA_VALIDATION_COUNTRY; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_string; val String::new()));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_CERTIFICATE_IDENTIFIER;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_string; val String::new()));
+                CKA_VALIDATION_CERTIFICATE_IDENTIFIER; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_string; val String::new()));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_CERTIFICATE_URI;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_string; val String::new()));
+                CKA_VALIDATION_CERTIFICATE_URI; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_string; val String::new()));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_VENDOR_URI;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_string; val String::new()));
+                CKA_VALIDATION_VENDOR_URI; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_string; val String::new()));
         data.attributes.push(attr_element!(
-                CKA_VALIDATION_PROFILE;
-                OAFlags::AlwaysRequired | OAFlags::NeverSettable
-                | OAFlags::Unchangeable; from_string; val String::new()));
+                CKA_VALIDATION_PROFILE; OAFlags::AlwaysRequired
+                | OAFlags::NeverSettable | OAFlags::Unchangeable;
+                Attribute::from_string; val String::new()));
         data
     }
 }
@@ -95,50 +94,50 @@ pub static VALIDATION_FACTORY: Lazy<Box<dyn ObjectFactory>> =
 pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
     /* Synthesize a FIPS CKO_VALIDATION object */
     let mut obj = Object::new();
-    obj.set_attr(attribute::from_bool(CKA_TOKEN, false))?;
-    obj.set_attr(attribute::from_bool(CKA_DESTROYABLE, false))?;
-    obj.set_attr(attribute::from_bool(CKA_MODIFIABLE, false))?;
-    obj.set_attr(attribute::from_bool(CKA_PRIVATE, false))?;
-    obj.set_attr(attribute::from_bool(CKA_SENSITIVE, false))?;
-    obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_VALIDATION))?;
-    obj.set_attr(attribute::from_ulong(
+    obj.set_attr(Attribute::from_bool(CKA_TOKEN, false))?;
+    obj.set_attr(Attribute::from_bool(CKA_DESTROYABLE, false))?;
+    obj.set_attr(Attribute::from_bool(CKA_MODIFIABLE, false))?;
+    obj.set_attr(Attribute::from_bool(CKA_PRIVATE, false))?;
+    obj.set_attr(Attribute::from_bool(CKA_SENSITIVE, false))?;
+    obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_VALIDATION))?;
+    obj.set_attr(Attribute::from_ulong(
         CKA_VALIDATION_TYPE,
         CKV_TYPE_SOFTWARE,
     ))?;
-    obj.set_attr(attribute::from_bytes(
+    obj.set_attr(Attribute::from_bytes(
         CKA_VALIDATION_VERSION,
         vec![3u8, 0u8],
     ))?;
-    obj.set_attr(attribute::from_ulong(CKA_VALIDATION_LEVEL, 1))?;
+    obj.set_attr(Attribute::from_ulong(CKA_VALIDATION_LEVEL, 1))?;
     /* TODO: This should be generated at build time */
-    obj.set_attr(attribute::from_string(
+    obj.set_attr(Attribute::from_string(
         CKA_VALIDATION_MODULE_ID,
         String::from("Kryoptic FIPS Module - v1"),
     ))?;
-    obj.set_attr(attribute::from_ulong(CKA_VALIDATION_FLAG, KRF_FIPS))?;
-    obj.set_attr(attribute::from_ulong(
+    obj.set_attr(Attribute::from_ulong(CKA_VALIDATION_FLAG, KRF_FIPS))?;
+    obj.set_attr(Attribute::from_ulong(
         CKA_VALIDATION_AUTHORITY_TYPE,
         CKV_AUTHORITY_TYPE_NIST_CMVP,
     ))?;
 
     /* TODO: The following attributes should all be determined at build time */
-    obj.set_attr(attribute::from_string(
+    obj.set_attr(Attribute::from_string(
         CKA_VALIDATION_COUNTRY,
         String::from("US"),
     ))?;
-    obj.set_attr(attribute::from_string(
+    obj.set_attr(Attribute::from_string(
         CKA_VALIDATION_CERTIFICATE_IDENTIFIER,
         String::from("Pending"),
     ))?;
-    obj.set_attr(attribute::from_string(
+    obj.set_attr(Attribute::from_string(
         CKA_VALIDATION_CERTIFICATE_URI,
         String::from(""),
     ))?;
-    obj.set_attr(attribute::from_string(
+    obj.set_attr(Attribute::from_string(
         CKA_VALIDATION_VENDOR_URI,
         String::from("https://github.com/latchset/kryoptic"),
     ))?;
-    obj.set_attr(attribute::from_string(
+    obj.set_attr(Attribute::from_string(
         CKA_VALIDATION_PROFILE,
         String::from(""),
     ))?;
@@ -1071,7 +1070,10 @@ pub fn is_approved(
                         Ok(f) => f,
                         Err(_) => 0,
                     } | KRF_FIPS;
-                    let _ = obj.set_attr(from_ulong(CKA_VALIDATION_FLAG, flag));
+                    let _ = obj.set_attr(Attribute::from_ulong(
+                        CKA_VALIDATION_FLAG,
+                        flag,
+                    ));
                     return true;
                 } else {
                     /* special case for HKDF which can return a DATA object */

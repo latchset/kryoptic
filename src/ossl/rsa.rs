@@ -3,7 +3,7 @@
 
 use core::ffi::{c_char, c_int, c_uint};
 
-use crate::attribute;
+use crate::attribute::Attribute;
 use crate::error::{Error, Result};
 use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::interface::*;
@@ -418,41 +418,41 @@ impl RsaPKCSOperation {
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key (has E already set) */
-        pubkey.set_attr(attribute::from_bytes(
+        pubkey.set_attr(Attribute::from_bytes(
             CKA_MODULUS,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_N))?,
         ))?;
 
         /* Private Key */
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_MODULUS,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_N))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_PUBLIC_EXPONENT,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_E))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_PRIVATE_EXPONENT,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_D))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_PRIME_1,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_PRIME_2,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_EXPONENT_1,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_EXPONENT_2,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2))?,
         ))?;
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_COEFFICIENT,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1))?,
         ))?;

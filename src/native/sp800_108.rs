@@ -1,7 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use crate::attribute::from_bytes;
+use crate::attribute::Attribute;
 use crate::error;
 use crate::error::Result;
 use crate::interface::*;
@@ -467,7 +467,7 @@ impl Derive for Sp800Operation {
         for key in &mut keys {
             let keysize =
                 usize::try_from(key.get_attr_as_ulong(CKA_VALUE_LEN)?)?;
-            key.set_attr(from_bytes(
+            key.set_attr(Attribute::from_bytes(
                 CKA_VALUE,
                 dkm[cursor..(cursor + keysize)].to_vec(),
             ))?;

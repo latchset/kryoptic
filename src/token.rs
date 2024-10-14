@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use std::vec::Vec;
 
 use super::aes;
-use super::attribute;
 use super::error;
 use super::interface;
 use super::mechanism;
 use super::object;
 use super::storage;
+use crate::attribute::{Attribute, CkAttrs};
 
 use super::{get_random_data, sizeof};
 use error::Result;
@@ -296,29 +296,29 @@ impl Token {
             Ok(o) => o.clone(),
             Err(_) => {
                 let mut o = Object::new();
-                o.set_attr(attribute::from_string(CKA_UNIQUE_ID, uid.clone()))?;
-                o.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
-                o.set_attr(attribute::from_ulong(CKA_CLASS, KRO_TOKEN_DATA))?;
+                o.set_attr(Attribute::from_string(CKA_UNIQUE_ID, uid.clone()))?;
+                o.set_attr(Attribute::from_bool(CKA_TOKEN, true))?;
+                o.set_attr(Attribute::from_ulong(CKA_CLASS, KRO_TOKEN_DATA))?;
                 o
             }
         };
-        obj.set_attr(attribute::string_from_sized(
+        obj.set_attr(Attribute::string_from_sized(
             CKA_LABEL,
             &self.info.label,
         ))?;
-        obj.set_attr(attribute::string_from_sized(
+        obj.set_attr(Attribute::string_from_sized(
             KRA_MANUFACTURER_ID,
             &self.info.manufacturerID,
         ))?;
-        obj.set_attr(attribute::string_from_sized(
+        obj.set_attr(Attribute::string_from_sized(
             KRA_MODEL,
             &self.info.model,
         ))?;
-        obj.set_attr(attribute::string_from_sized(
+        obj.set_attr(Attribute::string_from_sized(
             KRA_SERIAL_NUMBER,
             &self.info.serialNumber,
         ))?;
-        obj.set_attr(attribute::from_ulong(KRA_FLAGS, self.info.flags))?;
+        obj.set_attr(Attribute::from_ulong(KRA_FLAGS, self.info.flags))?;
 
         self.storage.store(&uid, obj)?;
         return Ok(());
@@ -353,30 +353,30 @@ impl Token {
         match self.storage.fetch_by_uid(&uid) {
             Ok(o) => {
                 let mut obj = o.clone();
-                obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
-                obj.set_attr(attribute::from_bytes(CKA_VALUE, wrapped))?;
-                obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
+                obj.set_attr(Attribute::from_string(CKA_LABEL, label))?;
+                obj.set_attr(Attribute::from_bytes(CKA_VALUE, wrapped))?;
+                obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
                 self.storage.store(&uid, obj)?;
             }
             Err(_) => {
                 let mut obj = Object::new();
-                obj.set_attr(attribute::from_string(
+                obj.set_attr(Attribute::from_string(
                     CKA_UNIQUE_ID,
                     uid.clone(),
                 ))?;
-                obj.set_attr(attribute::from_bool(CKA_TOKEN, true))?;
-                obj.set_attr(attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
-                obj.set_attr(attribute::from_ulong(
+                obj.set_attr(Attribute::from_bool(CKA_TOKEN, true))?;
+                obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
+                obj.set_attr(Attribute::from_ulong(
                     CKA_KEY_TYPE,
                     CKK_GENERIC_SECRET,
                 ))?;
-                obj.set_attr(attribute::from_string(CKA_LABEL, label))?;
-                obj.set_attr(attribute::from_bytes(CKA_VALUE, wrapped))?;
-                obj.set_attr(attribute::from_ulong(
+                obj.set_attr(Attribute::from_string(CKA_LABEL, label))?;
+                obj.set_attr(Attribute::from_bytes(CKA_VALUE, wrapped))?;
+                obj.set_attr(Attribute::from_ulong(
                     KRA_MAX_LOGIN_ATTEMPTS,
                     MAX_LOGIN_ATTEMPTS,
                 ))?;
-                obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
+                obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
 
                 self.storage.store(&uid, obj)?;
             }
@@ -419,7 +419,7 @@ impl Token {
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
         let truebool: CK_BBOOL = CK_TRUE;
-        let mut template = attribute::CkAttrs::with_capacity(5);
+        let mut template = CkAttrs::with_capacity(5);
         template.add_ulong(CKA_CLASS, &class);
         template.add_ulong(CKA_KEY_TYPE, &keytyp);
         template.add_ulong(CKA_VALUE_LEN, &keylen);
@@ -460,7 +460,7 @@ impl Token {
         let aes = self.mechanisms.get(CKM_AES_GCM)?;
         let factory = self.object_factories.get_object_factory(&kek)?;
         /* need to do this or wrap_key will fail */
-        kek.set_attr(attribute::from_bool(CKA_EXTRACTABLE, true))?;
+        kek.set_attr(Attribute::from_bool(CKA_EXTRACTABLE, true))?;
         let outlen = aes.wrap_key(
             &CK_MECHANISM {
                 mechanism: CKM_AES_GCM,
@@ -481,7 +481,7 @@ impl Token {
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
         let truebool: CK_BBOOL = CK_TRUE;
-        let mut template = attribute::CkAttrs::with_capacity(5);
+        let mut template = CkAttrs::with_capacity(5);
         template.add_ulong(CKA_CLASS, &class);
         template.add_ulong(CKA_KEY_TYPE, &keytyp);
         template.add_ulong(CKA_VALUE_LEN, &keylen);
@@ -568,7 +568,7 @@ impl Token {
         let class = CKO_SECRET_KEY;
         let keytyp = CKK_AES;
         let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
-        let mut template = attribute::CkAttrs::with_capacity(3);
+        let mut template = CkAttrs::with_capacity(3);
         template.add_ulong(CKA_CLASS, &class);
         template.add_ulong(CKA_KEY_TYPE, &keytyp);
         template.add_ulong(CKA_VALUE_LEN, &keylen);
@@ -720,7 +720,7 @@ impl Token {
         attempts: CK_ULONG,
     ) -> Result<()> {
         let mut obj = self.storage.fetch_by_uid(&uid)?.clone();
-        obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
+        obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
         self.storage.store(&uid, obj)
     }
 
@@ -752,7 +752,7 @@ impl Token {
             let _ = self.update_pin_attempts(SO_PIN_UID.to_string(), attempts);
 
             /* set token info */
-            obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
+            obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
             self.update_pin_flags(&obj)?;
         }
 
@@ -798,7 +798,7 @@ impl Token {
                 self.update_pin_attempts(USER_PIN_UID.to_string(), attempts);
 
             /* set token info */
-            obj.set_attr(attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
+            obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
             self.update_pin_flags(&obj)?;
         }
 
@@ -980,7 +980,7 @@ impl Token {
                 let encval = self.encrypt_value(&uid, plain)?;
 
                 /* now replace the clear text val with the encrypted one */
-                obj.set_attr(attribute::from_bytes(typ, encval))?;
+                obj.set_attr(Attribute::from_bytes(typ, encval))?;
             }
         }
         self.storage.store(&uid, obj)
@@ -1029,7 +1029,7 @@ impl Token {
                 let plain = self.decrypt_value(uid, encval)?;
 
                 /* now replace the encrypted val with the clear text one */
-                obj.set_attr(attribute::from_bytes(typ, plain))?;
+                obj.set_attr(Attribute::from_bytes(typ, plain))?;
             }
         }
         Ok(obj)

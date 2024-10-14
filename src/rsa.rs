@@ -3,8 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute;
-use crate::attribute::{from_bool, from_bytes, from_ulong};
+use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::{DerEncBigUint, PrivateKeyInfo};
@@ -69,9 +68,15 @@ impl RSAPubFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_public_key_attrs());
-        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_MODULUS_BITS; OAFlags::RequiredOnGenerate | OAFlags::Unchangeable; from_ulong; val 0));
-        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_MODULUS_BITS; OAFlags::RequiredOnGenerate
+            | OAFlags::Unchangeable; Attribute::from_ulong; val 0));
+        data.attributes.push(attr_element!(
+            CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
         data
     }
 }
@@ -159,17 +164,36 @@ impl RSAPrivFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PRIVATE_EXPONENT; OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PRIME_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_PRIME_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_EXPONENT_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_EXPONENT_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_COEFFICIENT; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_PRIVATE_EXPONENT; OAFlags::Sensitive
+            | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_PRIME_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_PRIME_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_EXPONENT_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_EXPONENT_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_COEFFICIENT; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
+            | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
 
         /* default to private */
-        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
+        let private = attr_element!(
+            CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
+            Attribute::from_bool; val true);
         match data
             .attributes
             .iter()
@@ -244,14 +268,14 @@ impl PrivKeyFactory for RSAPrivFactory {
     ) -> Result<Object> {
         let mut key = self.default_object_unwrap(template)?;
 
-        if !key.check_or_set_attr(attribute::from_ulong(
+        if !key.check_or_set_attr(Attribute::from_ulong(
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key
-            .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
+            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
         {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
@@ -278,49 +302,49 @@ impl PrivKeyFactory for RSAPrivFactory {
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
 
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_MODULUS,
             rsapkey.modulus.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_PUBLIC_EXPONENT,
             rsapkey.public_exponent.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_PRIVATE_EXPONENT,
             rsapkey.private_exponent.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_PRIME_1,
             rsapkey.prime1.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_PRIME_2,
             rsapkey.prime2.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_EXPONENT_1,
             rsapkey.exponent1.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_EXPONENT_2,
             rsapkey.exponent2.as_nopad_bytes().to_vec(),
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !key.check_or_set_attr(attribute::from_bytes(
+        if !key.check_or_set_attr(Attribute::from_bytes(
             CKA_COEFFICIENT,
             rsapkey.coefficient.as_nopad_bytes().to_vec(),
         ))? {
@@ -484,14 +508,14 @@ impl Mechanism for RsaPKCSMechanism {
     ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
-        if !pubkey.check_or_set_attr(attribute::from_ulong(
+        if !pubkey.check_or_set_attr(Attribute::from_ulong(
             CKA_CLASS,
             CKO_PUBLIC_KEY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !pubkey
-            .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
+            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
         {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
@@ -501,7 +525,7 @@ impl Mechanism for RsaPKCSMechanism {
         let exponent: Vec<u8> = match pubkey.get_attr(CKA_PUBLIC_EXPONENT) {
             Some(a) => a.get_value().clone(),
             None => {
-                pubkey.set_attr(attribute::from_bytes(
+                pubkey.set_attr(Attribute::from_bytes(
                     CKA_PUBLIC_EXPONENT,
                     vec![0x01, 0x00, 0x01],
                 ))?;
@@ -511,14 +535,14 @@ impl Mechanism for RsaPKCSMechanism {
 
         let mut privkey =
             PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
-        if !privkey.check_or_set_attr(attribute::from_ulong(
+        if !privkey.check_or_set_attr(Attribute::from_ulong(
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !privkey
-            .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
+            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
         {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }

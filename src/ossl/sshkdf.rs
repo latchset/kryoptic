@@ -1,7 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use crate::attribute::from_bytes;
+use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash;
 use crate::interface::*;
@@ -139,7 +139,7 @@ impl Derive for SSHKDFOperation {
 
         self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
 
-        dobj.set_attr(from_bytes(CKA_VALUE, dkm))?;
+        dobj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
         Ok(vec![dobj])
     }
 }
