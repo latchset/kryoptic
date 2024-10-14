@@ -4,7 +4,7 @@
 use std::error;
 use std::fmt;
 
-use super::interface;
+use crate::interface;
 
 use serde_json;
 

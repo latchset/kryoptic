@@ -3,12 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use super::error;
-use super::interface;
-use super::object;
-use error::Result;
-use interface::*;
-use object::{Object, ObjectFactories, ObjectFactory};
+use crate::error::Result;
+use crate::interface::*;
+use crate::object::{Object, ObjectFactories, ObjectFactory};
 
 use std::fmt::Debug;
 
@@ -17,14 +14,14 @@ pub trait Mechanism: Debug + Send + Sync {
     fn encryption_new(
         &self,
         _: &CK_MECHANISM,
-        _: &object::Object,
+        _: &Object,
     ) -> Result<Box<dyn Encryption>> {
         Err(CKR_MECHANISM_INVALID)?
     }
     fn decryption_new(
         &self,
         _: &CK_MECHANISM,
-        _: &object::Object,
+        _: &Object,
     ) -> Result<Box<dyn Decryption>> {
         Err(CKR_MECHANISM_INVALID)?
     }
@@ -34,22 +31,18 @@ pub trait Mechanism: Debug + Send + Sync {
     fn mac_new(
         &self,
         _: &CK_MECHANISM,
-        _: &object::Object,
+        _: &Object,
         _: CK_FLAGS,
     ) -> Result<Box<dyn Mac>> {
         Err(CKR_MECHANISM_INVALID)?
     }
-    fn sign_new(
-        &self,
-        _: &CK_MECHANISM,
-        _: &object::Object,
-    ) -> Result<Box<dyn Sign>> {
+    fn sign_new(&self, _: &CK_MECHANISM, _: &Object) -> Result<Box<dyn Sign>> {
         Err(CKR_MECHANISM_INVALID)?
     }
     fn verify_new(
         &self,
         _: &CK_MECHANISM,
-        _: &object::Object,
+        _: &Object,
     ) -> Result<Box<dyn Verify>> {
         Err(CKR_MECHANISM_INVALID)?
     }
@@ -76,8 +69,8 @@ pub trait Mechanism: Debug + Send + Sync {
     fn wrap_key(
         &self,
         _: &CK_MECHANISM,
-        _: &object::Object,
-        _: &object::Object,
+        _: &Object,
+        _: &Object,
         _: &mut [u8],
         _: &Box<dyn ObjectFactory>,
     ) -> Result<usize> {
@@ -87,7 +80,7 @@ pub trait Mechanism: Debug + Send + Sync {
     fn unwrap_key(
         &self,
         _: &CK_MECHANISM,
-        _: &object::Object,
+        _: &Object,
         _: &[u8],
         _: &[CK_ATTRIBUTE],
         _: &Box<dyn ObjectFactory>,
@@ -283,7 +276,7 @@ pub trait Verify: MechOperation {
 pub trait Derive: MechOperation {
     fn derive(
         &mut self,
-        _: &object::Object,
+        _: &Object,
         _: &[CK_ATTRIBUTE],
         _: &Mechanisms,
         _: &ObjectFactories,

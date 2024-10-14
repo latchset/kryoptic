@@ -1,10 +1,12 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::*;
-use hex;
 use std::ffi::CString;
 use std::sync::Once;
+
+use crate::*;
+
+use hex;
 
 #[macro_use]
 mod util;

@@ -4,13 +4,10 @@
 use std::collections::HashMap;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use super::error;
-use super::interface;
-use super::session::Session;
-use super::token::Token;
-
-use error::Result;
-use interface::*;
+use crate::error::Result;
+use crate::interface::*;
+use crate::session::Session;
+use crate::token::Token;
 
 static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] =
     *b"Kryoptic Slot                                                   ";

@@ -1,16 +1,15 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-// Helper routines to use with rust/asn1
-use super::error;
-use super::interface;
-
-use asn1;
-use error::Result;
-use interface::*;
 use std::borrow::Cow;
 
+use crate::error::Result;
+use crate::interface::*;
+
+use asn1;
 use zeroize::Zeroize;
+
+/* Helper routines to use with rust/asn1 */
 
 pub struct DerEncBigUint<'a> {
     data: Cow<'a, [u8]>,

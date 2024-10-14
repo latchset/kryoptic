@@ -1,18 +1,13 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::super::error;
-use super::super::interface;
-use super::super::object;
 use std::collections::HashMap;
-
-use super::Storage;
-
-use error::{Error, Result};
-use interface::*;
-use object::Object;
-
 use std::fmt::Debug;
+
+use crate::error::{Error, Result};
+use crate::interface::*;
+use crate::object::Object;
+use crate::storage::Storage;
 
 #[derive(Debug)]
 struct MemoryStorage {

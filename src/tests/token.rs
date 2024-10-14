@@ -1,11 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::tests;
-use tests::*;
+use std::env;
+
+use crate::tests::*;
 
 use serial_test::{parallel, serial};
-use std::env;
 
 fn test_token(name: &str) {
     let mut testtokn = TestToken::new(name, true);

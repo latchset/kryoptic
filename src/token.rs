@@ -5,25 +5,18 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use super::aes;
-use super::error;
-use super::interface;
-use super::mechanism;
-use super::object;
-use super::storage;
+use crate::aes;
 use crate::attribute::{Attribute, CkAttrs};
-
-use super::{get_random_data, sizeof};
-use error::Result;
-use interface::*;
-use mechanism::Mechanisms;
-use object::{Object, ObjectFactories};
-use storage::Storage;
-
-use hex;
-
+use crate::error::Result;
 #[cfg(feature = "fips")]
 use crate::fips;
+use crate::interface::*;
+use crate::mechanism::Mechanisms;
+use crate::object::{Object, ObjectFactories};
+use crate::storage::{json, memory, sqlite, Storage};
+use crate::{get_random_data, register_all, sizeof};
+
+use hex;
 
 #[cfg(feature = "fips")]
 const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
@@ -147,11 +140,11 @@ impl Token {
         /* when no filename is provided we assume a memory only
          * token that has no backing store */
         let store = if filename.ends_with(".json") {
-            storage::json::json()
+            json::json()
         } else if filename.ends_with(".sql") {
-            storage::sqlite::sqlite()
+            sqlite::sqlite()
         } else {
-            storage::memory::memory()
+            memory::memory()
         };
 
         let mut token: Token = Token {
@@ -194,7 +187,7 @@ impl Token {
         copy_sized_string(TOKEN_MODEL.as_bytes(), &mut token.info.model);
 
         /* register mechanisms and factories */
-        super::register_all(&mut token.mechanisms, &mut token.object_factories);
+        register_all(&mut token.mechanisms, &mut token.object_factories);
 
         if token.filename.len() > 0 {
             match token.storage.open(&token.filename) {
@@ -947,8 +940,7 @@ impl Token {
             let mut params = self.encryption_params(&iv, uid.as_bytes());
             let mech: CK_MECHANISM = CK_MECHANISM {
                 mechanism: CKM_AES_GCM,
-                pParameter: &mut params as *mut interface::CK_GCM_PARAMS
-                    as *mut _,
+                pParameter: &mut params as *mut CK_GCM_PARAMS as *mut _,
                 ulParameterLen: sizeof!(CK_GCM_PARAMS),
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;
@@ -994,8 +986,7 @@ impl Token {
             );
             let mech: CK_MECHANISM = CK_MECHANISM {
                 mechanism: CKM_AES_GCM,
-                pParameter: &mut params as *mut interface::CK_GCM_PARAMS
-                    as *mut _,
+                pParameter: &mut params as *mut CK_GCM_PARAMS as *mut _,
                 ulParameterLen: sizeof!(CK_GCM_PARAMS),
             };
             let aes = self.mechanisms.get(CKM_AES_GCM)?;

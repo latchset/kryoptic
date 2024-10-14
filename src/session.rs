@@ -3,18 +3,13 @@
 
 use std::vec::Vec;
 
-use super::error;
-use super::interface;
-use super::mechanism;
-use super::token;
-
-use error::Result;
-use interface::*;
-use mechanism::{Operation, SearchOperation};
-use token::Token;
+use crate::error::Result;
+use crate::interface::*;
+use crate::mechanism::{Operation, SearchOperation};
+use crate::token::Token;
 
 #[cfg(feature = "fips")]
-use super::fips;
+use crate::fips;
 
 #[derive(Debug)]
 pub struct SessionSearch {

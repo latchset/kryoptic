@@ -4,14 +4,13 @@
 use std::borrow::Cow;
 use std::ffi::{c_char, c_int, c_uint, c_void};
 
-use super::super::interface::*;
-use super::super::{byte_ptr, void_ptr};
 use crate::error::Result;
+use crate::interface::*;
+use crate::ossl::bindings::*;
+use crate::ossl::get_libctx;
+use crate::{byte_ptr, void_ptr};
 
 use zeroize::Zeroize;
-
-use super::bindings::*;
-use super::get_libctx;
 
 macro_rules! ptr_wrapper_struct {
     ($name:ident; $ctx:ident) => {

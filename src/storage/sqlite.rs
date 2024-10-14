@@ -1,26 +1,22 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use rusqlite::{params, types::Value, Connection, Rows, Transaction};
 use std::sync::{Arc, Mutex};
 
-use super::super::error;
-use super::super::interface;
-use super::super::object;
 use crate::attribute::{string_to_ck_date, AttrType, Attribute};
+use crate::error::{Error, Result};
+use crate::interface::*;
+use crate::object::Object;
+use crate::storage::Storage;
 
-use super::Storage;
+use rusqlite::{params, types::Value, Connection, Rows, Transaction};
 
-use error::{Error, Result};
-use interface::*;
-use object::Object;
-
-fn bad_code<E: std::error::Error + 'static>(error: E) -> error::Error {
-    error::Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
+fn bad_code<E: std::error::Error + 'static>(error: E) -> Error {
+    Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
 }
 
-fn bad_storage<E: std::error::Error + 'static>(error: E) -> error::Error {
-    error::Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
+fn bad_storage<E: std::error::Error + 'static>(error: E) -> Error {
+    Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
 }
 
 const IS_DB_INITIALIZED: &str =
@@ -246,7 +242,7 @@ impl SqliteStorage {
         Ok(objid)
     }
 
-    fn num_to_val(ulong: CK_ULONG) -> error::Result<Value> {
+    fn num_to_val(ulong: CK_ULONG) -> Result<Value> {
         /* CK_UNAVAILABLE_INFORMATION need to be special cased */
         /* for storage compatibility CK_ULONGs can only be stored as u32
          * values and PKCS#11 spec pay attentions to never allocate numbers
@@ -265,7 +261,7 @@ impl SqliteStorage {
         Ok(Value::from(val))
     }
 
-    fn val_to_ulong(val: i64) -> error::Result<CK_ULONG> {
+    fn val_to_ulong(val: i64) -> Result<CK_ULONG> {
         /* we need to map back CK_UNAVAILABLE_INFORMATION's special case */
         if val == -1 {
             Ok(CK_UNAVAILABLE_INFORMATION)

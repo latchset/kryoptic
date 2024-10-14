@@ -1,8 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::tests;
-use tests::*;
+use crate::tests::*;
 
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 pub const CK_BBOOL_SIZE: usize = std::mem::size_of::<CK_BBOOL>();

@@ -1,9 +1,6 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use getrandom;
-use libc;
-use once_cell::sync::Lazy;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_int, c_uchar, c_uint, c_void};
 use std::fs::File;
@@ -12,13 +9,16 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::path::Path;
 use std::slice;
-use zeroize::Zeroize;
 
 use crate::error::Result;
 use crate::interface::*;
+use crate::ossl::bindings::*;
+use crate::ossl::common::*;
 
-use super::bindings::*;
-use super::common::*;
+use getrandom;
+use libc;
+use once_cell::sync::Lazy;
+use zeroize::Zeroize;
 
 /* Entropy Stuff */
 
