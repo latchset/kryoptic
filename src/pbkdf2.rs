@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::{from_bool, from_bytes, from_ulong, CkAttrs};
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::hmac;
 use crate::interface::*;
@@ -44,14 +44,14 @@ impl PBKDF2Mechanism {
     fn mock_password_object(&self, key: Vec<u8>) -> Result<Object> {
         let mut obj = Object::new();
         obj.set_zeroize();
-        obj.set_attr(from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
-        obj.set_attr(from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
-        obj.set_attr(from_ulong(
+        obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
+        obj.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
+        obj.set_attr(Attribute::from_ulong(
             CKA_VALUE_LEN,
             CK_ULONG::try_from(key.len())?,
         ))?;
-        obj.set_attr(from_bytes(CKA_VALUE, key))?;
-        obj.set_attr(from_bool(CKA_DERIVE, true))?;
+        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_bool(CKA_DERIVE, true))?;
         Ok(obj)
     }
 }

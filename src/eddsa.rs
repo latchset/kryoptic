@@ -3,8 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute;
-use crate::attribute::{from_bool, from_bytes};
+use crate::attribute::Attribute;
 use crate::ecc_misc::*;
 use crate::error::Result;
 use crate::interface::*;
@@ -34,8 +33,13 @@ impl EDDSAPubFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_public_key_attrs());
-        data.attributes.push(attr_element!(CKA_EC_PARAMS; OAFlags::AlwaysRequired | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_EC_POINT; OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_EC_PARAMS; OAFlags::AlwaysRequired | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_EC_POINT; OAFlags::RequiredOnCreate
+            | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
         data
     }
 }
@@ -75,11 +79,18 @@ impl EDDSAPrivFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(CKA_EC_PARAMS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_EC_PARAMS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
+            | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
 
         /* default to private */
-        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
+        let private = attr_element!(
+            CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
+            Attribute::from_bool; val true);
         match data
             .attributes
             .iter()
@@ -206,13 +217,13 @@ impl Mechanism for EddsaMechanism {
     ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
-        if !pubkey.check_or_set_attr(attribute::from_ulong(
+        if !pubkey.check_or_set_attr(Attribute::from_ulong(
             CKA_CLASS,
             CKO_PUBLIC_KEY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !pubkey.check_or_set_attr(attribute::from_ulong(
+        if !pubkey.check_or_set_attr(Attribute::from_ulong(
             CKA_KEY_TYPE,
             CKK_EC_EDWARDS,
         ))? {
@@ -221,13 +232,13 @@ impl Mechanism for EddsaMechanism {
 
         let mut privkey =
             PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
-        if !privkey.check_or_set_attr(attribute::from_ulong(
+        if !privkey.check_or_set_attr(Attribute::from_ulong(
             CKA_CLASS,
             CKO_PRIVATE_KEY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
-        if !privkey.check_or_set_attr(attribute::from_ulong(
+        if !privkey.check_or_set_attr(Attribute::from_ulong(
             CKA_KEY_TYPE,
             CKK_EC_EDWARDS,
         ))? {
@@ -240,7 +251,7 @@ impl Mechanism for EddsaMechanism {
                 return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
             }
         };
-        if !privkey.check_or_set_attr(attribute::from_bytes(
+        if !privkey.check_or_set_attr(Attribute::from_bytes(
             CKA_EC_PARAMS,
             ec_params,
         ))? {

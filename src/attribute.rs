@@ -1,14 +1,12 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::error;
-use super::interface;
-
-use super::{bytes_to_vec, sizeof, void_ptr};
-use error::{Error, Result};
-use interface::*;
-
 use std::borrow::Cow;
+
+use crate::error::{Error, Result};
+use crate::interface::*;
+use crate::{bytes_to_vec, sizeof, void_ptr};
+
 use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -279,43 +277,80 @@ impl Attribute {
     pub fn zeroize(&mut self) {
         self.value.zeroize();
     }
+
+    pub fn from_date_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::DateType,
+            value: val,
+        }
+    }
+
+    pub fn from_ignore(t: CK_ULONG, _val: Option<()>) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::IgnoreType,
+            value: Vec::new(),
+        }
+    }
+
+    pub fn string_from_sized(t: CK_ULONG, val: &[u8]) -> Attribute {
+        let mut value = Vec::from(val);
+        let mut len = value.len();
+        for i in (0..len).rev() {
+            if value[i] != 0x20 {
+                break;
+            }
+            len -= 1;
+        }
+        value.resize(len, 0);
+        /* trailing null byte of a string */
+        value.push(0);
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::StringType,
+            value: value,
+        }
+    }
 }
 
 macro_rules! conversion_from_type {
     (make $fn1:ident; $fn2:ident; $fn3:ident; from $rtype:ty; as $atype:ident; via $conv:ident) => {
-        #[allow(dead_code)]
-        pub fn $fn1(t: CK_ULONG, val: $rtype) -> Attribute {
-            Attribute {
-                ck_type: t,
-                attrtype: AttrType::$atype,
-                value: $conv(val),
-            }
-        }
-
-        #[allow(dead_code)]
-        pub fn $fn2(t: CK_ULONG, val: $rtype) -> Result<Attribute> {
-            for a in &ATTRMAP {
-                if a.id == t {
-                    if a.atype == AttrType::$atype {
-                        return Ok($fn1(t, val));
-                    }
-                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        impl Attribute {
+            #[allow(dead_code)]
+            pub fn $fn1(t: CK_ULONG, val: $rtype) -> Attribute {
+                Attribute {
+                    ck_type: t,
+                    attrtype: AttrType::$atype,
+                    value: $conv(val),
                 }
             }
-            Err(Error::not_found((t.to_string())))
-        }
 
-        #[allow(dead_code)]
-        pub fn $fn3(s: String, val: $rtype) -> Result<Attribute> {
-            for a in &ATTRMAP {
-                if a.name == &s {
-                    if a.atype == AttrType::$atype {
-                        return Ok($fn1(a.id, val));
+            #[allow(dead_code)]
+            pub fn $fn2(t: CK_ULONG, val: $rtype) -> Result<Attribute> {
+                for a in &ATTRMAP {
+                    if a.id == t {
+                        if a.atype == AttrType::$atype {
+                            return Ok(Self::$fn1(t, val));
+                        }
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
-                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
+                Err(Error::not_found((t.to_string())))
             }
-            Err(Error::not_found((s)))
+
+            #[allow(dead_code)]
+            pub fn $fn3(s: String, val: $rtype) -> Result<Attribute> {
+                for a in &ATTRMAP {
+                    if a.name == &s {
+                        if a.atype == AttrType::$atype {
+                            return Ok(Self::$fn1(a.id, val));
+                        }
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                    }
+                }
+                Err(Error::not_found((s)))
+            }
         }
     };
 }
@@ -344,25 +379,6 @@ fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
     val
 }
 conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
-
-pub fn string_from_sized(t: CK_ULONG, val: &[u8]) -> Attribute {
-    let mut value = Vec::from(val);
-    let mut len = value.len();
-    for i in (0..len).rev() {
-        if value[i] != 0x20 {
-            break;
-        }
-        len -= 1;
-    }
-    value.resize(len, 0);
-    /* trailing null byte of a string */
-    value.push(0);
-    Attribute {
-        ck_type: t,
-        attrtype: AttrType::StringType,
-        value: value,
-    }
-}
 
 fn date_to_vec(val: CK_DATE) -> Vec<u8> {
     let mut v = Vec::with_capacity(8);
@@ -423,38 +439,24 @@ pub fn string_to_ck_date(date: &str) -> Result<CK_DATE> {
     vec_to_date_validate(buf)
 }
 
-pub fn from_date_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
-    Attribute {
-        ck_type: t,
-        attrtype: AttrType::DateType,
-        value: val,
-    }
-}
-
-pub fn from_ignore(t: CK_ULONG, _val: Option<()>) -> Attribute {
-    Attribute {
-        ck_type: t,
-        attrtype: AttrType::IgnoreType,
-        value: Vec::new(),
-    }
-}
-
-pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
-    for a in &ATTRMAP {
-        if a.name == s {
-            return Ok((a.id, a.atype));
+impl AttrType {
+    pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
+        for a in &ATTRMAP {
+            if a.name == s {
+                return Ok((a.id, a.atype));
+            }
         }
+        Err(Error::not_found(s.clone()))
     }
-    Err(Error::not_found(s.clone()))
-}
 
-pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
-    for a in &ATTRMAP {
-        if a.id == id {
-            return Ok(a.atype);
+    pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
+        for a in &ATTRMAP {
+            if a.id == id {
+                return Ok(a.atype);
+            }
         }
+        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
     }
-    return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
 }
 
 impl CK_ATTRIBUTE {
@@ -514,15 +516,25 @@ impl CK_ATTRIBUTE {
             }
         }
         match atype {
-            AttrType::BoolType => Ok(from_bool(self.type_, self.to_bool()?)),
-            AttrType::NumType => Ok(from_ulong(self.type_, self.to_ulong()?)),
-            AttrType::StringType => {
-                Ok(from_string(self.type_, self.to_string()?))
+            AttrType::BoolType => {
+                Ok(Attribute::from_bool(self.type_, self.to_bool()?))
             }
-            AttrType::BytesType => Ok(from_bytes(self.type_, self.to_buf()?)),
-            AttrType::DateType => Ok(from_date(self.type_, self.to_date()?)),
+            AttrType::NumType => {
+                Ok(Attribute::from_ulong(self.type_, self.to_ulong()?))
+            }
+            AttrType::StringType => {
+                Ok(Attribute::from_string(self.type_, self.to_string()?))
+            }
+            AttrType::BytesType => {
+                Ok(Attribute::from_bytes(self.type_, self.to_buf()?))
+            }
+            AttrType::DateType => {
+                Ok(Attribute::from_date(self.type_, self.to_date()?))
+            }
             AttrType::DenyType => Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
-            AttrType::IgnoreType => Ok(from_ignore(self.type_, None)),
+            AttrType::IgnoreType => {
+                Ok(Attribute::from_ignore(self.type_, None))
+            }
         }
     }
 }

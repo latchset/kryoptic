@@ -4,8 +4,7 @@
 use core::ffi::{c_char, c_int, c_uint};
 use std::borrow::Cow;
 
-use crate::attribute;
-use crate::attribute::CkAttrs;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::ecc::*;
 use crate::ecc_misc::*;
 use crate::error::Result;
@@ -324,10 +323,10 @@ impl EccOperation {
             Ok(b) => b,
             Err(_) => return Err(CKR_GENERAL_ERROR)?,
         };
-        pubkey.set_attr(attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
+        pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
         /* Private Key */
-        privkey.set_attr(attribute::from_bytes(
+        privkey.set_attr(Attribute::from_bytes(
             CKA_VALUE,
             params.get_bn(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?,
         ))?;

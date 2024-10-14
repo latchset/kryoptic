@@ -3,8 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute;
-use crate::attribute::{from_bool, from_bytes, from_ulong};
+use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
@@ -44,11 +43,16 @@ impl AesKeyFactory {
         data.attributes.append(&mut data.init_common_key_attrs());
         data.attributes
             .append(&mut data.init_common_secret_key_attrs());
-        data.attributes.push(attr_element!(CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate; from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive
+            | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate;
+            Attribute::from_bytes; val Vec::new()));
+        data.attributes.push(attr_element!(
+            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate;
+            Attribute::from_bytes; val Vec::new()));
 
         /* default to private */
-        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; from_bool; val true);
+        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; Attribute::from_bool; val true);
         match data
             .attributes
             .iter()
@@ -67,7 +71,7 @@ impl ObjectFactory for AesKeyFactory {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
-        if !obj.check_or_set_attr(from_ulong(
+        if !obj.check_or_set_attr(Attribute::from_ulong(
             CKA_VALUE_LEN,
             CK_ULONG::try_from(len)?,
         ))? {
@@ -149,7 +153,7 @@ impl SecretKeyFactory for AesKeyFactory {
     fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
         let keylen = key.len();
         check_key_len(keylen)?;
-        obj.set_attr(from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
     }
@@ -233,14 +237,14 @@ impl Mechanism for AesMechanism {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         let mut key = AES_KEY_FACTORY.default_object_generate(template)?;
-        if !key.check_or_set_attr(attribute::from_ulong(
+        if !key.check_or_set_attr(Attribute::from_ulong(
             CKA_CLASS,
             CKO_SECRET_KEY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if !key
-            .check_or_set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?
+            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?
         {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }

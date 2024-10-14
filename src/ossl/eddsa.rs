@@ -3,7 +3,7 @@
 
 use std::ffi::{c_char, c_int};
 
-use crate::attribute;
+use crate::attribute::Attribute;
 use crate::ecc_misc::*;
 use crate::error::Result;
 use crate::interface::*;
@@ -293,13 +293,13 @@ impl EddsaOperation {
             Ok(b) => b,
             Err(_) => return Err(CKR_GENERAL_ERROR)?,
         };
-        pubkey.set_attr(attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
+        pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
         /* Private Key */
         let value = params
             .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?
             .to_vec();
-        privkey.set_attr(attribute::from_bytes(CKA_VALUE, value))?;
+        privkey.set_attr(Attribute::from_bytes(CKA_VALUE, value))?;
         Ok(())
     }
 }

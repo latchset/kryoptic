@@ -5,15 +5,14 @@ use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, Map, Number, Value};
 
-use super::super::attribute;
 use super::super::error;
 use super::super::interface;
 use super::super::object;
+use crate::attribute::{string_to_ck_date, AttrType, Attribute};
 
 use super::memory;
 use super::Storage;
 
-use attribute::{AttrType, Attribute};
 use error::Result;
 use interface::*;
 use object::Object;
@@ -85,18 +84,18 @@ impl JsonToken {
             let mut obj = Object::new();
             let mut uid: Option<String> = None;
             for (key, val) in &jo.attributes {
-                let (id, atype) = attribute::attr_name_to_id_type(key)?;
+                let (id, atype) = AttrType::attr_name_to_id_type(key)?;
                 let attr = match atype {
                     AttrType::BoolType => match val.as_bool() {
-                        Some(b) => attribute::from_bool(id, b),
+                        Some(b) => Attribute::from_bool(id, b),
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::NumType => match val.as_u64() {
-                        Some(n) => attribute::from_u64(id, n),
+                        Some(n) => Attribute::from_u64(id, n),
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::StringType => match val.as_str() {
-                        Some(s) => attribute::from_string(id, s.to_string()),
+                        Some(s) => Attribute::from_string(id, s.to_string()),
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::BytesType => match val.as_str() {
@@ -108,7 +107,7 @@ impl JsonToken {
                             let mut v = vec![0; len];
                             match BASE64.decode_mut(s.as_bytes(), &mut v) {
                                 Ok(l) => {
-                                    attribute::from_bytes(id, v[0..l].to_vec())
+                                    Attribute::from_bytes(id, v[0..l].to_vec())
                                 }
                                 Err(_) => return Err(CKR_GENERAL_ERROR)?,
                             }
@@ -119,12 +118,9 @@ impl JsonToken {
                         Some(s) => {
                             if s.len() == 0 {
                                 /* special case for default empty value */
-                                attribute::from_date_bytes(id, Vec::new())
+                                Attribute::from_date_bytes(id, Vec::new())
                             } else {
-                                attribute::from_date(
-                                    id,
-                                    attribute::string_to_ck_date(&s)?,
-                                )
+                                Attribute::from_date(id, string_to_ck_date(&s)?)
                             }
                         }
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,

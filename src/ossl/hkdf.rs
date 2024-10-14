@@ -4,7 +4,7 @@
 use core::ffi::c_int;
 use std::fmt::Debug;
 
-use crate::attribute::from_bytes;
+use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
@@ -285,7 +285,7 @@ impl Derive for HKDFOperation {
             self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
         }
 
-        obj.set_attr(from_bytes(CKA_VALUE, dkm))?;
+        obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
 
         Ok(vec![obj])
     }

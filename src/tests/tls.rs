@@ -1,16 +1,16 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::hmac;
-use super::object;
-use super::tests;
-use super::tlskdf;
-use tests::*;
-
-use serial_test::parallel;
 use std::io;
 use std::io::BufRead;
+
+use crate::attribute::Attribute;
+use crate::hmac;
+use crate::object;
+use crate::tests::*;
+use crate::tlskdf;
+
+use serial_test::parallel;
 
 #[test]
 #[parallel]
@@ -96,18 +96,18 @@ fn test_tlsprf_vectors() {
 
         /* mock key */
         let mut key = object::Object::new();
-        key.set_attr(attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))
+        key.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))
             .unwrap();
-        key.set_attr(attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))
+        key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))
             .unwrap();
-        key.set_attr(attribute::from_bytes(CKA_VALUE, secret.clone()))
+        key.set_attr(Attribute::from_bytes(CKA_VALUE, secret.clone()))
             .unwrap();
-        key.set_attr(attribute::from_ulong(
+        key.set_attr(Attribute::from_ulong(
             CKA_VALUE_LEN,
             secret.len() as CK_ULONG,
         ))
         .unwrap();
-        key.set_attr(attribute::from_bool(CKA_DERIVE, true))
+        key.set_attr(Attribute::from_bool(CKA_DERIVE, true))
             .unwrap();
 
         let mech = hmac::test_get_hmac(mechtype);

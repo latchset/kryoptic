@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::from_bytes;
+use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash;
 use crate::interface::*;
@@ -129,7 +129,7 @@ impl Derive for SSHKDFOperation {
             curlen += len;
         }
 
-        dobj.set_attr(from_bytes(CKA_VALUE, dkm))?;
+        dobj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
         Ok(vec![dobj])
     }
 }

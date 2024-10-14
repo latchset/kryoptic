@@ -4,14 +4,13 @@
 use rusqlite::{params, types::Value, Connection, Rows, Transaction};
 use std::sync::{Arc, Mutex};
 
-use super::super::attribute;
 use super::super::error;
 use super::super::interface;
 use super::super::object;
+use crate::attribute::{string_to_ck_date, AttrType, Attribute};
 
 use super::Storage;
 
-use attribute::AttrType;
 use error::{Error, Result};
 use interface::*;
 use object::Object;
@@ -84,11 +83,11 @@ impl SqliteStorage {
                 objects.push(Object::new());
             }
             if let Some(obj) = objects.last_mut() {
-                let attrtype = attribute::attr_id_to_attrtype(atype)?;
+                let attrtype = AttrType::attr_id_to_attrtype(atype)?;
                 let attr = match attrtype {
                     AttrType::BoolType => {
                         match val.as_i64_or_null().map_err(bad_storage)? {
-                            Some(b) => attribute::from_bool(atype, b != 0),
+                            Some(b) => Attribute::from_bool(atype, b != 0),
                             None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                         }
                     }
@@ -96,7 +95,7 @@ impl SqliteStorage {
                         match val.as_i64_or_null().map_err(bad_storage)? {
                             Some(n) => {
                                 let val = Self::val_to_ulong(n)?;
-                                attribute::from_ulong(atype, val)
+                                Attribute::from_ulong(atype, val)
                             }
                             None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                         }
@@ -105,20 +104,20 @@ impl SqliteStorage {
                         .as_str_or_null()
                         .map_err(bad_storage)?
                     {
-                        Some(s) => attribute::from_string(atype, s.to_string()),
+                        Some(s) => Attribute::from_string(atype, s.to_string()),
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
                     AttrType::BytesType => {
                         match val.as_blob_or_null().map_err(bad_storage)? {
-                            Some(v) => attribute::from_bytes(atype, v.to_vec()),
-                            None => attribute::from_bytes(atype, Vec::new()),
+                            Some(v) => Attribute::from_bytes(atype, v.to_vec()),
+                            None => Attribute::from_bytes(atype, Vec::new()),
                         }
                     }
                     AttrType::DateType => {
                         match val.as_str_or_null().map_err(bad_storage)? {
-                            Some(s) => attribute::from_date(
+                            Some(s) => Attribute::from_date(
                                 atype,
-                                attribute::string_to_ck_date(s)?,
+                                string_to_ck_date(s)?,
                             ),
                             None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                         }
@@ -163,20 +162,18 @@ impl SqliteStorage {
             search_query.push_str(SEARCH_OBJ_ID);
             /* add parameters */
             search_params.push(Value::from(u32::try_from(a.type_)?));
-            search_params.push(
-                match attribute::attr_id_to_attrtype(a.type_)? {
-                    AttrType::BoolType => Value::from(a.to_bool()?),
-                    AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
-                    AttrType::StringType => Value::from(a.to_string()?),
-                    AttrType::BytesType => Value::from(a.to_buf()?),
-                    AttrType::DateType => {
-                        Value::from(a.to_attribute()?.to_date_string()?)
-                    }
-                    AttrType::DenyType | AttrType::IgnoreType => {
-                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
-                    }
-                },
-            );
+            search_params.push(match AttrType::attr_id_to_attrtype(a.type_)? {
+                AttrType::BoolType => Value::from(a.to_bool()?),
+                AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
+                AttrType::StringType => Value::from(a.to_string()?),
+                AttrType::BytesType => Value::from(a.to_buf()?),
+                AttrType::DateType => {
+                    Value::from(a.to_attribute()?.to_date_string()?)
+                }
+                AttrType::DenyType | AttrType::IgnoreType => {
+                    return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
+                }
+            });
             subqcount += 1;
         }
         if subqcount > 0 {
