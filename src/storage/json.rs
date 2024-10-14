@@ -1,21 +1,15 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use crate::attribute::{string_to_ck_date, AttrType, Attribute};
+use crate::error::{Error, Result};
+use crate::interface::*;
+use crate::object::Object;
+use crate::storage::{memory, Storage};
+
 use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, Map, Number, Value};
-
-use super::super::error;
-use super::super::interface;
-use super::super::object;
-use crate::attribute::{string_to_ck_date, AttrType, Attribute};
-
-use super::memory;
-use super::Storage;
-
-use error::Result;
-use interface::*;
-use object::Object;
 
 fn to_json_value(a: &Attribute) -> Value {
     match a.get_attrtype() {
@@ -41,11 +35,11 @@ fn to_json_value(a: &Attribute) -> Value {
     }
 }
 
-fn uninit(e: std::io::Error) -> error::Error {
+fn uninit(e: std::io::Error) -> Error {
     if e.kind() == std::io::ErrorKind::NotFound {
-        error::Error::ck_rv_from_error(CKR_CRYPTOKI_NOT_INITIALIZED, e)
+        Error::ck_rv_from_error(CKR_CRYPTOKI_NOT_INITIALIZED, e)
     } else {
-        error::Error::other_error(e)
+        Error::other_error(e)
     }
 }
 
@@ -163,11 +157,11 @@ impl JsonToken {
     pub fn save(&self, filename: &str) -> Result<()> {
         let jstr = match to_string_pretty(&self) {
             Ok(j) => j,
-            Err(e) => return Err(error::Error::other_error(e)),
+            Err(e) => return Err(Error::other_error(e)),
         };
         match std::fs::write(filename, jstr) {
             Ok(_) => Ok(()),
-            Err(e) => Err(error::Error::other_error(e)),
+            Err(e) => Err(Error::other_error(e)),
         }
     }
 }

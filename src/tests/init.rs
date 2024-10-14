@@ -1,13 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::tests;
-use tests::*;
-
-use serial_test::{parallel, serial};
-
 #[cfg(feature = "fips")]
 use crate::fips::indicators::KRF_FIPS;
+use crate::tests::*;
+
+use serial_test::{parallel, serial};
 
 #[test]
 #[parallel]

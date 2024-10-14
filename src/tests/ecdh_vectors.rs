@@ -1,13 +1,13 @@
 // Copyright 2024 Jakub Jelen
 // See LICENSE.txt file for terms
 
-use super::tests;
-use crate::ecc;
-use tests::*;
-
-use serial_test::parallel;
 use std::io;
 use std::io::BufRead;
+
+use crate::ecc;
+use crate::tests::*;
+
+use serial_test::parallel;
 
 #[derive(Debug)]
 struct EccKey {

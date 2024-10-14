@@ -1,23 +1,16 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::attribute;
-use super::error;
-use super::hmac;
-use super::interface;
-use super::mechanism;
-use super::misc;
-use super::object;
-
-use attribute::CkAttrs;
-use error::Result;
-use interface::*;
-use mechanism::*;
-use object::{Object, ObjectFactories};
-
-use super::{bytes_to_slice, bytes_to_vec, cast_params};
-
 use std::fmt::Debug;
+
+use crate::attribute::CkAttrs;
+use crate::error::Result;
+use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
+use crate::interface::*;
+use crate::mechanism::*;
+use crate::misc::CK_ULONG_SIZE;
+use crate::object::{Object, ObjectFactories};
+use crate::{bytes_to_slice, bytes_to_vec, cast_params};
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
@@ -231,7 +224,7 @@ impl Mechanism for TLSPRFMechanism {
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
-        key: &object::Object,
+        key: &Object,
     ) -> Result<Box<dyn Sign>> {
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
@@ -246,7 +239,7 @@ impl Mechanism for TLSPRFMechanism {
     fn verify_new(
         &self,
         mech: &CK_MECHANISM,
-        key: &object::Object,
+        key: &Object,
     ) -> Result<Box<dyn Verify>> {
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
@@ -309,7 +302,7 @@ impl TLSKDFOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
+        let prf = match hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
@@ -366,7 +359,7 @@ impl TLSKDFOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
+        let prf = match hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
@@ -419,7 +412,7 @@ impl TLSKDFOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let prf = match hmac::hash_to_hmac_mech(params.prfMechanism) {
+        let prf = match hash_to_hmac_mech(params.prfMechanism) {
             Ok(h) => h,
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
@@ -466,7 +459,7 @@ impl TLSKDFOperation {
     ) -> Result<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
         let allowed = unsafe {
-            std::mem::transmute::<&[CK_ULONG; 4], &[u8; 4 * misc::CK_ULONG_SIZE]>(
+            std::mem::transmute::<&[CK_ULONG; 4], &[u8; 4 * CK_ULONG_SIZE]>(
                 &TLS_MASTER_SECRET_ALLOWED_MECHS,
             )
         };
@@ -792,8 +785,8 @@ impl Derive for TLSKDFOperation {
 }
 
 static MAC_MECHANISMS: Lazy<Mechanisms> = Lazy::new(|| {
-    let mut mechanisms = mechanism::Mechanisms::new();
-    hmac::register_mechs_only(&mut mechanisms);
+    let mut mechanisms = Mechanisms::new();
+    register_mechs_only(&mut mechanisms);
     mechanisms
 });
 
@@ -814,7 +807,7 @@ impl TLSMACOperation {
             _ => return Err(CKR_MECHANISM_INVALID)?,
         }
         let params = cast_params!(mech, CK_TLS_MAC_PARAMS);
-        let prf = match hmac::hash_to_hmac_mech(params.prfHashMechanism) {
+        let prf = match hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };

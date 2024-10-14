@@ -1,13 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::error;
-use super::interface;
-use super::object;
-
-use error::Result;
-use interface::CK_ATTRIBUTE;
-use object::Object;
+use crate::error::Result;
+use crate::interface::CK_ATTRIBUTE;
+use crate::object::Object;
 
 use std::fmt::Debug;
 

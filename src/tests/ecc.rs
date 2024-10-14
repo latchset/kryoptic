@@ -1,8 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::tests;
-use tests::*;
+use crate::tests::*;
 
 use serial_test::parallel;
 

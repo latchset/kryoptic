@@ -8,6 +8,7 @@ use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms};
+use crate::CSPRNG;
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
@@ -1200,7 +1201,7 @@ pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
     let value_len = usize::try_from(key.get_attr_as_ulong(CKA_VALUE_LEN)?)?;
 
     let mut value: Vec<u8> = vec![0; value_len];
-    match super::CSPRNG
+    match CSPRNG
         .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
     {
         Ok(()) => (),

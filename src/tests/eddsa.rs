@@ -1,11 +1,10 @@
 // Copyright 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use super::tests;
-use tests::*;
-
 use std::io;
 use std::io::BufRead;
+
+use crate::tests::*;
 
 use serial_test::parallel;
 

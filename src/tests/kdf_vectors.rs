@@ -1,12 +1,12 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use super::tests;
-use tests::*;
-
-use serial_test::parallel;
 use std::io;
 use std::io::BufRead;
+
+use crate::tests::*;
+
+use serial_test::parallel;
 
 #[derive(Debug, PartialEq)]
 enum KdfCtrlLoc {
