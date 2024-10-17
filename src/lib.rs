@@ -554,6 +554,19 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     CKR_OK
 }
 
+#[cfg(test)]
+fn force_load_config() -> CK_RV {
+    let testconf = GlobalConfig::default_config();
+    if testconf.conf.slots.len() == 0 {
+        return CKR_GENERAL_ERROR;
+    }
+    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    for slot in testconf.conf.slots {
+        res_or_ret!(gconf.conf.add_slot(slot));
+    }
+    return CKR_OK;
+}
+
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     global_wlock!(STATE).finalize()
 }

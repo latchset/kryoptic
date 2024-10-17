@@ -120,8 +120,9 @@ impl TestToken<'_> {
         let dbpath = self.filename.clone();
         let dbtype = storage::name_to_type(&dbpath).unwrap();
         let mut conf = config::Config::new();
-        conf.add_slot(config::Slot::with_db(dbtype, Some(dbpath)))
-            .unwrap();
+        let mut slot = config::Slot::with_db(dbtype, Some(dbpath));
+        slot.slot = u32::try_from(self.get_slot()).unwrap();
+        conf.add_slot(slot).unwrap();
         let data = toml::to_string(&conf).unwrap();
         let mut file = OpenOptions::new()
             .write(true)
@@ -132,7 +133,7 @@ impl TestToken<'_> {
         file.write(data.as_bytes()).unwrap();
     }
 
-    fn make_init_args(&self, reserved: Option<String>) -> CK_C_INITIALIZE_ARGS {
+    fn make_init_args(reserved: Option<String>) -> CK_C_INITIALIZE_ARGS {
         CK_C_INITIALIZE_ARGS {
             CreateMutex: None,
             DestroyMutex: None,
@@ -172,7 +173,7 @@ impl TestToken<'_> {
         let mut td = Self::new(dbpath, false);
         td.setup_db(db);
 
-        let mut args = td.make_init_args(Some(td.make_init_string()));
+        let mut args = Self::make_init_args(Some(td.make_init_string()));
         let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
         let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
         assert_eq!(ret, CKR_OK);

@@ -13,7 +13,7 @@ fn test_init_token() {
     let dbpath = format!("{}/{}", TESTDIR, "test_init_token.sql");
     let mut testtokn = TestToken::new(dbpath, true);
 
-    let mut args = testtokn.make_init_args(Some(testtokn.make_init_string()));
+    let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -251,7 +251,7 @@ fn test_init_token() {
 fn test_re_init_token_common(db: String) {
     let mut testtokn = TestToken::new(db, true);
 
-    let mut args = testtokn.make_init_args(Some(testtokn.make_init_string()));
+    let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);

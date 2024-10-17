@@ -2,6 +2,8 @@
 // See LICENSE.txt file for terms
 
 use std::env;
+use std::fmt::Write as _;
+use std::io::Write;
 
 use crate::tests::*;
 
@@ -11,29 +13,15 @@ fn test_token_setup(name: &str) -> TestToken {
     let dbpath = format!("{}/{}", TESTDIR, name);
     let mut testtokn = TestToken::new(dbpath, true);
     testtokn.setup_db(None);
-
-    let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
-    let pplist = &mut plist;
-    let result = C_GetFunctionList(&mut *pplist);
-    assert_eq!(result, 0);
-    unsafe {
-        let list: CK_FUNCTION_LIST = *plist;
-        match list.C_Initialize {
-            Some(value) => {
-                let mut args =
-                    testtokn.make_init_args(Some(testtokn.make_init_string()));
-                let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-                let ret = value(args_ptr as *mut std::ffi::c_void);
-                assert_eq!(ret, CKR_OK)
-            }
-            None => todo!(),
-        }
-    }
-
     testtokn
 }
 
-fn test_token_env(testtokn: &TestToken, confname: &str) {
+fn test_token_env(suffix: &str) {
+    let dbname = format!("test_token_env{}", suffix);
+    let mut testtokn = test_token_setup(&dbname);
+    let confname = format!("{}/test_token_env{}.conf", TESTDIR, suffix);
+    testtokn.make_config_file(&confname);
+
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
     let result = C_GetFunctionList(&mut *pplist);
@@ -42,18 +30,28 @@ fn test_token_env(testtokn: &TestToken, confname: &str) {
         let list: CK_FUNCTION_LIST = *plist;
         match list.C_Initialize {
             Some(init_fn) => {
-                let mut args = testtokn.make_init_args(None);
+                let mut args = TestToken::make_init_args(None);
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 env::set_var("KRYOPTIC_CONF", confname);
+                let ret = force_load_config();
+                assert_eq!(ret, CKR_OK);
                 let ret = init_fn(args_ptr as *mut std::ffi::c_void);
+                env::remove_var("KRYOPTIC_CONF");
                 assert_eq!(ret, CKR_OK)
             }
             None => todo!(),
         }
     }
+
+    testtokn.finalize();
 }
 
-fn test_token_null_args(confname: &str) {
+fn test_token_null_args(suffix: &str) {
+    let dbname = format!("test_token_nullargs{}", suffix);
+    let mut testtokn = test_token_setup(&dbname);
+    let confname = format!("{}/test_token_nullargs{}.conf", TESTDIR, suffix);
+    testtokn.make_config_file(&confname);
+
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
     let result = C_GetFunctionList(&mut *pplist);
@@ -63,12 +61,17 @@ fn test_token_null_args(confname: &str) {
         match list.C_Initialize {
             Some(init_fn) => {
                 env::set_var("KRYOPTIC_CONF", confname);
+                let ret = force_load_config();
+                assert_eq!(ret, CKR_OK);
                 let ret = init_fn(std::ptr::null_mut());
+                env::remove_var("KRYOPTIC_CONF");
                 assert_eq!(ret, CKR_OK)
             }
             None => todo!(),
         }
     }
+
+    testtokn.finalize();
 }
 
 #[test]
@@ -92,11 +95,14 @@ fn test_token_datadir() {
         let list: CK_FUNCTION_LIST = *plist;
         match list.C_Initialize {
             Some(init_fn) => {
-                let mut args = testtokn.make_init_args(None);
+                let mut args = TestToken::make_init_args(None);
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 env::remove_var("KRYOPTIC_CONF");
                 env::set_var("XDG_CONFIG_HOME", basedir);
+                let ret = force_load_config();
+                assert_eq!(ret, CKR_OK);
                 let ret = init_fn(args_ptr as *mut std::ffi::c_void);
+                env::remove_var("XDG_CONFIG_HOME");
                 assert_eq!(ret, CKR_OK)
             }
             None => todo!(),
@@ -107,25 +113,17 @@ fn test_token_datadir() {
 }
 
 #[test]
-#[parallel]
+#[serial]
 fn test_token_json() {
-    let mut testtokn = test_token_setup("test_token.json");
-    let confname = format!("{}/test_token_json.conf", TESTDIR);
-    testtokn.make_config_file(&confname);
-    test_token_env(&testtokn, &confname);
-    test_token_null_args(&confname);
-    testtokn.finalize();
+    test_token_env(".json");
+    test_token_null_args(".json");
 }
 
 #[test]
-#[parallel]
+#[serial]
 fn test_token_sql() {
-    let mut testtokn = test_token_setup("test_token.sql");
-    let confname = format!("{}/test_token_sqlite.conf", TESTDIR);
-    testtokn.make_config_file(&confname);
-    test_token_env(&testtokn, &confname);
-    test_token_null_args(&confname);
-    testtokn.finalize();
+    test_token_env(".sql");
+    test_token_null_args(".sql");
 }
 
 #[test]
@@ -151,8 +149,9 @@ fn test_interface_null() {
             *(iface.pFunctionList as CK_FUNCTION_LIST_3_0_PTR);
         match list.C_Initialize {
             Some(value) => {
-                let mut args =
-                    testtokn.make_init_args(Some(testtokn.make_init_string()));
+                let mut args = TestToken::make_init_args(Some(
+                    testtokn.make_init_string(),
+                ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -187,8 +186,9 @@ fn test_interface_pkcs11() {
             *(iface.pFunctionList as CK_FUNCTION_LIST_3_0_PTR);
         match list.C_Initialize {
             Some(value) => {
-                let mut args =
-                    testtokn.make_init_args(Some(testtokn.make_init_string()));
+                let mut args = TestToken::make_init_args(Some(
+                    testtokn.make_init_string(),
+                ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -225,8 +225,9 @@ fn test_interface_pkcs11_version3() {
             *(iface.pFunctionList as CK_FUNCTION_LIST_3_0_PTR);
         match list.C_Initialize {
             Some(value) => {
-                let mut args =
-                    testtokn.make_init_args(Some(testtokn.make_init_string()));
+                let mut args = TestToken::make_init_args(Some(
+                    testtokn.make_init_string(),
+                ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -268,8 +269,9 @@ fn test_interface_pkcs11_version240() {
             *(iface.pFunctionList as CK_FUNCTION_LIST_PTR);
         match list.C_Initialize {
             Some(value) => {
-                let mut args =
-                    testtokn.make_init_args(Some(testtokn.make_init_string()));
+                let mut args = TestToken::make_init_args(Some(
+                    testtokn.make_init_string(),
+                ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
                 assert_eq!(ret, CKR_OK)
@@ -315,4 +317,69 @@ fn test_interface_invalid_version() {
         0,
     );
     assert_eq!(result, CKR_ARGUMENTS_BAD);
+}
+
+#[test]
+#[serial]
+fn test_config_multiple_tokens() {
+    let confname = format!("{}/{}", TESTDIR, "test_config_multiple.conf");
+    let dbs = [
+        (
+            "sqlite",
+            format!("{}/{}", TESTDIR, "test_config_multiple.sql"),
+            "TOKEN 1",
+        ),
+        (
+            "json",
+            format!("{}/{}", TESTDIR, "test_config_multiple.json"),
+            "TOKEN 2",
+        ),
+    ];
+    let mut config = String::new();
+    let mut tokens = Vec::<TestToken>::new();
+    for db in &dbs {
+        let mut token = TestToken::new(db.1.clone(), false);
+        token.setup_db(None);
+        /* here we hand code a config file.
+         * to ensure changes in the toml crate do not break the format */
+        write!(
+            &mut config,
+            "[[slots]]\nslot = {}\ndbtype = \"{}\"\ndbpath = \"{}\"\ndescription = \"{}\"\n",
+            token.get_slot(),
+            db.0,
+            db.1,
+            db.2
+        )
+        .unwrap();
+        tokens.push(token);
+    }
+
+    /* write out the config */
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&confname)
+        .unwrap();
+    file.write(config.as_bytes()).unwrap();
+
+    /* try to init this token now */
+    let mut args = TestToken::make_init_args(None);
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    env::set_var("KRYOPTIC_CONF", confname);
+    let ret = force_load_config();
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    env::remove_var("KRYOPTIC_CONF");
+    assert_eq!(ret, CKR_OK);
+
+    /* check slots and tokens */
+    for tok in &tokens {
+        let mut info = CK_SLOT_INFO::default();
+        let ret =
+            fn_get_slot_info(tok.get_slot(), &mut info as CK_SLOT_INFO_PTR);
+        assert_eq!(ret, CKR_OK);
+        let desc = std::str::from_utf8(&info.slotDescription).unwrap();
+        assert_eq!(desc.starts_with("TOKEN "), true);
+    }
 }
