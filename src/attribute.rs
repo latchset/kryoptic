@@ -312,6 +312,18 @@ impl Attribute {
             value: value,
         }
     }
+
+    pub fn from_attr_slice(
+        id: CK_ULONG,
+        at: AttrType,
+        val: &[u8],
+    ) -> Attribute {
+        Attribute {
+            ck_type: id,
+            attrtype: at,
+            value: val.to_vec(),
+        }
+    }
 }
 
 macro_rules! conversion_from_type {

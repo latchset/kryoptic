@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::interface::*;
 use crate::misc::copy_sized_string;
 use crate::object::Object;
+use crate::storage;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::{Storage, StorageTokenInfo};
 use crate::token::TokenFacilities;
@@ -25,18 +26,6 @@ pub static USER_PIN_FLAGS: [CK_FLAGS; 4] = [
     CKF_USER_PIN_COUNT_LOW, /* 2 or 3 .. */
     CKF_USER_PIN_COUNT_LOW, /* attempts left */
 ];
-
-#[cfg(feature = "fips")]
-const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
-#[cfg(not(feature = "fips"))]
-const TOKEN_LABEL: &str = "Kryoptic Soft Token";
-
-const MANUFACTURER_ID: &str = "Kryoptic Project";
-
-#[cfg(feature = "fips")]
-const TOKEN_MODEL: &str = "FIPS-140-3 v1";
-#[cfg(not(feature = "fips"))]
-const TOKEN_MODEL: &str = "v1";
 
 const SO_OBJ_UID: &str = "0";
 const USER_OBJ_UID: &str = "1";
@@ -267,9 +256,12 @@ impl StdStorageFormat {
         }
 
         /* default strings */
-        copy_sized_string(TOKEN_LABEL.as_bytes(), &mut info.label);
-        copy_sized_string(MANUFACTURER_ID.as_bytes(), &mut info.manufacturer);
-        copy_sized_string(TOKEN_MODEL.as_bytes(), &mut info.model);
+        copy_sized_string(storage::TOKEN_LABEL.as_bytes(), &mut info.label);
+        copy_sized_string(
+            storage::MANUFACTURER_ID.as_bytes(),
+            &mut info.manufacturer,
+        );
+        copy_sized_string(storage::TOKEN_MODEL.as_bytes(), &mut info.model);
 
         let mut obj = Object::new();
         obj.set_attr(Attribute::from_string(CKA_UNIQUE_ID, token_info_uid()))?;

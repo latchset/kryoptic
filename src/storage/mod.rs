@@ -10,6 +10,18 @@ use crate::token::TokenFacilities;
 
 use once_cell::sync::Lazy;
 
+#[cfg(feature = "fips")]
+const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
+#[cfg(not(feature = "fips"))]
+const TOKEN_LABEL: &str = "Kryoptic Soft Token";
+
+const MANUFACTURER_ID: &str = "Kryoptic Project";
+
+#[cfg(feature = "fips")]
+const TOKEN_MODEL: &str = "FIPS-140-3 v1";
+#[cfg(not(feature = "fips"))]
+const TOKEN_MODEL: &str = "v1";
+
 pub struct StorageTokenInfo {
     pub label: [CK_UTF8CHAR; 32usize],
     pub manufacturer: [CK_UTF8CHAR; 32usize],
@@ -39,12 +51,12 @@ pub trait Storage: Debug + Send + Sync {
     ) -> Result<Object>;
     fn store(
         &mut self,
-        faclities: &mut TokenFacilities,
+        facilities: &mut TokenFacilities,
         obj: Object,
     ) -> Result<CK_OBJECT_HANDLE>;
     fn search(
         &self,
-        faclities: &mut TokenFacilities,
+        facilities: &mut TokenFacilities,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Vec<CK_OBJECT_HANDLE>>;
     fn remove(
@@ -56,7 +68,7 @@ pub trait Storage: Debug + Send + Sync {
     fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()>;
     fn auth_user(
         &mut self,
-        faclities: &TokenFacilities,
+        facilities: &TokenFacilities,
         user_type: CK_USER_TYPE,
         pin: &[u8],
         flag: &mut CK_FLAGS,
@@ -75,13 +87,19 @@ mod aci;
 pub mod format;
 
 #[cfg(feature = "jsondb")]
-pub mod json;
+mod json;
 
 #[cfg(feature = "memorydb")]
-pub mod memory;
+mod memory;
+
+#[cfg(any(feature = "nssdb", feature = "sqlitedb"))]
+mod sqlite_common;
 
 #[cfg(feature = "sqlitedb")]
 mod sqlite;
+
+#[cfg(feature = "nssdb")]
+pub mod nssdb;
 
 static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
     let mut v = Vec::<&'static dyn StorageDBInfo>::with_capacity(4);
@@ -94,6 +112,9 @@ static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
 
     #[cfg(feature = "sqlitedb")]
     v.push(&sqlite::DBINFO);
+
+    #[cfg(feature = "nssdb")]
+    v.push(&nssdb::DBINFO);
 
     v
 });

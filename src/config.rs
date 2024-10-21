@@ -8,6 +8,8 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::interface;
 use crate::storage;
+#[cfg(feature = "nssdb")]
+use crate::storage::StorageDBInfo;
 
 use serde::de;
 use serde::{Deserialize, Serialize};
@@ -183,13 +185,35 @@ impl Config {
         }
     }
 
-    pub fn from_init_args(&mut self, args: &str) -> Result<()> {
-        let conf = if args.starts_with("kryoptic_conf=") {
+    #[cfg(feature = "nssdb")]
+    fn from_nss_init_args(args: &str) -> Result<Config> {
+        let mut conf = Config { slots: Vec::new() };
+        let mut slot = Slot::new();
+
+        slot.dbtype = Some(storage::nssdb::DBINFO.dbtype().to_string());
+        slot.dbpath = Some(args.to_string());
+        conf.slots.push(slot);
+        Ok(conf)
+    }
+
+    fn conf_from_args(&self, args: &str) -> Result<Config> {
+        if args.starts_with("kryoptic_conf=") {
             let comps: Vec<&str> = args.splitn(2, '=').collect();
-            Self::from_file(comps[1])?
-        } else {
-            Self::from_legacy_conf_string(args)?
-        };
+            return Self::from_file(comps[1]);
+        }
+
+        #[cfg(feature = "nssdb")]
+        /* heuristics for NSS compatibility */
+        if args.contains("configDir=") {
+            return Self::from_nss_init_args(args);
+        }
+
+        /* Finally try with legacy */
+        Self::from_legacy_conf_string(args)
+    }
+
+    pub fn from_init_args(&mut self, args: &str) -> Result<()> {
+        let conf = self.conf_from_args(args)?;
 
         /* check and add slots */
         for mut slot in conf.slots {
