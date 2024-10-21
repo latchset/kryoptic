@@ -123,7 +123,7 @@ impl Config {
          * the more common one of specifying a .sql file with no
          * slot specification. */
         if name.ends_with(".sql") {
-            match storage::name_to_type(name) {
+            match storage::suffix_to_type(name) {
                 Ok(typ_) => {
                     let mut slot = Slot::new();
                     slot.dbtype = Some(typ_.to_string());

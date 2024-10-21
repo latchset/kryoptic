@@ -537,7 +537,7 @@ extern "C" fn fn_init_token(
     if res_or_ret!(rstate.has_sessions(slot_id)) {
         return CKR_SESSION_EXISTS;
     }
-    let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
+    let vpin = bytes_to_slice!(pin, pin_len, u8);
     let vlabel: Vec<u8> = if label.is_null() {
         vec![0x20u8; 32]
     } else {
@@ -565,7 +565,7 @@ extern "C" fn fn_init_pin(
         return CKR_USER_NOT_LOGGED_IN;
     }
 
-    let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
+    let vpin = bytes_to_slice!(pin, pin_len, u8);
 
     ret_to_rv!(token.set_pin(CKU_USER, &vpin, &vec![0u8; 0]))
 }
@@ -581,12 +581,30 @@ extern "C" fn fn_set_pin(
     if !session.is_writable() {
         return CKR_SESSION_READ_ONLY;
     }
-    let vpin: Vec<u8> = bytes_to_vec!(new_pin, new_len);
-    let vold: Vec<u8> = bytes_to_vec!(old_pin, old_len);
+    let vpin = bytes_to_slice!(new_pin, new_len, u8);
+    let vold = bytes_to_slice!(old_pin, old_len, u8);
+
+    if vpin.len() == 0 || vold.len() == 0 {
+        return CKR_PIN_INVALID;
+    }
 
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
-    ret_to_rv!(token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, &vold))
+    let do_logout = if token.is_logged_in(KRY_UNSPEC) {
+        false
+    } else {
+        ok_or_ret!(token.login(CKU_USER, &vold));
+        true
+    };
+
+    let ret =
+        ret_to_rv!(token.set_pin(CK_UNAVAILABLE_INFORMATION, &vpin, &vold));
+
+    if do_logout {
+        let _ = token.logout();
+    }
+
+    ret
 }
 extern "C" fn fn_open_session(
     slot_id: CK_SLOT_ID,
@@ -673,7 +691,7 @@ extern "C" fn fn_login(
             return CKR_SESSION_READ_ONLY_EXISTS;
         }
     }
-    let vpin: Vec<u8> = bytes_to_vec!(pin, pin_len);
+    let vpin = bytes_to_slice!(pin, pin_len, u8);
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     if user_type == CKU_CONTEXT_SPECIFIC {
         let session = res_or_ret!(rstate.get_session_mut(s_handle));

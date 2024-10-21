@@ -5,7 +5,9 @@ use crate::attribute::{string_to_ck_date, AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::interface::*;
 use crate::object::Object;
-use crate::storage::{memory, Storage};
+use crate::storage::aci::StorageACI;
+use crate::storage::format::{StdStorageFormat, StorageRaw};
+use crate::storage::{memory, Storage, StorageDBInfo};
 
 use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
@@ -73,10 +75,9 @@ impl JsonToken {
         }
     }
 
-    pub fn prime_cache(&self, cache: &mut Box<dyn Storage>) -> Result<()> {
+    pub fn prime_cache(&self, cache: &mut Box<dyn StorageRaw>) -> Result<()> {
         for jo in &self.objects {
             let mut obj = Object::new();
-            let mut uid: Option<String> = None;
             for (key, val) in &jo.attributes {
                 let (id, atype) = AttrType::attr_name_to_id_type(key)?;
                 let attr = match atype {
@@ -124,22 +125,13 @@ impl JsonToken {
                 };
 
                 obj.set_attr(attr)?;
-                if key == "CKA_UNIQUE_ID" {
-                    uid = match val.as_str() {
-                        Some(s) => Some(s.to_string()),
-                        None => return Err(CKR_DEVICE_ERROR)?,
-                    }
-                }
             }
-            match uid {
-                Some(u) => cache.store(&u, obj)?,
-                None => return Err(CKR_DEVICE_ERROR)?,
-            }
+            cache.store_obj(obj)?;
         }
         Ok(())
     }
 
-    pub fn from_cache(cache: &mut Box<dyn Storage>) -> JsonToken {
+    pub fn from_cache(cache: &mut Box<dyn StorageRaw>) -> JsonToken {
         let objs = cache.search(&[]).unwrap();
         let mut jt = JsonToken {
             objects: Vec::with_capacity(objs.len()),
@@ -169,18 +161,20 @@ impl JsonToken {
 #[derive(Debug)]
 pub struct JsonStorage {
     filename: String,
-    cache: Box<dyn Storage>,
+    cache: Box<dyn StorageRaw>,
 }
 
-impl Storage for JsonStorage {
-    fn open(&mut self, filename: &String) -> Result<()> {
-        self.filename = filename.clone();
+impl StorageRaw for JsonStorage {
+    fn is_initialized(&self) -> Result<()> {
+        self.cache.is_initialized()
+    }
+    fn db_reset(&mut self) -> Result<()> {
+        // TODO: reset not implemented yet
+        Ok(())
+    }
+    fn open(&mut self) -> Result<()> {
         let token = JsonToken::load(&self.filename)?;
         token.prime_cache(&mut self.cache)
-    }
-    fn reinit(&mut self) -> Result<()> {
-        // TODO
-        Ok(())
     }
     fn flush(&mut self) -> Result<()> {
         let token = JsonToken::from_cache(&mut self.cache);
@@ -189,12 +183,12 @@ impl Storage for JsonStorage {
     fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
         self.cache.fetch_by_uid(uid)
     }
-    fn store(&mut self, uid: &String, obj: Object) -> Result<()> {
-        self.cache.store(uid, obj)?;
-        self.flush()
-    }
     fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
         self.cache.search(template)
+    }
+    fn store_obj(&mut self, obj: Object) -> Result<()> {
+        self.cache.store_obj(obj)?;
+        self.flush()
     }
     fn remove_by_uid(&mut self, uid: &String) -> Result<()> {
         self.cache.remove_by_uid(uid)?;
@@ -202,9 +196,37 @@ impl Storage for JsonStorage {
     }
 }
 
-pub fn json() -> Box<dyn Storage> {
-    Box::new(JsonStorage {
-        filename: String::from(""),
-        cache: memory::memory(),
-    })
+#[derive(Debug)]
+pub struct JsonDBInfo {
+    db_type: &'static str,
+    db_suffix: &'static str,
 }
+
+impl StorageDBInfo for JsonDBInfo {
+    fn new(&self, conf: &Option<String>) -> Result<Box<dyn Storage>> {
+        let raw_store = Box::new(JsonStorage {
+            filename: match conf {
+                Some(s) => s.clone(),
+                None => String::from(""),
+            },
+            cache: memory::raw_store(),
+        });
+        Ok(Box::new(StdStorageFormat::new(
+            raw_store,
+            StorageACI::new(true),
+        )))
+    }
+
+    fn dbtype(&self) -> &str {
+        self.db_type
+    }
+
+    fn dbsuffix(&self) -> &str {
+        self.db_suffix
+    }
+}
+
+pub static DBINFO: JsonDBInfo = JsonDBInfo {
+    db_type: "json",
+    db_suffix: ".json",
+};

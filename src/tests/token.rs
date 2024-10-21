@@ -11,7 +11,7 @@ use serial_test::{parallel, serial};
 
 fn test_token_setup(name: &str) -> TestToken {
     let dbpath = format!("{}/{}", TESTDIR, name);
-    let mut testtokn = TestToken::new(dbpath, true);
+    let mut testtokn = TestToken::new(dbpath);
     testtokn.setup_db(None);
     testtokn
 }
@@ -83,7 +83,7 @@ fn test_token_datadir() {
     let dbpath = format!("{}/token.sql", confdir);
     std::fs::create_dir_all(confdir).unwrap();
 
-    let mut testtokn = TestToken::new(dbpath, true);
+    let mut testtokn = TestToken::new(dbpath);
     testtokn.make_config_file(&confname);
     testtokn.setup_db(None);
 
@@ -130,7 +130,7 @@ fn test_token_sql() {
 #[parallel]
 fn test_interface_null() {
     let dbpath = format!("{}/{}", TESTDIR, "test_interface_null.sql");
-    let mut testtokn = TestToken::new(dbpath, true);
+    let mut testtokn = TestToken::new(dbpath);
     testtokn.setup_db(None);
 
     /* NULL interface name and NULL version -- the module should return default one */
@@ -167,7 +167,7 @@ fn test_interface_null() {
 #[parallel]
 fn test_interface_pkcs11() {
     let dbpath = format!("{}/{}", TESTDIR, "test_interface_pkcs11.sql");
-    let mut testtokn = TestToken::new(dbpath, true);
+    let mut testtokn = TestToken::new(dbpath);
     testtokn.setup_db(None);
 
     /* NULL version -- the module should return default one */
@@ -205,7 +205,7 @@ fn test_interface_pkcs11() {
 fn test_interface_pkcs11_version3() {
     let dbpath =
         format!("{}/{}", TESTDIR, "test_interface_pkcs11_version3.sql");
-    let mut testtokn = TestToken::new(dbpath, true);
+    let mut testtokn = TestToken::new(dbpath);
     testtokn.setup_db(None);
 
     /* Get the specific version 3.0 */
@@ -244,7 +244,7 @@ fn test_interface_pkcs11_version3() {
 fn test_interface_pkcs11_version240() {
     let dbpath =
         format!("{}/{}", TESTDIR, "test_interface_pkcs11_version240.sql");
-    let mut testtokn = TestToken::new(dbpath, true);
+    let mut testtokn = TestToken::new(dbpath);
     testtokn.setup_db(None);
 
     /* Get the specific version 2.40 */
@@ -338,7 +338,7 @@ fn test_config_multiple_tokens() {
     let mut config = String::new();
     let mut tokens = Vec::<TestToken>::new();
     for db in &dbs {
-        let mut token = TestToken::new(db.1.clone(), false);
+        let mut token = TestToken::new(db.1.clone());
         token.setup_db(None);
         /* here we hand code a config file.
          * to ensure changes in the toml crate do not break the format */
