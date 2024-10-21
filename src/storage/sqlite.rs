@@ -1,15 +1,19 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::attribute::{string_to_ck_date, AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::interface::*;
 use crate::object::Object;
-use crate::storage::Storage;
+use crate::storage::aci::StorageACI;
+use crate::storage::format::{StdStorageFormat, StorageRaw};
+use crate::storage::{Storage, StorageDBInfo};
 
-use rusqlite::{params, types::Value, Connection, Rows, Transaction};
+use rusqlite::types::Value;
+use rusqlite::{params, Connection, Rows, Transaction};
+use rusqlite::{Error as rlError, ErrorCode};
 
 fn bad_code<E: std::error::Error + 'static>(error: E) -> Error {
     Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
@@ -19,10 +23,60 @@ fn bad_storage<E: std::error::Error + 'static>(error: E) -> Error {
     Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
 }
 
-const IS_DB_INITIALIZED: &str =
-    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='objects'";
+impl From<rlError> for Error {
+    fn from(error: rlError) -> Error {
+        match error {
+            rlError::SqliteFailure(_, _) => match error.sqlite_error_code() {
+                Some(e) => match e {
+                    ErrorCode::ConstraintViolation
+                    | ErrorCode::TypeMismatch
+                    | ErrorCode::ApiMisuse
+                    | ErrorCode::ParameterOutOfRange => {
+                        Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
+                    }
+                    ErrorCode::DatabaseBusy
+                    | ErrorCode::DatabaseLocked
+                    | ErrorCode::FileLockingProtocolFailed => {
+                        Error::ck_rv_from_error(
+                            CKR_TOKEN_RESOURCE_EXCEEDED,
+                            error,
+                        )
+                    }
+                    ErrorCode::OutOfMemory => {
+                        Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
+                    }
+                    ErrorCode::CannotOpen
+                    | ErrorCode::NotFound
+                    | ErrorCode::PermissionDenied => {
+                        Error::ck_rv_from_error(CKR_TOKEN_NOT_RECOGNIZED, error)
+                    }
+                    ErrorCode::ReadOnly => Error::ck_rv_from_error(
+                        CKR_TOKEN_WRITE_PROTECTED,
+                        error,
+                    ),
+                    ErrorCode::TooBig => {
+                        Error::ck_rv_from_error(CKR_DATA_LEN_RANGE, error)
+                    }
+                    _ => Error::ck_rv_from_error(CKR_DEVICE_ERROR, error),
+                },
+                None => Error::ck_rv_from_error(CKR_GENERAL_ERROR, error),
+            },
+            _ => Error::ck_rv_from_error(CKR_GENERAL_ERROR, error),
+        }
+    }
+}
+
+impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for Error {
+    fn from(_: std::sync::PoisonError<std::sync::MutexGuard<'_, T>>) -> Error {
+        Error::ck_rv(CKR_CANT_LOCK)
+    }
+}
+
+const OBJECTS_TABLE: &str = "objects";
 const DROP_DB_TABLE: &str = "DROP TABLE objects";
 const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr))";
+const CHECK_DB_TABLE: &str =
+    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name = ?";
 
 /* search by filter constants */
 const SEARCH_ALL: &str = "SELECT * FROM objects";
@@ -37,6 +91,28 @@ const UPDATE_ATTR: &str = "INSERT OR REPLACE INTO objects VALUES (?, ?, ?)";
 const DELETE_OBJ: &str = "DELETE FROM objects WHERE id = ?";
 const MAX_ID: &str = "SELECT IFNULL(MAX(id), 0) FROM objects";
 
+pub fn check_table(
+    conn: MutexGuard<'_, rusqlite::Connection>,
+    tablename: &str,
+) -> Result<()> {
+    let mut stmt = conn.prepare(CHECK_DB_TABLE)?;
+    let mut rows = stmt.query(rusqlite::params![tablename])?;
+    if let Some(row) = rows.next()? {
+        match row.get(0)? {
+            1 => (),
+            0 => return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?,
+            _ => return Err(CKR_DEVICE_ERROR)?,
+        }
+    } else {
+        return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
+    }
+    match rows.next() {
+        Ok(None) => Ok(()),
+        Ok(_) => Err(CKR_DEVICE_ERROR)?,
+        Err(e) => Err(e)?,
+    }
+}
+
 #[derive(Debug)]
 pub struct SqliteStorage {
     filename: String,
@@ -44,29 +120,6 @@ pub struct SqliteStorage {
 }
 
 impl SqliteStorage {
-    fn is_initialized(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let result = conn
-            .query_row_and_then(IS_DB_INITIALIZED, [], |row| row.get(0))
-            .map_err(bad_storage)?;
-        match result {
-            1 => Ok(()),
-            0 => Err(CKR_CRYPTOKI_NOT_INITIALIZED)?,
-            _ => Err(CKR_DEVICE_MEMORY)?,
-        }
-    }
-
-    fn db_reset(&mut self) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
-        let mut tx = conn.transaction().map_err(bad_storage)?;
-        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-        /* the drop can fail when files are empty (new) */
-        let _ = tx.execute(DROP_DB_TABLE, params![]);
-        tx.execute(CREATE_DB_TABLE, params![])
-            .map_err(bad_storage)?;
-        tx.commit().map_err(bad_storage)
-    }
-
     fn rows_to_objects(mut rows: Rows) -> Result<Vec<Object>> {
         let mut objid = 0;
         let mut objects = Vec::<Object>::new();
@@ -130,66 +183,10 @@ impl SqliteStorage {
         Ok(objects)
     }
 
-    fn search_by_unique_id(conn: &Connection, uid: &String) -> Result<Object> {
-        let mut stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
-        let rows = stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?;
-        let mut objects = Self::rows_to_objects(rows)?;
-        match objects.len() {
-            0 => Err(Error::not_found(uid.clone())),
-            1 => Ok(objects.pop().unwrap()),
-            _ => Err(CKR_GENERAL_ERROR)?,
-        }
-    }
-
-    fn search_with_filter(
-        conn: &Connection,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Vec<Object>> {
-        let mut search_query = String::from(SEARCH_ALL);
-        let mut subqcount = 0;
-        let mut search_params = Vec::<Value>::with_capacity(template.len() * 2);
-        for a in template {
-            /* add subqueries */
-            if subqcount == 0 {
-                search_query.push_str(SEARCH_NEST);
-            } else {
-                search_query.push_str(SEARCH_CONCAT);
-            }
-            search_query.push_str(SEARCH_OBJ_ID);
-            /* add parameters */
-            search_params.push(Value::from(u32::try_from(a.type_)?));
-            search_params.push(match AttrType::attr_id_to_attrtype(a.type_)? {
-                AttrType::BoolType => Value::from(a.to_bool()?),
-                AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
-                AttrType::StringType => Value::from(a.to_string()?),
-                AttrType::BytesType => Value::from(a.to_buf()?),
-                AttrType::DateType => {
-                    Value::from(a.to_attribute()?.to_date_string()?)
-                }
-                AttrType::DenyType | AttrType::IgnoreType => {
-                    return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
-                }
-            });
-            subqcount += 1;
-        }
-        if subqcount > 0 {
-            search_query.push_str(SEARCH_CLOSE);
-        }
-        /* finally make sure results return ordered by id,
-         * this simplifies conversion to actual Objects */
-        search_query.push_str(SEARCH_ORDER);
-
-        let mut stmt = conn.prepare(&search_query).map_err(bad_code)?;
-        let rows = stmt
-            .query(rusqlite::params_from_iter(search_params))
-            .map_err(bad_code)?;
-        Ok(Self::rows_to_objects(rows)?)
-    }
-
     fn store_object(
         tx: &mut Transaction,
         uid: &String,
-        obj: &Object,
+        obj: Object,
     ) -> Result<()> {
         let objid = match Self::delete_object(tx, uid)? {
             0 => {
@@ -271,46 +268,101 @@ impl SqliteStorage {
     }
 }
 
-impl Storage for SqliteStorage {
-    fn open(&mut self, filename: &String) -> Result<()> {
-        self.filename = filename.clone();
+impl StorageRaw for SqliteStorage {
+    fn is_initialized(&self) -> Result<()> {
+        let conn = self.conn.lock()?;
+        check_table(conn, OBJECTS_TABLE)
+    }
+
+    fn db_reset(&mut self) -> Result<()> {
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction().map_err(bad_storage)?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+        /* the drop can fail when files are empty (new) */
+        let _ = tx.execute(DROP_DB_TABLE, params![]);
+        tx.execute(CREATE_DB_TABLE, params![])
+            .map_err(bad_storage)?;
+        tx.commit().map_err(bad_storage)
+    }
+
+    fn open(&mut self) -> Result<()> {
         self.conn = match Connection::open(&self.filename) {
             Ok(c) => Arc::new(Mutex::from(c)),
             Err(_) => return Err(CKR_TOKEN_NOT_PRESENT)?,
         };
-        self.is_initialized()
+        Ok(())
     }
-    fn reinit(&mut self) -> Result<()> {
-        self.db_reset()
-    }
+
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
+
     fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
-        let conn = self.conn.lock().unwrap();
-        Self::search_by_unique_id(&conn, uid)
+        let conn = self.conn.lock()?;
+        let mut stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
+        let rows = stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?;
+        let mut objects = Self::rows_to_objects(rows)?;
+        match objects.len() {
+            0 => Err(Error::not_found(uid.clone())),
+            1 => Ok(objects.pop().unwrap()),
+            _ => Err(CKR_GENERAL_ERROR)?,
+        }
     }
-    fn store(&mut self, uid: &String, obj: Object) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
+        let conn = self.conn.lock()?;
+        let mut search_query = String::from(SEARCH_ALL);
+        let mut subqcount = 0;
+        let mut search_params = Vec::<Value>::with_capacity(template.len() * 2);
+        for a in template {
+            /* add subqueries */
+            if subqcount == 0 {
+                search_query.push_str(SEARCH_NEST);
+            } else {
+                search_query.push_str(SEARCH_CONCAT);
+            }
+            search_query.push_str(SEARCH_OBJ_ID);
+            /* add parameters */
+            search_params.push(Value::from(u32::try_from(a.type_)?));
+            search_params.push(match AttrType::attr_id_to_attrtype(a.type_)? {
+                AttrType::BoolType => Value::from(a.to_bool()?),
+                AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
+                AttrType::StringType => Value::from(a.to_string()?),
+                AttrType::BytesType => Value::from(a.to_buf()?),
+                AttrType::DateType => {
+                    Value::from(a.to_attribute()?.to_date_string()?)
+                }
+                AttrType::DenyType | AttrType::IgnoreType => {
+                    return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
+                }
+            });
+            subqcount += 1;
+        }
+        if subqcount > 0 {
+            search_query.push_str(SEARCH_CLOSE);
+        }
+        /* finally make sure results return ordered by id,
+         * this simplifies conversion to actual Objects */
+        search_query.push_str(SEARCH_ORDER);
+
+        let mut stmt = conn.prepare(&search_query).map_err(bad_code)?;
+        let rows = stmt
+            .query(rusqlite::params_from_iter(search_params))
+            .map_err(bad_code)?;
+        Ok(Self::rows_to_objects(rows)?)
+    }
+
+    fn store_obj(&mut self, obj: Object) -> Result<()> {
+        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+        let mut conn = self.conn.lock()?;
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-        Self::store_object(&mut tx, uid, &obj)?;
+        Self::store_object(&mut tx, &uid, obj)?;
         tx.commit().map_err(bad_storage)
     }
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
-        let conn = self.conn.lock().unwrap();
-        let mut objects = Self::search_with_filter(&conn, template)?;
-        drop(conn);
-        let mut result = Vec::<Object>::new();
-        for obj in objects.drain(..) {
-            if obj.match_template(template) {
-                result.push(obj);
-            }
-        }
-        Ok(result)
-    }
+
     fn remove_by_uid(&mut self, uid: &String) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock()?;
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
         Self::delete_object(&mut tx, &uid)?;
@@ -318,9 +370,37 @@ impl Storage for SqliteStorage {
     }
 }
 
-pub fn sqlite() -> Box<dyn Storage> {
-    Box::new(SqliteStorage {
-        filename: String::from(""),
-        conn: Arc::new(Mutex::from(Connection::open_in_memory().unwrap())),
-    })
+#[derive(Debug)]
+pub struct SqliteDBInfo {
+    db_type: &'static str,
+    db_suffix: &'static str,
 }
+
+impl StorageDBInfo for SqliteDBInfo {
+    fn new(&self, conf: &Option<String>) -> Result<Box<dyn Storage>> {
+        let raw_store = Box::new(SqliteStorage {
+            filename: match conf {
+                Some(s) => s.clone(),
+                None => String::from(""),
+            },
+            conn: Arc::new(Mutex::from(Connection::open_in_memory()?)),
+        });
+        Ok(Box::new(StdStorageFormat::new(
+            raw_store,
+            StorageACI::new(true),
+        )))
+    }
+
+    fn dbtype(&self) -> &str {
+        self.db_type
+    }
+
+    fn dbsuffix(&self) -> &str {
+        self.db_suffix
+    }
+}
+
+pub static DBINFO: SqliteDBInfo = SqliteDBInfo {
+    db_type: "sqlite",
+    db_suffix: ".sql",
+};
