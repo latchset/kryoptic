@@ -65,16 +65,19 @@ tlskdf = []
 # Databases
 jsondb = ["memorydb"]
 memorydb = []
-sqlitedb = ["dep:rusqlite"]
+sqlitedb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
+nssdb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
 
-# these are always required, so easier to specify this way
-default = [ "aes", "hmac", "pbkdf2", "sqlitedb" ]
+default = [ "sqlitedb" ]
 
 ecc_all = ["ecdsa", "ec_montgomery", "eddsa", "ecdh"]
+hash_all = ["hash", "hmac"]
+kdf_all = [ "hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf" ]
 
-standard = [ "ecc_all", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+standard = [ "ecc_all", "hash_all", "kdf_all", "rsa"]
 
-fips = [ "rusqlite/bundled", "ecdsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+ecc_fips = ["ecdsa", "ecdh"]
+fips = [ "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
 
 dynamic = [ ] # Builds against system libcrypto.so
 

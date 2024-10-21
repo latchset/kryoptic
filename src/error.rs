@@ -186,6 +186,12 @@ impl From<asn1::ParseError> for Error {
     }
 }
 
+impl From<std::num::ParseIntError> for Error {
+    fn from(error: std::num::ParseIntError) -> Error {
+        Error::other_error(error)
+    }
+}
+
 impl From<asn1::WriteError> for Error {
     fn from(error: asn1::WriteError) -> Error {
         Error::other_error(error)

@@ -1,7 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use crate::attribute::{string_to_ck_date, AttrType, Attribute};
 use crate::error::{Error, Result};
@@ -9,6 +9,7 @@ use crate::interface::*;
 use crate::object::Object;
 use crate::storage::aci::StorageACI;
 use crate::storage::format::{StdStorageFormat, StorageRaw};
+use crate::storage::sqlite_common::check_table;
 use crate::storage::{Storage, StorageDBInfo};
 
 use itertools::Itertools;
@@ -76,8 +77,6 @@ impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for Error {
 const OBJECTS_TABLE: &str = "objects";
 const DROP_DB_TABLE: &str = "DROP TABLE objects";
 const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr))";
-const CHECK_DB_TABLE: &str =
-    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name = ?";
 
 /* search by filter constants */
 const SEARCH_ALL: &str = "SELECT * FROM objects";
@@ -91,28 +90,6 @@ const SEARCH_BY_SINGLE_ATTR: &str = "SELECT * FROM objects WHERE id IN (SELECT i
 const UPDATE_ATTR: &str = "INSERT OR REPLACE INTO objects VALUES (?, ?, ?)";
 const DELETE_OBJ: &str = "DELETE FROM objects WHERE id = ?";
 const MAX_ID: &str = "SELECT IFNULL(MAX(id), 0) FROM objects";
-
-pub fn check_table(
-    conn: MutexGuard<'_, rusqlite::Connection>,
-    tablename: &str,
-) -> Result<()> {
-    let mut stmt = conn.prepare(CHECK_DB_TABLE)?;
-    let mut rows = stmt.query(rusqlite::params![tablename])?;
-    if let Some(row) = rows.next()? {
-        match row.get(0)? {
-            1 => (),
-            0 => return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?,
-            _ => return Err(CKR_DEVICE_ERROR)?,
-        }
-    } else {
-        return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
-    }
-    match rows.next() {
-        Ok(None) => Ok(()),
-        Ok(_) => Err(CKR_DEVICE_ERROR)?,
-        Err(e) => Err(e)?,
-    }
-}
 
 #[derive(Debug)]
 pub struct SqliteStorage {

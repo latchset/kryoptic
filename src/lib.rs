@@ -78,17 +78,16 @@ macro_rules! ok_or_ret {
 
 macro_rules! cast_or_ret {
     ($type:tt from $val:expr) => {{
-        #[allow(irrefutable_let_patterns)]
-        let Ok(cast) = $type::try_from($val) else {
-            return CKR_GENERAL_ERROR;
-        };
-        cast
+        match $type::try_from($val) {
+            Ok(cast) => cast,
+            Err(_) => return CKR_GENERAL_ERROR,
+        }
     }};
     ($type:tt from $val:expr => $err:expr) => {{
-        let Ok(cast) = $type::try_from($val) else {
-            return $err;
-        };
-        cast
+        match $type::try_from($val) {
+            Ok(cast) => cast,
+            Err(_) => return $err,
+        }
     }};
 }
 
@@ -403,6 +402,15 @@ static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
     };
     RwLock::new(global_conf)
 });
+
+#[cfg(test)]
+pub fn add_slot(slot: config::Slot) -> CK_RV {
+    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    if gconf.conf.add_slot(slot).is_err() {
+        return CKR_GENERAL_ERROR;
+    }
+    CKR_OK
+}
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck CONFIG);

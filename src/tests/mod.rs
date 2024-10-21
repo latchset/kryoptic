@@ -285,3 +285,6 @@ mod aes_kw_vectors;
 
 #[cfg(feature = "tlskdf")]
 mod tls;
+
+#[cfg(feature = "nssdb")]
+mod nssdb;
