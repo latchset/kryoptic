@@ -5,8 +5,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use crate::aes;
-use crate::attribute::{Attribute, CkAttrs};
+use crate::attribute::CkAttrs;
 use crate::error::Result;
 #[cfg(feature = "fips")]
 use crate::fips;
@@ -14,90 +13,49 @@ use crate::interface::*;
 use crate::mechanism::Mechanisms;
 use crate::misc::copy_sized_string;
 use crate::object::{Object, ObjectFactories};
+use crate::register_all;
 use crate::storage::*;
-use crate::{get_random_data, register_all, sizeof, void_ptr};
 
-use hex;
+use bimap;
 
-#[cfg(feature = "fips")]
-const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
-#[cfg(not(feature = "fips"))]
-const TOKEN_LABEL: &str = "Kryoptic Soft Token";
-
-const MANUFACTURER_ID: &str = "Kryoptic Project";
-
-#[cfg(feature = "fips")]
-const TOKEN_MODEL: &str = "FIPS-140-3 v1";
-#[cfg(not(feature = "fips"))]
-const TOKEN_MODEL: &str = "v1";
-
-const SO_PIN_UID: &str = "0";
-const USER_PIN_UID: &str = "1";
-const TOKEN_INFO_UID: &str = "2";
-
-const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
-
-const USER_PIN_IV: &str = "UPIN";
-const DEFPIN_SALT: &str = "DEFAULT SALT DATA"; /* at least 16 bytes for FIPS */
-const DEFPIN_ITER: usize = 1000;
-const DEFAULT_IV_SIZE: usize = 12; /* 96 bits as required by FIPS for AES GCM */
-
-#[cfg(feature = "fips")]
-fn default_password() -> Vec<u8> {
-    const DEFPIN_PASS: &str = "DEFAULT PASSWORD";
-    DEFPIN_PASS.as_bytes().to_vec()
-}
-#[cfg(not(feature = "fips"))]
-fn default_password() -> Vec<u8> {
-    vec![0u8; 0]
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Handles {
-    map: HashMap<CK_OBJECT_HANDLE, String>,
-    rev: HashMap<String, CK_OBJECT_HANDLE>,
+    map: bimap::hash::BiHashMap<CK_OBJECT_HANDLE, String>,
     next: CK_OBJECT_HANDLE,
 }
 
 impl Handles {
     pub fn new() -> Handles {
         Handles {
-            map: HashMap::new(),
-            rev: HashMap::new(),
+            map: bimap::hash::BiHashMap::new(),
             next: 1,
         }
     }
 
-    pub fn insert(&mut self, handle: CK_OBJECT_HANDLE, value: String) {
-        if let Some(val) = self.rev.insert(value.clone(), handle) {
-            /* this uid was already mapped */
-            if val != handle {
-                let _ = self.map.remove(&val);
-            }
-        }
-        if let Some(uid) = self.map.insert(handle, value) {
-            /* this handle was already mapped */
-            if &uid != self.map.get(&handle).unwrap() {
-                let _ = self.rev.remove(&uid);
-            }
+    pub fn insert(
+        &mut self,
+        handle: CK_OBJECT_HANDLE,
+        value: String,
+    ) -> Result<()> {
+        match self.map.insert_no_overwrite(handle, value) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
         }
     }
 
     pub fn get(&self, handle: CK_OBJECT_HANDLE) -> Option<&String> {
-        self.map.get(&handle)
+        self.map.get_by_left(&handle)
     }
 
     pub fn get_by_uid(&self, uid: &String) -> Option<&CK_OBJECT_HANDLE> {
-        self.rev.get(uid)
+        self.map.get_by_right(uid)
     }
 
     pub fn remove(&mut self, handle: CK_OBJECT_HANDLE) {
-        if let Some(uid) = self.map.remove(&handle) {
-            let _ = self.rev.remove(&uid);
-        }
+        let _ = self.map.remove_by_left(&handle);
     }
 
-    fn next(&mut self) -> CK_OBJECT_HANDLE {
+    pub fn next(&mut self) -> CK_OBJECT_HANDLE {
         let next = self.next;
         self.next += 1;
         next
@@ -105,36 +63,30 @@ impl Handles {
 }
 
 #[derive(Debug)]
+pub struct TokenFacilities {
+    pub mechanisms: Mechanisms,
+    pub factories: ObjectFactories,
+    pub handles: Handles,
+}
+
+#[derive(Debug)]
 pub struct Token {
     info: CK_TOKEN_INFO,
-    filename: Option<String>,
-    object_factories: ObjectFactories,
-    mechanisms: Mechanisms,
+    facilities: TokenFacilities,
     storage: Box<dyn Storage>,
     session_objects: HashMap<CK_OBJECT_HANDLE, Object>,
-    handles: Handles,
-    kek: Option<Object>,
-    so_logged_in: bool,
+    logged: CK_USER_TYPE,
 }
 
 impl Token {
     pub fn new(dbtype: &str, dbpath: Option<String>) -> Result<Token> {
-        /* when no filename is provided we assume a memory only
-         * token that has no backing store */
-        let store = match dbtype {
-            SQLITEDB => sqlite::sqlite(),
-            JSONDB => json::json(),
-            MEMORYDB => memory::memory(),
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        };
-
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
                 label: [0u8; 32],
                 manufacturerID: [0u8; 32],
                 model: [0u8; 16],
                 serialNumber: [0u8; 16],
-                flags: CKF_RNG | CKF_LOGIN_REQUIRED,
+                flags: CKF_RNG,
                 ulMaxSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulSessionCount: 0,
                 ulMaxRwSessionCount: CK_EFFECTIVELY_INFINITE,
@@ -149,55 +101,30 @@ impl Token {
                 firmwareVersion: CK_VERSION { major: 0, minor: 0 },
                 utcTime: *b"0000000000000000",
             },
-            filename: match dbpath {
-                Some(s) => Some(s.clone()),
-                None => None,
+            facilities: TokenFacilities {
+                mechanisms: Mechanisms::new(),
+                factories: ObjectFactories::new(),
+                handles: Handles::new(),
             },
-            object_factories: ObjectFactories::new(),
-            mechanisms: Mechanisms::new(),
-            storage: store,
+            storage: new_storage(dbtype, &dbpath)?,
             session_objects: HashMap::new(),
-            handles: Handles::new(),
-            kek: None,
-            so_logged_in: false,
+            logged: KRY_UNSPEC,
         };
 
-        /* default strings */
-        copy_sized_string(TOKEN_LABEL.as_bytes(), &mut token.info.label);
-        copy_sized_string(
-            MANUFACTURER_ID.as_bytes(),
-            &mut token.info.manufacturerID,
-        );
-        copy_sized_string(TOKEN_MODEL.as_bytes(), &mut token.info.model);
-
         /* register mechanisms and factories */
-        register_all(&mut token.mechanisms, &mut token.object_factories);
+        register_all(
+            &mut token.facilities.mechanisms,
+            &mut token.facilities.factories,
+        );
 
-        if let Some(ref filename) = token.filename {
-            match token.storage.open(filename) {
-                Ok(()) => {
-                    token.load_token_info()?;
-                    token.info.flags |= CKF_TOKEN_INITIALIZED;
-                    #[cfg(not(test))]
-                    {
-                        token.info.flags &= !CKF_RESTORE_KEY_NOT_NEEDED;
-                    }
+        match token.storage.open() {
+            Ok(info) => token.fill_token_info(&info),
+            Err(err) => match err.rv() {
+                CKR_CRYPTOKI_NOT_INITIALIZED => {
+                    token.info.flags &= !CKF_TOKEN_INITIALIZED
                 }
-                Err(err) => match err.rv() {
-                    CKR_CRYPTOKI_NOT_INITIALIZED => {
-                        token.info.flags &= !CKF_TOKEN_INITIALIZED
-                    }
-                    _ => return Err(err),
-                },
-            }
-        } else {
-            token.info.flags &= !CKF_LOGIN_REQUIRED;
-            token.info.flags |= CKF_TOKEN_INITIALIZED;
-            token.info.flags |= CKF_RESTORE_KEY_NOT_NEEDED;
-        }
-
-        if token.info.flags & CKF_TOKEN_INITIALIZED != 0 {
-            token.init_pin_flags()?;
+                _ => return Err(err),
+            },
         }
 
         #[cfg(feature = "fips")]
@@ -206,648 +133,178 @@ impl Token {
         Ok(token)
     }
 
-    #[cfg(test)]
-    pub fn use_encryption(&mut self, enc: bool) {
-        if enc {
-            self.info.flags |= CKF_RESTORE_KEY_NOT_NEEDED;
-        } else {
-            self.info.flags &= !CKF_RESTORE_KEY_NOT_NEEDED;
-        }
+    fn fill_token_info(&mut self, info: &StorageTokenInfo) {
+        self.info.label = info.label;
+        self.info.manufacturerID = info.manufacturer;
+        self.info.model = info.model;
+        self.info.serialNumber = info.serial;
+        self.info.flags = info.flags | CKF_RNG;
+    }
+
+    pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
+        &self.info
     }
 
     pub fn is_initialized(&self) -> bool {
         self.info.flags & CKF_TOKEN_INITIALIZED == CKF_TOKEN_INITIALIZED
     }
 
-    fn is_login_required(&self) -> bool {
-        self.info.flags & CKF_LOGIN_REQUIRED == CKF_LOGIN_REQUIRED
-    }
-
-    fn load_token_info(&mut self) -> Result<()> {
-        let uid = TOKEN_INFO_UID.to_string();
-        let obj = match self.storage.fetch_by_uid(&uid) {
-            Ok(o) => o,
-            Err(e) => {
-                if e.attr_not_found() {
-                    /* it is ok if no token data is stored yet,
-                     * we'll use defaults */
-                    return Ok(());
-                } else {
-                    return Err(e);
-                }
-            }
-        };
-        if obj.get_attr_as_ulong(CKA_CLASS)? != KRO_TOKEN_DATA {
-            return Err(CKR_TOKEN_NOT_RECOGNIZED)?;
-        }
-        let label = obj
-            .get_attr_as_string(CKA_LABEL)
-            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-        copy_sized_string(label.as_bytes(), &mut self.info.label);
-        let issuer = obj
-            .get_attr_as_string(KRA_MANUFACTURER_ID)
-            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-        copy_sized_string(issuer.as_bytes(), &mut self.info.manufacturerID);
-        let model = obj
-            .get_attr_as_string(KRA_MODEL)
-            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-        copy_sized_string(model.as_bytes(), &mut self.info.model);
-        let serial = obj
-            .get_attr_as_string(KRA_SERIAL_NUMBER)
-            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-        copy_sized_string(serial.as_bytes(), &mut self.info.serialNumber);
-        self.info.flags = obj
-            .get_attr_as_ulong(KRA_FLAGS)
-            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-
-        Ok(())
-    }
-
-    fn store_token_info(&mut self) -> Result<()> {
-        let uid = TOKEN_INFO_UID.to_string();
-        let mut obj = match self.storage.fetch_by_uid(&uid) {
-            Ok(o) => o.clone(),
-            Err(_) => {
-                let mut o = Object::new();
-                o.set_attr(Attribute::from_string(CKA_UNIQUE_ID, uid.clone()))?;
-                o.set_attr(Attribute::from_bool(CKA_TOKEN, true))?;
-                o.set_attr(Attribute::from_ulong(CKA_CLASS, KRO_TOKEN_DATA))?;
-                o
-            }
-        };
-        obj.set_attr(Attribute::string_from_sized(
-            CKA_LABEL,
-            &self.info.label,
-        ))?;
-        obj.set_attr(Attribute::string_from_sized(
-            KRA_MANUFACTURER_ID,
-            &self.info.manufacturerID,
-        ))?;
-        obj.set_attr(Attribute::string_from_sized(
-            KRA_MODEL,
-            &self.info.model,
-        ))?;
-        obj.set_attr(Attribute::string_from_sized(
-            KRA_SERIAL_NUMBER,
-            &self.info.serialNumber,
-        ))?;
-        obj.set_attr(Attribute::from_ulong(KRA_FLAGS, self.info.flags))?;
-
-        self.storage.store(&uid, obj)?;
-        return Ok(());
-    }
-
-    fn fetch_pin_object(&mut self, uid: &str) -> Result<Object> {
-        let obj = match self.storage.fetch_by_uid(&uid.to_string()) {
-            Ok(o) => o,
-            Err(e) => {
-                if e.attr_not_found() {
-                    return Err(CKR_USER_PIN_NOT_INITIALIZED)?;
-                } else {
-                    return Err(e);
-                }
-            }
-        };
-        if obj.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-        if obj.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_GENERIC_SECRET {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-        Ok(obj)
-    }
-
-    fn store_pin_object(
-        &mut self,
-        uid: String,
-        label: String,
-        wrapped: Vec<u8>,
-    ) -> Result<()> {
-        match self.storage.fetch_by_uid(&uid) {
-            Ok(o) => {
-                let mut obj = o.clone();
-                obj.set_attr(Attribute::from_string(CKA_LABEL, label))?;
-                obj.set_attr(Attribute::from_bytes(CKA_VALUE, wrapped))?;
-                obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
-                self.storage.store(&uid, obj)?;
-            }
-            Err(_) => {
-                let mut obj = Object::new();
-                obj.set_attr(Attribute::from_string(
-                    CKA_UNIQUE_ID,
-                    uid.clone(),
-                ))?;
-                obj.set_attr(Attribute::from_bool(CKA_TOKEN, true))?;
-                obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
-                obj.set_attr(Attribute::from_ulong(
-                    CKA_KEY_TYPE,
-                    CKK_GENERIC_SECRET,
-                ))?;
-                obj.set_attr(Attribute::from_string(CKA_LABEL, label))?;
-                obj.set_attr(Attribute::from_bytes(CKA_VALUE, wrapped))?;
-                obj.set_attr(Attribute::from_ulong(
-                    KRA_MAX_LOGIN_ATTEMPTS,
-                    MAX_LOGIN_ATTEMPTS,
-                ))?;
-                obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
-
-                self.storage.store(&uid, obj)?;
-            }
-        }
-        return Ok(());
-    }
-
-    fn parse_pin_label(&self, label: &str) -> Result<(String, usize)> {
-        let parts: Vec<_> = label.split(":").collect();
-        if parts.len() != 2 {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-        Ok((
-            parts[0].to_string(),
-            match parts[1].parse() {
-                Ok(u) => u,
-                Err(_) => return Err(CKR_GENERAL_ERROR)?,
-            },
-        ))
-    }
-
-    fn pin_to_key(
-        &mut self,
-        pin: &Vec<u8>,
-        salt: &str,
-        iterations: usize,
-    ) -> Result<Object> {
-        let params = CK_PKCS5_PBKD2_PARAMS2 {
-            saltSource: CKZ_DATA_SPECIFIED,
-            pSaltSourceData: salt.as_ptr() as *const _ as *mut _,
-            ulSaltSourceDataLen: salt.len() as CK_ULONG,
-            iterations: iterations as CK_ULONG,
-            prf: CKP_PKCS5_PBKD2_HMAC_SHA512,
-            pPrfData: std::ptr::null_mut(),
-            ulPrfDataLen: 0,
-            pPassword: pin.as_ptr() as *const _ as *mut _,
-            ulPasswordLen: pin.len() as CK_ULONG,
-        };
-        let class = CKO_SECRET_KEY;
-        let keytyp = CKK_AES;
-        let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
-        let truebool: CK_BBOOL = CK_TRUE;
-        let mut template = CkAttrs::with_capacity(5);
-        template.add_ulong(CKA_CLASS, &class);
-        template.add_ulong(CKA_KEY_TYPE, &keytyp);
-        template.add_ulong(CKA_VALUE_LEN, &keylen);
-        template.add_bool(CKA_WRAP, &truebool);
-        template.add_bool(CKA_UNWRAP, &truebool);
-        let pbkdf2 = self.mechanisms.get(CKM_PKCS5_PBKD2)?;
-        pbkdf2.generate_key(
-            &CK_MECHANISM {
-                mechanism: CKM_PKCS5_PBKD2,
-                pParameter: &params as *const _ as *mut _,
-                ulParameterLen: sizeof!(CK_PKCS5_PBKD2_PARAMS2),
-            },
-            template.as_slice(),
-            &self.mechanisms,
-            &self.object_factories,
-        )
-    }
-
-    fn wrap_kek(
-        &mut self,
-        wrapper: &Object,
-        mut kek: Object,
-    ) -> Result<Vec<u8>> {
-        let vlen = kek.get_attr_as_ulong(CKA_VALUE_LEN)?;
-        let bs = aes::AES_BLOCK_SIZE;
-        let mut buf = vec![0u8; (((vlen as usize + bs) / bs) + 1) * bs];
-        let aes = self.mechanisms.get(CKM_AES_GCM)?;
-        let factory = self.object_factories.get_object_factory(&kek)?;
-        /* need to do this or wrap_key will fail */
-        kek.set_attr(Attribute::from_bool(CKA_EXTRACTABLE, true))?;
-        let outlen = aes.wrap_key(
-            &CK_MECHANISM {
-                mechanism: CKM_AES_KEY_WRAP_KWP,
-                pParameter: void_ptr!(USER_PIN_IV.as_ptr()),
-                ulParameterLen: USER_PIN_IV.len() as CK_ULONG,
-            },
-            wrapper,
-            &kek,
-            buf.as_mut_slice(),
-            factory,
-        )?;
-        buf.resize(outlen, 0);
-        Ok(buf)
-    }
-
-    fn unwrap_kek(&self, wrapper: &Object, wrapped: &[u8]) -> Result<Object> {
-        let class = CKO_SECRET_KEY;
-        let keytyp = CKK_AES;
-        let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
-        let truebool: CK_BBOOL = CK_TRUE;
-        let mut template = CkAttrs::with_capacity(5);
-        template.add_ulong(CKA_CLASS, &class);
-        template.add_ulong(CKA_KEY_TYPE, &keytyp);
-        template.add_ulong(CKA_VALUE_LEN, &keylen);
-        template.add_bool(CKA_ENCRYPT, &truebool);
-        template.add_bool(CKA_DECRYPT, &truebool);
-        let aes = self.mechanisms.get(CKM_AES_GCM)?;
-        Ok(aes.unwrap_key(
-            &CK_MECHANISM {
-                mechanism: CKM_AES_KEY_WRAP_KWP,
-                pParameter: void_ptr!(USER_PIN_IV.as_ptr()),
-                ulParameterLen: USER_PIN_IV.len() as CK_ULONG,
-            },
-            wrapper,
-            wrapped,
-            template.as_slice(),
-            self.object_factories
-                .get_obj_factory_from_key_template(template.as_slice())?,
-        )?)
-    }
-
-    fn update_pin_flags(&mut self, obj: &Object) -> Result<()> {
-        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
-        let is_so = match uid.as_str() {
-            SO_PIN_UID => true,
-            USER_PIN_UID => false,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        };
-        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
-        let attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
-        match max - attempts {
-            0 => {
-                if is_so {
-                    self.info.flags |= CKF_SO_PIN_LOCKED;
-                } else {
-                    self.info.flags |= CKF_USER_PIN_LOCKED;
-                }
-            }
-            1 => {
-                if is_so {
-                    self.info.flags |= CKF_SO_PIN_FINAL_TRY;
-                } else {
-                    self.info.flags |= CKF_USER_PIN_FINAL_TRY;
-                }
-            }
-            2 | 3 => {
-                if is_so {
-                    self.info.flags |= CKF_SO_PIN_COUNT_LOW;
-                } else {
-                    self.info.flags |= CKF_USER_PIN_COUNT_LOW;
-                }
-            }
-            _ => {
-                if attempts == 0 {
-                    self.info.flags &= if is_so {
-                        !(CKF_SO_PIN_FINAL_TRY | CKF_SO_PIN_COUNT_LOW)
-                    } else {
-                        !(CKF_USER_PIN_FINAL_TRY | CKF_USER_PIN_COUNT_LOW)
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn init_pin_flags(&mut self) -> Result<()> {
-        let so = self.fetch_pin_object(SO_PIN_UID)?;
-        self.update_pin_flags(&so)?;
-        let so_label = so.get_attr_as_string(CKA_LABEL)?;
-        if self.parse_pin_label(so_label.as_str())?.0 == DEFPIN_SALT {
-            self.info.flags |= CKF_SO_PIN_TO_BE_CHANGED;
-        }
-        let user = self.fetch_pin_object(USER_PIN_UID)?;
-        self.update_pin_flags(&user)?;
-        let user_label = user.get_attr_as_string(CKA_LABEL)?;
-        if self.parse_pin_label(user_label.as_str())?.0 == DEFPIN_SALT {
-            self.info.flags |= CKF_USER_PIN_TO_BE_CHANGED;
-        } else {
-            self.info.flags |= CKF_USER_PIN_INITIALIZED;
-        }
-        Ok(())
-    }
-
-    fn reset_user_pin(&mut self) -> Result<()> {
-        let class = CKO_SECRET_KEY;
-        let keytyp = CKK_AES;
-        let keylen = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
-        let mut template = CkAttrs::with_capacity(3);
-        template.add_ulong(CKA_CLASS, &class);
-        template.add_ulong(CKA_KEY_TYPE, &keytyp);
-        template.add_ulong(CKA_VALUE_LEN, &keylen);
-        let aes = self.mechanisms.get(CKM_AES_KEY_GEN)?;
-        let kek = aes.generate_key(
-            &CK_MECHANISM {
-                mechanism: CKM_AES_KEY_GEN,
-                pParameter: std::ptr::null_mut(),
-                ulParameterLen: 0,
-            },
-            template.as_slice(),
-            &self.mechanisms,
-            &self.object_factories,
-        )?;
-        /* the default pin is the null pin
-         * Except in FIPS mode where OpenSSL refuses empty passwords */
-        let key =
-            self.pin_to_key(&default_password(), DEFPIN_SALT, DEFPIN_ITER)?;
-        let wrapped = self.wrap_kek(&key, kek)?;
-        self.store_pin_object(
-            USER_PIN_UID.to_string(),
-            format!("{}:{}", DEFPIN_SALT, DEFPIN_ITER),
-            wrapped,
-        )
-    }
-
-    fn random_pin_salt(&self) -> Result<String> {
-        let mut data = [0u8; 8];
-        get_random_data(&mut data)?;
-        Ok(hex::encode(data))
-    }
-
-    pub fn set_pin(
-        &mut self,
-        user_type: CK_USER_TYPE,
-        pin: &Vec<u8>,
-        old: &Vec<u8>,
-    ) -> Result<()> {
-        let utype = match user_type {
-            CK_UNAVAILABLE_INFORMATION => {
-                if self.so_logged_in {
-                    CKU_SO
-                } else {
-                    CKU_USER
-                }
-            }
-            CKU_USER => CKU_USER,
-            CKU_SO => CKU_SO,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        };
-
-        match utype {
-            CKU_USER => {
-                if self.so_logged_in && old.len() == 0 {
-                    /* this is a forced change,
-                     * which will make all existing secrets unreadable */
-                    self.reset_user_pin()?;
-                }
-                let kek = if old.len() == 0 {
-                    /* In FIPS mode OpenSSL's PBKDF2 does not accept empty
-                     * passwords, so we replace it for a default password
-                     * during initialization */
-                    self.check_user_login(&default_password())?
-                } else {
-                    self.check_user_login(old)?
-                };
-                let salt = self.random_pin_salt()?;
-                let key = self.pin_to_key(pin, salt.as_str(), DEFPIN_ITER)?;
-                let wrapped = self.wrap_kek(&key, kek)?;
-                self.store_pin_object(
-                    USER_PIN_UID.to_string(),
-                    format!("{}:{}", salt, DEFPIN_ITER),
-                    wrapped,
-                )?;
-
-                if old.len() != 0 {
-                    self.info.flags |= CKF_USER_PIN_INITIALIZED;
-                }
-            }
-            CKU_SO => {
-                if self.is_initialized() {
-                    /* When the token is not yet initialized, the set_pin
-                     * operation is used to set the initial SO PIN, so we
-                     * can't check the old one in that case as we'd fail.
-                     */
-                    self.check_so_login(old)?;
-                }
-                let salt = if pin.len() != 0 {
-                    self.random_pin_salt()?
-                } else {
-                    DEFPIN_SALT.to_string()
-                };
-                let derived =
-                    self.pin_to_key(pin, salt.as_str(), DEFPIN_ITER)?;
-                let value = derived.get_attr_as_bytes(CKA_VALUE)?;
-                /* TODO: should we store a copy of the kek with
-                 * the so token for recovery reasons ? */
-                self.store_pin_object(
-                    SO_PIN_UID.to_string(),
-                    format!("{}:{}", salt, DEFPIN_ITER),
-                    value.clone(),
-                )?;
-            }
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        }
-        Ok(())
-    }
-
-    pub fn initialize(&mut self, pin: &Vec<u8>, label: &Vec<u8>) -> Result<()> {
+    pub fn initialize(&mut self, pin: &[u8], label: &[u8]) -> Result<()> {
         if self.is_initialized() {
-            self.check_so_login(pin)?;
+            self.auth_user(CKU_SO, pin, true)?;
         };
+
+        self.facilities.handles = Handles::new();
+        self.session_objects.clear();
+        self.logged = KRY_UNSPEC;
 
         /* this inits from scratch or deletes and reinits an existing db */
-        self.storage.reinit()?;
-
-        self.handles = Handles::new();
-        self.session_objects.clear();
-        self.so_logged_in = false;
-        self.kek = None;
-
-        /* mark uninitialized otherwise set_pin() will fail trying to verify
-         * the SO PIN from storage (which has just been obliterated) */
-        self.info.flags &= !CKF_TOKEN_INITIALIZED;
+        let mut info = self.storage.reinit(&self.facilities)?;
 
         /* Add SO PIN */
-        self.set_pin(CKU_SO, pin, &vec![0u8; 0])?;
-        /* Generate KEK and store with empty User PIN */
-        self.reset_user_pin()?;
+        self.set_pin(CKU_SO, pin, &[])?;
 
-        copy_sized_string(label.as_slice(), &mut self.info.label);
-        self.store_token_info()?;
+        /* copy Label */
+        copy_sized_string(label, &mut info.label);
 
-        self.init_pin_flags()?;
+        /* save token info with provided label */
+        self.storage.store_token_info(&info)?;
+
+        /* copy info on Token object */
+        self.fill_token_info(&info);
+
+        /* IMPORTANT: we always forcibly unauth here (A reinit
+         * creates the token as if CKU_SO was logged in in oreder
+         * to properly store data and set PINs).
+         * The caller must ensure authentication after a reset
+         * to be able to correctly access the database. */
+        self.storage.unauth_user(CKU_SO)?;
 
         #[cfg(feature = "fips")]
         if fips::token_init(self).is_err() {
             return Err(CKR_GENERAL_ERROR)?;
         }
 
-        self.info.flags |= CKF_TOKEN_INITIALIZED;
-
         Ok(())
     }
 
-    fn update_pin_attempts(
+    pub fn set_pin(
         &mut self,
-        uid: String,
-        attempts: CK_ULONG,
+        user_type: CK_USER_TYPE,
+        pin: &[u8],
+        old: &[u8],
     ) -> Result<()> {
-        let mut obj = self.storage.fetch_by_uid(&uid)?.clone();
-        obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
-        self.storage.store(&uid, obj)
-    }
-
-    fn check_so_login(&mut self, pin: &Vec<u8>) -> Result<()> {
-        let mut obj = self.fetch_pin_object(SO_PIN_UID)?;
-
-        let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
-        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
-        if stored_attempts >= max {
-            return Err(CKR_PIN_LOCKED)?;
-        }
-
-        let label = obj.get_attr_as_string(CKA_LABEL)?;
-        let (salt, iterations) = self.parse_pin_label(label.as_str())?;
-        let key = self.pin_to_key(pin, salt.as_str(), iterations)?;
-
-        let stored_value = obj.get_attr_as_bytes(CKA_VALUE)?;
-        let value = key.get_attr_as_bytes(CKA_VALUE)?;
-
-        let mut attempts = stored_attempts;
-        if value == stored_value {
-            attempts = 0;
-        } else {
-            attempts += 1;
-        }
-
-        /* Store attempts back to token */
-        if stored_attempts != attempts {
-            let _ = self.update_pin_attempts(SO_PIN_UID.to_string(), attempts);
-
-            /* set token info */
-            obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
-            self.update_pin_flags(&obj)?;
-        }
-
-        if attempts == 0 {
-            return Ok(());
-        }
-        if self.info.flags & CKF_SO_PIN_LOCKED != 0 {
-            return Err(CKR_PIN_LOCKED)?;
-        }
-        return Err(CKR_PIN_INCORRECT)?;
-    }
-
-    fn check_user_login(&mut self, pin: &Vec<u8>) -> Result<Object> {
-        let mut obj = self.fetch_pin_object(USER_PIN_UID)?;
-
-        let stored_attempts = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
-        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
-        if stored_attempts >= max {
-            return Err(CKR_PIN_LOCKED)?;
-        }
-
-        let label = obj.get_attr_as_string(CKA_LABEL)?;
-        let (salt, iterations) = self.parse_pin_label(label.as_str())?;
-        let key = self.pin_to_key(pin, salt.as_str(), iterations)?;
-
-        let mut attempts = stored_attempts;
-        let kek = match self
-            .unwrap_kek(&key, obj.get_attr_as_bytes(CKA_VALUE)?.as_slice())
-        {
-            Ok(k) => {
-                attempts = 0;
-                Some(k)
-            }
-            Err(_) => {
-                attempts += 1;
-                None
-            }
+        let utype = match user_type {
+            CK_UNAVAILABLE_INFORMATION => self.logged,
+            CKU_USER => CKU_USER,
+            CKU_SO => CKU_SO,
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
 
-        /* Store attempts back to token */
-        if stored_attempts != attempts {
-            let _ =
-                self.update_pin_attempts(USER_PIN_UID.to_string(), attempts);
-
-            /* set token info */
-            obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, attempts))?;
-            self.update_pin_flags(&obj)?;
+        if old.len() != 0 {
+            self.auth_user(utype, old, true)?;
         }
 
-        if attempts == 0 {
-            return Ok(kek.unwrap());
+        self.storage.set_user_pin(&self.facilities, utype, pin)?;
+
+        if utype == CKU_USER {
+            self.info.flags |= CKF_USER_PIN_INITIALIZED;
         }
-        if self.info.flags & CKF_USER_PIN_LOCKED != 0 {
-            return Err(CKR_PIN_LOCKED)?;
-        }
-        return Err(CKR_PIN_INCORRECT)?;
+        Ok(())
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
-        if user_type != CKU_SO && !self.is_login_required() {
+        if user_type != CKU_SO && self.info.flags & CKF_LOGIN_REQUIRED == 0 {
             return true;
         }
+
         match user_type {
-            KRY_UNSPEC => self.so_logged_in || self.kek.is_some(),
-            CKU_SO => self.so_logged_in,
-            CKU_USER => self.kek.is_some(),
+            KRY_UNSPEC => self.logged == CKU_SO || self.logged == CKU_USER,
+            CKU_SO => self.logged == CKU_SO,
+            CKU_USER => self.logged == CKU_USER,
             _ => false,
         }
     }
 
-    pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &Vec<u8>) -> CK_RV {
-        if !self.is_login_required() {
-            return CKR_OK;
-        }
+    fn update_auth_flags(&mut self, user_type: CK_USER_TYPE, flags: CK_FLAGS) {
         match user_type {
-            CKU_SO => {
-                if self.so_logged_in {
-                    return CKR_USER_ALREADY_LOGGED_IN;
-                }
-                if self.kek.is_some() {
-                    return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
-                }
-                match self.check_so_login(pin) {
-                    Ok(()) => {
-                        self.so_logged_in = true;
-                        CKR_OK
-                    }
-                    Err(e) => e.rv(),
-                }
-            }
             CKU_USER => {
-                if self.kek.is_some() {
+                self.info.flags &= !(CKF_USER_PIN_LOCKED
+                    | CKF_USER_PIN_FINAL_TRY
+                    | CKF_USER_PIN_COUNT_LOW);
+                self.info.flags |= flags;
+            }
+            CKU_SO => {
+                self.info.flags &= !(CKF_SO_PIN_LOCKED
+                    | CKF_SO_PIN_FINAL_TRY
+                    | CKF_SO_PIN_COUNT_LOW);
+                self.info.flags |= flags;
+            }
+            _ => (),
+        }
+    }
+
+    fn auth_user(
+        &mut self,
+        user_type: CK_USER_TYPE,
+        pin: &[u8],
+        check_only: bool,
+    ) -> Result<()> {
+        if user_type != CKU_SO && user_type != CKU_USER {
+            return Err(CKR_USER_TYPE_INVALID)?;
+        }
+        let mut flags: CK_FLAGS = 0;
+        let ret = self.storage.auth_user(
+            &self.facilities,
+            user_type,
+            pin,
+            &mut flags,
+            check_only,
+        );
+        self.update_auth_flags(user_type, flags);
+        if ret.is_err() {
+            return ret;
+        }
+        if !check_only {
+            self.logged = user_type;
+        }
+        Ok(())
+    }
+
+    pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &[u8]) -> CK_RV {
+        let result = match user_type {
+            CKU_SO | CKU_USER => {
+                if user_type == self.logged {
                     return CKR_USER_ALREADY_LOGGED_IN;
                 }
-                if self.so_logged_in {
+                if self.logged != KRY_UNSPEC {
                     return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
                 }
-                match self.check_user_login(pin) {
-                    Ok(kek) => {
-                        self.kek = Some(kek);
-                        CKR_OK
-                    }
-                    Err(e) => e.rv(),
-                }
+                self.auth_user(user_type, pin, false)
             }
-            CKU_CONTEXT_SPECIFIC => match self.check_user_login(pin) {
-                Ok(_) => CKR_OK,
-                Err(e) => e.rv(),
-            },
-            _ => CKR_USER_TYPE_INVALID,
+            CKU_CONTEXT_SPECIFIC => self.auth_user(self.logged, pin, true),
+            _ => return CKR_USER_TYPE_INVALID,
+        };
+        match result {
+            Ok(()) => CKR_OK,
+            Err(e) => e.rv(),
         }
     }
 
     pub fn logout(&mut self) -> CK_RV {
-        let mut ret = CKR_USER_NOT_LOGGED_IN;
-        if !self.is_login_required() {
-            ret = CKR_OK;
+        match self.logged {
+            KRY_UNSPEC => CKR_USER_NOT_LOGGED_IN,
+            CKU_SO | CKU_USER => {
+                self.clear_private_session_objects();
+                let user_type = self.logged;
+                self.logged = KRY_UNSPEC;
+                if self.storage.unauth_user(user_type).is_err() {
+                    return CKR_GENERAL_ERROR;
+                }
+                CKR_OK
+            }
+            _ => CKR_GENERAL_ERROR,
         }
-        if self.kek.is_some() {
-            self.kek = None;
-            ret = CKR_OK;
-        }
-        if self.so_logged_in {
-            self.so_logged_in = false;
-            ret = CKR_OK;
-        }
-        if ret != CKR_OK {
-            return ret;
-        }
-
-        self.clear_private_session_objects();
-
-        CKR_OK
     }
 
     pub fn save(&mut self) -> Result<()> {
@@ -865,7 +322,7 @@ impl Token {
         /* remove all private session objects */
         for handle in priv_handles {
             let _ = self.session_objects.remove(&handle);
-            self.handles.remove(handle);
+            self.facilities.handles.remove(handle);
         }
     }
 
@@ -882,135 +339,50 @@ impl Token {
 
         for h in handles {
             let _ = self.session_objects.remove(&h);
-            self.handles.remove(h);
+            self.facilities.handles.remove(h);
         }
     }
 
-    /* We should probably have lifetimes to ensure iv and aad are around for
-     * the lifetime of the returned structure, but this will require substantial
-     * reworking of the bindings, so for now we just get this comment.
-     * ENSURE the arguments stay in scope until CK_GCM_PARAMS is needed
-     * */
-    fn encryption_params(&self, iv: &[u8], aad: &[u8]) -> CK_GCM_PARAMS {
-        CK_GCM_PARAMS {
-            pIv: iv.as_ptr() as *mut CK_BYTE,
-            ulIvLen: iv.len() as CK_ULONG,
-            ulIvBits: (iv.len() * 8) as CK_ULONG,
-            pAAD: aad.as_ptr() as *mut CK_BYTE,
-            ulAADLen: aad.len() as CK_ULONG,
-            ulTagBits: 64 as CK_ULONG,
-        }
+    pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
+        self.clear_session_objects(handle);
     }
 
-    fn encrypt_value(&self, uid: &String, val: &Vec<u8>) -> Result<Vec<u8>> {
-        if let Some(ref kek) = self.kek {
-            let mut iv = [0u8; DEFAULT_IV_SIZE];
-            get_random_data(&mut iv)?;
-            let mut params = self.encryption_params(&iv, uid.as_bytes());
-            let mech: CK_MECHANISM = CK_MECHANISM {
-                mechanism: CKM_AES_GCM,
-                pParameter: &mut params as *mut CK_GCM_PARAMS as *mut _,
-                ulParameterLen: sizeof!(CK_GCM_PARAMS),
-            };
-            let aes = self.mechanisms.get(CKM_AES_GCM)?;
-            let mut op = aes.encryption_new(&mech, &kek)?;
-            let clen = op.encryption_len(val.len(), false)?;
-            let mut encval = vec![0u8; iv.len() + clen];
-            encval[..iv.len()].copy_from_slice(&iv);
-            let outlen = op.encrypt(
-                val.as_slice(),
-                &mut encval.as_mut_slice()[iv.len()..],
-            )?;
-            encval.resize(iv.len() + outlen, 0);
-            return Ok(encval);
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
+    pub fn get_mechs_num(&self) -> usize {
+        self.facilities.mechanisms.len()
     }
 
-    fn object_to_storage(
-        &mut self,
-        mut obj: Object,
-        encrypt: bool,
-    ) -> Result<()> {
-        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
-        if encrypt && self.info.flags & CKF_RESTORE_KEY_NOT_NEEDED != 0 {
-            let ats = self.object_factories.get_sensitive_attrs(&obj)?;
-            for typ in ats {
-                let plain = obj.get_attr_as_bytes(typ)?;
-                let encval = self.encrypt_value(&uid, plain)?;
-
-                /* now replace the clear text val with the encrypted one */
-                obj.set_attr(Attribute::from_bytes(typ, encval))?;
-            }
-        }
-        self.storage.store(&uid, obj)
+    pub fn get_mechs_list(&self) -> Vec<CK_MECHANISM_TYPE> {
+        self.facilities.mechanisms.list()
     }
 
-    fn decrypt_value(&self, uid: &String, val: &Vec<u8>) -> Result<Vec<u8>> {
-        if let Some(ref kek) = self.kek {
-            let mut params = self.encryption_params(
-                &val.as_slice()[..DEFAULT_IV_SIZE],
-                uid.as_bytes(),
-            );
-            let mech: CK_MECHANISM = CK_MECHANISM {
-                mechanism: CKM_AES_GCM,
-                pParameter: &mut params as *mut CK_GCM_PARAMS as *mut _,
-                ulParameterLen: sizeof!(CK_GCM_PARAMS),
-            };
-            let aes = self.mechanisms.get(CKM_AES_GCM)?;
-            let mut op = aes.decryption_new(&mech, &kek)?;
-            let mut plain =
-                vec![
-                    0u8;
-                    op.decryption_len(val.len() - DEFAULT_IV_SIZE, false)?
-                ];
-            let outlen = op.decrypt(
-                &val.as_slice()[DEFAULT_IV_SIZE..],
-                plain.as_mut_slice(),
-            )?;
-            plain.resize(outlen, 0);
-            return Ok(plain);
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-    }
-
-    fn object_from_storage(
+    pub fn get_mech_info(
         &self,
-        uid: &String,
-        decrypt: bool,
-    ) -> Result<Object> {
-        let mut obj = self.storage.fetch_by_uid(uid)?;
-        if decrypt && self.info.flags & CKF_RESTORE_KEY_NOT_NEEDED != 0 {
-            let ats = self.object_factories.get_sensitive_attrs(&obj)?;
-            for typ in ats {
-                let encval = obj.get_attr_as_bytes(typ)?;
-                let plain = self.decrypt_value(uid, encval)?;
-
-                /* now replace the encrypted val with the clear text one */
-                obj.set_attr(Attribute::from_bytes(typ, plain))?;
-            }
+        typ: CK_MECHANISM_TYPE,
+    ) -> Result<&CK_MECHANISM_INFO> {
+        match self.facilities.mechanisms.info(typ) {
+            Some(m) => Ok(m),
+            None => Err(CKR_MECHANISM_INVALID)?,
         }
-        Ok(obj)
+    }
+
+    pub fn get_mechanisms(&self) -> &Mechanisms {
+        &self.facilities.mechanisms
+    }
+
+    pub fn get_object_factories(&self) -> &ObjectFactories {
+        &self.facilities.factories
     }
 
     pub fn get_object_by_handle(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
     ) -> Result<Object> {
-        let is_logged_in = self.is_logged_in(KRY_UNSPEC);
-        let mut obj = match self.handles.get(o_handle) {
-            Some(s) => {
-                if let Some(o) = self.session_objects.get(&o_handle) {
-                    o.clone()
-                } else {
-                    self.object_from_storage(s, true)?
-                }
-            }
-            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
+        let mut obj = match self.session_objects.get(&o_handle) {
+            Some(o) => o.clone(),
+            None => self.storage.fetch(&self.facilities, o_handle, true)?,
         };
-        if !is_logged_in && obj.is_token() && obj.is_private() {
+        if !self.is_logged_in(KRY_UNSPEC) && obj.is_token() && obj.is_private()
+        {
             return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
         if obj.is_sensitive() {
@@ -1024,21 +396,18 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         mut obj: Object,
     ) -> Result<CK_OBJECT_HANDLE> {
-        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
-        let is_token = obj.is_token();
-        if is_token {
+        let handle: CK_OBJECT_HANDLE;
+        if obj.is_token() {
             if !self.is_logged_in(KRY_UNSPEC) {
                 return Err(CKR_USER_NOT_LOGGED_IN)?;
             }
+            handle = self.storage.store(&mut self.facilities, obj)?;
         } else {
+            handle = self.facilities.handles.next();
+            obj.set_handle(handle);
             obj.set_session(s_handle);
-        }
-        let handle = self.handles.next();
-        obj.set_handle(handle);
-        self.handles.insert(handle, uid.clone());
-        if obj.is_token() {
-            self.object_to_storage(obj, true)?;
-        } else {
+            let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+            self.facilities.handles.insert(handle, uid)?;
             self.session_objects.insert(handle, obj);
         }
         Ok(handle)
@@ -1049,7 +418,7 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> Result<CK_OBJECT_HANDLE> {
-        let object = self.object_factories.create(template)?;
+        let object = self.facilities.factories.create(template)?;
         self.insert_object(s_handle, object)
     }
 
@@ -1062,23 +431,16 @@ impl Token {
                 let _ = self.session_objects.remove(&o_handle);
             }
             None => {
-                let uid = match self.handles.get(o_handle) {
-                    Some(u) => u,
-                    None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
-                };
-                let obj = self.object_from_storage(uid, false)?;
+                let obj =
+                    self.storage.fetch(&self.facilities, o_handle, false)?;
                 if !obj.is_destroyable() {
                     return Err(CKR_ACTION_PROHIBITED)?;
                 }
-                let _ = self.storage.remove_by_uid(&uid);
+                let _ = self.storage.remove(&self.facilities, o_handle);
             }
         }
-        self.handles.remove(o_handle);
+        self.facilities.handles.remove(o_handle);
         Ok(())
-    }
-
-    pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
-        &self.info
     }
 
     pub fn get_object_attrs(
@@ -1087,21 +449,21 @@ impl Token {
         template: &mut [CK_ATTRIBUTE],
     ) -> Result<()> {
         let is_logged = self.is_logged_in(KRY_UNSPEC);
-        let obj = match self.handles.get(o_handle) {
-            Some(uid) => {
-                if let Some(o) = self.session_objects.get(&o_handle) {
-                    Cow::Borrowed(o)
-                } else {
-                    Cow::Owned(self.object_from_storage(uid, false)?)
-                }
-            }
-            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
+        let obj = match self.session_objects.get(&o_handle) {
+            Some(o) => Cow::Borrowed(o),
+            None => Cow::Owned(self.storage.fetch(
+                &self.facilities,
+                o_handle,
+                false,
+            )?),
         };
         if !is_logged && obj.is_token() && obj.is_private() {
             /* do not reveal if the object exists or not */
             return Err(CKR_OBJECT_HANDLE_INVALID)?;
         }
-        self.object_factories.get_object_attributes(&obj, template)
+        self.facilities
+            .factories
+            .get_object_attributes(&obj, template)
     }
 
     pub fn set_object_attrs(
@@ -1109,57 +471,33 @@ impl Token {
         o_handle: CK_OBJECT_HANDLE,
         template: &mut [CK_ATTRIBUTE],
     ) -> Result<()> {
-        let uid = match self.handles.get(o_handle) {
-            Some(u) => u,
-            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
-        };
-        if let Some(mut obj) = self.session_objects.get_mut(&o_handle) {
-            return self
-                .object_factories
-                .set_object_attributes(&mut obj, template);
-        } else {
-            /* no need to decrypt because Sensitive attributes
-             * cannot be changed via this function */
-            let mut obj = self.object_from_storage(uid, false)?;
-            self.object_factories
-                .set_object_attributes(&mut obj, template)?;
-            self.object_to_storage(obj, false)
-        }
-    }
-
-    pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
-        self.clear_session_objects(handle);
-    }
-
-    pub fn get_mechs_num(&self) -> usize {
-        self.mechanisms.len()
-    }
-
-    pub fn get_mechs_list(&self) -> Vec<CK_MECHANISM_TYPE> {
-        self.mechanisms.list()
-    }
-
-    pub fn get_mech_info(
-        &self,
-        typ: CK_MECHANISM_TYPE,
-    ) -> Result<&CK_MECHANISM_INFO> {
-        match self.mechanisms.info(typ) {
-            Some(m) => Ok(m),
-            None => Err(CKR_MECHANISM_INVALID)?,
+        match self.session_objects.get_mut(&o_handle) {
+            Some(mut obj) => self
+                .facilities
+                .factories
+                .set_object_attributes(&mut obj, template),
+            None => {
+                if !self.is_logged_in(KRY_UNSPEC) {
+                    return Err(CKR_USER_NOT_LOGGED_IN)?;
+                }
+                let mut obj =
+                    self.storage.fetch(&self.facilities, o_handle, true)?;
+                self.facilities
+                    .factories
+                    .set_object_attributes(&mut obj, template)?;
+                let _ = self.storage.store(&mut self.facilities, obj)?;
+                Ok(())
+            }
         }
     }
 
     pub fn get_object_size(&self, o_handle: CK_OBJECT_HANDLE) -> Result<usize> {
-        match self.handles.get(o_handle) {
-            Some(s) => {
-                if let Some(o) = self.session_objects.get(&o_handle) {
-                    o.rough_size()
-                } else {
-                    self.object_from_storage(s, false)?.rough_size()
-                }
-            }
-            None => Err(CKR_OBJECT_HANDLE_INVALID)?,
-        }
+        let obj = if let Some(o) = self.session_objects.get(&o_handle) {
+            Cow::Borrowed(o)
+        } else {
+            Cow::Owned(self.storage.fetch(&self.facilities, o_handle, false)?)
+        };
+        obj.rough_size()
     }
 
     pub fn copy_object(
@@ -1168,21 +506,16 @@ impl Token {
         o_handle: CK_OBJECT_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> Result<CK_OBJECT_HANDLE> {
-        let is_logged_in = self.is_logged_in(KRY_UNSPEC);
-        let obj: Cow<'_, Object> = match self.handles.get(o_handle) {
-            Some(uid) => {
-                if let Some(o) = self.session_objects.get_mut(&o_handle) {
-                    Cow::Borrowed(o)
-                } else {
-                    Cow::Owned(self.object_from_storage(uid, true)?)
-                }
+        let obj = if let Some(o) = self.session_objects.get_mut(&o_handle) {
+            Cow::Borrowed(o)
+        } else {
+            let o = self.storage.fetch(&mut self.facilities, o_handle, true)?;
+            if !self.is_logged_in(KRY_UNSPEC) && o.is_private() {
+                return Err(CKR_USER_NOT_LOGGED_IN)?;
             }
-            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
+            Cow::Owned(o)
         };
-        if !is_logged_in && obj.is_token() && obj.is_private() {
-            return Err(CKR_USER_NOT_LOGGED_IN)?;
-        }
-        let newobj = self.object_factories.copy(&obj, template)?;
+        let newobj = self.facilities.factories.copy(&obj, template)?;
         self.insert_object(s_handle, newobj)
     }
 
@@ -1190,13 +523,13 @@ impl Token {
         &mut self,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Vec<CK_OBJECT_HANDLE>> {
+        let mut tmpl = CkAttrs::from(template);
         let mut handles = Vec::<CK_OBJECT_HANDLE>::new();
-        let is_logged_in = self.is_logged_in(KRY_UNSPEC);
 
         /* First add internal session objects */
         for (_, o) in &self.session_objects {
             if o.is_sensitive() {
-                match self.object_factories.check_sensitive(o, template) {
+                match self.facilities.factories.check_sensitive(o, template) {
                     Err(_) => continue,
                     Ok(()) => (),
                 }
@@ -1206,49 +539,14 @@ impl Token {
             }
         }
 
-        /* Then search storage */
-        let ret = self.storage.search(template)?;
-        for o in ret {
-            if !is_logged_in && o.is_private() {
-                continue;
-            }
-
-            if o.is_sensitive() {
-                match self.object_factories.check_sensitive(&o, template) {
-                    Err(_) => continue,
-                    Ok(()) => (),
-                }
-            }
-
-            let uid = match o.get_attr_as_string(CKA_UNIQUE_ID) {
-                Ok(s) => s,
-                Err(_) => return Err(CKR_GENERAL_ERROR)?,
-            };
-            let handle = match self.handles.get_by_uid(&uid) {
-                Some(h) => *h,
-                None => {
-                    let h = self.handles.next();
-                    self.handles.insert(h, uid.clone());
-                    h
-                }
-            };
-
-            /* do not return internal objects */
-            if let Ok(numuid) = uid.parse::<usize>() {
-                if numuid < 10 {
-                    continue;
-                }
-            }
-            handles.push(handle);
+        if !self.is_logged_in(KRY_UNSPEC) {
+            tmpl.add_owned_bool(CKA_PRIVATE, CK_FALSE)?;
         }
+
+        /* Then search storage */
+        let mut storage_handles =
+            self.storage.search(&mut self.facilities, tmpl.as_slice())?;
+        handles.append(&mut storage_handles);
         Ok(handles)
-    }
-
-    pub fn get_mechanisms(&self) -> &Mechanisms {
-        &self.mechanisms
-    }
-
-    pub fn get_object_factories(&self) -> &ObjectFactories {
-        &self.object_factories
     }
 }

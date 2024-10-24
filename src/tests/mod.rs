@@ -52,11 +52,10 @@ struct TestToken<'a> {
     sync: Option<RwLockReadGuard<'a, u64>>,
     session: CK_SESSION_HANDLE,
     session_rw: bool,
-    encrypted: bool,
 }
 
 impl TestToken<'_> {
-    fn new<'a>(filename: String, encrypted: bool) -> TestToken<'a> {
+    fn new<'a>(filename: String) -> TestToken<'a> {
         let mut slots = SLOTS.write().unwrap();
         slots.id += 1;
         while check_test_slot_busy(slots.id) {
@@ -72,7 +71,6 @@ impl TestToken<'_> {
             sync: Some(SYNC.read().unwrap()),
             session: CK_INVALID_HANDLE,
             session_rw: false,
-            encrypted: encrypted,
         }
     }
 
@@ -89,17 +87,18 @@ impl TestToken<'_> {
         label.resize(32, 0x20);
         /* Init a brand new token */
         let mut token = Token::new(
-            storage::name_to_type(&self.filename).unwrap(),
+            storage::suffix_to_type(&self.filename).unwrap(),
             Some(self.filename.clone()),
         )
         .unwrap();
-        token.use_encryption(self.encrypted);
         token.initialize(&so_pin, &label).unwrap();
+        token.login(CKU_SO, &so_pin);
         token.set_pin(CKU_USER, &user_pin, &vec![0u8; 0]).unwrap();
+        token.logout();
         token.login(CKU_USER, &user_pin);
 
         let test_data = storage::json::JsonToken::load(filename).unwrap();
-        let mut cache = storage::memory::memory();
+        let mut cache = storage::memory::raw_store();
         test_data.prime_cache(&mut cache).unwrap();
 
         let objects = cache.search(&[]).unwrap();
@@ -114,7 +113,7 @@ impl TestToken<'_> {
 
     fn make_config_file(&self, confname: &str) {
         let dbpath = self.filename.clone();
-        let dbtype = storage::name_to_type(&dbpath).unwrap();
+        let dbtype = storage::suffix_to_type(&dbpath).unwrap();
         let mut conf = config::Config::new();
         let mut slot = config::Slot::with_db(dbtype, Some(dbpath));
         slot.slot = u32::try_from(self.get_slot()).unwrap();
@@ -172,7 +171,7 @@ impl TestToken<'_> {
         db: Option<&'a str>,
     ) -> TestToken<'a> {
         let dbpath = format!("{}/{}", TESTDIR, filename);
-        let mut td = Self::new(dbpath, false);
+        let mut td = Self::new(dbpath);
         td.setup_db(db);
 
         let mut args = Self::make_init_args(Some(td.make_init_string()));
