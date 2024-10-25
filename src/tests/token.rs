@@ -112,6 +112,7 @@ fn test_token_datadir() {
     testtokn.finalize();
 }
 
+#[cfg(feature = "jsondb")]
 #[test]
 #[serial]
 fn test_token_json() {
@@ -329,9 +330,16 @@ fn test_config_multiple_tokens() {
             format!("{}/{}", TESTDIR, "test_config_multiple.sql"),
             "TOKEN 1",
         ),
+        #[cfg(feature = "jsondb")]
         (
             "json",
             format!("{}/{}", TESTDIR, "test_config_multiple.json"),
+            "TOKEN 2",
+        ),
+        #[cfg(not(feature = "jsondb"))]
+        (
+            "sqlite",
+            format!("{}/{}", TESTDIR, "test_config_multiple_2.sql"),
             "TOKEN 2",
         ),
     ];

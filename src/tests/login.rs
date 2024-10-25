@@ -134,6 +134,7 @@ fn test_login(name: &str) {
     testtokn.finalize();
 }
 
+#[cfg(feature = "jsondb")]
 #[test]
 #[parallel]
 fn test_login_json() {
