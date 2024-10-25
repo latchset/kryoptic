@@ -275,6 +275,7 @@ fn test_re_init_token_common(db: String) {
     testtokn.finalize();
 }
 
+#[cfg(feature = "jsondb")]
 #[test]
 #[serial]
 fn test_re_init_token_json() {

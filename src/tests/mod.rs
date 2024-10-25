@@ -15,6 +15,7 @@ mod util;
 use util::*;
 
 mod token;
+mod ts;
 
 const TESTDIR: &str = "test/kryoptic";
 const SO_PIN: &str = "12345678";
@@ -97,11 +98,11 @@ impl TestToken<'_> {
         token.logout();
         token.login(CKU_USER, &user_pin);
 
-        let test_data = storage::json::JsonToken::load(filename).unwrap();
-        let mut cache = storage::memory::raw_store();
-        test_data.prime_cache(&mut cache).unwrap();
+        let test_data = ts::json::JsonObjects::load(filename).unwrap();
+        let mut tstore = ts::TransferStorage::new();
+        test_data.prime_store(&mut tstore).unwrap();
 
-        let objects = cache.search(&[]).unwrap();
+        let objects = tstore.search(&[]).unwrap();
         for obj in objects {
             token.insert_object(CK_INVALID_HANDLE, obj.clone()).unwrap();
         }

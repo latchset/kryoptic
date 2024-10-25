@@ -151,14 +151,30 @@ pub fn token_info_to_object(
 }
 
 pub trait StorageRaw: Debug + Send + Sync {
-    fn is_initialized(&self) -> Result<()>;
-    fn db_reset(&mut self) -> Result<()>;
-    fn open(&mut self) -> Result<()>;
-    fn flush(&mut self) -> Result<()>;
-    fn fetch_by_uid(&self, uid: &String) -> Result<Object>;
-    fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>>;
-    fn store_obj(&mut self, obj: Object) -> Result<()>;
-    fn remove_by_uid(&mut self, uid: &String) -> Result<()>;
+    fn is_initialized(&self) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn db_reset(&mut self) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn open(&mut self) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn flush(&mut self) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn fetch_by_uid(&self, _uid: &String) -> Result<Object> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn search(&self, _template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn store_obj(&mut self, _obj: Object) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn remove_by_uid(&mut self, _uid: &String) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
 }
 
 #[derive(Debug)]

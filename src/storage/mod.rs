@@ -72,7 +72,7 @@ pub trait Storage: Debug + Send + Sync {
 }
 
 mod aci;
-mod format;
+pub mod format;
 
 #[cfg(feature = "jsondb")]
 pub mod json;
@@ -81,7 +81,7 @@ pub mod json;
 pub mod memory;
 
 #[cfg(feature = "sqlitedb")]
-pub mod sqlite;
+mod sqlite;
 
 static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
     let mut v = Vec::<&'static dyn StorageDBInfo>::with_capacity(4);

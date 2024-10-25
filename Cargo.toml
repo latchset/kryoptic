@@ -65,7 +65,7 @@ memorydb = []
 sqlitedb = ["dep:rusqlite"]
 
 # these are always required, so easier to specify this way
-basic = [ "aes", "hmac", "pbkdf2", "sqlitedb", "jsondb" ]
+basic = [ "aes", "hmac", "pbkdf2", "sqlitedb" ]
 
 #select everything by default
 # Use --no-default-features --features basic, xxx for custom selections
