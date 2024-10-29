@@ -6,6 +6,9 @@ include!("bindings.rs");
 // types that need different mutability than bindgen provides
 pub type CK_FUNCTION_LIST_PTR = *const CK_FUNCTION_LIST;
 pub type CK_FUNCTION_LIST_3_0_PTR = *const CK_FUNCTION_LIST_3_0;
+// this is wrongly converted on 32b architecture to too large value
+// which can not be represented in CK_ULONG.
+pub const CK_UNAVAILABLE_INFORMATION: CK_ULONG = CK_ULONG::MAX;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct CK_INTERFACE {

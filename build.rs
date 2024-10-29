@@ -162,6 +162,7 @@ fn main() {
         .blocklist_type("CK_FUNCTION_LIST_PTR")
         .blocklist_type("CK_FUNCTION_LIST_3_0_PTR")
         .blocklist_type("CK_INTERFACE")
+        .blocklist_var("CK_UNAVAILABLE_INFORMATION")
         .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
         .expect("Unable to generate bindings")
