@@ -390,35 +390,18 @@ struct GlobalConfig {
     conf: Config,
 }
 
-impl GlobalConfig {
-    fn empty_config() -> GlobalConfig {
-        GlobalConfig {
-            conf: Config::new(),
-        }
-    }
-
-    fn default_config() -> GlobalConfig {
-        /* if there is no config file we get an empty config */
-        let filename = match Config::find_conf() {
-            Ok(f) => f,
-            Err(_) => return Self::empty_config(),
-        };
-        /* if the file is not accessible or malformed we set an empty config,
-         * an error will be returned later at fn_initialize() time */
-        let conf = if let Ok(c) = Config::from_file(&filename) {
-            c
-        } else if let Ok(c) = Config::from_legacy_conf_string(&filename) {
-            c
-        } else {
-            return Self::empty_config();
-        };
-
-        GlobalConfig { conf: conf }
-    }
-}
-
-static CONFIG: Lazy<RwLock<GlobalConfig>> =
-    Lazy::new(|| RwLock::new(GlobalConfig::default_config()));
+static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
+    /* if there is no config file or the configuration is malformed,
+     * set an empty config, an error will be returned later at
+     * fn_initialize() time */
+    let global_conf = GlobalConfig {
+        conf: match Config::default_config() {
+            Ok(conf) => conf,
+            Err(_) => Config::new(),
+        },
+    };
+    RwLock::new(global_conf)
+});
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck CONFIG);
@@ -463,7 +446,12 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
 
 #[cfg(test)]
 fn force_load_config() -> CK_RV {
-    let testconf = GlobalConfig::default_config();
+    let testconf = GlobalConfig {
+        conf: match Config::default_config() {
+            Ok(conf) => conf,
+            Err(e) => return e.rv(),
+        },
+    };
     if testconf.conf.slots.len() == 0 {
         return CKR_GENERAL_ERROR;
     }
