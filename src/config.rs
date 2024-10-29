@@ -37,7 +37,7 @@ pub struct Slot {
 impl Slot {
     pub fn new() -> Slot {
         Slot {
-            slot: 0,
+            slot: u32::MAX,
             description: None,
             manufacturer: None,
             dbtype: None,
@@ -48,7 +48,7 @@ impl Slot {
     #[cfg(test)]
     pub fn with_db(dbtype: &str, dbpath: Option<String>) -> Slot {
         Slot {
-            slot: 0,
+            slot: u32::MAX,
             description: None,
             manufacturer: None,
             dbtype: Some(dbtype.to_string()),
@@ -71,9 +71,10 @@ impl Config {
         Config { slots: Vec::new() }
     }
 
+    #[cfg(test)]
     pub fn add_slot(&mut self, slot: Slot) -> Result<()> {
         for s in &self.slots {
-            if slot.slot == s.slot {
+            if slot.slot == u32::MAX || slot.slot == s.slot {
                 return Err(interface::KRR_SLOT_CONFIG)?;
             }
         }
@@ -81,7 +82,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn find_conf() -> Result<String> {
+    fn find_conf() -> Result<String> {
         /* First check for our own env var,
          * this has the highest precedence */
         match env::var("KRYOPTIC_CONF") {
@@ -110,13 +111,13 @@ impl Config {
         }
     }
 
-    pub fn from_file(filename: &str) -> Result<Config> {
+    fn from_file(filename: &str) -> Result<Config> {
         let config_str = fs::read_to_string(filename)?;
         let conf: Config = toml::from_str(&config_str).map_err(config_error)?;
         Ok(conf)
     }
 
-    pub fn from_legacy_conf_string(name: &str) -> Result<Config> {
+    fn from_legacy_conf_string(name: &str) -> Result<Config> {
         let mut conf = Config { slots: Vec::new() };
         /* backwards compatibility where we used to only specify
          * a file, this does not support all older options, just
@@ -129,63 +130,105 @@ impl Config {
                     slot.dbtype = Some(typ_.to_string());
                     slot.dbpath = Some(name.to_string());
                     /* if this fails there will be no slots defined */
-                    let _ = conf.add_slot(slot);
+                    let _ = conf.slots.push(slot);
                 }
                 Err(_) => (),
             }
         }
-        return Ok(conf);
+        Ok(conf)
+    }
+
+    fn fix_slot_numbers(&mut self) {
+        let mut slotnum: u32 = 0;
+        /* if there are any slot missing a valid slot number
+         * we are going to allocate slots numbers after the highest
+         * properly configured one. Note that the config file format
+         * requires slot numbers, so this generally happens for legacy
+         * or init args configurations only, ie a single slot */
+        let mut missing = false;
+        for slot in &self.slots {
+            if slot.slot != u32::MAX {
+                if slotnum <= slot.slot {
+                    slotnum = slot.slot + 1;
+                }
+            } else {
+                missing = true;
+            }
+        }
+        if missing {
+            for slot in &mut self.slots {
+                if slot.slot == u32::MAX {
+                    slot.slot = slotnum;
+                    slotnum += 1;
+                }
+            }
+        }
+    }
+
+    pub fn default_config() -> Result<Config> {
+        let filename = Self::find_conf()?;
+
+        match Self::from_file(&filename) {
+            Ok(conf) => return Ok(conf),
+            Err(e) => {
+                /* attempt fallback, return original error on fail */
+                match Self::from_legacy_conf_string(&filename) {
+                    Ok(mut conf) => {
+                        conf.fix_slot_numbers();
+                        return Ok(conf);
+                    }
+                    Err(_) => return Err(e),
+                }
+            }
+        }
     }
 
     pub fn from_init_args(&mut self, args: &str) -> Result<()> {
-        let assign_slot: bool;
-        let mut conf = if args.starts_with("kryoptic_conf=") {
-            assign_slot = false;
+        let conf = if args.starts_with("kryoptic_conf=") {
             let comps: Vec<&str> = args.splitn(2, '=').collect();
             Self::from_file(comps[1])?
         } else {
-            assign_slot = true;
             Self::from_legacy_conf_string(args)?
         };
 
-        if assign_slot {
-            /* check if it has already been loaded */
-            for s in &self.slots {
-                if s.dbtype.as_deref() == conf.slots[0].dbtype.as_deref()
-                    && s.dbpath.as_deref() == conf.slots[0].dbpath.as_deref()
-                {
-                    conf.slots[0].slot = s.slot;
-                }
-            }
-        }
-
         /* check and add slots */
         for mut slot in conf.slots {
-            let mut slotnum: u32 = 0;
             let mut found = false;
+            /* check if it has already been loaded */
             for s in &self.slots {
-                if assign_slot {
-                    if slotnum <= s.slot {
-                        slotnum += s.slot + 1;
+                if slot.slot == u32::MAX {
+                    if s.dbtype.as_deref() == slot.dbtype.as_deref()
+                        && s.dbpath.as_deref() == slot.dbpath.as_deref()
+                    {
+                        /* already loaded so we just match the slot number */
+                        found = true;
+                        slot.slot = s.slot;
                     }
-                } else if s.slot == slot.slot {
-                    if s.dbtype.as_deref() != slot.dbtype.as_deref() {
-                        return Err(interface::CKR_ARGUMENTS_BAD)?;
+                } else {
+                    if slot.slot != s.slot {
+                        if s.dbtype.as_deref() == slot.dbtype.as_deref()
+                            && s.dbpath.as_deref() == slot.dbpath.as_deref()
+                        {
+                            /* already loaded in a different slot, fail! */
+                            return Err(interface::CKR_ARGUMENTS_BAD)?;
+                        }
+                    } else {
+                        if s.dbtype.as_deref() != slot.dbtype.as_deref() {
+                            return Err(interface::CKR_ARGUMENTS_BAD)?;
+                        }
+                        if s.dbpath.as_deref() != slot.dbpath.as_deref() {
+                            return Err(interface::CKR_ARGUMENTS_BAD)?;
+                        }
+                        /* already present skip adding */
+                        found = true;
                     }
-                    if s.dbpath.as_deref() != slot.dbpath.as_deref() {
-                        return Err(interface::CKR_ARGUMENTS_BAD)?;
-                    }
-                    /* already present skip adding */
-                    found = true;
                 }
             }
-            if assign_slot {
-                slot.slot = slotnum;
-            }
             if !found {
-                self.add_slot(slot)?;
+                self.slots.push(slot);
             }
         }
+        self.fix_slot_numbers();
         Ok(())
     }
 }
