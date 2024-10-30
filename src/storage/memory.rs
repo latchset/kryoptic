@@ -34,7 +34,10 @@ impl StorageRaw for MemoryStorage {
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
-    fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
+    fn fetch_by_uid(&self, uid: &String, _: &[CK_ATTRIBUTE]) -> Result<Object> {
+        /* we always return all attributes regardless as it is cheap
+         * and easy, the upper layers always filter out attributes as
+         * needed anyway */
         match self.objects.get(uid) {
             Some(o) => Ok(o.clone()),
             None => Err(Error::not_found(uid.clone())),

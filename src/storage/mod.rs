@@ -35,7 +35,7 @@ pub trait Storage: Debug + Send + Sync {
         &self,
         faclities: &TokenFacilities,
         handle: CK_OBJECT_HANDLE,
-        get_sensitive: bool,
+        attributes: &[CK_ATTRIBUTE],
     ) -> Result<Object>;
     fn store(
         &mut self,

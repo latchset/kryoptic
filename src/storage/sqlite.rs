@@ -11,8 +11,9 @@ use crate::storage::aci::StorageACI;
 use crate::storage::format::{StdStorageFormat, StorageRaw};
 use crate::storage::{Storage, StorageDBInfo};
 
+use itertools::Itertools;
 use rusqlite::types::Value;
-use rusqlite::{params, Connection, Rows, Transaction};
+use rusqlite::{params, Connection, Rows, Statement, Transaction};
 use rusqlite::{Error as rlError, ErrorCode};
 
 fn bad_code<E: std::error::Error + 'static>(error: E) -> Error {
@@ -297,10 +298,32 @@ impl StorageRaw for SqliteStorage {
         Ok(())
     }
 
-    fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
+    fn fetch_by_uid(
+        &self,
+        uid: &String,
+        attrs: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
         let conn = self.conn.lock()?;
-        let mut stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
-        let rows = stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?;
+        let mut stmt: Statement;
+        let rows = if attrs.len() == 0 {
+            stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
+            stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?
+        } else {
+            let mut params = Vec::<Value>::with_capacity(attrs.len() + 2);
+            params.push(Value::from(u32::try_from(CKA_UNIQUE_ID)?));
+            params.push(Value::from(uid.clone()));
+
+            for a in attrs {
+                params.push(Value::from(u32::try_from(a.type_)?));
+            }
+            let formatter = attrs
+                .iter()
+                .format_with(" OR ", |_, f| f(&format!("attr = ?")));
+            let sql = format!("{} AND ({})", SEARCH_BY_SINGLE_ATTR, formatter);
+            stmt = conn.prepare(&sql).map_err(bad_code)?;
+            stmt.query(rusqlite::params_from_iter(params))
+                .map_err(bad_code)?
+        };
         let mut objects = Self::rows_to_objects(rows)?;
         match objects.len() {
             0 => Err(Error::not_found(uid.clone())),
