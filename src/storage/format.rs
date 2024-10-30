@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::Attribute;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::interface::*;
 use crate::misc::copy_sized_string;
@@ -163,7 +163,11 @@ pub trait StorageRaw: Debug + Send + Sync {
     fn flush(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
-    fn fetch_by_uid(&self, _uid: &String) -> Result<Object> {
+    fn fetch_by_uid(
+        &self,
+        _uid: &String,
+        _attrs: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
         Err(CKR_GENERAL_ERROR)?
     }
     fn search(&self, _template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
@@ -197,7 +201,7 @@ impl StdStorageFormat {
     fn init_pin_flags(&mut self) -> Result<CK_FLAGS> {
         let mut so_flags: CK_FLAGS = 0;
         let uid = get_pin_uid(CKU_SO)?;
-        let obj = match self.store.fetch_by_uid(&uid) {
+        let obj = match self.store.fetch_by_uid(&uid, &[]) {
             Ok(o) => o,
             Err(e) => {
                 if e.attr_not_found() {
@@ -215,7 +219,7 @@ impl StdStorageFormat {
 
         let mut usr_flags: CK_FLAGS = 0;
         let uid = get_pin_uid(CKU_USER)?;
-        match self.store.fetch_by_uid(&uid) {
+        match self.store.fetch_by_uid(&uid, &[]) {
             Ok(obj) => {
                 let info = self.aci.user_attempts(&obj)?;
                 user_flags(CKU_USER, &info, &mut usr_flags);
@@ -308,23 +312,35 @@ impl Storage for StdStorageFormat {
         &self,
         facilities: &TokenFacilities,
         handle: CK_OBJECT_HANDLE,
-        get_sensitive: bool,
+        attributes: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         let uid = match facilities.handles.get(handle) {
             Some(u) => u,
             None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
         };
-        let mut obj = self.store.fetch_by_uid(&uid)?;
+        /* the values don't matter, only the type */
+        let dnm: CK_ULONG = 0;
+        let mut attrs = CkAttrs::from(attributes);
+        /* we need CKA_CLASS and CKA_KEY_TYPE to be present in
+         * order to get sensitive attrs from the factory later */
+        if attributes.len() != 0 {
+            attrs.add_missing_ulong(CKA_CLASS, &dnm);
+            /* it is safe to add CKA_KEY_TYPE even if the object
+             * is not a key, the attribute will simply not be returned
+             * in that case */
+            attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
+        }
+
+        let mut obj = self.store.fetch_by_uid(&uid, attrs.as_slice())?;
         let ats = facilities.factories.get_sensitive_attrs(&obj)?;
-        if !get_sensitive {
+        if self.aci.encrypts() {
             for typ in ats {
-                /* remove the sensitive attribute completely */
-                obj.del_attr(typ);
-            }
-        } else if self.aci.encrypts() {
-            for typ in ats {
-                /* replace the encrypted val with the clear text one */
-                let encval = obj.get_attr_as_bytes(typ)?;
+                /* replace the encrypted val with the clear text one
+                 * if the value was requested */
+                let encval = match obj.get_attr(typ) {
+                    Some(attr) => attr.get_value(),
+                    None => continue,
+                };
                 let plain = self.aci.decrypt_value(facilities, uid, encval)?;
                 obj.set_attr(Attribute::from_bytes(typ, plain))?;
             }
@@ -407,13 +423,13 @@ impl Storage for StdStorageFormat {
     }
 
     fn load_token_info(&self) -> Result<StorageTokenInfo> {
-        let obj = self.store.fetch_by_uid(&token_info_uid())?;
+        let obj = self.store.fetch_by_uid(&token_info_uid(), &[])?;
         object_to_token_info(&obj)
     }
 
     fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
         let uid = token_info_uid();
-        let mut obj = self.store.fetch_by_uid(&uid)?;
+        let mut obj = self.store.fetch_by_uid(&uid, &[])?;
         token_info_to_object(info, &mut obj)?;
         self.store.store_obj(obj)
     }
@@ -427,7 +443,7 @@ impl Storage for StdStorageFormat {
         check_only: bool,
     ) -> Result<()> {
         let uid = get_pin_uid(user_type)?;
-        let mut auth_obj = match self.store.fetch_by_uid(&uid) {
+        let mut auth_obj = match self.store.fetch_by_uid(&uid, &[]) {
             Ok(o) => o,
             Err(e) => {
                 if e.attr_not_found() {
@@ -462,7 +478,7 @@ impl Storage for StdStorageFormat {
 
     fn unauth_user(&mut self, user_type: CK_USER_TYPE) -> Result<()> {
         let uid = get_pin_uid(user_type)?;
-        let _ = match self.store.fetch_by_uid(&uid) {
+        let _ = match self.store.fetch_by_uid(&uid, &[]) {
             Ok(o) => o,
             Err(e) => {
                 if e.attr_not_found() {

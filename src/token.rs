@@ -379,7 +379,7 @@ impl Token {
     ) -> Result<Object> {
         let mut obj = match self.session_objects.get(&o_handle) {
             Some(o) => o.clone(),
-            None => self.storage.fetch(&self.facilities, o_handle, true)?,
+            None => self.storage.fetch(&self.facilities, o_handle, &[])?,
         };
         if !self.is_logged_in(KRY_UNSPEC) && obj.is_token() && obj.is_private()
         {
@@ -431,8 +431,16 @@ impl Token {
                 let _ = self.session_objects.remove(&o_handle);
             }
             None => {
-                let obj =
-                    self.storage.fetch(&self.facilities, o_handle, false)?;
+                let destroyable: CK_ATTRIBUTE = CK_ATTRIBUTE {
+                    type_: CKA_DESTROYABLE,
+                    pValue: std::ptr::null_mut(),
+                    ulValueLen: 0,
+                };
+                let obj = self.storage.fetch(
+                    &self.facilities,
+                    o_handle,
+                    &[destroyable],
+                )?;
                 if !obj.is_destroyable() {
                     return Err(CKR_ACTION_PROHIBITED)?;
                 }
@@ -449,18 +457,28 @@ impl Token {
         template: &mut [CK_ATTRIBUTE],
     ) -> Result<()> {
         let is_logged = self.is_logged_in(KRY_UNSPEC);
+
+        /* value does not matter, only type does */
+        let dnm: CK_BBOOL = 0;
+        let mut attrs = CkAttrs::from(template);
+        if !is_logged {
+            attrs.add_bool(CKA_TOKEN, &dnm);
+            attrs.add_bool(CKA_PRIVATE, &dnm);
+        }
+
         let obj = match self.session_objects.get(&o_handle) {
             Some(o) => Cow::Borrowed(o),
             None => Cow::Owned(self.storage.fetch(
                 &self.facilities,
                 o_handle,
-                false,
+                attrs.as_slice(),
             )?),
         };
         if !is_logged && obj.is_token() && obj.is_private() {
             /* do not reveal if the object exists or not */
             return Err(CKR_OBJECT_HANDLE_INVALID)?;
         }
+        drop(attrs);
         self.facilities
             .factories
             .get_object_attributes(&obj, template)
@@ -481,7 +499,7 @@ impl Token {
                     return Err(CKR_USER_NOT_LOGGED_IN)?;
                 }
                 let mut obj =
-                    self.storage.fetch(&self.facilities, o_handle, true)?;
+                    self.storage.fetch(&self.facilities, o_handle, &[])?;
                 self.facilities
                     .factories
                     .set_object_attributes(&mut obj, template)?;
@@ -495,7 +513,7 @@ impl Token {
         let obj = if let Some(o) = self.session_objects.get(&o_handle) {
             Cow::Borrowed(o)
         } else {
-            Cow::Owned(self.storage.fetch(&self.facilities, o_handle, false)?)
+            Cow::Owned(self.storage.fetch(&self.facilities, o_handle, &[])?)
         };
         obj.rough_size()
     }
@@ -509,7 +527,7 @@ impl Token {
         let obj = if let Some(o) = self.session_objects.get_mut(&o_handle) {
             Cow::Borrowed(o)
         } else {
-            let o = self.storage.fetch(&mut self.facilities, o_handle, true)?;
+            let o = self.storage.fetch(&mut self.facilities, o_handle, &[])?;
             if !self.is_logged_in(KRY_UNSPEC) && o.is_private() {
                 return Err(CKR_USER_NOT_LOGGED_IN)?;
             }

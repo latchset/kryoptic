@@ -35,8 +35,12 @@ impl StorageRaw for JsonStorage {
         let token = JsonObjects::from_store(&mut self.cache);
         token.save(&self.filename)
     }
-    fn fetch_by_uid(&self, uid: &String) -> Result<Object> {
-        self.cache.fetch_by_uid(uid)
+    fn fetch_by_uid(
+        &self,
+        uid: &String,
+        attrs: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
+        self.cache.fetch_by_uid(uid, attrs)
     }
     fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
         self.cache.search(template)
