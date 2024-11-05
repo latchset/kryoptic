@@ -39,3 +39,11 @@ impl ECPrivateKey<'_> {
         })
     }
 }
+
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
+)]
+pub struct PBMAC1Params<'a> {
+    pub key_derivation_func: Box<AlgorithmIdentifier<'a>>,
+    pub message_auth_scheme: Box<AlgorithmIdentifier<'a>>,
+}

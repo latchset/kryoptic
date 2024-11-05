@@ -99,14 +99,15 @@ pub struct BrokenAlgorithmIdentifier<'a> {
 pub enum BrokenAlgorithmParameters<'a> {
     #[defined_by(PBES2_OID)]
     Pbes2(BrokenPBES2Params<'a>),
+    #[defined_by(PBMAC1_OID)]
+    Pbmac1(PBMAC1Params<'a>),
 
     #[defined_by(AES_128_CBC_OID)]
     Aes128Cbc(&'a [u8]),
     #[defined_by(AES_256_CBC_OID)]
     Aes256Cbc(&'a [u8]),
-
-    #[default]
-    Other(asn1::ObjectIdentifier, Option<asn1::Tlv<'a>>),
+    #[defined_by(HMAC_WITH_SHA256_OID)]
+    HmacWithSha256(Option<asn1::Null>),
 }
 
 #[derive(
@@ -122,13 +123,14 @@ pub struct BrokenPBES2Params<'a> {
 )]
 struct NSSEncryptedDataInfo<'a> {
     pub algorithm: Box<BrokenAlgorithmIdentifier<'a>>,
-    pub encrypted_data: &'a [u8],
+    pub enc_or_sig_data: &'a [u8],
 }
 
 fn pbkdf2_derive(
     facilities: &TokenFacilities,
     params: &PBKDF2Params,
     secret: &[u8],
+    key_template: &[CK_ATTRIBUTE],
 ) -> Result<Object> {
     let mech = facilities.mechanisms.get(CKM_PKCS5_PBKD2)?;
 
@@ -148,27 +150,13 @@ fn pbkdf2_derive(
         ulPasswordLen: CK_ULONG::try_from(secret.len())?,
     };
 
-    let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
-    let ck_key_type: CK_KEY_TYPE = CKK_AES;
-    let ck_key_len: CK_ULONG = match params.key_length {
-        Some(l) => CK_ULONG::try_from(l)?,
-        None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-    };
-    let ck_true: CK_BBOOL = CK_TRUE;
-    let mut key_template = CkAttrs::with_capacity(5);
-    key_template.add_ulong(CKA_CLASS, &ck_class);
-    key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
-    key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
-    key_template.add_bool(CKA_DECRYPT, &ck_true);
-    key_template.add_bool(CKA_ENCRYPT, &ck_true);
-
     mech.generate_key(
         &CK_MECHANISM {
             mechanism: CKM_PKCS5_PBKD2,
             pParameter: void_ptr!(&ck_params),
             ulParameterLen: sizeof!(CK_PKCS5_PBKD2_PARAMS2),
         },
-        key_template.as_slice(),
+        key_template,
         &facilities.mechanisms,
         &facilities.factories,
     )
@@ -230,17 +218,127 @@ pub fn decrypt_data(
 
     let key = match &pbes2.key_derivation_func.params {
         AlgorithmParameters::Pbkdf2(ref params) => {
-            pbkdf2_derive(facilities, params, secret)?
+            let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
+            let ck_key_type: CK_KEY_TYPE = CKK_AES;
+            let ck_key_len: CK_ULONG = match params.key_length {
+                Some(l) => CK_ULONG::try_from(l)?,
+                None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+            };
+            let ck_true: CK_BBOOL = CK_TRUE;
+            let mut key_template = CkAttrs::with_capacity(5);
+            key_template.add_ulong(CKA_CLASS, &ck_class);
+            key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
+            key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
+            key_template.add_bool(CKA_DECRYPT, &ck_true);
+            key_template.add_bool(CKA_ENCRYPT, &ck_true);
+
+            pbkdf2_derive(facilities, params, secret, key_template.as_slice())?
         }
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     match &pbes2.encryption_scheme.params {
         BrokenAlgorithmParameters::Aes128Cbc(ref iv) => {
-            aes_cbc_decrypt(facilities, &key, iv, info.encrypted_data)
+            aes_cbc_decrypt(facilities, &key, iv, info.enc_or_sig_data)
         }
         BrokenAlgorithmParameters::Aes256Cbc(ref iv) => {
-            aes_cbc_decrypt(facilities, &key, iv, info.encrypted_data)
+            aes_cbc_decrypt(facilities, &key, iv, info.enc_or_sig_data)
         }
+        _ => Err(CKR_MECHANISM_INVALID)?,
+    }
+}
+
+/* NSS has a hardcoded list of attributes that are authenticated,
+ * some are vendor defined attributes */
+const AUTHENTICATED_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 2] = [
+    CKA_MODULUS,
+    CKA_PUBLIC_EXPONENT,
+    //CKA_CERT_SHA1_HASH,
+    //CKA_CERT_MD5_HASH,
+    //CKA_TRUST_SERVER_AUTH,
+    //CKA_TRUST_CLIENT_AUTH,
+    //CKA_TRUST_EMAIL_PROTECTION,
+    //CKA_TRUST_CODE_SIGNING,
+    //CKA_TRUST_STEP_UP_APPROVED,
+    //CKA_NSS_OVERRIDE_EXTENSIONS,
+];
+
+fn hmac_verify(
+    facilities: &TokenFacilities,
+    mechanism: CK_MECHANISM_TYPE,
+    key: &Object,
+    nssobjid: u32,
+    sdbtype: u32,
+    plaintext: &[u8],
+    signature: &[u8],
+) -> Result<()> {
+    let siglen = CK_ULONG::try_from(signature.len())?;
+    let ck_mech = CK_MECHANISM {
+        mechanism: mechanism,
+        pParameter: void_ptr!(&siglen),
+        ulParameterLen: sizeof!(CK_ULONG),
+    };
+    let mech = facilities.mechanisms.get(mechanism)?;
+    let mut op = mech.verify_new(&ck_mech, key)?;
+    let objid = nssobjid.to_be_bytes();
+    op.verify_update(&objid)?;
+    let attrtype = sdbtype.to_be_bytes();
+    op.verify_update(&attrtype)?;
+    op.verify_update(plaintext)?;
+    op.verify_final(signature)
+}
+
+fn check_signature(
+    facilities: &TokenFacilities,
+    secret: &[u8],
+    attribute: &[u8],
+    signature: &[u8],
+    nssobjid: u32,
+    sdbtype: u32,
+) -> Result<()> {
+    let info = match asn1::parse_single::<NSSEncryptedDataInfo>(signature) {
+        Ok(i) => i,
+        Err(e) => {
+            print!("{}", e);
+            return Err(CKR_DATA_INVALID)?;
+        }
+    };
+
+    let pbmac1 = match &info.algorithm.params {
+        BrokenAlgorithmParameters::Pbmac1(ref params) => params,
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    };
+
+    let key = match &pbmac1.key_derivation_func.params {
+        AlgorithmParameters::Pbkdf2(ref params) => {
+            let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
+            let ck_key_type: CK_KEY_TYPE = CKK_GENERIC_SECRET;
+            let ck_key_len: CK_ULONG = match params.key_length {
+                Some(l) => CK_ULONG::try_from(l)?,
+                None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+            };
+            let ck_true: CK_BBOOL = CK_TRUE;
+            let mut key_template = CkAttrs::with_capacity(5);
+            key_template.add_ulong(CKA_CLASS, &ck_class);
+            key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
+            key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
+            key_template.add_bool(CKA_SIGN, &ck_true);
+            key_template.add_bool(CKA_VERIFY, &ck_true);
+
+            pbkdf2_derive(facilities, params, secret, key_template.as_slice())?
+        }
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    };
+
+    match &pbmac1.message_auth_scheme.params {
+        AlgorithmParameters::HmacWithSha256(None) => hmac_verify(
+            facilities,
+            CKM_SHA256_HMAC_GENERAL,
+            &key,
+            nssobjid,
+            sdbtype,
+            attribute,
+            info.enc_or_sig_data,
+        ),
         _ => Err(CKR_MECHANISM_INVALID)?,
     }
 }
@@ -631,7 +729,8 @@ impl NSSStorage {
     }
 
     fn prepare_fetch(
-        nssid: &String,
+        table: &str,
+        objid: u32,
         attrs: &[CK_ATTRIBUTE],
     ) -> Result<NSSSearchQuery> {
         let mut columns: String;
@@ -652,28 +751,28 @@ impl NSSStorage {
             keys: None,
             params: Vec::<Value>::with_capacity(1),
         };
-        let (table, id) = nss_id_parse(nssid)?;
         let sql = format!(
             "SELECT DISTINCT {} FROM {} WHERE id = ? LIMIT 1",
             columns, table
         );
-        match table.as_str() {
+        match table {
             NSS_PUBLIC_TABLE => query.certs = Some(sql),
             NSS_PRIVATE_TABLE => query.keys = Some(sql),
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
 
-        query.params.push(Value::from(id));
+        query.params.push(Value::from(objid));
 
         Ok(query)
     }
 
     fn fetch_by_nssid(
         &self,
-        nssid: &String,
+        table: &str,
+        objid: u32,
         attrs: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let query = Self::prepare_fetch(nssid, &attrs)?;
+        let query = Self::prepare_fetch(table, objid, &attrs)?;
         let (conn, sql) = if let Some(ref sql) = query.certs {
             match self.certs {
                 Some(ref conn) => (conn.lock()?, sql),
@@ -831,25 +930,46 @@ impl NSSStorage {
         Ok(result)
     }
 
-    fn fetch_password(&self) -> Result<(Vec<u8>, Vec<u8>)> {
-        static SQL: &str =
-            "SELECT ALL item1, item2 FROM metaData WHERE id = 'password'";
-
-        let salt: &[u8];
-        let value: &[u8];
+    fn fetch_metadata(&self, name: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+        static SQL: &str = "SELECT ALL item1, item2 FROM metaData WHERE id = ?";
         let conn = match self.keys {
             Some(ref conn) => conn.lock()?,
             None => return Err(CKR_GENERAL_ERROR)?,
         };
         let mut stmt = conn.prepare(SQL)?;
-        let mut rows = stmt.query([])?;
-        if let Some(row) = rows.next()? {
-            salt = row.get_ref(0)?.as_blob()?;
-            value = row.get_ref(1)?.as_blob()?;
-        } else {
-            return Err(CKR_USER_PIN_NOT_INITIALIZED)?;
+        let mut rows = stmt.query(rusqlite::params![name])?;
+        match rows.next()? {
+            Some(row) => {
+                let item1 = row.get_ref(0)?.as_blob()?;
+                let item2 = match row.get_ref(1)?.as_blob_or_null()? {
+                    Some(b) => b,
+                    None => &[],
+                };
+                Ok((item1.to_vec(), item2.to_vec()))
+            }
+            None => Err(CKR_OBJECT_HANDLE_INVALID)?,
         }
-        Ok((salt.to_vec(), value.to_vec()))
+    }
+
+    fn fetch_password(&self) -> Result<(Vec<u8>, Vec<u8>)> {
+        match self.fetch_metadata("password") {
+            Ok((salt, value)) => Ok((salt, value)),
+            Err(e) => match e.rv() {
+                CKR_OBJECT_HANDLE_INVALID => Err(CKR_USER_PIN_NOT_INITIALIZED)?,
+                _ => Err(e)?,
+            },
+        }
+    }
+
+    fn fetch_signature(
+        &self,
+        dbtype: &str,
+        nssobjid: u32,
+        atype: CK_ATTRIBUTE_TYPE,
+    ) -> Result<Vec<u8>> {
+        let name = format!("sig_{}_{:08x}_{:08x}", dbtype, nssobjid, atype);
+        let (value, _) = self.fetch_metadata(&name)?;
+        Ok(value)
     }
 }
 
@@ -907,6 +1027,8 @@ impl Storage for NSSStorage {
             Some(id) => id,
             None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
         };
+        let (table, nssobjid) = nss_id_parse(nssid)?;
+
         /* the values don't matter, only the type */
         let dnm: CK_ULONG = 0;
         let mut attrs = CkAttrs::from(attributes);
@@ -919,11 +1041,11 @@ impl Storage for NSSStorage {
              * in that case */
             attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
         }
-        let mut obj = self.fetch_by_nssid(nssid, attrs.as_slice())?;
+        let mut obj =
+            self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
         let ats = facilities.factories.get_sensitive_attrs(&obj)?;
         if let Some(ref enckey) = self.enckey {
             for typ in ats {
-                /* FIXME: support decryption */
                 let encval = match obj.get_attr(typ) {
                     Some(attr) => attr.get_value(),
                     None => continue,
@@ -931,8 +1053,28 @@ impl Storage for NSSStorage {
                 let plain =
                     decrypt_data(facilities, enckey.as_slice(), encval)?;
                 obj.set_attr(Attribute::from_bytes(typ, plain))?;
+            }
 
-                /* FIXME: support checking signatures */
+            for typ in AUTHENTICATED_ATTRIBUTES {
+                let value = match obj.get_attr(typ) {
+                    Some(attr) => attr.get_value(),
+                    None => continue,
+                };
+                let dbtype = match table.as_str() {
+                    NSS_PUBLIC_TABLE => "cert",
+                    NSS_PRIVATE_TABLE => "key",
+                    _ => return Err(CKR_GENERAL_ERROR)?,
+                };
+                let sdbtype = u32::try_from(typ)?;
+                let signature = self.fetch_signature(dbtype, nssobjid, typ)?;
+                check_signature(
+                    facilities,
+                    enckey.as_slice(),
+                    value.as_slice(),
+                    signature.as_slice(),
+                    nssobjid,
+                    sdbtype,
+                )?;
             }
         }
 
