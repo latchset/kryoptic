@@ -79,27 +79,6 @@ fn test_nssdb_token() {
     let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
-    /* find one private key object */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let mut template = make_attr_template(
-        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
-        &[],
-        &[],
-    );
-    let ret = fn_find_objects_init(
-        session,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 1);
-    assert_ne!(handle, CK_INVALID_HANDLE);
-    let ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
-
     /* find one object with explicit empty label */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let mut template = make_attr_template(&[], &[(CKA_LABEL, &[])], &[]);
@@ -150,6 +129,51 @@ fn test_nssdb_token() {
     let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
+    /* have to login here, private keys can be found only if logged in */
+    testtokn.login();
+
+    /* find one private key object */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
+        &[],
+        &[],
+    );
+    let ret = fn_find_objects_init(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    let ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* find one private key object */
+    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
+        &[],
+        &[],
+    );
+    let ret = fn_find_objects_init(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+    let ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
     /* fetch public key RSA modulus */
     let mut template =
         make_ptrs_template(&[(CKA_MODULUS, std::ptr::null_mut(), 0)]);
@@ -171,8 +195,6 @@ fn test_nssdb_token() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(value, key1_modulus);
-
-    testtokn.login();
 
     /* Find private key */
     let mut pri_handle: CK_ULONG = CK_INVALID_HANDLE;
