@@ -8,7 +8,10 @@ use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
 use crate::object::Object;
 use crate::token::TokenFacilities;
+use crate::CSPRNG;
 use crate::{byte_ptr, sizeof, void_ptr};
+
+pub const NSS_MP_PBE_ITERATION_COUNT: usize = 10000;
 
 #[derive(
     asn1::Asn1Read, asn1::Asn1Write, PartialEq, Hash, Clone, Eq, Debug,
@@ -53,7 +56,7 @@ pub struct BrokenPBES2Params<'a> {
 #[derive(
     asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
 )]
-struct NSSEncryptedDataInfo<'a> {
+pub struct NSSEncryptedDataInfo<'a> {
     pub algorithm: Box<BrokenAlgorithmIdentifier<'a>>,
     pub enc_or_sig_data: &'a [u8],
 }
@@ -130,6 +133,33 @@ fn aes_cbc_decrypt(
     Ok(plain)
 }
 
+fn aes_cbc_encrypt(
+    facilities: &TokenFacilities,
+    key: &Object,
+    data: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    /* NSS has a Broken IV in the encoded data, so we need to adjust
+     * the IV to start with 0x04 0x0E which are the bytes that make a
+     * 16 bytes buffer "look like" a DER encoded OCTET_STRING. */
+    let mut iv: [u8; 16] = [0u8; 16];
+    iv[0] = 0x04;
+    iv[1] = 0x0e;
+    CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut iv[2..]))?;
+
+    let ck_mech = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(&iv),
+        ulParameterLen: CK_ULONG::try_from(iv.len())?,
+    };
+    let mech = facilities.mechanisms.get(CKM_AES_CBC_PAD)?;
+    let mut op = mech.encryption_new(&ck_mech, key)?;
+    let mut encdata = vec![0u8; op.encryption_len(data.len(), false)?];
+    let len = op.encrypt(data, &mut encdata)?;
+    encdata.resize(len, 0);
+
+    Ok((iv[2..].to_vec(), encdata))
+}
+
 pub fn decrypt_data(
     facilities: &TokenFacilities,
     secret: &[u8],
@@ -176,20 +206,67 @@ pub fn decrypt_data(
     }
 }
 
-/* NSS has a hardcoded list of attributes that are authenticated,
- * some are vendor defined attributes */
-pub const AUTHENTICATED_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 2] = [
-    CKA_MODULUS,
-    CKA_PUBLIC_EXPONENT,
-    //CKA_CERT_SHA1_HASH,
-    //CKA_CERT_MD5_HASH,
-    //CKA_TRUST_SERVER_AUTH,
-    //CKA_TRUST_CLIENT_AUTH,
-    //CKA_TRUST_EMAIL_PROTECTION,
-    //CKA_TRUST_CODE_SIGNING,
-    //CKA_TRUST_STEP_UP_APPROVED,
-    //CKA_NSS_OVERRIDE_EXTENSIONS,
-];
+const ENC_KEY_LEN: CK_ULONG = 32;
+
+pub fn encrypt_data<'a>(
+    facilities: &TokenFacilities,
+    secret: &'a [u8],
+    salt: &'a [u8],
+    iterations: usize,
+    data: &[u8],
+) -> Result<Vec<u8>> {
+    let pbkdf2_params = PBKDF2Params {
+        salt: salt,
+        iteration_count: u64::try_from(iterations)?,
+        /* SHA2-256 length */
+        key_length: Some(u64::try_from(ENC_KEY_LEN)?),
+        prf: Box::new(HMAC_SHA_256_ALG),
+    };
+
+    /* compute key */
+    let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
+    let ck_key_type: CK_KEY_TYPE = CKK_AES;
+    let ck_key_len: CK_ULONG = ENC_KEY_LEN;
+    let ck_true: CK_BBOOL = CK_TRUE;
+    let mut key_template = CkAttrs::with_capacity(5);
+    key_template.add_ulong(CKA_CLASS, &ck_class);
+    key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
+    key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
+    key_template.add_bool(CKA_DECRYPT, &ck_true);
+    key_template.add_bool(CKA_ENCRYPT, &ck_true);
+
+    let key = pbkdf2_derive(
+        facilities,
+        &pbkdf2_params,
+        secret,
+        key_template.as_slice(),
+    )?;
+    let (iv, enc_data) = aes_cbc_encrypt(facilities, &key, data)?;
+
+    let enc_params = BrokenAlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: BrokenAlgorithmParameters::Aes256Cbc(&iv),
+    };
+
+    let info = NSSEncryptedDataInfo {
+        algorithm: Box::new(BrokenAlgorithmIdentifier {
+            oid: asn1::DefinedByMarker::marker(),
+            params: BrokenAlgorithmParameters::Pbes2(BrokenPBES2Params {
+                key_derivation_func: Box::new(AlgorithmIdentifier {
+                    oid: asn1::DefinedByMarker::marker(),
+                    params: AlgorithmParameters::Pbkdf2(pbkdf2_params),
+                }),
+                encryption_scheme: Box::new(enc_params),
+            }),
+        }),
+        enc_or_sig_data: &enc_data,
+    };
+
+    match asn1::write_single(&info) {
+        Ok(der) => Ok(der),
+        Err(_) => Err(CKR_GENERAL_ERROR)?,
+    }
+}
 
 fn hmac_verify(
     facilities: &TokenFacilities,
