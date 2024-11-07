@@ -10,8 +10,8 @@ use crate::interface::*;
 use crate::kasn1::PrivateKeyInfo;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::ecc::{ECDHOperation, EccOperation};
-use crate::{attr_element, bytes_attr_not_empty, cast_params};
+use crate::ossl::ecc::EccOperation;
+use crate::{attr_element, bytes_attr_not_empty};
 
 use asn1;
 use once_cell::sync::Lazy;
@@ -398,20 +398,6 @@ impl Mechanism for EccMechanism {
         Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
-            return Err(CKR_MECHANISM_INVALID)?;
-        }
-        let kdf = match mech.mechanism {
-            CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => {
-                let params = cast_params!(mech, CK_ECDH1_DERIVE_PARAMS);
-                ECDHOperation::derive_new(mech.mechanism, params)?
-            }
-            _ => return Err(CKR_MECHANISM_INVALID)?,
-        };
-        Ok(Operation::Derive(Box::new(kdf)))
-    }
-
     fn generate_keypair(
         &self,
         mech: &CK_MECHANISM,
@@ -469,7 +455,6 @@ impl Mechanism for EccMechanism {
 
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     EccOperation::register_mechanisms(mechs);
-    ECDHOperation::register_mechanisms(mechs);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),
