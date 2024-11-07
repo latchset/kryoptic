@@ -47,3 +47,8 @@ pub struct PBMAC1Params<'a> {
     pub key_derivation_func: Box<AlgorithmIdentifier<'a>>,
     pub message_auth_scheme: Box<AlgorithmIdentifier<'a>>,
 }
+
+pub const HMAC_SHA_256_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::HmacWithSha256(Some(())),
+};

@@ -14,11 +14,14 @@ use crate::storage;
 use crate::storage::sqlite_common::check_table;
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 use crate::token::TokenFacilities;
+use crate::CSPRNG;
 
 use rusqlite::types::{FromSqlError, Value, ValueRef};
-use rusqlite::{Connection, Rows};
+use rusqlite::{params, Connection, Rows, Transaction};
 use zeroize::Zeroize;
 
+mod attrs;
+use attrs::*;
 mod ci;
 mod config;
 use ci::*;
@@ -44,6 +47,11 @@ const NSS_PRIVATE_TABLE: &str = "nssPrivate";
 const NSS_SPECIAL_NULL_VALUE: [u8; 3] = [0xa5, 0x0, 0x5a];
 
 const NSS_ID_PREFIX: &str = "NSSID";
+
+/* SFTK_MAX_PIN in NSS code */
+const NSS_PIN_MAX: usize = 500;
+/* SHA1_LENGTH in NSS code */
+const NSS_PIN_SALT_LEN: usize = 20;
 
 fn nss_id_format(table: &str, id: i32) -> String {
     format!("{}-{}-{}", NSS_ID_PREFIX, table, id)
@@ -137,29 +145,140 @@ impl NSSStorage {
     fn db_open(
         &self,
         path: &str,
-        ro: bool,
-        checktable: &str,
+        checktable: Option<&str>,
     ) -> Result<Arc<Mutex<Connection>>> {
-        if ro {
+        let exists = Path::new(path).exists();
+        if self.config.read_only {
             /* have to check explicitly because ::open() creates a new
              * file if it does not exist */
-            if !Path::new(path).exists() {
+            if !exists {
                 return Err(CKR_TOKEN_NOT_PRESENT)?;
+            }
+        } else {
+            /* may have to create the token directory */
+            let cdir = match self.config.configdir {
+                Some(ref c) => c,
+                None => return Err(CKR_TOKEN_NOT_RECOGNIZED)?,
+            };
+            if !Path::new(cdir).exists() {
+                std::fs::create_dir_all(cdir)?;
             }
         }
         match Connection::open(path) {
             Ok(c) => {
                 let conn = Arc::new(Mutex::from(c));
-                self.is_initialized(&conn, checktable)?;
+                match checktable {
+                    Some(ct) => self.is_initialized(&conn, ct)?,
+                    None => (),
+                }
                 Ok(conn)
             }
             Err(_) => Err(CKR_TOKEN_NOT_PRESENT)?,
         }
     }
 
+    fn new_main_tables(tx: &mut Transaction, table: &str) -> Result<()> {
+        /* the drop can fail when files are empty (new) */
+        let _ = tx.execute(&format!("DROP TABLE {}", table), params![]);
+
+        /* prep the monster tables NSSDB uses */
+        let mut columns = String::new();
+        for c in NSS_KNOWN_ATTRIBUTES.iter() {
+            write!(&mut columns, ", a{:x}", c)?;
+        }
+
+        /* main tables */
+        let sql = format!(
+            "CREATE TABLE {} (id PRIMARY KEY UNIQUE ON CONFLICT ABORT{})",
+            table, &columns
+        );
+        tx.execute(&sql, params![])?;
+
+        /* indexes */
+        let sql = format!("CREATE INDEX issuer ON {} (a81)", table);
+        tx.execute(&sql, params![])?;
+        let sql = format!("CREATE INDEX subject ON {} (a101)", table);
+        tx.execute(&sql, params![])?;
+        let sql = format!("CREATE INDEX label ON {} (a3)", table);
+        tx.execute(&sql, params![])?;
+        let sql = format!("CREATE INDEX ckaid ON {} (a102)", table);
+        tx.execute(&sql, params![])?;
+
+        Ok(())
+    }
+
+    fn certsfile(&self) -> Result<String> {
+        let cdir = match self.config.configdir {
+            Some(ref c) => c,
+            None => return Err(CKR_TOKEN_NOT_RECOGNIZED)?,
+        };
+        Ok(format!(
+            "{}/{}cert{}.db",
+            cdir, self.config.cert_prefix, CERT_DB_VERSION
+        ))
+    }
+
+    fn keysfile(&self) -> Result<String> {
+        let cdir = match self.config.configdir {
+            Some(ref c) => c,
+            None => return Err(CKR_TOKEN_NOT_RECOGNIZED)?,
+        };
+        Ok(format!(
+            "{}/{}key{}.db",
+            cdir, self.config.key_prefix, KEY_DB_VERSION
+        ))
+    }
+
+    fn initialize(&mut self) -> Result<()> {
+        /* we have to take one transaction at a time, which means one db
+         * can remain messed up if there is a failure ... */
+
+        /* public keys / certs db */
+        if !self.config.no_cert_db {
+            if self.certs.is_none() {
+                self.certs = Some(self.db_open(&self.certsfile()?, None)?);
+            }
+            match &self.certs {
+                Some(c) => {
+                    let mut conn = c.lock()?;
+                    let mut tx = conn.transaction()?;
+                    tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+                    Self::new_main_tables(&mut tx, NSS_PUBLIC_TABLE)?;
+                    tx.commit()?;
+                }
+                None => Err(CKR_GENERAL_ERROR)?,
+            }
+        }
+
+        /* Keys DB */
+        if !self.config.no_key_db {
+            if self.keys.is_none() {
+                self.keys = Some(self.db_open(&self.keysfile()?, None)?);
+            }
+            match &self.keys {
+                Some(c) => {
+                    let mut conn = c.lock()?;
+                    let mut tx = conn.transaction()?;
+                    tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+                    Self::new_main_tables(&mut tx, NSS_PRIVATE_TABLE)?;
+
+                    /* the drop can fail when files are empty (new) */
+                    let _ = tx.execute("DROP TABLE metaData", params![]);
+                    /* metadata */
+                    tx.execute("CREATE TABLE metaData (id PRIMARY KEY UNIQUE ON CONFLICT REPLACE, item1, item2)", params![])?;
+                    tx.commit()?;
+                }
+                None => Err(CKR_GENERAL_ERROR)?,
+            }
+        }
+
+        Ok(())
+    }
+
     fn rows_to_object(mut rows: Rows, all_cols: bool) -> Result<Object> {
         let mut obj = Object::new();
 
+        /* FIXME: move sourcing columns to db open */
         let cols = match rows.as_ref() {
             Some(s) => {
                 let cstr = s.column_names();
@@ -176,22 +295,16 @@ impl NSSStorage {
 
         if let Some(row) = rows.next()? {
             for i in first..cols.len() {
+                /* skip NSS vendor attributes */
+                if ignore_attribute(cols[i]) {
+                    continue;
+                }
                 let bn: Option<&[u8]> = row.get_ref(i)?.as_blob_or_null()?;
                 let blob: &[u8] = match bn {
                     Some(ref b) => b,
                     None => continue,
                 };
-                let atype = match AttrType::attr_id_to_attrtype(cols[i]) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        if cols[i] > CKA_VENDOR_DEFINED {
-                            /* FIXME: handle NSS vendor attributes */
-                            continue;
-                        } else {
-                            return Err(e);
-                        }
-                    }
-                };
+                let atype = AttrType::attr_id_to_attrtype(cols[i])?;
                 let attr = match atype {
                     AttrType::NumType => {
                         if blob.len() != 4 {
@@ -449,7 +562,7 @@ impl NSSStorage {
             None => return Err(CKR_GENERAL_ERROR)?,
         };
         let mut stmt = conn.prepare(SQL)?;
-        let mut rows = stmt.query(rusqlite::params![name])?;
+        let mut rows = stmt.query(params![name])?;
         match rows.next()? {
             Some(row) => {
                 let item1 = row.get_ref(0)?.as_blob()?;
@@ -483,37 +596,44 @@ impl NSSStorage {
         let (value, _) = self.fetch_metadata(&name)?;
         Ok(value)
     }
+
+    fn save_metadata(
+        &mut self,
+        name: &str,
+        item1: &[u8],
+        item2: &[u8],
+    ) -> Result<()> {
+        static SQL: &str =
+            "INSERT INTO metaData (id,item1,item2) VALUES(?,?,?);";
+        let conn = match self.keys {
+            Some(ref conn) => conn.lock()?,
+            None => return Err(CKR_GENERAL_ERROR)?,
+        };
+        let mut stmt = conn.prepare(SQL)?;
+        let _ = stmt.execute(params![
+            Value::from(name.to_string()),
+            Value::from(item1.to_vec()),
+            Value::from(item2.to_vec()),
+        ])?;
+        Ok(())
+    }
+
+    fn save_password(&mut self, item1: &[u8], item2: &[u8]) -> Result<()> {
+        self.save_metadata("password", item1, item2)
+    }
 }
 
 impl Storage for NSSStorage {
     fn open(&mut self) -> Result<StorageTokenInfo> {
         /* NSS does not have generic storage, instead it uses different
          * databases for different object types */
-        let cdir = match self.config.configdir {
-            Some(ref c) => c,
-            None => return Err(CKR_TOKEN_NOT_RECOGNIZED)?,
-        };
-        let certsfile = format!(
-            "{}/{}cert{}.db",
-            cdir, self.config.cert_prefix, CERT_DB_VERSION
-        );
-        let keysfile = format!(
-            "{}/{}key{}.db",
-            cdir, self.config.key_prefix, KEY_DB_VERSION
-        );
         if !self.config.no_cert_db {
-            self.certs = Some(self.db_open(
-                &certsfile,
-                self.config.read_only,
-                NSS_PUBLIC_TABLE,
-            )?);
+            self.certs =
+                Some(self.db_open(&self.certsfile()?, Some(NSS_PUBLIC_TABLE))?);
         }
         if !self.config.no_key_db {
-            self.keys = Some(self.db_open(
-                &keysfile,
-                self.config.read_only,
-                NSS_PRIVATE_TABLE,
-            )?);
+            self.keys =
+                Some(self.db_open(&self.keysfile()?, Some(NSS_PRIVATE_TABLE))?);
         }
         self.get_token_info()
     }
@@ -522,7 +642,9 @@ impl Storage for NSSStorage {
         &mut self,
         _facilities: &TokenFacilities,
     ) -> Result<StorageTokenInfo> {
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+        self.initialize()?;
+        self.enckey = None;
+        self.get_token_info()
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -637,7 +759,11 @@ impl Storage for NSSStorage {
     }
 
     fn store_token_info(&mut self, _info: &StorageTokenInfo) -> Result<()> {
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+        /* we can't store the token info back as NSSDB has
+         * no place for that info and uses a mix of configuration
+         * and env vars to define the labels anb stuff, so we just
+         * lie and ignore the request */
+        Ok(())
     }
 
     fn auth_user(
@@ -648,9 +774,20 @@ impl Storage for NSSStorage {
         flag: &mut CK_FLAGS,
         check_only: bool,
     ) -> Result<()> {
-        /* NSS supports only a CK_USER password, no CKU_SO */
-        if user_type != CKU_USER {
-            return Err(CKR_USER_TYPE_INVALID)?;
+        /* NSS supports only a CK_USER password,
+         * CKU_SO is allowed only when no pin is set yet */
+        match user_type {
+            CKU_USER => (),
+            CKU_SO => match self.fetch_password() {
+                Ok(_) => return Err(CKR_USER_TYPE_INVALID)?,
+                Err(e) => {
+                    if e.rv() == CKR_USER_PIN_NOT_INITIALIZED {
+                        return Ok(());
+                    }
+                    return Err(e);
+                }
+            },
+            _ => return Err(CKR_USER_TYPE_INVALID)?,
         }
 
         /* The principal encryption key is derived via simple SHA1
@@ -687,11 +824,42 @@ impl Storage for NSSStorage {
 
     fn set_user_pin(
         &mut self,
-        _facilities: &TokenFacilities,
-        _user_type: CK_USER_TYPE,
-        _pin: &[u8],
+        facilities: &TokenFacilities,
+        user_type: CK_USER_TYPE,
+        pin: &[u8],
     ) -> Result<()> {
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+        if user_type != CKU_USER {
+            return Err(CKR_USER_TYPE_INVALID)?;
+        }
+
+        if pin.len() > NSS_PIN_MAX {
+            return Err(CKR_PIN_LEN_RANGE)?;
+        }
+        let mut salt: [u8; NSS_PIN_SALT_LEN] = [0u8; NSS_PIN_SALT_LEN];
+        CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut salt))?;
+
+        let newenckey = enckey_derive(facilities, pin, &salt)?;
+
+        let iterations = match pin.len() {
+            0 => 1,
+            _ => {
+                /* FIXME: support env vars to change default */
+                NSS_MP_PBE_ITERATION_COUNT
+            }
+        };
+        let mut encdata = encrypt_data(
+            facilities,
+            newenckey.as_slice(),
+            &salt,
+            iterations,
+            NSS_PASS_CHECK,
+        )?;
+
+        /* FIXME: need to re-encode all encrypted/integrity protected attributes */
+
+        let result = self.save_password(&salt, encdata.as_slice());
+        encdata.zeroize();
+        result
     }
 }
 
