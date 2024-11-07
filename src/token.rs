@@ -162,7 +162,15 @@ impl Token {
         let mut info = self.storage.reinit(&self.facilities)?;
 
         /* Add SO PIN */
-        self.set_pin(CKU_SO, pin, &[])?;
+        match self.set_pin(CKU_SO, pin, &[]) {
+            Ok(()) => (),
+            Err(e) => {
+                /* not all storage dbs support setting a CKU_SO Pin */
+                if e.rv() != CKR_USER_TYPE_INVALID {
+                    return Err(e);
+                }
+            }
+        }
 
         /* copy Label */
         copy_sized_string(label, &mut info.label);
@@ -214,10 +222,6 @@ impl Token {
     }
 
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
-        if user_type != CKU_SO && self.info.flags & CKF_LOGIN_REQUIRED == 0 {
-            return true;
-        }
-
         match user_type {
             KRY_UNSPEC => self.logged == CKU_SO || self.logged == CKU_USER,
             CKU_SO => self.logged == CKU_SO,
@@ -459,7 +463,7 @@ impl Token {
         let is_logged = self.is_logged_in(KRY_UNSPEC);
 
         /* value does not matter, only type does */
-        let dnm: CK_BBOOL = 0;
+        let dnm: CK_BBOOL = CK_FALSE;
         let mut attrs = CkAttrs::from(template);
         if !is_logged {
             attrs.add_bool(CKA_TOKEN, &dnm);

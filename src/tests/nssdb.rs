@@ -250,3 +250,65 @@ fn test_nssdb_token() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_nssdb_init_token() {
+    let datadir = format!("{}/{}", TESTDIR, "test_nssdb_init_token");
+
+    let dbpath = format!("configDir={}", datadir);
+    let dbtype = "nssdb";
+    let dbname = format!("{}:{}", dbtype, dbpath);
+
+    let mut testtokn = TestToken::new(dbname);
+
+    /* pre-populate conf so we get the correct slot number assigned */
+    let mut slot = config::Slot::with_db(dbtype, Some(dbpath.clone()));
+    slot.slot = u32::try_from(testtokn.get_slot()).unwrap();
+    let ret = add_slot(slot);
+
+    assert_eq!(ret, CKR_OK);
+    let mut args = TestToken::make_init_args(Some(dbpath.clone()));
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* init once (NSSDB ignores SO pin) */
+    let pin_value = "Unused";
+    let ret = fn_init_token(
+        testtokn.get_slot(),
+        CString::new(pin_value).unwrap().into_raw() as *mut u8,
+        pin_value.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let session = testtokn.get_session(true);
+
+    /* NSS allows SO login w/o PIN only to set the initial User PIN */
+    let ret = fn_login(session, CKU_SO, &mut [] as *mut u8, 0);
+    assert_eq!(ret, CKR_OK);
+
+    /* set user pin */
+    let user_pin = "User PIN Value";
+    let ret = fn_init_pin(
+        session,
+        CString::new(user_pin).unwrap().into_raw() as *mut u8,
+        user_pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* try to login as user */
+    let ret = fn_login(
+        session,
+        CKU_USER,
+        CString::new(user_pin).unwrap().into_raw() as *mut u8,
+        user_pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
