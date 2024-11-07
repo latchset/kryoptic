@@ -32,8 +32,15 @@ pub mod aes;
 pub mod common;
 pub mod drbg;
 
+// the derive code for both ECDSA and Montgomery curves
+#[cfg(any(feature = "ecc", feature = "ec_montgomery"))]
+pub mod ecdh;
+
 #[cfg(feature = "ecc")]
 pub mod ecc;
+
+#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+pub mod ec_montgomery;
 
 #[cfg(all(feature = "eddsa", not(feature = "fips")))]
 pub mod eddsa;

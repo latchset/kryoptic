@@ -253,6 +253,9 @@ mod session;
 #[cfg(feature = "ecc")]
 mod ecc;
 
+#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+mod ec_montgomery;
+
 #[cfg(feature = "ecc")]
 mod ecdh;
 

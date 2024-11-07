@@ -13,6 +13,12 @@ mod ecc;
 #[cfg(any(feature = "ecc", feature = "eddsa"))]
 mod ecc_misc;
 
+#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+mod ec_montgomery;
+
+#[cfg(any(feature = "ec_montgomery", feature = "ecc"))]
+mod ecdh;
+
 #[cfg(all(feature = "eddsa", not(feature = "fips")))]
 mod eddsa;
 
@@ -51,6 +57,12 @@ pub fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "ecc")]
     ecc::register(mechs, ot);
+
+    #[cfg(any(feature = "ec_montgomery", feature = "ecc"))]
+    ecdh::register(mechs, ot);
+
+    #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+    ec_montgomery::register(mechs, ot);
 
     #[cfg(all(feature = "eddsa", not(feature = "fips")))]
     eddsa::register(mechs, ot);

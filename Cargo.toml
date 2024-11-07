@@ -50,6 +50,7 @@ zeroize = "1.6.0"
 aes = []
 ecc = []
 eddsa = []
+ec_montgomery = []
 hash = []
 hkdf = []
 hmac = ["hash"]
@@ -69,7 +70,7 @@ basic = [ "aes", "hmac", "pbkdf2", "sqlitedb" ]
 
 #select everything by default
 # Use --no-default-features --features basic, xxx for custom selections
-default = [ "basic", "ecc", "eddsa", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+default = [ "basic", "ecc", "ec_montgomery", "eddsa", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
 
 fips = [ "rusqlite/bundled", "basic", "ecc", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
 
