@@ -54,6 +54,12 @@ pub trait Storage: Debug + Send + Sync {
         facilities: &mut TokenFacilities,
         obj: Object,
     ) -> Result<CK_OBJECT_HANDLE>;
+    fn update(
+        &mut self,
+        facilities: &TokenFacilities,
+        handle: CK_OBJECT_HANDLE,
+        template: &[CK_ATTRIBUTE],
+    ) -> Result<()>;
     fn search(
         &self,
         facilities: &mut TokenFacilities,
