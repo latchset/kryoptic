@@ -724,6 +724,15 @@ impl Storage for NSSStorage {
         Err(CKR_FUNCTION_NOT_SUPPORTED)?
     }
 
+    fn update(
+        &mut self,
+        _facilities: &TokenFacilities,
+        _handle: CK_OBJECT_HANDLE,
+        _template: &[CK_ATTRIBUTE],
+    ) -> Result<()> {
+        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+    }
+
     fn search(
         &self,
         facilities: &mut TokenFacilities,

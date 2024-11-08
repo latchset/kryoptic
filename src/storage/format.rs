@@ -366,6 +366,24 @@ impl Storage for StdStorageFormat {
         Ok(handle)
     }
 
+    fn update(
+        &mut self,
+        facilities: &TokenFacilities,
+        handle: CK_OBJECT_HANDLE,
+        template: &[CK_ATTRIBUTE],
+    ) -> Result<()> {
+        let uid = match facilities.handles.get(handle) {
+            Some(u) => u,
+            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
+        };
+
+        let mut obj = self.store.fetch_by_uid(&uid, &[])?;
+        facilities
+            .factories
+            .set_object_attributes(&mut obj, template)?;
+        self.store.store_obj(obj)
+    }
+
     fn search(
         &self,
         facilities: &mut TokenFacilities,

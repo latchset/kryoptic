@@ -502,13 +502,7 @@ impl Token {
                 if !self.is_logged_in(KRY_UNSPEC) {
                     return Err(CKR_USER_NOT_LOGGED_IN)?;
                 }
-                let mut obj =
-                    self.storage.fetch(&self.facilities, o_handle, &[])?;
-                self.facilities
-                    .factories
-                    .set_object_attributes(&mut obj, template)?;
-                let _ = self.storage.store(&mut self.facilities, obj)?;
-                Ok(())
+                self.storage.update(&self.facilities, o_handle, template)
             }
         }
     }
