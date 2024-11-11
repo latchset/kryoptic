@@ -276,8 +276,7 @@ impl AesOperation {
                 let l = 15 - params.ulNonceLen;
                 if params.ulDataLen == 0
                     || params.ulDataLen > (1 << (8 * l))
-                    || (params.ulDataLen + params.ulMACLen)
-                        > CK_ULONG::try_from(u64::MAX)?
+                    || params.ulDataLen > (CK_ULONG::MAX - params.ulMACLen)
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
@@ -1014,8 +1013,7 @@ impl AesOperation {
                 let l = 15 - params.ulNonceLen;
                 if params.ulDataLen == 0
                     || params.ulDataLen > (1 << (8 * l))
-                    || (params.ulDataLen + params.ulMACLen)
-                        > CK_ULONG::try_from(u64::MAX)?
+                    || params.ulDataLen > (CK_ULONG::MAX - params.ulMACLen)
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }

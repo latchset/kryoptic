@@ -41,7 +41,7 @@ pub fn pbkdf2_derive(
         return Err(CKR_MECHANISM_INVALID)?;
     }
 
-    if dklen > (hlen * usize::try_from(u32::MAX)?) {
+    if dklen / hlen > usize::try_from(u32::MAX)? {
         return Err(CKR_KEY_SIZE_RANGE)?;
     }
 

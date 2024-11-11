@@ -236,7 +236,7 @@ impl Attribute {
         Ok(true)
     }
     pub fn to_ulong(&self) -> Result<CK_ULONG> {
-        if self.value.len() != 8 {
+        if self.value.len() != std::mem::size_of::<CK_ULONG>() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         Ok(CK_ULONG::from_ne_bytes(
@@ -366,7 +366,8 @@ fn ulong_to_vec(val: CK_ULONG) -> Vec<u8> {
 conversion_from_type! {make from_ulong; from_type_ulong; from_string_ulong; from CK_ULONG; as NumType; via ulong_to_vec}
 
 fn u64_to_vec(val: u64) -> Vec<u8> {
-    Vec::from(val.to_ne_bytes())
+    let inval = CK_ULONG::try_from(val).unwrap();
+    Vec::from(inval.to_ne_bytes())
 }
 conversion_from_type! {make from_u64; from_type_u64; from_string_u64; from u64; as NumType; via u64_to_vec}
 
