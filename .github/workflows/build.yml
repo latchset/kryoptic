@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic]
+        name: [ossl3, fips, release, dynamic, i686]
     container: fedora:latest
     steps:
       - name: Get Date for DNF cache entry
@@ -39,6 +39,10 @@ jobs:
             'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
             'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
             zlib-devel sed sqlite-devel
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            dnf -y install rust-std-static.i686 openssl-devel.i686 \
+              sqlite-devel.i686
+          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -99,6 +103,9 @@ jobs:
           fi
           if [ "${{ matrix.name }}" = "dynamic" ]; then
             cargo test --release --features dynamic
+          fi
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            cargo test --target i686-unknown-linux-gnu --features dynamic
           fi
 
       - uses: actions/upload-artifact@v3
