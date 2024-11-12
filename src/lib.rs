@@ -78,6 +78,7 @@ macro_rules! ok_or_ret {
 
 macro_rules! cast_or_ret {
     ($type:tt from $val:expr) => {{
+        #[allow(irrefutable_let_patterns)]
         let Ok(cast) = $type::try_from($val) else {
             return CKR_GENERAL_ERROR;
         };
