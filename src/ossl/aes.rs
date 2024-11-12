@@ -1810,7 +1810,7 @@ impl Decryption for AesOperation {
                     0
                 }
             }
-            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => cipher.len() - 8,
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => cipher.len(),
             _ => cipher.len(),
         };
         if plain.len() < outlen {
@@ -2096,7 +2096,16 @@ impl Decryption for AesOperation {
                     if data_len % 8 != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     } else {
-                        ((data_len / 8) * 8) - 8
+                        /* Originally this was ((data_len / 8) * 8) - 8
+                         * however this caused stack corruption on decryption
+                         * failures as in case of errors as OpenSSL's unwrap
+                         * function (CRYPTO_128_unwrap_pad) zeroizes outputs
+                         * by calling OPENSSL_cleanse(out, inlen). So the
+                         * output buffer needs to be always at least as large
+                         * as the input buffer regardless of the actual final
+                         * length, and needs to be a multiple of 8.
+                         */
+                        (data_len / 8) * 8
                     }
                 }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
