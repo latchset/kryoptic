@@ -233,10 +233,8 @@ static NSS_VENDOR_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 36] = [
 ];
 
 pub fn ignore_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
-    for a in &NSS_VENDOR_ATTRIBUTES {
-        if attr == *a {
-            return true;
-        }
+    if NSS_VENDOR_ATTRIBUTES.contains(&attr) {
+        return true;
     }
     if attr == DEPRECATED_CKA_SECONDARY_AUTH
         || attr == DEPRECATED_CKA_AUTH_PIN_FLAGS
@@ -257,10 +255,16 @@ pub static NSS_SENSITIVE_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 7] = [
 ];
 
 pub fn is_sensitive_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
-    for a in &NSS_SENSITIVE_ATTRIBUTES {
-        if attr == *a {
-            return true;
-        }
-    }
-    return false;
+    NSS_SENSITIVE_ATTRIBUTES.contains(&attr)
+}
+
+pub fn is_db_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
+    NSS_KNOWN_ATTRIBUTES.contains(&attr)
+}
+
+pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 3] =
+    [CKA_UNIQUE_ID, CKA_COPYABLE, CKA_DESTROYABLE];
+
+pub fn is_skippable_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
+    NSS_SKIP_ATTRIBUTES.contains(&attr)
 }
