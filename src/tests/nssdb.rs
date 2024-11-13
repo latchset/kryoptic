@@ -310,5 +310,73 @@ fn test_nssdb_init_token() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* import a key on the token */
+    let handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[
+            (CKA_VALUE, "Secret".as_bytes()),
+            (CKA_LABEL, "Test Generic Secret".as_bytes())
+        ],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_DERIVE, true),
+        ],
+    ));
+
+    /* fetch value */
+    let mut template =
+        make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
+    let ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(template[0].ulValueLen, 6);
+    let mut value = vec![0u8; 6];
+    template[0].pValue = void_ptr!(value.as_mut_ptr());
+    let ret = fn_get_attribute_value(
+        session,
+        handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value.as_slice(), "Secret".as_bytes());
+
+    /* generate key pair and store it */
+    /* RSA key pair */
+    let _ = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_ENCRYPT, true),
+            (CKA_VERIFY, true),
+            (CKA_WRAP, true),
+        ],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    let ret = fn_logout(session);
+    assert_eq!(ret, CKR_OK);
+
     testtokn.finalize();
 }

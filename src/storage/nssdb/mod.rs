@@ -53,7 +53,7 @@ const NSS_PIN_MAX: usize = 500;
 /* SHA1_LENGTH in NSS code */
 const NSS_PIN_SALT_LEN: usize = 20;
 
-fn nss_id_format(table: &str, id: i32) -> String {
+fn nss_id_format(table: &str, id: u32) -> String {
     format!("{}-{}-{}", NSS_ID_PREFIX, table, id)
 }
 
@@ -84,6 +84,25 @@ fn nss_id_parse(nssid: &str) -> Result<(String, u32)> {
 
 fn nss_col_to_type(col: &str) -> Result<CK_ULONG> {
     Ok(CK_ULONG::from_str_radix(&col[1..], 16)?)
+}
+
+fn num_to_val(ulong: CK_ULONG) -> Result<Value> {
+    /* CK_UNAVAILABLE_INFORMATION need to be special cased */
+    /* for storage compatibility CK_ULONGs can only be stored as u32
+     * values and PKCS#11 spec pay attentions to never allocate numbers
+     * bigger than what can be stored as a u32. However the value of
+     * CK_UNAVAILABLE_INFORMATION is defined as CK_ULONG::MAX which is
+     * a larger number than what we can store in a u32.
+     * ensure we store any CK_ULONG as a vector of 4 bytes in big
+     * endian format, and map ULONG::MAX to u32::MAX */
+    let val = if ulong == CK_UNAVAILABLE_INFORMATION {
+        u32::MAX
+    } else {
+        /* we need to catch as an error any value > u32::MAX so we always
+         * try_from a u32 first to check the boundaries. */
+        u32::try_from(ulong)?
+    };
+    Ok(Value::from(val.to_be_bytes().to_vec()))
 }
 
 static NSS_PASS_CHECK: &[u8; 14] = b"password-check";
@@ -441,7 +460,7 @@ impl NSSStorage {
                 if template[idx].pValue != std::ptr::null_mut() {
                     let t = template[idx].to_ulong()?;
                     match t {
-                        CKO_PRIVATE_KEY => do_certs = false,
+                        CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_certs = false,
                         CKO_PUBLIC_KEY | CKO_CERTIFICATE => do_keys = false,
                         _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     }
@@ -492,17 +511,10 @@ impl NSSStorage {
                 let val: &[u8] = &NSS_SPECIAL_NULL_VALUE;
                 query.params.push(ValueRef::from(val).into());
             } else {
-                match atype {
-                    AttrType::NumType => {
-                        let val = template[idx].to_ulong()?;
-                        query.params.push(Value::from(
-                            u32::try_from(val)?.to_be_bytes().to_vec(),
-                        ));
-                    }
-                    _ => {
-                        query.params.push(Value::from(template[idx].to_buf()?))
-                    }
-                }
+                query.params.push(match atype {
+                    AttrType::NumType => num_to_val(template[idx].to_ulong()?)?,
+                    _ => Value::from(template[idx].to_buf()?),
+                });
             }
         }
         Ok(query)
@@ -519,7 +531,7 @@ impl NSSStorage {
         let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
         let mut result = Vec::<String>::new();
         while let Some(row) = rows.next()? {
-            let id: i32 = row.get(0)?;
+            let id: u32 = row.get(0)?;
             result.push(nss_id_format(table, id));
         }
         Ok(result)
@@ -603,18 +615,14 @@ impl NSSStorage {
     }
 
     fn save_metadata(
-        &mut self,
+        tx: &mut Transaction,
         name: &str,
         item1: &[u8],
         item2: &[u8],
     ) -> Result<()> {
         static SQL: &str =
-            "INSERT INTO metaData (id,item1,item2) VALUES(?,?,?);";
-        let conn = match self.keys {
-            Some(ref conn) => conn.lock()?,
-            None => return Err(CKR_GENERAL_ERROR)?,
-        };
-        let mut stmt = conn.prepare(SQL)?;
+            "INSERT INTO metaData (id,item1,item2) VALUES(?,?,?)";
+        let mut stmt = tx.prepare(SQL)?;
         let _ = stmt.execute(params![
             Value::from(name.to_string()),
             Value::from(item1.to_vec()),
@@ -624,7 +632,116 @@ impl NSSStorage {
     }
 
     fn save_password(&mut self, item1: &[u8], item2: &[u8]) -> Result<()> {
-        self.save_metadata("password", item1, item2)
+        if let Some(ref c) = self.keys {
+            let mut conn = c.lock()?;
+            let mut tx = conn.transaction()?;
+            tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+            Self::save_metadata(&mut tx, "password", item1, item2)?;
+            tx.commit()?;
+            Ok(())
+        } else {
+            Err(CKR_GENERAL_ERROR)?
+        }
+    }
+
+    fn get_next_id(tx: &mut Transaction, table: &str) -> Result<u32> {
+        let max_query = format!("select MAX(id) from {}", table);
+        let mut id: u32;
+        let mut stmt = tx.prepare(&max_query)?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            let maxid: i64 = match row.get_ref(0)?.as_i64_or_null()? {
+                Some(n) => n,
+                None => 0,
+            };
+            if maxid > 0 && maxid < 0x3fffffff {
+                id = u32::try_from(maxid + 1)?;
+            } else {
+                /* we are wrapping or starting anew, so we need to loop
+                 * until we find a free spot */
+                let next_query = format!("select id from {} where id=?", table);
+                let mut stmt = tx.prepare(&next_query)?;
+                id = 1;
+                while id < 0x40000000 {
+                    let mut rows = stmt.query([Value::from(id)])?;
+                    if rows.next()?.is_none() {
+                        /* free found */
+                        break;
+                    }
+                    id += 1;
+                }
+                if id > 0x3fffffff {
+                    return Err(CKR_OBJECT_HANDLE_INVALID)?;
+                }
+            }
+        } else {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        Ok(id)
+    }
+
+    fn store_object(
+        tx: &mut Transaction,
+        table: &str,
+        obj: &Object,
+    ) -> Result<u32> {
+        /* get next available id */
+        let id = Self::get_next_id(tx, table)?;
+
+        let attrs = obj.get_attributes();
+        let mut params = Vec::<Value>::with_capacity(1 + attrs.len());
+        params.push(Value::from(id));
+
+        let mut sql = format!("INSERT INTO {} (id", table);
+
+        for a in attrs {
+            let a_type = a.get_type();
+
+            if is_skippable_attribute(a_type) {
+                /* this is an attribute we always set on objects,
+                 * but NSS does not store in the DB */
+                continue;
+            } else if !is_db_attribute(a_type) {
+                /* NSS does not know about this attribute */
+                return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+            }
+
+            write!(&mut sql, ", a{:x}", a_type)?;
+
+            let a_val = a.get_value();
+            params.push(if a_val.len() == 0 {
+                ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+            } else {
+                match a.get_attrtype() {
+                    AttrType::NumType => num_to_val(a.to_ulong()?)?,
+                    AttrType::DenyType | AttrType::IgnoreType => {
+                        ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                    }
+                    _ => ValueRef::from(a_val.as_slice()).into(),
+                }
+            });
+        }
+        write!(&mut sql, ") VALUES (?")?;
+        for _ in 1..params.len() {
+            write!(&mut sql, ", ?")?;
+        }
+        write!(&mut sql, ")")?;
+
+        let mut stmt = tx.prepare(&sql)?;
+        let _ = stmt.execute(rusqlite::params_from_iter(params))?;
+
+        Ok(id)
+    }
+
+    fn store_signature(
+        tx: &mut Transaction,
+        dbtype: &str,
+        nssobjid: u32,
+        atype: CK_ULONG,
+        val: &[u8],
+    ) -> Result<()> {
+        let name = format!("sig_{}_{:08x}_{:08x}", dbtype, nssobjid, atype);
+        Self::save_metadata(tx, &name, val, &[])
     }
 }
 
@@ -679,12 +796,13 @@ impl Storage for NSSStorage {
              * is not a key, the attribute will simply not be returned
              * in that case */
             attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
+            attrs.add_missing_ulong(CKA_EXTRACTABLE, &dnm);
+            attrs.add_missing_ulong(CKA_SENSITIVE, &dnm);
         }
         let mut obj =
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
-        let ats = facilities.factories.get_sensitive_attrs(&obj)?;
         if let Some(ref enckey) = self.enckey {
-            for typ in ats {
+            for typ in NSS_SENSITIVE_ATTRIBUTES {
                 let encval = match obj.get_attr(typ) {
                     Some(attr) => attr.get_value(),
                     None => continue,
@@ -723,10 +841,117 @@ impl Storage for NSSStorage {
 
     fn store(
         &mut self,
-        _faclities: &mut TokenFacilities,
-        _obj: Object,
+        facilities: &mut TokenFacilities,
+        mut obj: Object,
     ) -> Result<CK_OBJECT_HANDLE> {
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+        let (mut conn, table) = match obj.get_attr_as_ulong(CKA_CLASS)? {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY => match &self.keys {
+                Some(c) => (c.lock()?, NSS_PRIVATE_TABLE),
+                None => Err(CKR_GENERAL_ERROR)?,
+            },
+            CKO_PUBLIC_KEY | CKO_CERTIFICATE => match &self.certs {
+                Some(c) => (c.lock()?, NSS_PUBLIC_TABLE),
+                None => Err(CKR_GENERAL_ERROR)?,
+            },
+            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        };
+
+        if let Some(ref enckey) = self.enckey {
+            if table == NSS_PRIVATE_TABLE {
+                for typ in NSS_SENSITIVE_ATTRIBUTES {
+                    /* NOTE: this will not handle correctly empty attributes or
+                     * num types, but there are no sensitive ones */
+                    let plain = match obj.get_attr(typ) {
+                        Some(attr) => attr.get_value(),
+                        None => continue,
+                    };
+                    let encval = encrypt_data(
+                        facilities,
+                        enckey.as_slice(),
+                        NSS_MP_PBE_ITERATION_COUNT,
+                        plain.as_slice(),
+                    )?;
+                    obj.set_attr(Attribute::from_bytes(typ, encval))?;
+                }
+            }
+
+            let mut tx = conn.transaction()?;
+            tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+            let nssobjid = match Self::store_object(&mut tx, table, &obj) {
+                Ok(id) => id,
+                Err(e) => {
+                    /* FIXME retry once on abort in case there was a race
+                     * with picking next id ? */
+                    return Err(e);
+                }
+            };
+
+            if table == NSS_PRIVATE_TABLE {
+                for typ in AUTHENTICATED_ATTRIBUTES {
+                    /* NOTE: this will not handle correctly empty attributes or
+                     * num types, but there are no authenticated ones */
+                    let value = match obj.get_attr(typ) {
+                        Some(attr) => attr.get_value(),
+                        None => continue,
+                    };
+                    let sig = make_signature(
+                        facilities,
+                        enckey.as_slice(),
+                        value.as_slice(),
+                        nssobjid,
+                        u32::try_from(typ)?,
+                        u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
+                    )?;
+                    Self::store_signature(
+                        &mut tx,
+                        "key",
+                        nssobjid,
+                        typ,
+                        sig.as_slice(),
+                    )?;
+                }
+            } else {
+                let mut kconn = match &self.keys {
+                    Some(c) => c.lock()?,
+                    None => return Err(CKR_GENERAL_ERROR)?,
+                };
+                let mut ktx = kconn.transaction()?;
+                ktx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+                for typ in AUTHENTICATED_ATTRIBUTES {
+                    let value = match obj.get_attr(typ) {
+                        Some(attr) => attr.get_value(),
+                        None => continue,
+                    };
+                    let sig = make_signature(
+                        facilities,
+                        enckey.as_slice(),
+                        value.as_slice(),
+                        nssobjid,
+                        u32::try_from(typ)?,
+                        u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
+                    )?;
+                    Self::store_signature(
+                        &mut ktx,
+                        "cert",
+                        nssobjid,
+                        typ,
+                        sig.as_slice(),
+                    )?;
+                }
+                ktx.commit()?;
+            }
+
+            tx.commit()?;
+
+            /* create new handle for this object */
+            let handle = facilities.handles.next();
+            facilities
+                .handles
+                .insert(handle, nss_id_format(table, nssobjid))?;
+            Ok(handle)
+        } else {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
     }
 
     fn update(
@@ -863,7 +1088,6 @@ impl Storage for NSSStorage {
         let mut encdata = encrypt_data(
             facilities,
             newenckey.as_slice(),
-            &salt,
             iterations,
             NSS_PASS_CHECK,
         )?;

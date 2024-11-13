@@ -206,27 +206,30 @@ pub fn decrypt_data(
     }
 }
 
-const ENC_KEY_LEN: CK_ULONG = 32;
+/* SHA2-256 length */
+const SHA256_LEN: usize = 32;
 
 pub fn encrypt_data<'a>(
     facilities: &TokenFacilities,
     secret: &'a [u8],
-    salt: &'a [u8],
     iterations: usize,
     data: &[u8],
 ) -> Result<Vec<u8>> {
+    /* SHA2-256 length */
+    let mut salt: [u8; SHA256_LEN] = [0u8; SHA256_LEN];
+    CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut salt))?;
+
     let pbkdf2_params = PBKDF2Params {
-        salt: salt,
+        salt: &salt,
         iteration_count: u64::try_from(iterations)?,
-        /* SHA2-256 length */
-        key_length: Some(u64::try_from(ENC_KEY_LEN)?),
+        key_length: Some(u64::try_from(SHA256_LEN)?),
         prf: Box::new(HMAC_SHA_256_ALG),
     };
 
     /* compute key */
     let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
     let ck_key_type: CK_KEY_TYPE = CKK_AES;
-    let ck_key_len: CK_ULONG = ENC_KEY_LEN;
+    let ck_key_len = CK_ULONG::try_from(SHA256_LEN)?;
     let ck_true: CK_BBOOL = CK_TRUE;
     let mut key_template = CkAttrs::with_capacity(5);
     key_template.add_ulong(CKA_CLASS, &ck_class);
@@ -362,4 +365,90 @@ pub fn enckey_derive(
     let mut digest = vec![0u8; op.digest_len()?];
     op.digest_final(digest.as_mut_slice())?;
     Ok(digest)
+}
+
+fn hmac_sign(
+    facilities: &TokenFacilities,
+    key: &Object,
+    nssobjid: u32,
+    sdbtype: u32,
+    plaintext: &[u8],
+) -> Result<Vec<u8>> {
+    let ck_mech = CK_MECHANISM {
+        mechanism: CKM_SHA256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let mech = facilities.mechanisms.get(CKM_SHA256_HMAC)?;
+    let mut op = mech.sign_new(&ck_mech, key)?;
+    let mut signature = vec![0u8; op.signature_len()?];
+    let objid = nssobjid.to_be_bytes();
+    op.sign_update(&objid)?;
+    let attrtype = sdbtype.to_be_bytes();
+    op.sign_update(&attrtype)?;
+    op.sign_update(plaintext)?;
+    op.sign_final(signature.as_mut_slice())?;
+    Ok(signature)
+}
+
+pub fn make_signature(
+    facilities: &TokenFacilities,
+    secret: &[u8],
+    attribute: &[u8],
+    nssobjid: u32,
+    sdbtype: u32,
+    iterations: u64,
+) -> Result<Vec<u8>> {
+    let mut salt: [u8; SHA256_LEN] = [0u8; SHA256_LEN];
+    CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut salt))?;
+
+    let pbkdf2_params = PBKDF2Params {
+        salt: &salt,
+        iteration_count: iterations,
+        key_length: Some(u64::try_from(SHA256_LEN)?),
+        prf: Box::new(HMAC_SHA_256_ALG),
+    };
+
+    /* compute key */
+    let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
+    let ck_key_type: CK_KEY_TYPE = CKK_GENERIC_SECRET;
+    let ck_key_len = CK_ULONG::try_from(SHA256_LEN)?;
+    let ck_true: CK_BBOOL = CK_TRUE;
+    let mut key_template = CkAttrs::with_capacity(5);
+    key_template.add_ulong(CKA_CLASS, &ck_class);
+    key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
+    key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
+    key_template.add_bool(CKA_SIGN, &ck_true);
+    key_template.add_bool(CKA_VERIFY, &ck_true);
+
+    let key = pbkdf2_derive(
+        facilities,
+        &pbkdf2_params,
+        secret,
+        key_template.as_slice(),
+    )?;
+
+    let sig = hmac_sign(facilities, &key, nssobjid, sdbtype, attribute)?;
+
+    let info = NSSEncryptedDataInfo {
+        algorithm: Box::new(BrokenAlgorithmIdentifier {
+            oid: asn1::DefinedByMarker::marker(),
+            params: BrokenAlgorithmParameters::Pbmac1(PBMAC1Params {
+                key_derivation_func: Box::new(AlgorithmIdentifier {
+                    oid: asn1::DefinedByMarker::marker(),
+                    params: AlgorithmParameters::Pbkdf2(pbkdf2_params),
+                }),
+                message_auth_scheme: Box::new(AlgorithmIdentifier {
+                    oid: asn1::DefinedByMarker::marker(),
+                    params: AlgorithmParameters::HmacWithSha256(None),
+                }),
+            }),
+        }),
+        enc_or_sig_data: &sig,
+    };
+
+    match asn1::write_single(&info) {
+        Ok(der) => Ok(der),
+        Err(_) => Err(CKR_GENERAL_ERROR)?,
+    }
 }
