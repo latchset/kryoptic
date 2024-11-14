@@ -445,8 +445,13 @@ impl NSSStorage {
                         CKO_PUBLIC_KEY | CKO_CERTIFICATE => do_keys = false,
                         _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     }
-                    break;
                 }
+            }
+            /* In NSSDB sensitive attributes are encrypted, so we can check
+             * if the template is searching for any of the encrypted
+             * attributes and if so just fail immediately */
+            if is_sensitive_attribute(template[idx].type_) {
+                return Err(CKR_ATTRIBUTE_SENSITIVE)?;
             }
         }
 
@@ -741,7 +746,6 @@ impl Storage for NSSStorage {
         let mut ids = self.search_databases(template)?;
         let mut result = Vec::<CK_OBJECT_HANDLE>::with_capacity(ids.len());
         for id in ids.drain(..) {
-            /* FIXME: check for sensitive ! */
             let handle = match facilities.handles.get_by_uid(&id) {
                 Some(h) => *h,
                 None => {

@@ -245,3 +245,22 @@ pub fn ignore_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     }
     return false;
 }
+
+pub static NSS_SENSITIVE_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 7] = [
+    CKA_VALUE,
+    CKA_PRIVATE_EXPONENT,
+    CKA_PRIME_1,
+    CKA_PRIME_2,
+    CKA_EXPONENT_1,
+    CKA_EXPONENT_2,
+    CKA_COEFFICIENT,
+];
+
+pub fn is_sensitive_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
+    for a in &NSS_SENSITIVE_ATTRIBUTES {
+        if attr == *a {
+            return true;
+        }
+    }
+    return false;
+}
