@@ -15,7 +15,7 @@ Version:        0.1.0^%{revision_date}.git%{short_revision}
 Release:        %autorelease
 Summary:        PKCS #11 software token written in Rust
 
-SourceLicense:  GPL-3.0
+SourceLicense:  GPL-3.0-or-later
 # Apache-2.0
 # Apache-2.0 OR BSL-1.0
 # Apache-2.0 OR MIT
