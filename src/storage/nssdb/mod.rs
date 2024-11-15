@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::attribute::{AttrType, Attribute, CkAttrs};
 use crate::error::{Error, Result};
@@ -17,7 +17,7 @@ use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use rusqlite::types::{FromSqlError, Value, ValueRef};
-use rusqlite::{params, Connection, Rows, Transaction};
+use rusqlite::{params, Connection, OpenFlags, Rows, Transaction};
 use zeroize::Zeroize;
 
 mod attrs;
@@ -43,7 +43,9 @@ impl From<FromSqlError> for Error {
 const CERT_DB_VERSION: usize = 9;
 const KEY_DB_VERSION: usize = 4;
 const NSS_PUBLIC_TABLE: &str = "nssPublic";
+const NSS_PUBLIC_SCHEMA: &str = "public";
 const NSS_PRIVATE_TABLE: &str = "nssPrivate";
+const NSS_PRIVATE_SCHEMA: &str = "private";
 const NSS_SPECIAL_NULL_VALUE: [u8; 3] = [0xa5, 0x0, 0x5a];
 
 const NSS_ID_PREFIX: &str = "NSSID";
@@ -108,16 +110,15 @@ fn num_to_val(ulong: CK_ULONG) -> Result<Value> {
 static NSS_PASS_CHECK: &[u8; 14] = b"password-check";
 
 struct NSSSearchQuery {
-    certs: Option<String>,
-    keys: Option<String>,
+    public: Option<String>,
+    private: Option<String>,
     params: Vec<Value>,
 }
 
 #[derive(Debug)]
 pub struct NSSStorage {
     config: NSSConfig,
-    certs: Option<Arc<Mutex<Connection>>>,
-    keys: Option<Arc<Mutex<Connection>>>,
+    conn: Arc<Mutex<Connection>>,
     enckey: Option<Vec<u8>>,
 }
 
@@ -130,15 +131,6 @@ impl Drop for NSSStorage {
 }
 
 impl NSSStorage {
-    fn is_initialized(
-        &self,
-        check: &Arc<Mutex<Connection>>,
-        tablename: &str,
-    ) -> Result<()> {
-        let conn = check.lock()?;
-        check_table(conn, tablename)
-    }
-
     fn get_token_info(&self) -> Result<StorageTokenInfo> {
         let mut info = StorageTokenInfo {
             label: [0; 32],
@@ -161,44 +153,43 @@ impl NSSStorage {
         Ok(info)
     }
 
-    fn db_open(
-        &self,
-        path: &str,
-        checktable: Option<&str>,
-    ) -> Result<Arc<Mutex<Connection>>> {
-        let exists = Path::new(path).exists();
-        if self.config.read_only {
-            /* have to check explicitly because ::open() creates a new
-             * file if it does not exist */
-            if !exists {
-                return Err(CKR_TOKEN_NOT_PRESENT)?;
-            }
-        } else {
-            /* may have to create the token directory */
-            let cdir = match self.config.configdir {
-                Some(ref c) => c,
-                None => return Err(CKR_TOKEN_NOT_RECOGNIZED)?,
-            };
-            if !Path::new(cdir).exists() {
-                std::fs::create_dir_all(cdir)?;
+    fn db_uri(path: &str, read_only: bool) -> Result<String> {
+        let mut encoded_path = String::new();
+        for c in path.as_bytes() {
+            /* TODO: Find a small crate that can do URI Encoding
+             * without carring huge HTTP dependencies */
+            if (*c as char).is_ascii_alphanumeric() {
+                encoded_path.push(*c as char);
+            } else {
+                write!(&mut encoded_path, "%{:02X}", *c)?;
             }
         }
-        match Connection::open(path) {
-            Ok(c) => {
-                let conn = Arc::new(Mutex::from(c));
-                match checktable {
-                    Some(ct) => self.is_initialized(&conn, ct)?,
-                    None => (),
-                }
-                Ok(conn)
-            }
-            Err(_) => Err(CKR_TOKEN_NOT_PRESENT)?,
-        }
+        let mode = if read_only { "mode=ro" } else { "mode=rwc" };
+        Ok(format!("file:{}?{}&cache=private", &encoded_path, mode))
     }
 
-    fn new_main_tables(tx: &mut Transaction, table: &str) -> Result<()> {
+    fn db_attach(
+        conn: &mut MutexGuard<'_, rusqlite::Connection>,
+        path: &str,
+        name: &str,
+        read_only: bool,
+    ) -> Result<()> {
+        let uri = Self::db_uri(path, read_only)?;
+        let attach = format!("ATTACH DATABASE '{}' AS {}", uri, name);
+        if conn.execute(&attach, params![]).is_err() {
+            return Err(CKR_TOKEN_NOT_PRESENT)?;
+        }
+        Ok(())
+    }
+
+    fn new_main_tables(
+        tx: &mut Transaction,
+        schema: &str,
+        table: &str,
+    ) -> Result<()> {
         /* the drop can fail when files are empty (new) */
-        let _ = tx.execute(&format!("DROP TABLE {}", table), params![]);
+        let _ =
+            tx.execute(&format!("DROP TABLE {}.{}", schema, table), params![]);
 
         /* prep the monster tables NSSDB uses */
         let mut columns = String::new();
@@ -208,19 +199,28 @@ impl NSSStorage {
 
         /* main tables */
         let sql = format!(
-            "CREATE TABLE {} (id PRIMARY KEY UNIQUE ON CONFLICT ABORT{})",
-            table, &columns
+            "CREATE TABLE {}.{} (id PRIMARY KEY UNIQUE ON CONFLICT ABORT{})",
+            schema, table, &columns
         );
         tx.execute(&sql, params![])?;
 
         /* indexes */
-        let sql = format!("CREATE INDEX issuer ON {} (a81)", table);
+
+        /* a81 is CKA_ISSUER (81 hex, 129 dec) */
+        let sql = format!("CREATE INDEX {}.issuer ON {} (a81)", schema, table);
         tx.execute(&sql, params![])?;
-        let sql = format!("CREATE INDEX subject ON {} (a101)", table);
+
+        /* a101 is CKA_SUBJECT (101 hex, 257 dec) */
+        let sql =
+            format!("CREATE INDEX {}.subject ON {} (a101)", schema, table);
         tx.execute(&sql, params![])?;
-        let sql = format!("CREATE INDEX label ON {} (a3)", table);
+
+        /* a3 is CKA_LABEL */
+        let sql = format!("CREATE INDEX {}.label ON {} (a3)", schema, table);
         tx.execute(&sql, params![])?;
-        let sql = format!("CREATE INDEX ckaid ON {} (a102)", table);
+
+        /* a102 is CKA_ID (102 hex, 258 dec) */
+        let sql = format!("CREATE INDEX {}.ckaid ON {} (a102)", schema, table);
         tx.execute(&sql, params![])?;
 
         Ok(())
@@ -249,48 +249,40 @@ impl NSSStorage {
     }
 
     fn initialize(&mut self) -> Result<()> {
-        /* we have to take one transaction at a time, which means one db
-         * can remain messed up if there is a failure ... */
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+
+        /* we assume the correct databases are attached since db_open()
+         * even if they were not initialized (empty) */
 
         /* public keys / certs db */
         if !self.config.no_cert_db {
-            if self.certs.is_none() {
-                self.certs = Some(self.db_open(&self.certsfile()?, None)?);
-            }
-            match &self.certs {
-                Some(c) => {
-                    let mut conn = c.lock()?;
-                    let mut tx = conn.transaction()?;
-                    tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-                    Self::new_main_tables(&mut tx, NSS_PUBLIC_TABLE)?;
-                    tx.commit()?;
-                }
-                None => Err(CKR_GENERAL_ERROR)?,
-            }
+            Self::new_main_tables(
+                &mut tx,
+                NSS_PUBLIC_SCHEMA,
+                NSS_PUBLIC_TABLE,
+            )?;
         }
 
         /* Keys DB */
         if !self.config.no_key_db {
-            if self.keys.is_none() {
-                self.keys = Some(self.db_open(&self.keysfile()?, None)?);
-            }
-            match &self.keys {
-                Some(c) => {
-                    let mut conn = c.lock()?;
-                    let mut tx = conn.transaction()?;
-                    tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-                    Self::new_main_tables(&mut tx, NSS_PRIVATE_TABLE)?;
+            Self::new_main_tables(
+                &mut tx,
+                NSS_PRIVATE_SCHEMA,
+                NSS_PRIVATE_TABLE,
+            )?;
 
-                    /* the drop can fail when files are empty (new) */
-                    let _ = tx.execute("DROP TABLE metaData", params![]);
-                    /* metadata */
-                    tx.execute("CREATE TABLE metaData (id PRIMARY KEY UNIQUE ON CONFLICT REPLACE, item1, item2)", params![])?;
-                    tx.commit()?;
-                }
-                None => Err(CKR_GENERAL_ERROR)?,
-            }
+            /* the drop can fail when files are empty (new) */
+            let _ = tx.execute(
+                &format!("DROP TABLE {}.metaData", NSS_PRIVATE_SCHEMA),
+                params![],
+            );
+            /* metadata */
+            tx.execute(&format!("CREATE TABLE {}.metaData (id PRIMARY KEY UNIQUE ON CONFLICT REPLACE, item1, item2)", NSS_PRIVATE_SCHEMA), params![])?;
         }
 
+        tx.commit()?;
         Ok(())
     }
 
@@ -391,8 +383,8 @@ impl NSSStorage {
             }
         }
         let mut query = NSSSearchQuery {
-            certs: None,
-            keys: None,
+            public: None,
+            private: None,
             params: Vec::<Value>::with_capacity(1),
         };
         let sql = format!(
@@ -400,8 +392,8 @@ impl NSSStorage {
             columns, table
         );
         match table {
-            NSS_PUBLIC_TABLE => query.certs = Some(sql),
-            NSS_PRIVATE_TABLE => query.keys = Some(sql),
+            NSS_PUBLIC_TABLE => query.public = Some(sql),
+            NSS_PRIVATE_TABLE => query.private = Some(sql),
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
 
@@ -417,19 +409,14 @@ impl NSSStorage {
         attrs: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         let query = Self::prepare_fetch(table, objid, &attrs)?;
-        let (conn, sql) = if let Some(ref sql) = query.certs {
-            match self.certs {
-                Some(ref conn) => (conn.lock()?, sql),
-                None => return Err(CKR_GENERAL_ERROR)?,
-            }
-        } else if let Some(ref sql) = query.keys {
-            match self.keys {
-                Some(ref conn) => (conn.lock()?, sql),
-                None => return Err(CKR_GENERAL_ERROR)?,
-            }
+        let sql = if let Some(ref public) = query.public {
+            public
+        } else if let Some(ref private) = query.private {
+            private
         } else {
             return Err(CKR_GENERAL_ERROR)?;
         };
+        let conn = self.conn.lock()?;
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query(rusqlite::params_from_iter(query.params))?;
         Self::rows_to_object(rows, attrs.len() == 0)
@@ -446,22 +433,22 @@ impl NSSStorage {
      * certs or keys databases or both need to be searched.
      */
     fn prepare_search(template: &[CK_ATTRIBUTE]) -> Result<NSSSearchQuery> {
-        let mut do_keys = true;
-        let mut do_certs = true;
+        let mut do_private = true;
+        let mut do_public = true;
         let mut query = NSSSearchQuery {
-            certs: None,
-            keys: None,
+            public: None,
+            private: None,
             params: Vec::<Value>::with_capacity(template.len()),
         };
 
         /* find which tables we are going to use */
-        for idx in 0..template.len() {
-            if template[idx].type_ == CKA_CLASS {
-                if template[idx].pValue != std::ptr::null_mut() {
-                    let t = template[idx].to_ulong()?;
+        for attr in template {
+            if attr.type_ == CKA_CLASS {
+                if attr.pValue != std::ptr::null_mut() {
+                    let t = attr.to_ulong()?;
                     match t {
-                        CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_certs = false,
-                        CKO_PUBLIC_KEY | CKO_CERTIFICATE => do_keys = false,
+                        CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_public = false,
+                        CKO_PUBLIC_KEY | CKO_CERTIFICATE => do_private = false,
                         _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     }
                 }
@@ -469,20 +456,20 @@ impl NSSStorage {
             /* In NSSDB sensitive attributes are encrypted, so we can check
              * if the template is searching for any of the encrypted
              * attributes and if so just fail immediately */
-            if is_sensitive_attribute(template[idx].type_) {
+            if is_sensitive_attribute(attr.type_) {
                 return Err(CKR_ATTRIBUTE_SENSITIVE)?;
             }
         }
 
         /* if neither was excluded we may be asked for both */
-        if do_keys {
-            query.keys = Some(format!(
+        if do_private {
+            query.private = Some(format!(
                 "SELECT ALL id FROM {} WHERE ",
                 NSS_PRIVATE_TABLE
             ));
         }
-        if do_certs {
-            query.certs =
+        if do_public {
+            query.public =
                 Some(format!("SELECT ALL id FROM {} WHERE ", NSS_PUBLIC_TABLE));
         }
 
@@ -491,18 +478,18 @@ impl NSSStorage {
             let atype = AttrType::attr_id_to_attrtype(template[idx].type_)?;
             let atval = u32::try_from(template[idx].type_)?;
 
-            if let Some(ref mut keys) = query.keys {
+            if let Some(ref mut prv) = query.private {
                 if idx != 0 {
-                    keys.push_str(CONCAT);
+                    prv.push_str(CONCAT);
                 }
-                write!(keys, " a{:x} = ?", atval)?;
+                write!(prv, " a{:x} = ?", atval)?;
             }
 
-            if let Some(ref mut certs) = query.certs {
+            if let Some(ref mut pbl) = query.public {
                 if idx != 0 {
-                    certs.push_str(CONCAT);
+                    pbl.push_str(CONCAT);
                 }
-                write!(certs, " a{:x} = ?", atval)?;
+                write!(pbl, " a{:x} = ?", atval)?;
             }
 
             /* NSS Encodes explicitly empty attributes with a weird 3 bytes value,
@@ -521,12 +508,11 @@ impl NSSStorage {
     }
 
     fn search_with_params(
-        aconn: &Arc<Mutex<Connection>>,
+        conn: &mut MutexGuard<'_, rusqlite::Connection>,
         query: &str,
         params: Vec<Value>,
         table: &str,
     ) -> Result<Vec<String>> {
-        let conn = aconn.lock()?;
         let mut stmt = conn.prepare(query)?;
         let mut rows = stmt.query(rusqlite::params_from_iter(params))?;
         let mut result = Vec::<String>::new();
@@ -543,41 +529,31 @@ impl NSSStorage {
     ) -> Result<Vec<String>> {
         let mut result = Vec::<String>::new();
         let query = Self::prepare_search(template)?;
-        if let Some(ref sql) = query.certs {
-            if let Some(ref conn) = self.certs {
-                let mut certs = Self::search_with_params(
-                    conn,
-                    sql,
-                    query.params.clone(),
-                    NSS_PUBLIC_TABLE,
-                )?;
-                result.append(&mut certs);
-            } else {
-                return Err(CKR_GENERAL_ERROR)?;
-            }
+        let mut conn = self.conn.lock()?;
+        if let Some(ref sql) = query.public {
+            let mut public = Self::search_with_params(
+                &mut conn,
+                sql,
+                query.params.clone(),
+                NSS_PUBLIC_TABLE,
+            )?;
+            result.append(&mut public);
         }
-        if let Some(ref sql) = query.keys {
-            if let Some(ref conn) = self.keys {
-                let mut keys = Self::search_with_params(
-                    conn,
-                    sql,
-                    query.params,
-                    NSS_PRIVATE_TABLE,
-                )?;
-                result.append(&mut keys);
-            } else {
-                return Err(CKR_GENERAL_ERROR)?;
-            }
+        if let Some(ref sql) = query.private {
+            let mut private = Self::search_with_params(
+                &mut conn,
+                sql,
+                query.params,
+                NSS_PRIVATE_TABLE,
+            )?;
+            result.append(&mut private);
         }
         Ok(result)
     }
 
     fn fetch_metadata(&self, name: &str) -> Result<(Vec<u8>, Vec<u8>)> {
         static SQL: &str = "SELECT ALL item1, item2 FROM metaData WHERE id = ?";
-        let conn = match self.keys {
-            Some(ref conn) => conn.lock()?,
-            None => return Err(CKR_GENERAL_ERROR)?,
-        };
+        let conn = self.conn.lock()?;
         let mut stmt = conn.prepare(SQL)?;
         let mut rows = stmt.query(params![name])?;
         match rows.next()? {
@@ -632,16 +608,12 @@ impl NSSStorage {
     }
 
     fn save_password(&mut self, item1: &[u8], item2: &[u8]) -> Result<()> {
-        if let Some(ref c) = self.keys {
-            let mut conn = c.lock()?;
-            let mut tx = conn.transaction()?;
-            tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-            Self::save_metadata(&mut tx, "password", item1, item2)?;
-            tx.commit()?;
-            Ok(())
-        } else {
-            Err(CKR_GENERAL_ERROR)?
-        }
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+        Self::save_metadata(&mut tx, "password", item1, item2)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn get_next_id(tx: &mut Transaction, table: &str) -> Result<u32> {
@@ -747,15 +719,36 @@ impl NSSStorage {
 
 impl Storage for NSSStorage {
     fn open(&mut self) -> Result<StorageTokenInfo> {
-        /* NSS does not have generic storage, instead it uses different
-         * databases for different object types */
+        let mut ret = CKR_OK;
+        let mut conn = self.conn.lock()?;
+
         if !self.config.no_cert_db {
-            self.certs =
-                Some(self.db_open(&self.certsfile()?, Some(NSS_PUBLIC_TABLE))?);
+            Self::db_attach(
+                &mut conn,
+                &self.certsfile()?,
+                NSS_PUBLIC_SCHEMA,
+                self.config.read_only,
+            )?;
+            match check_table(&mut conn, NSS_PUBLIC_SCHEMA, NSS_PUBLIC_TABLE) {
+                Ok(_) => (),
+                Err(e) => ret = e.rv(),
+            }
         }
         if !self.config.no_key_db {
-            self.keys =
-                Some(self.db_open(&self.keysfile()?, Some(NSS_PRIVATE_TABLE))?);
+            Self::db_attach(
+                &mut conn,
+                &self.keysfile()?,
+                NSS_PRIVATE_SCHEMA,
+                self.config.read_only,
+            )?;
+            match check_table(&mut conn, NSS_PRIVATE_SCHEMA, NSS_PRIVATE_TABLE)
+            {
+                Ok(_) => (),
+                Err(e) => ret = e.rv(),
+            }
+        }
+        if ret != CKR_OK {
+            return Err(ret)?;
         }
         self.get_token_info()
     }
@@ -844,114 +837,79 @@ impl Storage for NSSStorage {
         facilities: &mut TokenFacilities,
         mut obj: Object,
     ) -> Result<CK_OBJECT_HANDLE> {
-        let (mut conn, table) = match obj.get_attr_as_ulong(CKA_CLASS)? {
-            CKO_PRIVATE_KEY | CKO_SECRET_KEY => match &self.keys {
-                Some(c) => (c.lock()?, NSS_PRIVATE_TABLE),
-                None => Err(CKR_GENERAL_ERROR)?,
-            },
-            CKO_PUBLIC_KEY | CKO_CERTIFICATE => match &self.certs {
-                Some(c) => (c.lock()?, NSS_PUBLIC_TABLE),
-                None => Err(CKR_GENERAL_ERROR)?,
-            },
+        let (table, dbtype) = match obj.get_attr_as_ulong(CKA_CLASS)? {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY => (NSS_PRIVATE_TABLE, "key"),
+            CKO_PUBLIC_KEY | CKO_CERTIFICATE => (NSS_PUBLIC_TABLE, "cert"),
             _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         };
 
-        if let Some(ref enckey) = self.enckey {
-            if table == NSS_PRIVATE_TABLE {
-                for typ in NSS_SENSITIVE_ATTRIBUTES {
-                    /* NOTE: this will not handle correctly empty attributes or
-                     * num types, but there are no sensitive ones */
-                    let plain = match obj.get_attr(typ) {
-                        Some(attr) => attr.get_value(),
-                        None => continue,
-                    };
-                    let encval = encrypt_data(
-                        facilities,
-                        enckey.as_slice(),
-                        NSS_MP_PBE_ITERATION_COUNT,
-                        plain.as_slice(),
-                    )?;
-                    obj.set_attr(Attribute::from_bytes(typ, encval))?;
-                }
-            }
+        let enckey = match self.enckey {
+            Some(ref e) => e,
+            None => return Err(CKR_USER_NOT_LOGGED_IN)?,
+        };
 
-            let mut tx = conn.transaction()?;
-            tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-            let nssobjid = match Self::store_object(&mut tx, table, &obj) {
-                Ok(id) => id,
-                Err(e) => {
-                    /* FIXME retry once on abort in case there was a race
-                     * with picking next id ? */
-                    return Err(e);
-                }
-            };
-
-            if table == NSS_PRIVATE_TABLE {
-                for typ in AUTHENTICATED_ATTRIBUTES {
-                    /* NOTE: this will not handle correctly empty attributes or
-                     * num types, but there are no authenticated ones */
-                    let value = match obj.get_attr(typ) {
-                        Some(attr) => attr.get_value(),
-                        None => continue,
-                    };
-                    let sig = make_signature(
-                        facilities,
-                        enckey.as_slice(),
-                        value.as_slice(),
-                        nssobjid,
-                        u32::try_from(typ)?,
-                        u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
-                    )?;
-                    Self::store_signature(
-                        &mut tx,
-                        "key",
-                        nssobjid,
-                        typ,
-                        sig.as_slice(),
-                    )?;
-                }
-            } else {
-                let mut kconn = match &self.keys {
-                    Some(c) => c.lock()?,
-                    None => return Err(CKR_GENERAL_ERROR)?,
+        if table == NSS_PRIVATE_TABLE {
+            for typ in NSS_SENSITIVE_ATTRIBUTES {
+                /* NOTE: this will not handle correctly empty attributes or
+                 * num types, but there are no sensitive ones */
+                let plain = match obj.get_attr(typ) {
+                    Some(attr) => attr.get_value(),
+                    None => continue,
                 };
-                let mut ktx = kconn.transaction()?;
-                ktx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-                for typ in AUTHENTICATED_ATTRIBUTES {
-                    let value = match obj.get_attr(typ) {
-                        Some(attr) => attr.get_value(),
-                        None => continue,
-                    };
-                    let sig = make_signature(
-                        facilities,
-                        enckey.as_slice(),
-                        value.as_slice(),
-                        nssobjid,
-                        u32::try_from(typ)?,
-                        u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
-                    )?;
-                    Self::store_signature(
-                        &mut ktx,
-                        "cert",
-                        nssobjid,
-                        typ,
-                        sig.as_slice(),
-                    )?;
-                }
-                ktx.commit()?;
+                let encval = encrypt_data(
+                    facilities,
+                    enckey.as_slice(),
+                    NSS_MP_PBE_ITERATION_COUNT,
+                    plain.as_slice(),
+                )?;
+                obj.set_attr(Attribute::from_bytes(typ, encval))?;
             }
-
-            tx.commit()?;
-
-            /* create new handle for this object */
-            let handle = facilities.handles.next();
-            facilities
-                .handles
-                .insert(handle, nss_id_format(table, nssobjid))?;
-            Ok(handle)
-        } else {
-            return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
+
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+        let nssobjid = match Self::store_object(&mut tx, table, &obj) {
+            Ok(id) => id,
+            Err(e) => {
+                /* FIXME retry once on abort in case there was a race
+                 * with picking next id ? */
+                return Err(e);
+            }
+        };
+
+        for typ in AUTHENTICATED_ATTRIBUTES {
+            /* NOTE: this will not handle correctly empty attributes or
+             * num types, but there are no authenticated ones */
+            let value = match obj.get_attr(typ) {
+                Some(attr) => attr.get_value(),
+                None => continue,
+            };
+            let sig = make_signature(
+                facilities,
+                enckey.as_slice(),
+                value.as_slice(),
+                nssobjid,
+                u32::try_from(typ)?,
+                u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
+            )?;
+            Self::store_signature(
+                &mut tx,
+                dbtype,
+                nssobjid,
+                typ,
+                sig.as_slice(),
+            )?;
+        }
+
+        tx.commit()?;
+
+        /* create new handle for this object */
+        let handle = facilities.handles.next();
+        facilities
+            .handles
+            .insert(handle, nss_id_format(table, nssobjid))?;
+        Ok(handle)
     }
 
     fn update(
@@ -1118,10 +1076,36 @@ impl StorageDBInfo for NSSDBInfo {
             }
             None => return Err(CKR_ARGUMENTS_BAD)?,
         };
+
+        let config = NSSConfig::from_args(&args)?;
+
+        /* may have to create the token directory */
+        let cdir = match config.configdir {
+            Some(ref c) => c,
+            None => return Err(CKR_TOKEN_NOT_RECOGNIZED)?,
+        };
+        if !Path::new(cdir).exists() {
+            std::fs::create_dir_all(cdir)?;
+        }
+
+        /* NSS does not have generic storage, instead it uses different
+         * databases for different object types, so we create an in memory
+         * database to set all common options, and then we attach each
+         * database file so we can operate on all of them with a single
+         * connection. Note: in order to create the database we need to
+         * have both the R/W and Create flags, the URIs generate will
+         * properly mark the attached databases as read-only if needed */
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE
+            | OpenFlags::SQLITE_OPEN_URI;
+        let conn = Arc::new(Mutex::from(
+            Connection::open_in_memory_with_flags(flags)?,
+        ));
+
         Ok(Box::new(NSSStorage {
-            config: NSSConfig::from_args(&args)?,
-            certs: None,
-            keys: None,
+            config: config,
+            conn: conn,
             enckey: None,
         }))
     }

@@ -249,7 +249,7 @@ impl SqliteStorage {
 impl StorageRaw for SqliteStorage {
     fn is_initialized(&self) -> Result<()> {
         let conn = self.conn.lock()?;
-        check_table(conn, OBJECTS_TABLE)
+        check_table(&conn, "", OBJECTS_TABLE)
     }
 
     fn db_reset(&mut self) -> Result<()> {

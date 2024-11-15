@@ -8,15 +8,18 @@ use crate::interface::*;
 
 use rusqlite;
 
-const CHECK_DB_TABLE: &str =
-    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name = ?";
-
 pub fn check_table(
-    conn: MutexGuard<'_, rusqlite::Connection>,
+    conn: &MutexGuard<'_, rusqlite::Connection>,
+    schema: &str,
     tablename: &str,
 ) -> Result<()> {
-    let mut stmt = conn.prepare(CHECK_DB_TABLE)?;
-    let mut rows = stmt.query(rusqlite::params![tablename])?;
+    let sql = if schema.len() > 0 {
+        format!("SELECT count(*) FROM {}.sqlite_master WHERE type='table' AND name = '{}'", schema, tablename)
+    } else {
+        format!("SELECT count(*) FROM sqlite_master WHERE type='table' AND name = '{}'", tablename)
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params![])?;
     if let Some(row) = rows.next()? {
         match row.get(0)? {
             1 => (),
