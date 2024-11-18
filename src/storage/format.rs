@@ -378,7 +378,26 @@ impl Storage for StdStorageFormat {
         };
 
         let mut obj = self.store.fetch_by_uid(&uid, &[])?;
-        for ck_attr in template {
+
+        let mut attrs = CkAttrs::from(template);
+
+        if self.aci.encrypts() {
+            let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+            for typ in ats {
+                /* replace the clear text val with the encrypted one */
+                match attrs.find_attr(typ) {
+                    Some(a) => {
+                        let plain = a.to_buf()?;
+                        let encval =
+                            self.aci.encrypt_value(facilities, &uid, &plain)?;
+                        attrs.insert_unique_vec(a.type_, encval)?;
+                    }
+                    None => (),
+                }
+            }
+        }
+
+        for ck_attr in attrs.as_slice() {
             obj.set_attr(ck_attr.to_attribute()?)?;
         }
         self.store.store_obj(obj)
