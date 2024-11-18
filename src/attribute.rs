@@ -750,4 +750,28 @@ impl<'a> CkAttrs<'a> {
     pub fn as_slice(&'a self) -> &'a [CK_ATTRIBUTE] {
         self.p.as_ref()
     }
+
+    pub fn find_attr(
+        &'a self,
+        typ: CK_ATTRIBUTE_TYPE,
+    ) -> Option<&'a CK_ATTRIBUTE> {
+        match self.p.as_ref().iter().find(|a| a.type_ == typ) {
+            Some(ref a) => Some(a),
+            None => None,
+        }
+    }
+
+    pub fn insert_unique_vec(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+        val: Vec<u8>,
+    ) -> Result<()> {
+        self.v.push(val);
+        let attr = self.attr_from_last(typ)?;
+        match self.p.as_ref().iter().position(|a| a.type_ == typ) {
+            Some(idx) => self.p.to_mut()[idx] = attr,
+            None => self.p.to_mut().push(attr),
+        }
+        Ok(())
+    }
 }
