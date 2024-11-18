@@ -502,6 +502,8 @@ impl Token {
                 if !self.is_logged_in(KRY_UNSPEC) {
                     return Err(CKR_USER_NOT_LOGGED_IN)?;
                 }
+                /* TODO: add a check_object_attributes, that needs only
+                 * class/key_type, to validate the template is ok */
                 self.storage.update(&self.facilities, o_handle, template)
             }
         }

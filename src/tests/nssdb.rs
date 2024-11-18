@@ -351,7 +351,7 @@ fn test_nssdb_init_token() {
 
     /* generate key pair and store it */
     /* RSA key pair */
-    let _ = ret_or_panic!(generate_key_pair(
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
         session,
         CKM_RSA_PKCS_KEY_PAIR_GEN,
         &[(CKA_MODULUS_BITS, 2048)],
@@ -374,6 +374,34 @@ fn test_nssdb_init_token() {
             (CKA_EXTRACTABLE, true),
         ],
     ));
+
+    let label = "Public Key test 1";
+    let mut template = make_ptrs_template(&[(
+        CKA_LABEL,
+        void_ptr!(label.as_ptr()),
+        label.as_bytes().len(),
+    )]);
+    let ret = fn_set_attribute_value(
+        session,
+        hpub,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let label = "Private Key test 1";
+    let mut template = make_ptrs_template(&[(
+        CKA_LABEL,
+        void_ptr!(label.as_ptr()),
+        label.as_bytes().len(),
+    )]);
+    let ret = fn_set_attribute_value(
+        session,
+        hpri,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
 
     let ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);

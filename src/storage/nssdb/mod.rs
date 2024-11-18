@@ -715,6 +715,55 @@ impl NSSStorage {
         let name = format!("sig_{}_{:08x}_{:08x}", dbtype, nssobjid, atype);
         Self::save_metadata(tx, &name, val, &[])
     }
+
+    fn store_attributes(
+        tx: &mut Transaction,
+        table: &str,
+        id: u32,
+        attrs: &CkAttrs,
+    ) -> Result<()> {
+        let mut sql = format!("UPDATE {} SET ", table);
+        let mut params = Vec::<Value>::with_capacity(1 + attrs.len());
+        for a in attrs.as_slice() {
+            let attr = a.to_attribute()?;
+            let a_type = attr.get_type();
+
+            if is_skippable_attribute(a_type) {
+                /* this is an attribute we always set on objects,
+                 * but NSS does not store in the DB */
+                continue;
+            } else if !is_db_attribute(a_type) {
+                /* NSS does not know about this attribute */
+                return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+            }
+
+            if params.len() == 0 {
+                write!(&mut sql, "a{:x}=?", a.type_)?;
+            } else {
+                write!(&mut sql, ",a{:x}=?", a.type_)?;
+            }
+
+            let a_val = attr.get_value();
+            params.push(if a_val.len() == 0 {
+                ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+            } else {
+                match attr.get_attrtype() {
+                    AttrType::NumType => num_to_val(attr.to_ulong()?)?,
+                    AttrType::DenyType | AttrType::IgnoreType => {
+                        ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                    }
+                    _ => ValueRef::from(a_val.as_slice()).into(),
+                }
+            });
+        }
+
+        sql.push_str(" WHERE id=?");
+        params.push(Value::from(id));
+
+        let mut stmt = tx.prepare(&sql)?;
+        let _ = stmt.execute(rusqlite::params_from_iter(params))?;
+        Ok(())
+    }
 }
 
 impl Storage for NSSStorage {
@@ -914,11 +963,79 @@ impl Storage for NSSStorage {
 
     fn update(
         &mut self,
-        _facilities: &TokenFacilities,
-        _handle: CK_OBJECT_HANDLE,
-        _template: &[CK_ATTRIBUTE],
+        facilities: &TokenFacilities,
+        handle: CK_OBJECT_HANDLE,
+        template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+        let nssid = match facilities.handles.get(handle) {
+            Some(id) => id,
+            None => return Err(CKR_OBJECT_HANDLE_INVALID)?,
+        };
+        let (table, nssobjid) = nss_id_parse(nssid)?;
+
+        let enckey = match self.enckey {
+            Some(ref e) => e,
+            None => return Err(CKR_USER_NOT_LOGGED_IN)?,
+        };
+
+        let mut attrs = CkAttrs::from(template);
+
+        if table == NSS_PRIVATE_TABLE {
+            for typ in NSS_SENSITIVE_ATTRIBUTES {
+                /* NOTE: this will not handle correctly empty attributes or
+                 * num types, but there are no sensitive ones */
+                match attrs.find_attr(typ) {
+                    Some(a) => {
+                        let plain = a.to_buf()?;
+                        let encval = encrypt_data(
+                            facilities,
+                            enckey.as_slice(),
+                            NSS_MP_PBE_ITERATION_COUNT,
+                            plain.as_slice(),
+                        )?;
+                        attrs.insert_unique_vec(a.type_, encval)?;
+                    }
+                    None => (),
+                }
+            }
+        }
+
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction()?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+        Self::store_attributes(&mut tx, &table, nssobjid, &attrs)?;
+
+        for typ in AUTHENTICATED_ATTRIBUTES {
+            /* NOTE: this will not handle correctly empty attributes or
+             * num types, but there are no authenticated ones */
+            match attrs.find_attr(typ) {
+                Some(a) => {
+                    let value = a.to_buf()?;
+                    let sig = make_signature(
+                        facilities,
+                        enckey.as_slice(),
+                        value.as_slice(),
+                        nssobjid,
+                        u32::try_from(typ)?,
+                        u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
+                    )?;
+                    Self::store_signature(
+                        &mut tx,
+                        if table == NSS_PUBLIC_TABLE {
+                            "cert"
+                        } else {
+                            "key"
+                        },
+                        nssobjid,
+                        typ,
+                        sig.as_slice(),
+                    )?;
+                }
+                None => (),
+            }
+        }
+
+        Ok(tx.commit()?)
     }
 
     fn search(
