@@ -595,6 +595,66 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Err(CKR_GENERAL_ERROR)?
     }
+
+    fn check_get_attributes(
+        &self,
+        template: &mut [CK_ATTRIBUTE],
+        sensitive: bool,
+    ) -> Result<()> {
+        let mut result = CKR_OK;
+        let attrs = self.get_attributes();
+        for ck_attr in template.iter_mut() {
+            match attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(attr) => {
+                    if sensitive && attr.is(OAFlags::Sensitive) {
+                        ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        if result == CKR_OK {
+                            result = CKR_ATTRIBUTE_SENSITIVE;
+                        }
+                    }
+                }
+                None => {
+                    ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    if result == CKR_OK {
+                        result = CKR_ATTRIBUTE_TYPE_INVALID;
+                    }
+                }
+            }
+        }
+        if result == CKR_OK {
+            Ok(())
+        } else {
+            Err(result)?
+        }
+    }
+
+    fn check_set_attributes(&self, template: &[CK_ATTRIBUTE]) -> Result<()> {
+        let attrs = self.get_attributes();
+        for ck_attr in template {
+            match attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
+                None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
+                Some(attr) => {
+                    if attr.is(OAFlags::Unchangeable) {
+                        if attr.attribute.get_attrtype() == AttrType::BoolType {
+                            let val = ck_attr.to_bool()?;
+                            if val {
+                                if !attr.is(OAFlags::ChangeToTrue) {
+                                    return Err(CKR_ATTRIBUTE_READ_ONLY)?;
+                                }
+                            } else {
+                                if !attr.is(OAFlags::ChangeToFalse) {
+                                    return Err(CKR_ATTRIBUTE_READ_ONLY)?;
+                                }
+                            }
+                        } else {
+                            return Err(CKR_ATTRIBUTE_READ_ONLY)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /* pkcs11-spec-v3.1 4.5 Data Objects */
@@ -1416,34 +1476,23 @@ impl ObjectFactories {
         obj: &Object,
         template: &mut [CK_ATTRIBUTE],
     ) -> Result<()> {
-        let mut result = CKR_OK;
         let sensitive = obj.is_sensitive() & !obj.is_extractable();
+        let mut result = match self
+            .get_object_factory(obj)?
+            .check_get_attributes(template, sensitive)
+        {
+            Ok(()) => CKR_OK,
+            Err(e) => e.rv(),
+        };
+
         let obj_attrs = obj.get_attributes();
-        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
         for ck_attr in template.iter_mut() {
-            if sensitive {
-                match objtype_attrs
-                    .iter()
-                    .find(|a| a.get_type() == ck_attr.type_)
-                {
-                    None => {
-                        ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        result = CKR_ATTRIBUTE_TYPE_INVALID;
-                        continue;
-                    }
-                    Some(attr) => {
-                        if attr.is(OAFlags::Sensitive) {
-                            ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                            result = CKR_ATTRIBUTE_SENSITIVE;
-                            continue;
-                        }
-                    }
-                }
-            }
             match obj_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => {
                     ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    result = CKR_ATTRIBUTE_TYPE_INVALID;
+                    if result == CKR_OK {
+                        result = CKR_ATTRIBUTE_TYPE_INVALID;
+                    }
                     continue;
                 }
                 Some(attr) => {
@@ -1454,7 +1503,9 @@ impl ObjectFactories {
                     } else {
                         if ck_attr.ulValueLen < attr_len {
                             ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                            result = CKR_BUFFER_TOO_SMALL;
+                            if result == CKR_OK {
+                                result = CKR_BUFFER_TOO_SMALL;
+                            }
                         } else {
                             ck_attr.ulValueLen = attr_len;
                             unsafe {
@@ -1486,39 +1537,8 @@ impl ObjectFactories {
         }
 
         /* first check that all attributes can be changed */
-        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
-        for ck_attr in template {
-            match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
-                None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
-                Some(attr) => {
-                    if attr.is(OAFlags::Unchangeable) {
-                        if attr.attribute.get_attrtype() == AttrType::BoolType {
-                            let val = match obj.get_attr(ck_attr.type_) {
-                                Some(a) => a.to_bool()?,
-                                None => {
-                                    if attr.has_default() {
-                                        attr.attribute.to_bool()?
-                                    } else {
-                                        return Err(CKR_ATTRIBUTE_READ_ONLY)?;
-                                    }
-                                }
-                            };
-                            if val {
-                                if !attr.is(OAFlags::ChangeToFalse) {
-                                    return Err(CKR_ATTRIBUTE_READ_ONLY)?;
-                                }
-                            } else {
-                                if !attr.is(OAFlags::ChangeToTrue) {
-                                    return Err(CKR_ATTRIBUTE_READ_ONLY)?;
-                                }
-                            }
-                        } else {
-                            return Err(CKR_ATTRIBUTE_READ_ONLY)?;
-                        }
-                    }
-                }
-            }
-        }
+        self.get_object_factory(obj)?
+            .check_set_attributes(template)?;
 
         /* if checks clear out, apply changes */
         for ck_attr in template {
