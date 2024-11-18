@@ -378,9 +378,9 @@ impl Storage for StdStorageFormat {
         };
 
         let mut obj = self.store.fetch_by_uid(&uid, &[])?;
-        facilities
-            .factories
-            .set_object_attributes(&mut obj, template)?;
+        for ck_attr in template {
+            obj.set_attr(ck_attr.to_attribute()?)?;
+        }
         self.store.store_obj(obj)
     }
 

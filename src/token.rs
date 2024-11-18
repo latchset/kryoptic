@@ -497,13 +497,32 @@ impl Token {
             Some(mut obj) => self
                 .facilities
                 .factories
+                .get_object_factory(obj)?
                 .set_object_attributes(&mut obj, template),
             None => {
                 if !self.is_logged_in(KRY_UNSPEC) {
                     return Err(CKR_USER_NOT_LOGGED_IN)?;
                 }
-                /* TODO: add a check_object_attributes, that needs only
-                 * class/key_type, to validate the template is ok */
+                /* We just need the object type to find the correct factory */
+                /* value does not matter, only type does */
+                let dnmu = CK_UNAVAILABLE_INFORMATION;
+                let dnmb = CK_FALSE;
+                let mut attrs = CkAttrs::with_capacity(3);
+                attrs.add_ulong(CKA_CLASS, &dnmu);
+                attrs.add_ulong(CKA_KEY_TYPE, &dnmu);
+                attrs.add_bool(CKA_MODIFIABLE, &dnmb);
+
+                let obj = self.storage.fetch(
+                    &self.facilities,
+                    o_handle,
+                    attrs.as_slice(),
+                )?;
+                let factory =
+                    self.facilities.factories.get_object_factory(&obj)?;
+                if !obj.is_modifiable() {
+                    return Err(CKR_ACTION_PROHIBITED)?;
+                }
+                factory.check_set_attributes(template)?;
                 self.storage.update(&self.facilities, o_handle, template)
             }
         }
