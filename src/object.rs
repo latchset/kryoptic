@@ -655,6 +655,26 @@ pub trait ObjectFactory: Debug + Send + Sync {
         }
         Ok(())
     }
+
+    fn set_object_attributes(
+        &self,
+        obj: &mut Object,
+        template: &[CK_ATTRIBUTE],
+    ) -> Result<()> {
+        if !obj.is_modifiable() {
+            return Err(CKR_ACTION_PROHIBITED)?;
+        }
+
+        /* first check that all attributes can be changed */
+        self.check_set_attributes(template)?;
+
+        /* if checks clear out, apply changes */
+        for ck_attr in template {
+            obj.set_attr(ck_attr.to_attribute()?)?;
+        }
+
+        Ok(())
+    }
 }
 
 /* pkcs11-spec-v3.1 4.5 Data Objects */
@@ -1525,27 +1545,6 @@ impl ObjectFactories {
         } else {
             Err(result)?
         }
-    }
-
-    pub fn set_object_attributes(
-        &self,
-        obj: &mut Object,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<()> {
-        if !obj.is_modifiable() {
-            return Err(CKR_ACTION_PROHIBITED)?;
-        }
-
-        /* first check that all attributes can be changed */
-        self.get_object_factory(obj)?
-            .check_set_attributes(template)?;
-
-        /* if checks clear out, apply changes */
-        for ck_attr in template {
-            obj.set_attr(ck_attr.to_attribute()?)?;
-        }
-
-        Ok(())
     }
 
     pub fn copy(
