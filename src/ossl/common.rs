@@ -6,9 +6,19 @@ use std::ffi::{c_char, c_int, c_uint, c_void};
 
 use crate::error::Result;
 use crate::interface::*;
+use crate::object;
 use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
 use crate::{byte_ptr, void_ptr};
+
+#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+use crate::ossl::ec_montgomery as ecm;
+#[cfg(feature = "ecc")]
+use crate::ossl::ecc;
+#[cfg(all(feature = "eddsa", not(feature = "fips")))]
+use crate::ossl::eddsa;
+#[cfg(feature = "rsa")]
+use crate::ossl::rsa;
 
 use zeroize::Zeroize;
 
@@ -261,6 +271,38 @@ impl EvpPkey {
     pub fn as_mut_ptr(&mut self) -> *mut EVP_PKEY {
         self.ptr
     }
+
+    fn from_object(
+        obj: &object::Object,
+        class: CK_OBJECT_CLASS,
+    ) -> Result<EvpPkey> {
+        let key_class = match class {
+            CKO_PUBLIC_KEY => EVP_PKEY_PUBLIC_KEY,
+            CKO_PRIVATE_KEY => EVP_PKEY_PRIVATE_KEY,
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
+        let key_type = obj.get_attr_as_ulong(CKA_KEY_TYPE)?;
+        let (name, params) = match key_type {
+            #[cfg(feature = "ecc")]
+            CKK_EC => ecc::ecc_object_to_params(obj, class)?,
+            #[cfg(all(feature = "eddsa", not(feature = "fips")))]
+            CKK_EC_EDWARDS => eddsa::eddsa_object_to_params(obj, class)?,
+            #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+            CKK_EC_MONTGOMERY => ecm::ecm_object_to_params(obj, class)?,
+            #[cfg(feature = "rsa")]
+            CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
+            _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+        };
+        Self::fromdata(name, key_class, &params)
+    }
+
+    pub fn pubkey_from_object(obj: &object::Object) -> Result<EvpPkey> {
+        Self::from_object(obj, CKO_PUBLIC_KEY)
+    }
+
+    pub fn privkey_from_object(obj: &object::Object) -> Result<EvpPkey> {
+        Self::from_object(obj, CKO_PRIVATE_KEY)
+    }
 }
 
 impl Drop for EvpPkey {
@@ -494,6 +536,32 @@ impl<'a> OsslParam<'a> {
                 v.len(),
             )
         };
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn add_owned_octet_string(
+        &mut self,
+        key: *const c_char,
+        v: Vec<u8>,
+    ) -> Result<()> {
+        if self.finalized {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+
+        if key == std::ptr::null() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+
+        let param = unsafe {
+            OSSL_PARAM_construct_octet_string(
+                key,
+                void_ptr!(v.as_ptr()),
+                v.len(),
+            )
+        };
+        self.v.push(v);
         self.p.to_mut().push(param);
         Ok(())
     }

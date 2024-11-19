@@ -1,7 +1,7 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use core::ffi::c_int;
+use core::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
 use crate::ecc::*;
@@ -26,7 +26,7 @@ use zeroize::Zeroize;
 /* confusingly enough, this is not EC for FIPS-level operations  */
 #[cfg(feature = "fips")]
 static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
-static EC_NAME: &[u8; 3] = b"EC\0";
+pub static EC_NAME: &[u8; 3] = b"EC\0";
 
 fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
     let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
@@ -86,46 +86,42 @@ fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     Ok(octet.to_vec())
 }
 
-pub fn make_ecdsa_public_key(
-    curve_name: &Vec<u8>,
-    ec_point: &Vec<u8>,
-) -> Result<EvpPkey> {
+pub fn ecc_object_to_params(
+    key: &Object,
+    class: CK_OBJECT_CLASS,
+) -> Result<(*const c_char, OsslParam)> {
+    let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
+    if kclass != class {
+        return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+    }
     let mut params = OsslParam::with_capacity(2);
     params.zeroize = true;
-    params.add_utf8_string(
+
+    let curve_name = get_curve_name_from_obj(key)?;
+    params.add_owned_utf8_string(
         name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
         curve_name,
     )?;
-    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
+
+    match kclass {
+        CKO_PUBLIC_KEY => {
+            params.add_owned_octet_string(
+                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                get_ec_point_from_obj(key)?,
+            )?;
+        }
+        CKO_PRIVATE_KEY => {
+            params.add_bn(
+                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                key.get_attr_as_bytes(CKA_VALUE)?,
+            )?;
+        }
+        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    }
+
     params.finalize();
 
-    EvpPkey::fromdata(name_as_char(EC_NAME), EVP_PKEY_PUBLIC_KEY, &params)
-}
-
-/// Convert the PKCS #11 public key object to OpenSSL EVP_PKEY
-fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
-    make_ecdsa_public_key(
-        &get_curve_name_from_obj(key)?,
-        &get_ec_point_from_obj(key)?,
-    )
-}
-
-/// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
-pub fn ecdsa_object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
-    let curve_name = get_curve_name_from_obj(key)?;
-    let mut params = OsslParam::with_capacity(2);
-    params.zeroize = true;
-    params.add_utf8_string(
-        name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-        &curve_name,
-    )?;
-    params.add_bn(
-        name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
-        key.get_attr_as_bytes(CKA_VALUE)?,
-    )?;
-    params.finalize();
-
-    EvpPkey::fromdata(name_as_char(EC_NAME), EVP_PKEY_PRIVATE_KEY, &params)
+    Ok((name_as_char(EC_NAME), params))
 }
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
@@ -250,11 +246,12 @@ impl EccOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EccOperation> {
+        let privkey = EvpPkey::privkey_from_object(key)?;
         Ok(EccOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_ecdsa_obj(key)?,
             public_key: None,
-            private_key: Some(ecdsa_object_to_ecc_private_key(key)?),
+            private_key: Some(privkey),
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -272,10 +269,11 @@ impl EccOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EccOperation> {
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
         Ok(EccOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_ecdsa_obj(key)?,
-            public_key: Some(object_to_ecc_public_key(key)?),
+            public_key: Some(pubkey),
             private_key: None,
             finalized: false,
             in_use: false,
