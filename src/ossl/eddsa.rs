@@ -215,43 +215,44 @@ impl EddsaOperation {
     }
 }
 
-macro_rules! sig_params {
-    ($op:expr) => {{
-        let mut params = OsslParam::with_capacity(2);
-        params.zeroize = true;
-        match &$op.params.context_data {
-            Some(v) => {
-                params.add_octet_string(
-                    name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
-                    &v,
-                )?;
-            }
-            _ => (),
-        };
+fn sig_params<'a>(
+    eddsa_params: &'a EddsaParams,
+    outlen: usize,
+) -> Result<OsslParam<'a>> {
+    let mut params = OsslParam::with_capacity(2);
+    params.zeroize = true;
+    match &eddsa_params.context_data {
+        Some(v) => {
+            params.add_octet_string(
+                name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+                &v,
+            )?;
+        }
+        _ => (),
+    };
 
-        let instance = match $op.params.ph_flag {
-            None => match $op.output_len {
-                OUTLEN_ED25519 => b"Ed25519\0".to_vec(),
-                _ => return Err(CKR_GENERAL_ERROR)?,
-            },
-            Some(true) => match $op.output_len {
-                OUTLEN_ED448 => b"Ed448ph\0".to_vec(),
-                OUTLEN_ED25519 => b"Ed25519ph\0".to_vec(),
-                _ => return Err(CKR_GENERAL_ERROR)?,
-            },
-            Some(false) => match $op.output_len {
-                OUTLEN_ED448 => b"Ed448\0".to_vec(),
-                OUTLEN_ED25519 => b"Ed25519ctx\0".to_vec(),
-                _ => return Err(CKR_GENERAL_ERROR)?,
-            },
-        };
-        params.add_owned_utf8_string(
-            name_as_char(OSSL_SIGNATURE_PARAM_INSTANCE),
-            instance,
-        )?;
-        params.finalize();
-        params
-    }};
+    let instance = match eddsa_params.ph_flag {
+        None => match outlen {
+            OUTLEN_ED25519 => b"Ed25519\0".to_vec(),
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        },
+        Some(true) => match outlen {
+            OUTLEN_ED448 => b"Ed448ph\0".to_vec(),
+            OUTLEN_ED25519 => b"Ed25519ph\0".to_vec(),
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        },
+        Some(false) => match outlen {
+            OUTLEN_ED448 => b"Ed448\0".to_vec(),
+            OUTLEN_ED25519 => b"Ed25519ctx\0".to_vec(),
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        },
+    };
+    params.add_owned_utf8_string(
+        name_as_char(OSSL_SIGNATURE_PARAM_INSTANCE),
+        instance,
+    )?;
+    params.finalize();
+    Ok(params)
 }
 
 impl MechOperation for EddsaOperation {
@@ -283,7 +284,7 @@ impl Sign for EddsaOperation {
         if !self.in_use {
             self.in_use = true;
 
-            let mut params = sig_params!(self);
+            let mut params = sig_params(&self.params, self.output_len)?;
 
             #[cfg(not(feature = "fips"))]
             if unsafe {
@@ -383,7 +384,7 @@ impl Verify for EddsaOperation {
         if !self.in_use {
             self.in_use = true;
 
-            let mut params = sig_params!(self);
+            let mut params = sig_params(&self.params, self.output_len)?;
 
             #[cfg(not(feature = "fips"))]
             if unsafe {
