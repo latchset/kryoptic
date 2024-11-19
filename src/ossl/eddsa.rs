@@ -5,7 +5,7 @@ use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
 use crate::ecc_misc::*;
-use crate::error::{device_error, general_error, Result};
+use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
 use crate::object::Object;
@@ -23,84 +23,16 @@ use crate::ossl::get_libctx;
 #[cfg(feature = "fips")]
 static ECDSA_NAME: &[u8; 6] = b"EDDSA\0";
 
-static OSSL_ED25519: &[u8; 8] = b"ED25519\0";
-static OSSL_ED448: &[u8; 6] = b"ED448\0";
+pub const OUTLEN_ED25519: usize = 64;
+pub const OUTLEN_ED448: usize = 114;
 
-pub const BITS_ED25519: usize = 255;
-pub const BITS_ED448: usize = 448;
-
-// ASN.1 encoding of the OID
-const OID_ED25519: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 112);
-const OID_ED448: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 113);
-
-// ASN.1 encoding of the curve name
-const STRING_ED25519: &[u8] = &[
-    0x13, 0x0c, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x32, 0x35, 0x35,
-    0x31, 0x39,
-];
-const STRING_ED448: &[u8] = &[
-    0x13, 0x0a, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x34, 0x34, 0x38,
-];
-
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
-    match oid {
-        OID_ED25519 => Ok(BITS_ED25519),
-        OID_ED448 => Ok(BITS_ED448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
-    let asn1_name = match asn1::write_single(&name) {
-        Ok(r) => r,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    match asn1_name.as_slice() {
-        STRING_ED25519 => Ok(BITS_ED25519),
-        STRING_ED448 => Ok(BITS_ED448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
-    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    let bits = match asn1::parse_single::<ECParameters>(x) {
-        Ok(a) => match a {
-            ECParameters::OId(o) => oid_to_bits(o)?,
-            ECParameters::CurveName(c) => curve_name_to_bits(c)?,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        },
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    Ok(bits)
-}
-
-fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
-    match make_bits_from_ec_params(key) {
-        Ok(BITS_ED25519) => Ok(OSSL_ED25519),
-        Ok(BITS_ED448) => Ok(OSSL_ED448),
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn make_output_length_from_obj(key: &Object) -> Result<usize> {
-    match make_bits_from_ec_params(key) {
-        Ok(255) => Ok(64),
-        Ok(448) => Ok(114),
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> Result<EddsaParams> {
+fn parse_params(mech: &CK_MECHANISM, outlen: usize) -> Result<EddsaParams> {
     if mech.mechanism != CKM_EDDSA {
         return Err(CKR_MECHANISM_INVALID)?;
     }
     match mech.ulParameterLen {
         0 => {
-            if is_448 {
+            if outlen == OUTLEN_ED448 {
                 Err(CKR_MECHANISM_PARAM_INVALID)?
             } else {
                 Ok(no_params())
@@ -124,13 +56,6 @@ fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> Result<EddsaParams> {
             })
         }
     }
-}
-
-fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
-    let point = key.get_attr_as_bytes(CKA_EC_POINT).map_err(general_error)?;
-    /* [u8] is an octet string for the asn1 library */
-    let octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
-    Ok(octet.to_vec())
 }
 
 pub fn eddsa_object_to_params(
@@ -175,14 +100,6 @@ fn no_params() -> EddsaParams {
     }
 }
 
-fn is_448_curve(key: &Object) -> Result<bool> {
-    match make_bits_from_ec_params(key) {
-        Ok(BITS_ED25519) => Ok(false),
-        Ok(BITS_ED448) => Ok(true),
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
 macro_rules! get_sig_ctx {
     ($key:ident) => {
         /* needless match, but otherwise rust complains about experimental attributes on
@@ -209,7 +126,6 @@ pub struct EddsaOperation {
     public_key: Option<EvpPkey>,
     private_key: Option<EvpPkey>,
     params: EddsaParams,
-    is448: bool,
     data: Vec<u8>,
     finalized: bool,
     in_use: bool,
@@ -225,15 +141,14 @@ impl EddsaOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EddsaOperation> {
-        let is_448 = is_448_curve(key)?;
         let privkey = EvpPkey::privkey_from_object(key)?;
+        let outlen = 2 * ((privkey.get_bits()? + 7) / 8);
         Ok(EddsaOperation {
             mech: mech.mechanism,
-            output_len: make_output_length_from_obj(key)?,
+            output_len: outlen,
             public_key: None,
             private_key: Some(privkey),
-            params: parse_params(mech, is_448)?,
-            is448: is_448,
+            params: parse_params(mech, outlen)?,
             data: Vec::new(),
             finalized: false,
             in_use: false,
@@ -246,15 +161,14 @@ impl EddsaOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EddsaOperation> {
-        let is_448 = is_448_curve(key)?;
         let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
         Ok(EddsaOperation {
             mech: mech.mechanism,
-            output_len: make_output_length_from_obj(key)?,
+            output_len: outlen,
             public_key: Some(pubkey),
             private_key: None,
-            params: parse_params(mech, is_448)?,
-            is448: is_448,
+            params: parse_params(mech, outlen)?,
             data: Vec::new(),
             finalized: false,
             in_use: false,
@@ -316,27 +230,20 @@ macro_rules! sig_params {
         };
 
         let instance = match $op.params.ph_flag {
-            None => {
-                if $op.is448 {
-                    return Err(CKR_GENERAL_ERROR)?;
-                } else {
-                    b"Ed25519\0".to_vec()
-                }
-            }
-            Some(true) => {
-                if $op.is448 {
-                    b"Ed448ph\0".to_vec()
-                } else {
-                    b"Ed25519ph\0".to_vec()
-                }
-            }
-            Some(false) => {
-                if $op.is448 {
-                    b"Ed448\0".to_vec()
-                } else {
-                    b"Ed25519ctx\0".to_vec()
-                }
-            }
+            None => match $op.output_len {
+                OUTLEN_ED25519 => b"Ed25519\0".to_vec(),
+                _ => return Err(CKR_GENERAL_ERROR)?,
+            },
+            Some(true) => match $op.output_len {
+                OUTLEN_ED448 => b"Ed448ph\0".to_vec(),
+                OUTLEN_ED25519 => b"Ed25519ph\0".to_vec(),
+                _ => return Err(CKR_GENERAL_ERROR)?,
+            },
+            Some(false) => match $op.output_len {
+                OUTLEN_ED448 => b"Ed448\0".to_vec(),
+                OUTLEN_ED25519 => b"Ed25519ctx\0".to_vec(),
+                _ => return Err(CKR_GENERAL_ERROR)?,
+            },
         };
         params.add_owned_utf8_string(
             name_as_char(OSSL_SIGNATURE_PARAM_INSTANCE),

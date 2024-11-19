@@ -14,8 +14,8 @@ use crate::{attr_element, bytes_attr_not_empty};
 
 use once_cell::sync::Lazy;
 
-pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_CURVE25519;
-pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_CURVE448;
+pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X25519;
+pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X448;
 
 #[derive(Debug)]
 pub struct ECMontgomeryPubFactory {

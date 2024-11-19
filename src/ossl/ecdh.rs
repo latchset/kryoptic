@@ -6,16 +6,13 @@ use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
 use crate::bytes_to_vec;
+use crate::ecc_misc::*;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
-#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-use crate::ossl::ec_montgomery::get_ossl_name_from_obj;
-#[cfg(feature = "ecc")]
-use crate::ossl::ecc::{get_curve_name_from_obj, EC_NAME};
 
 fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     match mech {
@@ -39,9 +36,9 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
     let name = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
         #[cfg(feature = "ecc")]
         CKK_EC => {
-            params.add_owned_utf8_string(
+            params.add_const_c_string(
                 name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-                get_curve_name_from_obj(key)?,
+                name_as_char(get_ossl_name_from_obj(key)?),
             )?;
             EC_NAME
         }
@@ -135,10 +132,7 @@ impl Derive for ECDHOperation {
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
 
-        let raw_max = 2
-            * ((usize::try_from(unsafe { EVP_PKEY_get_bits(pkey.as_ptr()) })?
-                + 7)
-                / 8);
+        let raw_max = 2 * ((pkey.get_bits()? + 7) / 8);
         /* the raw ECDH results have length of bit field length */
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => {

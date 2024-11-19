@@ -303,6 +303,31 @@ impl EvpPkey {
     pub fn privkey_from_object(obj: &object::Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PRIVATE_KEY)
     }
+
+    #[cfg(not(feature = "fips"))]
+    pub fn get_bits(&self) -> Result<usize> {
+        let ret = unsafe { EVP_PKEY_get_bits(self.ptr) };
+        if ret == 0 {
+            return Err(CKR_KEY_INDIGESTIBLE)?;
+        }
+        Ok(usize::try_from(ret)?)
+    }
+    #[cfg(feature = "fips")]
+    pub fn get_bits(&self) -> Result<usize> {
+        /* EVP_PKEY_get_bits() not available in libfips.a */
+        let mut bits: c_int = 0;
+        let ret = unsafe {
+            EVP_PKEY_get_int_param(
+                self.ptr,
+                name_as_char(OSSL_PKEY_PARAM_BITS),
+                &mut bits,
+            )
+        };
+        if ret == 0 {
+            return Err(CKR_KEY_INDIGESTIBLE)?;
+        }
+        Ok(usize::try_from(bits)?)
+    }
 }
 
 impl Drop for EvpPkey {
@@ -450,6 +475,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_utf8_string(
         &mut self,
         key: *const c_char,
