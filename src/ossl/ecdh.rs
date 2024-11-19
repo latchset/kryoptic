@@ -13,15 +13,9 @@ use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-use crate::ossl::ec_montgomery::{
-    make_ec_montgomery_public_key, make_output_length_from_montgomery_obj,
-    montgomery_object_to_ecc_private_key,
-};
+use crate::ossl::ec_montgomery::get_ossl_name_from_obj;
 #[cfg(feature = "ecc")]
-use crate::ossl::ecc::{
-    ecdsa_object_to_ecc_private_key, get_curve_name_from_obj,
-    make_ecdsa_public_key, make_output_length_from_ecdsa_obj,
-};
+use crate::ossl::ecc::{get_curve_name_from_obj, EC_NAME};
 
 fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     match mech {
@@ -38,39 +32,28 @@ fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     }
 }
 
-fn make_derive_output_length_from_obj(key: &Object) -> Result<usize> {
-    let key_type = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
-    match key_type {
-        #[cfg(feature = "ecc")]
-        CKK_EC => make_output_length_from_ecdsa_obj(key),
-        #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-        CKK_EC_MONTGOMERY => make_output_length_from_montgomery_obj(key),
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    }
-}
-
-fn derive_object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
-    let key_type = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
-    match key_type {
-        #[cfg(feature = "ecc")]
-        CKK_EC => ecdsa_object_to_ecc_private_key(key),
-        #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-        CKK_EC_MONTGOMERY => montgomery_object_to_ecc_private_key(key),
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    }
-}
-
 fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
-    let key_type = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
-    match key_type {
+    let mut params = OsslParam::with_capacity(2);
+    params.zeroize = true;
+
+    let name = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
         #[cfg(feature = "ecc")]
         CKK_EC => {
-            make_ecdsa_public_key(&get_curve_name_from_obj(key)?, &ec_point)
+            params.add_owned_utf8_string(
+                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+                get_curve_name_from_obj(key)?,
+            )?;
+            EC_NAME
         }
         #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-        CKK_EC_MONTGOMERY => make_ec_montgomery_public_key(key, ec_point),
+        CKK_EC_MONTGOMERY => get_ossl_name_from_obj(key)?,
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    }
+    };
+
+    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
+    params.finalize();
+
+    EvpPkey::fromdata(name_as_char(name), EVP_PKEY_PUBLIC_KEY, &params)
 }
 
 #[derive(Debug)]
@@ -140,6 +123,8 @@ impl Derive for ECDHOperation {
         };
         let outlen: c_uint;
 
+        let mut pkey = EvpPkey::privkey_from_object(key)?;
+
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;
         params.add_int(
@@ -150,8 +135,11 @@ impl Derive for ECDHOperation {
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
 
+        let raw_max = 2
+            * ((usize::try_from(unsafe { EVP_PKEY_get_bits(pkey.as_ptr()) })?
+                + 7)
+                / 8);
         /* the raw ECDH results have length of bit field length */
-        let raw_max = make_derive_output_length_from_obj(key)?;
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => {
                 let value_len = usize::try_from(a.to_ulong()?)?;
@@ -205,7 +193,6 @@ impl Derive for ECDHOperation {
 
         params.finalize();
 
-        let mut pkey = derive_object_to_ecc_private_key(key)?;
         let mut ctx = pkey.new_ctx()?;
         let res = unsafe {
             EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
@@ -215,8 +202,7 @@ impl Derive for ECDHOperation {
         }
 
         let ec_point = {
-            let ec_point_size = make_derive_output_length_from_obj(key)? + 1;
-            if self.public.len() > ec_point_size {
+            if self.public.len() > raw_max + 1 {
                 /* try to see if it is a DER encoded point */
                 match asn1::parse_single::<&[u8]>(self.public.as_slice()) {
                     Ok(pt) => Cow::Owned(pt.to_vec()),

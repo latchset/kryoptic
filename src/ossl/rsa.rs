@@ -31,8 +31,21 @@ pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
 static RSA_NAME: &[u8; 4] = b"RSA\0";
 
-fn object_to_rsa_public_key(key: &Object) -> Result<EvpPkey> {
-    let mut params = OsslParam::with_capacity(2);
+pub fn rsa_object_to_params(
+    key: &Object,
+    class: CK_OBJECT_CLASS,
+) -> Result<(*const c_char, OsslParam)> {
+    let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
+    let mut params = match class {
+        CKO_PUBLIC_KEY => OsslParam::with_capacity(2),
+        CKO_PRIVATE_KEY => {
+            if kclass == CKO_PUBLIC_KEY {
+                return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+            }
+            OsslParam::with_capacity(9)
+        }
+        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    };
     params.zeroize = true;
     params.add_bn(
         name_as_char(OSSL_PKEY_PARAM_RSA_N),
@@ -42,61 +55,48 @@ fn object_to_rsa_public_key(key: &Object) -> Result<EvpPkey> {
         name_as_char(OSSL_PKEY_PARAM_RSA_E),
         key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
     )?;
-    params.finalize();
 
-    EvpPkey::fromdata(name_as_char(RSA_NAME), EVP_PKEY_PUBLIC_KEY, &params)
-}
+    if class == CKO_PRIVATE_KEY {
+        params.add_bn(
+            name_as_char(OSSL_PKEY_PARAM_RSA_D),
+            key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
+        )?;
 
-fn object_to_rsa_private_key(key: &Object) -> Result<EvpPkey> {
-    let mut params = OsslParam::with_capacity(9);
-    params.zeroize = true;
-    params.add_bn(
-        name_as_char(OSSL_PKEY_PARAM_RSA_N),
-        key.get_attr_as_bytes(CKA_MODULUS)?,
-    )?;
-    params.add_bn(
-        name_as_char(OSSL_PKEY_PARAM_RSA_E),
-        key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
-    )?;
-    params.add_bn(
-        name_as_char(OSSL_PKEY_PARAM_RSA_D),
-        key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
-    )?;
+        /* OpenSSL can compute a,b,c with just p,q */
+        if key.get_attr(CKA_PRIME_1).is_some()
+            && key.get_attr(CKA_PRIME_2).is_some()
+        {
+            params.add_bn(
+                name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1),
+                key.get_attr_as_bytes(CKA_PRIME_1)?,
+            )?;
+            params.add_bn(
+                name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2),
+                key.get_attr_as_bytes(CKA_PRIME_2)?,
+            )?;
+        }
 
-    /* OpenSSL can compute a,b,c with just p,q */
-    if key.get_attr(CKA_PRIME_1).is_some()
-        && key.get_attr(CKA_PRIME_2).is_some()
-    {
-        params.add_bn(
-            name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR1),
-            key.get_attr_as_bytes(CKA_PRIME_1)?,
-        )?;
-        params.add_bn(
-            name_as_char(OSSL_PKEY_PARAM_RSA_FACTOR2),
-            key.get_attr_as_bytes(CKA_PRIME_2)?,
-        )?;
-    }
-
-    if key.get_attr(CKA_EXPONENT_1).is_some()
-        && key.get_attr(CKA_EXPONENT_2).is_some()
-        && key.get_attr(CKA_COEFFICIENT).is_some()
-    {
-        params.add_bn(
-            name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1),
-            key.get_attr_as_bytes(CKA_EXPONENT_1)?,
-        )?;
-        params.add_bn(
-            name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2),
-            key.get_attr_as_bytes(CKA_EXPONENT_2)?,
-        )?;
-        params.add_bn(
-            name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
-            key.get_attr_as_bytes(CKA_COEFFICIENT)?,
-        )?;
+        if key.get_attr(CKA_EXPONENT_1).is_some()
+            && key.get_attr(CKA_EXPONENT_2).is_some()
+            && key.get_attr(CKA_COEFFICIENT).is_some()
+        {
+            params.add_bn(
+                name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT1),
+                key.get_attr_as_bytes(CKA_EXPONENT_1)?,
+            )?;
+            params.add_bn(
+                name_as_char(OSSL_PKEY_PARAM_RSA_EXPONENT2),
+                key.get_attr_as_bytes(CKA_EXPONENT_2)?,
+            )?;
+            params.add_bn(
+                name_as_char(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
+                key.get_attr_as_bytes(CKA_COEFFICIENT)?,
+            )?;
+        }
     }
     params.finalize();
 
-    EvpPkey::fromdata(name_as_char(RSA_NAME), EVP_PKEY_PRIVATE_KEY, &params)
+    Ok((name_as_char(RSA_NAME), params))
 }
 
 fn mgf1_to_digest_name_as_slice(mech: CK_MECHANISM_TYPE) -> &'static [u8] {
@@ -256,6 +256,7 @@ impl RsaPKCSOperation {
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
         let oaep_params = parse_oaep_params(mech)?;
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: Self::max_message_len(
@@ -264,7 +265,7 @@ impl RsaPKCSOperation {
                 oaep_params.hash,
             )?,
             output_len: modulus.len(),
-            public_key: Some(object_to_rsa_public_key(key)?),
+            public_key: Some(pubkey),
             private_key: None,
             finalized: false,
             in_use: false,
@@ -289,6 +290,8 @@ impl RsaPKCSOperation {
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
         let oaep_params = parse_oaep_params(mech)?;
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let privkey = EvpPkey::privkey_from_object(key)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: modulus.len(),
@@ -297,8 +300,8 @@ impl RsaPKCSOperation {
                 mech.mechanism,
                 oaep_params.hash,
             )?,
-            public_key: Some(object_to_rsa_public_key(key)?),
-            private_key: Some(object_to_rsa_private_key(key)?),
+            public_key: Some(pubkey),
+            private_key: Some(privkey),
             finalized: false,
             in_use: false,
             sigctx: None,
@@ -323,6 +326,8 @@ impl RsaPKCSOperation {
         }
 
         let pss_params = parse_pss_params(mech)?;
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let privkey = EvpPkey::privkey_from_object(key)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: match mech.mechanism {
@@ -331,8 +336,8 @@ impl RsaPKCSOperation {
                 _ => 0,
             },
             output_len: modulus.len(),
-            public_key: Some(object_to_rsa_public_key(key)?),
-            private_key: Some(object_to_rsa_private_key(key)?),
+            public_key: Some(pubkey),
+            private_key: Some(privkey),
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -363,6 +368,7 @@ impl RsaPKCSOperation {
         }
 
         let pss_params = parse_pss_params(mech)?;
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: match mech.mechanism {
@@ -370,7 +376,7 @@ impl RsaPKCSOperation {
                 _ => 0,
             },
             output_len: modulus.len(),
-            public_key: Some(object_to_rsa_public_key(key)?),
+            public_key: Some(pubkey),
             private_key: None,
             finalized: false,
             in_use: false,

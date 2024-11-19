@@ -5,7 +5,7 @@ use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
 use crate::ecc_misc::*;
-use crate::error::Result;
+use crate::error::{device_error, general_error, Result};
 use crate::interface::*;
 use crate::mechanism::*;
 use crate::object::Object;
@@ -126,51 +126,46 @@ fn parse_params(mech: &CK_MECHANISM, is_448: bool) -> Result<EddsaParams> {
     }
 }
 
-/// Convert the PKCS #11 public key object to OpenSSL EVP_PKEY
-fn object_to_ecc_public_key(key: &Object) -> Result<EvpPkey> {
-    let ec_point = match key.get_attr_as_bytes(CKA_EC_POINT) {
-        Ok(v) => v,
-        Err(_) => return Err(CKR_DEVICE_ERROR)?,
-    };
-    /* The CKA_EC_POINT should be DER encoded */
-    let octet = match asn1::parse_single::<&[u8]>(ec_point) {
-        Ok(a) => a.to_vec(),
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    let mut params = OsslParam::with_capacity(1);
-    params.zeroize = true;
-    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), &octet)?;
-    params.finalize();
-
-    EvpPkey::fromdata(
-        get_ossl_name_from_obj(key)?.as_ptr() as *const c_char,
-        EVP_PKEY_PUBLIC_KEY,
-        &params,
-    )
+fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
+    let point = key.get_attr_as_bytes(CKA_EC_POINT).map_err(general_error)?;
+    /* [u8] is an octet string for the asn1 library */
+    let octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
+    Ok(octet.to_vec())
 }
 
-/// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
-fn object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
-    let priv_key = match key.get_attr_as_bytes(CKA_VALUE) {
-        Ok(v) => v,
-        Err(_) => return Err(CKR_DEVICE_ERROR)?,
-    };
-    let mut priv_key_octet: Vec<u8> = Vec::with_capacity(priv_key.len() + 2);
-    priv_key_octet.push(4); /* tag octet string */
-    priv_key_octet.push(u8::try_from(priv_key.len())?); /* length */
-    priv_key_octet.extend(priv_key);
-
+pub fn eddsa_object_to_params(
+    key: &Object,
+    class: CK_OBJECT_CLASS,
+) -> Result<(*const c_char, OsslParam)> {
+    let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
+    if kclass != class {
+        return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+    }
     let mut params = OsslParam::with_capacity(1);
     params.zeroize = true;
-    params
-        .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY), priv_key)?;
+
+    let name = get_ossl_name_from_obj(key)?;
+
+    match kclass {
+        CKO_PUBLIC_KEY => {
+            params.add_owned_octet_string(
+                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                get_ec_point_from_obj(key)?,
+            )?;
+        }
+        CKO_PRIVATE_KEY => {
+            params.add_octet_string(
+                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                key.get_attr_as_bytes(CKA_VALUE)?,
+            )?;
+        }
+
+        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    }
+
     params.finalize();
 
-    EvpPkey::fromdata(
-        get_ossl_name_from_obj(key)?.as_ptr() as *const c_char,
-        EVP_PKEY_PRIVATE_KEY,
-        &params,
-    )
+    Ok((name_as_char(name), params))
 }
 
 fn no_params() -> EddsaParams {
@@ -231,11 +226,12 @@ impl EddsaOperation {
         _: &CK_MECHANISM_INFO,
     ) -> Result<EddsaOperation> {
         let is_448 = is_448_curve(key)?;
+        let privkey = EvpPkey::privkey_from_object(key)?;
         Ok(EddsaOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
             public_key: None,
-            private_key: Some(object_to_ecc_private_key(key)?),
+            private_key: Some(privkey),
             params: parse_params(mech, is_448)?,
             is448: is_448,
             data: Vec::new(),
@@ -251,10 +247,11 @@ impl EddsaOperation {
         _: &CK_MECHANISM_INFO,
     ) -> Result<EddsaOperation> {
         let is_448 = is_448_curve(key)?;
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
         Ok(EddsaOperation {
             mech: mech.mechanism,
             output_len: make_output_length_from_obj(key)?,
-            public_key: Some(object_to_ecc_public_key(key)?),
+            public_key: Some(pubkey),
             private_key: None,
             params: parse_params(mech, is_448)?,
             is448: is_448,

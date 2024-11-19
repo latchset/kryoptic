@@ -5,7 +5,7 @@ use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
 use crate::ecc_misc::*;
-use crate::error::Result;
+use crate::error::{device_error, general_error, Result};
 use crate::interface::*;
 use crate::object::Object;
 use crate::ossl::bindings::*;
@@ -67,7 +67,7 @@ fn make_bits_from_obj(key: &Object) -> Result<usize> {
     Ok(bits)
 }
 
-fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
+pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
     match make_bits_from_obj(key) {
         Ok(BITS_CURVE25519) => Ok(OSSL_CURVE25519),
         Ok(BITS_CURVE448) => Ok(OSSL_CURVE448),
@@ -75,52 +75,46 @@ fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
     }
 }
 
-pub fn make_output_length_from_montgomery_obj(key: &Object) -> Result<usize> {
-    match make_bits_from_obj(key) {
-        Ok(255) => Ok(64),
-        Ok(448) => Ok(114),
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    }
+fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
+    let point = key.get_attr_as_bytes(CKA_EC_POINT).map_err(general_error)?;
+    /* [u8] is an octet string for the asn1 library */
+    let octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
+    Ok(octet.to_vec())
 }
 
-pub fn make_ec_montgomery_public_key(
+pub fn ecm_object_to_params(
     key: &Object,
-    ec_point: &Vec<u8>,
-) -> Result<EvpPkey> {
+    class: CK_OBJECT_CLASS,
+) -> Result<(*const c_char, OsslParam)> {
+    let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
+    if kclass != class {
+        return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+    }
     let mut params = OsslParam::with_capacity(1);
     params.zeroize = true;
-    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
+
+    let name = get_ossl_name_from_obj(key)?;
+
+    match kclass {
+        CKO_PUBLIC_KEY => {
+            params.add_owned_octet_string(
+                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                get_ec_point_from_obj(key)?,
+            )?;
+        }
+        CKO_PRIVATE_KEY => {
+            params.add_octet_string(
+                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                key.get_attr_as_bytes(CKA_VALUE)?,
+            )?;
+        }
+
+        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    }
+
     params.finalize();
 
-    EvpPkey::fromdata(
-        get_ossl_name_from_obj(key)?.as_ptr() as *const c_char,
-        EVP_PKEY_PUBLIC_KEY,
-        &params,
-    )
-}
-
-/// Convert the PKCS #11 private key object to OpenSSL EVP_PKEY
-pub fn montgomery_object_to_ecc_private_key(key: &Object) -> Result<EvpPkey> {
-    let priv_key = match key.get_attr_as_bytes(CKA_VALUE) {
-        Ok(v) => v,
-        Err(_) => return Err(CKR_DEVICE_ERROR)?,
-    };
-    let mut priv_key_octet: Vec<u8> = Vec::with_capacity(priv_key.len() + 2);
-    priv_key_octet.push(4); /* tag octet string */
-    priv_key_octet.push(u8::try_from(priv_key.len())?); /* length */
-    priv_key_octet.extend(priv_key);
-
-    let mut params = OsslParam::with_capacity(1);
-    params.zeroize = true;
-    params
-        .add_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY), priv_key)?;
-    params.finalize();
-
-    EvpPkey::fromdata(
-        get_ossl_name_from_obj(key)?.as_ptr() as *const c_char,
-        EVP_PKEY_PRIVATE_KEY,
-        &params,
-    )
+    Ok((name_as_char(name), params))
 }
 
 #[derive(Debug)]
@@ -149,12 +143,9 @@ impl ECMontgomeryOperation {
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
-        let point_encoded = match asn1::write_single(
+        let point_encoded = asn1::write_single(
             &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
-        ) {
-            Ok(b) => b,
-            Err(_) => return Err(CKR_GENERAL_ERROR)?,
-        };
+        )?;
         pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
         /* Private Key */
