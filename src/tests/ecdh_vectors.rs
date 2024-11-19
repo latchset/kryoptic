@@ -3,8 +3,9 @@
 
 use std::io;
 use std::io::BufRead;
+use std::str::from_utf8;
 
-use crate::ecc;
+use crate::ecc_misc;
 use crate::tests::*;
 
 use serial_test::parallel;
@@ -20,26 +21,13 @@ struct EccKey {
 struct EcdhTestUnit {
     line: usize,
     count: usize,
-    curve_name: &'static str,
+    curve_name: &'static [u8],
     ec_params: &'static [u8],
     cavs: EccKey,
     iut: EccKey,
     z: Vec<u8>,
     fail: bool,
     errno: u8,
-}
-
-// defined here for completing parsing -- not used as this curve is not supported
-const NAME_SECP224R1: &str = "prime224v1";
-
-fn map_curve(curve: &str) -> Option<&'static str> {
-    match curve {
-        "P-224" => Some(NAME_SECP224R1),
-        "P-256" => Some(ecc::NAME_SECP256R1),
-        "P-384" => Some(ecc::NAME_SECP384R1),
-        "P-521" => Some(ecc::NAME_SECP521R1),
-        _ => None,
-    }
 }
 
 enum EcdhParserState {
@@ -53,7 +41,7 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
 
     let mut data = Vec::<EcdhTestUnit>::new();
     let mut tags = Vec::<String>::new();
-    let mut sets = HashMap::<String, &str>::new();
+    let mut sets = HashMap::<String, &[u8]>::new();
     let mut tag = None;
     let mut curve = None;
     let mut tagg = String::new();
@@ -87,9 +75,14 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
                     tag = Some(line.clone());
                     curve = None;
                 } else if line.starts_with(kw) {
-                    curve = map_curve(&line[kw.len()..line.len() - 1]);
+                    curve = ecc_misc::map_curve_name(
+                        &line[kw.len()..line.len() - 1],
+                    );
                     if curve != None {
-                        println!("  : {} Matched", curve.unwrap());
+                        println!(
+                            "  : {} Matched",
+                            from_utf8(curve.unwrap()).unwrap()
+                        );
                     }
                 }
 
@@ -97,7 +90,11 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
                     Some(ref t) => match curve {
                         Some(c) => {
                             sets.insert(t.clone(), c);
-                            println!("  : {} -> {} Mapped", t, c);
+                            println!(
+                                "  : {} -> {} Mapped",
+                                t,
+                                from_utf8(c).unwrap()
+                            );
                             tag = None;
                         }
                         _ => (),
@@ -113,11 +110,15 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
                 if line.starts_with("[") {
                     tagg = format!("[{}]", &line[1..3]);
                 } else if line.starts_with("COUNT = ") {
-                    let curve_name =
-                        sets.get(&tagg).expect("Failed to parse tag to string");
-                    println!("  : curve_name = {}", curve_name);
+                    let curve_name = sets
+                        .get(&tagg)
+                        .expect("Failed to parse tag to curve name");
+                    println!(
+                        "  : curve_name = {}",
+                        from_utf8(curve_name).unwrap()
+                    );
                     let ec_params =
-                        match ecc::curve_name_to_ec_params(curve_name) {
+                        match ecc_misc::curve_name_to_ec_params(curve_name) {
                             Ok(p) => p,
                             Err(_) => continue, /* skip unsupported */
                         };
@@ -190,12 +191,12 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
     data
 }
 
-fn test_to_ecc_point(key: &EccKey, curve_name: &'static str) -> Vec<u8> {
+fn test_to_ecc_point(key: &EccKey, curve_name: &'static [u8]) -> Vec<u8> {
     let mut ec_point = Vec::<u8>::with_capacity(key.x.len() + key.y.len() + 1);
     ec_point.push(0x04);
     /* The P-521 curve points are heavily zero padded so we need to make sure they are well
      * formatted for OpenSSL -- to the field length boundary */
-    let field_len = match ecc::name_to_bits(curve_name) {
+    let field_len = match ecc_misc::curve_name_to_bits(curve_name) {
         Ok(l) => l,
         Err(_) => panic!("Unknown curve given"),
     };
@@ -222,7 +223,9 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
                     CKA_LABEL,
                     format!(
                         "{} private key, COUNT={}, line {}",
-                        unit.curve_name, unit.count, unit.line
+                        from_utf8(unit.curve_name).unwrap(),
+                        unit.count,
+                        unit.line
                     )
                     .as_bytes()
                 )
@@ -243,7 +246,9 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
                     CKA_LABEL,
                     format!(
                         "{} public key, COUNT={}, line {}",
-                        unit.curve_name, unit.count, unit.line
+                        from_utf8(unit.curve_name).unwrap(),
+                        unit.count,
+                        unit.line
                     )
                     .as_bytes()
                 )

@@ -5,7 +5,7 @@ use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
 use crate::ecc_misc::*;
-use crate::error::{device_error, general_error, Result};
+use crate::error::Result;
 use crate::interface::*;
 use crate::object::Object;
 use crate::ossl::bindings::*;
@@ -13,74 +13,6 @@ use crate::ossl::common::*;
 
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
-
-static OSSL_CURVE25519: &[u8; 7] = b"X25519\0";
-static OSSL_CURVE448: &[u8; 5] = b"X448\0";
-
-pub const BITS_CURVE25519: usize = 255;
-pub const BITS_CURVE448: usize = 448;
-
-// ASN.1 encoding of the OID
-const OID_CURVE25519: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 110);
-const OID_CURVE448: asn1::ObjectIdentifier = asn1::oid!(1, 3, 101, 111);
-
-// ASN.1 encoding of the curve name
-const STRING_CURVE25519: &[u8] = &[
-    0x13, 0x0a, 0x63, 0x75, 0x72, 0x76, 0x65, 0x32, 0x35, 0x35, 0x31, 0x39,
-];
-const STRING_CURVE448: &[u8] =
-    &[0x13, 0x08, 0x63, 0x75, 0x72, 0x76, 0x65, 0x34, 0x34, 0x38];
-
-fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
-    match oid {
-        OID_CURVE25519 => Ok(BITS_CURVE25519),
-        OID_CURVE448 => Ok(BITS_CURVE448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
-    let asn1_name = match asn1::write_single(&name) {
-        Ok(r) => r,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    match asn1_name.as_slice() {
-        STRING_CURVE25519 => Ok(BITS_CURVE25519),
-        STRING_CURVE448 => Ok(BITS_CURVE448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn make_bits_from_obj(key: &Object) -> Result<usize> {
-    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    let bits = match asn1::parse_single::<ECParameters>(x) {
-        Ok(a) => match a {
-            ECParameters::OId(o) => oid_to_bits(o)?,
-            ECParameters::CurveName(c) => curve_name_to_bits(c)?,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        },
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    Ok(bits)
-}
-
-pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
-    match make_bits_from_obj(key) {
-        Ok(BITS_CURVE25519) => Ok(OSSL_CURVE25519),
-        Ok(BITS_CURVE448) => Ok(OSSL_CURVE448),
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
-    let point = key.get_attr_as_bytes(CKA_EC_POINT).map_err(general_error)?;
-    /* [u8] is an octet string for the asn1 library */
-    let octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
-    Ok(octet.to_vec())
-}
 
 pub fn ecm_object_to_params(
     key: &Object,

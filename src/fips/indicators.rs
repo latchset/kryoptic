@@ -3,7 +3,7 @@
 
 use crate::attr_element;
 use crate::attribute::Attribute;
-use crate::ecc::ec_key_curve_size;
+use crate::ecc_misc::*;
 use crate::error::Result;
 use crate::interface::*;
 use crate::object::{OAFlags, Object, ObjectAttr, ObjectFactory};
@@ -900,14 +900,13 @@ fn check_key(
             Ok(m) => m.len(),
             Err(_) => return false,
         },
-        CKK_EC => match ec_key_curve_size(obj) {
-            Ok(s) => btb!(s),
+        CKK_EC | CKK_EC_EDWARDS => match get_ossl_name_from_obj(obj) {
+            Ok(s) => match curve_name_to_bits(s) {
+                Ok(l) => l,
+                Err(_) => return false,
+            },
             Err(_) => return false,
         },
-        CKK_EC_EDWARDS => {
-            /* TODO */
-            return false;
-        }
         _ => {
             /* assume everything else is a symmetric key */
             match obj.get_attr_as_ulong(CKA_VALUE_LEN) {

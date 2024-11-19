@@ -19,113 +19,6 @@ use once_cell::sync::Lazy;
 pub const MIN_EC_SIZE_BITS: usize = 256;
 pub const MAX_EC_SIZE_BITS: usize = 521;
 
-// ASN.1 encoding of the OID
-const OID_SECP256R1: asn1::ObjectIdentifier =
-    asn1::oid!(1, 2, 840, 10045, 3, 1, 7);
-const OID_SECP384R1: asn1::ObjectIdentifier = asn1::oid!(1, 3, 132, 0, 34);
-const OID_SECP521R1: asn1::ObjectIdentifier = asn1::oid!(1, 3, 132, 0, 35);
-
-// ASN.1 encoding of the curve name
-const STRING_SECP256R1: &[u8] = &[
-    0x13, 0x0a, 0x70, 0x72, 0x69, 0x6d, 0x65, 0x32, 0x35, 0x36, 0x76, 0x31,
-];
-const STRING_SECP384R1: &[u8] = &[
-    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x33, 0x38, 0x34, 0x72, 0x31,
-];
-const STRING_SECP521R1: &[u8] = &[
-    0x13, 0x09, 0x73, 0x65, 0x63, 0x70, 0x35, 0x32, 0x31, 0x72, 0x31,
-];
-
-pub const NAME_SECP256R1: &str = "prime256v1";
-pub const NAME_SECP384R1: &str = "secp384r1";
-pub const NAME_SECP521R1: &str = "secp521r1";
-
-const BITS_SECP256R1: usize = 256;
-const BITS_SECP384R1: usize = 384;
-const BITS_SECP521R1: usize = 521;
-
-pub fn oid_to_curve_name(oid: asn1::ObjectIdentifier) -> Result<&'static str> {
-    match oid {
-        OID_SECP256R1 => Ok(NAME_SECP256R1),
-        OID_SECP384R1 => Ok(NAME_SECP384R1),
-        OID_SECP521R1 => Ok(NAME_SECP521R1),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-#[cfg(test)]
-pub fn curve_name_to_ec_params(name: &'static str) -> Result<&'static [u8]> {
-    match name {
-        NAME_SECP256R1 => Ok(STRING_SECP256R1),
-        NAME_SECP384R1 => Ok(STRING_SECP384R1),
-        NAME_SECP521R1 => Ok(STRING_SECP521R1),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-#[cfg(test)]
-pub fn name_to_bits(name: &'static str) -> Result<usize> {
-    match name {
-        NAME_SECP256R1 => Ok(BITS_SECP256R1),
-        NAME_SECP384R1 => Ok(BITS_SECP384R1),
-        NAME_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
-    match oid {
-        OID_SECP256R1 => Ok(BITS_SECP256R1),
-        OID_SECP384R1 => Ok(BITS_SECP384R1),
-        OID_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-pub fn curve_name_to_bits(name: asn1::PrintableString) -> Result<usize> {
-    let asn1_name = match asn1::write_single(&name) {
-        Ok(r) => r,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    match asn1_name.as_slice() {
-        STRING_SECP256R1 => Ok(BITS_SECP256R1),
-        STRING_SECP384R1 => Ok(BITS_SECP384R1),
-        STRING_SECP521R1 => Ok(BITS_SECP521R1),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-pub fn curve_name_to_oid(
-    name: asn1::PrintableString,
-) -> Result<asn1::ObjectIdentifier> {
-    let asn1_name = match asn1::write_single(&name) {
-        Ok(r) => r,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    Ok(match asn1_name.as_slice() {
-        STRING_SECP256R1 => OID_SECP256R1,
-        STRING_SECP384R1 => OID_SECP384R1,
-        STRING_SECP521R1 => OID_SECP521R1,
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    })
-}
-
-#[cfg(feature = "fips")]
-pub fn ec_key_curve_size(key: &Object) -> Result<usize> {
-    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    match asn1::parse_single::<ECParameters>(x) {
-        Ok(a) => match a {
-            ECParameters::OId(o) => oid_to_bits(o),
-            ECParameters::CurveName(c) => curve_name_to_bits(c),
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        },
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
 #[derive(Debug)]
 pub struct ECCPubFactory {
     attributes: Vec<ObjectAttr>,
@@ -231,21 +124,6 @@ impl ObjectFactory for ECCPrivFactory {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
-    }
-}
-
-fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
-    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    match asn1::parse_single::<ECParameters>(x) {
-        Ok(a) => match a {
-            ECParameters::OId(o) => Ok(o),
-            ECParameters::CurveName(c) => curve_name_to_oid(c),
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        },
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
     }
 }
 

@@ -26,65 +26,6 @@ use zeroize::Zeroize;
 /* confusingly enough, this is not EC for FIPS-level operations  */
 #[cfg(feature = "fips")]
 static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
-pub static EC_NAME: &[u8; 3] = b"EC\0";
-
-fn make_bits_from_ec_params(key: &Object) -> Result<usize> {
-    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    let bits = match asn1::parse_single::<ECParameters>(x) {
-        Ok(a) => match a {
-            ECParameters::OId(o) => oid_to_bits(o)?,
-            ECParameters::CurveName(c) => curve_name_to_bits(c)?,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        },
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    Ok(bits)
-}
-
-pub fn make_output_length_from_ecdsa_obj(key: &Object) -> Result<usize> {
-    let bits = match make_bits_from_ec_params(key) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    Ok(2 * ((bits + 7) / 8))
-}
-
-pub fn get_curve_name_from_obj(key: &Object) -> Result<Vec<u8>> {
-    let x = match key.get_attr_as_bytes(CKA_EC_PARAMS) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    let name = match asn1::parse_single::<ECParameters>(x) {
-        Ok(a) => match a {
-            ECParameters::OId(o) => oid_to_curve_name(o)?,
-            ECParameters::CurveName(c) => c.as_str(),
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        },
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-    let mut curve_name = Vec::with_capacity(name.len() + 1);
-    curve_name.extend_from_slice(name.as_bytes());
-    /* null byte terminator in c string */
-    curve_name.push(0);
-    Ok(curve_name)
-}
-
-fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
-    let x = match key.get_attr_as_bytes(CKA_EC_POINT) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_GENERAL_ERROR)?,
-    };
-
-    /* [u8] is an octet string for the asn1 library */
-    let octet = match asn1::parse_single::<&[u8]>(x) {
-        Ok(a) => a,
-        Err(_) => return Err(CKR_DEVICE_ERROR)?,
-    };
-    Ok(octet.to_vec())
-}
 
 pub fn ecc_object_to_params(
     key: &Object,
@@ -97,10 +38,9 @@ pub fn ecc_object_to_params(
     let mut params = OsslParam::with_capacity(2);
     params.zeroize = true;
 
-    let curve_name = get_curve_name_from_obj(key)?;
-    params.add_owned_utf8_string(
+    params.add_const_c_string(
         name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-        curve_name,
+        name_as_char(get_ossl_name_from_obj(key)?),
     )?;
 
     match kclass {
@@ -247,9 +187,10 @@ impl EccOperation {
         _: &CK_MECHANISM_INFO,
     ) -> Result<EccOperation> {
         let privkey = EvpPkey::privkey_from_object(key)?;
+        let outlen = 2 * ((privkey.get_bits()? + 7) / 8);
         Ok(EccOperation {
             mech: mech.mechanism,
-            output_len: make_output_length_from_ecdsa_obj(key)?,
+            output_len: outlen,
             public_key: None,
             private_key: Some(privkey),
             finalized: false,
@@ -270,9 +211,10 @@ impl EccOperation {
         _: &CK_MECHANISM_INFO,
     ) -> Result<EccOperation> {
         let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
         Ok(EccOperation {
             mech: mech.mechanism,
-            output_len: make_output_length_from_ecdsa_obj(key)?,
+            output_len: outlen,
             public_key: Some(pubkey),
             private_key: None,
             finalized: false,
@@ -291,11 +233,10 @@ impl EccOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let curve_name = get_curve_name_from_obj(pubkey)?;
         let mut params = OsslParam::with_capacity(1);
-        params.add_utf8_string(
+        params.add_const_c_string(
             name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-            &curve_name,
+            name_as_char(get_ossl_name_from_obj(pubkey)?),
         )?;
         params.finalize();
 
