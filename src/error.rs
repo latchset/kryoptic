@@ -6,6 +6,7 @@ use std::fmt;
 
 use crate::interface;
 
+use asn1;
 use serde_json;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -147,6 +148,8 @@ impl fmt::Display for Error {
     }
 }
 
+impl std::error::Error for Error {}
+
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Error {
         Error::other_error(error)
@@ -177,6 +180,18 @@ impl From<interface::CK_RV> for Error {
     }
 }
 
+impl From<asn1::ParseError> for Error {
+    fn from(error: asn1::ParseError) -> Error {
+        Error::other_error(error)
+    }
+}
+
+impl From<asn1::WriteError> for Error {
+    fn from(error: asn1::WriteError) -> Error {
+        Error::other_error(error)
+    }
+}
+
 #[macro_export]
 macro_rules! some_or_err {
     ($action:expr) => {
@@ -193,4 +208,18 @@ macro_rules! some_or_err {
             return Err(CKR_GENERAL_ERROR)?;
         }
     };
+}
+
+pub fn general_error<E>(error: E) -> Error
+where
+    E: Into<Box<dyn error::Error>>,
+{
+    Error::ck_rv_from_error(interface::CKR_GENERAL_ERROR, error)
+}
+
+pub fn device_error<E>(error: E) -> Error
+where
+    E: Into<Box<dyn error::Error>>,
+{
+    Error::ck_rv_from_error(interface::CKR_DEVICE_ERROR, error)
 }
