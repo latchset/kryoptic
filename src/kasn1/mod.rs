@@ -176,3 +176,9 @@ impl PrivateKeyInfo<'_> {
         &self.private_key.as_bytes()
     }
 }
+
+#[allow(dead_code)]
+pub mod oid;
+
+#[allow(dead_code)]
+pub mod pkcs;
