@@ -4,7 +4,7 @@
 use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
-use crate::ec::{get_ec_point_from_obj, get_ossl_name_from_obj};
+use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;

@@ -5,7 +5,7 @@ use core::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
 use crate::ec::ecdsa::*;
-use crate::ec::{get_ec_point_from_obj, get_ossl_name_from_obj, EC_NAME};
+use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::DerEncBigUint;
@@ -22,10 +22,6 @@ use crate::ossl::fips::*;
 use crate::ossl::get_libctx;
 
 use zeroize::Zeroize;
-
-/* confusingly enough, this is not EC for FIPS-level operations  */
-#[cfg(feature = "fips")]
-static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
 
 pub fn ecc_object_to_params(
     key: &Object,

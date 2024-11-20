@@ -6,7 +6,6 @@ use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
 use crate::bytes_to_vec;
-use crate::ec::{get_ossl_name_from_obj, EC_NAME};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;

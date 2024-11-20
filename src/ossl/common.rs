@@ -4,9 +4,11 @@
 use std::borrow::Cow;
 use std::ffi::{c_char, c_int, c_uint, c_void};
 
+use crate::ec::get_oid_from_obj;
 use crate::error::Result;
 use crate::interface::*;
-use crate::object;
+use crate::kasn1::oid;
+use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
 use crate::{byte_ptr, void_ptr};
@@ -20,6 +22,7 @@ use crate::ossl::montgomery as ecm;
 #[cfg(feature = "rsa")]
 use crate::ossl::rsa;
 
+use asn1;
 use zeroize::Zeroize;
 
 macro_rules! ptr_wrapper_struct {
@@ -272,10 +275,7 @@ impl EvpPkey {
         self.ptr
     }
 
-    fn from_object(
-        obj: &object::Object,
-        class: CK_OBJECT_CLASS,
-    ) -> Result<EvpPkey> {
+    fn from_object(obj: &Object, class: CK_OBJECT_CLASS) -> Result<EvpPkey> {
         let key_class = match class {
             CKO_PUBLIC_KEY => EVP_PKEY_PUBLIC_KEY,
             CKO_PRIVATE_KEY => EVP_PKEY_PRIVATE_KEY,
@@ -296,11 +296,11 @@ impl EvpPkey {
         Self::fromdata(name, key_class, &params)
     }
 
-    pub fn pubkey_from_object(obj: &object::Object) -> Result<EvpPkey> {
+    pub fn pubkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PUBLIC_KEY)
     }
 
-    pub fn privkey_from_object(obj: &object::Object) -> Result<EvpPkey> {
+    pub fn privkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PRIVATE_KEY)
     }
 
@@ -858,4 +858,34 @@ pub fn mech_type_to_digest_name(mech: CK_MECHANISM_TYPE) -> *const c_char {
         | CKM_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512.as_ptr(),
         _ => std::ptr::null(),
     }) as *const c_char
+}
+
+pub static EC_NAME: &[u8; 3] = b"EC\0";
+#[cfg(feature = "fips")]
+pub static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
+
+/* Curve names as used in OpenSSL */
+const NAME_SECP256R1: &[u8] = b"prime256v1\0";
+const NAME_SECP384R1: &[u8] = b"secp384r1\0";
+const NAME_SECP521R1: &[u8] = b"secp521r1\0";
+const NAME_ED25519: &[u8] = b"ED25519\0";
+const NAME_ED448: &[u8] = b"ED448\0";
+const NAME_X25519: &[u8] = b"X25519\0";
+const NAME_X448: &[u8] = b"X448\0";
+
+fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static [u8]> {
+    match oid {
+        &oid::EC_SECP256R1 => Ok(NAME_SECP256R1),
+        &oid::EC_SECP384R1 => Ok(NAME_SECP384R1),
+        &oid::EC_SECP521R1 => Ok(NAME_SECP521R1),
+        &oid::ED25519_OID => Ok(NAME_ED25519),
+        &oid::ED448_OID => Ok(NAME_ED448),
+        &oid::X25519_OID => Ok(NAME_X25519),
+        &oid::X448_OID => Ok(NAME_X448),
+        _ => Err(CKR_GENERAL_ERROR)?,
+    }
+}
+
+pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
+    oid_to_ossl_name(&get_oid_from_obj(key)?)
 }

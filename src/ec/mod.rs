@@ -47,17 +47,6 @@ pub const EDWARDS448: &str = "edwards448";
 pub const CURVE25519: &str = "curve25519";
 pub const CURVE448: &str = "curve448";
 
-/* Curve names as used in OpenSSL */
-const NAME_SECP256R1: &[u8] = b"prime256v1\0";
-const NAME_SECP384R1: &[u8] = b"secp384r1\0";
-const NAME_SECP521R1: &[u8] = b"secp521r1\0";
-const NAME_ED25519: &[u8] = b"ED25519\0";
-const NAME_ED448: &[u8] = b"ED448\0";
-const NAME_X25519: &[u8] = b"X25519\0";
-const NAME_X448: &[u8] = b"X448\0";
-
-pub static EC_NAME: &[u8; 3] = b"EC\0";
-
 #[cfg(any(test, feature = "fips"))]
 pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
@@ -72,19 +61,6 @@ pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
-fn oid_to_ossl_name(oid: asn1::ObjectIdentifier) -> Result<&'static [u8]> {
-    match oid {
-        EC_SECP256R1 => Ok(NAME_SECP256R1),
-        EC_SECP384R1 => Ok(NAME_SECP384R1),
-        EC_SECP521R1 => Ok(NAME_SECP521R1),
-        ED25519_OID => Ok(NAME_ED25519),
-        ED448_OID => Ok(NAME_ED448),
-        X25519_OID => Ok(NAME_X25519),
-        X448_OID => Ok(NAME_X448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
 fn curvename_to_oid(name: &str) -> Result<asn1::ObjectIdentifier> {
     match name {
         PRIME256V1 => Ok(EC_SECP256R1),
@@ -94,25 +70,6 @@ fn curvename_to_oid(name: &str) -> Result<asn1::ObjectIdentifier> {
         EDWARDS448 => Ok(ED448_OID),
         CURVE25519 => Ok(X25519_OID),
         CURVE448 => Ok(X448_OID),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
-fn curvename_to_ossl_name(
-    name: asn1::PrintableString,
-) -> Result<&'static [u8]> {
-    oid_to_ossl_name(curvename_to_oid(name.as_str())?)
-}
-
-pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
-    let params = key
-        .get_attr_as_bytes(CKA_EC_PARAMS)
-        .map_err(general_error)?;
-    let ecp =
-        asn1::parse_single::<ECParameters>(params).map_err(general_error)?;
-    match ecp {
-        ECParameters::OId(oid) => oid_to_ossl_name(oid),
-        ECParameters::CurveName(curve) => curvename_to_ossl_name(curve),
         _ => Err(CKR_GENERAL_ERROR)?,
     }
 }
