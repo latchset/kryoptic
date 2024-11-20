@@ -3,7 +3,7 @@
 
 use crate::attr_element;
 use crate::attribute::Attribute;
-use crate::ec::{curve_name_to_bits, get_ossl_name_from_obj};
+use crate::ec::{get_oid_from_obj, oid_to_bits};
 use crate::error::Result;
 use crate::interface::*;
 use crate::object::{OAFlags, Object, ObjectAttr, ObjectFactory};
@@ -900,8 +900,8 @@ fn check_key(
             Ok(m) => m.len(),
             Err(_) => return false,
         },
-        CKK_EC | CKK_EC_EDWARDS => match get_ossl_name_from_obj(obj) {
-            Ok(s) => match curve_name_to_bits(s) {
+        CKK_EC | CKK_EC_EDWARDS => match get_oid_from_obj(obj) {
+            Ok(oid) => match oid_to_bits(oid) {
                 Ok(l) => l,
                 Err(_) => return false,
             },
