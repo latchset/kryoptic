@@ -340,7 +340,7 @@ fn test_rsa_key() {
     testtokn.finalize();
 }
 
-#[cfg(feature = "ecc")]
+#[cfg(feature = "ecdsa")]
 #[test]
 #[parallel]
 fn test_ecc_key() {

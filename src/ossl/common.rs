@@ -11,12 +11,12 @@ use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
 use crate::{byte_ptr, void_ptr};
 
-#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-use crate::ossl::ec_montgomery as ecm;
-#[cfg(feature = "ecc")]
-use crate::ossl::ecc;
-#[cfg(all(feature = "eddsa", not(feature = "fips")))]
+#[cfg(feature = "ecdsa")]
+use crate::ossl::ecdsa;
+#[cfg(feature = "eddsa")]
 use crate::ossl::eddsa;
+#[cfg(feature = "ec_montgomery")]
+use crate::ossl::montgomery as ecm;
 #[cfg(feature = "rsa")]
 use crate::ossl::rsa;
 
@@ -283,11 +283,11 @@ impl EvpPkey {
         };
         let key_type = obj.get_attr_as_ulong(CKA_KEY_TYPE)?;
         let (name, params) = match key_type {
-            #[cfg(feature = "ecc")]
-            CKK_EC => ecc::ecc_object_to_params(obj, class)?,
-            #[cfg(all(feature = "eddsa", not(feature = "fips")))]
+            #[cfg(feature = "ecdsa")]
+            CKK_EC => ecdsa::ecc_object_to_params(obj, class)?,
+            #[cfg(feature = "eddsa")]
             CKK_EC_EDWARDS => eddsa::eddsa_object_to_params(obj, class)?,
-            #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+            #[cfg(feature = "ec_montgomery")]
             CKK_EC_MONTGOMERY => ecm::ecm_object_to_params(obj, class)?,
             #[cfg(feature = "rsa")]
             CKK_RSA => rsa::rsa_object_to_params(obj, class)?,

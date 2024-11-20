@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
-use crate::ecc_misc::*;
+use crate::ec::{ec_key_check_import, BITS_ED25519, BITS_ED448};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;

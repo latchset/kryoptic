@@ -4,8 +4,8 @@
 use core::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
-use crate::ecc::*;
-use crate::ecc_misc::*;
+use crate::ec::ecdsa::*;
+use crate::ec::{get_ec_point_from_obj, get_ossl_name_from_obj, EC_NAME};
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::DerEncBigUint;

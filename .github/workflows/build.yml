@@ -78,7 +78,7 @@ jobs:
       - name: Build
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo build -vv --features fips
+            cargo build -vv --no-default-features --features fips
           fi
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo build -vv
@@ -93,7 +93,7 @@ jobs:
       - name: Test
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo test --features fips
+            cargo test --no-default-features --features fips
           fi
           if [ "${{ matrix.name }}" = "ossl3" ]; then
             cargo test

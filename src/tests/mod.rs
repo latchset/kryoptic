@@ -250,19 +250,19 @@ mod rsa;
 
 mod session;
 
-#[cfg(feature = "ecc")]
+#[cfg(feature = "ecdsa")]
 mod ecc;
 
-#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+#[cfg(feature = "ec_montgomery")]
 mod ec_montgomery;
 
-#[cfg(feature = "ecc")]
+#[cfg(feature = "ecdh")]
 mod ecdh;
 
-#[cfg(feature = "ecc")]
+#[cfg(feature = "ecdh")]
 mod ecdh_vectors;
 
-#[cfg(all(feature = "eddsa", not(feature = "fips")))]
+#[cfg(feature = "eddsa")]
 mod eddsa;
 
 #[cfg(feature = "hash")]

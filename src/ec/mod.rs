@@ -9,6 +9,18 @@ use crate::object::Object;
 
 use asn1;
 
+#[cfg(feature = "ecdh")]
+pub mod ecdh;
+
+#[cfg(feature = "ecdsa")]
+pub mod ecdsa;
+
+#[cfg(feature = "eddsa")]
+pub mod eddsa;
+
+#[cfg(feature = "ec_montgomery")]
+pub mod montgomery;
+
 type Version = u64;
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
@@ -48,9 +60,10 @@ pub fn ec_key_check_import(obj: &mut Object) -> Result<()> {
 }
 
 // Bit sized for curves
-const BITS_SECP256R1: usize = 256;
-const BITS_SECP384R1: usize = 384;
-const BITS_SECP521R1: usize = 521;
+pub const BITS_SECP256R1: usize = 256;
+#[allow(dead_code)]
+pub const BITS_SECP384R1: usize = 384;
+pub const BITS_SECP521R1: usize = 521;
 pub const BITS_ED25519: usize = 256;
 pub const BITS_ED448: usize = 448;
 pub const BITS_X25519: usize = 256;
@@ -99,6 +112,7 @@ const NAME_X448: &[u8] = b"X448\0";
 
 pub static EC_NAME: &[u8; 3] = b"EC\0";
 
+#[cfg(any(test, feature = "fips"))]
 pub fn curve_name_to_bits(name: &[u8]) -> Result<usize> {
     match name {
         NAME_SECP256R1 => Ok(BITS_SECP256R1),

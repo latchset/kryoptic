@@ -4,12 +4,13 @@
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
-use crate::ecc_misc::*;
+use crate::ec::montgomery::montgomery::ECMontgomeryOperation;
+use crate::ec::{ec_key_check_import, BITS_X25519, BITS_X448};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::ec_montgomery::*;
+use crate::ossl::montgomery;
 use crate::{attr_element, bytes_attr_not_empty};
 
 use once_cell::sync::Lazy;
