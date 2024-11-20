@@ -4,7 +4,7 @@
 use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
-use crate::ecc_misc::*;
+use crate::ec::{get_ec_point_from_obj, get_ossl_name_from_obj};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
@@ -18,10 +18,6 @@ use crate::ossl::fips::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::ossl::get_libctx;
-
-/* confusingly enough, this is not EC for FIPS-level operations  */
-#[cfg(feature = "fips")]
-static ECDSA_NAME: &[u8; 6] = b"EDDSA\0";
 
 pub const OUTLEN_ED25519: usize = 64;
 pub const OUTLEN_ED448: usize = 114;

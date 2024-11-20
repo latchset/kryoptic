@@ -4,20 +4,19 @@
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
-use crate::ecc_misc::*;
+use crate::ec::*;
 use crate::error::Result;
-use crate::interface::*;
 use crate::kasn1::PrivateKeyInfo;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::ecc::EccOperation;
+use crate::ossl::ecdsa::EccOperation;
 use crate::{attr_element, bytes_attr_not_empty};
 
 use asn1;
 use once_cell::sync::Lazy;
 
-pub const MIN_EC_SIZE_BITS: usize = 256;
-pub const MAX_EC_SIZE_BITS: usize = 521;
+pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
+pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
 
 #[derive(Debug)]
 pub struct ECCPubFactory {

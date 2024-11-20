@@ -3,7 +3,7 @@
 
 use crate::attr_element;
 use crate::attribute::Attribute;
-use crate::ecc_misc::*;
+use crate::ec::{curve_name_to_bits, get_ossl_name_from_obj};
 use crate::error::Result;
 use crate::interface::*;
 use crate::object::{OAFlags, Object, ObjectAttr, ObjectFactory};

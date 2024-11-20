@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::ecc::*;
+use crate::ec::ecdsa::{MAX_EC_SIZE_BITS, MIN_EC_SIZE_BITS};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms, Operation};

@@ -5,7 +5,7 @@ use std::io;
 use std::io::BufRead;
 use std::str::from_utf8;
 
-use crate::ecc_misc;
+use crate::ec;
 use crate::tests::*;
 
 use serial_test::parallel;
@@ -75,9 +75,7 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
                     tag = Some(line.clone());
                     curve = None;
                 } else if line.starts_with(kw) {
-                    curve = ecc_misc::map_curve_name(
-                        &line[kw.len()..line.len() - 1],
-                    );
+                    curve = ec::map_curve_name(&line[kw.len()..line.len() - 1]);
                     if curve != None {
                         println!(
                             "  : {} Matched",
@@ -118,7 +116,7 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
                         from_utf8(curve_name).unwrap()
                     );
                     let ec_params =
-                        match ecc_misc::curve_name_to_ec_params(curve_name) {
+                        match ec::curve_name_to_ec_params(curve_name) {
                             Ok(p) => p,
                             Err(_) => continue, /* skip unsupported */
                         };
@@ -196,7 +194,7 @@ fn test_to_ecc_point(key: &EccKey, curve_name: &'static [u8]) -> Vec<u8> {
     ec_point.push(0x04);
     /* The P-521 curve points are heavily zero padded so we need to make sure they are well
      * formatted for OpenSSL -- to the field length boundary */
-    let field_len = match ecc_misc::curve_name_to_bits(curve_name) {
+    let field_len = match ec::curve_name_to_bits(curve_name) {
         Ok(l) => l,
         Err(_) => panic!("Unknown curve given"),
     };

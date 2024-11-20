@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
 use crate::bytes_to_vec;
-use crate::ecc_misc::*;
+use crate::ec::{get_ossl_name_from_obj, EC_NAME};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
@@ -34,7 +34,7 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
     params.zeroize = true;
 
     let name = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
-        #[cfg(feature = "ecc")]
+        #[cfg(feature = "ecdsa")]
         CKK_EC => {
             params.add_const_c_string(
                 name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
@@ -42,7 +42,7 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
             )?;
             EC_NAME
         }
-        #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
+        #[cfg(feature = "ec_montgomery")]
         CKK_EC_MONTGOMERY => get_ossl_name_from_obj(key)?,
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     };

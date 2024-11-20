@@ -4,23 +4,17 @@
 #[cfg(all(feature = "dynamic", feature = "fips"))]
 compile_error!("Feature 'dynamic' and 'fips' are mutually exclusive and cannot be enabled together");
 
+#[cfg(all(
+    feature = "ecdh",
+    not(any(feature = "ecdsa", feature = "ec_montgomery"))
+))]
+compile_error!("Feature 'ecdh' requires either 'ecdsa' or 'ec_montgomery'");
+
 #[cfg(feature = "aes")]
 mod aes;
 
-#[cfg(feature = "ecc")]
-mod ecc;
-
-#[cfg(any(feature = "ecc", feature = "eddsa"))]
-mod ecc_misc;
-
-#[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-mod ec_montgomery;
-
-#[cfg(any(feature = "ec_montgomery", feature = "ecc"))]
-mod ecdh;
-
-#[cfg(all(feature = "eddsa", not(feature = "fips")))]
-mod eddsa;
+#[cfg(any(feature = "ecdsa", feature = "eddsa", feature = "ec_montgomery"))]
+mod ec;
 
 #[cfg(feature = "hash")]
 mod hash;
@@ -55,17 +49,17 @@ pub fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     #[cfg(feature = "aes")]
     aes::register(mechs, ot);
 
-    #[cfg(feature = "ecc")]
-    ecc::register(mechs, ot);
+    #[cfg(feature = "ecdsa")]
+    ec::ecdsa::register(mechs, ot);
 
-    #[cfg(any(feature = "ec_montgomery", feature = "ecc"))]
-    ecdh::register(mechs, ot);
+    #[cfg(feature = "ecdh")]
+    ec::ecdh::register(mechs, ot);
 
-    #[cfg(all(feature = "ec_montgomery", not(feature = "fips")))]
-    ec_montgomery::register(mechs, ot);
+    #[cfg(feature = "ec_montgomery")]
+    ec::montgomery::register(mechs, ot);
 
-    #[cfg(all(feature = "eddsa", not(feature = "fips")))]
-    eddsa::register(mechs, ot);
+    #[cfg(feature = "eddsa")]
+    ec::eddsa::register(mechs, ot);
 
     #[cfg(feature = "hash")]
     hash::register(mechs, ot);

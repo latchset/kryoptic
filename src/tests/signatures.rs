@@ -126,7 +126,7 @@ fn test_rsa_signatures() {
     testtokn.finalize();
 }
 
-#[cfg(feature = "ecc")]
+#[cfg(feature = "ecdsa")]
 #[test]
 #[parallel]
 fn test_ecc_signatures() {
