@@ -78,34 +78,34 @@ jobs:
       - name: Build
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo build -vv --no-default-features --features fips
+            cargo build -vv --features fips
           fi
           if [ "${{ matrix.name }}" = "ossl3" ]; then
-            cargo build -vv
+            cargo build -vv --features standard
           fi
           if [ "${{ matrix.name }}" = "release" ]; then
-            cargo build -vv --release
+            cargo build -vv --release --features standard
           fi
           if [ "${{ matrix.name }}" = "dynamic" ]; then
-            cargo build -vv --release --features dynamic
+            cargo build -vv --release --features standard,dynamic
           fi
 
       - name: Test
         run: |
           if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo test --no-default-features --features fips
+            cargo test --features fips
           fi
           if [ "${{ matrix.name }}" = "ossl3" ]; then
-            cargo test
+            cargo test --features standard
           fi
           if [ "${{ matrix.name }}" = "release" ]; then
-            cargo test --release
+            cargo test --release --features standard
           fi
           if [ "${{ matrix.name }}" = "dynamic" ]; then
-            cargo test --release --features dynamic
+            cargo test --release --features standard,dynamic
           fi
           if [ "${{ matrix.name }}" = "i686" ]; then
-            cargo test --target i686-unknown-linux-gnu --features dynamic
+            cargo test --target i686-unknown-linux-gnu --features standard,dynamic
           fi
 
       - uses: actions/upload-artifact@v3
