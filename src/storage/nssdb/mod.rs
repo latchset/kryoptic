@@ -16,6 +16,7 @@ use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
+use itertools::Itertools;
 use rusqlite::types::{FromSqlError, Value, ValueRef};
 use rusqlite::{params, Connection, OpenFlags, Rows, Transaction};
 use zeroize::Zeroize;
@@ -192,15 +193,15 @@ impl NSSStorage {
             tx.execute(&format!("DROP TABLE {}.{}", schema, table), params![]);
 
         /* prep the monster tables NSSDB uses */
-        let mut columns = String::new();
-        for c in NSS_KNOWN_ATTRIBUTES.iter() {
-            write!(&mut columns, ", a{:x}", c)?;
-        }
+        let formatter = NSS_KNOWN_ATTRIBUTES
+            .iter()
+            .format_with(", ", |a, f| f(&format_args!("a{:x}", a)));
+        let columns = format!(", {}", formatter);
 
         /* main tables */
         let sql = format!(
             "CREATE TABLE {}.{} (id PRIMARY KEY UNIQUE ON CONFLICT ABORT{})",
-            schema, table, &columns
+            schema, table, columns
         );
         tx.execute(&sql, params![])?;
 
@@ -369,18 +370,14 @@ impl NSSStorage {
         objid: u32,
         attrs: &[CK_ATTRIBUTE],
     ) -> Result<NSSSearchQuery> {
-        let mut columns: String;
+        let columns: String;
         if attrs.len() == 0 {
             columns = "*".to_string();
         } else {
-            columns = String::new();
-            for i in 0..attrs.len() {
-                if i == 0 {
-                    write!(&mut columns, "a{:x}", attrs[0].type_)?;
-                } else {
-                    write!(&mut columns, ", a{:x}", attrs[i].type_)?;
-                }
-            }
+            let formatter = attrs
+                .iter()
+                .format_with(", ", |a, f| f(&format_args!("a{:x}", a.type_)));
+            columns = format!("{}", formatter);
         }
         let mut query = NSSSearchQuery {
             public: None,
@@ -661,10 +658,10 @@ impl NSSStorage {
         let id = Self::get_next_id(tx, table)?;
 
         let attrs = obj.get_attributes();
+        let mut atypes =
+            Vec::<CK_ATTRIBUTE_TYPE>::with_capacity(1 + attrs.len());
         let mut params = Vec::<Value>::with_capacity(1 + attrs.len());
         params.push(Value::from(id));
-
-        let mut sql = format!("INSERT INTO {} (id", table);
 
         for a in attrs {
             let a_type = a.get_type();
@@ -678,7 +675,7 @@ impl NSSStorage {
                 return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
             }
 
-            write!(&mut sql, ", a{:x}", a_type)?;
+            atypes.push(a_type);
 
             let a_val = a.get_value();
             params.push(if a_val.len() == 0 {
@@ -693,11 +690,15 @@ impl NSSStorage {
                 }
             });
         }
-        write!(&mut sql, ") VALUES (?")?;
-        for _ in 1..params.len() {
-            write!(&mut sql, ", ?")?;
-        }
-        write!(&mut sql, ")")?;
+        let aformatter = atypes
+            .iter()
+            .format_with(", ", |a, f| f(&format_args!("a{:x}", a)));
+        let pformatter =
+            params.iter().format_with(", ", |_, f| f(&format!("?")));
+        let sql = format!(
+            "INSERT INTO {} (id, {}) VALUES ({})",
+            table, aformatter, pformatter
+        );
 
         let mut stmt = tx.prepare(&sql)?;
         let _ = stmt.execute(rusqlite::params_from_iter(params))?;
@@ -722,7 +723,8 @@ impl NSSStorage {
         id: u32,
         attrs: &CkAttrs,
     ) -> Result<()> {
-        let mut sql = format!("UPDATE {} SET ", table);
+        let mut atypes =
+            Vec::<CK_ATTRIBUTE_TYPE>::with_capacity(1 + attrs.len());
         let mut params = Vec::<Value>::with_capacity(1 + attrs.len());
         for a in attrs.as_slice() {
             let attr = a.to_attribute()?;
@@ -737,11 +739,7 @@ impl NSSStorage {
                 return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
             }
 
-            if params.len() == 0 {
-                write!(&mut sql, "a{:x}=?", a.type_)?;
-            } else {
-                write!(&mut sql, ",a{:x}=?", a.type_)?;
-            }
+            atypes.push(a.type_);
 
             let a_val = attr.get_value();
             params.push(if a_val.len() == 0 {
@@ -756,9 +754,12 @@ impl NSSStorage {
                 }
             });
         }
-
-        sql.push_str(" WHERE id=?");
         params.push(Value::from(id));
+
+        let formatter = atypes
+            .iter()
+            .format_with(", ", |a, f| f(&format_args!("a{:x}=?", a)));
+        let sql = format!("UPDATE {} SET {} WHERE id=?", table, formatter);
 
         let mut stmt = tx.prepare(&sql)?;
         let _ = stmt.execute(rusqlite::params_from_iter(params))?;
