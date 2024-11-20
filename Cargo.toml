@@ -67,13 +67,11 @@ memorydb = []
 sqlitedb = ["dep:rusqlite"]
 
 # these are always required, so easier to specify this way
-basic = [ "aes", "hmac", "pbkdf2", "sqlitedb" ]
+default = [ "aes", "hmac", "pbkdf2", "sqlitedb" ]
 
-#select everything by default
-# Use --no-default-features --features basic, xxx for custom selections
-default = [ "basic", "ecdsa", "ec_montgomery", "eddsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+standard = [ "ecdsa", "ec_montgomery", "eddsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
 
-fips = [ "rusqlite/bundled", "basic", "ecdsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+fips = [ "rusqlite/bundled", "ecdsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
 
 dynamic = [ ] # Builds against system libcrypto.so
 
