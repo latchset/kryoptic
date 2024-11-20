@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
-use crate::kasn1::{DerEncBigUint, PrivateKeyInfo};
+use crate::kasn1::{oid, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::rsa::*;
@@ -14,9 +14,6 @@ use crate::{attr_element, bytes_attr_not_empty};
 
 use asn1;
 use once_cell::sync::Lazy;
-
-pub const OID_RSA_ENCRYPTION: asn1::ObjectIdentifier =
-    asn1::oid!(1, 2, 840, 113549, 1, 1, 1);
 
 fn rsa_check_import(obj: &Object) -> Result<()> {
     let modulus = match obj.get_attr_as_bytes(CKA_MODULUS) {
@@ -252,8 +249,7 @@ impl PrivKeyFactory for RSAPrivFactory {
             Ok(p) => p,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
-        let pkeyinfo =
-            PrivateKeyInfo::new(&pkey.as_slice(), OID_RSA_ENCRYPTION)?;
+        let pkeyinfo = PrivateKeyInfo::new(&pkey.as_slice(), oid::RSA_OID)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -292,7 +288,7 @@ impl PrivKeyFactory for RSAPrivFactory {
             Ok(k) => k,
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
-        if pkeyinfo.get_oid() != &OID_RSA_ENCRYPTION {
+        if pkeyinfo.get_oid() != &oid::RSA_OID {
             return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
         let rsapkey = match asn1::parse_single::<RSAPrivateKey>(
