@@ -4,7 +4,6 @@
 use std::borrow::Cow;
 use std::ffi::{c_char, c_int, c_uint, c_void};
 
-use crate::ec::get_oid_from_obj;
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::oid;
@@ -13,6 +12,8 @@ use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
 use crate::{byte_ptr, void_ptr};
 
+#[cfg(feature = "ecc")]
+use crate::ec::get_oid_from_obj;
 #[cfg(feature = "ecdsa")]
 use crate::ossl::ecdsa;
 #[cfg(feature = "eddsa")]
@@ -886,6 +887,7 @@ fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static [u8]> {
     }
 }
 
+#[cfg(feature = "ecc")]
 pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
     oid_to_ossl_name(&get_oid_from_obj(key)?)
 }

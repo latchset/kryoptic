@@ -13,7 +13,7 @@ compile_error!("Feature 'ecdh' requires either 'ecdsa' or 'ec_montgomery'");
 #[cfg(feature = "aes")]
 mod aes;
 
-#[cfg(any(feature = "ecdsa", feature = "eddsa", feature = "ec_montgomery"))]
+#[cfg(feature = "ecc")]
 mod ec;
 
 #[cfg(feature = "hash")]

@@ -48,10 +48,11 @@ zeroize = "1.6.0"
 
 [features]
 aes = []
-ecdsa = []
-ecdh = []
-eddsa = []
-ec_montgomery = []
+ecc = []
+ecdsa = ["ecc"]
+ecdh = ["ecc"]
+eddsa = ["ecc"]
+ec_montgomery = ["ecc"]
 hash = []
 hkdf = []
 hmac = ["hash"]
@@ -69,7 +70,9 @@ sqlitedb = ["dep:rusqlite"]
 # these are always required, so easier to specify this way
 default = [ "aes", "hmac", "pbkdf2", "sqlitedb" ]
 
-standard = [ "ecdsa", "ec_montgomery", "eddsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
+ecc_all = ["ecdsa", "ec_montgomery", "eddsa", "ecdh"]
+
+standard = [ "ecc_all", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
 
 fips = [ "rusqlite/bundled", "ecdsa", "ecdh", "hash", "hkdf", "rsa", "sp800_108", "sshkdf", "tlskdf"]
 
