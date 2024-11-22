@@ -22,6 +22,7 @@ struct EcdhTestUnit {
     line: usize,
     count: usize,
     curve_name: &'static str,
+    key_size: usize,
     ec_params: Vec<u8>,
     cavs: EccKey,
     iut: EccKey,
@@ -47,6 +48,21 @@ pub fn map_curve_name(curve: &str) -> Option<&'static str> {
         "P-521" => Some(ec::SECP521R1),
         _ => None,
     }
+}
+
+fn parse_point(prefix: &str, line: &str, size: usize, ln: usize) -> Vec<u8> {
+    let mut v = parse_or_panic!(hex::decode(&line[prefix.len()..]); line; ln);
+    /* remove padding */
+    if v.len() > size {
+        let padlen = v.len() - size;
+        for x in 0..padlen {
+            if v[x] != 0 {
+                panic!("Invalid key padding line '{}' (line {})", line, ln);
+            }
+        }
+        let _ = v.drain(0..padlen);
+    }
+    v
 }
 
 fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
@@ -127,6 +143,8 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
                         line: ln,
                         count: (&line[8..]).parse().unwrap(),
                         curve_name: curve_name,
+                        key_size: ec::curvename_to_key_size(curve_name)
+                            .unwrap(),
                         ec_params: ec_params,
                         cavs: EccKey {
                             d: Vec::new(),
@@ -154,22 +172,22 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
 
                 if line.starts_with("dsCAVS = ") {
                     unit.cavs.d =
-                        parse_or_panic!(hex::decode(&line[9..]); line; ln);
+                        parse_point("dsCAVS = ", &line, unit.key_size, ln);
                 } else if line.starts_with("QsCAVSx = ") {
                     unit.cavs.x =
-                        parse_or_panic!(hex::decode(&line[10..]); line; ln);
+                        parse_point("QsCAVSx = ", &line, unit.key_size, ln);
                 } else if line.starts_with("QsCAVSy = ") {
                     unit.cavs.y =
-                        parse_or_panic!(hex::decode(&line[10..]); line; ln);
+                        parse_point("QsCAVSy = ", &line, unit.key_size, ln);
                 } else if line.starts_with("dsIUT = ") {
                     unit.iut.d =
-                        parse_or_panic!(hex::decode(&line[8..]); line; ln);
+                        parse_point("dsIUT = ", &line, unit.key_size, ln);
                 } else if line.starts_with("QsIUTx = ") {
                     unit.iut.x =
-                        parse_or_panic!(hex::decode(&line[9..]); line; ln);
+                        parse_point("QsIUTx = ", &line, unit.key_size, ln);
                 } else if line.starts_with("QsIUTy = ") {
                     unit.iut.y =
-                        parse_or_panic!(hex::decode(&line[9..]); line; ln);
+                        parse_point("QsIUTy = ", &line, unit.key_size, ln);
                 } else if line.starts_with("Z = ") {
                     unit.z = parse_or_panic!(hex::decode(&line[4..]); line; ln);
                 } else if line.starts_with("Result = ") {
@@ -192,20 +210,11 @@ fn parse_ecdh_vector(filename: &str) -> Vec<EcdhTestUnit> {
     data
 }
 
-fn test_to_ecc_point(key: &EccKey, curve_name: &str) -> Vec<u8> {
+fn test_to_ecc_point(key: &EccKey) -> Vec<u8> {
     let mut ec_point = Vec::<u8>::with_capacity(key.x.len() + key.y.len() + 1);
     ec_point.push(0x04);
-    /* The P-521 curve points are heavily zero padded so we need to make sure they are well
-     * formatted for OpenSSL -- to the field length boundary */
-    let field_len = match ec::curvename_to_bits(curve_name) {
-        Ok(l) => l,
-        Err(_) => panic!("Unknown curve given"),
-    };
-    let bytes = (field_len + 7) / 8;
-    assert!(key.x.len() >= bytes);
-    assert!(key.y.len() >= bytes);
-    ec_point.extend_from_slice(&key.x[(key.x.len() - bytes)..]);
-    ec_point.extend_from_slice(&key.y[(key.y.len() - bytes)..]);
+    ec_point.extend_from_slice(&key.x);
+    ec_point.extend_from_slice(&key.y);
     asn1::write_single(&ec_point.as_slice()).unwrap()
 }
 
@@ -233,7 +242,7 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
         ));
 
         /* import also public counterpart -- not used for anything now */
-        let ec_point = test_to_ecc_point(&unit.iut, unit.curve_name);
+        let ec_point = test_to_ecc_point(&unit.iut);
         let _pub_handle = ret_or_panic!(import_object(
             session,
             CKO_PUBLIC_KEY,
@@ -265,7 +274,7 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
 
         let mut dk_handle = CK_INVALID_HANDLE;
 
-        let mut peer_point = test_to_ecc_point(&unit.cavs, unit.curve_name);
+        let mut peer_point = test_to_ecc_point(&unit.cavs);
 
         let mut params = CK_ECDH1_DERIVE_PARAMS {
             kdf: CKD_NULL,
