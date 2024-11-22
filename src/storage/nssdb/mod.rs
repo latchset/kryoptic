@@ -1132,7 +1132,13 @@ impl Storage for NSSStorage {
     }
 
     fn unauth_user(&mut self, _user_type: CK_USER_TYPE) -> Result<()> {
-        self.enckey = None;
+        match self.enckey {
+            Some(ref mut key) => {
+                key.zeroize();
+                self.enckey = None;
+            }
+            None => (),
+        }
         Ok(())
     }
 
