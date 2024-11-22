@@ -2,7 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::bytes_attr_not_empty;
-use crate::error::{device_error, general_error, Result};
+use crate::error::{device_error, Error, Result};
 use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
@@ -47,6 +47,40 @@ pub const EDWARDS448: &str = "edwards448";
 pub const CURVE25519: &str = "curve25519";
 pub const CURVE448: &str = "curve448";
 
+fn bits_to_bytes(bits: usize) -> usize {
+    (bits + 7) / 8
+}
+
+fn ec_secp_point_size(bits: usize) -> usize {
+    2 * bits_to_bytes(bits) + 1
+}
+
+pub fn ec_point_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
+    match oid {
+        &EC_SECP256R1 => Ok(ec_secp_point_size(BITS_SECP256R1)),
+        &EC_SECP384R1 => Ok(ec_secp_point_size(BITS_SECP384R1)),
+        &EC_SECP521R1 => Ok(ec_secp_point_size(BITS_SECP521R1)),
+        &ED25519_OID => Ok(bits_to_bytes(BITS_ED25519)),
+        &ED448_OID => Ok(bits_to_bytes(BITS_ED448)),
+        &X25519_OID => Ok(bits_to_bytes(BITS_X25519)),
+        &X448_OID => Ok(bits_to_bytes(BITS_X448)),
+        _ => Err(CKR_GENERAL_ERROR)?,
+    }
+}
+
+pub fn ec_priv_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
+    match oid {
+        &EC_SECP256R1 => Ok(bits_to_bytes(BITS_SECP256R1)),
+        &EC_SECP384R1 => Ok(bits_to_bytes(BITS_SECP384R1)),
+        &EC_SECP521R1 => Ok(bits_to_bytes(BITS_SECP521R1)),
+        &ED25519_OID => Ok(bits_to_bytes(BITS_ED25519)),
+        &ED448_OID => Ok(bits_to_bytes(BITS_ED448)),
+        &X25519_OID => Ok(bits_to_bytes(BITS_X25519)),
+        &X448_OID => Ok(bits_to_bytes(BITS_X448)),
+        _ => Err(CKR_GENERAL_ERROR)?,
+    }
+}
+
 #[cfg(any(test, feature = "fips"))]
 pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
@@ -75,20 +109,18 @@ fn curvename_to_oid(name: &str) -> Result<asn1::ObjectIdentifier> {
 }
 
 pub fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
-    let params = key
-        .get_attr_as_bytes(CKA_EC_PARAMS)
-        .map_err(general_error)?;
-    let ecp =
-        asn1::parse_single::<ECParameters>(params).map_err(general_error)?;
+    let params = key.get_attr_as_bytes(CKA_EC_PARAMS)?;
+    let ecp = asn1::parse_single::<ECParameters>(params)
+        .map_err(|e| Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e))?;
     match ecp {
         ECParameters::OId(oid) => Ok(oid),
         ECParameters::CurveName(c) => curvename_to_oid(c.as_str()),
-        _ => return Err(CKR_GENERAL_ERROR)?,
+        _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
     }
 }
 
 pub fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
-    let point = key.get_attr_as_bytes(CKA_EC_POINT).map_err(general_error)?;
+    let point = key.get_attr_as_bytes(CKA_EC_POINT)?;
     /* [u8] is an octet string for the asn1 library */
     let octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
     Ok(octet.to_vec())
