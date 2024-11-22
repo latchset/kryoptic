@@ -68,7 +68,7 @@ pub fn ec_point_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
-pub fn ec_priv_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
+pub fn ec_key_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         &EC_SECP256R1 => Ok(bits_to_bytes(BITS_SECP256R1)),
         &EC_SECP384R1 => Ok(bits_to_bytes(BITS_SECP384R1)),
@@ -81,7 +81,7 @@ pub fn ec_priv_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
-#[cfg(any(test, feature = "fips"))]
+#[cfg(feature = "fips")]
 pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         EC_SECP256R1 => Ok(BITS_SECP256R1),
@@ -127,8 +127,8 @@ pub fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
 }
 
 #[cfg(test)]
-pub fn curvename_to_bits(name: &str) -> Result<usize> {
-    oid_to_bits(curvename_to_oid(name)?)
+pub fn curvename_to_key_size(name: &str) -> Result<usize> {
+    ec_key_size(&curvename_to_oid(name)?)
 }
 
 #[cfg(test)]
