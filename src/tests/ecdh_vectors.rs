@@ -7,6 +7,7 @@ use std::io::BufRead;
 use crate::ec;
 use crate::tests::*;
 
+use asn1;
 use serial_test::parallel;
 
 #[derive(Debug)]
@@ -205,7 +206,7 @@ fn test_to_ecc_point(key: &EccKey, curve_name: &str) -> Vec<u8> {
     assert!(key.y.len() >= bytes);
     ec_point.extend_from_slice(&key.x[(key.x.len() - bytes)..]);
     ec_point.extend_from_slice(&key.y[(key.y.len() - bytes)..]);
-    ec_point
+    asn1::write_single(&ec_point.as_slice()).unwrap()
 }
 
 fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
@@ -232,13 +233,13 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
         ));
 
         /* import also public counterpart -- not used for anything now */
-        let _ec_point = test_to_ecc_point(&unit.iut, unit.curve_name);
+        let ec_point = test_to_ecc_point(&unit.iut, unit.curve_name);
         let _pub_handle = ret_or_panic!(import_object(
             session,
             CKO_PUBLIC_KEY,
             &[(CKA_KEY_TYPE, CKK_EC)],
             &[
-                (CKA_EC_POINT, &unit.iut.d),
+                (CKA_EC_POINT, &ec_point),
                 (CKA_EC_PARAMS, &unit.ec_params),
                 (
                     CKA_LABEL,

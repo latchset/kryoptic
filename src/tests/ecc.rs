@@ -3,6 +3,7 @@
 
 use crate::tests::*;
 
+use asn1;
 use serial_test::parallel;
 
 #[test]
@@ -15,13 +16,17 @@ fn test_create_ec_objects() {
     /* login */
     testtokn.login();
 
-    let point = hex::decode(
-        "041B803BF0586DECF25616E879B0399AA3DAAB60916FC76C9B6C687FC1454C\
+    let point = asn1::write_single(
+        &hex::decode(
+            "041B803BF0586DECF25616E879B0399AA3DAAB60916FC76C9B6C687FC1454C\
          BA90D5F15AEB36E7070CFFB4966499B71B389453C0075203FA047D4F3E4434\
          3EDC84FB793BF1B8CA94DD3F293AFBE68E3BE93F1245BE9FB71BE3C50F1263\
          BC12D516",
+        )
+        .expect("Failed to decode hex point")
+        .as_slice(),
     )
-    .expect("Failed to decode hex point");
+    .expect("Failed to Asn.1 encode ec point");
     let params =
         hex::decode("06052B81040022").expect("Failed to decode hex params");
     let _ = ret_or_panic!(import_object(

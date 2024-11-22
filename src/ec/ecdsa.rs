@@ -3,14 +3,14 @@
 
 use std::fmt::Debug;
 
+use crate::attr_element;
 use crate::attribute::Attribute;
 use crate::ec::*;
-use crate::error::Result;
-use crate::kasn1::PrivateKeyInfo;
+use crate::error::{general_error, Error, Result};
+use crate::kasn1::{oid, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::ecdsa::EccOperation;
-use crate::{attr_element, bytes_attr_not_empty};
 
 use asn1;
 use once_cell::sync::Lazy;
@@ -44,8 +44,38 @@ impl ObjectFactory for ECCPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
-        bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
-        bytes_attr_not_empty!(obj; CKA_EC_POINT);
+        /* According to PKCS#11 v3.1 6.3.3:
+         * CKA_EC_PARAMS, Byte array,
+         * DER-encoding of an ANSI X9.62 Parameters value */
+        let oid = get_oid_from_obj(&obj).map_err(|e| {
+            if e.attr_not_found() {
+                Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
+            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
+                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
+            } else {
+                general_error(e)
+            }
+        })?;
+        match oid {
+            oid::EC_SECP256R1 | oid::EC_SECP384R1 | oid::EC_SECP521R1 => (),
+            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        }
+
+        /* According to PKCS#11 v3.1 6.3.3:
+         * CKA_EC_POINT, Byte array,
+         * DER-encoding of ANSI X9.62 ECPoint value Q */
+        let point = get_ec_point_from_obj(&obj).map_err(|e| {
+            if e.attr_not_found() {
+                Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
+            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
+                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
+            } else {
+                general_error(e)
+            }
+        })?;
+        if point.len() != ec_point_size(&oid)? {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
 
         Ok(obj)
     }
