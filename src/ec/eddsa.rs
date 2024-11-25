@@ -136,9 +136,42 @@ impl EDDSAPrivFactory {
 
 impl ObjectFactory for EDDSAPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let obj = self.default_object_create(template)?;
 
-        ec_key_check_import(&mut obj)?;
+        /* According to PKCS#11 v3.1 6.3.6:
+         * CKA_EC_PARAMS, Byte array,
+         * DER-encoding of a Parameters value as defined above (6.3.3?) */
+        let oid = get_oid_from_obj(&obj).map_err(|e| {
+            if e.attr_not_found() {
+                Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
+            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
+                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
+            } else {
+                general_error(e)
+            }
+        })?;
+        match oid {
+            oid::ED25519_OID | oid::ED448_OID => (),
+            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        }
+
+        /* According to PKCS#11 v3.1 6.3.6:
+         * CKA_VALUE, BigInteger,
+         * Private key bytes in little endian order as defined in RFC 8032 */
+        match obj.get_attr_as_bytes(CKA_VALUE) {
+            Ok(v) => {
+                if v.len() != ec_key_size(&oid)? {
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                }
+            }
+            Err(e) => {
+                if e.attr_not_found() {
+                    return Err(CKR_TEMPLATE_INCOMPLETE)?;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
 
         Ok(obj)
     }
