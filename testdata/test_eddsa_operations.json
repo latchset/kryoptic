@@ -8,7 +8,7 @@
         "CKA_LABEL": "Ed25519 Public Key (TEST 2)",
         "CKA_MODIFIABLE": false,
         "CKA_EC_PARAMS": "EwxlZHdhcmRzMjU1MTk=",
-        "CKA_EC_POINT": "BCA9QBfD6EOJWpK3CqdNG368nJgszy7ElozAzVXxKvRmDA==",
+        "CKA_EC_POINT": "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=",
         "CKA_PRIVATE": false,
         "CKA_TOKEN": true,
         "CKA_VERIFY": true
@@ -40,7 +40,7 @@
         "CKA_LABEL": "Ed448 Public key (TEST 2)",
         "CKA_MODIFIABLE": false,
         "CKA_EC_PARAMS": "EwplZHdhcmRzNDQ4",
-        "CKA_EC_POINT": "BDlDuij0MM3/RWrlMVRffs0KyDSlXZNYwDcr+gxsZ5jAhmrqAesAdCgCuEOOpMuCFpwjUWBie0w6lIA=",
+        "CKA_EC_POINT": "Q7oo9DDN/0Vq5TFUX37NCsg0pV2TWMA3K/oMbGeYwIZq6gHrAHQoArhDjqTLghacI1FgYntMOpSA",
         "CKA_PRIVATE": false,
         "CKA_TOKEN": true,
         "CKA_VERIFY": true

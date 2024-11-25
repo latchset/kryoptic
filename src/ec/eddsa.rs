@@ -3,14 +3,14 @@
 
 use std::fmt::Debug;
 
+use crate::attr_element;
 use crate::attribute::Attribute;
-use crate::ec::{ec_key_check_import, BITS_ED25519, BITS_ED448};
-use crate::error::Result;
-use crate::interface::*;
+use crate::ec::*;
+use crate::error::{general_error, Error, Result};
+use crate::kasn1::oid;
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::eddsa::*;
-use crate::{attr_element, bytes_attr_not_empty};
 
 use once_cell::sync::Lazy;
 
@@ -48,8 +48,38 @@ impl ObjectFactory for EDDSAPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
-        bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
-        bytes_attr_not_empty!(obj; CKA_EC_POINT);
+        /* According to PKCS#11 v3.1 6.3.5:
+         * CKA_EC_PARAMS, Byte array,
+         * DER-encoding of a Parameters value as defined above (6.3.3) */
+        let oid = get_oid_from_obj(&obj).map_err(|e| {
+            if e.attr_not_found() {
+                Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
+            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
+                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
+            } else {
+                general_error(e)
+            }
+        })?;
+        match oid {
+            oid::ED25519_OID | oid::ED448_OID => (),
+            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        }
+
+        /* According to PKCS#11 v3.1 6.3.5:
+         * CKA_EC_POINT, Byte array,
+         * Public key bytes in little endian order as defined in RFC 8032 */
+        let point = get_ec_point_from_obj(&obj).map_err(|e| {
+            if e.attr_not_found() {
+                Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
+            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
+                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
+            } else {
+                general_error(e)
+            }
+        })?;
+        if point.len() != ec_point_size(&oid)? {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
 
         Ok(obj)
     }
