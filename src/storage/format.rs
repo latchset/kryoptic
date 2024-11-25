@@ -313,14 +313,15 @@ impl Storage for StdStorageFormat {
         /* the values don't matter, only the type */
         let dnm: CK_ULONG = 0;
         let mut attrs = CkAttrs::from(attributes);
-        /* we need CKA_CLASS and CKA_KEY_TYPE to be present in
+        /* we need object defining attributes to be present in
          * order to get sensitive attrs from the factory later */
         if attributes.len() != 0 {
             attrs.add_missing_ulong(CKA_CLASS, &dnm);
-            /* it is safe to add CKA_KEY_TYPE even if the object
-             * is not a key, the attribute will simply not be returned
-             * in that case */
+            /* it is safe to add attributes even if the objects
+             * are not of the correct type, the attribute will simply
+             * not be returned in that case */
             attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
+            attrs.add_missing_ulong(CKA_CERTIFICATE_TYPE, &dnm);
         }
 
         let mut obj = self.store.fetch_by_uid(&uid, attrs.as_slice())?;
