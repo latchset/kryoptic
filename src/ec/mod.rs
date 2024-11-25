@@ -34,7 +34,7 @@ pub const BITS_SECP256R1: usize = 256;
 pub const BITS_SECP384R1: usize = 384;
 pub const BITS_SECP521R1: usize = 521;
 pub const BITS_ED25519: usize = 256;
-pub const BITS_ED448: usize = 448;
+pub const BITS_ED448: usize = 456;
 pub const BITS_X25519: usize = 256;
 pub const BITS_X448: usize = 448;
 
@@ -121,8 +121,14 @@ pub fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
 
 pub fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     let point = key.get_attr_as_bytes(CKA_EC_POINT)?;
-    /* [u8] is an octet string for the asn1 library */
-    let octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
+    let octet = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
+        CKK_EC => {
+            /* [u8] is an octet string for the asn1 library */
+            asn1::parse_single::<&[u8]>(point).map_err(device_error)?
+        }
+        CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => point.as_slice(),
+        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    };
     Ok(octet.to_vec())
 }
 

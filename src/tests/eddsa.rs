@@ -22,7 +22,7 @@ fn test_create_eddsa_objects() {
 
     /* Test Vectors for Ed25519ctx */
     let point = hex::decode(
-        "0420dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+        "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
     )
     .expect("Failed to decode hex point");
     let params = hex::decode("130c656477617264733235353139")
@@ -361,7 +361,7 @@ fn parse_eddsa_vector(filename: &str) -> Vec<EddsaTestUnit> {
                     },
                     algo: line.clone(),
                     secret: Vec::new(),
-                    public: vec![0x04, 0x00], /* DER encoded, the second byte will be replaced later */
+                    public: Vec::new(),
                     message: Vec::new(),
                     context: Vec::new(),
                     signature: Vec::new(),
@@ -421,8 +421,6 @@ fn parse_eddsa_vector(filename: &str) -> Vec<EddsaTestUnit> {
                     continue;
                 }
 
-                /* Finalize public key encoding here */
-                unit.public[1] = (unit.public.len() - 2) as u8;
                 let sig = parse_or_panic!(hex::decode(&line); line; ln);
                 unit.signature.extend(sig);
             }
