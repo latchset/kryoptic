@@ -59,8 +59,23 @@ impl Slot {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "encoding")]
+pub enum EcPointEncoding {
+    Bytes,
+    Der,
+}
+
+impl Default for EcPointEncoding {
+    fn default() -> Self {
+        EcPointEncoding::Bytes
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub ec_point_encoding: EcPointEncoding,
     pub slots: Vec<Slot>,
 }
 
@@ -70,7 +85,10 @@ fn config_error<E: de::Error + 'static>(error: E) -> Error {
 
 impl Config {
     pub fn new() -> Config {
-        Config { slots: Vec::new() }
+        Config {
+            ec_point_encoding: EcPointEncoding::default(),
+            slots: Vec::new(),
+        }
     }
 
     #[cfg(test)]
@@ -120,7 +138,10 @@ impl Config {
     }
 
     fn from_legacy_conf_string(name: &str) -> Result<Config> {
-        let mut conf = Config { slots: Vec::new() };
+        let mut conf = Config {
+            ec_point_encoding: EcPointEncoding::default(),
+            slots: Vec::new(),
+        };
         /* backwards compatibility where we used to only specify
          * a file, this does not support all older options, just
          * the more common one of specifying a .sql file with no
@@ -171,17 +192,34 @@ impl Config {
         let filename = Self::find_conf()?;
 
         match Self::from_file(&filename) {
-            Ok(conf) => return Ok(conf),
+            Ok(conf) => Ok(conf),
             Err(e) => {
                 /* attempt fallback, return original error on fail */
                 match Self::from_legacy_conf_string(&filename) {
                     Ok(mut conf) => {
                         conf.fix_slot_numbers();
-                        return Ok(conf);
+                        Ok(conf)
                     }
                     Err(_) => return Err(e),
                 }
             }
+        }
+    }
+
+    pub fn load_env_vars_overrides(&mut self) {
+        match env::var("KRYOPTIC_EC_POINT_ENCODING") {
+            Ok(var) => {
+                self.ec_point_encoding = match var.as_str() {
+                    "DER" => EcPointEncoding::Der,
+                    "BYTES" => EcPointEncoding::Bytes,
+                    _ =>
+                    /* ignore */
+                    {
+                        self.ec_point_encoding
+                    }
+                }
+            }
+            Err(_) => (),
         }
     }
 
