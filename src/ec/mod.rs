@@ -1,7 +1,6 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use crate::bytes_attr_not_empty;
 use crate::error::{device_error, Error, Result};
 use crate::interface::*;
 use crate::kasn1::oid::*;
@@ -21,12 +20,6 @@ pub mod eddsa;
 
 #[cfg(feature = "ec_montgomery")]
 pub mod montgomery;
-
-pub fn ec_key_check_import(obj: &mut Object) -> Result<()> {
-    bytes_attr_not_empty!(obj; CKA_EC_PARAMS);
-    bytes_attr_not_empty!(obj; CKA_VALUE);
-    Ok(())
-}
 
 // Bit sized for curves
 pub const BITS_SECP256R1: usize = 256;
