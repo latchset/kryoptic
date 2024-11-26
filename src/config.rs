@@ -187,7 +187,10 @@ impl Config {
 
     #[cfg(feature = "nssdb")]
     fn from_nss_init_args(args: &str) -> Result<Config> {
-        let mut conf = Config { slots: Vec::new() };
+        let mut conf = Config {
+            ec_point_encoding: EcPointEncoding::default(),
+            slots: Vec::new(),
+        };
         let mut slot = Slot::new();
 
         slot.dbtype = Some(storage::nssdb::DBINFO.dbtype().to_string());

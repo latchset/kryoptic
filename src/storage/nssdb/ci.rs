@@ -306,7 +306,7 @@ pub fn check_signature(
 ) -> Result<()> {
     let info = match asn1::parse_single::<NSSEncryptedDataInfo>(signature) {
         Ok(i) => i,
-        Err(e) => return Err(CKR_DATA_INVALID)?,
+        Err(_) => return Err(CKR_DATA_INVALID)?,
     };
 
     let pbmac1 = match &info.algorithm.params {
