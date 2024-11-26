@@ -315,6 +315,12 @@ macro_rules! global_rlock {
             Err(_) => return CKR_GENERAL_ERROR,
         }
     };
+    (noinitcheck $GLOBAL:expr) => {{
+        match $GLOBAL.read() {
+            Ok(r) => r,
+            Err(_) => return CKR_GENERAL_ERROR,
+        }
+    }};
 }
 
 macro_rules! global_wlock {
@@ -394,12 +400,13 @@ static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
     /* if there is no config file or the configuration is malformed,
      * set an empty config, an error will be returned later at
      * fn_initialize() time */
-    let global_conf = GlobalConfig {
+    let mut global_conf = GlobalConfig {
         conf: match Config::default_config() {
             Ok(conf) => conf,
             Err(_) => Config::new(),
         },
     };
+    global_conf.conf.load_env_vars_overrides();
     RwLock::new(global_conf)
 });
 
@@ -469,6 +476,20 @@ fn force_load_config() -> CK_RV {
         res_or_ret!(gconf.conf.add_slot(slot));
     }
     return CKR_OK;
+}
+
+#[cfg(test)]
+fn get_ec_point_encoding(save: &mut config::EcPointEncoding) -> CK_RV {
+    let gconf = global_rlock!(noinitcheck CONFIG);
+    *save = gconf.conf.ec_point_encoding;
+    CKR_OK
+}
+
+#[cfg(test)]
+fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
+    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    gconf.conf.ec_point_encoding = val;
+    CKR_OK
 }
 
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
@@ -890,8 +911,73 @@ extern "C" fn fn_get_attribute_value(
     let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let mut tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
-    ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl))
+
+    #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
+    let ec_point_len = match tmpl.iter().find(|a| a.type_ == CKA_EC_POINT) {
+        Some(a) => {
+            let gconf = global_rlock!(noinitcheck CONFIG);
+            /* enable the whole thing only if we need to convert to backwards
+             * compatible DER encoding */
+            if gconf.conf.ec_point_encoding == config::EcPointEncoding::Der {
+                let buflen =
+                    cast_or_ret!(usize from a.ulValueLen => CKR_ARGUMENTS_BAD);
+                Some(buflen)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
+    let result = ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl));
+
+    #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
+    if let Some(bufsize) = ec_point_len {
+        use ec::{point_buf_to_der, point_len_to_der};
+
+        match tmpl.iter_mut().find(|a| a.type_ == CKA_EC_POINT) {
+            Some(a) => {
+                if a.ulValueLen == CK_UNAVAILABLE_INFORMATION {
+                    /* do not touch this */
+                    return result;
+                }
+                let buflen =
+                    cast_or_ret!(usize from a.ulValueLen => CKR_GENERAL_ERROR);
+                if a.pValue == std::ptr::null_mut() {
+                    let len = point_len_to_der(buflen);
+                    if len != buflen {
+                        a.ulValueLen = cast_or_ret!(CK_ULONG from len);
+                    }
+                } else {
+                    let buf: &mut [u8] = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            a.pValue as *mut u8,
+                            buflen,
+                        )
+                    };
+                    let out = res_or_ret!(point_buf_to_der(buf, bufsize));
+                    if let Some(v) = out {
+                        if v.len() > bufsize {
+                            return CKR_GENERAL_ERROR;
+                        }
+                        unsafe {
+                            /* update buffer with the DER encoded version */
+                            std::ptr::copy_nonoverlapping(
+                                v.as_ptr(),
+                                a.pValue as *mut u8,
+                                v.len(),
+                            );
+                        }
+                        a.ulValueLen = cast_or_ret!(CK_ULONG from v.len());
+                    }
+                }
+            }
+            None => (),
+        }
+    }
+    result
 }
+
 extern "C" fn fn_set_attribute_value(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
@@ -916,6 +1002,7 @@ extern "C" fn fn_set_attribute_value(
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     ret_to_rv!(token.set_object_attrs(o_handle, &mut tmpl))
 }
+
 extern "C" fn fn_find_objects_init(
     s_handle: CK_SESSION_HANDLE,
     template: CK_ATTRIBUTE_PTR,
@@ -3167,34 +3254,27 @@ struct InterfaceData {
     version: CK_VERSION,
 }
 unsafe impl Sync for CK_INTERFACE {}
+unsafe impl Send for CK_INTERFACE {}
 unsafe impl Sync for InterfaceData {}
+unsafe impl Send for InterfaceData {}
 
-#[cfg(feature = "fips")]
-static INTERFACE_SET: [InterfaceData; 3] = [
-    InterfaceData {
+static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
+    let mut v = Vec::with_capacity(3);
+    v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_300),
         version: FNLIST_300.version,
-    },
-    InterfaceData {
+    });
+    v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_240),
         version: FNLIST_240.version,
-    },
-    InterfaceData {
+    });
+    #[cfg(feature = "fips")]
+    v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_VAL),
         version: FNLIST_VAL.version,
-    },
-];
-#[cfg(not(feature = "fips"))]
-static INTERFACE_SET: [InterfaceData; 2] = [
-    InterfaceData {
-        interface: std::ptr::addr_of!(INTERFACE_300),
-        version: FNLIST_300.version,
-    },
-    InterfaceData {
-        interface: std::ptr::addr_of!(INTERFACE_240),
-        version: FNLIST_240.version,
-    },
-];
+    });
+    v
+});
 
 #[no_mangle]
 pub extern "C" fn C_GetInterfaceList(
@@ -3257,7 +3337,7 @@ pub extern "C" fn C_GetInterface(
         interface_name
     };
 
-    for intf in &INTERFACE_SET {
+    for intf in INTERFACE_SET.iter() {
         let found: bool = unsafe {
             let name = (*intf.interface).pInterfaceName as *const c_char;
             libc::strcmp(request_name as *const c_char, name) == 0

@@ -6,7 +6,7 @@ use std::io::BufRead;
 
 use crate::tests::*;
 
-use serial_test::parallel;
+use serial_test::{parallel, serial};
 
 /* TODO enable for FIPS when our OpenSSL will include EdDSA in FIPS module */
 
@@ -556,6 +556,118 @@ fn test_eddsa_vector() {
     testtokn.login();
 
     test_eddsa_units(session, test_data);
+
+    testtokn.finalize();
+}
+
+/* Test needs to be run serially as it changes global config */
+#[test]
+#[serial]
+fn test_create_eddsa_compat() {
+    let mut testtokn =
+        TestToken::initialized("test_create_eddsa_compat.sql", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* Test Vectors for Ed25519ctx */
+    let point = hex::decode(
+        "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+    )
+    .expect("Failed to decode hex point");
+    let params = hex::decode("130c656477617264733235353139")
+        .expect("Failed to decode hex params");
+    let public_handle = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC_EDWARDS)],
+        &[
+            (CKA_LABEL, "Ed25519 with ByteArray EC Point".as_bytes()),
+            (CKA_EC_POINT, point.as_slice()),
+            (CKA_EC_PARAMS, params.as_slice()),
+        ],
+        &[(CKA_VERIFY, true)]
+    ));
+
+    /* Test Vectors for Ed25519ctx with public point in DER format*/
+    let point_der = hex::decode(
+        "0420dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+    )
+    .expect("Failed to decode hex point");
+    let der_handle = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC_EDWARDS)],
+        &[
+            (CKA_LABEL, "Ed25519 with DER EC Point".as_bytes()),
+            (CKA_EC_POINT, point_der.as_slice()),
+            (CKA_EC_PARAMS, params.as_slice()),
+        ],
+        &[(CKA_VERIFY, true)]
+    ));
+
+    let mut value = vec![0u8; point.len()];
+    let mut extract_template = make_ptrs_template(&[(
+        CKA_EC_POINT,
+        void_ptr!(value.as_mut_ptr()),
+        value.len(),
+    )]);
+
+    /* test both public_handle, and public30_handle, they should both
+     * return the same byte array point in standard mode */
+    let ret = fn_get_attribute_value(
+        session,
+        public_handle,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value, point);
+
+    value[0] = !value[0]; /* clobber */
+    let ret = fn_get_attribute_value(
+        session,
+        der_handle,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value, point);
+
+    /* test both public_handle, and publicDer_handle, they should both
+     * return the same DER encoded point in compatibility mode */
+    let mut saved = config::EcPointEncoding::default();
+    assert_eq!(get_ec_point_encoding(&mut saved), CKR_OK);
+    assert_eq!(set_ec_point_encoding(config::EcPointEncoding::Der), CKR_OK);
+
+    let mut value = vec![0u8; point_der.len()];
+    let mut extract_template = make_ptrs_template(&[(
+        CKA_EC_POINT,
+        void_ptr!(value.as_mut_ptr()),
+        value.len(),
+    )]);
+
+    let ret = fn_get_attribute_value(
+        session,
+        public_handle,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value, point_der);
+
+    value[0] = !value[0]; /* clobber */
+    let ret = fn_get_attribute_value(
+        session,
+        der_handle,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value, point_der);
+
+    assert_eq!(set_ec_point_encoding(saved), CKR_OK);
 
     testtokn.finalize();
 }

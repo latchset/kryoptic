@@ -46,7 +46,7 @@ impl EDDSAPubFactory {
 
 impl ObjectFactory for EDDSAPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.default_object_create(template)?;
+        let mut obj = self.default_object_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.5:
          * CKA_EC_PARAMS, Byte array,
@@ -77,8 +77,14 @@ impl ObjectFactory for EDDSAPubFactory {
                 general_error(e)
             }
         })?;
-        if point.len() != ec_point_size(&oid)? {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        let rawsize = ec_point_size(&oid)?;
+        if point.len() != rawsize {
+            /* For compatibility with applications that use DER encoding */
+            if point.len() == rawsize + 2 {
+                convert_ec_point_from_30(&mut obj)?;
+            } else {
+                return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+            }
         }
 
         Ok(obj)
