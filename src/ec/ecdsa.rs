@@ -42,7 +42,7 @@ impl ECCPubFactory {
 
 impl ObjectFactory for ECCPubFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.default_object_create(template)?;
+        let mut obj = self.default_object_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.3:
          * CKA_EC_PARAMS, Byte array,
@@ -64,18 +64,13 @@ impl ObjectFactory for ECCPubFactory {
         /* According to PKCS#11 v3.1 6.3.3:
          * CKA_EC_POINT, Byte array,
          * DER-encoding of ANSI X9.62 ECPoint value Q */
-        let point = get_ec_point_from_obj(&obj).map_err(|e| {
+        check_ec_point_from_obj(&oid, &mut obj).map_err(|e| {
             if e.attr_not_found() {
                 Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
-            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
-                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
             } else {
-                general_error(e)
+                e
             }
         })?;
-        if point.len() != ec_point_size(&oid)? {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
 
         Ok(obj)
     }

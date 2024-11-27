@@ -68,24 +68,13 @@ impl ObjectFactory for EDDSAPubFactory {
         /* According to PKCS#11 v3.1 6.3.5:
          * CKA_EC_POINT, Byte array,
          * Public key bytes in little endian order as defined in RFC 8032 */
-        let point = get_ec_point_from_obj(&obj).map_err(|e| {
+        check_ec_point_from_obj(&oid, &mut obj).map_err(|e| {
             if e.attr_not_found() {
                 Error::ck_rv_from_error(CKR_TEMPLATE_INCOMPLETE, e)
-            } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
-                Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
             } else {
-                general_error(e)
+                e
             }
         })?;
-        let rawsize = ec_point_size(&oid)?;
-        if point.len() != rawsize {
-            /* For compatibility with applications that use DER encoding */
-            if point.len() == rawsize + 2 {
-                convert_ec_point_from_30(&mut obj)?;
-            } else {
-                return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-            }
-        }
 
         Ok(obj)
     }
