@@ -134,17 +134,6 @@ pub fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     Ok(octet.to_vec())
 }
 
-pub fn convert_ec_point_from_30(key: &mut Object) -> Result<()> {
-    match key.get_attr_as_ulong(CKA_KEY_TYPE).map_err(general_error)? {
-        CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => (),
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    }
-    let point = key.get_attr_as_bytes(CKA_EC_POINT)?;
-    let decoded = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
-    key.set_attr(Attribute::from_bytes(CKA_EC_POINT, decoded.to_vec()))
-        .map_err(general_error)
-}
-
 #[cfg(test)]
 pub fn curvename_to_key_size(name: &str) -> Result<usize> {
     ec_key_size(&curvename_to_oid(name)?)
@@ -183,4 +172,41 @@ pub fn point_buf_to_der(buf: &[u8], bufsize: usize) -> Result<Option<Vec<u8>>> {
         }
         _ => Ok(None),
     }
+}
+
+#[cfg(feature = "ecc")]
+pub fn check_ec_point_from_obj(
+    oid: &asn1::ObjectIdentifier,
+    key: &mut Object,
+) -> Result<()> {
+    let point = key.get_attr_as_bytes(CKA_EC_POINT)?;
+    let size = ec_point_size(&oid)?;
+
+    let octet: &[u8];
+    let compat: bool;
+    match oid {
+        &EC_SECP256R1 | &EC_SECP384R1 | &EC_SECP521R1 => {
+            octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
+            compat = false;
+        }
+        &ED25519_OID | &ED448_OID | &X25519_OID | &X448_OID => {
+            octet = point.as_slice();
+            compat = true;
+        }
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    }
+
+    if octet.len() == size {
+        return Ok(());
+    }
+
+    if compat && octet.len() == size + 2 {
+        /* Compatibility with applications that use DER encoding */
+        let raw = asn1::parse_single::<&[u8]>(octet).map_err(device_error)?;
+        key.set_attr(Attribute::from_bytes(CKA_EC_POINT, raw.to_vec()))
+            .map_err(general_error)?;
+        return Ok(());
+    }
+
+    Err(CKR_ATTRIBUTE_VALUE_INVALID)?
 }
