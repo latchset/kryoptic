@@ -8,7 +8,6 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::interface;
 use crate::storage;
-#[cfg(feature = "nssdb")]
 use crate::storage::StorageDBInfo;
 
 use serde::de;
@@ -146,17 +145,13 @@ impl Config {
          * a file, this does not support all older options, just
          * the more common one of specifying a .sql file with no
          * slot specification. */
+        #[cfg(feature = "sqlitedb")]
         if name.ends_with(".sql") {
-            match storage::suffix_to_type(name) {
-                Ok(typ_) => {
-                    let mut slot = Slot::new();
-                    slot.dbtype = Some(typ_.to_string());
-                    slot.dbpath = Some(name.to_string());
-                    /* if this fails there will be no slots defined */
-                    let _ = conf.slots.push(slot);
-                }
-                Err(_) => (),
-            }
+            let mut slot = Slot::new();
+            slot.dbtype = Some(storage::sqlite::DBINFO.dbtype().to_string());
+            slot.dbpath = Some(name.to_string());
+            /* if this fails there will be no slots defined */
+            let _ = conf.slots.push(slot);
         }
         Ok(conf)
     }

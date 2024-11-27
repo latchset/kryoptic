@@ -102,7 +102,7 @@ mod memory;
 mod sqlite_common;
 
 #[cfg(feature = "sqlitedb")]
-mod sqlite;
+pub mod sqlite;
 
 #[cfg(feature = "nssdb")]
 pub mod nssdb;
@@ -125,6 +125,7 @@ static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
     v
 });
 
+#[cfg(test)]
 pub fn suffix_to_type(name: &str) -> Result<&'static str> {
     for i in 0..STORAGE_DBS.len() {
         let suffix = STORAGE_DBS[i].dbsuffix();
