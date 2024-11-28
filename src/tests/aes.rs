@@ -11,7 +11,7 @@ const AES_BLOCK_SIZE: usize = 16;
 #[parallel]
 fn test_aes_operations() {
     let mut testtokn = TestToken::initialized(
-        "test_aes_operations.sql",
+        "test_aes_operations",
         Some("testdata/test_aes_operations.json"),
     );
     let session = testtokn.get_session(true);
@@ -1066,7 +1066,7 @@ fn test_aes_operations() {
 #[test]
 #[parallel]
 fn test_aes_macs() {
-    let mut testtokn = TestToken::initialized("test_aes_macs.sql", None);
+    let mut testtokn = TestToken::initialized("test_aes_macs", None);
     let session = testtokn.get_session(true);
 
     /* login */

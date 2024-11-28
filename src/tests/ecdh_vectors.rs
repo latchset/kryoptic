@@ -342,7 +342,7 @@ fn test_ecdh_vector() {
         "testdata/KASValidityTest_ECCStaticUnified_KDFConcat_NOKC_resp.fax",
     );
 
-    let mut testtokn = TestToken::initialized("test_ecdh_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_ecdh_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */

@@ -8,7 +8,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_secret_key() {
-    let mut testtokn = TestToken::initialized("test_secret_key.sql", None);
+    let mut testtokn = TestToken::initialized("test_secret_key", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -83,7 +83,7 @@ fn test_secret_key() {
 #[test]
 #[parallel]
 fn test_rsa_key() {
-    let mut testtokn = TestToken::initialized("test_rsa_key.sql", None);
+    let mut testtokn = TestToken::initialized("test_rsa_key", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -344,7 +344,7 @@ fn test_rsa_key() {
 #[test]
 #[parallel]
 fn test_ecc_key() {
-    let mut testtokn = TestToken::initialized("test_ecc_key.sql", None);
+    let mut testtokn = TestToken::initialized("test_ecc_key", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -610,7 +610,7 @@ fn test_ecc_key() {
 #[test]
 #[parallel]
 fn test_eddsa_key() {
-    let mut testtokn = TestToken::initialized("test_eddsa_key.sql", None);
+    let mut testtokn = TestToken::initialized("test_eddsa_key", None);
     let session = testtokn.get_session(true);
 
     /* login */

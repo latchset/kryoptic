@@ -9,13 +9,14 @@ use crate::tests::*;
 
 use serial_test::{parallel, serial};
 
+#[cfg(any(feature = "jsondb", feature = "sqlitedb"))]
 fn test_token_setup(name: &str) -> TestToken {
-    let dbpath = format!("{}/{}", TESTDIR, name);
-    let mut testtokn = TestToken::new(dbpath);
+    let mut testtokn = TestToken::new(String::from(name));
     testtokn.setup_db(None);
     testtokn
 }
 
+#[cfg(any(feature = "jsondb", feature = "sqlitedb"))]
 fn test_token_env(suffix: &str) {
     let dbname = format!("test_token_env{}", suffix);
     let mut testtokn = test_token_setup(&dbname);
@@ -46,6 +47,7 @@ fn test_token_env(suffix: &str) {
     testtokn.finalize();
 }
 
+#[cfg(any(feature = "jsondb", feature = "sqlitedb"))]
 fn test_token_null_args(suffix: &str) {
     let dbname = format!("test_token_nullargs{}", suffix);
     let mut testtokn = test_token_setup(&dbname);
@@ -80,10 +82,10 @@ fn test_token_datadir() {
     let basedir = format!("{}/datadirtest", TESTDIR);
     let confdir = format!("{}/kryoptic", basedir);
     let confname = format!("{}/{}", confdir, config::DEFAULT_CONF_NAME);
-    let dbpath = format!("{}/token.sql", confdir);
+    let dbname = String::from("token");
     std::fs::create_dir_all(confdir).unwrap();
 
-    let mut testtokn = TestToken::new(dbpath);
+    let mut testtokn = TestToken::new(dbname);
     testtokn.make_config_file(&confname);
     testtokn.setup_db(None);
 
@@ -120,6 +122,7 @@ fn test_token_json() {
     test_token_null_args(".json");
 }
 
+#[cfg(feature = "sqlitedb")]
 #[test]
 #[serial]
 fn test_token_sql() {
@@ -130,8 +133,8 @@ fn test_token_sql() {
 #[test]
 #[parallel]
 fn test_interface_null() {
-    let dbpath = format!("{}/{}", TESTDIR, "test_interface_null.sql");
-    let mut testtokn = TestToken::new(dbpath);
+    let dbname = String::from("test_interface_null");
+    let mut testtokn = TestToken::new(dbname);
     testtokn.setup_db(None);
 
     /* NULL interface name and NULL version -- the module should return default one */
@@ -167,8 +170,8 @@ fn test_interface_null() {
 #[test]
 #[parallel]
 fn test_interface_pkcs11() {
-    let dbpath = format!("{}/{}", TESTDIR, "test_interface_pkcs11.sql");
-    let mut testtokn = TestToken::new(dbpath);
+    let dbname = String::from("test_interface_pkcs11");
+    let mut testtokn = TestToken::new(dbname);
     testtokn.setup_db(None);
 
     /* NULL version -- the module should return default one */
@@ -204,9 +207,8 @@ fn test_interface_pkcs11() {
 #[test]
 #[parallel]
 fn test_interface_pkcs11_version3() {
-    let dbpath =
-        format!("{}/{}", TESTDIR, "test_interface_pkcs11_version3.sql");
-    let mut testtokn = TestToken::new(dbpath);
+    let dbname = String::from("test_interface_pkcs11_version3");
+    let mut testtokn = TestToken::new(dbname);
     testtokn.setup_db(None);
 
     /* Get the specific version 3.0 */
@@ -243,9 +245,8 @@ fn test_interface_pkcs11_version3() {
 #[test]
 #[parallel]
 fn test_interface_pkcs11_version240() {
-    let dbpath =
-        format!("{}/{}", TESTDIR, "test_interface_pkcs11_version240.sql");
-    let mut testtokn = TestToken::new(dbpath);
+    let dbname = String::from("test_interface_pkcs11_version240");
+    let mut testtokn = TestToken::new(dbname);
     testtokn.setup_db(None);
 
     /* Get the specific version 2.40 */
@@ -323,30 +324,31 @@ fn test_interface_invalid_version() {
 #[test]
 #[serial]
 fn test_config_multiple_tokens() {
-    let confname = format!("{}/{}", TESTDIR, "test_config_multiple.conf");
+    let name = String::from("test_config_multiple");
+    let confname = format!("{}/{}.conf", TESTDIR, name);
     let dbs = [
+        #[cfg(feature = "memorydb")]
         (
-            "sqlite",
-            format!("{}/{}", TESTDIR, "test_config_multiple.sql"),
+            "memory",
+            String::from("flags=encrypt"), // TODO fix and test unencrypted memory!
             "TOKEN 1",
         ),
         #[cfg(feature = "jsondb")]
+        ("json", format!("{}/{}.json", TESTDIR, name), "TOKEN 2"),
+        #[cfg(feature = "sqlitedb")]
+        ("sqlite", format!("{}/{}.sql", TESTDIR, name), "TOKEN 3"),
+        #[cfg(feature = "nssdb")]
         (
-            "json",
-            format!("{}/{}", TESTDIR, "test_config_multiple.json"),
-            "TOKEN 2",
-        ),
-        #[cfg(not(feature = "jsondb"))]
-        (
-            "sqlite",
-            format!("{}/{}", TESTDIR, "test_config_multiple_2.sql"),
-            "TOKEN 2",
+            "nssdb",
+            format!("configDir={}/{}", TESTDIR, name),
+            "TOKEN 4",
         ),
     ];
     let mut config = String::new();
     let mut tokens = Vec::<TestToken>::new();
     for db in &dbs {
-        let mut token = TestToken::new(db.1.clone());
+        let mut token =
+            TestToken::new_type(String::from(db.0), db.1.clone(), name.clone());
         token.setup_db(None);
         /* here we hand code a config file.
          * to ensure changes in the toml crate do not break the format */

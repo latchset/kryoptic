@@ -9,7 +9,7 @@ use serial_test::parallel;
 #[parallel]
 fn test_rsa_operations() {
     let mut testtokn = TestToken::initialized(
-        "test_rsa_operations.sql",
+        "test_rsa_operations",
         Some("testdata/test_rsa_operations.json"),
     );
     let session = testtokn.get_session(true);

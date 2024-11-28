@@ -10,8 +10,8 @@ use serial_test::{parallel, serial};
 #[test]
 #[parallel]
 fn test_init_token() {
-    let dbpath = format!("{}/{}", TESTDIR, "test_init_token.sql");
-    let mut testtokn = TestToken::new(dbpath);
+    let dbname = String::from("test_init_token");
+    let mut testtokn = TestToken::new(dbname);
 
     let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -69,7 +69,7 @@ fn test_init_token() {
     );
 
     #[cfg(feature = "fips")]
-    {
+    if testtokn.dbtype != "nssdb" {
         let mut handle: [CK_ULONG; 1] = [CK_INVALID_HANDLE];
         let template =
             make_attr_template(&[(CKA_CLASS, CKO_VALIDATION)], &[], &[]);
@@ -248,8 +248,9 @@ fn test_init_token() {
     testtokn.finalize();
 }
 
-fn test_re_init_token_common(db: String) {
-    let mut testtokn = TestToken::new(db);
+fn test_re_init_token_common(dbtype: String, dbargs: String) {
+    let mut testtokn =
+        TestToken::new_type(dbtype, dbargs, String::from("test_reinit_token"));
 
     let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
@@ -279,13 +280,30 @@ fn test_re_init_token_common(db: String) {
 #[test]
 #[serial]
 fn test_re_init_token_json() {
-    let dbpath = format!("{}/{}", TESTDIR, "test_reinit_token.json");
-    test_re_init_token_common(dbpath)
+    let dbargs = format!("{}/{}", TESTDIR, "test_reinit_token.json");
+    test_re_init_token_common(String::from("json"), dbargs)
 }
 
+#[cfg(feature = "sqlitedb")]
 #[test]
 #[serial]
 fn test_re_init_token_sql() {
-    let dbpath = format!("{}/{}", TESTDIR, "test_reinit_token.sql");
-    test_re_init_token_common(dbpath)
+    let dbargs = format!("{}/{}", TESTDIR, "test_reinit_token.sql");
+    test_re_init_token_common(String::from("sqlite"), dbargs)
+}
+
+#[cfg(feature = "nssdb")]
+#[test]
+#[serial]
+fn test_re_init_token_nss() {
+    let dbargs = format!("configDir={}/{}", TESTDIR, "test_reinit_token");
+    test_re_init_token_common(String::from("nssdb"), dbargs)
+}
+
+#[cfg(feature = "memorydb")]
+#[test]
+#[serial]
+fn test_re_init_token_memory() {
+    let dbargs = "flags=encrypt".to_string();
+    test_re_init_token_common(String::from("memory"), dbargs)
 }

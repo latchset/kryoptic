@@ -14,7 +14,7 @@ use serial_test::{parallel, serial};
 #[parallel]
 fn test_create_eddsa_objects() {
     let mut testtokn =
-        TestToken::initialized("test_create_eddsa_objects.sql", None);
+        TestToken::initialized("test_create_eddsa_objects", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -110,7 +110,7 @@ fn test_create_eddsa_objects() {
 #[parallel]
 fn test_eddsa_operations() {
     let mut testtokn = TestToken::initialized(
-        "test_eddsa_operations.sql",
+        "test_eddsa_operations",
         Some("testdata/test_eddsa_operations.json"),
     );
     let session = testtokn.get_session(true);
@@ -549,7 +549,7 @@ fn test_eddsa_vector() {
     /* Taken from RFC, filtered out the headers */
     let test_data = parse_eddsa_vector("testdata/rfc8032.txt");
 
-    let mut testtokn = TestToken::initialized("test_eddsa_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_eddsa_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */

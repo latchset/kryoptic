@@ -79,7 +79,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(dbtype: &str, dbpath: Option<String>) -> Result<Token> {
+    pub fn new(dbtype: &str, dbargs: Option<String>) -> Result<Token> {
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
                 label: [0u8; 32],
@@ -106,7 +106,7 @@ impl Token {
                 factories: ObjectFactories::new(),
                 handles: Handles::new(),
             },
-            storage: new_storage(dbtype, &dbpath)?,
+            storage: new_storage(dbtype, &dbargs)?,
             session_objects: HashMap::new(),
             logged: KRY_UNSPEC,
         };

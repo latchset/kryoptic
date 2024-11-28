@@ -8,7 +8,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_get_mechs() {
-    let mut testtokn = TestToken::initialized("test_get_mechs.sql", None);
+    let mut testtokn = TestToken::initialized("test_get_mechs", None);
 
     let mut count: CK_ULONG = 0;
     let ret = fn_get_mechanism_list(
