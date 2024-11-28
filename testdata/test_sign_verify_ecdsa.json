@@ -1,0 +1,47 @@
+{"objects": [{
+    "attributes": {
+        "CKA_UNIQUE_ID": "20",
+        "CKA_CLASS": 2,
+        "CKA_KEY_TYPE": 3,
+        "CKA_DESTROYABLE": false,
+        "CKA_ID": "RklQU18xODYtMy9TaWdHZW46IFtQLTUyMSxTSEEtNTEyXQ==",
+        "CKA_LABEL": "FIPS_186-3/SigGen: [P-521,SHA-512] (Public key)",
+        "CKA_MODIFIABLE": false,
+        "CKA_EC_PARAMS": "BgUrgQQAIw==",
+        "CKA_EC_POINT": "BIGFBABhOH/WuVkU6IX5Eu37tfsnRlUCfyFsQJHKg+GTNnQP2Brt/gR/UbQr32gWESEBPg1VsRehTkMD+SbI3rt3p/2q0QDn0MdcOGJuiVyiFSa5+f34Tc7Lk/KyMzkFUNKxRjt+4/WN9zRkNf8ENBmVg8l8ZlqX8S9wbyNX2ktAKI3viI5Z5g==",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VERIFY": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "21",
+        "CKA_CLASS": 3,
+        "CKA_KEY_TYPE": 3,
+        "CKA_DESTROYABLE": false,
+        "CKA_ID": "RklQU18xODYtMy9TaWdHZW46IFtQLTUyMSxTSEEtNTEyXQ==",
+        "CKA_LABEL": "FIPS_186-3/SigGen: [P-521,SHA-512] (Private key)",
+        "CKA_MODIFIABLE": false,
+        "CKA_PRIVATE": true,
+        "CKA_SENSITIVE": true,
+        "CKA_EXTRACTABLE": false,
+        "CKA_EC_PARAMS": "BgUrgQQAIw==",
+        "CKA_VALUE": "90nTJwS8UzyoLO8KzxA9j0+6Z/CNJnjlFe19uIYmf/rwL6sAgNyiNZty9XTMwpoPIYyGVcDMz5/ubF5WeqFMuSY=",
+        "CKA_TOKEN": true,
+        "CKA_SIGN": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "22",
+        "CKA_APPLICATION": "CKM_ECDSA_SHA512",
+        "CKA_CLASS": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_LABEL": "FIPS_186-3/SigGen: [P-521,SHA-512]",
+        "CKA_MODIFIABLE": false,
+        "CKA_OBJECT_ID": "AE3oJupwStELwPdTivijhD8oT1XIuUavkjWvWvdPK3bgmeS8cv150oo4D41LTJGawpDSSMN5g7oFrqQuLdef3TPoAIdIjIWalv6iZuoTv20RTEKbFjvpeldVkIbttkrtShhZS0b7nvx/0l2LLejwnKBYf1S9KHKZ9Hsv8SSqxWbo7jtD",
+        "CKA_PRIVATE": false,
+        "CKA_TOKEN": true,
+        "CKA_VALUE": "ns1QDGDnAUBJIuWKsgzAAmUf3ufLyTNq3aM+TBCI+rGWTst5BNxoVoZdbI4VBBzPLVrDAumdNG/y9oZTHSVSFnjU/T92u/LIk9JGy012k3kv4YFyEIFGhTEDpR+CSsxiHLcxHSRjwzYepwclTysFK8IsuAEoc9y7lb8aXMU6uJ8="
+    }
+}]}
+

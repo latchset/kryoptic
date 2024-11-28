@@ -64,7 +64,7 @@ fn test_rsa_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
     let mut testtokn = TestToken::initialized(
         "test_rsa_signatures.sql",
-        Some("testdata/test_sign_verify.json"),
+        Some("testdata/test_sign_verify_rsa.json"),
     );
     let session = testtokn.get_session(false);
 
@@ -133,7 +133,7 @@ fn test_ecc_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
     let mut testtokn = TestToken::initialized(
         "test_ecc_signatures.sql",
-        Some("testdata/test_sign_verify.json"),
+        Some("testdata/test_sign_verify_ecdsa.json"),
     );
     let session = testtokn.get_session(false);
 
