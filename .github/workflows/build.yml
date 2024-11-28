@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic, i686]
+        name: [ossl3, fips, release, dynamic, i686, minimal]
+        db: [memorydb, jsondb, sqlitedb, nssdb]
     container: fedora:latest
     steps:
       - name: Get Date for DNF cache entry
@@ -75,38 +76,30 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build
+      - name: Build & test
         run: |
+          FEATURES="${{ matrix.db }}"
+          OPTS=""
+
           if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo build -vv --features fips
-          fi
-          if [ "${{ matrix.name }}" = "ossl3" ]; then
-            cargo build -vv --features standard
-          fi
-          if [ "${{ matrix.name }}" = "release" ]; then
-            cargo build -vv --release --features standard
-          fi
-          if [ "${{ matrix.name }}" = "dynamic" ]; then
-            cargo build -vv --release --features standard,dynamic
+            FEATURES="${FEATURES},fips"
+          elif [ "${{ matrix.name }}" = "ossl3" ]; then
+            FEATURES="${FEATURES},standard"
+          elif [ "${{ matrix.name }}" = "release" ]; then
+            FEATURES="${FEATURES},standard"
+            OPTS="--release"
+          elif [ "${{ matrix.name }}" = "dynamic" ]; then
+            FEATURES="${FEATURES},standard,dynamic"
+            OPTS="--release"
+          elif [ "${{ matrix.name }}" = "i686" ]; then
+            FEATURES="${FEATURES},standard,dynamic"
+            OPTS="--target i686-unknown-linux-gnu"
+          elif [ "${{ matrix.name }}" = "minimal" ]; then
+            OPTS="--no-default-features"
           fi
 
-      - name: Test
-        run: |
-          if [ "${{ matrix.name }}" = "fips" ]; then
-            cargo test --features fips,nssdb
-          fi
-          if [ "${{ matrix.name }}" = "ossl3" ]; then
-            cargo test --features standard,nssdb
-          fi
-          if [ "${{ matrix.name }}" = "release" ]; then
-            cargo test --release --features standard
-          fi
-          if [ "${{ matrix.name }}" = "dynamic" ]; then
-            cargo test --release --features standard,dynamic,nssdb
-          fi
-          if [ "${{ matrix.name }}" = "i686" ]; then
-            cargo test --target i686-unknown-linux-gnu --features standard,dynamic,nssdb
-          fi
+          cargo build -vv $OPTS --features "$FEATURES"
+          cargo test -vv $OPTS --features "$FEATURES"
 
       - uses: actions/upload-artifact@v3
         if: failure()
