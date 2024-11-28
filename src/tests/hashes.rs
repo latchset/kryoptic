@@ -9,7 +9,7 @@ use serial_test::parallel;
 #[parallel]
 fn test_hashes_digest() {
     let mut testtokn = TestToken::initialized(
-        "test_hashes.sql",
+        "test_hashes",
         Some("testdata/test_hashes.json"),
     );
     let session = testtokn.get_session(false);

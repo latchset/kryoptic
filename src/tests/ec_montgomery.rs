@@ -9,7 +9,7 @@ use serial_test::parallel;
 #[parallel]
 fn test_create_ec_montgomery_objects() {
     let mut testtokn =
-        TestToken::initialized("test_create_ec_montgomery_objects.sql", None);
+        TestToken::initialized("test_create_ec_montgomery_objects", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -116,7 +116,7 @@ fn test_ec_montgomery_derive_x448() {
 }
 
 fn test_ec_montgomery_derive(t: TestUnit) {
-    let dbname = format!("test_ec_montgomery_derive_{}.sql", t.curve);
+    let dbname = format!("test_ec_montgomery_derive_{}", t.curve);
     let mut testtokn = TestToken::initialized(&dbname, None);
     let session = testtokn.get_session(true);
 

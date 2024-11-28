@@ -93,10 +93,10 @@ mod aci;
 pub mod format;
 
 #[cfg(feature = "jsondb")]
-mod json;
+pub mod json;
 
 #[cfg(feature = "memorydb")]
-mod memory;
+pub mod memory;
 
 #[cfg(any(feature = "nssdb", feature = "sqlitedb"))]
 mod sqlite_common;
