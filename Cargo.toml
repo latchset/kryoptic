@@ -56,7 +56,7 @@ ec_montgomery = ["ecc"]
 hash = []
 hkdf = []
 hmac = ["hash"]
-pbkdf2 = []
+pbkdf2 = ["hmac"]
 rsa = []
 sp800_108 = []
 sshkdf = []
@@ -64,7 +64,7 @@ tlskdf = []
 
 # Databases
 jsondb = ["memorydb"]
-memorydb = []
+memorydb = ["aes", "pbkdf2"] # for encryption
 sqlitedb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
 nssdb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
 
