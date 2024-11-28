@@ -7,8 +7,12 @@ use serial_test::parallel;
 
 #[test]
 #[parallel]
+#[cfg(feature = "rsa")]
 fn test_get_attr() {
-    let mut testtokn = TestToken::initialized("test_get_attr.sql", None);
+    let mut testtokn = TestToken::initialized(
+        "test_get_attr.sql",
+        Some("testdata/test_basic_rsa.json"),
+    );
     let session = testtokn.get_session(false);
 
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
@@ -101,8 +105,12 @@ fn test_get_attr() {
 
 #[test]
 #[parallel]
-fn test_set_attr() {
-    let mut testtokn = TestToken::initialized("test_set_attr.sql", None);
+#[cfg(feature = "rsa")]
+fn test_set_attr_rsa() {
+    let mut testtokn = TestToken::initialized(
+        "test_set_attr.sql",
+        Some("testdata/test_basic_rsa.json"),
+    );
     let session = testtokn.get_session(false);
 
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
