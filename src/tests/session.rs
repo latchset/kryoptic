@@ -8,7 +8,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_session_objects() {
-    let mut testtokn = TestToken::initialized("test_session_objects.sql", None);
+    let mut testtokn = TestToken::initialized("test_session_objects", None);
 
     let mut login_session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let mut ret = fn_open_session(

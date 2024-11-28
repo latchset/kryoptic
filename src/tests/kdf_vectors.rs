@@ -542,7 +542,7 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
 fn test_kdf_ctr_vector() {
     let test_data = parse_kdf_vector("testdata/KDFCTR_gen.txt");
 
-    let mut testtokn = TestToken::initialized("test_kdf_ctr_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_kdf_ctr_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */
@@ -558,8 +558,7 @@ fn test_kdf_ctr_vector() {
 fn test_kdf_feedback_vector() {
     let test_data = parse_kdf_vector("testdata/KDFFeedback_gen.txt");
 
-    let mut testtokn =
-        TestToken::initialized("test_kdf_feedback_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_kdf_feedback_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */

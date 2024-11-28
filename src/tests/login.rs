@@ -5,8 +5,10 @@ use crate::tests::*;
 
 use serial_test::parallel;
 
-fn test_login(name: &str) {
-    let mut testtokn = TestToken::initialized(name, None);
+#[test]
+#[parallel]
+fn test_login() {
+    let mut testtokn = TestToken::initialized("test_login", None);
     let session = testtokn.get_session(false);
 
     let mut info = CK_SESSION_INFO {
@@ -132,17 +134,4 @@ fn test_login(name: &str) {
     assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
-}
-
-#[cfg(feature = "jsondb")]
-#[test]
-#[parallel]
-fn test_login_json() {
-    test_login("test_login.json");
-}
-
-#[test]
-#[parallel]
-fn test_login_sql() {
-    test_login("test_login.sql");
 }

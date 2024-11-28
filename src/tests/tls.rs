@@ -444,7 +444,7 @@ fn test_tls_master_secret_vectors() {
     let test_data = parse_kdf_vector("testdata/tlsprf_vectors.txt");
 
     let mut testtokn =
-        TestToken::initialized("tls_master_secret_vectors.sql", None);
+        TestToken::initialized("tls_master_secret_vectors", None);
     let session = testtokn.get_session(false);
 
     /* login */
@@ -458,7 +458,7 @@ fn test_tls_master_secret_vectors() {
 #[test]
 #[parallel]
 fn test_tls_mechanisms() {
-    let mut testtokn = TestToken::initialized("tls_mechanisms.sql", None);
+    let mut testtokn = TestToken::initialized("tls_mechanisms", None);
     let session = testtokn.get_session(false);
 
     /* login */

@@ -203,8 +203,8 @@ fn test_kw_vector(mech: &str, op: &str, size: &str) {
     let test_data =
         parse_kw_vector(&format!("testdata/kwtestvectors/{}.txt", name));
 
-    let sql_name = format!("test_{}_vector.sql", name);
-    let mut testtokn = TestToken::initialized(&sql_name, None);
+    let db_name = format!("test_{}_vector", name);
+    let mut testtokn = TestToken::initialized(&db_name, None);
     let session = testtokn.get_session(false);
 
     /* login */

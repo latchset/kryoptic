@@ -8,15 +8,16 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_nssdb_token() {
+    let name = String::from("test_nssdb");
     let datadir = "testdata/nssdbdir";
-    let destdir = format!("{}/test_nssdb", TESTDIR);
+    let destdir = format!("{}/{}", TESTDIR, name);
 
-    let dbpath = format!("configDir={}", destdir);
+    let dbargs = format!("configDir={}", destdir);
     let dbtype = "nssdb";
-    let dbname = format!("{}:{}", dbtype, dbpath);
 
     /* allocates a unique slotid to use in the tests */
-    let mut testtokn = TestToken::new(dbname);
+    let mut testtokn =
+        TestToken::new_type(String::from(dbtype), String::from(""), name);
 
     /* Do this after TestToken::new() otherwise the data
      * is wiped away by the initialization code */
@@ -38,12 +39,12 @@ fn test_nssdb_token() {
     .is_ok());
 
     /* pre-populate conf so we get the correct slot number assigned */
-    let mut slot = config::Slot::with_db(dbtype, Some(dbpath.clone()));
+    let mut slot = config::Slot::with_db(dbtype, Some(dbargs.clone()));
     slot.slot = u32::try_from(testtokn.get_slot()).unwrap();
     let ret = add_slot(slot);
     assert_eq!(ret, CKR_OK);
 
-    let mut args = TestToken::make_init_args(Some(dbpath.clone()));
+    let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);
@@ -254,21 +255,22 @@ fn test_nssdb_token() {
 #[test]
 #[parallel]
 fn test_nssdb_init_token() {
-    let datadir = format!("{}/{}", TESTDIR, "test_nssdb_init_token");
+    let name = String::from("test_nssdb_init_token");
+    let datadir = format!("{}/{}", TESTDIR, name);
 
-    let dbpath = format!("configDir={}", datadir);
+    let dbargs = format!("configDir={}", datadir);
     let dbtype = "nssdb";
-    let dbname = format!("{}:{}", dbtype, dbpath);
 
-    let mut testtokn = TestToken::new(dbname);
+    let mut testtokn =
+        TestToken::new_type(String::from(dbtype), String::from(""), name);
 
     /* pre-populate conf so we get the correct slot number assigned */
-    let mut slot = config::Slot::with_db(dbtype, Some(dbpath.clone()));
+    let mut slot = config::Slot::with_db(dbtype, Some(dbargs.clone()));
     slot.slot = u32::try_from(testtokn.get_slot()).unwrap();
     let ret = add_slot(slot);
 
     assert_eq!(ret, CKR_OK);
-    let mut args = TestToken::make_init_args(Some(dbpath.clone()));
+    let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     assert_eq!(ret, CKR_OK);

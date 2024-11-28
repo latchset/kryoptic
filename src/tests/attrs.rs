@@ -10,7 +10,7 @@ use serial_test::parallel;
 #[cfg(feature = "rsa")]
 fn test_get_attr() {
     let mut testtokn = TestToken::initialized(
-        "test_get_attr.sql",
+        "test_get_attr",
         Some("testdata/test_basic_rsa.json"),
     );
     let session = testtokn.get_session(false);
@@ -108,7 +108,7 @@ fn test_get_attr() {
 #[cfg(feature = "rsa")]
 fn test_set_attr_rsa() {
     let mut testtokn = TestToken::initialized(
-        "test_set_attr.sql",
+        "test_set_attr",
         Some("testdata/test_basic_rsa.json"),
     );
     let session = testtokn.get_session(false);

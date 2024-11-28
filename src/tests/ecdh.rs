@@ -9,7 +9,7 @@ use serial_test::parallel;
 #[parallel]
 fn test_ecc_derive_plain() {
     let mut testtokn = TestToken::initialized(
-        "test_ecc_derive_plain.sql",
+        "test_ecc_derive_plain",
         Some("testdata/test_ecc_operations.json"),
     );
     let session = testtokn.get_session(true);
@@ -283,7 +283,7 @@ fn test_ecc_derive_plain() {
 fn test_ecc_derive_x963() {
     /* derive with shared data and X9.63 KDF (and cofactor) */
     let mut testtokn = TestToken::initialized(
-        "test_ecc_derive_x963.sql",
+        "test_ecc_derive_x963",
         Some("testdata/test_ecc_operations.json"),
     );
     let session = testtokn.get_session(true);
@@ -361,7 +361,7 @@ fn test_ecc_derive_x963() {
 fn test_ecc_derive_nist() {
     /* derive with shared data and NIST KDF not supported now */
     let mut testtokn = TestToken::initialized(
-        "test_ecc_derive_nist.sql",
+        "test_ecc_derive_nist",
         Some("testdata/test_ecc_operations.json"),
     );
     let session = testtokn.get_session(true);

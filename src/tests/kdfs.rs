@@ -10,7 +10,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_sp800_kdf() {
-    let mut testtokn = TestToken::initialized("test_sp800_kdf.sql", None);
+    let mut testtokn = TestToken::initialized("test_sp800_kdf", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -216,7 +216,7 @@ fn test_sp800_kdf() {
 #[test]
 #[parallel]
 fn test_aes_enc_kdf() {
-    let mut testtokn = TestToken::initialized("test_aes_enc_kdf.sql", None);
+    let mut testtokn = TestToken::initialized("test_aes_enc_kdf", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -291,7 +291,7 @@ fn test_aes_enc_kdf() {
 #[test]
 #[parallel]
 fn test_hash_kdf() {
-    let mut testtokn = TestToken::initialized("test_hash_kdf.sql", None);
+    let mut testtokn = TestToken::initialized("test_hash_kdf", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -514,7 +514,7 @@ fn test_hash_kdf() {
 #[test]
 #[parallel]
 fn test_hkdf() {
-    let mut testtokn = TestToken::initialized("test_hkdf.sql", None);
+    let mut testtokn = TestToken::initialized("test_hkdf", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -792,7 +792,7 @@ fn test_hkdf() {
 #[test]
 #[parallel]
 fn test_pbkdf2() {
-    let mut testtokn = TestToken::initialized("test_pbkdf2.sql", None);
+    let mut testtokn = TestToken::initialized("test_pbkdf2", None);
     let session = testtokn.get_session(false);
 
     testtokn.login();
@@ -908,7 +908,7 @@ fn test_pbkdf2() {
 #[test]
 #[parallel]
 fn test_sshkdf() {
-    let mut testtokn = TestToken::initialized("test_sshkdf.sql", None);
+    let mut testtokn = TestToken::initialized("test_sshkdf", None);
     let session = testtokn.get_session(false);
 
     testtokn.login();

@@ -63,7 +63,7 @@ fn get_test_case_data(session: CK_SESSION_HANDLE, name: &str) -> TestCase {
 fn test_rsa_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
     let mut testtokn = TestToken::initialized(
-        "test_rsa_signatures.sql",
+        "test_rsa_signatures",
         Some("testdata/test_sign_verify_rsa.json"),
     );
     let session = testtokn.get_session(false);
@@ -132,7 +132,7 @@ fn test_rsa_signatures() {
 fn test_ecc_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
     let mut testtokn = TestToken::initialized(
-        "test_ecc_signatures.sql",
+        "test_ecc_signatures",
         Some("testdata/test_sign_verify_ecdsa.json"),
     );
     let session = testtokn.get_session(false);
@@ -204,7 +204,7 @@ fn test_ecc_signatures() {
 fn test_hmac_signatures() {
     /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
     let mut testtokn = TestToken::initialized(
-        "test_hmac_signatures.sql",
+        "test_hmac_signatures",
         Some("testdata/test_sign_verify.json"),
     );
     let session = testtokn.get_session(false);

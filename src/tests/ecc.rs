@@ -9,8 +9,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_create_ec_objects() {
-    let mut testtokn =
-        TestToken::initialized("test_create_ec_objects.sql", None);
+    let mut testtokn = TestToken::initialized("test_create_ec_objects", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -66,7 +65,7 @@ fn test_create_ec_objects() {
 #[parallel]
 fn test_ecc_operations() {
     let mut testtokn = TestToken::initialized(
-        "test_ecc_operations.sql",
+        "test_ecc_operations",
         Some("testdata/test_ecc_operations.json"),
     );
     let session = testtokn.get_session(true);
