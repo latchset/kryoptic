@@ -7,8 +7,12 @@ use serial_test::parallel;
 
 #[test]
 #[parallel]
+#[cfg(feature = "rsa")]
 fn test_copy_objects() {
-    let mut testtokn = TestToken::initialized("test_copy_objects.sql", None);
+    let mut testtokn = TestToken::initialized(
+        "test_copy_objects.sql",
+        Some("testdata/test_basic_rsa.json"),
+    );
     let session = testtokn.get_session(false);
 
     /* login */
