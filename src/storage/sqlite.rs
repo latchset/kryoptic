@@ -15,7 +15,6 @@ use crate::storage::{Storage, StorageDBInfo};
 use itertools::Itertools;
 use rusqlite::types::Value;
 use rusqlite::{params, Connection, Rows, Statement, Transaction};
-use rusqlite::{Error as rlError, ErrorCode};
 
 fn bad_code<E: std::error::Error + 'static>(error: E) -> Error {
     Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
@@ -23,55 +22,6 @@ fn bad_code<E: std::error::Error + 'static>(error: E) -> Error {
 
 fn bad_storage<E: std::error::Error + 'static>(error: E) -> Error {
     Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
-}
-
-impl From<rlError> for Error {
-    fn from(error: rlError) -> Error {
-        match error {
-            rlError::SqliteFailure(_, _) => match error.sqlite_error_code() {
-                Some(e) => match e {
-                    ErrorCode::ConstraintViolation
-                    | ErrorCode::TypeMismatch
-                    | ErrorCode::ApiMisuse
-                    | ErrorCode::ParameterOutOfRange => {
-                        Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
-                    }
-                    ErrorCode::DatabaseBusy
-                    | ErrorCode::DatabaseLocked
-                    | ErrorCode::FileLockingProtocolFailed => {
-                        Error::ck_rv_from_error(
-                            CKR_TOKEN_RESOURCE_EXCEEDED,
-                            error,
-                        )
-                    }
-                    ErrorCode::OutOfMemory => {
-                        Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
-                    }
-                    ErrorCode::CannotOpen
-                    | ErrorCode::NotFound
-                    | ErrorCode::PermissionDenied => {
-                        Error::ck_rv_from_error(CKR_TOKEN_NOT_RECOGNIZED, error)
-                    }
-                    ErrorCode::ReadOnly => Error::ck_rv_from_error(
-                        CKR_TOKEN_WRITE_PROTECTED,
-                        error,
-                    ),
-                    ErrorCode::TooBig => {
-                        Error::ck_rv_from_error(CKR_DATA_LEN_RANGE, error)
-                    }
-                    _ => Error::ck_rv_from_error(CKR_DEVICE_ERROR, error),
-                },
-                None => Error::ck_rv_from_error(CKR_GENERAL_ERROR, error),
-            },
-            _ => Error::ck_rv_from_error(CKR_GENERAL_ERROR, error),
-        }
-    }
-}
-
-impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for Error {
-    fn from(_: std::sync::PoisonError<std::sync::MutexGuard<'_, T>>) -> Error {
-        Error::ck_rv(CKR_CANT_LOCK)
-    }
 }
 
 const OBJECTS_TABLE: &str = "objects";
