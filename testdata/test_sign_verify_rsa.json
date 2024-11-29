@@ -36,17 +36,4 @@
         "CKA_TOKEN": true,
         "CKA_SIGN": true
     }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "12",
-        "CKA_APPLICATION": "CKM_RSA_PKCS",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "PKCS#1 v1.5 Signature Example 15.1",
-        "CKA_MODIFIABLE": false,
-        "CKA_OBJECT_ID": "t1pUZrZdDzAO9Tgz8hdcijR6OAT8Y0UdyQLwtx+Qg0We03pReaO3I6U/EFFkLXc3TExsjbscogUl9cnzLbd2lTVW2jEpDiIZdILOtpkGxGp1j7DnQJuoAQd9Kgog6ufR1tOSq0lX6Gt28GUtaLg5iKePJuERcupgm/hJ+714rX7c4h3mYqCBNowEBgfO4p2wYnIn9EljrRcdIpO2M6OS4zHcpU/jCCdS9D9jwWG0R6TGWmh1Zw1fZgD8yGChyusKiPj97E5WQ5ilxGyH9ozgcAH2ITq+CrViX4fRkCXwjYHax71FhryTghkfbSiA9iJ+XfPu0h53ktJJSASH82VSYQ==",
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "9F1V81VR6XXWqNx+qfSIWTlAzHVpSiePJ+V4oWPYObNAQIQYCM+cWMm4cov1+c6O6BHqkXFPR7q5LQ9tWib8/ups2TuRDAoslj5k6xgj8QJ1PUHwM1kQrTqXcQTxqvbDdCcWqXVdEbju1pBHf0RcXScgiy4oQzD6PTAUI/p/LQhuCtC4krnbVE5FbT8Nq4XZU8EtNAqoc+2nJ8imSdt/pjdA4l6a8VM7MH5hMpmTEQ6VGU4Dk5nDgk0kxR8ismveECTNOVlYot/rSBam6K3ttQsfa1bQswYP8PHEyw0OAB3VnXO+Eg=="
-    }
 }]}
