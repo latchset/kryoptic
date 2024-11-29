@@ -78,11 +78,14 @@ fn test_login() {
         assert_ne!(ret, CKR_OK);
     }
 
-    /* check pin flags */
-    let mut token_info = CK_TOKEN_INFO::default();
-    let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(token_info.flags & pin_flags_mask, CKF_USER_PIN_COUNT_LOW);
+    /* NSS DB does not support pin counter */
+    if testtokn.dbtype != "nssdb" {
+        /* check pin flags */
+        let mut token_info = CK_TOKEN_INFO::default();
+        let ret = fn_get_token_info(testtokn.get_slot(), &mut token_info);
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(token_info.flags & pin_flags_mask, CKF_USER_PIN_COUNT_LOW);
+    }
 
     /* login */
     let pin = "12345678";

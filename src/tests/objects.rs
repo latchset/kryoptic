@@ -107,13 +107,15 @@ fn test_create_objects() {
     /* login */
     testtokn.login();
 
-    let _ = ret_or_panic!(import_object(
-        session,
-        CKO_DATA,
-        &[],
-        &byte_values,
-        &bool_values,
-    ));
+    if testtokn.dbtype != "nssdb" {
+        let _ = ret_or_panic!(import_object(
+            session,
+            CKO_DATA,
+            &[],
+            &byte_values,
+            &bool_values,
+        ));
+    }
 
     let _ = ret_or_panic!(import_object(
         session,
