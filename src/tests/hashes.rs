@@ -8,40 +8,16 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_hashes_digest() {
-    let mut testtokn = TestToken::initialized(
-        "test_hashes",
-        Some("testdata/test_hashes.json"),
-    );
+    let mut testtokn = TestToken::initialized("test_hashes", None);
     let session = testtokn.get_session(false);
 
-    /* get test data */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "10".as_bytes())], &[]);
-    let mut ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
-
-    /* get values */
-    let mut hash: [u8; 32] = [0; 32];
-    let mut value: [u8; 32] = [0; 32];
-    let mut template = make_ptrs_template(&[
-        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
-        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
-    ]);
-    ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    let value_len = template[0].ulValueLen;
+    /* test data */
+    let hash = hex::decode(
+        "e32bd03f46f51d4a5c903429fea1c31032d8d7aa689c764141b7cebd74f4e140",
+    )
+    .expect("failed to decode hash");
+    let mut value = hex::decode("48656c6c6f205348413235360a")
+        .expect("failed to decode value");
 
     /* one shot digest */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -49,7 +25,7 @@ fn test_hashes_digest() {
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
-    ret = fn_digest_init(session, &mut mechanism);
+    let mut ret = fn_digest_init(session, &mut mechanism);
     assert_eq!(ret, CKR_OK);
 
     let mut digest: [u8; 32] = [0; 32];
@@ -57,7 +33,7 @@ fn test_hashes_digest() {
     ret = fn_digest(
         session,
         value.as_mut_ptr(),
-        value_len,
+        value.len() as CK_ULONG,
         digest.as_mut_ptr(),
         &mut digest_len,
     );
@@ -68,7 +44,8 @@ fn test_hashes_digest() {
     ret = fn_digest_init(session, &mut mechanism);
     assert_eq!(ret, CKR_OK);
 
-    ret = fn_digest_update(session, value.as_mut_ptr(), value_len);
+    ret =
+        fn_digest_update(session, value.as_mut_ptr(), value.len() as CK_ULONG);
     assert_eq!(ret, CKR_OK);
 
     let mut digest2_len: CK_ULONG = 0;
@@ -83,34 +60,14 @@ fn test_hashes_digest() {
 
     /* ==== SHA 384 ==== */
 
-    /* get test data */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "11".as_bytes())], &[]);
-    ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
-
-    /* get values */
-    let mut hash: [u8; 48] = [0; 48];
-    let mut value: [u8; 48] = [0; 48];
-    let mut template = make_ptrs_template(&[
-        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
-        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
-    ]);
-    ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    let value_len = template[0].ulValueLen;
+    /* test data */
+    let hash = hex::decode(
+        "d20cf10aec4b5294440edb9650bd0e91f2652c7535e42d3565e1710873d15de5\
+         d9773637b15bb08c757bea52580d87c5",
+    )
+    .expect("failed to decode hash");
+    let mut value = hex::decode("48656c6c6f205348413338340a")
+        .expect("failed to decode value");
 
     /* one shot digest */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -126,7 +83,7 @@ fn test_hashes_digest() {
     ret = fn_digest(
         session,
         value.as_mut_ptr(),
-        value_len,
+        value.len() as CK_ULONG,
         digest.as_mut_ptr(),
         &mut digest_len,
     );
@@ -135,34 +92,14 @@ fn test_hashes_digest() {
 
     /* ==== SHA 512 ==== */
 
-    /* get test data */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "12".as_bytes())], &[]);
-    ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
-
-    /* get values */
-    let mut hash: [u8; 64] = [0; 64];
-    let mut value: [u8; 64] = [0; 64];
-    let mut template = make_ptrs_template(&[
-        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
-        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
-    ]);
-    ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    let value_len = template[0].ulValueLen;
+    /* test data */
+    let hash = hex::decode(
+        "eec46beef24079f2d0f2e1c34f88baa7d8d89014fd453c12ceedc7590999104b\
+         d0223646fb10c00068a5c46b7d6bf21ab119af3717f59d6b6f70a503ac515605",
+    )
+    .expect("failed to decode hash");
+    let mut value = hex::decode("48656c6c6f205348413531320a")
+        .expect("failed to decode value");
 
     /* one shot digest */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -178,7 +115,7 @@ fn test_hashes_digest() {
     ret = fn_digest(
         session,
         value.as_mut_ptr(),
-        value_len,
+        value.len() as CK_ULONG,
         digest.as_mut_ptr(),
         &mut digest_len,
     );
@@ -187,34 +124,11 @@ fn test_hashes_digest() {
 
     /* ==== SHA 1 ==== */
 
-    /* get test data */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "13".as_bytes())], &[]);
-    ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
-
-    /* get values */
-    let mut hash: [u8; 20] = [0; 20];
-    let mut value: [u8; 20] = [0; 20];
-    let mut template = make_ptrs_template(&[
-        (CKA_VALUE, void_ptr!(value.as_mut_ptr()), value.len()),
-        (CKA_OBJECT_ID, void_ptr!(hash.as_mut_ptr()), hash.len()),
-    ]);
-    ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-
-    let value_len = template[0].ulValueLen;
+    /* test data */
+    let hash = hex::decode("31d2378fd917639c7120f58bdff96da84dc5b19f")
+        .expect("failed to decode hash");
+    let mut value =
+        hex::decode("48656c6c6f20534841310a").expect("failed to decode value");
 
     /* one shot digest */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
@@ -230,7 +144,7 @@ fn test_hashes_digest() {
     ret = fn_digest(
         session,
         value.as_mut_ptr(),
-        value_len,
+        value.len() as CK_ULONG,
         digest.as_mut_ptr(),
         &mut digest_len,
     );
