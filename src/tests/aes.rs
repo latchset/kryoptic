@@ -7,6 +7,20 @@ use serial_test::parallel;
 
 const AES_BLOCK_SIZE: usize = 16;
 
+fn get_gcm_test_data() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let iv =
+        hex::decode("3d8cf16e262880ddfe0c86eb").expect("failed to decode IV");
+    let aad = hex::decode("8560b10c011a1d4190eb46a3692daa17")
+        .expect("failed to decode AAD");
+    let tag = hex::decode("761cb84a963e1db1a4ab2c5f904c09db")
+        .expect("failed to decode tag");
+    let ct =
+        hex::decode("b1ee05f1415a61d7637e97c5f3").expect("Failed to decode CT");
+    let plaintext = hex::decode("2efbaedfec3cfe4ac32f201fa5")
+        .expect("Failed to decode plaintext");
+    (iv, aad, tag, ct, plaintext)
+}
+
 #[test]
 #[parallel]
 fn test_aes_operations() {
@@ -500,14 +514,10 @@ fn test_aes_operations() {
                 Err(e) => panic!("{}", e),
             };
 
-        let ciphertext = match get_test_data(session, testname, "ciphertext") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let plaintext = match get_test_data(session, testname, "plaintext") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
+        let ciphertext = hex::decode("4154c0be71072945d8156f5f046d198d")
+            .expect("Failed to decode ciphertext");
+        let plaintext = hex::decode("8b2b1b22f733ac09d1196d6be6a87a72")
+            .expect("Failed to decode plaintext");
 
         let dec = ret_or_panic!(decrypt(
             session,
@@ -531,18 +541,24 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
-        let iv = match get_test_data(session, testname, "iv") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let plaintext = match get_test_data(session, testname, "plaintext") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let ciphertext = match get_test_data(session, testname, "ciphertext") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
+        let iv = hex::decode("1dbbeb2f19abb448af849796244a19d7")
+            .expect("Failed to decode IV");
+        let plaintext = hex::decode(
+            "40d930f9a05334d9816fe204999c3f82a03f6a0457a8c475c94553d1d116693a\
+             dc618049f0a769a2eed6a6cb14c0143ec5cccdbc8dec4ce560cfd20622570932\
+             6d4de7948e54d603d01b12d7fed752fb23f1aa4494fbb00130e9ded4e77e37c0\
+             79042d828040c325b1a5efd15fc842e44014ca4374bf38f3c3fc3ee327733b0c\
+             8aee1abcd055772f18dc04603f7b2c1ea69ff662361f2be0a171bbdcea1e5d3f",
+        )
+        .expect("Failed to decode plaintext");
+        let ciphertext = hex::decode(
+            "6be8a12800455a320538853e0cba31bd2d80ea0c85164a4c5c261ae485417d93\
+             effe2ebc0d0a0b51d6ea18633d210cf63c0c4ddbc27607f2e81ed9113191ef86\
+             d56f3b99be6c415a4150299fb846ce7160b40b63baf1179d19275a2e83698376\
+             d28b92548c68e06e6d994e2c1501ed297014e702cdefee2f656447706009614d\
+             801de1caaf73f8b7fa56cf1ba94b631933bbe577624380850f117435a0355b2b",
+        )
+        .expect("Failed to decode ciphertext");
 
         let enc = ret_or_panic!(encrypt(
             session,
@@ -566,26 +582,7 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
-        let iv = match get_test_data(session, testname, "IV") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let aad = match get_test_data(session, testname, "AAD") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let tag = match get_test_data(session, testname, "Tag") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let ct = match get_test_data(session, testname, "CT") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let plaintext = match get_test_data(session, testname, "PT") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
+        let (iv, aad, tag, ct, plaintext) = get_gcm_test_data();
 
         let param = CK_GCM_PARAMS {
             pIv: byte_ptr!(iv.as_ptr()),
@@ -621,18 +618,16 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
-        let iv = match get_test_data(session, testname, "iv") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let plaintext = match get_test_data(session, testname, "plaintext") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let ciphertext = match get_test_data(session, testname, "ciphertext") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
+        let iv = hex::decode("0007bdfd5cbd60278dcc091200000001")
+            .expect("failed to decode iv");
+        let plaintext = hex::decode(
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223"
+        )
+        .expect("failed to decode plaintext");
+        let ciphertext = hex::decode(
+            "96893fc55e5c722f540b7dd1ddf7e758d288bc95c69165884536c811662f2188abee0935"
+        )
+        .expect("failed to decode ciphertext");
 
         let mut param = CK_AES_CTR_PARAMS {
             ulCounterBits: 32,
@@ -849,26 +844,7 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
-        let iv = match get_test_data(session, testname, "IV") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let aad = match get_test_data(session, testname, "AAD") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let tag = match get_test_data(session, testname, "Tag") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let ct = match get_test_data(session, testname, "CT") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
-        let plaintext = match get_test_data(session, testname, "PT") {
-            Ok(vec) => vec,
-            Err(ret) => return assert_eq!(ret, CKR_OK),
-        };
+        let (iv, aad, tag, ct, plaintext) = get_gcm_test_data();
 
         let ret = fn_message_decrypt_init(session, &mut mechanism, key_handle);
         assert_eq!(ret, CKR_OK);
