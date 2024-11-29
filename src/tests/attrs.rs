@@ -18,9 +18,12 @@ fn test_get_attr() {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
     /* public key data */
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "10".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PUBLIC_KEY)],
+        &[(CKA_ID, "\x01".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -52,10 +55,13 @@ fn test_get_attr() {
 
     /* private key data */
     handle = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "11".as_bytes())], &[]);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY)],
+        &[(CKA_ID, "\x01".as_bytes())],
+        &[],
+    );
     /* first try should not find it */
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -69,7 +75,7 @@ fn test_get_attr() {
     testtokn.login();
 
     /* after login should find it */
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -116,9 +122,12 @@ fn test_set_attr_rsa() {
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
 
     /* public key data */
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "10".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PUBLIC_KEY)],
+        &[(CKA_ID, "\x01".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);

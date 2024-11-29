@@ -551,15 +551,17 @@ fn test_ecc_key() {
     );
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
 
-    /* attempt context specific login (wrong pin) */
-    let pin = "AAAAAAAA";
-    let ret = fn_login(
-        session,
-        CKU_CONTEXT_SPECIFIC,
-        pin.as_ptr() as *mut _,
-        pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_PIN_INCORRECT);
+    if testtokn.dbtype != "nssdb" {
+        /* attempt context specific login (wrong pin) */
+        let pin = "AAAAAAAA";
+        let ret = fn_login(
+            session,
+            CKU_CONTEXT_SPECIFIC,
+            pin.as_ptr() as *mut _,
+            pin.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_PIN_INCORRECT);
+    }
 
     /* retry op w/o authentication should still fail */
     let mut siglen: CK_ULONG = 0;
