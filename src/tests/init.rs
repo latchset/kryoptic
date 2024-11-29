@@ -33,15 +33,18 @@ fn test_init_token() {
     );
     assert_eq!(ret, CKR_OK);
 
-    /* verify wrong SO PIN fails */
-    let bad_value = "SO Bad Value";
-    ret = fn_init_token(
-        testtokn.get_slot(),
-        CString::new(bad_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG,
-        std::ptr::null_mut(),
-    );
-    assert_eq!(ret, CKR_PIN_INCORRECT);
+    /* NSS DB does not support SO PIN */
+    if testtokn.dbtype != "nssdb" {
+        /* verify wrong SO PIN fails */
+        let bad_value = "SO Bad Value";
+        ret = fn_init_token(
+            testtokn.get_slot(),
+            CString::new(bad_value).unwrap().into_raw() as *mut u8,
+            pin_value.len() as CK_ULONG,
+            std::ptr::null_mut(),
+        );
+        assert_eq!(ret, CKR_PIN_INCORRECT);
+    }
 
     /* re-init */
     let pin_value = "SO Pin Value";
@@ -126,16 +129,18 @@ fn test_init_token() {
     );
     assert_eq!(ret, CKR_OK);
 
-    /* change so pin */
     let new_pin = "New SO Pin Value";
-    ret = fn_set_pin(
-        session,
-        CString::new(pin_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG,
-        CString::new(new_pin).unwrap().into_raw() as *mut u8,
-        new_pin.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
+    if testtokn.dbtype != "nssdb" {
+        /* change so pin */
+        ret = fn_set_pin(
+            session,
+            CString::new(pin_value).unwrap().into_raw() as *mut u8,
+            pin_value.len() as CK_ULONG,
+            CString::new(new_pin).unwrap().into_raw() as *mut u8,
+            new_pin.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+    }
 
     /* try to open ro_session and fail */
     ret = fn_open_session(
