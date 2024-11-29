@@ -30,18 +30,5 @@
         "CKA_TOKEN": true,
         "CKA_SIGN": true
     }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "22",
-        "CKA_APPLICATION": "CKM_ECDSA_SHA512",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "FIPS_186-3/SigGen: [P-521,SHA-512]",
-        "CKA_MODIFIABLE": false,
-        "CKA_OBJECT_ID": "AE3oJupwStELwPdTivijhD8oT1XIuUavkjWvWvdPK3bgmeS8cv150oo4D41LTJGawpDSSMN5g7oFrqQuLdef3TPoAIdIjIWalv6iZuoTv20RTEKbFjvpeldVkIbttkrtShhZS0b7nvx/0l2LLejwnKBYf1S9KHKZ9Hsv8SSqxWbo7jtD",
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "ns1QDGDnAUBJIuWKsgzAAmUf3ufLyTNq3aM+TBCI+rGWTst5BNxoVoZdbI4VBBzPLVrDAumdNG/y9oZTHSVSFnjU/T92u/LIk9JGy012k3kv4YFyEIFGhTEDpR+CSsxiHLcxHSRjwzYepwclTysFK8IsuAEoc9y7lb8aXMU6uJ8="
-    }
 }]}
 
