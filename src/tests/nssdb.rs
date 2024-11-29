@@ -175,6 +175,9 @@ fn test_nssdb_token() {
     let ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 
+    #[cfg(not(feature = "rsa"))]
+    return;
+
     /* fetch public key RSA modulus */
     let mut template =
         make_ptrs_template(&[(CKA_MODULUS, std::ptr::null_mut(), 0)]);
@@ -350,6 +353,9 @@ fn test_nssdb_init_token() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(value.as_slice(), "Secret".as_bytes());
+
+    #[cfg(not(feature = "rsa"))]
+    return;
 
     /* generate key pair and store it */
     /* RSA key pair */
