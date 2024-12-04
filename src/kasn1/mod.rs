@@ -177,6 +177,88 @@ impl PrivateKeyInfo<'_> {
     }
 }
 
+/* Following structs are used for storage purposes */
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Hash, Clone, Eq, Debug,
+)]
+pub struct KAlgorithmIdentifier<'a> {
+    pub oid: asn1::DefinedByMarker<asn1::ObjectIdentifier>,
+    #[defined_by(oid)]
+    pub params: KAlgorithmParameters<'a>,
+}
+
+#[derive(
+    asn1::Asn1DefinedByRead,
+    asn1::Asn1DefinedByWrite,
+    PartialEq,
+    Eq,
+    Hash,
+    Clone,
+    Debug,
+)]
+pub enum KAlgorithmParameters<'a> {
+    #[defined_by(oid::KKDF1_OID)]
+    Kkdf1(KKDF1Params<'a>),
+
+    #[defined_by(oid::PBKDF2_OID)]
+    Pbkdf2(pkcs::PBKDF2Params<'a>),
+
+    #[defined_by(oid::KKBPS1_OID)]
+    Kkbps1(KKBPS1Params<'a>),
+
+    #[defined_by(oid::AES_128_GCM_OID)]
+    Aes128Gcm(KGCMParams),
+    #[defined_by(oid::AES_192_GCM_OID)]
+    Aes192Gcm(KGCMParams),
+    #[defined_by(oid::AES_256_GCM_OID)]
+    Aes256Gcm(KGCMParams),
+
+    #[defined_by(oid::HMAC_WITH_SHA256_OID)]
+    HmacWithSha256(Option<asn1::Null>),
+    #[defined_by(oid::HMAC_WITH_SHA384_OID)]
+    HmacWithSha384(Option<asn1::Null>),
+    #[defined_by(oid::HMAC_WITH_SHA512_OID)]
+    HmacWithSha512(Option<asn1::Null>),
+
+    #[default]
+    Other(asn1::ObjectIdentifier, Option<asn1::Tlv<'a>>),
+}
+
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
+)]
+pub struct KKDF1Params<'a> {
+    pub prf: Box<KAlgorithmIdentifier<'a>>,
+    pub info: &'a [u8],
+    pub key_length: u64,
+}
+
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
+)]
+pub struct KKBPS1Params<'a> {
+    pub key_version_number: u64,
+    pub key_derivation_func: Box<KAlgorithmIdentifier<'a>>,
+    pub encryption_scheme: Box<KAlgorithmIdentifier<'a>>,
+}
+
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
+)]
+pub struct KProtectedData<'a> {
+    pub algorithm: Box<KAlgorithmIdentifier<'a>>,
+    pub data: &'a [u8],
+    pub signature: Option<&'a [u8]>,
+}
+
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
+)]
+pub struct KGCMParams {
+    pub aes_iv: [u8; 12],
+    pub aes_tag: [u8; 8],
+}
+
 #[allow(dead_code)]
 pub mod oid;
 
