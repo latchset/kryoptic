@@ -198,6 +198,12 @@ impl From<asn1::WriteError> for Error {
     }
 }
 
+impl From<Vec<u8>> for Error {
+    fn from(v: Vec<u8>) -> Error {
+        Error::buf_too_small(v.len())
+    }
+}
+
 #[macro_export]
 macro_rules! some_or_err {
     ($action:expr) => {
