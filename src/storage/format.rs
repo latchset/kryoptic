@@ -6,9 +6,7 @@ use std::fmt::Debug;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::interface::*;
-use crate::misc::copy_sized_string;
 use crate::object::Object;
-use crate::storage;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::{Storage, StorageTokenInfo};
 use crate::token::TokenFacilities;
@@ -29,7 +27,6 @@ pub static USER_PIN_FLAGS: [CK_FLAGS; 4] = [
 
 const SO_OBJ_UID: &str = "0";
 const USER_OBJ_UID: &str = "1";
-const TOKEN_INFO_UID: &str = "2";
 
 pub fn so_obj_uid() -> String {
     SO_OBJ_UID.to_string()
@@ -37,10 +34,6 @@ pub fn so_obj_uid() -> String {
 
 pub fn user_obj_uid() -> String {
     USER_OBJ_UID.to_string()
-}
-
-pub fn token_info_uid() -> String {
-    TOKEN_INFO_UID.to_string()
 }
 
 pub fn user_flags(
@@ -85,60 +78,6 @@ fn get_pin_uid(user_type: CK_USER_TYPE) -> Result<String> {
     }
 }
 
-pub fn object_to_token_info(obj: &Object) -> Result<StorageTokenInfo> {
-    if obj.get_attr_as_ulong(CKA_CLASS)? != KRO_TOKEN_DATA {
-        return Err(CKR_TOKEN_NOT_RECOGNIZED)?;
-    }
-    let label = obj
-        .get_attr_as_string(CKA_LABEL)
-        .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-    let manufacturer = obj
-        .get_attr_as_string(KRA_MANUFACTURER_ID)
-        .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-    let model = obj
-        .get_attr_as_string(KRA_MODEL)
-        .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-    let serial = obj
-        .get_attr_as_string(KRA_SERIAL_NUMBER)
-        .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?;
-    let mut info = StorageTokenInfo {
-        label: [0; 32],
-        manufacturer: [0; 32],
-        model: [0; 16],
-        serial: [0; 16],
-        flags: obj
-            .get_attr_as_ulong(KRA_FLAGS)
-            .map_err(|_| CKR_TOKEN_NOT_RECOGNIZED)?,
-    };
-    copy_sized_string(label.as_bytes(), &mut info.label);
-    copy_sized_string(manufacturer.as_bytes(), &mut info.manufacturer);
-    copy_sized_string(model.as_bytes(), &mut info.model);
-    copy_sized_string(serial.as_bytes(), &mut info.serial);
-    Ok(info)
-}
-
-pub fn token_info_to_object(
-    info: &StorageTokenInfo,
-    obj: &mut Object,
-) -> Result<()> {
-    obj.set_attr(Attribute::string_from_sized(CKA_LABEL, &info.label))?;
-    obj.set_attr(Attribute::string_from_sized(
-        KRA_MANUFACTURER_ID,
-        &info.manufacturer,
-    ))?;
-    obj.set_attr(Attribute::string_from_sized(KRA_MODEL, &info.model))?;
-    obj.set_attr(Attribute::string_from_sized(
-        KRA_SERIAL_NUMBER,
-        &info.serial,
-    ))?;
-
-    /* filter out runtime flags */
-    let flags = info.flags
-        & (CKF_LOGIN_REQUIRED | CKF_TOKEN_INITIALIZED | CKF_WRITE_PROTECTED);
-    obj.set_attr(Attribute::from_ulong(KRA_FLAGS, flags))?;
-    Ok(())
-}
-
 pub trait StorageRaw: Debug + Send + Sync {
     fn is_initialized(&self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
@@ -166,6 +105,12 @@ pub trait StorageRaw: Debug + Send + Sync {
         Err(CKR_GENERAL_ERROR)?
     }
     fn remove_by_uid(&mut self, _uid: &String) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn fetch_token_info(&self) -> Result<StorageTokenInfo> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn store_token_info(&mut self, _info: &StorageTokenInfo) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
 }
@@ -244,32 +189,12 @@ impl StdStorageFormat {
         encrypted: bool,
     ) -> Result<StorageTokenInfo> {
         /* TOKEN INFO */
-        let mut info = StorageTokenInfo {
-            label: [0u8; 32],
-            manufacturer: [0u8; 32],
-            model: [0u8; 16],
-            serial: [0u8; 16],
-            flags: CKF_TOKEN_INITIALIZED,
-        };
+        let mut info = StorageTokenInfo::default();
+        info.flags |= CKF_TOKEN_INITIALIZED;
         if encrypted {
             info.flags |= CKF_LOGIN_REQUIRED;
         }
-
-        /* default strings */
-        copy_sized_string(storage::TOKEN_LABEL.as_bytes(), &mut info.label);
-        copy_sized_string(
-            storage::MANUFACTURER_ID.as_bytes(),
-            &mut info.manufacturer,
-        );
-        copy_sized_string(storage::TOKEN_MODEL.as_bytes(), &mut info.model);
-
-        let mut obj = Object::new();
-        obj.set_attr(Attribute::from_string(CKA_UNIQUE_ID, token_info_uid()))?;
-        obj.set_attr(Attribute::from_bool(CKA_TOKEN, true))?;
-        obj.set_attr(Attribute::from_ulong(CKA_CLASS, KRO_TOKEN_DATA))?;
-        token_info_to_object(&info, &mut obj)?;
-        let info = object_to_token_info(&obj)?;
-        self.store.store_obj(obj)?;
+        self.store.store_token_info(&info)?;
         Ok(info)
     }
 }
@@ -453,15 +378,11 @@ impl Storage for StdStorageFormat {
     }
 
     fn load_token_info(&self) -> Result<StorageTokenInfo> {
-        let obj = self.store.fetch_by_uid(&token_info_uid(), &[])?;
-        object_to_token_info(&obj)
+        self.store.fetch_token_info()
     }
 
     fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
-        let uid = token_info_uid();
-        let mut obj = self.store.fetch_by_uid(&uid, &[])?;
-        token_info_to_object(info, &mut obj)?;
-        self.store.store_obj(obj)
+        self.store.store_token_info(info)
     }
 
     fn auth_user(
