@@ -7,9 +7,10 @@ use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
 use crate::object::Object;
+use crate::storage::aci::pbkdf2_derive;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
-use crate::{byte_ptr, sizeof, void_ptr};
+use crate::{sizeof, void_ptr};
 
 pub const NSS_MP_PBE_ITERATION_COUNT: usize = 10000;
 
@@ -59,42 +60,6 @@ pub struct BrokenPBES2Params<'a> {
 pub struct NSSEncryptedDataInfo<'a> {
     pub algorithm: Box<BrokenAlgorithmIdentifier<'a>>,
     pub enc_or_sig_data: &'a [u8],
-}
-
-fn pbkdf2_derive(
-    facilities: &TokenFacilities,
-    params: &PBKDF2Params,
-    secret: &[u8],
-    key_template: &[CK_ATTRIBUTE],
-) -> Result<Object> {
-    let mech = facilities.mechanisms.get(CKM_PKCS5_PBKD2)?;
-
-    let ck_params = CK_PKCS5_PBKD2_PARAMS2 {
-        saltSource: CKZ_SALT_SPECIFIED,
-        pSaltSourceData: void_ptr!(params.salt.as_ptr()),
-        ulSaltSourceDataLen: CK_ULONG::try_from(params.salt.len())?,
-        iterations: CK_ULONG::try_from(params.iteration_count)?,
-        prf: match params.prf.oid() {
-            &HMAC_WITH_SHA1_OID => CKP_PKCS5_PBKD2_HMAC_SHA1,
-            &HMAC_WITH_SHA256_OID => CKP_PKCS5_PBKD2_HMAC_SHA256,
-            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-        },
-        pPrfData: std::ptr::null_mut(),
-        ulPrfDataLen: 0,
-        pPassword: byte_ptr!(secret.as_ptr()),
-        ulPasswordLen: CK_ULONG::try_from(secret.len())?,
-    };
-
-    mech.generate_key(
-        &CK_MECHANISM {
-            mechanism: CKM_PKCS5_PBKD2,
-            pParameter: void_ptr!(&ck_params),
-            ulParameterLen: sizeof!(CK_PKCS5_PBKD2_PARAMS2),
-        },
-        key_template,
-        &facilities.mechanisms,
-        &facilities.factories,
-    )
 }
 
 fn aes_cbc_decrypt(
