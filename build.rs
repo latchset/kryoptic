@@ -82,7 +82,7 @@ fn build_ossl() {
             providers_path.to_string_lossy()
         );
         println!("cargo:rustc-link-lib=static=fips");
-        println!("cargo::rerun-if-changed={}", libfips);
+        println!("cargo:rerun-if-changed={}", libfips);
 
         (libfips, buildargs, "fips.h")
     };
@@ -94,7 +94,7 @@ fn build_ossl() {
 
         println!("cargo:rustc-link-search={}", openssl_path.to_str().unwrap());
         println!("cargo:rustc-link-lib=static=crypto");
-        println!("cargo::rerun-if-changed={}", libcrypto);
+        println!("cargo:rerun-if-changed={}", libcrypto);
 
         (libcrypto, ["--debug"], "ossl.h")
     };
@@ -154,7 +154,7 @@ fn main() {
 
     /* PKCS11 Headers */
     let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
-    println!("cargo::rerun-if-changed={}", pkcs11_header);
+    println!("cargo:rerun-if-changed={}", pkcs11_header);
     bindgen::Builder::default()
         .header(pkcs11_header)
         .derive_default(true)
@@ -174,10 +174,10 @@ fn main() {
     use_system_ossl();
 
     #[cfg(not(feature = "dynamic"))]
-    println!("cargo::rerun-if-changed={}", ".git/modules/openssl/HEAD");
+    println!("cargo:rerun-if-changed={}", ".git/modules/openssl/HEAD");
 
     #[cfg(not(feature = "dynamic"))]
     build_ossl();
 
-    println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build.rs");
 }
