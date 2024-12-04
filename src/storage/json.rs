@@ -6,7 +6,7 @@ use crate::interface::*;
 use crate::object::Object;
 use crate::storage::aci::StorageACI;
 use crate::storage::format::{StdStorageFormat, StorageRaw};
-use crate::storage::{memory, Storage, StorageDBInfo};
+use crate::storage::{memory, Storage, StorageDBInfo, StorageTokenInfo};
 
 mod objects {
     include!("json_objects.rs");
@@ -52,6 +52,12 @@ impl StorageRaw for JsonStorage {
     fn remove_by_uid(&mut self, uid: &String) -> Result<()> {
         self.cache.remove_by_uid(uid)?;
         self.flush()
+    }
+    fn fetch_token_info(&self) -> Result<StorageTokenInfo> {
+        self.cache.fetch_token_info()
+    }
+    fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
+        self.cache.store_token_info(info)
     }
 }
 

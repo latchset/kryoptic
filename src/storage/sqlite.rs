@@ -6,15 +6,18 @@ use std::sync::{Arc, Mutex};
 use crate::attribute::{string_to_ck_date, AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::interface::*;
+use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::storage::aci::StorageACI;
 use crate::storage::format::{StdStorageFormat, StorageRaw};
 use crate::storage::sqlite_common::check_table;
-use crate::storage::{Storage, StorageDBInfo};
+use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
 use itertools::Itertools;
-use rusqlite::types::Value;
-use rusqlite::{params, Connection, Rows, Statement, Transaction};
+use rusqlite::types::{Value, ValueRef};
+use rusqlite::{
+    params, params_from_iter, Connection, Rows, Statement, Transaction,
+};
 
 fn bad_code<E: std::error::Error + 'static>(error: E) -> Error {
     Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
@@ -24,9 +27,16 @@ fn bad_storage<E: std::error::Error + 'static>(error: E) -> Error {
     Error::ck_rv_from_error(CKR_DEVICE_MEMORY, error)
 }
 
+const DB_VERSION_COL: &str = "version";
+const DB_VERSION: &str = "v1";
+
+const DROP_META_TABLE: &str = "DROP TABLE meta";
+const CREATE_META_TABLE: &str =
+    "CREATE TABLE meta (name TEXT NOT NULL, id INTEGER, value TEXT, data BLOB, UNIQUE(name, value))";
+
 const OBJECTS_TABLE: &str = "objects";
-const DROP_DB_TABLE: &str = "DROP TABLE objects";
-const CREATE_DB_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr))";
+const DROP_OBJ_TABLE: &str = "DROP TABLE objects";
+const CREATE_OBJ_TABLE: &str = "CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr))";
 
 /* search by filter constants */
 const SEARCH_ALL: &str = "SELECT * FROM objects";
@@ -109,6 +119,42 @@ impl SqliteStorage {
             }
         }
         Ok(objects)
+    }
+
+    fn store_meta(
+        tx: &mut Transaction,
+        name: &str,
+        id: Option<u32>,
+        value: Option<&str>,
+        data: Option<&[u8]>,
+    ) -> Result<()> {
+        let mut sql = String::from("INSERT OR REPLACE INTO meta (name");
+        let mut params = Vec::<Value>::with_capacity(4);
+
+        params.push(Value::from(ValueRef::from(name)));
+
+        if let Some(i) = id {
+            sql.push_str(", id");
+            params.push(Value::from(i as i64));
+        }
+        if let Some(v) = value {
+            sql.push_str(", value");
+            params.push(Value::from(ValueRef::from(v)));
+        }
+        if let Some(d) = data {
+            sql.push_str(", data");
+            params.push(Value::from(ValueRef::from(d)));
+        }
+        sql.push_str(") VALUES(?");
+
+        for _ in 1..params.len() {
+            sql.push_str(", ?");
+        }
+        sql.push_str(")");
+
+        let mut stmt = tx.prepare(&sql)?;
+        let _ = stmt.execute(params_from_iter(params))?;
+        Ok(())
     }
 
     fn store_object(
@@ -206,9 +252,19 @@ impl StorageRaw for SqliteStorage {
         let mut conn = self.conn.lock()?;
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
-        /* the drop can fail when files are empty (new) */
-        let _ = tx.execute(DROP_DB_TABLE, params![]);
-        tx.execute(CREATE_DB_TABLE, params![])
+        /* the drops can fail when files are empty (new) */
+        let _ = tx.execute(DROP_META_TABLE, params![]);
+        tx.execute(CREATE_META_TABLE, params![])
+            .map_err(bad_storage)?;
+        Self::store_meta(
+            &mut tx,
+            DB_VERSION_COL,
+            None,
+            Some(DB_VERSION),
+            None,
+        )?;
+        let _ = tx.execute(DROP_OBJ_TABLE, params![]);
+        tx.execute(CREATE_OBJ_TABLE, params![])
             .map_err(bad_storage)?;
         tx.commit().map_err(bad_storage)
     }
@@ -316,6 +372,85 @@ impl StorageRaw for SqliteStorage {
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
         Self::delete_object(&mut tx, &uid)?;
+        tx.commit().map_err(bad_storage)
+    }
+
+    fn fetch_token_info(&self) -> Result<StorageTokenInfo> {
+        let mut info = StorageTokenInfo::default();
+        let conn = self.conn.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT value, data from meta WHERE name='TOKEN INFO'")?;
+        let mut rows = stmt.query(params![])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let value: Vec<u8> = row.get(1)?;
+            match name.as_str() {
+                "label" => copy_sized_string(value.as_slice(), &mut info.label),
+                "manufacturer" => {
+                    copy_sized_string(value.as_slice(), &mut info.manufacturer)
+                }
+                "model" => copy_sized_string(value.as_slice(), &mut info.model),
+                "serial" => {
+                    copy_sized_string(value.as_slice(), &mut info.serial)
+                }
+                "flags" => {
+                    info.flags = CK_FLAGS::try_from(u32::from_le_bytes(
+                        value.try_into()?,
+                    ))?
+                }
+                _ => (), /* ignore unknown values for forward compatibility */
+            }
+        }
+        Ok(info)
+    }
+
+    fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction().map_err(bad_storage)?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+
+        Self::store_meta(
+            &mut tx,
+            "TOKEN INFO",
+            None,
+            Some("label"),
+            Some(&info.label as &[u8]),
+        )?;
+        Self::store_meta(
+            &mut tx,
+            "TOKEN INFO",
+            None,
+            Some("manufacturer"),
+            Some(&info.manufacturer as &[u8]),
+        )?;
+        Self::store_meta(
+            &mut tx,
+            "TOKEN INFO",
+            None,
+            Some("model"),
+            Some(&info.model as &[u8]),
+        )?;
+        Self::store_meta(
+            &mut tx,
+            "TOKEN INFO",
+            None,
+            Some("serial"),
+            Some(&info.serial as &[u8]),
+        )?;
+        /* filter out runtime flags */
+        let flags = info.flags
+            & (CKF_LOGIN_REQUIRED
+                | CKF_TOKEN_INITIALIZED
+                | CKF_WRITE_PROTECTED);
+        let flags32 = u32::try_from(flags)?;
+        Self::store_meta(
+            &mut tx,
+            "TOKEN INFO",
+            None,
+            Some("flags"),
+            Some(&flags32.to_le_bytes() as &[u8]),
+        )?;
+
         tx.commit().map_err(bad_storage)
     }
 }
