@@ -215,8 +215,7 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
 fn test_cmac_aes_128_vector() {
     let test_data = parse_mac_vector("testdata/CMACGenAES128.rsp");
 
-    let mut testtokn =
-        TestToken::initialized("test_cmac_aes_128_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_cmac_aes_128_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */
@@ -232,8 +231,7 @@ fn test_cmac_aes_128_vector() {
 fn test_cmac_aes_192_vector() {
     let test_data = parse_mac_vector("testdata/CMACGenAES192.rsp");
 
-    let mut testtokn =
-        TestToken::initialized("test_cmac_aes_192_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_cmac_aes_192_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */
@@ -249,8 +247,7 @@ fn test_cmac_aes_192_vector() {
 fn test_cmac_aes_256_vector() {
     let test_data = parse_mac_vector("testdata/CMACGenAES256.rsp");
 
-    let mut testtokn =
-        TestToken::initialized("test_cmac_aes_256_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_cmac_aes_256_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */
@@ -265,7 +262,7 @@ fn test_cmac_aes_256_vector() {
 #[parallel]
 fn test_hmac_vector() {
     let test_data = parse_mac_vector("testdata/HMAC.rsp");
-    let mut testtokn = TestToken::initialized("test_hmac_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_hmac_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */

@@ -48,7 +48,9 @@ pub mod eddsa;
 #[cfg(feature = "fips")]
 pub mod fips;
 
+#[cfg(feature = "hash")]
 pub mod hash;
+#[cfg(feature = "hkdf")]
 pub mod hkdf;
 
 #[cfg(all(feature = "hmac", feature = "fips"))]
@@ -60,6 +62,7 @@ pub mod kbkdf;
 #[cfg(all(feature = "pbkdf2", feature = "fips"))]
 pub mod pbkdf2;
 
+#[cfg(feature = "rsa")]
 pub mod rsa;
 
 #[cfg(all(feature = "sshkdf", feature = "fips"))]

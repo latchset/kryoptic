@@ -8,7 +8,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_random() {
-    let mut testtokn = TestToken::initialized("test_random.sql", None);
+    let mut testtokn = TestToken::initialized("test_random", None);
     let session = testtokn.get_session(false);
 
     let data: &[u8] = &mut [0, 0, 0, 0];

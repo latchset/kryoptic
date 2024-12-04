@@ -73,30 +73,6 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "103",
-        "CKA_APPLICATION": "SigVer15_186-3.rsp SHAAlg = SHA256 1660",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "msg",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "aRjWMoygqLZLvoHZHN6lGZEbWfwtvVOvdgBv7EsYoyB4cTXOiDsrLtsmBBv4aqUsIwuWIDNbbn+ewIx+1rcII9gZ6asBnpkpJJ+Wb9sgaTEaDdxoCsRo9RTU7Yc7BKa+sJhbkaDP2O1RsJ+ebQbac56qk51aACdZAcT4zyUHYzk="
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "104",
-        "CKA_APPLICATION": "SigVer15_186-3.rsp SHAAlg = SHA256 1660",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "sig",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "eU0KRbyfxv67WG4xnfppJMiIWUgCud65Zolj/bMJvwKBeWCnRXEG/EdPkWAUNuiVTLtoFTULLFG1PJaNLEjMF5lVDV0DtB9uWow8Jk0uL+C1uP9T/cud0RHJhctIjXCG5lSLQHfsAHIcnLUA/gegMcIDDorR3QESw0/9kJHXehh6rIZhspju4562FflxXExIpnYu3lWkZux/PNtqk3z8gBiKhdj406KoCxmc5eY3WvjwLwbXBqNNnPODGJA5ZdtUqqfT+np+5YA0zVjIQ1c5yJBjZuLduik/L7LBXwf6SVEBRHHn9nfTvaz/xMaKkG4I1os5+QEHRsus0imAzuc+jQ=="
-    }
-}, {
-    "attributes": {
         "CKA_UNIQUE_ID": "201",
         "CKA_CLASS": 2,
         "CKA_KEY_TYPE": 0,
@@ -129,42 +105,6 @@
         "CKA_PRIME_2": "4tV21uNgZpFMlMXEAc5K2woJ1sL0r/pXdK65H07Pjzd1RLKOdH+XUgxLuKgfFZWgzYr4aNxofsBdjVOtjFU9cvki3LzlPDAd79xbu/CDqEojkM03iRJtJovb4Z/i1jgEtJp8x/8+N9k7bzZmO8GNv1VD3JjCVtBzR7/sXBX6idfv0RsXii63cDku0g/Kdkzpqsqt8VDcro7ZYftM8Go30vHyQBROwVQ/a38dcyagDKkSomFxGuI1DUcRHL4s/ckr",
         "CKA_TOKEN": true,
         "CKA_SIGN": true
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "203",
-        "CKA_APPLICATION": "SigVerPSS_186-3.rsp SHAAlg = SHA384 2514",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "msg",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "SJ6YqLRN/G3LD9is0+uuMXasqMldK9CmAcyDBL5LIw0quQ36pMHLfDAwilqCtc5bWORkZg2Bmehr/Kl2wjh6tDaQinVdHCYjCjDeYmMmNfA6Xp3PmoKip58PZWaLEUwpFy74XwfldysBGLsLn8hLuMMhOU0rtlSqRQ2eG0ReATU="
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "204",
-        "CKA_APPLICATION": "SigVerPSS_186-3.rsp SHAAlg = SHA384 2514",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "sig",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "TxRpdwIHQGtURjWvzFj+ZWz7QY87fV6PS+nEBTiHxEyGxKCjne/eiTXJFn5R63MqvC2AByRgrSdFma09fO4AQ2vGgOox95GZfkXRIpCUWbK1ihwS16NC0mBBD7NkzulMzb1vzflGU+4w3jB+4I0OXHX9KWEv97bAcoKvAF6Fh8bfPIWEV9WklOphaYqRuGBdMJHt4DHWnz5Eaq5wFCcB9MnGdmgeBN4AILMJgdXpZcUa+5/Q1danjfIBndLPr8Jw5nhHdBMISOrEORxMRbkm+igaNDtlHuBD+52kYT3A48q8DmjeqNly/mmI+vBV+XvuRLbekAfOIBmCoBkuJJ+LUztU92gkkyxyuMrdpgEIzZve7eimjhWaBqKZ8ZyA5ZrV3UmjnLBsQW44KAjj1JWVkdjeQYC2XXoooXZj97baSWzoos8I8c4Kw2AVjrLX2VbYsd0kk1V1AbM4SCgdnT+nWQq5IpDRbYt9gkrcLHSIGZciu+0jVOTSAfmq790vX4WV"
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "205",
-        "CKA_APPLICATION": "SigVerPSS_186-3.rsp SHAAlg = SHA384 2514",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "salt",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "ESIzRFVUMhZ4kA=="
     }
 }, {
     "attributes": {
@@ -206,30 +146,6 @@
     }
 }, {
     "attributes": {
-        "CKA_UNIQUE_ID": "303",
-        "CKA_APPLICATION": "pkcs1v15crypt-vectors.txt - PKCS#1 v1.5 Encryption Example 15.20",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "msg",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "abdkSFX5HRxhyEmOS6G6TYRbqIKxcw=="
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "304",
-        "CKA_APPLICATION": "pkcs1v15crypt-vectors.txt - PKCS#1 v1.5 Encryption Example 15.20",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "enc",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "q0Jnlyx3loOTiNSth97XS7ZT6acFDigughkodWifcO4doYofcyIJLNKf0AEZkipt4SYBmAqp+m5hnid16Hra4xaVwTBOd/UszgFmZfImfCB2JkPGADwBbYSARDxwHfbB2NZVVJYA7kVbcORzMZsNREXgt1UqH4COiPMmSEJzWuYd8DJe0DaQ1tXWk60f7SJmhFA3nbUyPcAcia/642m5wwHDGcN931Ht9G4Jsh5d6RSD6OPLIe63BXvC69w6qj1lAMkvmbF7MYC7oEfXYHN3YzaxXQVNeaRAzF6YXqVD/Kol2x3Ykrcbt0pc9oJj2P1Y8aSObC/LjAtxolHPwaIBVw=="
-    }
-}, {
-    "attributes": {
         "CKA_UNIQUE_ID": "401",
         "CKA_CLASS": 2,
         "CKA_KEY_TYPE": 0,
@@ -265,29 +181,5 @@
         "CKA_COEFFICIENT": "l1fK9tBkUIqPvk36Gei4fX7XNEd9G9jqjFfYWuYEL8t83MNOkIzDficIoGukAoqHnc+nK2fikZ/J/uk06kyTGZ9359ffsCCNLhboz8hnaEAQyPaQnyyfRMvXBwxWnwE9O/CZyzcDdeOOw+FG3BBX88JdiV9+PpYk+mGRsNYS18Q=",
         "CKA_TOKEN": true,
         "CKA_DECRYPT": true
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "403",
-        "CKA_APPLICATION": "oaep-sha512-sha512.txt - First Key Example - OAEP Example 1 alg=sha512 mgf1=sha512",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "msg",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "ZigZThIHPbA7qUzanvlTI5fVDbp5uYcASv7+NA=="
-    }
-}, {
-    "attributes": {
-        "CKA_UNIQUE_ID": "404",
-        "CKA_APPLICATION": "oaep-sha512-sha512.txt - First Key Example - OAEP Example 1 alg=sha512 mgf1=sha512",
-        "CKA_CLASS": 0,
-        "CKA_DESTROYABLE": false,
-        "CKA_LABEL": "enc",
-        "CKA_MODIFIABLE": false,
-        "CKA_PRIVATE": false,
-        "CKA_TOKEN": true,
-        "CKA_VALUE": "e33M7pe0PUtuIU77kMItZnm4wUSJHUfwZ09s3JS4xKh8H6ud3Wodd9TJ0Eh6Bx4qAyOs9/BFVLQ5Us/UnRxkKHenjATciSIkDu5q/F65SJa4PD/Ex+IcWfj+G88DqnURDIZlXiXVW3VHYVPjnjqAAX+mHGQIOLWyfQPVgwdGkmvd1kNKys0PzANhXFuoULWRxnO8jogtUUZXlcyer/H0pl5w+cknd/CHfGnCbB5cuL8K6Hq2Hs7yTUNJ61ehwaJwBHAwOPLFbZ1PQI3t+55SYySb6e3v1wTHqp9rP22wth84SN2JTnCj9EjqZYP110uC7ChQrh0OM1wiCHzEaOWvZA=="
     }
 }]}

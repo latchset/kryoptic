@@ -7,8 +7,12 @@ use serial_test::parallel;
 
 #[test]
 #[parallel]
+#[cfg(feature = "rsa")]
 fn test_copy_objects() {
-    let mut testtokn = TestToken::initialized("test_copy_objects.sql", None);
+    let mut testtokn = TestToken::initialized(
+        "test_copy_objects",
+        Some("testdata/test_basic_rsa.json"),
+    );
     let session = testtokn.get_session(false);
 
     /* login */
@@ -16,9 +20,12 @@ fn test_copy_objects() {
 
     /* public key data */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "10".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PUBLIC_KEY)],
+        &[(CKA_ID, "\x01".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -74,7 +81,7 @@ fn test_copy_objects() {
 #[test]
 #[parallel]
 fn test_create_objects() {
-    let mut testtokn = TestToken::initialized("test_create_objects.sql", None);
+    let mut testtokn = TestToken::initialized("test_create_objects", None);
     let session = testtokn.get_session(false);
 
     let byte_values = [
@@ -103,13 +110,15 @@ fn test_create_objects() {
     /* login */
     testtokn.login();
 
-    let _ = ret_or_panic!(import_object(
-        session,
-        CKO_DATA,
-        &[],
-        &byte_values,
-        &bool_values,
-    ));
+    if testtokn.dbtype != "nssdb" {
+        let _ = ret_or_panic!(import_object(
+            session,
+            CKO_DATA,
+            &[],
+            &byte_values,
+            &bool_values,
+        ));
+    }
 
     let _ = ret_or_panic!(import_object(
         session,
