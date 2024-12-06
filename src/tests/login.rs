@@ -66,7 +66,7 @@ fn test_login() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.flags & pin_flags_mask, 0);
 
-    /* fail a few more time to brig the count to low */
+    /* fail a few more times to bring the count to low */
     for _ in 1..7 {
         let pin = "87654321";
         let ret = fn_login(

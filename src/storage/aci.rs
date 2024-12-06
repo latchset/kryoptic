@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 
 use crate::aes;
-use crate::attribute::{Attribute, CkAttrs};
+use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::*;
@@ -15,6 +15,7 @@ use crate::CSPRNG;
 use crate::{byte_ptr, sizeof, void_ptr};
 
 use asn1;
+use zeroize::Zeroize;
 
 pub fn pbkdf2_derive(
     facilities: &TokenFacilities,
@@ -177,7 +178,6 @@ fn aes_gcm_decrypt(
 }
 
 const SHA256_LEN: usize = 32;
-const KEK_AAD: &str = "ENCRYPTION KEY";
 const GEN_KEYTYP: CK_ULONG = CKK_GENERIC_SECRET;
 const AES_KEYTYP: CK_ULONG = CKK_AES;
 const AES_KEYLEN: CK_ULONG = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
@@ -203,6 +203,7 @@ fn secret_key_template<'a>(
 
 fn encrypt_key(
     facilities: &TokenFacilities,
+    id: &str,
     pin: &[u8],
     iterations: usize,
     key_version: u64,
@@ -226,8 +227,7 @@ fn encrypt_key(
         pin,
         key_template.as_slice(),
     )?;
-    let (gcm, data) =
-        aes_gcm_encrypt(facilities, &kek, KEK_AAD.as_bytes(), key)?;
+    let (gcm, data) = aes_gcm_encrypt(facilities, &kek, id.as_bytes(), key)?;
 
     let enc_params = KAlgorithmIdentifier {
         oid: asn1::DefinedByMarker::marker(),
@@ -258,6 +258,7 @@ fn encrypt_key(
 
 fn decrypt_key(
     facilities: &TokenFacilities,
+    id: &str,
     pin: &[u8],
     data: &[u8],
 ) -> Result<(u64, Vec<u8>)> {
@@ -292,13 +293,7 @@ fn decrypt_key(
     };
     Ok((
         kkbps1.key_version_number,
-        aes_gcm_decrypt(
-            facilities,
-            &key,
-            params,
-            KEK_AAD.as_bytes(),
-            pdata.data,
-        )?,
+        aes_gcm_decrypt(facilities, &key, params, id.as_bytes(), pdata.data)?,
     ))
 }
 
@@ -393,22 +388,46 @@ fn decrypt_data(
     aes_gcm_decrypt(facilities, &dek, params, data_id.as_bytes(), pdata.data)
 }
 
-const DEFAULT_PIN: &str = "DEFAULT PIN";
-const DEFPIN_ITER: usize = 1000;
-
 const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 
 pub struct StorageAuthInfo {
+    pub default_pin: bool,
+    pub user_data: Option<Vec<u8>>,
     pub max_attempts: CK_ULONG,
     pub cur_attempts: CK_ULONG,
-    pub locked: bool,
-    pub update_obj: bool,
+}
+
+impl Default for StorageAuthInfo {
+    fn default() -> StorageAuthInfo {
+        StorageAuthInfo {
+            default_pin: false,
+            user_data: None,
+            max_attempts: MAX_LOGIN_ATTEMPTS,
+            cur_attempts: 0,
+        }
+    }
+}
+
+impl Drop for StorageAuthInfo {
+    fn drop(&mut self) {
+        if let Some(ref mut data) = self.user_data {
+            data.zeroize();
+        }
+    }
+}
+
+impl StorageAuthInfo {
+    pub fn locked(&self) -> bool {
+        self.cur_attempts >= self.max_attempts
+    }
 }
 
 /* Storage abstract Authentication, Confidentialiy, Integrity
  * functionality */
 #[derive(Debug)]
 pub struct StorageACI {
+    def_iterations: usize,
+    key_version: u64,
     key: Option<Object>,
     encrypt: bool,
 }
@@ -416,6 +435,8 @@ pub struct StorageACI {
 impl StorageACI {
     pub fn new(encrypt: bool) -> StorageACI {
         StorageACI {
+            def_iterations: 1000,
+            key_version: 0,
             key: None,
             encrypt: encrypt,
         }
@@ -434,6 +455,7 @@ impl StorageACI {
          * key and HKDF allows only CKK_HKDF or CKK_GENERIC_SECRET */
         let template = secret_key_template(&GEN_KEYTYP, &AES_KEYLEN);
         let mech = facilities.mechanisms.get(CKM_GENERIC_SECRET_KEY_GEN)?;
+        self.key_version += 1;
         self.key = Some(mech.generate_key(
             &CK_MECHANISM {
                 mechanism: CKM_GENERIC_SECRET_KEY_GEN,
@@ -458,10 +480,9 @@ impl StorageACI {
         val: &Vec<u8>,
     ) -> Result<Vec<u8>> {
         if let Some(ref key) = self.key {
-            let key_version = 1; /* FIXME */
             encrypt_data(
                 facilities,
-                key_version,
+                self.key_version,
                 key,
                 uid.as_str(),
                 val.as_slice(),
@@ -478,10 +499,9 @@ impl StorageACI {
         val: &Vec<u8>,
     ) -> Result<Vec<u8>> {
         if let Some(ref key) = self.key {
-            let key_version = 1; /* FIXME */
             decrypt_data(
                 facilities,
-                key_version,
+                self.key_version,
                 key,
                 uid.as_str(),
                 val.as_slice(),
@@ -491,27 +511,20 @@ impl StorageACI {
         }
     }
 
-    fn new_storage_object(uid: &String) -> Result<Object> {
-        let mut obj = Object::new();
-        obj.set_zeroize();
-        obj.set_attr(Attribute::from_string(CKA_UNIQUE_ID, uid.clone()))?;
-        obj.set_attr(Attribute::from_bool(CKA_TOKEN, true))?;
-        obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
-        obj.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
-        obj.set_attr(Attribute::from_ulong(
-            KRA_MAX_LOGIN_ATTEMPTS,
-            MAX_LOGIN_ATTEMPTS,
-        ))?;
-        obj.set_attr(Attribute::from_ulong(KRA_LOGIN_ATTEMPTS, 0))?;
-        Ok(obj)
-    }
-
-    fn key_to_storage_object(
+    /// Creates a user authentication token by deriving a key encryption
+    /// key (kek) from the pin.
+    ///
+    /// If encryption is enabled, then the encryption key is wrapped
+    /// with this key and returned as the auth token.
+    ///
+    /// Otherwise the derived key is returned as the token.
+    pub fn key_to_user_data(
         &mut self,
         facilities: &TokenFacilities,
+        uid: &str,
         pin: &[u8],
-        uid: &String,
-    ) -> Result<Object> {
+    ) -> Result<StorageAuthInfo> {
+        let mut info = StorageAuthInfo::default();
         let ek = if self.encrypt {
             match self.key {
                 Some(ref k) => k.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
@@ -520,111 +533,59 @@ impl StorageACI {
         } else {
             "NO ENCRYPTION".as_bytes()
         };
-        let iterations = DEFPIN_ITER;
-        let key_version = 1; /* FIXME */
-        let wrapped =
-            encrypt_key(facilities, pin, iterations, key_version, ek)?;
-        let mut obj = Self::new_storage_object(uid)?;
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, wrapped))?;
-
-        Ok(obj)
-    }
-
-    pub fn auth_object_is_default(&self, obj: &Object) -> Result<bool> {
-        match obj.get_attr_as_string(CKA_LABEL) {
-            Ok(label) => Ok(label.as_str() == DEFAULT_PIN),
-            Err(_) => Ok(false),
-        }
-    }
-
-    /// Returns, the max available and the current attempts at
-    /// authentication that resulted in a failure. A successful
-    /// authentication causes current to return to 0
-    pub fn user_attempts(&self, obj: &Object) -> Result<StorageAuthInfo> {
-        let max = obj.get_attr_as_ulong(KRA_MAX_LOGIN_ATTEMPTS)?;
-        let cur = obj.get_attr_as_ulong(KRA_LOGIN_ATTEMPTS)?;
-        Ok(StorageAuthInfo {
-            max_attempts: max,
-            cur_attempts: cur,
-            locked: cur >= max,
-            update_obj: false,
-        })
-    }
-
-    /// Creates a user authentication token by deriving a key encryption
-    /// key (kek) from the pin.
-    ///
-    /// If encryption is enabled, then the encryption key is wrapped
-    /// with this key and returned as the auth token.
-    ///
-    /// Otherwise the derived key is returned as the token.
-    ///
-    /// If the pin is empty, sets a label that indicated the PIN needs to
-    /// be reset.
-    pub fn make_auth_object(
-        &mut self,
-        facilities: &TokenFacilities,
-        uid: &String,
-        pin: &[u8],
-    ) -> Result<Object> {
-        let mut key = self.key_to_storage_object(facilities, pin, uid)?;
-        if pin.len() == 0 {
-            key.set_attr(Attribute::from_string(
-                CKA_LABEL,
-                DEFAULT_PIN.to_string(),
-            ))?;
-        };
-        Ok(key)
+        info.user_data = Some(encrypt_key(
+            facilities,
+            uid,
+            pin,
+            self.def_iterations,
+            self.key_version,
+            ek,
+        )?);
+        Ok(info)
     }
 
     pub fn authenticate(
         &mut self,
         facilities: &TokenFacilities,
-        auth_obj: &mut Object,
+        uid: &str,
+        info: &mut StorageAuthInfo,
         pin: &[u8],
         set_key: bool,
-    ) -> Result<StorageAuthInfo> {
-        let mut info = self.user_attempts(&auth_obj)?;
-        if info.locked {
-            return Ok(info);
+    ) -> Result<bool> {
+        if info.locked() {
+            return Ok(false);
         }
 
         let stored = info.cur_attempts;
-        let wrapped = auth_obj.get_attr_as_bytes(CKA_VALUE)?.as_slice();
-        match decrypt_key(facilities, pin, wrapped) {
+        let wrapped = match &info.user_data {
+            Some(data) => data.as_slice(),
+            None => return Err(CKR_GENERAL_ERROR)?,
+        };
+        match decrypt_key(facilities, uid, pin, wrapped) {
             Ok((key_version, key)) => {
-                if key_version != 1 {
-                    /* FIXME */
-                    info.cur_attempts += 1;
-                } else if !self.encrypt {
-                    if key.as_slice() == "NO ENCRYPTION".as_bytes() {
-                        info.cur_attempts = 0;
-                    } else {
-                        info.cur_attempts += 1;
-                    }
-                } else if self.encrypt {
+                if self.encrypt {
                     if set_key {
                         let mut template =
                             secret_key_template(&GEN_KEYTYP, &AES_KEYLEN);
                         template.add_vec(CKA_VALUE, key)?;
+                        self.key_version = key_version;
                         self.key = Some(
                             facilities.factories.create(template.as_slice())?,
                         );
                     }
                     info.cur_attempts = 0;
+                } else {
+                    if key.as_slice() == "NO ENCRYPTION".as_bytes() {
+                        info.cur_attempts = 0;
+                    } else {
+                        info.cur_attempts += 1;
+                    }
                 }
             }
             Err(_) => info.cur_attempts += 1,
         }
 
-        /* Store attempts back to token */
-        if info.cur_attempts != stored {
-            info.update_obj = true;
-            auth_obj.set_attr(Attribute::from_ulong(
-                KRA_LOGIN_ATTEMPTS,
-                info.cur_attempts,
-            ))?;
-        }
-        Ok(info)
+        /* Indicate if data has changed */
+        Ok(info.cur_attempts != stored)
     }
 }

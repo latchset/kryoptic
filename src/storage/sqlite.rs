@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::interface::*;
 use crate::misc::copy_sized_string;
 use crate::object::Object;
-use crate::storage::aci::StorageACI;
+use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::format::{StdStorageFormat, StorageRaw};
 use crate::storage::sqlite_common::check_table;
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
@@ -242,6 +242,11 @@ impl SqliteStorage {
     }
 }
 
+const USER_FLAGS: &str = "USER FLAGS";
+const USER_COUNTER: &str = "USER COUNTER";
+const USER_DATA: &str = "USER DATA";
+const USER_FLAGS_DEFAULT_PIN: u32 = 1;
+
 impl StorageRaw for SqliteStorage {
     fn is_initialized(&self) -> Result<()> {
         let conn = self.conn.lock()?;
@@ -451,6 +456,80 @@ impl StorageRaw for SqliteStorage {
             Some(&flags32.to_le_bytes() as &[u8]),
         )?;
 
+        tx.commit().map_err(bad_storage)
+    }
+
+    fn fetch_user(&self, uid: &str) -> Result<StorageAuthInfo> {
+        let conn = self.conn.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, data from meta WHERE (name in (?, ?, ?) AND value=?)",
+        )?;
+        let mut rows = stmt.query(params![
+            Value::from(ValueRef::from(USER_FLAGS)),
+            Value::from(ValueRef::from(USER_COUNTER)),
+            Value::from(ValueRef::from(USER_DATA)),
+            Value::from(ValueRef::from(uid))
+        ])?;
+        let mut info = StorageAuthInfo::default();
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let data: Vec<u8> = row.get(1)?;
+            match name.as_str() {
+                USER_FLAGS => {
+                    let flags32 = u32::from_le_bytes(data.try_into()?);
+                    if flags32 & USER_FLAGS_DEFAULT_PIN != 0 {
+                        info.default_pin = true;
+                    }
+                }
+                USER_COUNTER => {
+                    info.cur_attempts = CK_ULONG::try_from(u32::from_le_bytes(
+                        data.try_into()?,
+                    ))?
+                }
+                USER_DATA => info.user_data = Some(data),
+                _ => (), /* ignore unknown values for forward compatibility */
+            }
+        }
+        if info.user_data.is_none() {
+            return Err(CKR_USER_PIN_NOT_INITIALIZED)?;
+        }
+        Ok(info)
+    }
+
+    fn store_user(&mut self, uid: &str, data: &StorageAuthInfo) -> Result<()> {
+        let mut conn = self.conn.lock()?;
+        let mut tx = conn.transaction().map_err(bad_storage)?;
+        tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+
+        if data.default_pin {
+            let flags32 = USER_FLAGS_DEFAULT_PIN;
+            Self::store_meta(
+                &mut tx,
+                USER_FLAGS,
+                None,
+                Some(uid),
+                Some(&flags32.to_le_bytes() as &[u8]),
+            )?;
+        }
+
+        let counter32 = u32::try_from(data.cur_attempts)?;
+        Self::store_meta(
+            &mut tx,
+            USER_COUNTER,
+            None,
+            Some(uid),
+            Some(&counter32.to_le_bytes() as &[u8]),
+        )?;
+
+        if let Some(blob) = &data.user_data {
+            Self::store_meta(
+                &mut tx,
+                USER_DATA,
+                None,
+                Some(uid),
+                Some(blob.as_slice()),
+            )?;
+        }
         tx.commit().map_err(bad_storage)
     }
 }
