@@ -37,7 +37,7 @@ macro_rules! attrmap_element {
     };
 }
 
-static ATTRMAP: [Attrmap<'_>; 147] = [
+static ATTRMAP: [Attrmap<'_>; 143] = [
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -169,10 +169,6 @@ static ATTRMAP: [Attrmap<'_>; 147] = [
     attrmap_element!(CKA_HSS_KEYS_REMAINING; as NumType),
     attrmap_element!(KRA_MAX_LOGIN_ATTEMPTS; as NumType),
     attrmap_element!(KRA_LOGIN_ATTEMPTS; as NumType),
-    attrmap_element!(KRA_FLAGS; as NumType),
-    attrmap_element!(KRA_MANUFACTURER_ID; as StringType),
-    attrmap_element!(KRA_MODEL; as StringType),
-    attrmap_element!(KRA_SERIAL_NUMBER; as StringType),
     attrmap_element!(CKA_VALIDATION_TYPE; as NumType),
     attrmap_element!(CKA_VALIDATION_VERSION; as BytesType),
     attrmap_element!(CKA_VALIDATION_LEVEL; as NumType),

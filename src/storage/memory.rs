@@ -4,16 +4,19 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
+use crate::attribute::Attribute;
 use crate::error::{Error, Result};
 use crate::interface::*;
+use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::storage::aci::StorageACI;
 use crate::storage::format::{StdStorageFormat, StorageRaw};
-use crate::storage::{Storage, StorageDBInfo};
+use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
 #[derive(Debug)]
 struct MemoryStorage {
     objects: HashMap<String, Object>,
+    token_info: StorageTokenInfo,
 }
 
 impl StorageRaw for MemoryStorage {
@@ -61,11 +64,24 @@ impl StorageRaw for MemoryStorage {
         self.objects.remove(uid);
         Ok(())
     }
+
+    fn fetch_token_info(&self) -> Result<StorageTokenInfo> {
+        Ok(self.token_info.clone())
+    }
+
+    fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
+        self.token_info.label = info.label;
+        self.token_info.manufacturer = info.manufacturer;
+        self.token_info.model = info.model;
+        self.token_info.serial = info.serial;
+        self.token_info.flags = info.flags;
+    }
 }
 
 pub fn raw_store() -> Box<dyn StorageRaw> {
     Box::new(MemoryStorage {
         objects: HashMap::new(),
+        token_info: StorageTokenInfo::default(),
     })
 }
 
