@@ -10,8 +10,9 @@ use crate::interface::*;
 use crate::kasn1::*;
 use crate::object::Object;
 use crate::token::TokenFacilities;
+use crate::Operation;
 use crate::CSPRNG;
-use crate::{byte_ptr, get_random_data, sizeof, void_ptr};
+use crate::{byte_ptr, sizeof, void_ptr};
 
 use asn1;
 
@@ -49,6 +50,50 @@ pub fn pbkdf2_derive(
         &facilities.mechanisms,
         &facilities.factories,
     )
+}
+
+fn hkdf_expand(
+    facilities: &TokenFacilities,
+    params: &KKDF1Params,
+    key: &Object,
+    key_template: &[CK_ATTRIBUTE],
+) -> Result<Object> {
+    let mech = facilities.mechanisms.get(CKM_HKDF_DERIVE)?;
+
+    let hkdf_params = CK_HKDF_PARAMS {
+        bExtract: CK_FALSE,
+        bExpand: CK_TRUE,
+        prfHashMechanism: CKM_SHA256,
+        ulSaltType: CKF_HKDF_SALT_NULL,
+        pSalt: std::ptr::null_mut(),
+        ulSaltLen: 0,
+        hSaltKey: CK_INVALID_HANDLE,
+        pInfo: byte_ptr!(params.info.as_ptr()),
+        ulInfoLen: params.info.len() as CK_ULONG,
+    };
+
+    let mut op = match mech.derive_operation(&CK_MECHANISM {
+        mechanism: CKM_HKDF_DERIVE,
+        pParameter: void_ptr!(&hkdf_params),
+        ulParameterLen: sizeof!(CK_HKDF_PARAMS),
+    })? {
+        Operation::Derive(op) => op,
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    let mut vobj = op.derive(
+        key,
+        key_template,
+        &facilities.mechanisms,
+        &facilities.factories,
+    )?;
+    if vobj.len() != 1 {
+        return Err(CKR_GENERAL_ERROR)?;
+    }
+    match vobj.pop() {
+        Some(obj) => Ok(obj),
+        None => Err(CKR_GENERAL_ERROR)?,
+    }
 }
 
 fn aes_gcm_encrypt(
@@ -133,18 +178,26 @@ fn aes_gcm_decrypt(
 
 const SHA256_LEN: usize = 32;
 const KEK_AAD: &str = "ENCRYPTION KEY";
+const GEN_KEYTYP: CK_ULONG = CKK_GENERIC_SECRET;
+const AES_KEYTYP: CK_ULONG = CKK_AES;
 const AES_KEYLEN: CK_ULONG = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
 
-fn aes_key_template() -> CkAttrs<'static> {
+fn secret_key_template<'a>(
+    keytype: &'a CK_ULONG,
+    keylen: &'a CK_ULONG,
+) -> CkAttrs<'a> {
     const CLASS: CK_ATTRIBUTE_TYPE = CKO_SECRET_KEY;
-    const KEYTYP: CK_ULONG = CKK_AES;
     const TRUEBOOL: CK_BBOOL = CK_TRUE;
     let mut template = CkAttrs::with_capacity(5);
     template.add_ulong(CKA_CLASS, &CLASS);
-    template.add_ulong(CKA_KEY_TYPE, &KEYTYP);
-    template.add_ulong(CKA_VALUE_LEN, &AES_KEYLEN);
-    template.add_bool(CKA_DECRYPT, &TRUEBOOL);
-    template.add_bool(CKA_ENCRYPT, &TRUEBOOL);
+    template.add_ulong(CKA_KEY_TYPE, keytype);
+    template.add_ulong(CKA_VALUE_LEN, keylen);
+    if *keytype == CKK_GENERIC_SECRET {
+        template.add_bool(CKA_DERIVE, &TRUEBOOL);
+    } else {
+        template.add_bool(CKA_DECRYPT, &TRUEBOOL);
+        template.add_bool(CKA_ENCRYPT, &TRUEBOOL);
+    }
     template
 }
 
@@ -166,7 +219,7 @@ fn encrypt_key(
     };
 
     /* compute key */
-    let key_template = aes_key_template();
+    let key_template = secret_key_template(&AES_KEYTYP, &AES_KEYLEN);
     let kek = pbkdf2_derive(
         facilities,
         &pbkdf2_params,
@@ -225,7 +278,7 @@ fn decrypt_key(
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
             }
-            let key_template = aes_key_template();
+            let key_template = secret_key_template(&AES_KEYTYP, &AES_KEYLEN);
 
             pbkdf2_derive(facilities, params, pin, key_template.as_slice())?
         }
@@ -249,9 +302,99 @@ fn decrypt_key(
     ))
 }
 
+fn encrypt_data(
+    facilities: &TokenFacilities,
+    key_version: u64,
+    key: &Object,
+    data_id: &str,
+    data: &[u8],
+) -> Result<Vec<u8>> {
+    let kdf_params = KKDF1Params {
+        prf: Box::new(KAlgorithmIdentifier {
+            oid: asn1::DefinedByMarker::marker(),
+            params: KAlgorithmParameters::HmacWithSha256(Some(())),
+        }),
+        info: data_id.as_bytes(),
+        key_length: AES_KEYLEN as u64,
+    };
+
+    /* compute key */
+    let key_template = secret_key_template(&AES_KEYTYP, &AES_KEYLEN);
+    let dek =
+        hkdf_expand(facilities, &kdf_params, key, key_template.as_slice())?;
+    let (gcm, encrypted) =
+        aes_gcm_encrypt(facilities, &dek, data_id.as_bytes(), data)?;
+
+    /* We use a 256 bit key so Aes256Gcm is the correct algorithm */
+    let enc_params = KAlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: KAlgorithmParameters::Aes256Gcm(gcm),
+    };
+
+    let pdata = KProtectedData {
+        algorithm: Box::new(KAlgorithmIdentifier {
+            oid: asn1::DefinedByMarker::marker(),
+            params: KAlgorithmParameters::Kkbps1(KKBPS1Params {
+                key_version_number: key_version,
+                key_derivation_func: Box::new(KAlgorithmIdentifier {
+                    oid: asn1::DefinedByMarker::marker(),
+                    params: KAlgorithmParameters::Kkdf1(kdf_params),
+                }),
+                encryption_scheme: Box::new(enc_params),
+            }),
+        }),
+        data: &encrypted,
+        signature: None,
+    };
+
+    match asn1::write_single(&pdata) {
+        Ok(der) => Ok(der),
+        Err(_) => Err(CKR_GENERAL_ERROR)?,
+    }
+}
+
+fn decrypt_data(
+    facilities: &TokenFacilities,
+    key_version: u64,
+    key: &Object,
+    data_id: &str,
+    data: &[u8],
+) -> Result<Vec<u8>> {
+    let pdata = match asn1::parse_single::<KProtectedData>(data) {
+        Ok(p) => p,
+        Err(_) => return Err(CKR_DATA_INVALID)?,
+    };
+
+    let kkbps1 = match &pdata.algorithm.params {
+        KAlgorithmParameters::Kkbps1(ref params) => params,
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    };
+    if kkbps1.key_version_number != key_version {
+        return Err(CKR_KEY_CHANGED)?;
+    }
+
+    let dek = match &kkbps1.key_derivation_func.params {
+        KAlgorithmParameters::Kkdf1(ref params) => {
+            if params.key_length != AES_KEYLEN as u64 {
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+            }
+
+            let key_template = secret_key_template(&AES_KEYTYP, &AES_KEYLEN);
+            hkdf_expand(facilities, &params, key, key_template.as_slice())?
+        }
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    };
+    let params = match &kkbps1.encryption_scheme.params {
+        KAlgorithmParameters::Aes128Gcm(ref gcm) => gcm,
+        KAlgorithmParameters::Aes192Gcm(ref gcm) => gcm,
+        KAlgorithmParameters::Aes256Gcm(ref gcm) => gcm,
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    };
+    aes_gcm_decrypt(facilities, &dek, params, data_id.as_bytes(), pdata.data)
+}
+
 const DEFAULT_PIN: &str = "DEFAULT PIN";
 const DEFPIN_ITER: usize = 1000;
-const DEFAULT_IV_SIZE: usize = 12; /* 96 bits as required by FIPS for AES GCM */
 
 const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 
@@ -286,11 +429,14 @@ impl StorageACI {
         if !self.encrypt {
             return Ok(());
         }
-        let template = aes_key_template();
-        let aes = facilities.mechanisms.get(CKM_AES_KEY_GEN)?;
-        self.key = Some(aes.generate_key(
+        /* Need to use a generic secret here, because the secret key
+         * is used together with HKDF to derive the actual encryption
+         * key and HKDF allows only CKK_HKDF or CKK_GENERIC_SECRET */
+        let template = secret_key_template(&GEN_KEYTYP, &AES_KEYLEN);
+        let mech = facilities.mechanisms.get(CKM_GENERIC_SECRET_KEY_GEN)?;
+        self.key = Some(mech.generate_key(
             &CK_MECHANISM {
-                mechanism: CKM_AES_KEY_GEN,
+                mechanism: CKM_GENERIC_SECRET_KEY_GEN,
                 pParameter: std::ptr::null_mut(),
                 ulParameterLen: 0,
             },
@@ -305,22 +451,6 @@ impl StorageACI {
         self.key = None;
     }
 
-    /* We should probably have lifetimes to ensure iv and aad are around for
-     * the lifetime of the returned structure, but this will require substantial
-     * reworking of the bindings, so for now we just get this comment.
-     * ENSURE the arguments stay in scope until CK_GCM_PARAMS is needed
-     * */
-    fn encryption_params(iv: &[u8], aad: &[u8]) -> CK_GCM_PARAMS {
-        CK_GCM_PARAMS {
-            pIv: iv.as_ptr() as *mut CK_BYTE,
-            ulIvLen: iv.len() as CK_ULONG,
-            ulIvBits: (iv.len() * 8) as CK_ULONG,
-            pAAD: aad.as_ptr() as *mut CK_BYTE,
-            ulAADLen: aad.len() as CK_ULONG,
-            ulTagBits: 64 as CK_ULONG,
-        }
-    }
-
     pub fn encrypt_value(
         &self,
         facilities: &TokenFacilities,
@@ -328,25 +458,14 @@ impl StorageACI {
         val: &Vec<u8>,
     ) -> Result<Vec<u8>> {
         if let Some(ref key) = self.key {
-            let mut iv = [0u8; DEFAULT_IV_SIZE];
-            get_random_data(&mut iv)?;
-            let mut params = Self::encryption_params(&iv, uid.as_bytes());
-            let mech: CK_MECHANISM = CK_MECHANISM {
-                mechanism: CKM_AES_GCM,
-                pParameter: &mut params as *mut CK_GCM_PARAMS as *mut _,
-                ulParameterLen: sizeof!(CK_GCM_PARAMS),
-            };
-            let aes = facilities.mechanisms.get(CKM_AES_GCM)?;
-            let mut op = aes.encryption_new(&mech, &key)?;
-            let clen = op.encryption_len(val.len(), false)?;
-            let mut encval = vec![0u8; iv.len() + clen];
-            encval[..iv.len()].copy_from_slice(&iv);
-            let outlen = op.encrypt(
+            let key_version = 1; /* FIXME */
+            encrypt_data(
+                facilities,
+                key_version,
+                key,
+                uid.as_str(),
                 val.as_slice(),
-                &mut encval.as_mut_slice()[iv.len()..],
-            )?;
-            encval.resize(iv.len() + outlen, 0);
-            return Ok(encval);
+            )
         } else {
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -359,28 +478,14 @@ impl StorageACI {
         val: &Vec<u8>,
     ) -> Result<Vec<u8>> {
         if let Some(ref key) = self.key {
-            let mut params = Self::encryption_params(
-                &val.as_slice()[..DEFAULT_IV_SIZE],
-                uid.as_bytes(),
-            );
-            let mech: CK_MECHANISM = CK_MECHANISM {
-                mechanism: CKM_AES_GCM,
-                pParameter: &mut params as *mut CK_GCM_PARAMS as *mut _,
-                ulParameterLen: sizeof!(CK_GCM_PARAMS),
-            };
-            let aes = facilities.mechanisms.get(CKM_AES_GCM)?;
-            let mut op = aes.decryption_new(&mech, &key)?;
-            let mut plain =
-                vec![
-                    0u8;
-                    op.decryption_len(val.len() - DEFAULT_IV_SIZE, false)?
-                ];
-            let outlen = op.decrypt(
-                &val.as_slice()[DEFAULT_IV_SIZE..],
-                plain.as_mut_slice(),
-            )?;
-            plain.resize(outlen, 0);
-            return Ok(plain);
+            let key_version = 1; /* FIXME */
+            decrypt_data(
+                facilities,
+                key_version,
+                key,
+                uid.as_str(),
+                val.as_slice(),
+            )
         } else {
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -499,7 +604,8 @@ impl StorageACI {
                     }
                 } else if self.encrypt {
                     if set_key {
-                        let mut template = aes_key_template();
+                        let mut template =
+                            secret_key_template(&GEN_KEYTYP, &AES_KEYLEN);
                         template.add_vec(CKA_VALUE, key)?;
                         self.key = Some(
                             facilities.factories.create(template.as_slice())?,
