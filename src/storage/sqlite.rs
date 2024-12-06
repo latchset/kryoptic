@@ -81,7 +81,8 @@ const DB_VERSION_COL: &str = "version";
 const DB_VERSION: &str = "v1";
 
 const DROP_META_TABLE: &str = "DROP TABLE meta";
-const CREATE_META_TABLE: &str = "CREATE TABLE meta (name TEXT NOT NULL, id INTEGER, value TEXT, data BLOB, UNIQUE(name))";
+const CREATE_META_TABLE: &str =
+    "CREATE TABLE meta (name TEXT NOT NULL, id INTEGER, value TEXT, data BLOB, UNIQUE(name, value))";
 
 const OBJECTS_TABLE: &str = "objects";
 const DROP_OBJ_TABLE: &str = "DROP TABLE objects";
@@ -168,6 +169,38 @@ impl SqliteStorage {
             }
         }
         Ok(objects)
+    }
+
+    #[allow(dead_code)]
+    fn delete_meta(
+        tx: &mut Transaction,
+        name: &str,
+        id: Option<u32>,
+        value: Option<&str>,
+        data: Option<&[u8]>,
+    ) -> Result<()> {
+        let mut sql = String::from("DELETE FROM meta WHERE (name=?");
+        let mut params = Vec::<Value>::with_capacity(4);
+
+        params.push(Value::from(ValueRef::from(name)));
+
+        if let Some(i) = id {
+            sql.push_str("AND id=?");
+            params.push(Value::from(i as i64));
+        }
+        if let Some(v) = value {
+            sql.push_str("AND value=?");
+            params.push(Value::from(ValueRef::from(v)));
+        }
+        if let Some(d) = data {
+            sql.push_str("AND data=?");
+            params.push(Value::from(ValueRef::from(d)));
+        }
+        sql.push_str(")");
+
+        let mut stmt = tx.prepare(&sql)?;
+        let _ = stmt.execute(params_from_iter(params))?;
+        Ok(())
     }
 
     fn store_meta(
@@ -457,6 +490,9 @@ impl StorageRaw for SqliteStorage {
         let mut conn = self.conn.lock()?;
         let mut tx = conn.transaction().map_err(bad_storage)?;
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+
+        /* First delete current rows, then INSERT new */
+        //Self::delete_meta(&mut tx, "TOKEN INFO", None, None, None)?;
         Self::store_meta(
             &mut tx,
             "TOKEN INFO",
