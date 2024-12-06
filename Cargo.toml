@@ -54,7 +54,7 @@ ecdh = ["ecc"]
 eddsa = ["ecc"]
 ec_montgomery = ["ecc"]
 hash = []
-hkdf = []
+hkdf = ["hmac"]
 hmac = ["hash"]
 pbkdf2 = ["hmac"]
 rsa = []
@@ -64,8 +64,8 @@ tlskdf = []
 
 # Databases
 jsondb = ["memorydb"]
-memorydb = ["aes", "pbkdf2"] # for encryption
-sqlitedb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
+memorydb = ["aes", "hkdf", "pbkdf2"] # for encryption
+sqlitedb = [ "dep:rusqlite", "aes", "hkdf", "pbkdf2" ]
 nssdb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
 
 default = [ "sqlitedb" ]
