@@ -1,11 +1,11 @@
 all:
-	cargo build
+	cargo build --features standard,nssdb
 
 fips:
 	cargo build --features fips
 
 check:
-	cargo test
+	cargo test --features standard,nssdb
 
 check-fips:
 	cargo test --features fips
