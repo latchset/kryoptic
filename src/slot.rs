@@ -26,15 +26,15 @@ pub struct Slot {
 impl Slot {
     pub fn new(config: &config::Slot) -> Result<Slot> {
         let dbtype: &str;
-        let dbpath: Option<String>;
+        let dbargs: Option<String>;
 
         match &config.dbtype {
             Some(t) => dbtype = t.as_str(),
             None => return Err(CKR_GENERAL_ERROR)?,
         }
-        match &config.dbpath {
-            Some(p) => dbpath = Some(p.clone()),
-            None => dbpath = None,
+        match &config.dbargs {
+            Some(p) => dbargs = Some(p.clone()),
+            None => dbargs = None,
         }
 
         let mut slot = Slot {
@@ -45,7 +45,7 @@ impl Slot {
                 hardwareVersion: CK_VERSION { major: 0, minor: 0 },
                 firmwareVersion: CK_VERSION { major: 0, minor: 0 },
             },
-            token: RwLock::new(Token::new(dbtype, dbpath)?),
+            token: RwLock::new(Token::new(dbtype, dbargs)?),
             sessions: HashMap::new(),
         };
 

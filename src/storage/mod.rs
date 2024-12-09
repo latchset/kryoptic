@@ -33,7 +33,6 @@ pub struct StorageTokenInfo {
 pub trait StorageDBInfo: Debug + Send + Sync {
     fn new(&self, conf: &Option<String>) -> Result<Box<dyn Storage>>;
     fn dbtype(&self) -> &str;
-    fn dbsuffix(&self) -> &str;
 }
 
 pub trait Storage: Debug + Send + Sync {
@@ -93,16 +92,16 @@ mod aci;
 pub mod format;
 
 #[cfg(feature = "jsondb")]
-mod json;
+pub mod json;
 
 #[cfg(feature = "memorydb")]
-mod memory;
+pub mod memory;
 
 #[cfg(any(feature = "nssdb", feature = "sqlitedb"))]
 mod sqlite_common;
 
 #[cfg(feature = "sqlitedb")]
-mod sqlite;
+pub mod sqlite;
 
 #[cfg(feature = "nssdb")]
 pub mod nssdb;
@@ -124,19 +123,6 @@ static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
 
     v
 });
-
-pub fn suffix_to_type(name: &str) -> Result<&'static str> {
-    for i in 0..STORAGE_DBS.len() {
-        let suffix = STORAGE_DBS[i].dbsuffix();
-        if suffix == "" {
-            continue;
-        }
-        if name.ends_with(suffix) {
-            return Ok(STORAGE_DBS[i].dbtype());
-        }
-    }
-    Err(KRR_CONFIG_ERROR)?
-}
 
 pub fn new_storage(
     name: &str,

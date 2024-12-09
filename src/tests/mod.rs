@@ -6,6 +6,7 @@ use std::fs::{create_dir_all, remove_dir_all, OpenOptions};
 use std::io::Write;
 use std::sync::Once;
 
+use crate::storage::StorageDBInfo;
 use crate::*;
 
 use hex;
@@ -48,7 +49,9 @@ static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
 
 struct TestToken<'a> {
     slot: CK_SLOT_ID,
-    filename: String,
+    name: String,
+    dbtype: String,
+    dbargs: String,
     finalize: Option<RwLockWriteGuard<'a, u64>>,
     sync: Option<RwLockReadGuard<'a, u64>>,
     session: CK_SESSION_HANDLE,
@@ -56,7 +59,17 @@ struct TestToken<'a> {
 }
 
 impl TestToken<'_> {
-    fn new<'a>(filename: String) -> TestToken<'a> {
+    fn new<'a>(name: String) -> TestToken<'a> {
+        let (dbtype, dbargs) = Self::get_default_db(&name);
+
+        Self::new_type(String::from(dbtype), dbargs, name)
+    }
+
+    fn new_type<'a>(
+        dbtype: String,
+        dbargs: String,
+        name: String,
+    ) -> TestToken<'a> {
         let mut slots = SLOTS.write().unwrap();
         slots.id += 1;
         while check_test_slot_busy(slots.id) {
@@ -67,7 +80,9 @@ impl TestToken<'_> {
 
         TestToken {
             slot: slots.id,
-            filename: filename,
+            name: name,
+            dbtype: dbtype,
+            dbargs: dbargs,
             finalize: finalizer,
             sync: Some(SYNC.read().unwrap()),
             session: CK_INVALID_HANDLE,
@@ -75,37 +90,35 @@ impl TestToken<'_> {
         }
     }
 
-    fn setup_db<'a>(&mut self, source: Option<&'a str>) {
-        let basic = "testdata/test_basic.json";
-        let filename = match source {
-            Some(s) => s,
-            None => basic,
-        };
-
+    fn setup_db<'a>(&mut self, import: Option<&'a str>) {
         let so_pin = SO_PIN.as_bytes().to_vec();
         let user_pin = USER_PIN.as_bytes().to_vec();
         let mut label = TOKEN_LABEL.as_bytes().to_vec();
         label.resize(32, 0x20);
         /* Init a brand new token */
-        let mut token = Token::new(
-            storage::suffix_to_type(&self.filename).unwrap(),
-            Some(self.filename.clone()),
-        )
-        .unwrap();
+        let mut token =
+            Token::new(&self.dbtype, Some(self.dbargs.clone())).unwrap();
         token.initialize(&so_pin, &label).unwrap();
         token.login(CKU_SO, &so_pin);
         token.set_pin(CKU_USER, &user_pin, &vec![0u8; 0]).unwrap();
         token.logout();
         token.login(CKU_USER, &user_pin);
 
-        let test_data = ts::json::JsonObjects::load(filename).unwrap();
-        let mut tstore = ts::TransferStorage::new();
-        test_data.prime_store(&mut tstore).unwrap();
+        match import {
+            Some(s) => {
+                let test_data = ts::json::JsonObjects::load(s).unwrap();
+                let mut tstore = ts::TransferStorage::new();
+                test_data.prime_store(&mut tstore).unwrap();
 
-        let objects = tstore.search(&[]).unwrap();
-        for obj in objects {
-            token.insert_object(CK_INVALID_HANDLE, obj.clone()).unwrap();
-        }
+                let objects = tstore.search(&[]).unwrap();
+                for obj in objects {
+                    token
+                        .insert_object(CK_INVALID_HANDLE, obj.clone())
+                        .unwrap();
+                }
+            }
+            None => (),
+        };
     }
 
     fn get_slot(&self) -> CK_SLOT_ID {
@@ -113,10 +126,9 @@ impl TestToken<'_> {
     }
 
     fn make_config_file(&self, confname: &str) {
-        let dbpath = self.filename.clone();
-        let dbtype = storage::suffix_to_type(&dbpath).unwrap();
         let mut conf = config::Config::new();
-        let mut slot = config::Slot::with_db(dbtype, Some(dbpath));
+        let mut slot =
+            config::Slot::with_db(&self.dbtype, Some(self.dbargs.clone()));
         slot.slot = u32::try_from(self.get_slot()).unwrap();
         conf.add_slot(slot).unwrap();
         let data = toml::to_string(&conf).unwrap();
@@ -130,7 +142,7 @@ impl TestToken<'_> {
     }
 
     fn make_init_string(&self) -> String {
-        let confname = format!("{}.conf", self.filename);
+        let confname = format!("{}/{}.conf", TESTDIR, self.name);
         self.make_config_file(&confname);
         format!("kryoptic_conf={}", confname)
     }
@@ -167,13 +179,38 @@ impl TestToken<'_> {
         }
     }
 
+    #[allow(unreachable_code)]
+    fn get_default_db(name: &str) -> (&'static str, String) {
+        /* in order of preference, the first wins */
+        #[cfg(feature = "nssdb")]
+        {
+            let ret = format!("configDir={}/{}/", TESTDIR, name);
+            return (storage::nssdb::DBINFO.dbtype(), ret);
+        }
+        #[cfg(feature = "sqlitedb")]
+        {
+            let ret = format!("{}/{}.sql", TESTDIR, name);
+            return (storage::sqlite::DBINFO.dbtype(), ret);
+        }
+        #[cfg(feature = "jsondb")]
+        {
+            let ret = format!("{}/{}.json", TESTDIR, name);
+            return (storage::json::DBINFO.dbtype(), ret);
+        }
+        #[cfg(feature = "memorydb")]
+        {
+            let ret = format!("flags=encrypt");
+            return (storage::memory::DBINFO.dbtype(), ret);
+        }
+        panic!("At least one of the storage backends needs to be enabled")
+    }
+
     fn initialized<'a>(
-        filename: &'a str,
-        db: Option<&'a str>,
+        name: &'a str,
+        import: Option<&'a str>,
     ) -> TestToken<'a> {
-        let dbpath = format!("{}/{}", TESTDIR, filename);
-        let mut td = Self::new(dbpath);
-        td.setup_db(db);
+        let mut td = Self::new(String::from(name));
+        td.setup_db(import);
 
         let mut args = Self::make_init_args(Some(td.make_init_string()));
         let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;

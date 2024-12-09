@@ -14,7 +14,7 @@ use serial_test::{parallel, serial};
 #[parallel]
 fn test_create_eddsa_objects() {
     let mut testtokn =
-        TestToken::initialized("test_create_eddsa_objects.sql", None);
+        TestToken::initialized("test_create_eddsa_objects", None);
     let session = testtokn.get_session(true);
 
     /* login */
@@ -110,7 +110,7 @@ fn test_create_eddsa_objects() {
 #[parallel]
 fn test_eddsa_operations() {
     let mut testtokn = TestToken::initialized(
-        "test_eddsa_operations.sql",
+        "test_eddsa_operations",
         Some("testdata/test_eddsa_operations.json"),
     );
     let session = testtokn.get_session(true);
@@ -120,9 +120,12 @@ fn test_eddsa_operations() {
 
     /* Ed25519 private key */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "21".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY)],
+        &[(CKA_ID, "\x02".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -177,9 +180,12 @@ fn test_eddsa_operations() {
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* test that signature verification works */
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "20".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PUBLIC_KEY)],
+        &[(CKA_ID, "\x02".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -203,9 +209,12 @@ fn test_eddsa_operations() {
 
     /* Ed448 */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "23".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY)],
+        &[(CKA_ID, "\x03".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -275,9 +284,12 @@ fn test_eddsa_operations() {
     assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
     /* test that signature verification works */
-    let template =
-        make_attr_template(&[], &[(CKA_UNIQUE_ID, "22".as_bytes())], &[]);
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let template = make_attr_template(
+        &[(CKA_CLASS, CKO_PUBLIC_KEY)],
+        &[(CKA_ID, "\x03".as_bytes())],
+        &[],
+    );
+    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -549,7 +561,7 @@ fn test_eddsa_vector() {
     /* Taken from RFC, filtered out the headers */
     let test_data = parse_eddsa_vector("testdata/rfc8032.txt");
 
-    let mut testtokn = TestToken::initialized("test_eddsa_vector.sql", None);
+    let mut testtokn = TestToken::initialized("test_eddsa_vector", None);
     let session = testtokn.get_session(false);
 
     /* login */

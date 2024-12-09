@@ -58,7 +58,6 @@ impl StorageRaw for JsonStorage {
 #[derive(Debug)]
 pub struct JsonDBInfo {
     db_type: &'static str,
-    db_suffix: &'static str,
 }
 
 impl StorageDBInfo for JsonDBInfo {
@@ -79,13 +78,6 @@ impl StorageDBInfo for JsonDBInfo {
     fn dbtype(&self) -> &str {
         self.db_type
     }
-
-    fn dbsuffix(&self) -> &str {
-        self.db_suffix
-    }
 }
 
-pub static DBINFO: JsonDBInfo = JsonDBInfo {
-    db_type: "json",
-    db_suffix: ".json",
-};
+pub static DBINFO: JsonDBInfo = JsonDBInfo { db_type: "json" };

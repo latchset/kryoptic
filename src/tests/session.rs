@@ -8,7 +8,7 @@ use serial_test::parallel;
 #[test]
 #[parallel]
 fn test_session_objects() {
-    let mut testtokn = TestToken::initialized("test_session_objects.sql", None);
+    let mut testtokn = TestToken::initialized("test_session_objects", None);
 
     let mut login_session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let mut ret = fn_open_session(
@@ -53,18 +53,22 @@ fn test_session_objects() {
         &[],
     ));
 
-    /* store in token object */
     let app2 = "app2";
-    let _ = ret_or_panic!(import_object(
-        session,
-        CKO_DATA,
-        &[],
-        &[
-            (CKA_APPLICATION, app2.as_bytes()),
-            (CKA_VALUE, "token data".as_bytes())
-        ],
-        &[(CKA_TOKEN, true)],
-    ));
+    let mut expect_count = 0;
+    if testtokn.dbtype != "nssdb" {
+        /* store in token object */
+        let _ = ret_or_panic!(import_object(
+            session,
+            CKO_DATA,
+            &[],
+            &[
+                (CKA_APPLICATION, app2.as_bytes()),
+                (CKA_VALUE, "token data".as_bytes())
+            ],
+            &[(CKA_TOKEN, true)],
+        ));
+        expect_count = 1;
+    }
 
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
@@ -107,8 +111,10 @@ fn test_session_objects() {
     let mut count: CK_ULONG = 0;
     ret = fn_find_objects(session, &mut handle2, 1, &mut count);
     assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 1);
-    assert_ne!(handle2, CK_INVALID_HANDLE);
+    assert_eq!(count, expect_count);
+    if count > 0 {
+        assert_ne!(handle2, CK_INVALID_HANDLE);
+    }
     ret = fn_find_objects_final(session);
     assert_eq!(ret, CKR_OK);
 

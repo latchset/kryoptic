@@ -1187,7 +1187,6 @@ impl Storage for NSSStorage {
 #[derive(Debug)]
 pub struct NSSDBInfo {
     db_type: &'static str,
-    db_suffix: &'static str,
 }
 
 impl StorageDBInfo for NSSDBInfo {
@@ -1239,13 +1238,6 @@ impl StorageDBInfo for NSSDBInfo {
     fn dbtype(&self) -> &str {
         self.db_type
     }
-
-    fn dbsuffix(&self) -> &str {
-        self.db_suffix
-    }
 }
 
-pub static DBINFO: NSSDBInfo = NSSDBInfo {
-    db_type: "nssdb",
-    db_suffix: "",
-};
+pub static DBINFO: NSSDBInfo = NSSDBInfo { db_type: "nssdb" };
