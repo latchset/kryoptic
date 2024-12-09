@@ -337,5 +337,59 @@ fn test_rsa_operations() {
     /* RSA PKCS Wrap */
     /* RSA PKCS OAEP Wrap */
 
+    /* generate key pair and store it */
+    /* RSA key pair */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_ENCRYPT, true),
+            (CKA_VERIFY, true),
+            (CKA_WRAP, true),
+        ],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    let label = "Public Key test 1";
+    let mut template = make_ptrs_template(&[(
+        CKA_LABEL,
+        void_ptr!(label.as_ptr()),
+        label.as_bytes().len(),
+    )]);
+    let ret = fn_set_attribute_value(
+        session,
+        hpub,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let label = "Private Key test 1";
+    let mut template = make_ptrs_template(&[(
+        CKA_LABEL,
+        void_ptr!(label.as_ptr()),
+        label.as_bytes().len(),
+    )]);
+    let ret = fn_set_attribute_value(
+        session,
+        hpri,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
     testtokn.finalize();
 }
