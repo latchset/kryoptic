@@ -354,7 +354,7 @@ fn test_config_multiple_tokens() {
          * to ensure changes in the toml crate do not break the format */
         write!(
             &mut config,
-            "[[slots]]\nslot = {}\ndbtype = \"{}\"\ndbpath = \"{}\"\ndescription = \"{}\"\n",
+            "[[slots]]\nslot = {}\ndbtype = \"{}\"\ndbargs = \"{}\"\ndescription = \"{}\"\n",
             token.get_slot(),
             db.0,
             db.1,
