@@ -33,7 +33,6 @@ pub struct StorageTokenInfo {
 pub trait StorageDBInfo: Debug + Send + Sync {
     fn new(&self, conf: &Option<String>) -> Result<Box<dyn Storage>>;
     fn dbtype(&self) -> &str;
-    fn dbsuffix(&self) -> &str;
 }
 
 pub trait Storage: Debug + Send + Sync {

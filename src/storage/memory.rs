@@ -72,7 +72,6 @@ pub fn raw_store() -> Box<dyn StorageRaw> {
 #[derive(Debug)]
 pub struct MemoryDBInfo {
     db_type: &'static str,
-    db_suffix: &'static str,
 }
 
 impl StorageDBInfo for MemoryDBInfo {
@@ -94,13 +93,6 @@ impl StorageDBInfo for MemoryDBInfo {
     fn dbtype(&self) -> &str {
         self.db_type
     }
-
-    fn dbsuffix(&self) -> &str {
-        self.db_suffix
-    }
 }
 
-pub static DBINFO: MemoryDBInfo = MemoryDBInfo {
-    db_type: "memory",
-    db_suffix: "",
-};
+pub static DBINFO: MemoryDBInfo = MemoryDBInfo { db_type: "memory" };

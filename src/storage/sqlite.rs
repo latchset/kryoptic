@@ -323,7 +323,6 @@ impl StorageRaw for SqliteStorage {
 #[derive(Debug)]
 pub struct SqliteDBInfo {
     db_type: &'static str,
-    db_suffix: &'static str,
 }
 
 impl StorageDBInfo for SqliteDBInfo {
@@ -344,13 +343,6 @@ impl StorageDBInfo for SqliteDBInfo {
     fn dbtype(&self) -> &str {
         self.db_type
     }
-
-    fn dbsuffix(&self) -> &str {
-        self.db_suffix
-    }
 }
 
-pub static DBINFO: SqliteDBInfo = SqliteDBInfo {
-    db_type: "sqlite",
-    db_suffix: ".sql",
-};
+pub static DBINFO: SqliteDBInfo = SqliteDBInfo { db_type: "sqlite" };
