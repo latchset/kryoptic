@@ -403,6 +403,20 @@ fn test_nssdb_init_token() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* add a public object to ensure attributes are handled correctly
+     * CKA_VALUE is encrypted only for private objects */
+    let _ = ret_or_panic!(import_object(
+        session,
+        CKO_CERTIFICATE,
+        &[(CKA_CERTIFICATE_TYPE, CKC_X_509)],
+        &[
+            (CKA_CHECK_VALUE, "ignored".as_bytes()),
+            (CKA_SUBJECT, "subject".as_bytes()),
+            (CKA_VALUE, "value".as_bytes())
+        ],
+        &[(CKA_TOKEN, true), (CKA_TRUSTED, false)],
+    ));
+
     let ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
 
