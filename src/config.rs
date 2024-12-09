@@ -32,7 +32,7 @@ pub struct Slot {
     pub description: Option<String>,
     pub manufacturer: Option<String>,
     pub dbtype: Option<String>,
-    pub dbpath: Option<String>,
+    pub dbargs: Option<String>,
 }
 
 impl Slot {
@@ -42,18 +42,18 @@ impl Slot {
             description: None,
             manufacturer: None,
             dbtype: None,
-            dbpath: None,
+            dbargs: None,
         }
     }
 
     #[cfg(test)]
-    pub fn with_db(dbtype: &str, dbpath: Option<String>) -> Slot {
+    pub fn with_db(dbtype: &str, dbargs: Option<String>) -> Slot {
         Slot {
             slot: u32::MAX,
             description: None,
             manufacturer: None,
             dbtype: Some(dbtype.to_string()),
-            dbpath: dbpath,
+            dbargs: dbargs,
         }
     }
 }
@@ -149,7 +149,7 @@ impl Config {
         if name.ends_with(".sql") {
             let mut slot = Slot::new();
             slot.dbtype = Some(storage::sqlite::DBINFO.dbtype().to_string());
-            slot.dbpath = Some(name.to_string());
+            slot.dbargs = Some(name.to_string());
             /* if this fails there will be no slots defined */
             let _ = conf.slots.push(slot);
         }
@@ -227,7 +227,7 @@ impl Config {
         let mut slot = Slot::new();
 
         slot.dbtype = Some(storage::nssdb::DBINFO.dbtype().to_string());
-        slot.dbpath = Some(args.to_string());
+        slot.dbargs = Some(args.to_string());
         conf.slots.push(slot);
         Ok(conf)
     }
@@ -258,7 +258,7 @@ impl Config {
             for s in &self.slots {
                 if slot.slot == u32::MAX {
                     if s.dbtype.as_deref() == slot.dbtype.as_deref()
-                        && s.dbpath.as_deref() == slot.dbpath.as_deref()
+                        && s.dbargs.as_deref() == slot.dbargs.as_deref()
                     {
                         /* already loaded so we just match the slot number */
                         found = true;
@@ -267,7 +267,7 @@ impl Config {
                 } else {
                     if slot.slot != s.slot {
                         if s.dbtype.as_deref() == slot.dbtype.as_deref()
-                            && s.dbpath.as_deref() == slot.dbpath.as_deref()
+                            && s.dbargs.as_deref() == slot.dbargs.as_deref()
                         {
                             /* already loaded in a different slot, fail! */
                             return Err(interface::CKR_ARGUMENTS_BAD)?;
@@ -276,7 +276,7 @@ impl Config {
                         if s.dbtype.as_deref() != slot.dbtype.as_deref() {
                             return Err(interface::CKR_ARGUMENTS_BAD)?;
                         }
-                        if s.dbpath.as_deref() != slot.dbpath.as_deref() {
+                        if s.dbargs.as_deref() != slot.dbargs.as_deref() {
                             return Err(interface::CKR_ARGUMENTS_BAD)?;
                         }
                         /* already present skip adding */
