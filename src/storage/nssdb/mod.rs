@@ -845,14 +845,16 @@ impl Storage for NSSStorage {
         let mut obj =
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
         if let Some(ref enckey) = self.enckey {
-            for typ in NSS_SENSITIVE_ATTRIBUTES {
-                let encval = match obj.get_attr(typ) {
-                    Some(attr) => attr.get_value(),
-                    None => continue,
-                };
-                let plain =
-                    decrypt_data(facilities, enckey.as_slice(), encval)?;
-                obj.set_attr(Attribute::from_bytes(typ, plain))?;
+            if table == NSS_PRIVATE_TABLE {
+                for typ in NSS_SENSITIVE_ATTRIBUTES {
+                    let encval = match obj.get_attr(typ) {
+                        Some(attr) => attr.get_value(),
+                        None => continue,
+                    };
+                    let plain =
+                        decrypt_data(facilities, enckey.as_slice(), encval)?;
+                    obj.set_attr(Attribute::from_bytes(typ, plain))?;
+                }
             }
 
             for typ in AUTHENTICATED_ATTRIBUTES {
