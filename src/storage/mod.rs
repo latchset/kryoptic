@@ -125,20 +125,6 @@ static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
     v
 });
 
-#[cfg(test)]
-pub fn suffix_to_type(name: &str) -> Result<&'static str> {
-    for i in 0..STORAGE_DBS.len() {
-        let suffix = STORAGE_DBS[i].dbsuffix();
-        if suffix == "" {
-            continue;
-        }
-        if name.ends_with(suffix) {
-            return Ok(STORAGE_DBS[i].dbtype());
-        }
-    }
-    Err(KRR_CONFIG_ERROR)?
-}
-
 pub fn new_storage(
     name: &str,
     conf: &Option<String>,
