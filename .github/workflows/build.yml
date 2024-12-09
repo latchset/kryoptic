@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         name: [ossl3, fips, release, dynamic, i686, minimal]
-        db: [memorydb, jsondb, sqlitedb, nssdb]
+        db: [jsondb, sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
     container: fedora:latest
     steps:
       - name: Get Date for DNF cache entry
