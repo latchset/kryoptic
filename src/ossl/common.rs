@@ -874,6 +874,7 @@ const NAME_ED448: &[u8] = b"ED448\0";
 const NAME_X25519: &[u8] = b"X25519\0";
 const NAME_X448: &[u8] = b"X448\0";
 
+#[cfg(feature = "ecc")]
 fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static [u8]> {
     match oid {
         &oid::EC_SECP256R1 => Ok(NAME_SECP256R1),
