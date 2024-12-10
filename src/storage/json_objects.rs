@@ -2,8 +2,11 @@ use crate::attribute::string_to_ck_date;
 use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::interface::*;
+use crate::misc::copy_sized_string;
 use crate::object::Object;
-use crate::storage::format::StorageRaw;
+use crate::storage::aci;
+use crate::storage::format;
+use crate::storage::StorageTokenInfo;
 
 use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
@@ -56,11 +59,42 @@ impl JsonObject {
         }
         jo
     }
+    fn from_user(uid: &str, info: &aci::StorageAuthInfo) -> JsonObject {
+        let mut ju = JsonObject {
+            attributes: Map::new(),
+        };
+        ju.attributes
+            .insert("name".to_string(), Value::String(uid.to_string()));
+        ju.attributes
+            .insert("default_pin".to_string(), Value::Bool(info.default_pin));
+        ju.attributes.insert(
+            "attempts".to_string(),
+            Value::Number(Number::from(info.cur_attempts)),
+        );
+        if let Some(data) = &info.user_data {
+            ju.attributes.insert(
+                "data".to_string(),
+                Value::String(BASE64.encode(data.as_slice())),
+            );
+        }
+        ju
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JsonTokenInfo {
+    label: String,
+    manufacturer: String,
+    model: String,
+    serial: String,
+    flags: CK_ULONG,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonObjects {
     objects: Vec<JsonObject>,
+    users: Option<Vec<JsonObject>>,
+    token: Option<JsonTokenInfo>,
 }
 
 impl JsonObjects {
@@ -71,7 +105,69 @@ impl JsonObjects {
         }
     }
 
-    pub fn prime_store(&self, store: &mut Box<dyn StorageRaw>) -> Result<()> {
+    pub fn prime_store(
+        &self,
+        store: &mut Box<dyn format::StorageRaw>,
+    ) -> Result<()> {
+        if let Some(t) = &self.token {
+            let mut info = StorageTokenInfo {
+                label: [0; 32],
+                manufacturer: [0; 32],
+                model: [0; 16],
+                serial: [0; 16],
+                flags: 0,
+            };
+            copy_sized_string(t.label.as_bytes(), &mut info.label);
+            copy_sized_string(
+                t.manufacturer.as_bytes(),
+                &mut info.manufacturer,
+            );
+            copy_sized_string(t.model.as_bytes(), &mut info.model);
+            copy_sized_string(t.serial.as_bytes(), &mut info.serial);
+            info.flags = t.flags;
+            store.store_token_info(&info)?;
+        }
+        if let Some(users) = &self.users {
+            for ju in users {
+                let mut uid = String::new();
+                let mut info = aci::StorageAuthInfo::default();
+                for (key, val) in &ju.attributes {
+                    match key.as_str() {
+                        "name" => match val.as_str() {
+                            Some(s) => uid.push_str(s),
+                            None => return Err(CKR_DEVICE_ERROR)?,
+                        },
+                        "default_pin" => match val.as_bool() {
+                            Some(b) => info.default_pin = b,
+                            None => return Err(CKR_DEVICE_ERROR)?,
+                        },
+                        "attempts" => match val.as_u64() {
+                            Some(u) => {
+                                info.cur_attempts = CK_ULONG::try_from(u)?
+                            }
+                            None => return Err(CKR_DEVICE_ERROR)?,
+                        },
+                        "data" => match val.as_str() {
+                            Some(s) => {
+                                let len = match BASE64.decode_len(s.len()) {
+                                    Ok(l) => l,
+                                    Err(_) => return Err(CKR_DEVICE_ERROR)?,
+                                };
+                                let mut v = vec![0; len];
+                                match BASE64.decode_mut(s.as_bytes(), &mut v) {
+                                    Ok(l) => v.resize(l, 0),
+                                    Err(_) => return Err(CKR_DEVICE_ERROR)?,
+                                }
+                                info.user_data = Some(v);
+                            }
+                            None => return Err(CKR_DEVICE_ERROR)?,
+                        },
+                        _ => (), /* ignore unknown */
+                    }
+                }
+                store.store_user(uid.as_str(), &info)?;
+            }
+        }
         for jo in &self.objects {
             let mut obj = Object::new();
             for (key, val) in &jo.attributes {
@@ -127,19 +223,39 @@ impl JsonObjects {
         Ok(())
     }
 
-    pub fn from_store(store: &mut Box<dyn StorageRaw>) -> JsonObjects {
+    pub fn from_store(store: &mut Box<dyn format::StorageRaw>) -> JsonObjects {
         let objs = store.search(&[]).unwrap();
-        let mut jt = JsonObjects {
-            objects: Vec::with_capacity(objs.len()),
-        };
+        let mut jobjs = Vec::with_capacity(objs.len());
         for o in objs {
             if !o.is_token() {
                 continue;
             }
-            jt.objects.push(JsonObject::from_object(&o));
+            jobjs.push(JsonObject::from_object(&o));
         }
 
-        jt
+        let info = store.fetch_token_info().unwrap();
+        let jtoken = JsonTokenInfo {
+            label: String::from_utf8(info.label.to_vec()).unwrap(),
+            manufacturer: String::from_utf8(info.manufacturer.to_vec())
+                .unwrap(),
+            model: String::from_utf8(info.model.to_vec()).unwrap(),
+            serial: String::from_utf8(info.serial.to_vec()).unwrap(),
+            flags: info.flags,
+        };
+
+        let mut jusers = Vec::new();
+        for id in [format::SO_ID, format::USER_ID] {
+            match store.fetch_user(id) {
+                Ok(u) => jusers.push(JsonObject::from_user(id, &u)),
+                Err(_) => (),
+            }
+        }
+
+        JsonObjects {
+            objects: jobjs,
+            users: Some(jusers),
+            token: Some(jtoken),
+        }
     }
 
     pub fn save(&self, filename: &str) -> Result<()> {
