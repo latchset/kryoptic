@@ -391,5 +391,69 @@ fn test_rsa_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
+    #[cfg(not(feature = "fips"))]
+    {
+        /* RSA PKCS Sig */
+        let pri_key_handle = match get_test_key_handle(
+            session,
+            "SigVer15_186-3.rsp [mod = 2048]",
+            CKO_PRIVATE_KEY,
+        ) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+        let pub_key_handle = match get_test_key_handle(
+            session,
+            "SigVer15_186-3.rsp [mod = 2048]",
+            CKO_PUBLIC_KEY,
+        ) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+
+        /* Test Raw Signature */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_RSA_X_509,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_sign_init(session, &mut mechanism, pri_key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut sig_len: CK_ULONG = 0;
+        let data = "check";
+        let ret = fn_sign(
+            session,
+            byte_ptr!(data.as_ptr()),
+            data.len() as CK_ULONG,
+            std::ptr::null_mut(),
+            &mut sig_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let mut signature = vec![0; sig_len as usize];
+        let ret = fn_sign(
+            session,
+            byte_ptr!(data.as_ptr()),
+            data.len() as CK_ULONG,
+            signature.as_mut_ptr(),
+            &mut sig_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_verify_init(session, &mut mechanism, pub_key_handle);
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_verify(
+            session,
+            byte_ptr!(data.as_ptr()),
+            data.len() as CK_ULONG,
+            byte_ptr!(signature.as_ptr()),
+            signature.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+    }
+
     testtokn.finalize();
 }

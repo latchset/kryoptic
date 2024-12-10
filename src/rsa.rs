@@ -374,18 +374,19 @@ impl RsaPKCSMechanism {
     }
 
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_RSA_PKCS,
-            Self::new_mechanism(
-                CKF_ENCRYPT
-                    | CKF_DECRYPT
-                    | CKF_SIGN
-                    | CKF_VERIFY
-                    | CKF_WRAP
-                    | CKF_UNWRAP,
-            ),
-        );
-
+        for ckm in &[CKM_RSA_X_509, CKM_RSA_PKCS] {
+            mechs.add_mechanism(
+                *ckm,
+                Self::new_mechanism(
+                    CKF_ENCRYPT
+                        | CKF_DECRYPT
+                        | CKF_SIGN
+                        | CKF_VERIFY
+                        | CKF_WRAP
+                        | CKF_UNWRAP,
+                ),
+            );
+        }
         for ckm in &[
             CKM_SHA1_RSA_PKCS,
             CKM_SHA224_RSA_PKCS,
