@@ -460,24 +460,25 @@ impl NSSStorage {
 
         /* if neither was excluded we may be asked for both */
         if do_private {
-            query.private = Some(format!(
-                "SELECT ALL id FROM {} WHERE ",
-                NSS_PRIVATE_TABLE
-            ));
+            query.private =
+                Some(format!("SELECT ALL id FROM {} ", NSS_PRIVATE_TABLE));
         }
         if do_public {
             query.public =
-                Some(format!("SELECT ALL id FROM {} WHERE ", NSS_PUBLIC_TABLE));
+                Some(format!("SELECT ALL id FROM {} ", NSS_PUBLIC_TABLE));
         }
 
         for idx in 0..template.len() {
             static CONCAT: &str = " AND";
+            static WHERE: &str = " WHERE";
             let atype = AttrType::attr_id_to_attrtype(template[idx].type_)?;
             let atval = u32::try_from(template[idx].type_)?;
 
             if let Some(ref mut prv) = query.private {
                 if idx != 0 {
                     prv.push_str(CONCAT);
+                } else {
+                    prv.push_str(WHERE);
                 }
                 write!(prv, " a{:x} = ?", atval)?;
             }
@@ -485,6 +486,8 @@ impl NSSStorage {
             if let Some(ref mut pbl) = query.public {
                 if idx != 0 {
                     pbl.push_str(CONCAT);
+                } else {
+                    pbl.push_str(WHERE);
                 }
                 write!(pbl, " a{:x} = ?", atval)?;
             }
