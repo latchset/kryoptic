@@ -4,8 +4,8 @@
 use crate::error::Result;
 use crate::interface::*;
 use crate::object::Object;
-use crate::storage::aci::StorageACI;
-use crate::storage::format::{StdStorageFormat, StorageRaw};
+use crate::storage::aci;
+use crate::storage::format;
 use crate::storage::{memory, Storage, StorageDBInfo, StorageTokenInfo};
 
 mod objects {
@@ -16,10 +16,10 @@ use objects::*;
 #[derive(Debug)]
 pub struct JsonStorage {
     filename: String,
-    cache: Box<dyn StorageRaw>,
+    cache: Box<dyn format::StorageRaw>,
 }
 
-impl StorageRaw for JsonStorage {
+impl format::StorageRaw for JsonStorage {
     fn is_initialized(&self) -> Result<()> {
         self.cache.is_initialized()
     }
@@ -57,7 +57,19 @@ impl StorageRaw for JsonStorage {
         self.cache.fetch_token_info()
     }
     fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
-        self.cache.store_token_info(info)
+        self.cache.store_token_info(info)?;
+        self.flush()
+    }
+    fn fetch_user(&self, uid: &str) -> Result<aci::StorageAuthInfo> {
+        self.cache.fetch_user(uid)
+    }
+    fn store_user(
+        &mut self,
+        uid: &str,
+        data: &aci::StorageAuthInfo,
+    ) -> Result<()> {
+        self.cache.store_user(uid, data)?;
+        self.flush()
     }
 }
 
@@ -75,9 +87,9 @@ impl StorageDBInfo for JsonDBInfo {
             },
             cache: memory::raw_store(),
         });
-        Ok(Box::new(StdStorageFormat::new(
+        Ok(Box::new(format::StdStorageFormat::new(
             raw_store,
-            StorageACI::new(true),
+            aci::StorageACI::new(true),
         )))
     }
 

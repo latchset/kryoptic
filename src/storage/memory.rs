@@ -4,24 +4,23 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::attribute::Attribute;
 use crate::error::{Error, Result};
 use crate::interface::*;
-use crate::misc::copy_sized_string;
 use crate::object::Object;
-use crate::storage::aci::StorageACI;
-use crate::storage::format::{StdStorageFormat, StorageRaw};
+use crate::storage::aci;
+use crate::storage::format;
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
 #[derive(Debug)]
 struct MemoryStorage {
     objects: HashMap<String, Object>,
     token_info: StorageTokenInfo,
+    users: HashMap<String, aci::StorageAuthInfo>,
 }
 
-impl StorageRaw for MemoryStorage {
+impl format::StorageRaw for MemoryStorage {
     fn is_initialized(&self) -> Result<()> {
-        if self.objects.len() != 0 {
+        if self.token_info.flags & CKF_TOKEN_INITIALIZED != 0 {
             Ok(())
         } else {
             Err(CKR_CRYPTOKI_NOT_INITIALIZED)?
@@ -75,13 +74,31 @@ impl StorageRaw for MemoryStorage {
         self.token_info.model = info.model;
         self.token_info.serial = info.serial;
         self.token_info.flags = info.flags;
+        Ok(())
+    }
+
+    fn fetch_user(&self, uid: &str) -> Result<aci::StorageAuthInfo> {
+        match self.users.get(uid) {
+            Some(u) => Ok(u.clone()),
+            None => Err(CKR_USER_PIN_NOT_INITIALIZED)?,
+        }
+    }
+
+    fn store_user(
+        &mut self,
+        uid: &str,
+        data: &aci::StorageAuthInfo,
+    ) -> Result<()> {
+        self.users.insert(uid.to_string(), data.clone());
+        Ok(())
     }
 }
 
-pub fn raw_store() -> Box<dyn StorageRaw> {
+pub fn raw_store() -> Box<dyn format::StorageRaw> {
     Box::new(MemoryStorage {
         objects: HashMap::new(),
         token_info: StorageTokenInfo::default(),
+        users: HashMap::new(),
     })
 }
 
@@ -100,9 +117,9 @@ impl StorageDBInfo for MemoryDBInfo {
             None => false,
         };
         let raw_store = raw_store();
-        Ok(Box::new(StdStorageFormat::new(
+        Ok(Box::new(format::StdStorageFormat::new(
             raw_store,
-            StorageACI::new(encrypt),
+            aci::StorageACI::new(encrypt),
         )))
     }
 

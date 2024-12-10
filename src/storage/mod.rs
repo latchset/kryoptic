@@ -23,6 +23,7 @@ const TOKEN_MODEL: &str = "FIPS-140-3 v1";
 #[cfg(not(feature = "fips"))]
 const TOKEN_MODEL: &str = "v1";
 
+#[derive(Clone, Debug)]
 pub struct StorageTokenInfo {
     pub label: [CK_UTF8CHAR; 32usize],
     pub manufacturer: [CK_UTF8CHAR; 32usize],
@@ -105,7 +106,7 @@ pub trait Storage: Debug + Send + Sync {
     ) -> Result<()>;
 }
 
-mod aci;
+pub mod aci;
 pub mod format;
 
 #[cfg(feature = "jsondb")]
