@@ -60,8 +60,8 @@ fn checked_pin(pin: &[u8]) -> &[u8] {
     pin
 }
 
-const SO_ID: &str = "SO";
-const USER_ID: &str = "USER";
+pub const SO_ID: &str = "SO";
+pub const USER_ID: &str = "USER";
 
 fn get_pin_uid(user_type: CK_USER_TYPE) -> Result<&'static str> {
     match user_type {

@@ -390,6 +390,7 @@ fn decrypt_data(
 
 const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 
+#[derive(Clone, Debug)]
 pub struct StorageAuthInfo {
     pub default_pin: bool,
     pub user_data: Option<Vec<u8>>,
