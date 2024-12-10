@@ -5,6 +5,7 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::interface::*;
+use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::token::TokenFacilities;
 
@@ -22,12 +23,29 @@ const TOKEN_MODEL: &str = "FIPS-140-3 v1";
 #[cfg(not(feature = "fips"))]
 const TOKEN_MODEL: &str = "v1";
 
+#[derive(Clone, Debug)]
 pub struct StorageTokenInfo {
     pub label: [CK_UTF8CHAR; 32usize],
     pub manufacturer: [CK_UTF8CHAR; 32usize],
     pub model: [CK_UTF8CHAR; 16usize],
     pub serial: [CK_CHAR; 16usize],
     pub flags: CK_FLAGS,
+}
+
+impl Default for StorageTokenInfo {
+    fn default() -> StorageTokenInfo {
+        let mut def = StorageTokenInfo {
+            label: [0; 32],
+            manufacturer: [0; 32],
+            model: [0; 16],
+            serial: [0; 16],
+            flags: 0,
+        };
+        copy_sized_string(TOKEN_LABEL.as_bytes(), &mut def.label);
+        copy_sized_string(MANUFACTURER_ID.as_bytes(), &mut def.manufacturer);
+        copy_sized_string(TOKEN_MODEL.as_bytes(), &mut def.model);
+        def
+    }
 }
 
 pub trait StorageDBInfo: Debug + Send + Sync {
@@ -89,7 +107,7 @@ pub trait Storage: Debug + Send + Sync {
     ) -> Result<()>;
 }
 
-mod aci;
+pub mod aci;
 pub mod format;
 
 #[cfg(feature = "jsondb")]
