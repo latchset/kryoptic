@@ -844,6 +844,10 @@ impl Storage for NSSStorage {
             attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
             attrs.add_missing_ulong(CKA_EXTRACTABLE, &dnm);
             attrs.add_missing_ulong(CKA_SENSITIVE, &dnm);
+            /* we can not query a DB for these */
+            for a in NSS_SKIP_ATTRIBUTES {
+                let _ = attrs.remove_ulong(a);
+            }
         }
         let mut obj =
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
@@ -880,6 +884,13 @@ impl Storage for NSSStorage {
                     nssobjid,
                     sdbtype,
                 )?;
+            }
+        }
+        /* add back the attributes that we requested, but that do not exist in DB */
+        for a in NSS_SKIP_ATTRIBUTES {
+            match attributes.iter().position(|r| r.type_ == a) {
+                Some(_) => obj.set_attr(Attribute::from_bool(a, true))?,
+                None => (),
             }
         }
 
