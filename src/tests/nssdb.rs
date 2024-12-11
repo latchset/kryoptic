@@ -201,6 +201,9 @@ fn test_nssdb_init_token() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(value.as_slice(), "Secret".as_bytes());
 
+    let ret = fn_destroy_object(session, handle);
+    assert_eq!(ret, CKR_OK);
+
     /* add a public object to ensure attributes are handled correctly
      * CKA_VALUE is encrypted only for private objects */
     let _ = ret_or_panic!(import_object(
