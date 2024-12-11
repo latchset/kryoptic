@@ -220,3 +220,48 @@ fn test_nssdb_init_token() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_nssdb_init_token_params() {
+    let name = String::from("test_nssdb_init_token_params");
+    let datadir = format!("{}/{}", TESTDIR, name);
+
+    let dbargs = format!(
+        "configDir={} \
+         manufacturerID=<My Kryoptic> \
+         libraryDescription='My Library' \
+         cryptoTokenDescription=\"My token description\" \
+         dbTokenDescription=(db Token Description) \
+         cryptoSlotDescription=[my slot description] \
+         flags=passwordRequired",
+        datadir
+    );
+    let dbtype = "nssdb";
+
+    let mut testtokn =
+        TestToken::new_type(String::from(dbtype), String::from(""), name);
+
+    /* pre-populate conf so we get the correct slot number assigned */
+    let mut slot = config::Slot::with_db(dbtype, Some(dbargs.clone()));
+    slot.slot = u32::try_from(testtokn.get_slot()).unwrap();
+    let ret = add_slot(slot);
+
+    assert_eq!(ret, CKR_OK);
+    let mut args = TestToken::make_init_args(Some(dbargs.clone()));
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* init once (NSSDB ignores SO pin) */
+    let pin_value = "Unused";
+    let ret = fn_init_token(
+        testtokn.get_slot(),
+        CString::new(pin_value).unwrap().into_raw() as *mut u8,
+        pin_value.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
