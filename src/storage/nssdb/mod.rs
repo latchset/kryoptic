@@ -149,7 +149,7 @@ impl NSSStorage {
             &mut info.manufacturer,
         );
         if self.config.password_required {
-            info.flags = CKF_LOGIN_REQUIRED;
+            info.flags |= CKF_LOGIN_REQUIRED;
         }
         Ok(info)
     }
