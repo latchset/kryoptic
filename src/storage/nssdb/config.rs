@@ -66,6 +66,8 @@ impl Default for NSSConfig {
     }
 }
 
+const END_VALUE: u8 = b' ';
+
 impl NSSConfig {
     fn parse_flags(&mut self, args: &[u8]) -> Result<()> {
         let mut idx = 0;
@@ -113,14 +115,14 @@ impl NSSConfig {
             '{' => b'}',
             '[' => b']',
             '<' => b'>',
-            _ => b' ',
+            _ => END_VALUE,
         };
-        let valx = if find != b' ' { idx + 2 } else { idx + 1 };
+        let valx = if find != END_VALUE { idx + 2 } else { idx + 1 };
         idx = valx;
 
         while idx < args.len() {
             if let Some(pos) = args[idx..].iter().position(|&x| x == find) {
-                idx = pos;
+                idx += pos;
 
                 /* backtrack check for escapes */
                 let mut esc = 0;
@@ -144,7 +146,7 @@ impl NSSConfig {
         if idx >= args.len() {
             /* This may be the last parameter, in which case it is ok
              * if not trailing space is present otherwise error out */
-            if idx == args.len() && find != ' ' as u8 {
+            if idx == args.len() && find != END_VALUE as u8 {
                 return Err(CKR_ARGUMENTS_BAD)?;
             }
         }
@@ -152,7 +154,12 @@ impl NSSConfig {
         value = String::from_utf8_lossy(&args[valx..idx]).to_string();
 
         if idx < args.len() {
+            /* accounting for the space separator */
             idx += 1;
+            if find != END_VALUE {
+                /* accounting for the closing brace/quote/symbol */
+                idx += 1;
+            }
         }
 
         match name.as_str() {
@@ -191,7 +198,7 @@ impl NSSConfig {
         let mut idx = 0usize;
 
         while idx < bargs.len() {
-            idx = config.parse_parameter(&bargs[idx..])?;
+            idx += config.parse_parameter(&bargs[idx..])?;
         }
         Ok(config)
     }
