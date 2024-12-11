@@ -502,6 +502,23 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
+    fn set_attribute_default(
+        &self,
+        attr: CK_ATTRIBUTE_TYPE,
+        obj: &mut Object,
+    ) -> Result<()> {
+        let attributes = self.get_attributes();
+        match attributes.iter().find(|a| a.get_type() == attr) {
+            Some(defattr) => {
+                if defattr.has_default() {
+                    obj.set_attr(defattr.attribute.clone())?;
+                }
+            }
+            None => (),
+        }
+        Ok(())
+    }
+
     fn default_copy(
         &self,
         origin: &Object,

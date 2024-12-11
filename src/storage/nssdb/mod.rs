@@ -888,8 +888,9 @@ impl Storage for NSSStorage {
         }
         /* add back the attributes that we requested, but that do not exist in DB */
         for a in NSS_SKIP_ATTRIBUTES {
+            let factory = facilities.factories.get_object_factory(&obj)?;
             match attributes.iter().position(|r| r.type_ == a) {
-                Some(_) => obj.set_attr(Attribute::from_bool(a, true))?,
+                Some(_) => factory.set_attribute_default(a, &mut obj)?,
                 None => (),
             }
         }
