@@ -228,6 +228,17 @@ impl RsaPKCSOperation {
         }
     }
 
+    fn get_key_size(key: &Object, info: &CK_MECHANISM_INFO) -> Result<usize> {
+        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
+        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
+        if modulus_bits < info.ulMinKeySize
+            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
+        {
+            return Err(CKR_KEY_SIZE_RANGE)?;
+        }
+        Ok(modulus.len())
+    }
+
     fn max_message_len(
         modulus: usize,
         mech: CK_MECHANISM_TYPE,
@@ -244,30 +255,23 @@ impl RsaPKCSOperation {
         }
     }
 
-    pub fn encrypt_new(
+    fn encdec_new(
         mech: &CK_MECHANISM,
-        key: &Object,
-        info: &CK_MECHANISM_INFO,
+        pubkey: Option<EvpPkey>,
+        privkey: Option<EvpPkey>,
+        keysize: usize,
     ) -> Result<RsaPKCSOperation> {
-        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
-        if modulus_bits < info.ulMinKeySize
-            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
-        {
-            return Err(CKR_KEY_SIZE_RANGE)?;
-        }
         let oaep_params = parse_oaep_params(mech)?;
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: Self::max_message_len(
-                modulus.len(),
+                keysize,
                 mech.mechanism,
                 oaep_params.hash,
             )?,
-            output_len: modulus.len(),
-            public_key: Some(pubkey),
-            private_key: None,
+            output_len: keysize,
+            public_key: pubkey,
+            private_key: privkey,
             finalized: false,
             in_use: false,
             sigctx: None,
@@ -278,36 +282,56 @@ impl RsaPKCSOperation {
         })
     }
 
+    pub fn encrypt_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+    ) -> Result<RsaPKCSOperation> {
+        let keysize = Self::get_key_size(key, info)?;
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        Self::encdec_new(mech, Some(pubkey), None, keysize)
+    }
+
     pub fn decrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
-        if modulus_bits < info.ulMinKeySize
-            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
-        {
-            return Err(CKR_KEY_SIZE_RANGE)?;
-        }
-        let oaep_params = parse_oaep_params(mech)?;
+        let keysize = Self::get_key_size(key, info)?;
         let pubkey = EvpPkey::pubkey_from_object(key)?;
         let privkey = EvpPkey::privkey_from_object(key)?;
+        Self::encdec_new(mech, Some(pubkey), Some(privkey), keysize)
+    }
+
+    fn sigver_new(
+        mech: &CK_MECHANISM,
+        pubkey: Option<EvpPkey>,
+        privkey: Option<EvpPkey>,
+        keysize: usize,
+    ) -> Result<RsaPKCSOperation> {
+        let pss_params = parse_pss_params(mech)?;
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
-            max_input: modulus.len(),
-            output_len: Self::max_message_len(
-                modulus.len(),
-                mech.mechanism,
-                oaep_params.hash,
-            )?,
-            public_key: Some(pubkey),
-            private_key: Some(privkey),
+            max_input: match mech.mechanism {
+                CKM_RSA_X_509 => keysize,
+                CKM_RSA_PKCS => keysize - 11,
+                CKM_RSA_PKCS_PSS => Self::hash_len(pss_params.hash)?,
+                _ => 0,
+            },
+            output_len: keysize,
+            public_key: pubkey,
+            private_key: privkey,
             finalized: false,
             in_use: false,
-            sigctx: None,
-            pss: no_pss_params(),
-            oaep: oaep_params,
+            sigctx: match mech.mechanism {
+                CKM_RSA_X_509 | CKM_RSA_PKCS => None,
+                #[cfg(feature = "fips")]
+                _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
+                #[cfg(not(feature = "fips"))]
+                _ => Some(EvpMdCtx::new()?),
+            },
+            pss: pss_params,
+            oaep: no_oaep_params(),
             #[cfg(feature = "fips")]
             fips_approved: None,
         })
@@ -318,42 +342,10 @@ impl RsaPKCSOperation {
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
-        if modulus_bits < info.ulMinKeySize
-            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
-        {
-            return Err(CKR_KEY_SIZE_RANGE)?;
-        }
-
-        let pss_params = parse_pss_params(mech)?;
+        let keysize = Self::get_key_size(key, info)?;
         let pubkey = EvpPkey::pubkey_from_object(key)?;
         let privkey = EvpPkey::privkey_from_object(key)?;
-        Ok(RsaPKCSOperation {
-            mech: mech.mechanism,
-            max_input: match mech.mechanism {
-                CKM_RSA_X_509 => modulus.len(),
-                CKM_RSA_PKCS => modulus.len() - 11,
-                CKM_RSA_PKCS_PSS => Self::hash_len(pss_params.hash)?,
-                _ => 0,
-            },
-            output_len: modulus.len(),
-            public_key: Some(pubkey),
-            private_key: Some(privkey),
-            finalized: false,
-            in_use: false,
-            sigctx: match mech.mechanism {
-                CKM_RSA_X_509 | CKM_RSA_PKCS => None,
-                #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
-                #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::new()?),
-            },
-            pss: pss_params,
-            oaep: no_oaep_params(),
-            #[cfg(feature = "fips")]
-            fips_approved: None,
-        })
+        Self::sigver_new(mech, Some(pubkey), Some(privkey), keysize)
     }
 
     pub fn verify_new(
@@ -361,40 +353,9 @@ impl RsaPKCSOperation {
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let modulus = key.get_attr_as_bytes(CKA_MODULUS)?;
-        let modulus_bits: CK_ULONG = modulus.len() as CK_ULONG * 8;
-        if modulus_bits < info.ulMinKeySize
-            || (info.ulMaxKeySize != 0 && modulus_bits > info.ulMaxKeySize)
-        {
-            return Err(CKR_KEY_SIZE_RANGE)?;
-        }
-
-        let pss_params = parse_pss_params(mech)?;
+        let keysize = Self::get_key_size(key, info)?;
         let pubkey = EvpPkey::pubkey_from_object(key)?;
-        Ok(RsaPKCSOperation {
-            mech: mech.mechanism,
-            max_input: match mech.mechanism {
-                CKM_RSA_X_509 => modulus.len(),
-                CKM_RSA_PKCS => modulus.len() - 11,
-                _ => 0,
-            },
-            output_len: modulus.len(),
-            public_key: Some(pubkey),
-            private_key: None,
-            finalized: false,
-            in_use: false,
-            sigctx: match mech.mechanism {
-                CKM_RSA_X_509 | CKM_RSA_PKCS => None,
-                #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(name_as_char(RSA_NAME))?),
-                #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::new()?),
-            },
-            pss: pss_params,
-            oaep: no_oaep_params(),
-            #[cfg(feature = "fips")]
-            fips_approved: None,
-        })
+        Self::sigver_new(mech, Some(pubkey), None, keysize)
     }
 
     pub fn generate_keypair(
