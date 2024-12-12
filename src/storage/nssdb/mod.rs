@@ -842,6 +842,7 @@ impl Storage for NSSStorage {
              * is not a key, the attribute will simply not be returned
              * in that case */
             attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
+            attrs.add_missing_ulong(CKA_CERTIFICATE_TYPE, &dnm);
             attrs.add_missing_ulong(CKA_EXTRACTABLE, &dnm);
             attrs.add_missing_ulong(CKA_SENSITIVE, &dnm);
             /* we can not query a DB for these */
