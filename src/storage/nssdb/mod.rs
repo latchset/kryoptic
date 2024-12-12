@@ -151,6 +151,14 @@ impl NSSStorage {
         if self.config.password_required {
             info.flags |= CKF_LOGIN_REQUIRED;
         }
+        match self.fetch_password() {
+            Ok(_) => info.flags |= CKF_USER_PIN_INITIALIZED,
+            Err(e) => {
+                if e.rv() != CKR_USER_PIN_NOT_INITIALIZED {
+                    return Err(e);
+                }
+            }
+        }
         Ok(info)
     }
 
@@ -803,6 +811,10 @@ impl Storage for NSSStorage {
         if ret != CKR_OK {
             return Err(ret)?;
         }
+        /* ensure we drop the lock here, otherwise we deadlock inside
+         * get_token_info() where we try to acquire it again to search
+         * the database. */
+        drop(conn);
         self.get_token_info()
     }
 
