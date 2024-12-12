@@ -206,7 +206,7 @@ fn test_nssdb_init_token() {
 
     /* add a public object to ensure attributes are handled correctly
      * CKA_VALUE is encrypted only for private objects */
-    let _ = ret_or_panic!(import_object(
+    let cert_handle = ret_or_panic!(import_object(
         session,
         CKO_CERTIFICATE,
         &[(CKA_CERTIFICATE_TYPE, CKC_X_509)],
@@ -217,6 +217,28 @@ fn test_nssdb_init_token() {
         ],
         &[(CKA_TOKEN, true), (CKA_TRUSTED, false)],
     ));
+
+    /* Read the cert back */
+    let mut template =
+        make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
+    let ret = fn_get_attribute_value(
+        session,
+        cert_handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(template[0].ulValueLen, 5);
+    let mut value = vec![0u8; 5];
+    template[0].pValue = void_ptr!(value.as_mut_ptr());
+    let ret = fn_get_attribute_value(
+        session,
+        cert_handle,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value.as_slice(), "value".as_bytes());
 
     let ret = fn_logout(session);
     assert_eq!(ret, CKR_OK);
