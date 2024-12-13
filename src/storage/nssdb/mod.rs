@@ -1187,8 +1187,8 @@ impl Storage for NSSStorage {
         CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut salt))?;
 
         let enckey = enckey_derive(facilities, pin, &salt)?;
-        let mut tmpkeys = KeysWithCaching::default();
-        tmpkeys.set_key(enckey);
+        let mut newkeys = KeysWithCaching::default();
+        newkeys.set_key(enckey);
 
         let iterations = match pin.len() {
             0 => 1,
@@ -1198,9 +1198,14 @@ impl Storage for NSSStorage {
             }
         };
         let mut encdata =
-            encrypt_data(facilities, &tmpkeys, iterations, NSS_PASS_CHECK)?;
+            encrypt_data(facilities, &newkeys, iterations, NSS_PASS_CHECK)?;
 
         /* FIXME: need to re-encode all encrypted/integrity protected attributes */
+
+        /* now that the pin has changed all cached keys are invalid, replace the lot */
+        self.keys = newkeys;
+        /* changing the pin does not leave the token logged in */
+        self.keys.unset_key();
 
         let result = self.save_password(&salt, encdata.as_slice());
         encdata.zeroize();
