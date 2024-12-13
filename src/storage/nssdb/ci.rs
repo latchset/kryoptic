@@ -18,6 +18,7 @@ use crate::{sizeof, void_ptr};
 use zeroize::Zeroize;
 
 const SHA256_LEN: usize = 32;
+const MAX_KEY_CACHE_SIZE: usize = 128;
 
 enum KeyOp {
     Encryption,
@@ -108,11 +109,15 @@ impl KeysWithCaching {
     }
 
     fn set_cached_key(&self, id: &[u8; SHA256_LEN], key: Object) -> Result<()> {
-        let mut w = match self.cache.write() {
-            Ok(w) => w,
+        match self.cache.write() {
+            Ok(mut w) => {
+                if w.len() > MAX_KEY_CACHE_SIZE {
+                    let _ = w.pop_last();
+                }
+                let _ = w.insert(*id, key);
+            }
             Err(_) => return Err(CKR_CANT_LOCK)?,
         };
-        let _ = w.insert(*id, key);
         Ok(())
     }
 
