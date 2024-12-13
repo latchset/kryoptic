@@ -204,6 +204,13 @@ impl From<Vec<u8>> for Error {
     }
 }
 
+use std::array::TryFromSliceError;
+impl From<TryFromSliceError> for Error {
+    fn from(error: TryFromSliceError) -> Error {
+        Error::other_error(error)
+    }
+}
+
 #[macro_export]
 macro_rules! some_or_err {
     ($action:expr) => {

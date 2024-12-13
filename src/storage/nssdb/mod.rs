@@ -120,15 +120,7 @@ struct NSSSearchQuery {
 pub struct NSSStorage {
     config: NSSConfig,
     conn: Arc<Mutex<Connection>>,
-    enckey: Option<Vec<u8>>,
-}
-
-impl Drop for NSSStorage {
-    fn drop(&mut self) {
-        if let Some(ref mut key) = &mut self.enckey {
-            key.zeroize();
-        }
-    }
+    keys: KeysWithCaching,
 }
 
 impl NSSStorage {
@@ -823,7 +815,7 @@ impl Storage for NSSStorage {
         _facilities: &TokenFacilities,
     ) -> Result<StorageTokenInfo> {
         self.initialize()?;
-        self.enckey = None;
+        self.keys = KeysWithCaching::default();
         self.get_token_info()
     }
 
@@ -864,15 +856,14 @@ impl Storage for NSSStorage {
         }
         let mut obj =
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
-        if let Some(ref enckey) = self.enckey {
+        if self.keys.available() {
             if table == NSS_PRIVATE_TABLE {
                 for typ in NSS_SENSITIVE_ATTRIBUTES {
                     let encval = match obj.get_attr(typ) {
                         Some(attr) => attr.get_value(),
                         None => continue,
                     };
-                    let plain =
-                        decrypt_data(facilities, enckey.as_slice(), encval)?;
+                    let plain = decrypt_data(facilities, &self.keys, encval)?;
                     obj.set_attr(Attribute::from_bytes(typ, plain))?;
                 }
             }
@@ -891,7 +882,7 @@ impl Storage for NSSStorage {
                 let signature = self.fetch_signature(dbtype, nssobjid, typ)?;
                 check_signature(
                     facilities,
-                    enckey.as_slice(),
+                    &self.keys,
                     value.as_slice(),
                     signature.as_slice(),
                     nssobjid,
@@ -923,10 +914,9 @@ impl Storage for NSSStorage {
             _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         };
 
-        let enckey = match self.enckey {
-            Some(ref e) => e,
-            None => return Err(CKR_USER_NOT_LOGGED_IN)?,
-        };
+        if !self.keys.available() {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
 
         if table == NSS_PRIVATE_TABLE {
             for typ in NSS_SENSITIVE_ATTRIBUTES {
@@ -938,7 +928,7 @@ impl Storage for NSSStorage {
                 };
                 let encval = encrypt_data(
                     facilities,
-                    enckey.as_slice(),
+                    &self.keys,
                     NSS_MP_PBE_ITERATION_COUNT,
                     plain.as_slice(),
                 )?;
@@ -967,11 +957,11 @@ impl Storage for NSSStorage {
             };
             let sig = make_signature(
                 facilities,
-                enckey.as_slice(),
+                &self.keys,
                 value.as_slice(),
                 nssobjid,
                 u32::try_from(typ)?,
-                u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
+                NSS_MP_PBE_ITERATION_COUNT,
             )?;
             Self::store_signature(
                 &mut tx,
@@ -1004,10 +994,9 @@ impl Storage for NSSStorage {
         };
         let (table, nssobjid) = nss_id_parse(nssid)?;
 
-        let enckey = match self.enckey {
-            Some(ref e) => e,
-            None => return Err(CKR_USER_NOT_LOGGED_IN)?,
-        };
+        if !self.keys.available() {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
 
         let mut attrs = CkAttrs::from(template);
 
@@ -1020,7 +1009,7 @@ impl Storage for NSSStorage {
                         let plain = a.to_buf()?;
                         let encval = encrypt_data(
                             facilities,
-                            enckey.as_slice(),
+                            &self.keys,
                             NSS_MP_PBE_ITERATION_COUNT,
                             plain.as_slice(),
                         )?;
@@ -1044,11 +1033,11 @@ impl Storage for NSSStorage {
                     let value = a.to_buf()?;
                     let sig = make_signature(
                         facilities,
-                        enckey.as_slice(),
+                        &self.keys,
                         value.as_slice(),
                         nssobjid,
                         u32::try_from(typ)?,
-                        u64::try_from(NSS_MP_PBE_ITERATION_COUNT)?,
+                        NSS_MP_PBE_ITERATION_COUNT,
                     )?;
                     Self::store_signature(
                         &mut tx,
@@ -1141,35 +1130,44 @@ impl Storage for NSSStorage {
          * key through pbkdf2 and then decrypting the entry according
          * to the chosen algorithm. The data is a structured ASN.1
          * structure that includes in formation about which algorithm
-         * to use for the decryption. */
+         * to use for the decryption.
+         * NOTE: to allow key caching we set the key unchecked, and
+         * then remove it on failure or if only a check was requested */
         let (salt, data) = self.fetch_password()?;
-        let mut enckey = enckey_derive(facilities, pin, salt.as_slice())?;
-        let plain =
-            decrypt_data(facilities, enckey.as_slice(), data.as_slice())?;
-        if plain.as_slice() != NSS_PASS_CHECK {
-            return Err(CKR_PIN_INCORRECT)?;
+        let enckey = enckey_derive(facilities, pin, salt.as_slice())?;
+        let originally_set = self.keys.available();
+        if originally_set && self.keys.check_key(enckey.as_slice()) {
+            return Ok(());
+        }
+        self.keys.set_key(enckey);
+        let check = match decrypt_data(facilities, &self.keys, data.as_slice())
+        {
+            Ok(plain) => {
+                if plain.as_slice() == NSS_PASS_CHECK {
+                    Ok(())
+                } else {
+                    Err(CKR_PIN_INCORRECT)?
+                }
+            }
+            Err(e) => Err(e),
+        };
+        if check.is_err() {
+            /* unconditionally remove the key on failure */
+            self.keys.unset_key();
+            return check;
         }
 
         /* NSS does not support any error counter for authentication attempts */
         *flag = 0;
 
-        if !check_only {
-            self.enckey = Some(enckey);
-        } else {
-            enckey.zeroize();
+        if check_only && !originally_set {
+            self.keys.unset_key();
         }
         Ok(())
     }
 
     fn unauth_user(&mut self, _user_type: CK_USER_TYPE) -> Result<()> {
-        match self.enckey {
-            Some(ref mut key) => {
-                key.zeroize();
-                self.enckey = None;
-            }
-            None => (),
-        }
-        Ok(())
+        Ok(self.keys.unset_key())
     }
 
     fn set_user_pin(
@@ -1188,7 +1186,9 @@ impl Storage for NSSStorage {
         let mut salt: [u8; NSS_PIN_SALT_LEN] = [0u8; NSS_PIN_SALT_LEN];
         CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut salt))?;
 
-        let newenckey = enckey_derive(facilities, pin, &salt)?;
+        let enckey = enckey_derive(facilities, pin, &salt)?;
+        let mut tmpkeys = KeysWithCaching::default();
+        tmpkeys.set_key(enckey);
 
         let iterations = match pin.len() {
             0 => 1,
@@ -1197,12 +1197,8 @@ impl Storage for NSSStorage {
                 NSS_MP_PBE_ITERATION_COUNT
             }
         };
-        let mut encdata = encrypt_data(
-            facilities,
-            newenckey.as_slice(),
-            iterations,
-            NSS_PASS_CHECK,
-        )?;
+        let mut encdata =
+            encrypt_data(facilities, &tmpkeys, iterations, NSS_PASS_CHECK)?;
 
         /* FIXME: need to re-encode all encrypted/integrity protected attributes */
 
@@ -1259,7 +1255,7 @@ impl StorageDBInfo for NSSDBInfo {
         Ok(Box::new(NSSStorage {
             config: config,
             conn: conn,
-            enckey: None,
+            keys: KeysWithCaching::default(),
         }))
     }
 

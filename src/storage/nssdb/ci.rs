@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::collections::BTreeMap;
+use std::sync::{RwLock, RwLockReadGuard};
+
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::interface::*;
@@ -11,6 +14,119 @@ use crate::storage::aci::pbkdf2_derive;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
 use crate::{sizeof, void_ptr};
+
+use zeroize::Zeroize;
+
+const SHA256_LEN: usize = 32;
+
+enum KeyOp {
+    Encryption,
+    Signature,
+}
+
+#[derive(Debug)]
+struct LockedKey<'a> {
+    id: [u8; SHA256_LEN],
+    l: RwLockReadGuard<'a, BTreeMap<[u8; SHA256_LEN], Object>>,
+}
+
+impl LockedKey<'_> {
+    fn get_id(&self) -> [u8; SHA256_LEN] {
+        self.id
+    }
+
+    pub fn get_key<'a>(&'a self) -> Option<&'a Object> {
+        self.l.get(&self.id)
+    }
+}
+
+#[derive(Debug)]
+pub struct KeysWithCaching {
+    enckey: Option<Vec<u8>>,
+    cache: RwLock<BTreeMap<[u8; SHA256_LEN], Object>>,
+}
+
+impl Default for KeysWithCaching {
+    fn default() -> KeysWithCaching {
+        KeysWithCaching {
+            enckey: None,
+            cache: RwLock::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl Drop for KeysWithCaching {
+    fn drop(&mut self) {
+        if let Some(ref mut key) = &mut self.enckey {
+            key.zeroize();
+        }
+    }
+}
+
+impl KeysWithCaching {
+    pub fn available(&self) -> bool {
+        self.enckey.is_some()
+    }
+
+    fn get_key(&self) -> Result<&[u8]> {
+        match &self.enckey {
+            Some(ref key) => Ok(key.as_slice()),
+            None => Err(CKR_USER_NOT_LOGGED_IN)?,
+        }
+    }
+
+    pub fn check_key(&self, check: &[u8]) -> bool {
+        match &self.enckey {
+            Some(ref key) => key.as_slice() == check,
+            None => false,
+        }
+    }
+
+    pub fn set_key(&mut self, key: Vec<u8>) {
+        self.enckey = Some(key);
+    }
+
+    pub fn unset_key(&mut self) {
+        self.enckey = None;
+    }
+
+    fn get_cached_key(&self, id: &[u8; SHA256_LEN]) -> Option<LockedKey> {
+        if self.enckey.is_none() {
+            /* access to the cache is available only if enckey is set.
+             * When unset it means the user logged off and no
+             * keys should be available */
+            return None;
+        }
+        let read_lock = match self.cache.read() {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+        Some(LockedKey {
+            id: *id,
+            l: read_lock,
+        })
+    }
+
+    fn set_cached_key(&self, id: &[u8; SHA256_LEN], key: Object) -> Result<()> {
+        let mut w = match self.cache.write() {
+            Ok(w) => w,
+            Err(_) => return Err(CKR_CANT_LOCK)?,
+        };
+        let _ = w.insert(*id, key);
+        Ok(())
+    }
+
+    fn invalidate_cached_key(&self, lk: LockedKey) {
+        let id = lk.get_id();
+        drop(lk);
+        match self.cache.write() {
+            Ok(mut w) => {
+                let _ = w.remove(&id);
+            }
+            Err(_) => (),
+        }
+    }
+}
 
 pub const NSS_MP_PBE_ITERATION_COUNT: usize = 10000;
 
@@ -125,9 +241,72 @@ fn aes_cbc_encrypt(
     Ok((iv[2..].to_vec(), encdata))
 }
 
+fn derive_key_internal<'a>(
+    facilities: &TokenFacilities,
+    keys: &'a KeysWithCaching,
+    params: &PBKDF2Params,
+    operation: KeyOp,
+) -> Result<LockedKey<'a>> {
+    let keyid: [u8; 32] = params.salt.try_into()?;
+
+    /* First check if we have this key in cache */
+    match keys.get_cached_key(&keyid) {
+        Some(lk) => match lk.get_key() {
+            Some(_) => return Ok(lk),
+            None => (),
+        },
+        None => (),
+    }
+
+    /* if not compute it */
+    let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
+    let ck_key_type: CK_KEY_TYPE = match operation {
+        KeyOp::Encryption => CKK_AES,
+        KeyOp::Signature => CKK_GENERIC_SECRET,
+    };
+    let ck_key_len: CK_ULONG = match params.key_length {
+        Some(l) => CK_ULONG::try_from(l)?,
+        None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+    };
+    let ck_true: CK_BBOOL = CK_TRUE;
+    let mut key_template = CkAttrs::with_capacity(5);
+    key_template.add_ulong(CKA_CLASS, &ck_class);
+    key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
+    key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
+    match operation {
+        KeyOp::Encryption => {
+            key_template.add_bool(CKA_DECRYPT, &ck_true);
+            key_template.add_bool(CKA_ENCRYPT, &ck_true);
+        }
+        KeyOp::Signature => {
+            key_template.add_bool(CKA_SIGN, &ck_true);
+            key_template.add_bool(CKA_VERIFY, &ck_true);
+        }
+    }
+
+    let key = pbkdf2_derive(
+        facilities,
+        params,
+        keys.get_key()?,
+        key_template.as_slice(),
+    )?;
+
+    /* and store in cache for later use */
+    keys.set_cached_key(&keyid, key)?;
+    match keys.get_cached_key(&keyid) {
+        Some(lk) => match lk.get_key() {
+            Some(_) => return Ok(lk),
+            None => (),
+        },
+        None => (),
+    }
+
+    return Err(CKR_GENERAL_ERROR)?;
+}
+
 pub fn decrypt_data(
     facilities: &TokenFacilities,
-    secret: &[u8],
+    keys: &KeysWithCaching,
     data: &[u8],
 ) -> Result<Vec<u8>> {
     let info = match asn1::parse_single::<NSSEncryptedDataInfo>(data) {
@@ -140,43 +319,36 @@ pub fn decrypt_data(
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
 
-    let key = match &pbes2.key_derivation_func.params {
+    let lockedkey = match &pbes2.key_derivation_func.params {
         AlgorithmParameters::Pbkdf2(ref params) => {
-            let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
-            let ck_key_type: CK_KEY_TYPE = CKK_AES;
-            let ck_key_len: CK_ULONG = match params.key_length {
-                Some(l) => CK_ULONG::try_from(l)?,
-                None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-            };
-            let ck_true: CK_BBOOL = CK_TRUE;
-            let mut key_template = CkAttrs::with_capacity(5);
-            key_template.add_ulong(CKA_CLASS, &ck_class);
-            key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
-            key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
-            key_template.add_bool(CKA_DECRYPT, &ck_true);
-            key_template.add_bool(CKA_ENCRYPT, &ck_true);
-
-            pbkdf2_derive(facilities, params, secret, key_template.as_slice())?
+            derive_key_internal(facilities, keys, params, KeyOp::Encryption)?
         }
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
-    match &pbes2.encryption_scheme.params {
+
+    let key = match lockedkey.get_key() {
+        Some(k) => k,
+        None => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    let result = match &pbes2.encryption_scheme.params {
         BrokenAlgorithmParameters::Aes128Cbc(ref iv) => {
-            aes_cbc_decrypt(facilities, &key, iv, info.enc_or_sig_data)
+            aes_cbc_decrypt(facilities, key, iv, info.enc_or_sig_data)
         }
         BrokenAlgorithmParameters::Aes256Cbc(ref iv) => {
-            aes_cbc_decrypt(facilities, &key, iv, info.enc_or_sig_data)
+            aes_cbc_decrypt(facilities, key, iv, info.enc_or_sig_data)
         }
         _ => Err(CKR_MECHANISM_INVALID)?,
+    };
+    if result.is_err() {
+        keys.invalidate_cached_key(lockedkey)
     }
+    result
 }
 
-/* SHA2-256 length */
-const SHA256_LEN: usize = 32;
-
-pub fn encrypt_data<'a>(
+pub fn encrypt_data(
     facilities: &TokenFacilities,
-    secret: &'a [u8],
+    keys: &KeysWithCaching,
     iterations: usize,
     data: &[u8],
 ) -> Result<Vec<u8>> {
@@ -191,25 +363,25 @@ pub fn encrypt_data<'a>(
         prf: Box::new(HMAC_SHA_256_ALG),
     };
 
-    /* compute key */
-    let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
-    let ck_key_type: CK_KEY_TYPE = CKK_AES;
-    let ck_key_len = CK_ULONG::try_from(SHA256_LEN)?;
-    let ck_true: CK_BBOOL = CK_TRUE;
-    let mut key_template = CkAttrs::with_capacity(5);
-    key_template.add_ulong(CKA_CLASS, &ck_class);
-    key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
-    key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
-    key_template.add_bool(CKA_DECRYPT, &ck_true);
-    key_template.add_bool(CKA_ENCRYPT, &ck_true);
-
-    let key = pbkdf2_derive(
+    let lockedkey = derive_key_internal(
         facilities,
+        keys,
         &pbkdf2_params,
-        secret,
-        key_template.as_slice(),
+        KeyOp::Encryption,
     )?;
-    let (iv, enc_data) = aes_cbc_encrypt(facilities, &key, data)?;
+
+    let key = match lockedkey.get_key() {
+        Some(k) => k,
+        None => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    let (iv, enc_data) = match aes_cbc_encrypt(facilities, key, data) {
+        Ok(x) => x,
+        Err(e) => {
+            keys.invalidate_cached_key(lockedkey);
+            return Err(e);
+        }
+    };
 
     let enc_params = BrokenAlgorithmIdentifier {
         oid: asn1::DefinedByMarker::marker(),
@@ -263,7 +435,7 @@ fn hmac_verify(
 
 pub fn check_signature(
     facilities: &TokenFacilities,
-    secret: &[u8],
+    keys: &KeysWithCaching,
     attribute: &[u8],
     signature: &[u8],
     nssobjid: u32,
@@ -279,39 +451,34 @@ pub fn check_signature(
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
 
-    let key = match &pbmac1.key_derivation_func.params {
+    let lockedkey = match &pbmac1.key_derivation_func.params {
         AlgorithmParameters::Pbkdf2(ref params) => {
-            let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
-            let ck_key_type: CK_KEY_TYPE = CKK_GENERIC_SECRET;
-            let ck_key_len: CK_ULONG = match params.key_length {
-                Some(l) => CK_ULONG::try_from(l)?,
-                None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-            };
-            let ck_true: CK_BBOOL = CK_TRUE;
-            let mut key_template = CkAttrs::with_capacity(5);
-            key_template.add_ulong(CKA_CLASS, &ck_class);
-            key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
-            key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
-            key_template.add_bool(CKA_SIGN, &ck_true);
-            key_template.add_bool(CKA_VERIFY, &ck_true);
-
-            pbkdf2_derive(facilities, params, secret, key_template.as_slice())?
+            derive_key_internal(facilities, keys, params, KeyOp::Signature)?
         }
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
 
-    match &pbmac1.message_auth_scheme.params {
+    let key = match lockedkey.get_key() {
+        Some(k) => k,
+        None => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    let result = match &pbmac1.message_auth_scheme.params {
         AlgorithmParameters::HmacWithSha256(None) => hmac_verify(
             facilities,
             CKM_SHA256_HMAC_GENERAL,
-            &key,
+            key,
             nssobjid,
             sdbtype,
             attribute,
             info.enc_or_sig_data,
         ),
         _ => Err(CKR_MECHANISM_INVALID)?,
+    };
+    if result.is_err() {
+        keys.invalidate_cached_key(lockedkey);
     }
+    result
 }
 
 pub fn enckey_derive(
@@ -358,42 +525,41 @@ fn hmac_sign(
 
 pub fn make_signature(
     facilities: &TokenFacilities,
-    secret: &[u8],
+    keys: &KeysWithCaching,
     attribute: &[u8],
     nssobjid: u32,
     sdbtype: u32,
-    iterations: u64,
+    iterations: usize,
 ) -> Result<Vec<u8>> {
     let mut salt: [u8; SHA256_LEN] = [0u8; SHA256_LEN];
     CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut salt))?;
 
     let pbkdf2_params = PBKDF2Params {
         salt: &salt,
-        iteration_count: iterations,
+        iteration_count: u64::try_from(iterations)?,
         key_length: Some(u64::try_from(SHA256_LEN)?),
         prf: Box::new(HMAC_SHA_256_ALG),
     };
 
-    /* compute key */
-    let ck_class: CK_OBJECT_CLASS = CKO_SECRET_KEY;
-    let ck_key_type: CK_KEY_TYPE = CKK_GENERIC_SECRET;
-    let ck_key_len = CK_ULONG::try_from(SHA256_LEN)?;
-    let ck_true: CK_BBOOL = CK_TRUE;
-    let mut key_template = CkAttrs::with_capacity(5);
-    key_template.add_ulong(CKA_CLASS, &ck_class);
-    key_template.add_ulong(CKA_KEY_TYPE, &ck_key_type);
-    key_template.add_ulong(CKA_VALUE_LEN, &ck_key_len);
-    key_template.add_bool(CKA_SIGN, &ck_true);
-    key_template.add_bool(CKA_VERIFY, &ck_true);
-
-    let key = pbkdf2_derive(
+    let lockedkey = derive_key_internal(
         facilities,
+        keys,
         &pbkdf2_params,
-        secret,
-        key_template.as_slice(),
+        KeyOp::Signature,
     )?;
 
-    let sig = hmac_sign(facilities, &key, nssobjid, sdbtype, attribute)?;
+    let key = match lockedkey.get_key() {
+        Some(k) => k,
+        None => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    let sig = match hmac_sign(facilities, key, nssobjid, sdbtype, attribute) {
+        Ok(x) => x,
+        Err(e) => {
+            keys.invalidate_cached_key(lockedkey);
+            return Err(e);
+        }
+    };
 
     let info = NSSEncryptedDataInfo {
         algorithm: Box::new(BrokenAlgorithmIdentifier {
