@@ -290,3 +290,56 @@ fn test_nssdb_init_token_params() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_nssdb_key_cache() {
+    let name = String::from("test_nssdb_key_cache");
+    let datadir = "testdata/nssdbdir";
+    let destdir = format!("{}/{}", TESTDIR, name);
+
+    let dbargs = format!("configDir={}", destdir);
+    let dbtype = "nssdb";
+
+    /* allocates a unique slotid to use in the tests */
+    let mut testtokn =
+        TestToken::new_type(String::from(dbtype), String::from(""), name);
+
+    /* Do this after TestToken::new() otherwise the data
+     * is wiped away by the initialization code */
+    std::fs::create_dir_all(destdir.clone()).unwrap();
+    assert!(std::fs::copy(
+        format!("{}/cert9.db", datadir),
+        format!("{}/cert9.db", destdir),
+    )
+    .is_ok());
+    assert!(std::fs::copy(
+        format!("{}/key4.db", datadir),
+        format!("{}/key4.db", destdir),
+    )
+    .is_ok());
+    assert!(std::fs::copy(
+        format!("{}/pkcs11.txt", datadir),
+        format!("{}/pkcs11.txt", destdir),
+    )
+    .is_ok());
+
+    /* pre-populate conf so we get the correct slot number assigned */
+    let mut slot = config::Slot::with_db(dbtype, Some(dbargs.clone()));
+    slot.slot = u32::try_from(testtokn.get_slot()).unwrap();
+    let ret = add_slot(slot);
+    assert_eq!(ret, CKR_OK);
+
+    let mut args = TestToken::make_init_args(Some(dbargs.clone()));
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    let _ = testtokn.get_session(false);
+    for _ in 0..1000 {
+        testtokn.login();
+        testtokn.logout();
+    }
+
+    testtokn.finalize();
+}
