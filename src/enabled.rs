@@ -43,7 +43,7 @@ mod tlskdf;
 use mechanism::Mechanisms;
 use object::ObjectFactories;
 
-pub fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     object::register(mechs, ot);
 
     #[cfg(feature = "aes")]
