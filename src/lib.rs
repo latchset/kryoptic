@@ -49,6 +49,8 @@ include!("enabled.rs");
 mod kasn1;
 mod misc;
 
+use crate::misc::{bytes_to_slice, bytes_to_vec, cast_params};
+
 macro_rules! ret_to_rv {
     ($ret:expr) => {
         match $ret {

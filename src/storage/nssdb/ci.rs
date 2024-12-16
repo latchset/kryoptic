@@ -9,12 +9,11 @@ use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
-use crate::misc::zeromem;
+use crate::misc::{sizeof, void_ptr, zeromem};
 use crate::object::Object;
 use crate::storage::aci::pbkdf2_derive;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
-use crate::{sizeof, void_ptr};
 
 const SHA256_LEN: usize = 32;
 const MAX_KEY_CACHE_SIZE: usize = 128;

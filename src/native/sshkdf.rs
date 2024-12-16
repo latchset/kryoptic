@@ -10,7 +10,6 @@ use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
-use crate::{bytes_to_vec, cast_params};
 
 #[derive(Debug)]
 pub struct SSHKDFOperation {
@@ -25,7 +24,7 @@ pub struct SSHKDFOperation {
 
 impl SSHKDFOperation {
     pub fn new(mech: &CK_MECHANISM) -> Result<SSHKDFOperation> {
-        let params = cast_params!(mech, KR_SSHKDF_PARAMS);
+        let params = misc::cast_params!(mech, KR_SSHKDF_PARAMS);
 
         if !hash::is_valid_hash(params.prfHashMechanism) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -46,11 +45,14 @@ impl SSHKDFOperation {
             finalized: false,
             prf: params.prfHashMechanism,
             key_type: params.derivedKeyType,
-            exchange_hash: bytes_to_vec!(
+            exchange_hash: misc::bytes_to_vec!(
                 params.pExchangeHash,
                 params.ulExchangeHashLen
             ),
-            session_id: bytes_to_vec!(params.pSessionId, params.ulSessionIdLen),
+            session_id: misc::bytes_to_vec!(
+                params.pSessionId,
+                params.ulSessionIdLen
+            ),
             is_data: is_data,
         })
     }

@@ -6,7 +6,7 @@ use core::ffi::{c_char, c_int};
 use crate::attribute::Attribute;
 use crate::ec::ecdsa::*;
 use crate::ec::get_ec_point_from_obj;
-use crate::error::Result;
+use crate::error::{some_or_err, Result};
 use crate::interface::*;
 use crate::kasn1::DerEncBigUint;
 use crate::mechanism::*;
@@ -14,7 +14,6 @@ use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
-use crate::some_or_err;
 
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;

@@ -3,7 +3,6 @@
 
 use crate::tests::*;
 
-pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 pub const CK_BBOOL_SIZE: usize = std::mem::size_of::<CK_BBOOL>();
 
 macro_rules! make_attribute {

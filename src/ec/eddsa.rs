@@ -3,7 +3,6 @@
 
 use std::fmt::Debug;
 
-use crate::attr_element;
 use crate::attribute::Attribute;
 use crate::ec::*;
 use crate::error::{general_error, Error, Result};
