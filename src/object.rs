@@ -303,6 +303,7 @@ macro_rules! attr_element {
 }
 pub(crate) use attr_element;
 
+#[allow(unused_macros)]
 macro_rules! bytes_attr_not_empty {
     ($obj:expr; $id:expr) => {
         match $obj.get_attr_as_bytes($id) {
@@ -321,6 +322,7 @@ macro_rules! bytes_attr_not_empty {
         }
     };
 }
+#[allow(unused_imports)]
 pub(crate) use bytes_attr_not_empty;
 
 pub trait ObjectFactory: Debug + Send + Sync {
@@ -502,6 +504,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
+    #[allow(dead_code)]
     fn set_attribute_default(
         &self,
         attr: CK_ATTRIBUTE_TYPE,
