@@ -3,13 +3,11 @@
 
 use std::fmt::Debug;
 
-use crate::error;
-use crate::error::Result;
+use crate::error::{map_err, Result};
 use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms, Operation};
+use crate::misc::{bytes_to_vec, cast_params, sizeof};
 use crate::object::{Object, ObjectFactories};
-
-use crate::{bytes_to_vec, cast_params, map_err, sizeof};
 
 #[cfg(not(feature = "fips"))]
 use crate::native::sp800_108::*;

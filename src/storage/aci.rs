@@ -8,12 +8,11 @@ use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::*;
-use crate::misc::zeromem;
+use crate::misc::{byte_ptr, sizeof, void_ptr, zeromem};
 use crate::object::Object;
 use crate::token::TokenFacilities;
 use crate::Operation;
 use crate::CSPRNG;
-use crate::{byte_ptr, sizeof, void_ptr};
 
 use asn1;
 

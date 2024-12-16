@@ -8,9 +8,8 @@ use crate::error::Result;
 use crate::hmac;
 use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms};
+use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-
-use crate::{bytes_to_vec, cast_params};
 
 #[cfg(not(feature = "fips"))]
 use crate::native::pbkdf2::pbkdf2_derive;

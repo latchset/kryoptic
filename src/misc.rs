@@ -9,14 +9,6 @@ use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::ossl::common::zeromem as ossl_zeromem;
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 
-#[macro_export]
-macro_rules! map_err {
-    ($map:expr, $err:tt) => {{
-        $map.map_err(|e| error::Error::ck_rv_from_error($err, e))
-    }};
-}
-
-#[macro_export]
 macro_rules! bytes_to_vec {
     ($ptr:expr, $len:expr) => {{
         let ptr = $ptr as *const u8;
@@ -33,22 +25,22 @@ macro_rules! bytes_to_vec {
         }
     }};
 }
+pub(crate) use bytes_to_vec;
 
-#[macro_export]
 macro_rules! void_ptr {
     ($ptr:expr) => {
         $ptr as *const _ as CK_VOID_PTR
     };
 }
+pub(crate) use void_ptr;
 
-#[macro_export]
 macro_rules! byte_ptr {
     ($ptr:expr) => {
         $ptr as *const _ as CK_BYTE_PTR
     };
 }
+pub(crate) use byte_ptr;
 
-#[macro_export]
 macro_rules! cast_params {
     ($mech:expr, $params:ty) => {{
         let Ok(len) = usize::try_from($mech.ulParameterLen) else {
@@ -80,15 +72,15 @@ macro_rules! cast_params {
         unsafe { *($param as *const $params) }
     }};
 }
+pub(crate) use cast_params;
 
-#[macro_export]
 macro_rules! sizeof {
     ($type:ty) => {
         CK_ULONG::try_from(std::mem::size_of::<$type>()).unwrap()
     };
 }
+pub(crate) use sizeof;
 
-#[macro_export]
 macro_rules! bytes_to_slice {
     ($ptr: expr, $len:expr, $typ:ty) => {
         if $len > 0 {
@@ -116,6 +108,7 @@ macro_rules! bytes_to_slice {
         }
     };
 }
+pub(crate) use bytes_to_slice;
 
 #[allow(dead_code)]
 pub fn common_derive_data_object(

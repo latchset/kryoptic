@@ -296,14 +296,13 @@ impl ObjectAttr {
     }
 }
 
-#[macro_export]
 macro_rules! attr_element {
     ($id:expr; $flags:expr; $from_type:expr; val $defval:expr) => {
         ObjectAttr::new($from_type($id, $defval), $flags)
     };
 }
+pub(crate) use attr_element;
 
-#[macro_export]
 macro_rules! bytes_attr_not_empty {
     ($obj:expr; $id:expr) => {
         match $obj.get_attr_as_bytes($id) {
@@ -322,6 +321,7 @@ macro_rules! bytes_attr_not_empty {
         }
     };
 }
+pub(crate) use bytes_attr_not_empty;
 
 pub trait ObjectFactory: Debug + Send + Sync {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {

@@ -7,10 +7,10 @@ use std::ffi::{c_char, c_int, c_uint, c_void};
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::oid;
+use crate::misc::{byte_ptr, void_ptr};
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
-use crate::{byte_ptr, void_ptr};
 
 #[cfg(feature = "ecc")]
 use crate::ec::get_oid_from_obj;

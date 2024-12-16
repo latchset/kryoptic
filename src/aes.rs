@@ -7,10 +7,9 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
-use crate::misc::zeromem;
+use crate::misc::{cast_params, zeromem};
 use crate::object::*;
 use crate::ossl::aes::*;
-use crate::{attr_element, cast_params};
 
 use once_cell::sync::Lazy;
 

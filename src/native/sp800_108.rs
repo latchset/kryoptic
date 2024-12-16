@@ -2,13 +2,12 @@
 // See LICENSE.txt file for terms
 
 use crate::attribute::Attribute;
-use crate::error;
-use crate::error::Result;
+use crate::error::{map_err, Result};
 use crate::interface::*;
 use crate::mechanism::{Derive, Mac, MechOperation, Mechanisms};
+use crate::misc::{bytes_to_slice, bytes_to_vec};
 use crate::object::{Object, ObjectFactories};
 use crate::sp800_108::*;
-use crate::{bytes_to_slice, bytes_to_vec, map_err};
 
 macro_rules! maxsize {
     ($size: expr) => {
