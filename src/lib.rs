@@ -1,6 +1,12 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+#![warn(missing_docs)]
+
+//! This is Kryoptic
+//!
+//! A cryptographic software token using the PKCS#11 standard API
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr};
@@ -2612,6 +2618,21 @@ extern "C" fn fn_get_info(info: CK_INFO_PTR) -> CK_RV {
     CKR_OK
 }
 
+/// Provides access to the functions defined in the API specification
+///
+/// The vtable returned by this function includes a version specifier as
+/// the first element of this table. This version number determines the
+/// length and contents of the rest of the vtable.
+///
+/// Often for backwards compatibility reasons the table returned by this
+/// function is the table specified in PKCS#11 v2.40.
+///
+/// While access to later versions of the table is deferred to the
+/// `C_GeInterfaceList` function available starting with version 3.0 of the
+/// specification.
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258)
+
 #[no_mangle]
 pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
     unsafe {
@@ -3336,6 +3357,18 @@ static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
     v
 });
 
+/// Provides access to the list of interfaces defined by this implementation
+///
+/// Starting with PKCS#11 version 3.0 modules provide a list of interfaces
+/// that can be fetched. Each interface provides a name and a pointer to a
+/// vtable containing the functions defined for that interface.
+/// Additionally flags are returned as well.
+/// Custom interfaces can be defined by any vendor by specifying a custom
+/// interface name. The name "PKCS 11" is reserved for official standard
+/// interfaces.
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259)
+
 #[no_mangle]
 pub extern "C" fn C_GetInterfaceList(
     interfaces_list: CK_INTERFACE_PTR,
@@ -3370,6 +3403,14 @@ pub extern "C" fn C_GetInterfaceList(
     }
     CKR_OK
 }
+
+/// Returns a specific interface identified by name and version
+///
+/// Applications that wants to immediately access a specific interface name,
+/// optionally a specific version too.
+/// The `interface` argument returns the pointer to the requested vtable
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260)
 
 #[no_mangle]
 pub extern "C" fn C_GetInterface(
