@@ -95,11 +95,11 @@ macro_rules! cast_or_ret {
 
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
-pub fn get_random_data(data: &mut [u8]) -> Result<()> {
+fn get_random_data(data: &mut [u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().generate_random(data))
 }
 
-pub fn random_add_seed(data: &[u8]) -> Result<()> {
+fn random_add_seed(data: &[u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().add_seed(data))
 }
 
@@ -2449,7 +2449,7 @@ extern "C" fn fn_wait_for_slot_event(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-pub static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
+static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     version: CK_VERSION {
         major: 2,
         minor: 40,
@@ -3195,7 +3195,7 @@ extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-pub static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
+static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     version: CK_VERSION { major: 3, minor: 0 },
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
