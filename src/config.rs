@@ -26,6 +26,33 @@ const DEFAULT_CONF_DIR: &str = "test";
 
 pub const DEFAULT_CONF_NAME: &str = "token.conf";
 
+/// Configuration for a slot
+///
+/// The basic facility of a PKCS#11 is the slot. The slot represents an
+/// idealized hardware slot where a token can be inserted at any time to
+/// execute operations.
+///
+/// In Kryoptic we use slots to allow to provide multiple independent
+/// tokens with their own storage separate from any other slot. Slots
+/// can't share the same storage.
+///
+/// Each slot is identified by a slot number (a u32 quantity) and can
+/// optionally have a customized description and manufacturer string.
+/// If no description or manufacturer strings are provided then default
+/// ones are set and returned to PKCS#11 applications.
+///
+/// Finally the storage is defined by a pair of arguments: dbtype and dbargs
+///
+/// This structure is generally sourced from a toml configuration file that
+/// defines all the slots to be exposed to the application.
+///
+/// Example:
+///
+/// \[\[slots\]\]
+///  slot = 1
+///  dbtype = "sql"
+///  dbargs = "/var/lib/kryoptic/token.sql"
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Slot {
     pub slot: u32,
@@ -36,6 +63,9 @@ pub struct Slot {
 }
 
 impl Slot {
+    /// Creates a new empty slot with the slot number set to the special
+    /// indicator of u32::MAX, which will fault if encountered by the
+    /// configuration processing functions
     pub fn new() -> Slot {
         Slot {
             slot: u32::MAX,
@@ -46,6 +76,9 @@ impl Slot {
         }
     }
 
+    /// Creates a new slot with a specific dbtype and db arguments set
+    /// The slot number is set to u32::MAX which indicates this slot still
+    /// needs to be assigned a specific number (tests will do that)
     #[cfg(test)]
     pub fn with_db(dbtype: &str, dbargs: Option<String>) -> Slot {
         Slot {
@@ -57,6 +90,15 @@ impl Slot {
         }
     }
 }
+
+/// For compatibility with applications that expect DER encoded EC Points
+///
+/// Allows to set a global default encoding for CKA_EC_POINT attributes.
+///
+/// Example:
+///
+/// \[ec_point_encoding\]
+/// encoding = "Bytes"
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "encoding")]
@@ -71,6 +113,11 @@ impl Default for EcPointEncoding {
     }
 }
 
+/// Main configuration structure
+///
+/// The main config structure is comprised of two elements, a general
+/// EC Point Encoding indicator and a list of slots
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -83,6 +130,8 @@ fn config_error<E: de::Error + 'static>(error: E) -> Error {
 }
 
 impl Config {
+    /// Creates a new, empty, config structure, with the EC POINT Encoding
+    /// set to the default.
     pub fn new() -> Config {
         Config {
             ec_point_encoding: EcPointEncoding::default(),
@@ -90,6 +139,9 @@ impl Config {
         }
     }
 
+    /// Allows to add a preconfigured slot structure.
+    /// Available only for tests. Ensures the slot number is set and that
+    /// there are no duplicates
     #[cfg(test)]
     pub fn add_slot(&mut self, slot: Slot) -> Result<()> {
         for s in &self.slots {
@@ -101,6 +153,27 @@ impl Config {
         Ok(())
     }
 
+    /// Find the applicable configuration for Kryoptic.
+    /// Kryoptic searches for a configuration file in multiple places
+    /// falling back from one to the next and stops once configuration file
+    /// is found. There is no config file merging/include support currently
+    ///
+    /// The first place where configuration is looked for is in the file
+    /// indicated by the `KRYOPTIC_CONF` environment variable. If this
+    /// variable is not set, then the code checks if the standard
+    /// `XDG_CONFIG_HOME` environment variable is available.
+    /// If this variable exists kryoptic assumes the config file is named:
+    ///  `${XDG_CONFIG_HOME}/kryoptic/token.conf`
+    ///
+    /// Otherwise if the environment variable HOME is set the code assumes
+    /// the configuration file is named:
+    ///  `${HOME}/.config/kryoptic/token.conf`
+    ///
+    /// Finally if nothing matches the code tries the relative path:
+    ///  `test/kryoptic/token.conf`
+    ///
+    ///  It is srongly advised to set the `KRYOPTIC_CONF` variable for most
+    ///  use cases.
     fn find_conf() -> Result<String> {
         /* First check for our own env var,
          * this has the highest precedence */
@@ -130,12 +203,19 @@ impl Config {
         }
     }
 
+    /// Generates a configuration structure from the named file which must
+    /// be a properly formatted configuration file in toml format.
     fn from_file(filename: &str) -> Result<Config> {
         let config_str = fs::read_to_string(filename)?;
         let conf: Config = toml::from_str(&config_str).map_err(config_error)?;
         Ok(conf)
     }
 
+    /// Generates a configuration structure from a legacy argument as passed
+    /// into the reserved argument of the `C_Initialize()` function.
+    ///
+    /// A valid argument is the path of a file for the sqlite storage driver
+    /// which must end with a .sql suffix
     fn from_legacy_conf_string(name: &str) -> Result<Config> {
         let mut conf = Config {
             ec_point_encoding: EcPointEncoding::default(),
@@ -156,6 +236,9 @@ impl Config {
         Ok(conf)
     }
 
+    /// Ensure all slot numbers are consistent, and allocates new slot
+    /// numbers for slots that have the special invalid slow number of
+    /// u32::MAX
     fn fix_slot_numbers(&mut self) {
         let mut slotnum: u32 = 0;
         /* if there are any slot missing a valid slot number
@@ -183,6 +266,8 @@ impl Config {
         }
     }
 
+    /// Generates the default configuration structure by searching the default
+    /// configuration file
     pub fn default_config() -> Result<Config> {
         let filename = Self::find_conf()?;
 
@@ -201,6 +286,16 @@ impl Config {
         }
     }
 
+    /// Load environment variables overrides for configurations items.
+    ///
+    /// The only variable currently defined is `KRYOPTIC_EC_POINT_ENCODING`
+    /// Which can be used to override the encoding specified in the
+    /// configuration file. This is useful when multiple applications use
+    /// the same configuration file but expect different behavior from the
+    /// configure default:
+    ///
+    /// Example:
+    /// `export KRYOPTIC_EC_POINT_ENCODING="BYTES"`
     pub fn load_env_vars_overrides(&mut self) {
         match env::var("KRYOPTIC_EC_POINT_ENCODING") {
             Ok(var) => {
@@ -218,6 +313,9 @@ impl Config {
         }
     }
 
+    /// Loads the NSS DB Storage configuration which is generally provided
+    /// as a complex formatted string as a reserved argument when calling
+    /// the `C_Intialize()` function.
     #[cfg(feature = "nssdb")]
     fn from_nss_init_args(args: &str) -> Result<Config> {
         let mut conf = Config {
@@ -232,6 +330,8 @@ impl Config {
         Ok(conf)
     }
 
+    /// Calls the correct configuration parser based on the detected
+    /// database configuration string
     fn conf_from_args(&self, args: &str) -> Result<Config> {
         if args.starts_with("kryoptic_conf=") {
             let comps: Vec<&str> = args.splitn(2, '=').collect();
@@ -248,6 +348,8 @@ impl Config {
         Self::from_legacy_conf_string(args)
     }
 
+    /// Allows to specify the configuration file as a string provided as the
+    /// reserved argument of the `C_Initialize()` function.
     pub fn from_init_args(&mut self, args: &str) -> Result<()> {
         let conf = self.conf_from_args(args)?;
 
