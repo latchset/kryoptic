@@ -10,7 +10,6 @@ use crate::kasn1::{oid, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::rsa::*;
-use crate::{attr_element, bytes_attr_not_empty};
 
 use asn1;
 use once_cell::sync::Lazy;

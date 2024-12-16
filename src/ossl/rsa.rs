@@ -4,15 +4,15 @@
 use core::ffi::{c_char, c_int, c_uint};
 
 use crate::attribute::Attribute;
+use crate::error::some_or_err;
 use crate::error::{Error, Result};
 use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::interface::*;
 use crate::mechanism::*;
-use crate::misc::zeromem;
+use crate::misc::{bytes_to_vec, cast_params, zeromem};
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
-use crate::{bytes_to_vec, cast_params, some_or_err};
 
 #[cfg(not(feature = "fips"))]
 use crate::ossl::get_libctx;
