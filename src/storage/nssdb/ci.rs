@@ -84,11 +84,17 @@ impl KeysWithCaching {
     }
 
     pub fn set_key(&mut self, key: Vec<u8>) {
+        if let Some(ref mut oldkey) = &mut self.enckey {
+            oldkey.zeroize();
+        }
         self.enckey = Some(key);
     }
 
     pub fn unset_key(&mut self) {
-        self.enckey = None;
+        if let Some(ref mut key) = &mut self.enckey {
+            key.zeroize();
+            self.enckey = None;
+        }
     }
 
     fn get_cached_key(&self, id: &[u8; SHA256_LEN]) -> Option<LockedKey> {
