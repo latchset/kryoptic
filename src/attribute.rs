@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use crate::error::{Error, Result};
 use crate::interface::*;
-use crate::{bytes_to_vec, sizeof, void_ptr};
+use crate::misc::{bytes_to_vec, sizeof, void_ptr};
 
 use zeroize::Zeroize;
 

@@ -211,7 +211,6 @@ impl From<TryFromSliceError> for Error {
     }
 }
 
-#[macro_export]
 macro_rules! some_or_err {
     ($action:expr) => {
         if let Some(ref x) = $action {
@@ -228,6 +227,7 @@ macro_rules! some_or_err {
         }
     };
 }
+pub(crate) use some_or_err;
 
 pub fn general_error<E>(error: E) -> Error
 where
@@ -242,3 +242,11 @@ where
 {
     Error::ck_rv_from_error(interface::CKR_DEVICE_ERROR, error)
 }
+
+macro_rules! map_err {
+    ($map:expr, $err:tt) => {{
+        use crate::error::Error;
+        $map.map_err(|e| Error::ck_rv_from_error($err, e))
+    }};
+}
+pub(crate) use map_err;
