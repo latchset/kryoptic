@@ -23,3 +23,6 @@ check-spell:
 
 tests: build
 	src/tools/softhsm/test.sh
+
+docs:
+	cargo doc --features standard,nssdb,jsondb,fips --document-private-items
