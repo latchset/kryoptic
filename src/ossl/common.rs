@@ -153,11 +153,13 @@ ptr_wrapper!(ctx; CIPHER; Cipher);
 ptr_wrapper!(ctx_from_name; KDF; Kdf);
 ptr_wrapper!(ctx_from_name; MAC; Mac);
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 #[derive(Debug)]
 pub struct EvpPkeyCtx {
     ptr: *mut EVP_PKEY_CTX,
 }
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 impl EvpPkeyCtx {
     pub fn new(name: *const c_char) -> Result<EvpPkeyCtx> {
         let ptr = unsafe {
@@ -186,6 +188,7 @@ impl EvpPkeyCtx {
     }
 }
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 impl Drop for EvpPkeyCtx {
     fn drop(&mut self) {
         unsafe {
@@ -194,14 +197,18 @@ impl Drop for EvpPkeyCtx {
     }
 }
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 unsafe impl Send for EvpPkeyCtx {}
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 unsafe impl Sync for EvpPkeyCtx {}
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 #[derive(Debug)]
 pub struct EvpPkey {
     ptr: *mut EVP_PKEY,
 }
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 impl EvpPkey {
     pub fn fromdata(
         pkey_name: *const c_char,
@@ -275,6 +282,7 @@ impl EvpPkey {
         self.ptr
     }
 
+    #[cfg(any(feature = "ecc", feature = "rsa"))]
     fn from_object(obj: &Object, class: CK_OBJECT_CLASS) -> Result<EvpPkey> {
         let key_class = match class {
             CKO_PUBLIC_KEY => EVP_PKEY_PUBLIC_KEY,
@@ -296,10 +304,12 @@ impl EvpPkey {
         Self::fromdata(name, key_class, &params)
     }
 
+    #[cfg(any(feature = "ecc", feature = "rsa"))]
     pub fn pubkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PUBLIC_KEY)
     }
 
+    #[cfg(any(feature = "ecc", feature = "rsa"))]
     pub fn privkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PRIVATE_KEY)
     }
@@ -330,6 +340,7 @@ impl EvpPkey {
     }
 }
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 impl Drop for EvpPkey {
     fn drop(&mut self) {
         unsafe {
@@ -338,7 +349,9 @@ impl Drop for EvpPkey {
     }
 }
 
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 unsafe impl Send for EvpPkey {}
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 unsafe impl Sync for EvpPkey {}
 
 pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
@@ -387,6 +400,7 @@ impl<'a> OsslParam<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>> {
         if ptr.is_null() {
             return Err(CKR_DEVICE_ERROR)?;
@@ -423,6 +437,7 @@ impl<'a> OsslParam<'a> {
         p
     }
 
+    #[allow(dead_code)]
     pub fn add_bn(&mut self, key: *const c_char, v: &Vec<u8>) -> Result<()> {
         if self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
@@ -522,6 +537,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_const_c_string(
         &mut self,
         key: *const c_char,
@@ -542,6 +558,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_octet_string(
         &mut self,
         key: *const c_char,
@@ -613,6 +630,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_uint(
         &mut self,
         key: *const c_char,
@@ -633,6 +651,7 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_int(
         &mut self,
         key: *const c_char,
@@ -711,6 +730,7 @@ impl<'a> OsslParam<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn as_ptr(&self) -> *const OSSL_PARAM {
         if !self.finalized {
             panic!("Unfinalized OsslParam");
@@ -718,6 +738,7 @@ impl<'a> OsslParam<'a> {
         self.p.as_ref().as_ptr()
     }
 
+    #[allow(dead_code)]
     pub fn as_mut_ptr(&mut self) -> *mut OSSL_PARAM {
         if !self.finalized {
             panic!("Unfinalized OsslParam");
@@ -744,6 +765,7 @@ impl<'a> OsslParam<'a> {
         Ok(val)
     }
 
+    #[allow(dead_code)]
     pub fn get_bn(&self, key: *const c_char) -> Result<Vec<u8>> {
         if !self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
@@ -776,6 +798,7 @@ impl<'a> OsslParam<'a> {
         Ok(vec)
     }
 
+    #[allow(dead_code)]
     pub fn get_octet_string(&self, key: *const c_char) -> Result<&'a [u8]> {
         if !self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
@@ -860,17 +883,25 @@ pub fn mech_type_to_digest_name(mech: CK_MECHANISM_TYPE) -> *const c_char {
     }) as *const c_char
 }
 
+#[cfg(feature = "ecc")]
 pub static EC_NAME: &[u8; 3] = b"EC\0";
-#[cfg(feature = "fips")]
+#[cfg(all(feature = "ecc", feature = "fips"))]
 pub static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
 
 /* Curve names as used in OpenSSL */
+#[cfg(feature = "ecc")]
 const NAME_SECP256R1: &[u8] = b"prime256v1\0";
+#[cfg(feature = "ecc")]
 const NAME_SECP384R1: &[u8] = b"secp384r1\0";
+#[cfg(feature = "ecc")]
 const NAME_SECP521R1: &[u8] = b"secp521r1\0";
+#[cfg(feature = "ecc")]
 const NAME_ED25519: &[u8] = b"ED25519\0";
+#[cfg(feature = "ecc")]
 const NAME_ED448: &[u8] = b"ED448\0";
+#[cfg(feature = "ecc")]
 const NAME_X25519: &[u8] = b"X25519\0";
+#[cfg(feature = "ecc")]
 const NAME_X448: &[u8] = b"X448\0";
 
 #[cfg(feature = "ecc")]

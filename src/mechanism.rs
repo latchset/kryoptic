@@ -247,12 +247,15 @@ pub trait Mac: MechOperation {
     fn mac(&mut self, _data: &[u8], _digest: &mut [u8]) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    #[allow(dead_code)]
     fn mac_update(&mut self, _data: &[u8]) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    #[allow(dead_code)]
     fn mac_final(&mut self, _digest: &mut [u8]) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    #[allow(dead_code)]
     fn mac_len(&self) -> Result<usize> {
         Err(CKR_GENERAL_ERROR)?
     }
