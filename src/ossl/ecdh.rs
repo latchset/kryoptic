@@ -5,10 +5,10 @@ use core::ffi::{c_char, c_int, c_uint};
 use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
-use crate::bytes_to_vec;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::bytes_to_vec;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;

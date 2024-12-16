@@ -18,3 +18,6 @@ fix-format:
 
 check-spell:
 	@.github/codespell.sh
+
+docs:
+	cargo doc --features standard,nssdb,jsondb,fips --examples --document-private-items
