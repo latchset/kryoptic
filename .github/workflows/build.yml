@@ -101,7 +101,7 @@ jobs:
           cargo build -vv $OPTS --features "$FEATURES"
           cargo test -vv $OPTS --features "$FEATURES"
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: Build logs ${{ matrix.name }}
