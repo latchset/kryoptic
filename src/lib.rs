@@ -101,9 +101,17 @@ macro_rules! cast_or_ret {
 
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
+/// Fill a buffer with random data
+///
+/// Uses the instantaited CSPRNG to fill the buffer with random data
+
 fn get_random_data(data: &mut [u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().generate_random(data))
 }
+
+/// Add seed data to the CSPRNG
+///
+/// This is not counted as entropy but just as additional data
 
 fn random_add_seed(data: &[u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().add_seed(data))
@@ -427,6 +435,10 @@ pub fn add_slot(slot: config::Slot) -> CK_RV {
     CKR_OK
 }
 
+/// Implementation of C_Initialize function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255)
+
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck CONFIG);
 
@@ -500,9 +512,17 @@ fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
     CKR_OK
 }
 
+/// Implementation of C_Finalize function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256)
+
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
     global_wlock!(STATE).finalize()
 }
+
+/// Implementation of C_GetMechanismList function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203266](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203266)
 
 extern "C" fn fn_get_mechanism_list(
     slot_id: CK_SLOT_ID,
@@ -540,6 +560,11 @@ extern "C" fn fn_get_mechanism_list(
     }
     CKR_OK
 }
+
+/// Implementation of C_GetMechanismInfo function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203267](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203267)
+
 extern "C" fn fn_get_mechanism_info(
     slot_id: CK_SLOT_ID,
     typ: CK_MECHANISM_TYPE,
@@ -553,6 +578,11 @@ extern "C" fn fn_get_mechanism_info(
     }
     CKR_OK
 }
+
+/// Implementation of C_InitToken function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203268](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203268)
+
 extern "C" fn fn_init_token(
     slot_id: CK_SLOT_ID,
     pin: CK_UTF8CHAR_PTR,
@@ -580,6 +610,11 @@ extern "C" fn fn_init_token(
         _ => CKR_GENERAL_ERROR,
     }
 }
+
+/// Implementation of C_InitPIN function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203269](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203269)
+
 extern "C" fn fn_init_pin(
     s_handle: CK_SESSION_HANDLE,
     pin: CK_UTF8CHAR_PTR,
@@ -595,6 +630,11 @@ extern "C" fn fn_init_pin(
 
     ret_to_rv!(token.set_pin(CKU_USER, &vpin, &vec![0u8; 0]))
 }
+
+/// Implementation of C_SetPIN function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203270](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203270)
+
 extern "C" fn fn_set_pin(
     s_handle: CK_SESSION_HANDLE,
     old_pin: CK_UTF8CHAR_PTR,
@@ -632,6 +672,11 @@ extern "C" fn fn_set_pin(
 
     ret
 }
+
+/// Implementation of C_OpenSession function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203272](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203272)
+
 extern "C" fn fn_open_session(
     slot_id: CK_SLOT_ID,
     flags: CK_FLAGS,
@@ -657,6 +702,11 @@ extern "C" fn fn_open_session(
     }
     CKR_OK
 }
+
+/// Implementation of C_CloseSession function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203273](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203273)
+
 extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let mut wstate = global_wlock!(STATE);
     let mut token = res_or_ret!(wstate.get_token_from_session_mut(s_handle));
@@ -665,6 +715,11 @@ extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let _ = res_or_ret!(wstate.drop_session(s_handle));
     CKR_OK
 }
+
+/// Implementation of C_CloseAllSessions function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203274](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203274)
+
 extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
     let mut wstate = global_wlock!(STATE);
     let dropped_sessions = res_or_ret!(wstate.drop_all_sessions_slot(slot_id));
@@ -674,6 +729,11 @@ extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
     }
     CKR_OK
 }
+
+/// Implementation of C_GetSessionInfo function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203275](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203275)
+
 extern "C" fn fn_get_session_info(
     s_handle: CK_SESSION_HANDLE,
     info: CK_SESSION_INFO_PTR,
@@ -685,6 +745,11 @@ extern "C" fn fn_get_session_info(
     }
     CKR_OK
 }
+
+/// Implementation of C_GetOperationState function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203277](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203277)
+
 extern "C" fn fn_get_operation_state(
     _session: CK_SESSION_HANDLE,
     _operation_state: CK_BYTE_PTR,
@@ -692,6 +757,11 @@ extern "C" fn fn_get_operation_state(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SetOperationState function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203278](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203278)
+
 extern "C" fn fn_set_operation_state(
     _session: CK_SESSION_HANDLE,
     _operation_state: CK_BYTE_PTR,
@@ -701,6 +771,11 @@ extern "C" fn fn_set_operation_state(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_Login function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203279](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203279)
+
 extern "C" fn fn_login(
     s_handle: CK_SESSION_HANDLE,
     user_type: CK_USER_TYPE,
@@ -759,6 +834,11 @@ extern "C" fn fn_login(
         }
     }
 }
+
+/// Implementation of C_Logout function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203281](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203281)
+
 extern "C" fn fn_logout(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
@@ -784,6 +864,10 @@ macro_rules! fail_if_cka_token_true {
         }
     };
 }
+
+/// Implementation of C_CreateObject function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203283](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203283)
 
 extern "C" fn fn_create_object(
     s_handle: CK_SESSION_HANDLE,
@@ -851,6 +935,11 @@ extern "C" fn fn_create_object(
 
     CKR_OK
 }
+
+/// Implementation of C_CopyObject function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203284](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203284)
+
 extern "C" fn fn_copy_object(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
@@ -878,6 +967,11 @@ extern "C" fn fn_copy_object(
 
     CKR_OK
 }
+
+/// Implementation of C_DestroyObject function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203285](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203285)
+
 extern "C" fn fn_destroy_object(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
@@ -894,6 +988,10 @@ extern "C" fn fn_destroy_object(
     ret_to_rv!(token.destroy_object(o_handle))
 }
 
+/// Implementation of C_GetObjectSize function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203286](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203286)
+
 extern "C" fn fn_get_object_size(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
@@ -907,6 +1005,10 @@ extern "C" fn fn_get_object_size(
     unsafe { *size = len }
     CKR_OK
 }
+
+/// Implementation of C_GetAttributeValue function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203287](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203287)
 
 extern "C" fn fn_get_attribute_value(
     s_handle: CK_SESSION_HANDLE,
@@ -986,6 +1088,10 @@ extern "C" fn fn_get_attribute_value(
     result
 }
 
+/// Implementation of C_SetAttributeValue function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203288](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203288)
+
 extern "C" fn fn_set_attribute_value(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
@@ -1011,6 +1117,10 @@ extern "C" fn fn_set_attribute_value(
     ret_to_rv!(token.set_object_attrs(o_handle, &mut tmpl))
 }
 
+/// Implementation of C_FindObjectsInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203289](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203289)
+
 extern "C" fn fn_find_objects_init(
     s_handle: CK_SESSION_HANDLE,
     template: CK_ATTRIBUTE_PTR,
@@ -1025,6 +1135,10 @@ extern "C" fn fn_find_objects_init(
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
     ret_to_rv!(session.new_search_operation(&mut token, tmpl))
 }
+
+/// Implementation of C_FindObjects function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203290](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203290)
 
 extern "C" fn fn_find_objects(
     s_handle: CK_SESSION_HANDLE,
@@ -1061,6 +1175,11 @@ extern "C" fn fn_find_objects(
     }
     CKR_OK
 }
+
+/// Implementation of C_FindObjectsFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203291](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203291)
+
 extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
@@ -1090,6 +1209,11 @@ macro_rules! check_op_empty_or_fail {
         }
     };
 }
+
+/// Check that the mechanism is allowed by the Key object
+///
+/// Verifies that the mechanism is listed in the CKA_ALLOWED_MECHANISMS
+/// attribute if such attribute is present, otherwise allows everything.
 
 fn check_allowed_mechs(mech: &CK_MECHANISM, key: &object::Object) -> CK_RV {
     let allowed = match key.get_attr(CKA_ALLOWED_MECHANISMS) {
@@ -1121,6 +1245,10 @@ fn check_allowed_mechs(mech: &CK_MECHANISM, key: &object::Object) -> CK_RV {
     return CKR_MECHANISM_INVALID;
 }
 
+/// Implementation of C_EncryptInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203293](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203293)
+
 extern "C" fn fn_encrypt_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
@@ -1148,6 +1276,10 @@ extern "C" fn fn_encrypt_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_Encrypt function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203294](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203294)
 
 extern "C" fn fn_encrypt(
     s_handle: CK_SESSION_HANDLE,
@@ -1194,6 +1326,11 @@ extern "C" fn fn_encrypt(
     }
     CKR_OK
 }
+
+/// Implementation of C_EncryptUpdate function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203295](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203295)
+
 extern "C" fn fn_encrypt_update(
     s_handle: CK_SESSION_HANDLE,
     part: CK_BYTE_PTR,
@@ -1233,6 +1370,11 @@ extern "C" fn fn_encrypt_update(
     unsafe { *pul_encrypted_part_len = retlen };
     CKR_OK
 }
+
+/// Implementation of C_EncryptFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203296](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203296)
+
 extern "C" fn fn_encrypt_final(
     s_handle: CK_SESSION_HANDLE,
     last_encrypted_part: CK_BYTE_PTR,
@@ -1275,6 +1417,10 @@ extern "C" fn fn_encrypt_final(
     CKR_OK
 }
 
+/// Implementation of C_DecryptInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203304](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203304)
+
 extern "C" fn fn_decrypt_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
@@ -1302,6 +1448,11 @@ extern "C" fn fn_decrypt_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_Decrypt function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203305](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203305)
+
 extern "C" fn fn_decrypt(
     s_handle: CK_SESSION_HANDLE,
     encrypted_data: CK_BYTE_PTR,
@@ -1348,6 +1499,11 @@ extern "C" fn fn_decrypt(
     }
     CKR_OK
 }
+
+/// Implementation of C_DecryptUpdate function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203306](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203306)
+
 extern "C" fn fn_decrypt_update(
     s_handle: CK_SESSION_HANDLE,
     encrypted_part: CK_BYTE_PTR,
@@ -1388,6 +1544,11 @@ extern "C" fn fn_decrypt_update(
     unsafe { *pul_part_len = retlen };
     CKR_OK
 }
+
+/// Implementation of C_DecryptFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203307](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203307)
+
 extern "C" fn fn_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
     last_part: CK_BYTE_PTR,
@@ -1430,6 +1591,10 @@ extern "C" fn fn_decrypt_final(
     CKR_OK
 }
 
+/// Implementation of C_DigestInit
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203315](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203315)
+
 extern "C" fn fn_digest_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
@@ -1449,6 +1614,10 @@ extern "C" fn fn_digest_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_Digest function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203316](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203316)
 
 extern "C" fn fn_digest(
     s_handle: CK_SESSION_HANDLE,
@@ -1500,6 +1669,11 @@ extern "C" fn fn_digest(
     }
     ret
 }
+
+/// Implementation of C_DigestUpdate function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203317](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203317)
+
 extern "C" fn fn_digest_update(
     s_handle: CK_SESSION_HANDLE,
     part: CK_BYTE_PTR,
@@ -1521,6 +1695,11 @@ extern "C" fn fn_digest_update(
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.digest_update(data))
 }
+
+/// Implementation of C_DigestKey function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203318](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203318)
+
 extern "C" fn fn_digest_key(
     s_handle: CK_SESSION_HANDLE,
     key_handle: CK_OBJECT_HANDLE,
@@ -1557,6 +1736,11 @@ extern "C" fn fn_digest_key(
 
     CKR_OK
 }
+
+/// Implementation of C_DigestFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203319](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203319)
+
 extern "C" fn fn_digest_final(
     s_handle: CK_SESSION_HANDLE,
     pdigest: CK_BYTE_PTR,
@@ -1604,6 +1788,10 @@ extern "C" fn fn_digest_final(
     ret
 }
 
+/// Implementation of C_SignInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203321](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203321)
+
 extern "C" fn fn_sign_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
@@ -1630,6 +1818,11 @@ extern "C" fn fn_sign_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_Sign function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203322](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203322)
+
 extern "C" fn fn_sign(
     s_handle: CK_SESSION_HANDLE,
     pdata: CK_BYTE_PTR,
@@ -1681,6 +1874,11 @@ extern "C" fn fn_sign(
     }
     ret
 }
+
+/// Implementation of C_SignUpdate function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203323](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203323)
+
 extern "C" fn fn_sign_update(
     s_handle: CK_SESSION_HANDLE,
     part: CK_BYTE_PTR,
@@ -1702,6 +1900,11 @@ extern "C" fn fn_sign_update(
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.sign_update(data))
 }
+
+/// Implementation of C_SignFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203324](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203324)
+
 extern "C" fn fn_sign_final(
     s_handle: CK_SESSION_HANDLE,
     psignature: CK_BYTE_PTR,
@@ -1748,6 +1951,11 @@ extern "C" fn fn_sign_final(
     }
     ret
 }
+
+/// Implementation of C_SignRecoverInit function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203325](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203325)
+
 extern "C" fn fn_sign_recover_init(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
@@ -1755,6 +1963,11 @@ extern "C" fn fn_sign_recover_init(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SignRecover function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203326](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203326)
+
 extern "C" fn fn_sign_recover(
     _session: CK_SESSION_HANDLE,
     _data: CK_BYTE_PTR,
@@ -1764,6 +1977,11 @@ extern "C" fn fn_sign_recover(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_VerifyInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203334](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203334)
+
 extern "C" fn fn_verify_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
@@ -1790,6 +2008,11 @@ extern "C" fn fn_verify_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_Verify function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203335](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203335)
+
 extern "C" fn fn_verify(
     s_handle: CK_SESSION_HANDLE,
     pdata: CK_BYTE_PTR,
@@ -1828,6 +2051,11 @@ extern "C" fn fn_verify(
 
     ret
 }
+
+/// Implementation of C_VerifyUpdate function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203336](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203336)
+
 extern "C" fn fn_verify_update(
     s_handle: CK_SESSION_HANDLE,
     part: CK_BYTE_PTR,
@@ -1849,6 +2077,11 @@ extern "C" fn fn_verify_update(
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.verify_update(data))
 }
+
+/// Implementation of C_VerifyFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203337](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203337)
+
 extern "C" fn fn_verify_final(
     s_handle: CK_SESSION_HANDLE,
     psignature: CK_BYTE_PTR,
@@ -1883,6 +2116,11 @@ extern "C" fn fn_verify_final(
 
     ret
 }
+
+/// Implementation of C_VerifyRecoverInit function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203338](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203338)
+
 extern "C" fn fn_verify_recover_init(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
@@ -1890,6 +2128,11 @@ extern "C" fn fn_verify_recover_init(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_VerifyRecover function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203339](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203339)
+
 extern "C" fn fn_verify_recover(
     _session: CK_SESSION_HANDLE,
     _signature: CK_BYTE_PTR,
@@ -1899,6 +2142,11 @@ extern "C" fn fn_verify_recover(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_DigestEncryptUpdate function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203347](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203347)
+
 extern "C" fn fn_digest_encrypt_update(
     _session: CK_SESSION_HANDLE,
     _part: CK_BYTE_PTR,
@@ -1908,6 +2156,11 @@ extern "C" fn fn_digest_encrypt_update(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_DecryptDigestUpdate function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203348](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203348)
+
 extern "C" fn fn_decrypt_digest_update(
     _session: CK_SESSION_HANDLE,
     _encrypted_part: CK_BYTE_PTR,
@@ -1917,6 +2170,11 @@ extern "C" fn fn_decrypt_digest_update(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SignEncryptUpdate function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203349](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203349)
+
 extern "C" fn fn_sign_encrypt_update(
     _session: CK_SESSION_HANDLE,
     _part: CK_BYTE_PTR,
@@ -1926,6 +2184,11 @@ extern "C" fn fn_sign_encrypt_update(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_DecryptVerifyUpdate function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203350](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203350)
+
 extern "C" fn fn_decrypt_verify_update(
     _session: CK_SESSION_HANDLE,
     _encrypted_part: CK_BYTE_PTR,
@@ -1935,6 +2198,10 @@ extern "C" fn fn_decrypt_verify_update(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_GenerateKey function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203352](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203352)
 
 extern "C" fn fn_generate_key(
     s_handle: CK_SESSION_HANDLE,
@@ -1994,6 +2261,10 @@ extern "C" fn fn_generate_key(
     }
     CKR_OK
 }
+
+/// Implementation of C_GeneateKeyPair function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203353](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203353)
 
 extern "C" fn fn_generate_key_pair(
     s_handle: CK_SESSION_HANDLE,
@@ -2076,6 +2347,10 @@ extern "C" fn fn_generate_key_pair(
     }
 }
 
+/// Implementation of C_WrapKey function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203354](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203354)
+
 extern "C" fn fn_wrap_key(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
@@ -2142,6 +2417,10 @@ extern "C" fn fn_wrap_key(
     unsafe { *pul_wrapped_key_len = retlen };
     CKR_OK
 }
+
+/// Implementation of C_UnwrapKey function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203355](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203355)
 
 extern "C" fn fn_unwrap_key(
     s_handle: CK_SESSION_HANDLE,
@@ -2211,6 +2490,10 @@ extern "C" fn fn_unwrap_key(
         Err(e) => e.rv(),
     }
 }
+
+/// Implementation of C_DeriveKey function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203356](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203356)
 
 extern "C" fn fn_derive_key(
     s_handle: CK_SESSION_HANDLE,
@@ -2417,6 +2700,10 @@ extern "C" fn fn_derive_key(
     }
 }
 
+/// Implementation of C_SeedRandom function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203358](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203358)
+
 extern "C" fn fn_seed_random(
     s_handle: CK_SESSION_HANDLE,
     seed: CK_BYTE_PTR,
@@ -2428,6 +2715,10 @@ extern "C" fn fn_seed_random(
     let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
     ret_to_rv!(random_add_seed(data))
 }
+
+/// Implementation of C_GeneateRandom function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203359](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203359)
 
 extern "C" fn fn_generate_random(
     s_handle: CK_SESSION_HANDLE,
@@ -2441,12 +2732,27 @@ extern "C" fn fn_generate_random(
         unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
     ret_to_rv!(get_random_data(data))
 }
+
+/// Implementation of C_GetFunctionStatus function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203361](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203361)
+
 extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_CancelFunction function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203362](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203362)
+
 extern "C" fn fn_cancel_function(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_WaitForSlotEvent function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203265](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203265)
+
 extern "C" fn fn_wait_for_slot_event(
     _flags: CK_FLAGS,
     _slot: CK_SLOT_ID_PTR,
@@ -2530,6 +2836,10 @@ static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
 };
 
+/// Implementation of C_GetSlotList function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203262](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203262)
+
 extern "C" fn fn_get_slot_list(
     _token_present: CK_BBOOL,
     slot_list: CK_SLOT_ID_PTR,
@@ -2564,6 +2874,10 @@ extern "C" fn fn_get_slot_list(
     CKR_OK
 }
 
+/// Implementation of C_GetSlotInfo function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203263](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203263)
+
 extern "C" fn fn_get_slot_info(
     slot_id: CK_SLOT_ID,
     info: CK_SLOT_INFO_PTR,
@@ -2579,6 +2893,10 @@ extern "C" fn fn_get_slot_info(
     }
     CKR_OK
 }
+
+/// Implementation of C_GetTokenInfo function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203264](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203264)
 
 extern "C" fn fn_get_token_info(
     slot_id: CK_SLOT_ID,
@@ -2610,6 +2928,10 @@ static MODULE_INFO: CK_INFO = CK_INFO {
     libraryDescription: LIBRARY_DESCRIPTION,
     libraryVersion: LIBRARY_VERSION,
 };
+
+/// Implementation of C_GetInfo function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203257](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203257)
 
 extern "C" fn fn_get_info(info: CK_INFO_PTR) -> CK_RV {
     unsafe {
@@ -2643,6 +2965,10 @@ pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
 
 // Additional 3.0 functions
 
+/// Implementation of C_LoginUser function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203280](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203280)
+
 extern "C" fn fn_login_user(
     _session: CK_SESSION_HANDLE,
     _user_type: CK_USER_TYPE,
@@ -2653,12 +2979,21 @@ extern "C" fn fn_login_user(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SessionCancel function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203276](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203276)
+
 extern "C" fn fn_session_cancel(
     _session: CK_SESSION_HANDLE,
     _flags: CK_FLAGS,
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_MessageEncryptInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203298](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203298)
 
 extern "C" fn fn_message_encrypt_init(
     s_handle: CK_SESSION_HANDLE,
@@ -2685,6 +3020,10 @@ extern "C" fn fn_message_encrypt_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_EncryptMessage function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203299](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203299)
 
 extern "C" fn fn_encrypt_message(
     s_handle: CK_SESSION_HANDLE,
@@ -2763,6 +3102,10 @@ extern "C" fn fn_encrypt_message(
     CKR_OK
 }
 
+/// Implementation of C_EncryptMessageBegin function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203300](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203300)
+
 extern "C" fn fn_encrypt_message_begin(
     s_handle: CK_SESSION_HANDLE,
     parameter: CK_VOID_PTR,
@@ -2802,6 +3145,10 @@ extern "C" fn fn_encrypt_message_begin(
     };
     ret_to_rv!(operation.msg_encrypt_begin(parameter, parameter_len, adata))
 }
+
+/// Implementation of C_EncryptMessageNext function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203301](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203301)
 
 extern "C" fn fn_encrypt_message_next(
     s_handle: CK_SESSION_HANDLE,
@@ -2885,6 +3232,10 @@ extern "C" fn fn_encrypt_message_next(
     CKR_OK
 }
 
+/// Implementation of C_MessageEncryptFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203302](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203302)
+
 extern "C" fn fn_message_encrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
@@ -2897,6 +3248,10 @@ extern "C" fn fn_message_encrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     }
     ret_to_rv!(operation.finalize())
 }
+
+/// Implementation of C_MessageDecryptInit function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203309](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203309)
 
 extern "C" fn fn_message_decrypt_init(
     s_handle: CK_SESSION_HANDLE,
@@ -2923,6 +3278,10 @@ extern "C" fn fn_message_decrypt_init(
         CKR_MECHANISM_INVALID
     }
 }
+
+/// Implementation of C_DecryptMessage function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203310](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203310)
 
 extern "C" fn fn_decrypt_message(
     s_handle: CK_SESSION_HANDLE,
@@ -3001,6 +3360,10 @@ extern "C" fn fn_decrypt_message(
     CKR_OK
 }
 
+/// Implementation of C_DecryptMessageBegin function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203311](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203311)
+
 extern "C" fn fn_decrypt_message_begin(
     s_handle: CK_SESSION_HANDLE,
     parameter: CK_VOID_PTR,
@@ -3040,6 +3403,10 @@ extern "C" fn fn_decrypt_message_begin(
     };
     ret_to_rv!(operation.msg_decrypt_begin(parameter, parameter_len, adata))
 }
+
+/// Implementation of C_DecryptMessageNext function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203312](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203312)
 
 extern "C" fn fn_decrypt_message_next(
     s_handle: CK_SESSION_HANDLE,
@@ -3124,6 +3491,10 @@ extern "C" fn fn_decrypt_message_next(
     CKR_OK
 }
 
+/// Implementation of C_MessageDecryptFinal function
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203313](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203313)
+
 extern "C" fn fn_message_decrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
@@ -3137,6 +3508,10 @@ extern "C" fn fn_message_decrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     ret_to_rv!(operation.finalize())
 }
 
+/// Implementation of C_MessageSignInit function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203328](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203328)
+
 extern "C" fn fn_message_sign_init(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
@@ -3144,6 +3519,11 @@ extern "C" fn fn_message_sign_init(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SignMessage function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203329](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203329)
+
 extern "C" fn fn_sign_message(
     _session: CK_SESSION_HANDLE,
     _parameter: CK_VOID_PTR,
@@ -3155,6 +3535,11 @@ extern "C" fn fn_sign_message(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SignMessageBegin function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203330](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203330)
+
 extern "C" fn fn_sign_message_begin(
     _session: CK_SESSION_HANDLE,
     _parameter: CK_VOID_PTR,
@@ -3162,6 +3547,11 @@ extern "C" fn fn_sign_message_begin(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_SignMessageNext function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203331](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203331)
+
 extern "C" fn fn_sign_message_next(
     _session: CK_SESSION_HANDLE,
     _parameter: CK_VOID_PTR,
@@ -3173,9 +3563,19 @@ extern "C" fn fn_sign_message_next(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_MessageSignFinal function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203332](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203332)
+
 extern "C" fn fn_message_sign_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_MessageVerifyInit function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203341](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203341)
+
 extern "C" fn fn_message_verify_init(
     _session: CK_SESSION_HANDLE,
     _mechanism: CK_MECHANISM_PTR,
@@ -3183,6 +3583,11 @@ extern "C" fn fn_message_verify_init(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_VerifyMessage function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203342](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203342)
+
 extern "C" fn fn_verify_message(
     _session: CK_SESSION_HANDLE,
     _parameter: CK_VOID_PTR,
@@ -3194,6 +3599,11 @@ extern "C" fn fn_verify_message(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_VerifyMessageBegin function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203343](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203343)
+
 extern "C" fn fn_verify_message_begin(
     _session: CK_SESSION_HANDLE,
     _parameter: CK_VOID_PTR,
@@ -3201,6 +3611,11 @@ extern "C" fn fn_verify_message_begin(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_VerifyMessageNext function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203344](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203344)
+
 extern "C" fn fn_verify_message_next(
     _session: CK_SESSION_HANDLE,
     _parameter: CK_VOID_PTR,
@@ -3212,6 +3627,11 @@ extern "C" fn fn_verify_message_next(
 ) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
+
+/// Implementation of C_MessageVerifyFinal function (Not Implemented Yet)
+///
+/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203345](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203345)
+
 extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
@@ -3458,6 +3878,11 @@ pub extern "C" fn C_GetInterface(
 
     CKR_ARGUMENTS_BAD
 }
+
+/// Implementation of the OpenSSL provider initialization function
+///
+/// This function allows OpenSSL to use this module as an OpenSSL FIPS
+/// provider
 
 #[cfg(feature = "fips")]
 #[no_mangle]
