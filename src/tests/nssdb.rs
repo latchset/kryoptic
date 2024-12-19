@@ -343,3 +343,42 @@ fn test_nssdb_key_cache() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_nssdb_derive_key() {
+    use crate::kasn1::pkcs::PBKDF2Params;
+    use crate::kasn1::pkcs::HMAC_SHA_256_ALG;
+    use crate::storage::nssdb::ci::derive_key_test;
+    use crate::storage::nssdb::ci::KeyOp;
+    use crate::storage::nssdb::ci::KeysWithCaching;
+    use crate::token::Handles;
+    use crate::token::TokenFacilities;
+
+    let mut facilities = TokenFacilities {
+        mechanisms: Mechanisms::new(),
+        factories: ObjectFactories::new(),
+        handles: Handles::new(),
+    };
+    register_all(&mut facilities.mechanisms, &mut facilities.factories);
+    let mut key_cache = KeysWithCaching::default();
+    key_cache.set_key(vec![42u8; 32]);
+
+    for t in 0..100 {
+        let salt: [u8; 32] = [t as u8; 32];
+        let params = PBKDF2Params {
+            salt: &salt,
+            iteration_count: 10000,
+            key_length: Some(32),
+            prf: Box::new(HMAC_SHA_256_ALG),
+        };
+
+        let _ = derive_key_test(
+            &facilities,
+            &key_cache,
+            &params,
+            KeyOp::Encryption,
+        )
+        .unwrap();
+    }
+}

@@ -23,7 +23,7 @@ use zeroize::Zeroize;
 
 mod attrs;
 use attrs::*;
-mod ci;
+pub mod ci;
 mod config;
 use ci::*;
 use config::*;
