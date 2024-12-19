@@ -4,7 +4,7 @@ cargo-install-lib = true
 cargo-install-bin = false
 
 [features]
-enable = ["dynamic"]
+enable = ["standard", "dynamic", "nssdb"]
 
 [requires]
 build = ["openssl-devel"]
