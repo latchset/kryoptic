@@ -8,6 +8,7 @@ use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::*;
+use crate::misc::zeromem;
 use crate::object::Object;
 use crate::token::TokenFacilities;
 use crate::Operation;
@@ -15,7 +16,6 @@ use crate::CSPRNG;
 use crate::{byte_ptr, sizeof, void_ptr};
 
 use asn1;
-use zeroize::Zeroize;
 
 pub fn pbkdf2_derive(
     facilities: &TokenFacilities,
@@ -412,7 +412,7 @@ impl Default for StorageAuthInfo {
 impl Drop for StorageAuthInfo {
     fn drop(&mut self) {
         if let Some(ref mut data) = self.user_data {
-            data.zeroize();
+            zeromem(data.as_mut_slice());
         }
     }
 }

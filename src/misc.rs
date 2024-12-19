@@ -6,7 +6,7 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::interface::*;
 use crate::object::{Object, ObjectFactories, ObjectType};
-
+use crate::ossl::common::zeromem as ossl_zeromem;
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 
 #[macro_export]
@@ -190,4 +190,8 @@ pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
         d[..slen].copy_from_slice(&s[..slen]);
         d[slen..].fill(0x20); /* space in ASCII/UTF8 */
     }
+}
+
+pub fn zeromem(mem: &mut [u8]) {
+    ossl_zeromem(mem);
 }

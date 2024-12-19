@@ -9,13 +9,12 @@ use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
+use crate::misc::zeromem;
 use crate::object::Object;
 use crate::storage::aci::pbkdf2_derive;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
 use crate::{sizeof, void_ptr};
-
-use zeroize::Zeroize;
 
 const SHA256_LEN: usize = 32;
 const MAX_KEY_CACHE_SIZE: usize = 128;
@@ -59,7 +58,7 @@ impl Default for KeysWithCaching {
 impl Drop for KeysWithCaching {
     fn drop(&mut self) {
         if let Some(ref mut key) = &mut self.enckey {
-            key.zeroize();
+            zeromem(key.as_mut_slice());
         }
     }
 }
@@ -85,14 +84,14 @@ impl KeysWithCaching {
 
     pub fn set_key(&mut self, key: Vec<u8>) {
         if let Some(ref mut oldkey) = &mut self.enckey {
-            oldkey.zeroize();
+            zeromem(oldkey.as_mut_slice());
         }
         self.enckey = Some(key);
     }
 
     pub fn unset_key(&mut self) {
         if let Some(ref mut key) = &mut self.enckey {
-            key.zeroize();
+            zeromem(key.as_mut_slice());
             self.enckey = None;
         }
     }

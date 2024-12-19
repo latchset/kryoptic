@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
@@ -18,8 +19,6 @@ use crate::ossl::get_libctx;
 
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
-
-use zeroize::Zeroize;
 
 #[cfg(not(feature = "fips"))]
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
@@ -439,12 +438,12 @@ impl RsaPKCSOperation {
         let mut op = match Self::encrypt_new(mech, wrapping_key, info) {
             Ok(o) => o,
             Err(e) => {
-                keydata.zeroize();
+                zeromem(keydata.as_mut_slice());
                 return Err(e);
             }
         };
         let result = op.encrypt(&keydata, output);
-        keydata.zeroize();
+        zeromem(keydata.as_mut_slice());
         result
     }
 

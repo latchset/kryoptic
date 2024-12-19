@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::attribute::{AttrType, Attribute, CkAttrs};
 use crate::error::{Error, Result};
 use crate::interface::*;
-use crate::misc::copy_sized_string;
+use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
 use crate::storage;
 use crate::storage::sqlite_common::check_table;
@@ -19,7 +19,6 @@ use crate::CSPRNG;
 use itertools::Itertools;
 use rusqlite::types::{FromSqlError, Value, ValueRef};
 use rusqlite::{params, Connection, OpenFlags, Rows, Transaction};
-use zeroize::Zeroize;
 
 mod attrs;
 use attrs::*;
@@ -1208,7 +1207,7 @@ impl Storage for NSSStorage {
         self.keys.unset_key();
 
         let result = self.save_password(&salt, encdata.as_slice());
-        encdata.zeroize();
+        zeromem(encdata.as_mut_slice());
         result
     }
 }

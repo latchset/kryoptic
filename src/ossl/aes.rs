@@ -8,6 +8,7 @@ use crate::error;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
@@ -19,7 +20,6 @@ use crate::get_random_data;
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
-use zeroize::Zeroize;
 
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 const MIN_RANDOM_IV_BITS: usize = 64;
@@ -126,7 +126,7 @@ struct AesKey {
 
 impl Drop for AesKey {
     fn drop(&mut self) {
-        self.raw.zeroize()
+        zeromem(self.raw.as_mut_slice());
     }
 }
 
@@ -176,7 +176,7 @@ impl AesIvData {
 }
 impl Drop for AesIvData {
     fn drop(&mut self) {
-        self.buf.zeroize();
+        zeromem(self.buf.as_mut_slice());
     }
 }
 
@@ -193,8 +193,8 @@ struct AesParams {
 #[cfg(feature = "fips")]
 impl AesParams {
     fn zeroize(&mut self) {
-        self.iv.buf.zeroize();
-        self.aad.zeroize();
+        zeromem(self.iv.buf.as_mut_slice());
+        zeromem(self.aad.as_mut_slice());
     }
 }
 
@@ -215,7 +215,7 @@ pub struct AesOperation {
 
 impl Drop for AesOperation {
     fn drop(&mut self) {
-        self.finalbuf.zeroize()
+        zeromem(self.finalbuf.as_mut_slice());
     }
 }
 
@@ -944,7 +944,7 @@ impl AesOperation {
         let mut op = match Self::encrypt_new(mech, wrapping_key) {
             Ok(o) => o,
             Err(e) => {
-                keydata.zeroize();
+                zeromem(keydata.as_mut_slice());
                 return Err(e);
             }
         };
@@ -967,7 +967,7 @@ impl AesOperation {
             _ => (),
         }
         let result = op.encrypt(&keydata, output);
-        keydata.zeroize();
+        zeromem(keydata.as_mut_slice());
         result
     }
 
@@ -997,8 +997,8 @@ impl AesOperation {
     ) -> Result<CK_BYTE_PTR> {
         #[cfg(feature = "fips")]
         {
-            self.params.iv.buf.zeroize();
-            self.params.aad.zeroize();
+            zeromem(self.params.iv.buf.as_mut_slice());
+            zeromem(self.params.aad.as_mut_slice());
         }
         match self.mech {
             CKM_AES_CCM => {
@@ -1277,7 +1277,7 @@ impl AesOperation {
         #[cfg(feature = "fips")]
         {
             self.params.zeroize();
-            self.finalbuf.zeroize();
+            zeromem(self.finalbuf.as_mut_slice());
         }
         self.finalized = false;
         self.in_use = true;
@@ -1343,7 +1343,7 @@ impl AesOperation {
         #[cfg(feature = "fips")]
         {
             self.params.zeroize();
-            self.finalbuf.zeroize();
+            zeromem(self.finalbuf.as_mut_slice());
         }
         self.finalized = false;
         self.in_use = true;
@@ -1523,7 +1523,7 @@ impl Encryption for AesOperation {
         }
         if self.mech == CKM_AES_CCM {
             if plain_len > 0 && plain_buf == self.finalbuf.as_ptr() {
-                self.finalbuf.zeroize();
+                zeromem(self.finalbuf.as_mut_slice());
                 self.finalbuf.clear();
             }
         }
@@ -2274,11 +2274,11 @@ impl MsgEncryption for AesOperation {
             )
         };
         if res != 1 {
-            cipher.zeroize();
+            zeromem(cipher);
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
         if outl != 0 {
-            cipher.zeroize();
+            zeromem(cipher);
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
         let res = unsafe {
@@ -2290,7 +2290,7 @@ impl MsgEncryption for AesOperation {
             )
         };
         if res != 1 {
-            cipher.zeroize();
+            zeromem(cipher);
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
@@ -2469,11 +2469,11 @@ impl MsgDecryption for AesOperation {
                     )
                 };
                 if res != 1 {
-                    plain.zeroize();
+                    zeromem(plain);
                     return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
                 }
                 if outl != 0 {
-                    plain.zeroize();
+                    zeromem(plain);
                     return Err(self.op_err(CKR_DEVICE_ERROR));
                 }
 
@@ -2629,7 +2629,7 @@ impl AesCmacOperation {
         }
 
         output.copy_from_slice(&buf[..output.len()]);
-        buf.zeroize();
+        zeromem(&mut buf);
 
         #[cfg(feature = "fips")]
         {
@@ -2740,8 +2740,8 @@ pub struct AesMacOperation {
 
 impl Drop for AesMacOperation {
     fn drop(&mut self) {
-        self.padbuf.zeroize();
-        self.macbuf.zeroize();
+        zeromem(&mut self.padbuf);
+        zeromem(&mut self.macbuf);
     }
 }
 
