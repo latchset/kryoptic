@@ -7,13 +7,12 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 use crate::object::*;
 use crate::ossl::aes::*;
 use crate::{attr_element, cast_params};
 
 use once_cell::sync::Lazy;
-
-use zeroize::Zeroize;
 
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
 pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
@@ -100,7 +99,7 @@ impl ObjectFactory for AesKeyFactory {
             Some(idx) => {
                 let len = usize::try_from(template[idx].to_ulong()?)?;
                 if len > data.len() {
-                    data.zeroize();
+                    zeromem(data.as_mut_slice());
                     return Err(CKR_KEY_SIZE_RANGE)?;
                 }
                 if len < data.len() {
@@ -112,7 +111,7 @@ impl ObjectFactory for AesKeyFactory {
         match check_key_len(data.len()) {
             Ok(_) => (),
             Err(e) => {
-                data.zeroize();
+                zeromem(data.as_mut_slice());
                 return Err(e);
             }
         }

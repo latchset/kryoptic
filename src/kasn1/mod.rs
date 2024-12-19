@@ -5,9 +5,9 @@ use std::borrow::Cow;
 
 use crate::error::Result;
 use crate::interface::*;
+use crate::misc::zeromem;
 
 use asn1;
-use zeroize::Zeroize;
 
 /* Helper routines to use with rust/asn1 */
 
@@ -68,7 +68,7 @@ impl<'a> DerEncBigUint<'a> {
 impl Drop for DerEncBigUint<'_> {
     fn drop(&mut self) {
         match &self.data {
-            Cow::Owned(_) => self.data.to_mut().zeroize(),
+            Cow::Owned(_) => zeromem(self.data.to_mut()),
             _ => (),
         }
     }
@@ -111,7 +111,7 @@ impl<'a> DerEncOctetString<'a> {
 impl Drop for DerEncOctetString<'_> {
     fn drop(&mut self) {
         match &self.data {
-            Cow::Owned(_) => self.data.to_mut().zeroize(),
+            Cow::Owned(_) => zeromem(self.data.to_mut()),
             _ => (),
         }
     }

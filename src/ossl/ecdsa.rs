@@ -10,6 +10,7 @@ use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::DerEncBigUint;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
@@ -20,8 +21,6 @@ use crate::ossl::fips::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::ossl::get_libctx;
-
-use zeroize::Zeroize;
 
 pub fn ecc_object_to_params(
     key: &Object,
@@ -328,7 +327,7 @@ impl Sign for EccOperation {
             }
             ossl_sign.resize(siglen, 0);
             let ret = ossl_to_pkcs11_signature(&ossl_sign, signature);
-            ossl_sign.zeroize();
+            zeromem(ossl_sign.as_mut_slice());
             return ret;
         }
         self.sign_update(data)?;
@@ -431,7 +430,7 @@ impl Sign for EccOperation {
         }
 
         let ret = ossl_to_pkcs11_signature(&ossl_sign, signature);
-        ossl_sign.zeroize();
+        zeromem(ossl_sign.as_mut_slice());
         ret
     }
 
@@ -475,7 +474,7 @@ impl Verify for EccOperation {
             if res != 1 {
                 return Err(CKR_SIGNATURE_INVALID)?;
             }
-            ossl_sign.zeroize();
+            zeromem(ossl_sign.as_mut_slice());
             return Ok(());
         }
         self.verify_update(data)?;
@@ -565,7 +564,7 @@ impl Verify for EccOperation {
             .unwrap()
             .digest_verify_final(&ossl_sign)?;
 
-        ossl_sign.zeroize();
+        zeromem(ossl_sign.as_mut_slice());
         Ok(())
     }
 

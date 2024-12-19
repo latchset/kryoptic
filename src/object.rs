@@ -8,12 +8,12 @@ use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms};
+use crate::misc::zeromem;
 use crate::CSPRNG;
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
-use zeroize::Zeroize;
 
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
@@ -1032,7 +1032,7 @@ macro_rules! ok_or_clear {
         match $exp {
             Ok(x) => x,
             Err(e) => {
-                $clear.zeroize();
+                zeromem($clear.as_mut_slice());
                 return Err(e);
             }
         }

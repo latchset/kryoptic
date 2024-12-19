@@ -24,7 +24,6 @@ use crate::ossl::montgomery as ecm;
 use crate::ossl::rsa;
 
 use asn1;
-use zeroize::Zeroize;
 
 macro_rules! ptr_wrapper_struct {
     ($name:ident; $ctx:ident) => {
@@ -367,7 +366,7 @@ impl Drop for OsslParam<'_> {
     fn drop(&mut self) {
         if self.zeroize {
             while let Some(mut elem) = self.v.pop() {
-                elem.zeroize();
+                zeromem(elem.as_mut_slice());
             }
         }
     }
@@ -891,4 +890,10 @@ fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static [u8]> {
 #[cfg(feature = "ecc")]
 pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
     oid_to_ossl_name(&get_oid_from_obj(key)?)
+}
+
+pub fn zeromem(mem: &mut [u8]) {
+    unsafe {
+        OPENSSL_cleanse(void_ptr!(mem.as_mut_ptr()), mem.len());
+    }
 }

@@ -8,9 +8,9 @@ use crate::hash;
 use crate::hmac::*;
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 
 use constant_time_eq::constant_time_eq;
-use zeroize::Zeroize;
 
 /* HMAC spec From FIPS 198-1 */
 
@@ -32,9 +32,9 @@ pub struct HMACOperation {
 
 impl Drop for HMACOperation {
     fn drop(&mut self) {
-        self.state.zeroize();
-        self.ipad.zeroize();
-        self.opad.zeroize();
+        zeromem(self.state.as_mut_slice());
+        zeromem(self.ipad.as_mut_slice());
+        zeromem(self.opad.as_mut_slice());
     }
 }
 
