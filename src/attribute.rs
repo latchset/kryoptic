@@ -5,9 +5,8 @@ use std::borrow::Cow;
 
 use crate::error::{Error, Result};
 use crate::interface::*;
+use crate::misc::zeromem;
 use crate::{bytes_to_vec, sizeof, void_ptr};
-
-use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttrType {
@@ -271,7 +270,7 @@ impl Attribute {
     }
 
     pub fn zeroize(&mut self) {
-        self.value.zeroize();
+        zeromem(self.value.as_mut_slice());
     }
 
     pub fn from_date_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
@@ -559,7 +558,7 @@ impl Drop for CkAttrs<'_> {
     fn drop(&mut self) {
         if self.zeroize {
             while let Some(mut elem) = self.v.pop() {
-                elem.zeroize();
+                zeromem(elem.as_mut_slice());
             }
         }
     }

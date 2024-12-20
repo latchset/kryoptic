@@ -44,7 +44,6 @@ serde_json = "1.0.104"
 serial_test = "3.1.1"
 toml = { version = "0.8.19", default-features = false, features = ["display", "parse"] }
 uuid = { version = "1.4.1", features = ["v4"] }
-zeroize = "1.6.0"
 
 [features]
 aes = []

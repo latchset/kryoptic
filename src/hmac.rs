@@ -7,11 +7,11 @@ use crate::error::{Error, Result};
 use crate::hash;
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 use crate::object::*;
 use crate::sizeof;
 
 use once_cell::sync::Lazy;
-use zeroize::Zeroize;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::hmac::HMACOperation;
@@ -26,7 +26,7 @@ pub struct HmacKey {
 
 impl Drop for HmacKey {
     fn drop(&mut self) {
-        self.raw.zeroize()
+        zeromem(self.raw.as_mut_slice())
     }
 }
 

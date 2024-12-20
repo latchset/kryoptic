@@ -18,7 +18,6 @@ use crate::ossl::common::*;
 use getrandom;
 use libc;
 use once_cell::sync::Lazy;
-use zeroize::Zeroize;
 
 /* Entropy Stuff */
 
@@ -434,7 +433,7 @@ unsafe fn fips_cleanse(
     let slice: &mut [u8] =
         slice::from_raw_parts_mut(addr as *mut u8, pos + len);
     let (_, clear) = slice.split_at_mut(pos);
-    clear.zeroize()
+    zeromem(clear);
 }
 
 unsafe extern "C" fn fips_malloc(

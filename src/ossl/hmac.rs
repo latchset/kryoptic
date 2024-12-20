@@ -7,12 +7,12 @@ use crate::error::Result;
 use crate::hmac::*;
 use crate::interface::*;
 use crate::mechanism::*;
+use crate::misc::zeromem;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::ossl::fips::*;
 
 use constant_time_eq::constant_time_eq;
-use zeroize::Zeroize;
 
 #[derive(Debug)]
 pub struct HMACOperation {
@@ -113,12 +113,12 @@ impl HMACOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
         if outlen != self.maclen {
-            buf.zeroize();
+            zeromem(buf.as_mut_slice());
             return Err(CKR_GENERAL_ERROR)?;
         }
 
         output.copy_from_slice(&buf[..output.len()]);
-        buf.zeroize();
+        zeromem(buf.as_mut_slice());
 
         self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
         Ok(())
