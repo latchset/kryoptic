@@ -9,11 +9,11 @@ use crate::error::Result;
 use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
+use crate::misc::{sizeof, void_ptr};
 use crate::object::Object;
 use crate::storage::aci::pbkdf2_derive;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
-use crate::{sizeof, void_ptr};
 
 use zeroize::Zeroize;
 
