@@ -1394,6 +1394,18 @@ impl AesOperation {
             _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
         };
 
+        /*
+         * NIST SP 800-38D: 5.2.1.2 Output Data
+         * > t may be any one of the following five values: 128, 120, 112,
+         * > 104, or 96. For certain applications, t may be 64 or 32;
+         *
+         * We assume here that 64b (8B) is still acceptable value and since
+         * we take the length from user in bytes, we do not have to bother
+         * about values non-dividable by 8.
+         */
+        if self.params.taglen < 8 {
+            self.fips_approved = Some(false);
+        }
         Ok(())
     }
 }
@@ -2632,9 +2644,22 @@ impl AesCmacOperation {
         zeromem(&mut buf);
 
         #[cfg(feature = "fips")]
-        {
-            self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
-        }
+        self.fips_approval_cmac()?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "fips")]
+    fn fips_approval_cmac(&mut self) -> Result<()> {
+        /*
+         * NIST SP 800-38B A.2:
+         * > For most applications, a value for Tlen that is at least 64
+         * > should provide sufficient protection against guessing attacks.
+         *
+         * 64b == 8B
+         */
+        self.fips_approved = Some(self.maclen >= 8);
+
         Ok(())
     }
 }

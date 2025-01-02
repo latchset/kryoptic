@@ -510,6 +510,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [restrict!(CKK_AES), restrict!()],
             genflags: CKF_ENCRYPT
                 | CKF_DECRYPT
+                | CKF_SIGN // for CMAC
+                | CKF_VERIFY
                 | CKF_WRAP
                 | CKF_UNWRAP
                 | CKF_DERIVE,

@@ -752,10 +752,11 @@ fn test_aes_operations() {
         let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
-        /* IV needs to be of size 12 for the test to work in FIPS mode as well */
+        /* IV needs to be of size 12 for the test to work in FIPS mode as well,
+         * the tag needs to be 64b to pass FIPS requirement */
         let iv = "BA0987654321";
         let aad = "AUTH ME";
-        let mut tag = [0u8; 4];
+        let mut tag = [0u8; 8];
         let mut param = CK_GCM_MESSAGE_PARAMS {
             pIv: iv.as_ptr() as *mut CK_BYTE,
             ulIvLen: iv.len() as CK_ULONG,
@@ -1170,7 +1171,7 @@ fn test_aes_macs() {
         );
 
         /* test that we can get correct indicators based on inputs */
-        assert_eq!(check_validation(session, 0), true);
+        assert_eq!(check_validation(session, 1), true);
 
         /* too long */
         let size: CK_ULONG = (AES_BLOCK_SIZE + 1) as CK_ULONG;
@@ -1216,6 +1217,42 @@ fn test_aes_macs() {
                 }
             )
         );
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 1), true);
+
+        /* 16b or 2B is too small for FIPS */
+        let size: CK_ULONG = 2 as CK_ULONG;
+
+        let mac = ret_or_panic!(sig_gen(
+            session,
+            handle,
+            data.as_bytes(),
+            &CK_MECHANISM {
+                mechanism: CKM_AES_CMAC_GENERAL,
+                pParameter: void_ptr!(&size),
+                ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+            }
+        ));
+        assert_eq!(mac.len(), size as usize);
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CMAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            )
+        );
+
+        /* test that we can get correct indicators based on inputs */
+        assert_eq!(check_validation(session, 0), true);
     }
 
     testtokn.finalize();
