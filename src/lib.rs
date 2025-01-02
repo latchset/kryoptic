@@ -478,14 +478,14 @@ fn force_load_config() -> CK_RV {
     return CKR_OK;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "eddsa"))]
 fn get_ec_point_encoding(save: &mut config::EcPointEncoding) -> CK_RV {
     let gconf = global_rlock!(noinitcheck CONFIG);
     *save = gconf.conf.ec_point_encoding;
     CKR_OK
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "eddsa"))]
 fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck CONFIG);
     gconf.conf.ec_point_encoding = val;
