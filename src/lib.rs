@@ -374,7 +374,7 @@ fn init_fips_approval(
     session.set_fips_indicator(key_ok);
 }
 
-/* final assemssment on FIPS indicator, after the operation is complete */
+/* final assessment on FIPS indicator, after the operation is complete */
 #[cfg(feature = "fips")]
 fn finalize_fips_approval(
     mut session: RwLockWriteGuard<'_, Session>,
