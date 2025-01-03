@@ -120,6 +120,9 @@ impl HMACOperation {
         output.copy_from_slice(&buf[..output.len()]);
         zeromem(buf.as_mut_slice());
 
+        /* The OpenSSL implementation verifies the truncation is > 112b according to the
+         * FIPS 140-3 IG, C.D Use of a Truncated HMAC
+         */
         self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
         Ok(())
     }
