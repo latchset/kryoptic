@@ -13,9 +13,15 @@ use crate::ossl::aes::*;
 
 use once_cell::sync::Lazy;
 
+/// Smallest AES Key Size (128 bits)
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
+/// Medium AES Key size (192 bits)
 pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
+/// Largest AES Key Size (256 bits)
 pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
+
+/// The AES block size is 128 bits (16 bytes) for all currently implemented
+/// variants
 pub const AES_BLOCK_SIZE: usize = 16;
 
 pub(crate) fn check_key_len(len: usize) -> Result<()> {
@@ -24,6 +30,19 @@ pub(crate) fn check_key_len(len: usize) -> Result<()> {
         _ => Err(CKR_KEY_SIZE_RANGE)?,
     }
 }
+
+/// This is a specialized factory for objects of class CKO_SECRET_KEY
+/// and CKA_KEY_TYPE of value CKK_AES
+///
+/// [AES secret key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203476)
+/// (Version 3.1)
+///
+/// Derives from the generic ObjectFactory, CommonKeyFactory and
+/// SecretKeyFactory
+///
+/// This is used to store the list of attributes allowed for an AES Key object, as well as provide
+/// methods for generic manipulation of AES key objects (generation, derivation, wrapping ...)
+///
 
 #[derive(Debug)]
 pub struct AesKeyFactory {
@@ -65,6 +84,9 @@ impl AesKeyFactory {
 }
 
 impl ObjectFactory for AesKeyFactory {
+    /// Creation of AES keys use the default generic secret creation
+    /// code and additionally ensures the key size is one of the AES allowed
+    /// sizes (currently 128, 192 or 256 bits).
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
@@ -117,6 +139,8 @@ impl ObjectFactory for AesKeyFactory {
         SecretKeyFactory::import_from_wrapped(self, data, template)
     }
 
+    /// The AES derive adds key length checks on top of the generic secret
+    /// derive helper
     fn default_object_derive(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -148,6 +172,8 @@ impl SecretKeyFactory for AesKeyFactory {
         ObjectFactory::default_object_unwrap(self, template)
     }
 
+    /// Helper to set key that check the key is correctly formed for an
+    /// AES key object
     fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
         let keylen = key.len();
         check_key_len(keylen)?;
@@ -156,6 +182,8 @@ impl SecretKeyFactory for AesKeyFactory {
         Ok(())
     }
 
+    /// AES recommends very specific size preferring the largest key size
+    /// first and going down from there
     fn recommend_key_size(&self, max: usize) -> Result<usize> {
         if max >= MAX_AES_SIZE_BYTES {
             Ok(MAX_AES_SIZE_BYTES)
@@ -169,8 +197,21 @@ impl SecretKeyFactory for AesKeyFactory {
     }
 }
 
+/// A statically allocated Key Factory facility.
+///
+/// Static allocation allows a single implementation to be shared by all users.
+/// Factories store data that does not change for the life of the application
+/// so it is safe to allocate them only once.
 static AES_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(AesKeyFactory::new()));
+
+/// The Generic AES Mechanism object
+///
+/// Implements access to the Mechanisms functions applicable to the AES
+/// cryptosystem.
+/// The mechanism function can implement a crypto operation directly or return
+/// an allocated [AesOperation] object for operations that need to keep data
+/// around until they complete.
 
 #[derive(Debug)]
 pub(crate) struct AesMechanism {
@@ -224,6 +265,11 @@ impl Mechanism for AesMechanism {
         Ok(Box::new(AesOperation::decrypt_new(mech, key)?))
     }
 
+    /// Implements the AES Key generation mechanism
+    ///
+    /// [AES key generation](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203477)
+    /// (Version 3.1)
+
     fn generate_key(
         &self,
         mech: &CK_MECHANISM,
@@ -252,6 +298,11 @@ impl Mechanism for AesMechanism {
         Ok(key)
     }
 
+    /// Implements the AES Key wrap operation (Wrap)
+    ///
+    /// [AES Key Wrap](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203510)
+    /// (Version 3.1)
+
     fn wrap_key(
         &self,
         mech: &CK_MECHANISM,
@@ -272,6 +323,11 @@ impl Mechanism for AesMechanism {
         )
     }
 
+    /// Implements the AES Key wrap operation (Unwrap)
+    ///
+    /// [AES Key Wrap](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203510)
+    /// (Version 3.1)
+
     fn unwrap_key(
         &self,
         mech: &CK_MECHANISM,
@@ -286,6 +342,11 @@ impl Mechanism for AesMechanism {
         let keydata = AesOperation::unwrap(mech, wrapping_key, data)?;
         key_template.import_from_wrapped(keydata, template)
     }
+
+    /// Implements the AES derivation operation
+    ///
+    /// [Key derivation by data encryption – DES & AES](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203514)
+    /// (Version 3.1)
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
@@ -306,6 +367,7 @@ impl Mechanism for AesMechanism {
         Ok(Operation::Derive(Box::new(kdf)))
     }
 
+    /// Internal interface for MAC operations required by other mechanisms
     fn mac_new(
         &self,
         mech: &CK_MECHANISM,
@@ -325,6 +387,12 @@ impl Mechanism for AesMechanism {
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
+
+    /// Implements AES MAC/CMAC operation (Sign)
+    ///
+    /// [AES MAC](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203484)
+    /// [AES CMAC](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203500)
+    /// (version 3.1)
 
     fn sign_new(
         &self,
@@ -349,6 +417,12 @@ impl Mechanism for AesMechanism {
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
+
+    /// Implements AES MAC/CMAC operations (Verify)
+    ///
+    /// [AES MAC](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203484)
+    /// [AES CMAC](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203500)
+    /// (version 3.1)
 
     fn verify_new(
         &self,
@@ -405,6 +479,12 @@ impl Mechanism for AesMechanism {
     }
 }
 
+/// AES KDF Operation implementation
+///
+/// An AES Operation specific for Key Derivation that uses the AES cipher
+/// with various modes as the PRF to compute a derived key
+/// Implements [Derive]
+
 #[derive(Debug)]
 struct AesKDFOperation<'a> {
     mech: CK_MECHANISM_TYPE,
@@ -416,6 +496,7 @@ struct AesKDFOperation<'a> {
 }
 
 impl AesKDFOperation<'_> {
+    /// Helper function to register the AES KDF Mechanisms
     fn register_mechanisms(mechs: &mut Mechanisms) {
         if mechs.get(CKM_AES_ECB).is_ok() {
             mechs.add_mechanism(
@@ -439,6 +520,7 @@ impl AesKDFOperation<'_> {
         }
     }
 
+    /// Instantiates a new CKM_AES_ECB based KDF operation
     fn aes_ecb_new<'a>(
         params: CK_KEY_DERIVATION_STRING_DATA,
     ) -> Result<AesKDFOperation<'a>> {
@@ -463,6 +545,7 @@ impl AesKDFOperation<'_> {
         })
     }
 
+    /// Instantiates a new CKM_AES_CBC based KDF operation
     fn aes_cbc_new<'a>(
         params: CK_AES_CBC_ENCRYPT_DATA_PARAMS,
     ) -> Result<AesKDFOperation<'a>> {
@@ -499,6 +582,7 @@ impl MechOperation for AesKDFOperation<'_> {
 }
 
 impl Derive for AesKDFOperation<'_> {
+    /// Derives a Key using the parameters set on the AESKDFOperation object
     fn derive(
         &mut self,
         key: &Object,
@@ -546,6 +630,7 @@ impl Derive for AesKDFOperation<'_> {
     }
 }
 
+/// Registers all implemented AES Mechanisms and Factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     AesOperation::register_mechanisms(mechs);
     AesKDFOperation::register_mechanisms(mechs);
