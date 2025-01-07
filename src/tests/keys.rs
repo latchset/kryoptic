@@ -404,10 +404,10 @@ fn test_ecc_key() {
     /* Wrap EC key in AES */
     let handle = ret_or_panic!(generate_key(
         session,
-        CKM_GENERIC_SECRET_KEY_GEN,
+        CKM_AES_KEY_GEN,
         std::ptr::null_mut(),
         0,
-        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16),],
         &[],
         &[
             (CKA_WRAP, true),
@@ -416,10 +416,11 @@ fn test_ecc_key() {
         ],
     ));
 
+    let iv = [0xCCu8; 4];
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_AES_ECB,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
+        mechanism: CKM_AES_KEY_WRAP_KWP,
+        pParameter: void_ptr!(&iv),
+        ulParameterLen: iv.len() as CK_ULONG,
     };
 
     let mut wrapped = vec![0u8; 65536];
@@ -435,6 +436,8 @@ fn test_ecc_key() {
     );
     assert_eq!(ret, CKR_OK);
 
+    assert_eq!(check_validation(session, 1), true);
+
     let mut pri_template = make_attr_template(
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
         &[],
@@ -443,7 +446,6 @@ fn test_ecc_key() {
             (CKA_SENSITIVE, true),
             (CKA_TOKEN, true),
             (CKA_SIGN, true),
-            (CKA_UNWRAP, true),
             (CKA_EXTRACTABLE, true),
         ],
     );
@@ -460,6 +462,8 @@ fn test_ecc_key() {
         &mut prikey2,
     );
     assert_eq!(ret, CKR_OK);
+
+    assert_eq!(check_validation(session, 1), true);
 
     /* Test the unwrapped key can be used */
     let data = "plaintext";
