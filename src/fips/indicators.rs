@@ -567,14 +567,26 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         FipsMechanism {
             mechanism: CKM_AES_KEY_WRAP,
             operations: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-            restrictions: [restrict!(CKK_AES), restrict!()],
-            genflags: 0,
+            restrictions: [restrict!(KRY_UNSPEC), restrict!()],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
         },
         FipsMechanism {
             mechanism: CKM_AES_KEY_WRAP_KWP,
             operations: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-            restrictions: [restrict!(CKK_AES), restrict!()],
-            genflags: 0,
+            restrictions: [restrict!(KRY_UNSPEC), restrict!()],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
         },
         /* SHA */
         FipsMechanism {
@@ -904,7 +916,7 @@ fn check_key(
         },
         CKK_EC | CKK_EC_EDWARDS => match get_oid_from_obj(obj) {
             Ok(oid) => match oid_to_bits(oid) {
-                Ok(l) => l,
+                Ok(l) => btb!(l),
                 Err(_) => return false,
             },
             Err(_) => return false,
