@@ -1965,15 +1965,10 @@ extern "C" fn fn_generate_key(
         return CKR_MECHANISM_INVALID;
     }
 
-    #[cfg(not(feature = "fips"))]
     let key = match mech.generate_key(mechanism, tmpl, mechanisms, factories) {
-        Ok(k) => k,
-        Err(e) => return e.rv(),
-    };
-
-    #[cfg(feature = "fips")]
-    let key = match mech.generate_key(mechanism, tmpl, mechanisms, factories) {
+        #[allow(unused_mut)]
         Ok(mut k) => {
+            #[cfg(feature = "fips")]
             session.set_fips_indicator(fips::indicators::is_approved(
                 mechanism.mechanism,
                 CKF_GENERATE,
@@ -1994,7 +1989,7 @@ extern "C" fn fn_generate_key(
 
 extern "C" fn fn_generate_key_pair(
     s_handle: CK_SESSION_HANDLE,
-    mechanism: CK_MECHANISM_PTR,
+    mechptr: CK_MECHANISM_PTR,
     public_key_template: CK_ATTRIBUTE_PTR,
     public_key_attribute_count: CK_ULONG,
     private_key_template: CK_ATTRIBUTE_PTR,
@@ -2003,9 +1998,18 @@ extern "C" fn fn_generate_key_pair(
     private_key: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
+    #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
+    #[cfg(feature = "fips")]
+    let mut session = {
+        let mut s = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        s.reset_fips_indicator();
+        s
+    };
 
-    let data: &CK_MECHANISM = unsafe { &*mechanism };
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let pubcnt = cast_or_ret!(usize from public_key_attribute_count);
     let pubtmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(public_key_template, pubcnt) };
@@ -2020,14 +2024,31 @@ extern "C" fn fn_generate_key_pair(
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
-    let mech = res_or_ret!(token.get_mechanisms().get(data.mechanism));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_GENERATE_KEY_PAIR != CKF_GENERATE_KEY_PAIR {
         return CKR_MECHANISM_INVALID;
     }
 
-    let result = mech.generate_keypair(data, pubtmpl, pritmpl);
+    let result = mech.generate_keypair(mechanism, pubtmpl, pritmpl);
     match result {
-        Ok((pubkey, privkey)) => {
+        #[allow(unused_mut)]
+        Ok((mut pubkey, mut privkey)) => {
+            #[cfg(feature = "fips")]
+            {
+                let mut approved = fips::indicators::is_approved(
+                    mechanism.mechanism,
+                    CKF_GENERATE_KEY_PAIR,
+                    None,
+                    Some(&mut pubkey),
+                );
+                approved &= fips::indicators::is_approved(
+                    mechanism.mechanism,
+                    CKF_GENERATE_KEY_PAIR,
+                    None,
+                    Some(&mut privkey),
+                );
+                session.set_fips_indicator(approved);
+            }
             let pubh = res_or_ret!(token.insert_object(s_handle, pubkey));
             match token.insert_object(s_handle, privkey) {
                 Ok(privh) => {
@@ -2056,7 +2077,16 @@ extern "C" fn fn_wrap_key(
     pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
+    #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
+    #[cfg(feature = "fips")]
+    let mut session = {
+        let mut s = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        s.reset_fips_indicator();
+        s
+    };
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let slot_id = session.get_slot_id();
@@ -2087,8 +2117,19 @@ extern "C" fn fn_wrap_key(
     let wraplen = cast_or_ret!(usize from pwraplen => CKR_ARGUMENTS_BAD);
     let wrapped: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) };
-    let outlen =
-        res_or_ret!(mech.wrap_key(mechanism, &wkey, &key, wrapped, factory,));
+    let outlen = match mech.wrap_key(mechanism, &wkey, &key, wrapped, factory) {
+        Ok(len) => {
+            #[cfg(feature = "fips")]
+            session.set_fips_indicator(fips::indicators::is_approved(
+                mechanism.mechanism,
+                CKF_WRAP,
+                Some(&wkey),
+                None,
+            ));
+            len
+        }
+        Err(e) => return e.rv(),
+    };
     let retlen = cast_or_ret!(CK_ULONG from outlen);
     unsafe { *pul_wrapped_key_len = retlen };
     CKR_OK
@@ -2105,7 +2146,16 @@ extern "C" fn fn_unwrap_key(
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
     let rstate = global_rlock!(STATE);
+    #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
+    #[cfg(feature = "fips")]
+    let mut session = {
+        let mut s = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        s.reset_fips_indicator();
+        s
+    };
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
     let cnt = cast_or_ret!(usize from attribute_count);
@@ -2135,7 +2185,15 @@ extern "C" fn fn_unwrap_key(
 
     let result = mech.unwrap_key(mechanism, &key, data, tmpl, factory);
     match result {
-        Ok(obj) => {
+        #[allow(unused_mut)]
+        Ok(mut obj) => {
+            #[cfg(feature = "fips")]
+            session.set_fips_indicator(fips::indicators::is_approved(
+                mechanism.mechanism,
+                CKF_UNWRAP,
+                Some(&key),
+                Some(&mut obj),
+            ));
             let kh = res_or_ret!(token.insert_object(s_handle, obj));
             unsafe {
                 core::ptr::write(key_handle as *mut _, kh);
