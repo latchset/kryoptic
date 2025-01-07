@@ -11,7 +11,7 @@ use crate::interface::*;
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
 use crate::storage;
-use crate::storage::sqlite_common::check_table;
+use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
@@ -773,6 +773,12 @@ impl Storage for NSSStorage {
     fn open(&mut self) -> Result<StorageTokenInfo> {
         let mut ret = CKR_OK;
         let mut conn = self.conn.lock()?;
+
+        /* Ensure secure delete is always set on the db
+         * Doing this before the attach statements ensures the
+         * same setting applies to all of the databases
+         */
+        set_secure_delete(&conn)?;
 
         if !self.config.no_cert_db {
             Self::db_attach(

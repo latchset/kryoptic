@@ -85,3 +85,9 @@ pub fn check_table(
         Err(e) => Err(e)?,
     }
 }
+
+pub fn set_secure_delete(
+    conn: &MutexGuard<'_, rusqlite::Connection>,
+) -> Result<()> {
+    Ok(conn.execute_batch("PRAGMA secure_delete = ON")?)
+}
