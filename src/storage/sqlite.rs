@@ -10,7 +10,7 @@ use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::format::{StdStorageFormat, StorageRaw};
-use crate::storage::sqlite_common::check_table;
+use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
 use itertools::Itertools;
@@ -279,7 +279,9 @@ impl StorageRaw for SqliteStorage {
             Ok(c) => Arc::new(Mutex::from(c)),
             Err(_) => return Err(CKR_TOKEN_NOT_PRESENT)?,
         };
-        Ok(())
+        /* Ensure secure delete is always set on the db */
+        let conn = self.conn.lock()?;
+        set_secure_delete(&conn)
     }
 
     fn flush(&mut self) -> Result<()> {
