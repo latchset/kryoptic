@@ -899,7 +899,19 @@ impl Storage for NSSStorage {
         for a in NSS_SKIP_ATTRIBUTES {
             let factory = facilities.factories.get_object_factory(&obj)?;
             match attributes.iter().position(|r| r.type_ == a) {
-                Some(_) => factory.set_attribute_default(a, &mut obj)?,
+                Some(_) => {
+                    factory.set_attribute_default(a, &mut obj)?;
+                    /* Paper over lack of validation flag storage
+                     * FIXME: remove once we have 3.2 spec and can store
+                     * official attribute */
+                    #[cfg(feature = "fips")]
+                    if a == CKA_VALIDATION_FLAGS {
+                        obj.set_attr(Attribute::from_ulong(
+                            CKA_VALIDATION_FLAGS,
+                            crate::fips::indicators::KRF_FIPS,
+                        ))?;
+                    }
+                }
                 None => (),
             }
         }
