@@ -363,6 +363,8 @@ fn test_rsa_operations() {
         ],
     ));
 
+    assert_eq!(check_validation(session, 1), true);
+
     let label = "Public Key test 1";
     let mut template = make_ptrs_template(&[(
         CKA_LABEL,
