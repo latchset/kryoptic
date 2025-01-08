@@ -1,4 +1,6 @@
-all:
+all: build
+
+build:
 	cargo build --features standard,nssdb
 
 fips:
@@ -18,3 +20,6 @@ fix-format:
 
 check-spell:
 	@.github/codespell.sh
+
+tests: build
+	src/tools/softhsm/test.sh
