@@ -5,8 +5,7 @@ use std::borrow::Cow;
 
 use crate::error::{Error, Result};
 use crate::interface::*;
-use crate::misc::zeromem;
-use crate::{bytes_to_vec, sizeof, void_ptr};
+use crate::misc::{bytes_to_vec, sizeof, void_ptr, zeromem};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AttrType {

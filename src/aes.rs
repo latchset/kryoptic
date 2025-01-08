@@ -7,16 +7,21 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::*;
-use crate::misc::zeromem;
+use crate::misc::{cast_params, zeromem};
 use crate::object::*;
 use crate::ossl::aes::*;
-use crate::{attr_element, cast_params};
 
 use once_cell::sync::Lazy;
 
+/// Smallest AES Key Size (128 bits)
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
+/// Medium AES Key size (192 bits)
 pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
+/// Biggest AES Key Size (256 bits)
 pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
+
+/// The AES block size is 128 bits (16 bytes) for all currently implemented
+/// variants
 pub const AES_BLOCK_SIZE: usize = 16;
 
 pub(crate) fn check_key_len(len: usize) -> Result<()> {
@@ -25,6 +30,14 @@ pub(crate) fn check_key_len(len: usize) -> Result<()> {
         _ => Err(CKR_KEY_SIZE_RANGE)?,
     }
 }
+
+/// The AES Key Factory object
+///
+/// Derives from the generic ObjectFactory, CommonKeyFactory and
+/// SecretKeyFactory
+///
+/// This is used to store the list of attributes allowed for an AES Key object, as well as provide
+/// method for generic manipulation of AES key objects (generation, derivation, wrapping ...)
 
 #[derive(Debug)]
 pub struct AesKeyFactory {
@@ -170,8 +183,21 @@ impl SecretKeyFactory for AesKeyFactory {
     }
 }
 
+/// A statically allocated Key Factory facility.
+///
+/// Static allocation allows a single implementation to be shared by all users.
+/// Factories store data that does not change for the life of the application
+/// so it is safe to allocate them only once.
 static AES_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(AesKeyFactory::new()));
+
+/// The Generic AES Mechanism object
+///
+/// Implements access to the Mechanisms functions applicable to the AES
+/// cryptosystem.
+/// The mechanism function can implement a crypto operation directly or return
+/// an allocated [AesOperation] object for operations that need to keep data
+/// around until they complete.
 
 #[derive(Debug)]
 pub(crate) struct AesMechanism {
@@ -406,6 +432,12 @@ impl Mechanism for AesMechanism {
     }
 }
 
+/// AES KDF Operation implementation
+///
+/// An AES Operation specific for Key Derivation that uses the AES cipher
+/// with various modes as the PRF to compute a derived key
+/// Implements [Derive]
+
 #[derive(Debug)]
 struct AesKDFOperation<'a> {
     mech: CK_MECHANISM_TYPE,
@@ -417,6 +449,7 @@ struct AesKDFOperation<'a> {
 }
 
 impl AesKDFOperation<'_> {
+    /// Helper function to register the AES KDF Mechanisms
     fn register_mechanisms(mechs: &mut Mechanisms) {
         if mechs.get(CKM_AES_ECB).is_ok() {
             mechs.add_mechanism(
@@ -440,6 +473,7 @@ impl AesKDFOperation<'_> {
         }
     }
 
+    /// Instantiates a new CKM_AES_ECB based KDF operation
     fn aes_ecb_new<'a>(
         params: CK_KEY_DERIVATION_STRING_DATA,
     ) -> Result<AesKDFOperation<'a>> {
@@ -464,6 +498,7 @@ impl AesKDFOperation<'_> {
         })
     }
 
+    /// Instantiates a new CKM_AES_CBC based KDF operation
     fn aes_cbc_new<'a>(
         params: CK_AES_CBC_ENCRYPT_DATA_PARAMS,
     ) -> Result<AesKDFOperation<'a>> {
@@ -500,6 +535,7 @@ impl MechOperation for AesKDFOperation<'_> {
 }
 
 impl Derive for AesKDFOperation<'_> {
+    /// Derives a Key using the parameters set on the AESKDFOperation object
     fn derive(
         &mut self,
         key: &Object,
@@ -547,6 +583,7 @@ impl Derive for AesKDFOperation<'_> {
     }
 }
 
+/// Registers all implemented AES Mechanisms and Factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     AesOperation::register_mechanisms(mechs);
     AesKDFOperation::register_mechanisms(mechs);

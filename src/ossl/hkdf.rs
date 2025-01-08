@@ -10,13 +10,12 @@ use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
 use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc;
+use crate::misc::*;
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
-use crate::{bytes_to_slice, cast_params};
 
 #[derive(Debug)]
 pub struct HKDFOperation {
@@ -212,14 +211,9 @@ impl Derive for HKDFOperation {
         }
 
         let (mut obj, keysize) = if self.emit_data_obj {
-            misc::common_derive_data_object(template, objfactories, self.prflen)
+            common_derive_data_object(template, objfactories, self.prflen)
         } else {
-            misc::common_derive_key_object(
-                key,
-                template,
-                objfactories,
-                self.prflen,
-            )
+            common_derive_key_object(key, template, objfactories, self.prflen)
         }?;
 
         if !self.expand && keysize != self.prflen {

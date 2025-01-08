@@ -7,10 +7,9 @@ use crate::ec::ecdsa::{MAX_EC_SIZE_BITS, MIN_EC_SIZE_BITS};
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms, Operation};
+use crate::misc::cast_params;
 use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
-
-use crate::cast_params;
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     ECDHMechanism::register_mechanisms(mechs);
