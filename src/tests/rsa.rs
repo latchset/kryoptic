@@ -202,6 +202,7 @@ fn test_rsa_operations() {
         sLen: salt.len() as CK_ULONG,
     };
 
+    /* this is the only allowed mechanism */
     let mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_SHA384_RSA_PKCS_PSS,
         pParameter: &params as *const _ as CK_VOID_PTR,
@@ -221,6 +222,27 @@ fn test_rsa_operations() {
      * something usable */
     let ret = sig_verify(session, pub_key_handle, &msg, &signed, &mechanism);
     assert_eq!(ret, CKR_OK);
+
+    if testtokn.dbtype != "nssdb" {
+        /* this is not allowed mechanism per CKA_ALLOWED_MECHANISMS */
+        let params = CK_RSA_PKCS_PSS_PARAMS {
+            hashAlg: CKM_SHA512,
+            mgf: CKG_MGF1_SHA512,
+            sLen: salt.len() as CK_ULONG,
+        };
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_SHA512_RSA_PKCS_PSS,
+            pParameter: &params as *const _ as CK_VOID_PTR,
+            ulParameterLen: sizeof!(CK_RSA_PKCS_PSS_PARAMS),
+        };
+
+        match sig_gen(session, pri_key_handle, &msg, &mechanism) {
+            Ok(_) => panic!(
+                "The operation using non-allowed mechanisms should have failed"
+            ),
+            Err(e) => assert_eq!(e.rv(), CKR_MECHANISM_INVALID),
+        }
+    }
 
     #[cfg(not(feature = "fips"))]
     {
