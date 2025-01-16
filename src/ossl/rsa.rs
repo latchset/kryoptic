@@ -25,7 +25,7 @@ pub const MIN_RSA_SIZE_BITS: usize = 1024;
 #[cfg(feature = "fips")]
 pub const MIN_RSA_SIZE_BITS: usize = 2048;
 
-pub const MAX_RSA_SIZE_BITS: usize = 16536;
+pub const MAX_RSA_SIZE_BITS: usize = 16384;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
 static RSA_NAME: &[u8; 4] = b"RSA\0";
