@@ -749,12 +749,20 @@ impl AesOperation {
         if res != 1 {
             return Err(self.op_err(CKR_DEVICE_ERROR))?;
         }
-        if self.mech == CKM_AES_CBC_PAD {
-            let res =
-                unsafe { EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1) };
-            if res != 1 {
-                return Err(self.op_err(CKR_DEVICE_ERROR));
-            }
+        /* OpenSSL defaults to padding on, so we need to turn it explicitly
+         * off for mechanisms that do not use it because PKCS#11 does not
+         * implicitly provide padding. */
+        let res = match self.mech {
+            CKM_AES_ECB | CKM_AES_CBC => unsafe {
+                EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 0)
+            },
+            CKM_AES_CBC_PAD => unsafe {
+                EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1)
+            },
+            _ => 1,
+        };
+        if res != 1 {
+            return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
         if self.mech == CKM_AES_CCM {
@@ -850,11 +858,14 @@ impl AesOperation {
         if res != 1 {
             return Err(self.op_err(CKR_DEVICE_ERROR))?;
         }
-        let res = unsafe {
-            EVP_CIPHER_CTX_set_padding(
-                self.ctx.as_mut_ptr(),
-                if self.mech == CKM_AES_CBC_PAD { 1 } else { 0 },
-            )
+        let res = match self.mech {
+            CKM_AES_ECB | CKM_AES_CBC => unsafe {
+                EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 0)
+            },
+            CKM_AES_CBC_PAD => unsafe {
+                EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1)
+            },
+            _ => 1,
         };
         if res != 1 {
             return Err(self.op_err(CKR_DEVICE_ERROR));
@@ -1594,10 +1605,10 @@ impl Encryption for AesOperation {
                     }
                 }
             }
-            CKM_AES_CTS | CKM_AES_CBC | CKM_AES_ECB => (),
+            CKM_AES_CTS => (),
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => (),
-            CKM_AES_CBC_PAD => {
+            CKM_AES_ECB | CKM_AES_CBC | CKM_AES_CBC_PAD => {
                 /* check if this is a second call after
                  * we saved the final buffer */
                 if self.finalbuf.len() > 0 {
@@ -1628,6 +1639,11 @@ impl Encryption for AesOperation {
                         )
                     };
                     if res != 1 {
+                        if self.mech != CKM_AES_CBC_PAD {
+                            /* For raw ECB and CBC mode this most likely means there
+                             * was data left in the internal OpenSSL buffer */
+                            return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        }
                         return Err(self.op_err(CKR_DEVICE_ERROR));
                     }
                     outlen = usize::try_from(outl)?;
