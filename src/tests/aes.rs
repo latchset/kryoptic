@@ -112,6 +112,23 @@ fn test_aes_operations() {
         ));
         assert_eq!(dec.len(), data.len());
         assert_eq!(data.as_bytes(), dec.as_slice());
+
+        /* AES CBC negative test */
+        let data = "short";
+        let iv = "FEDCBA0987654321";
+        err_or_panic!(
+            encrypt(
+                session,
+                handle,
+                data.as_bytes(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CBC,
+                    pParameter: void_ptr!(iv.as_bytes()),
+                    ulParameterLen: iv.len() as CK_ULONG,
+                }
+            ),
+            CKR_DATA_LEN_RANGE
+        );
     }
 
     {
