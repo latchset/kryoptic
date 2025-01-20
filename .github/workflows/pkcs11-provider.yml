@@ -1,0 +1,89 @@
+---
+name: Integration tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Integration test with pkcs11-provider
+    runs-on: ubuntu-22.04
+    container: fedora:latest
+    steps:
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: DNF cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/dnf
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
+      - name: Install Dependencies (only dynamic build)
+        run: |
+            dnf -y install clang git meson cargo expect pkgconf-pkg-config \
+              openssl-devel openssl opensc p11-kit-devel gnutls-utils \
+              gcc g++ sqlite-devel python3-six which
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          git config --global --add safe.directory /__w/kryoptic/kryoptic
+          cargo generate-lockfile
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            kryoptic/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('kryoptic/**/Cargo.lock') }}
+
+      - name: Build & test
+        run: |
+          cargo build --features dynamic,standard,nssdb
+          cargo test --features dynamic,standard,nssdb | tee testout.log 2>&1
+          grep -q "0 failed" testout.log
+
+      - name: Get pkcs11-provider
+        id: pkcs11_provider_setup
+        run: |
+          echo "KRYOPTIC=${PWD}" >> "$GITHUB_OUTPUT"
+          git clone https://github.com/latchset/pkcs11-provider.git
+          cd pkcs11-provider
+
+      - name: Setup & build & test pkcs11-provider
+        env:
+          KRYOPTIC: ${{ steps.pkcs11_provider_setup.outputs.KRYOPTIC }}
+        run: |
+          cd pkcs11-provider
+          git config --global --add safe.directory \
+              /__w/pkcs11-provider/pkcs11-provider
+          git submodule update --init
+          meson setup builddir
+          meson compile -C builddir
+          meson test --num-processes 1 -C builddir
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Test logs kryoptic
+          path: |
+            pkcs11-provider/builddir/meson-logs/
+            pkcs11-provider/builddir/tests/kryoptic*/p11prov-debug.log
+            pkcs11-provider/builddir/tests/kryoptic*/testvars
+            pkcs11-provider/builddir/tests/kryoptic*/openssl.cnf
+            pkcs11-provider/builddir/tests/*.log
+
