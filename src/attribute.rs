@@ -389,7 +389,7 @@ fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
 conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
 
 fn date_to_vec(val: CK_DATE) -> Vec<u8> {
-    let mut v = Vec::with_capacity(8);
+    let mut v = vec![0u8; 8];
     v[0] = val.year[0];
     v[1] = val.year[1];
     v[2] = val.year[2];
@@ -486,6 +486,12 @@ impl CK_ATTRIBUTE {
         }
     }
     pub fn to_string(&self) -> Result<String> {
+        if self.ulValueLen == 0 {
+            return Ok(String::new());
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
         let buf: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const _,
@@ -498,6 +504,12 @@ impl CK_ATTRIBUTE {
         }
     }
     pub fn to_slice(&self) -> Result<&[u8]> {
+        if self.ulValueLen == 0 {
+            return Ok(&[]);
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
         Ok(unsafe {
             std::slice::from_raw_parts(
                 self.pValue as *const u8,
@@ -509,6 +521,17 @@ impl CK_ATTRIBUTE {
         Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
     pub fn to_date(&self) -> Result<CK_DATE> {
+        if self.ulValueLen == 0 {
+            /* set 0000-00-00 */
+            return Ok(CK_DATE {
+                year: [0x30, 0x30, 0x30, 0x30],
+                month: [0x30, 0x30],
+                day: [0x30, 0x30],
+            });
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
         if self.ulValueLen != 8 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
