@@ -21,7 +21,12 @@ fn rsa_check_import(obj: &Object) -> Result<()> {
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     };
     match obj.get_attr_as_ulong(CKA_MODULUS_BITS) {
-        Ok(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        Ok(b) => {
+            let len = usize::try_from((b + 7) / 8)?;
+            if modulus.len() != len {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        }
         Err(e) => {
             if !e.attr_not_found() {
                 return Err(e);
