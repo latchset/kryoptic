@@ -245,7 +245,7 @@ struct FipsMechanism {
 
 struct FipsChecks {
     keys: [FipsKeyType; 15],
-    mechs: [FipsMechanism; 67],
+    mechs: [FipsMechanism; 71],
 }
 
 /* TODO: double check the values, this is just an initial
@@ -782,6 +782,15 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             ],
             genflags: 0,
         },
+        FipsMechanism {
+            mechanism: CKM_TLS_MAC,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [
+                restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+                restrict!(),
+            ],
+            genflags: 0,
+        },
         /* Key gen, gen/derive */
         FipsMechanism {
             mechanism: CKM_PKCS5_PBKD2,
@@ -796,10 +805,10 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_GENERIC_SECRET_KEY_GEN,
             operations: CKF_GENERATE,
             restrictions: [
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
                 restrict!(),
             ],
-            genflags: CKF_DERIVE,
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
         },
         FipsMechanism {
             mechanism: CKM_HKDF_KEY_GEN,
@@ -839,6 +848,45 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
                 | CKF_DECRYPT
                 | CKF_WRAP
                 | CKF_UNWRAP
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_TLS12_MASTER_KEY_DERIVE,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(CKK_GENERIC_SECRET, step!(48 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_TLS12_KEY_AND_MAC_DERIVE,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_TLS12_KEY_SAFE_DERIVE,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
                 | CKF_DERIVE,
         },
         FipsMechanism {
@@ -1104,5 +1152,6 @@ pub fn is_approved(
         }
     }
 
+    /* mechanism not found in the indicators table -- not allowed */
     false
 }
