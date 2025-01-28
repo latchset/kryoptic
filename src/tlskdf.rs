@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::CkAttrs;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
 use crate::interface::*;
@@ -11,6 +11,9 @@ use crate::mechanism::*;
 use crate::misc::CK_ULONG_SIZE;
 use crate::object::{Object, ObjectFactories};
 use crate::{bytes_to_slice, bytes_to_vec, cast_params};
+
+#[cfg(feature = "fips")]
+use crate::hmac::test_get_hmac;
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
@@ -41,11 +44,13 @@ pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
 
 const TLS_MASTER_SECRET_SIZE: CK_ULONG = 48;
 const TLS_RANDOM_SEED_SIZE: usize = 32;
-const TLS_MASTER_SECRET_ALLOWED_MECHS: [CK_ULONG; 4] = [
+const TLS_MASTER_SECRET_ALLOWED_MECHS: [CK_ULONG; 6] = [
     CKM_TLS12_KEY_AND_MAC_DERIVE,
     CKM_TLS12_KEY_SAFE_DERIVE,
-    CKM_TLS12_KDF,
-    CKM_TLS12_MAC,
+    CKM_TLS_KDF,
+    CKM_TLS12_KDF, /* deprecated alias for CKM_TLS_KDF */
+    CKM_TLS_MAC,
+    CKM_TLS12_MAC, /* deprecated alias for CKM_TLS_MAC */
 ];
 const TLS_MASTER_SECRET_LABEL: &[u8; 13] = b"master secret";
 const TLS_KEY_EXPANSION_LABEL: &[u8; 13] = b"key expansion";
@@ -200,6 +205,60 @@ impl TLSPRFMechanism {
     }
 }
 
+#[cfg(feature = "fips")]
+struct FIPSSelftest {
+    result: CK_RV,
+}
+
+#[cfg(feature = "fips")]
+static TLS_PRF_SELFTEST: Lazy<FIPSSelftest> = Lazy::new(|| {
+    let mut status = FIPSSelftest {
+        result: CKR_FIPS_SELF_TEST_FAILED,
+    };
+
+    /* Test vector taken from OpenSSL selftest */
+    let prf: CK_MECHANISM_TYPE = CKM_SHA256_HMAC;
+    let secret = hex::decode("202c88c00f84a17a20027079604787461176455539e705be730890602c289a5001e34eeb3a043e5d52a65e66125188bf").unwrap();
+    let label: &[u8] = b"key expansion";
+    let randoms = hex::decode("ae6c806f8ad4d80784549dff28a4b58fd837681a51d928c3e30ee5ff14f3986862e1fd91f23f558a605f28478c58cf72637b89784d959df7e946d3f07bd1b616").unwrap();
+    let mut seed = Vec::<u8>::with_capacity(label.len() + randoms.len());
+    seed.extend_from_slice(&label);
+    seed.extend_from_slice(&randoms);
+
+    let expect = hex::decode("d06139889fffac1e3a71865f504aa5d0d2a2e89506c6f2279b670c3e1b74f531016a2530c51a3a0f7e1d6590d0f0566b2f387f8d11fd4f731cdd572d2eae927f6f2f81410b25e6960be68985add6c38445ad9f8c64bf8068bf9a6679485d966f1ad6f68b43495b10a683755ea2b858d70ccac7ec8b053c6bd41ca299d4e51928").unwrap();
+
+    /* mock key */
+    let mut key = Object::new();
+    key.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))
+        .unwrap();
+    key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))
+        .unwrap();
+    key.set_attr(Attribute::from_bytes(CKA_VALUE, secret.clone()))
+        .unwrap();
+    key.set_attr(Attribute::from_ulong(
+        CKA_VALUE_LEN,
+        secret.len() as CK_ULONG,
+    ))
+    .unwrap();
+    key.set_attr(Attribute::from_bool(CKA_DERIVE, true))
+        .unwrap();
+
+    let mech = test_get_hmac(prf);
+
+    let mut tlsprf = match TLSPRF::init(&key, &mech, prf) {
+        Ok(a) => a,
+        Err(_) => return status,
+    };
+    let out = match tlsprf.finish(&seed, expect.len()) {
+        Ok(a) => a,
+        Err(_) => return status,
+    };
+    if out == expect {
+        status.result = CKR_OK;
+    }
+    status
+});
+
 impl Mechanism for TLSPRFMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
@@ -274,6 +333,11 @@ unsafe impl Sync for TLSKDFOperation {}
 
 impl TLSKDFOperation {
     fn new(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
+        #[cfg(feature = "fips")]
+        if TLS_PRF_SELFTEST.result != CKR_OK {
+            return Err(TLS_PRF_SELFTEST.result)?;
+        }
+
         match mech.mechanism {
             CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
             CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
@@ -461,7 +525,7 @@ impl TLSKDFOperation {
     ) -> Result<CkAttrs<'a>> {
         /* augment template, then check that it has all the right values */
         let allowed = unsafe {
-            std::mem::transmute::<&[CK_ULONG; 4], &[u8; 4 * CK_ULONG_SIZE]>(
+            std::mem::transmute::<&[CK_ULONG; 6], &[u8; 6 * CK_ULONG_SIZE]>(
                 &TLS_MASTER_SECRET_ALLOWED_MECHS,
             )
         };
@@ -797,10 +861,17 @@ struct TLSMACOperation {
     outputlen: usize,
     seed: Vec<u8>,
     tlsprf: TLSPRF,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl TLSMACOperation {
     fn new(mech: &CK_MECHANISM, key: &Object) -> Result<TLSMACOperation> {
+        #[cfg(feature = "fips")]
+        if TLS_PRF_SELFTEST.result != CKR_OK {
+            return Err(TLS_PRF_SELFTEST.result)?;
+        }
+
         match mech.mechanism {
             CKM_TLS_MAC | CKM_TLS12_MAC => (),
             _ => return Err(CKR_MECHANISM_INVALID)?,
@@ -826,6 +897,8 @@ impl TLSMACOperation {
             outputlen: maclen,
             seed: label.to_vec(),
             tlsprf: TLSPRF::init(key, mac, prf)?,
+            #[cfg(feature = "fips")]
+            fips_approved: None,
         })
     }
 
@@ -857,6 +930,12 @@ impl TLSMACOperation {
 
         let out = self.tlsprf.finish(&self.seed, self.outputlen)?;
         output.copy_from_slice(out.as_slice());
+
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = Some(true);
+        }
+
         Ok(())
     }
 }
@@ -868,6 +947,11 @@ impl MechOperation for TLSMACOperation {
 
     fn finalized(&self) -> bool {
         self.finalized
+    }
+
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
     }
 }
 

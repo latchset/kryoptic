@@ -250,7 +250,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "fips", test))]
 pub fn test_get_hmac(mech: CK_MECHANISM_TYPE) -> Box<dyn Mechanism> {
     for hs in &hash::HASH_MECH_SET {
         if hs.mac == mech {
