@@ -276,10 +276,12 @@ impl TLSKDFOperation {
     fn new(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         match mech.mechanism {
             CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
-            CKM_TLS12_KEY_AND_MAC_DERIVE => Self::new_tls12_keymac_derive(mech),
-            CKM_TLS12_KEY_SAFE_DERIVE => Self::new_tls12_keymac_derive(mech),
-            CKM_TLS12_KDF => Self::new_tls_generic_key_derive(mech),
-            CKM_TLS_KDF => Self::new_tls_generic_key_derive(mech),
+            CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
+                Self::new_tls12_keymac_derive(mech)
+            }
+            CKM_TLS12_KDF | CKM_TLS_KDF => {
+                Self::new_tls_generic_key_derive(mech)
+            }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         }
     }
@@ -770,10 +772,7 @@ impl Derive for TLSKDFOperation {
             CKM_TLS12_MASTER_KEY_DERIVE => {
                 self.derive_master_key(key, template, mechanisms, objfactories)
             }
-            CKM_TLS12_KEY_AND_MAC_DERIVE => {
-                self.derive_mac_key(key, template, mechanisms, objfactories)
-            }
-            CKM_TLS12_KEY_SAFE_DERIVE => {
+            CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
                 self.derive_mac_key(key, template, mechanisms, objfactories)
             }
             CKM_TLS12_KDF | CKM_TLS_KDF => {
