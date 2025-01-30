@@ -53,6 +53,10 @@ fn incomplete(e: Error) -> Error {
     }
 }
 
+/// This is a generic container for all PKCS#11 Objects
+/// For Key objects it is possible to set the zeroize feature which
+/// will cause zeroization of every attribute when the object is dropped.
+
 #[derive(Debug, Clone)]
 pub struct Object {
     handle: CK_OBJECT_HANDLE,
@@ -81,10 +85,14 @@ impl Object {
         }
     }
 
+    /// Set zeroization for the whole object, this is done when
+    /// the object is dropped via the Drop trait and memory is freed.
     pub fn set_zeroize(&mut self) {
         self.zeroize = true;
     }
 
+    /// Generates the internal per object unique id
+    /// This is generally called at object creation or import
     pub fn generate_unique(&mut self) {
         if !self
             .attributes
@@ -97,6 +105,8 @@ impl Object {
         }
     }
 
+    /// Allow for a full copy of all attributes but regenerates the
+    /// unique id
     pub fn blind_copy(&self) -> Result<Object> {
         let mut obj = Object::new();
         obj.generate_unique();
@@ -109,6 +119,8 @@ impl Object {
         Ok(obj)
     }
 
+    /// Set the current handle being provided to the application, this
+    /// is an internal cache that is not stored in the databases.
     pub fn set_handle(&mut self, h: CK_OBJECT_HANDLE) {
         self.handle = h
     }
@@ -117,6 +129,7 @@ impl Object {
         self.handle
     }
 
+    /// Set the session this object is tied to (for session objects).
     pub fn set_session(&mut self, s: CK_SESSION_HANDLE) {
         self.session = s
     }
@@ -147,6 +160,8 @@ impl Object {
         Ok(())
     }
 
+    /// Sets an attribute, but returns failure if a pre-existing value
+    /// is present and does not match the value being set.
     pub fn check_or_set_attr(&mut self, a: Attribute) -> Result<bool> {
         let atype = a.get_type();
         match self.attributes.iter().find(|r| r.get_type() == atype) {
@@ -176,6 +191,9 @@ impl Object {
     attr_as_type! {make get_attr_as_string; with String; StringType; via to_string}
     attr_as_type! {make get_attr_as_bytes; with &Vec<u8>; BytesType; via to_bytes}
 
+    /// Checks that the attributes in the template are present on the object
+    /// with the specified value if any value is specified in the individual
+    /// template attribute.
     pub fn match_template(&self, template: &[CK_ATTRIBUTE]) -> bool {
         for ck_attr in template {
             match self.attributes.iter().find(|r| r.match_ck_attr(ck_attr)) {
@@ -186,6 +204,12 @@ impl Object {
         true
     }
 
+    /// Checks that the object is an object of the type specified in the class
+    /// and ktype arguments and that it supports the operations specified in
+    /// the op argument.
+    ///
+    /// If ktype is not specified (by setting its value to
+    /// CK_UNAVAILABLE_INFORMATION) only the class and operations are checked.
     pub fn check_key_ops(
         &self,
         class: CK_OBJECT_CLASS,
@@ -269,6 +293,10 @@ bitflags! {
     }
 }
 
+/// This object is used to list the attribute that are allowed for specific
+/// object types and also can define what if any their default value is and
+/// what operation can be done on this object by applications.
+
 #[derive(Debug, Clone)]
 pub struct ObjectAttr {
     attribute: Attribute,
@@ -324,6 +352,12 @@ macro_rules! bytes_attr_not_empty {
 }
 #[allow(unused_imports)]
 pub(crate) use bytes_attr_not_empty;
+
+/// This trait must be implemented by any mechanisms that defines an
+/// object type, like key object of a specific type. The ObjectFactory
+/// is responsible for defining what are the allowed attributes for the
+/// specific object/key type, and any special behaviors for object
+/// creation/import or other manipulation.
 
 pub trait ObjectFactory: Debug + Send + Sync {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
@@ -455,6 +489,20 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
+    /// This function implements the creation/import/derivation of any object
+    /// type and encodes common rules to interpret the list of ObjectAttr for
+    /// the object.
+    ///
+    /// The unacceptable_flags argument defines what attributes can't be
+    /// manipulated by the calling function when their flag matches one of
+    /// the flags specified in this argument.
+    ///
+    /// The required_flags argument defines what attributes must be provided
+    /// in the template by the calling function when their flag matches one of
+    /// the flags specified in this argument.
+    ///
+    /// This function should not be overridden by specialized factories.
+
     fn internal_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -522,6 +570,8 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(())
     }
 
+    /// Helper to copy objects that respects the semantics and restrictions
+    /// defined in the PKCS#11 specification.
     fn default_copy(
         &self,
         origin: &Object,
@@ -600,10 +650,16 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
+    /// Helpers to allow serialization to export key material.
+    /// A key type factory should implement this function only if a
+    /// standardized serialization format specified in PKCS#11 exists.
     fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
         return Err(CKR_GENERAL_ERROR)?;
     }
 
+    /// Helper to allow deserialization of a data packet wrapped by
+    /// another mechanism. Useful only for key type factories for which a
+    /// standard serialization format is specified.
     fn import_from_wrapped(
         &self,
         mut _data: Vec<u8>,
@@ -612,10 +668,19 @@ pub trait ObjectFactory: Debug + Send + Sync {
         return Err(CKR_GENERAL_ERROR)?;
     }
 
+    /// Helper to access traits that are only available for objects of
+    /// class CKO_SECRET_KEY. Other key type factories should not
+    /// implement this method.
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Err(CKR_GENERAL_ERROR)?
     }
 
+    /// Helper function to check if the attributes requested in the template
+    /// are marked as sensitive or invalid. Only the first error is returned
+    /// if multiple issues are found in the template.
+    /// However the ulValueLen parameter of each attribute in the template is
+    /// appropriately set based on the type of issue encountered as required
+    /// by the PKCS#11 specification.
     fn check_get_attributes(
         &self,
         template: &mut [CK_ATTRIBUTE],
@@ -648,6 +713,10 @@ pub trait ObjectFactory: Debug + Send + Sync {
         }
     }
 
+    /// Helper function to check if the attributes specified in the template
+    /// can be modified according to the PKCS#11 rules for the specific object.
+    /// If an attribute provided in the template cannot be changed an
+    /// appropriate error is returned.
     fn check_set_attributes(&self, template: &[CK_ATTRIBUTE]) -> Result<()> {
         let attrs = self.get_attributes();
         for ck_attr in template {
@@ -676,6 +745,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(())
     }
 
+    /// Helper function to change the attributes of an existing object.
+    /// This helpers performs the necessary checks required to permit
+    /// object modification in accordance to the PKCS#11 specification
+    /// and returns an error if any check fails before any attribute is
+    /// modified.
     fn set_object_attributes(
         &self,
         obj: &mut Object,
@@ -697,7 +771,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
     }
 }
 
-/* pkcs11-spec-v3.1 4.5 Data Objects */
+/// This is a specialized factory for objects of class CKO_DATA
+///
+/// [Data Objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203218)
+/// (Version 3.1)
+
 #[derive(Debug)]
 struct DataFactory {
     attributes: Vec<ObjectAttr>,
@@ -742,7 +820,12 @@ impl ObjectFactory for DataFactory {
     }
 }
 
-/* pkcs11-spec-v3.1 4.6 Certificate objects */
+/// This is a common trait to define factories for objects of class
+/// CKO_CERTIFICATE
+///
+/// [Certificate objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203221)
+/// (Version 3.1)
+
 pub trait CertFactory {
     fn init_common_certificate_attrs(&self) -> Vec<ObjectAttr> {
         vec![
@@ -796,7 +879,12 @@ pub trait CertFactory {
     }
 }
 
-/* pkcs11-spec-v3.1 4.6.3 X.509 public key certificate objects */
+/// This is a specialized factory for objects of class CKO_CERTIFICATE
+/// and CKA_CERTIFICATE_TYPE of value CKC_X_509
+///
+/// [X.509 public key certificate objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203224)
+/// (Version 3.1)
+
 #[derive(Debug)]
 struct X509Factory {
     attributes: Vec<ObjectAttr>,
@@ -905,7 +993,12 @@ impl ObjectFactory for X509Factory {
 
 impl CertFactory for X509Factory {}
 
-/* pkcs11-spec-v3.1 4.7 Key objects */
+/// This is a common trait to define factories for objects that
+/// are keys, this trait defines attribute common to all key classes.
+///
+/// [Key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203227)
+/// (Version 3.1)
+
 pub trait CommonKeyFactory {
     fn init_common_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
@@ -940,7 +1033,12 @@ pub trait CommonKeyFactory {
     }
 }
 
-/* pkcs11-spec-v3.1 4.8 Public key objects */
+/// This is a common trait to define factories for key objects of class
+/// CKO_PUBLIC_KEY
+///
+/// [Public key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203230)
+/// (Version 3.1)
+
 #[allow(dead_code)]
 pub trait PubKeyFactory {
     fn init_common_public_key_attrs(&self) -> Vec<ObjectAttr> {
@@ -970,7 +1068,12 @@ pub trait PubKeyFactory {
     }
 }
 
-/* pkcs11-spec-v3.1 4.9 Private key objects */
+/// This is a common trait to define factories for key objects of class
+/// CKO_PRIVATE_KEY
+///
+/// [Private key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203231)
+/// (Version 3.1)
+
 #[allow(dead_code)]
 pub trait PrivKeyFactory {
     fn init_common_private_key_attrs(&self) -> Vec<ObjectAttr> {
@@ -1042,7 +1145,12 @@ macro_rules! ok_or_clear {
     };
 }
 
-/* pkcs11-spec-v3.1 4.10 Secre key objects */
+/// This is a common trait to define factories for key objects of class
+/// CKO_SECRET_KEY
+///
+/// [Secret key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203232)
+/// (Version 3.1)
+
 pub trait SecretKeyFactory {
     fn init_common_secret_key_attrs(&self) -> Vec<ObjectAttr> {
         vec![
@@ -1156,6 +1264,9 @@ pub trait SecretKeyFactory {
         }
     }
 
+    /// Helper to set a key on a key object, individual factories can override
+    /// this function to ensure the key is appropriately formed for the type.
+    /// For example by checking the buffer length.
     fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
         let keylen = key.len();
         obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
@@ -1163,12 +1274,23 @@ pub trait SecretKeyFactory {
         Ok(())
     }
 
+    /// Helper to allow other mechanisms select the correct key length.
+    /// Specialized factories are expected to override this function.
+    ///
+    /// The expected input is the maximum amount of bytes the caller can
+    /// generate, the output will be the allowable size closest to this input
+    /// that the mechanism should use.
     fn recommend_key_size(&self, _: usize) -> Result<usize> {
         return Err(CKR_GENERAL_ERROR)?;
     }
 }
 
-/* pkcs11-spec-v3.1 6.8 Generic secret key */
+/// This is a specialized factory for objects of class CKO_SECRET_KEY
+/// and CKA_KEY_TYPE of value CKK_GENERIC_SECRET
+///
+/// [Generic secret key](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203468)
+/// (Version 3.1)
+
 #[derive(Debug)]
 pub struct GenericSecretKeyFactory {
     keysize: usize,
@@ -1339,6 +1461,11 @@ impl Mechanism for GenericSecretKeyMechanism {
         &self.info
     }
 
+    /// Implements the Generic Secret Key Generation
+    ///
+    /// [Generic secret key generation](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203471)
+    /// (Version 3.1)
+
     fn generate_key(
         &self,
         mech: &CK_MECHANISM,
@@ -1381,6 +1508,12 @@ impl ObjectType {
         }
     }
 }
+
+/// This structure holds all of the registered object factories for
+/// the implemented object types.
+///
+/// It provides accessors to find and retrieve object factories, and
+/// to add object factories at token initialization.
 
 #[derive(Debug)]
 pub struct ObjectFactories {
@@ -1455,6 +1588,7 @@ impl ObjectFactories {
             .create(template)
     }
 
+    /// Returns the object factory associated to the specified object
     pub fn get_object_factory(
         &self,
         obj: &Object,
@@ -1470,6 +1604,10 @@ impl ObjectFactories {
         self.get_factory(ObjectType::new(class, type_))
     }
 
+    /// Helper to check if the template includes invalid or sensitive
+    /// attributes related to the specified object. This is done by
+    /// sourcing the object factory related to the provide object and
+    /// then using object type specific attribute lists.
     pub fn check_sensitive(
         &self,
         obj: &Object,
@@ -1489,6 +1627,9 @@ impl ObjectFactories {
         Ok(())
     }
 
+    /// Returns the list of attributes marked as sensitive for the object.
+    /// Sources the object specific factory to determine which attributes
+    /// are sensitive.
     pub fn get_sensitive_attrs(
         &self,
         obj: &Object,
@@ -1511,6 +1652,12 @@ impl ObjectFactories {
         Ok(v)
     }
 
+    /// Fills the template with the specified attributes from the provided
+    /// object. Ensures the attribute are valid and can be returned. If the
+    /// object is not extractable and a sensitive attribute is requested an
+    /// appropriate error is returned and the template is not filled, except
+    /// for setting the ulValueLen of the forbidden attributes appropriately
+    /// as required by the PKCS#11 specification.
     pub fn get_object_attributes(
         &self,
         obj: &Object,
@@ -1567,6 +1714,8 @@ impl ObjectFactories {
         }
     }
 
+    /// Uses an object type specific copy operation to return a copy
+    /// of the provided object
     pub fn copy(
         &self,
         obj: &Object,
@@ -1578,6 +1727,8 @@ impl ObjectFactories {
         self.get_object_factory(obj)?.copy(obj, template)
     }
 
+    /// Finds the appropriate object factory to operate on the object
+    /// defined by the template
     pub fn get_obj_factory_from_key_template(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -1594,6 +1745,8 @@ impl ObjectFactories {
         self.get_factory(ObjectType::new(class, key_type))
     }
 
+    /// Finds the appropriate object factory for the derivation template
+    /// provided and attempts a key derivation operation.
     pub fn derive_key_from_template(
         &self,
         key: &Object,
