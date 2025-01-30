@@ -691,7 +691,7 @@ impl AesOperation {
         }
     }
 
-    fn encrypt_initialize(&mut self) -> Result<()> {
+    fn cipher_initialize(&mut self, enc: bool) -> Result<()> {
         let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
             Err(e) => {
@@ -703,11 +703,12 @@ impl AesOperation {
          * will attempt to set parameters that require it on the context,
          * before key and iv can be installed */
         let res = unsafe {
-            EVP_EncryptInit_ex2(
+            EVP_CipherInit_ex2(
                 self.ctx.as_mut_ptr(),
                 evpcipher.as_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
+                if enc { 1 } else { 0 },
                 std::ptr::null(),
             )
         };
@@ -734,7 +735,7 @@ impl AesOperation {
 
         /* set key, iv, additional params */
         let res = unsafe {
-            EVP_EncryptInit_ex2(
+            EVP_CipherInit_ex2(
                 self.ctx.as_mut_ptr(),
                 std::ptr::null(),
                 self.key.raw.as_ptr(),
@@ -743,6 +744,7 @@ impl AesOperation {
                 } else {
                     std::ptr::null()
                 },
+                if enc { 1 } else { 0 },
                 params_ptr,
             )
         };
@@ -768,113 +770,7 @@ impl AesOperation {
         if self.mech == CKM_AES_CCM {
             let mut outl: c_int = 0;
             let res = unsafe {
-                EVP_EncryptUpdate(
-                    self.ctx.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    &mut outl,
-                    std::ptr::null(),
-                    c_int::try_from(self.params.datalen)?,
-                )
-            };
-            if res != 1 {
-                return Err(self.op_err(CKR_DEVICE_ERROR));
-            }
-        }
-
-        if self.params.aad.len() > 0 {
-            let mut outl: c_int = 0;
-            let res = unsafe {
-                EVP_EncryptUpdate(
-                    self.ctx.as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    &mut outl,
-                    self.params.aad.as_ptr(),
-                    c_int::try_from(self.params.aad.len())?,
-                )
-            };
-            if res != 1 {
-                return Err(self.op_err(CKR_DEVICE_ERROR));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn decrypt_initialize(&mut self) -> Result<()> {
-        let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(self.op_err(e.rv()));
-            }
-        };
-
-        /* Need to initialize the cipher on the ctx first, as some modes
-         * will attempt to set parameters that require it on the context,
-         * before key and iv can be installed */
-        let res = unsafe {
-            EVP_DecryptInit_ex2(
-                self.ctx.as_mut_ptr(),
-                evpcipher.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-            )
-        };
-        if res != 1 {
-            return Err(self.op_err(CKR_DEVICE_ERROR));
-        }
-
-        /* IV ctrl calls for AEAD modes */
-        self.prep_iv()?;
-
-        if self.mech == CKM_AES_CCM {
-            /* set tag len too */
-            self.ccm_tag_len()?;
-        }
-
-        let mut params = OsslParam::new();
-        let params_ptr = if self.mech == CKM_AES_CTS {
-            self.cts_params(&mut params)?;
-            params.finalize();
-            params.as_ptr()
-        } else {
-            std::ptr::null()
-        };
-
-        /* set key, iv, additional params */
-        let res = unsafe {
-            EVP_DecryptInit_ex2(
-                self.ctx.as_mut_ptr(),
-                std::ptr::null(),
-                self.key.raw.as_ptr(),
-                if self.params.iv.buf.len() != 0 {
-                    self.params.iv.buf.as_ptr()
-                } else {
-                    std::ptr::null()
-                },
-                params_ptr,
-            )
-        };
-        if res != 1 {
-            return Err(self.op_err(CKR_DEVICE_ERROR))?;
-        }
-        let res = match self.mech {
-            CKM_AES_ECB | CKM_AES_CBC => unsafe {
-                EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 0)
-            },
-            CKM_AES_CBC_PAD => unsafe {
-                EVP_CIPHER_CTX_set_padding(self.ctx.as_mut_ptr(), 1)
-            },
-            _ => 1,
-        };
-        if res != 1 {
-            return Err(self.op_err(CKR_DEVICE_ERROR));
-        }
-
-        if self.mech == CKM_AES_CCM {
-            let mut outl: c_int = 0;
-            let res = unsafe {
-                EVP_DecryptUpdate(
+                EVP_CipherUpdate(
                     self.ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
                     &mut outl,
@@ -891,7 +787,7 @@ impl AesOperation {
         if self.params.aad.len() > 0 {
             let mut outl: c_int = 0;
             let res = unsafe {
-                EVP_DecryptUpdate(
+                EVP_CipherUpdate(
                     self.ctx.as_mut_ptr(),
                     std::ptr::null_mut(),
                     &mut outl,
@@ -1301,7 +1197,7 @@ impl AesOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        self.encrypt_initialize()?;
+        self.cipher_initialize(true)?;
 
         if self.params.iv.gen != CKG_NO_GENERATE {
             let iv = bytes_to_slice!(mut iv_ptr, self.params.iv.buf.len(), u8);
@@ -1367,7 +1263,7 @@ impl AesOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        self.decrypt_initialize()?;
+        self.cipher_initialize(false)?;
 
         #[cfg(feature = "fips")]
         self.fips_approval_aead()?;
@@ -1457,7 +1353,7 @@ impl Encryption for AesOperation {
         }
         if !self.in_use {
             self.in_use = true;
-            self.encrypt_initialize()?;
+            self.cipher_initialize(true)?;
         }
 
         let mut outlen = self.encryption_len(plain.len(), false)?;
@@ -1795,7 +1691,7 @@ impl Decryption for AesOperation {
         }
         if !self.in_use {
             self.in_use = true;
-            self.decrypt_initialize()?;
+            self.cipher_initialize(false)?;
         }
 
         let outlen = match self.mech {
