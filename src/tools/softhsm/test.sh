@@ -13,14 +13,35 @@ status() {
     exit 1
 }
 
+find_soname() {
+    for _lib in "$@" ; do
+        SO_NAME="${_lib}/libkryoptic_pkcs11.so"
+        if test -f "$SO_NAME" ; then
+            echo "Using kryoptic path $_lib"
+            SO_TARGET_DIR="$_lib"
+            return
+        fi
+    done
+    echo "skipped: Unable to find kryoptic PKCS#11 library"
+    exit 0
+}
+
+if [ "x$P11LIB" = "x" ]; then
+    find_soname \
+        "target/debug" \
+        "target/i686-unknown-linux-gnu/debug"
+
+    export P11LIB="${P11LIB:-$SO_NAME}"
+    export TARGET_DIR="${TARGET_DIR:-$SO_TARGET_DIR}"
+else
+    export TARGET_DIR="${TARGET_DIR:-target/debug}"
+fi
 
 export TOKDIR="${TOKDIR:-test/softhsm}"
-
 mkdir -p "${TOKDIR}"
 rm -f "${TOKDIR}"/token.sql
 
 export PINVALUE="${PINVALUE:-12345678}"
-export P11LIB="${P11LIB:-target/debug/libkryoptic_pkcs11.so}"
 export KRYOPTIC_CONF="${KRYOPTIC_CONF:-$TOKDIR/token.sql}"
 export TOKENLABEL="${TOKENLABEL:-Kryoptic Token}"
 export TOKENLABELURI="${TOKENLABELURI:-Kryoptic%20Token}"
@@ -35,7 +56,7 @@ pkcs11-tool --module "${P11LIB}" --init-token \
 pkcs11-tool --module "${P11LIB}" --so-pin "${PINVALUE}" \
     --login --login-type so --init-pin --pin "${PINVALUE}" >>${LOGFILE} 2>&1
 
-target/debug/softhsm_migrate -m "${P11LIB}" -i "${KRYOPTIC_CONF}" \
+$TARGET_DIR/softhsm_migrate -m "${P11LIB}" -i "${KRYOPTIC_CONF}" \
     -p "${PINVALUE}" -q "${PINVALUE}" "${SOFTHSM_TOKEN}" >>${LOGFILE} 2>&1
 
 P11DEFARGS=("--module=${P11LIB}" "--login" "--pin=${PINVALUE}" "--token-label=${TOKENLABEL}")
