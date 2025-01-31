@@ -26,42 +26,42 @@ pub(crate) fn check_key_len(len: usize) -> Result<()> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AesKeyFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl AesKeyFactory {
     fn new() -> AesKeyFactory {
-        let mut data: AesKeyFactory = AesKeyFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_secret_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: AesKeyFactory = Default::default();
+
+        factory.add_common_object_attrs();
+        factory.add_common_storage_attrs();
+        factory.add_common_key_attrs();
+        factory.add_common_secret_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive
             | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE_LEN; OAFlags::RequiredOnGenerate;
             Attribute::from_bytes; val Vec::new()));
 
         /* default to private */
-        let private = attr_element!(CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; Attribute::from_bool; val true);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_PRIVATE)
-        {
-            Some(idx) => data.attributes[idx] = private,
-            None => data.attributes.push(private),
+        let private = attr_element!(
+            CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
+            Attribute::from_bool; val true);
+        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
+            Some(idx) => attributes[idx] = private,
+            None => attributes.push(private),
         }
 
-        data
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -78,10 +78,6 @@ impl ObjectFactory for AesKeyFactory {
         }
 
         Ok(obj)
-    }
-
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
     }
 
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
@@ -137,18 +133,19 @@ impl ObjectFactory for AesKeyFactory {
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Ok(self)
     }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
 }
 
 impl CommonKeyFactory for AesKeyFactory {}
 
 impl SecretKeyFactory for AesKeyFactory {
-    fn default_object_unwrap(
-        &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        ObjectFactory::default_object_unwrap(self, template)
-    }
-
     fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
         let keylen = key.len();
         check_key_len(keylen)?;
