@@ -905,9 +905,9 @@ impl Storage for NSSStorage {
                      * FIXME: remove once we have 3.2 spec and can store
                      * official attribute */
                     #[cfg(feature = "fips")]
-                    if a == CKA_VALIDATION_FLAGS {
+                    if a == CKA_OBJECT_VALIDATION_FLAGS {
                         obj.set_attr(Attribute::from_ulong(
-                            CKA_VALIDATION_FLAGS,
+                            CKA_OBJECT_VALIDATION_FLAGS,
                             crate::fips::indicators::KRF_FIPS,
                         ))?;
                     }

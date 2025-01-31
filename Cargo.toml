@@ -82,8 +82,10 @@ kdf_all = [ "hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf" ]
 standard = [ "ecc_all", "hash_all", "kdf_all", "rsa"]
 
 ecc_fips = ["ecdsa", "ecdh"]
-fips = [ "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
+fips = [ "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa", "pkcs11_3_2" ]
 
 dynamic = [ ] # Builds against system libcrypto.so
+
+pkcs11_3_2 = [ ] # Enables use of 3.2 pre release hedaers
 
 slow = [] # Enables slow tests
