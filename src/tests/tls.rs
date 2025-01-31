@@ -500,6 +500,7 @@ fn test_tls_mechanisms() {
         }
     ));
     assert_eq!(mac.len(), 64);
+    assert_eq!(check_validation(session, 1), true);
     assert_eq!(
         CKR_OK,
         sig_verify(
@@ -514,6 +515,7 @@ fn test_tls_mechanisms() {
             }
         )
     );
+    assert_eq!(check_validation(session, 1), true);
 
     /* Test CKM_TLS12_KEY_SAFE_DERIVE */
     let derive_template = make_attr_template(
@@ -569,6 +571,7 @@ fn test_tls_mechanisms() {
         std::ptr::null_mut(),
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     /* ensure IVs were ignored */
     assert_eq!(cliiv.as_slice(), &[0u8; 10]);
@@ -609,6 +612,7 @@ fn test_tls_mechanisms() {
         &mut dk_handle,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
 
     /* The End */
     testtokn.finalize();
