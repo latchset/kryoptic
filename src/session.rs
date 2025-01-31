@@ -214,8 +214,9 @@ impl Session {
         self.fips_indicator
     }
 
-    #[cfg(feature = "fips")]
+    #[cfg(feature = "pkcs11_3_2")]
     pub fn get_last_validation_flags(&self) -> CK_FLAGS {
+        #[cfg(feature = "fips")]
         if self.fips_indicator == Some(true) {
             return fips::indicators::KRF_FIPS;
         }

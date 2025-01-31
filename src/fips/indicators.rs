@@ -1120,7 +1120,9 @@ pub fn is_approved(
         if checks & 1 == 1 {
             let mut valid_key = false;
             if let Some(obj) = iobj {
-                if let Ok(f) = obj.get_attr_as_ulong(CKA_VALIDATION_FLAGS) {
+                if let Ok(f) =
+                    obj.get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS)
+                {
                     if (f & KRF_FIPS) == KRF_FIPS {
                         valid_key = true;
                     } else if let Ok(class) = obj.get_attr_as_ulong(CKA_CLASS) {
@@ -1150,13 +1152,14 @@ pub fn is_approved(
                     Some(&m.restrictions),
                 ) {
                     /* add FIPS validation flag */
-                    let flag = match obj.get_attr_as_ulong(CKA_VALIDATION_FLAGS)
+                    let flag = match obj
+                        .get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS)
                     {
                         Ok(f) => f,
                         Err(_) => 0,
                     } | KRF_FIPS;
                     let _ = obj.set_attr(Attribute::from_ulong(
-                        CKA_VALIDATION_FLAGS,
+                        CKA_OBJECT_VALIDATION_FLAGS,
                         flag,
                     ));
                     return true;

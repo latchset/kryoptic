@@ -1092,7 +1092,7 @@ pub trait CommonKeyFactory: ObjectFactory {
 
         #[cfg(feature = "pkcs11_3_2")]
         attrs.push(attr_element!(
-            CKA_VALIDATION_FLAGS;
+            CKA_OBJECT_VALIDATION_FLAGS;
             OAFlags::NeverSettable | OAFlags::Ephemeral;
             Attribute::from_ulong; val 0));
     }

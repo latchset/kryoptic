@@ -87,8 +87,10 @@ kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf"]
 standard = ["sqlitedb", "ecc_all", "hash_all", "kdf_all", "rsa"]
 
 ecc_fips = ["ecdsa", "ecdh"]
-fips = ["sqlitedb", "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
+fips = ["sqlitedb", "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa", "pkcs11_3_2"]
 
 dynamic = [] # Builds against system libcrypto.so
+
+pkcs11_3_2 = [ ] # Exposes PKCS#11 3.2 Interfaces and new functions
 
 slow = [] # Enables slow tests
