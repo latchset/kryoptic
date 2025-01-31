@@ -263,7 +263,10 @@ impl Storage for StdStorageFormat {
             let ats = facilities.factories.get_sensitive_attrs(&obj)?;
             for typ in ats {
                 /* replace the clear text val with the encrypted one */
-                let plain = obj.get_attr_as_bytes(typ)?;
+                let plain = match obj.get_attr(typ) {
+                    Some(attr) => attr.get_value(),
+                    None => continue,
+                };
                 let encval = self.aci.encrypt_value(facilities, &uid, plain)?;
                 obj.set_attr(Attribute::from_bytes(typ, encval))?;
             }
