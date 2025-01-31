@@ -17,30 +17,30 @@ use once_cell::sync::Lazy;
 pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X25519;
 pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X448;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ECMontgomeryPubFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl ECMontgomeryPubFactory {
     pub fn new() -> ECMontgomeryPubFactory {
-        let mut data: ECMontgomeryPubFactory = ECMontgomeryPubFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_public_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: ECMontgomeryPubFactory = Default::default();
+
+        factory.add_common_public_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_EC_PARAMS; OAFlags::AlwaysRequired | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_EC_POINT; OAFlags::RequiredOnCreate
             | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data
+
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -79,8 +79,12 @@ impl ObjectFactory for ECMontgomeryPubFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
@@ -88,26 +92,23 @@ impl CommonKeyFactory for ECMontgomeryPubFactory {}
 
 impl PubKeyFactory for ECMontgomeryPubFactory {}
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ECMontgomeryPrivFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl ECMontgomeryPrivFactory {
     pub fn new() -> ECMontgomeryPrivFactory {
-        let mut data: ECMontgomeryPrivFactory = ECMontgomeryPrivFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: ECMontgomeryPrivFactory = Default::default();
+
+        factory.add_common_private_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_EC_PARAMS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
             | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
@@ -116,16 +117,14 @@ impl ECMontgomeryPrivFactory {
         let private = attr_element!(
             CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
             Attribute::from_bool; val true);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_PRIVATE)
-        {
-            Some(idx) => data.attributes[idx] = private,
-            None => data.attributes.push(private),
+        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
+            Some(idx) => attributes[idx] = private,
+            None => attributes.push(private),
         }
 
-        data
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -171,10 +170,6 @@ impl ObjectFactory for ECMontgomeryPrivFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
@@ -185,6 +180,14 @@ impl ObjectFactory for ECMontgomeryPrivFactory {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 

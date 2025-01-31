@@ -16,30 +16,30 @@ use once_cell::sync::Lazy;
 pub const MIN_EDDSA_SIZE_BITS: usize = BITS_ED25519;
 pub const MAX_EDDSA_SIZE_BITS: usize = BITS_ED448;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EDDSAPubFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl EDDSAPubFactory {
     pub fn new() -> EDDSAPubFactory {
-        let mut data: EDDSAPubFactory = EDDSAPubFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_public_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: EDDSAPubFactory = Default::default();
+
+        factory.add_common_public_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_EC_PARAMS; OAFlags::AlwaysRequired | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_EC_POINT; OAFlags::RequiredOnCreate
             | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data
+
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -78,8 +78,12 @@ impl ObjectFactory for EDDSAPubFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
@@ -87,26 +91,23 @@ impl CommonKeyFactory for EDDSAPubFactory {}
 
 impl PubKeyFactory for EDDSAPubFactory {}
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EDDSAPrivFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl EDDSAPrivFactory {
     pub fn new() -> EDDSAPrivFactory {
-        let mut data: EDDSAPrivFactory = EDDSAPrivFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: EDDSAPrivFactory = Default::default();
+
+        factory.add_common_private_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_EC_PARAMS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
             | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
@@ -115,16 +116,14 @@ impl EDDSAPrivFactory {
         let private = attr_element!(
             CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
             Attribute::from_bool; val true);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_PRIVATE)
-        {
-            Some(idx) => data.attributes[idx] = private,
-            None => data.attributes.push(private),
+        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
+            Some(idx) => attributes[idx] = private,
+            None => attributes.push(private),
         }
 
-        data
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -170,10 +169,6 @@ impl ObjectFactory for EDDSAPrivFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
@@ -184,6 +179,14 @@ impl ObjectFactory for EDDSAPrivFactory {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
