@@ -2948,7 +2948,11 @@ extern "C" fn fn_get_token_info(
     CKR_OK
 }
 
+#[cfg(feature = "pkcs11_3_2")]
+static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 2 };
+#[cfg(not(feature = "pkcs11_3_2"))]
 static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 0 };
+
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic                        ";
 static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] =
@@ -3786,6 +3790,254 @@ static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     C_MessageVerifyFinal: Some(fn_message_verify_final),
 };
 
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_encapsulate_key(
+    _s_handle: CK_SESSION_HANDLE,
+    _mechptr: *mut CK_MECHANISM,
+    _pubkey_handle: CK_OBJECT_HANDLE,
+    _template: *mut CK_ATTRIBUTE,
+    _attribute_count: CK_ULONG,
+    _encrypted_part: *mut CK_BYTE,
+    _encrypted_part_len: *mut CK_ULONG,
+    _key_handle: *mut CK_OBJECT_HANDLE,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_decapsulate_key(
+    _s_handle: CK_SESSION_HANDLE,
+    _mechptr: *mut CK_MECHANISM,
+    _privkey_handle: CK_OBJECT_HANDLE,
+    _template: *mut CK_ATTRIBUTE,
+    _attribute_count: CK_ULONG,
+    _encrypted_part: *mut CK_BYTE,
+    _encrypted_part_len: CK_ULONG,
+    _key_handle: *mut CK_OBJECT_HANDLE,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_verify_signature_init(
+    _s_handle: CK_SESSION_HANDLE,
+    _mechptr: *mut CK_MECHANISM,
+    _key_handle: CK_OBJECT_HANDLE,
+    _signature: *mut CK_BYTE,
+    _singature_len: CK_ULONG,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_verify_signature(
+    _s_handle: CK_SESSION_HANDLE,
+    _data: *mut CK_BYTE,
+    _data_len: CK_ULONG,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_verify_signature_update(
+    _s_handle: CK_SESSION_HANDLE,
+    _data: *mut CK_BYTE,
+    _data_len: CK_ULONG,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_verify_signature_final(_s_handle: CK_SESSION_HANDLE) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_get_session_validation_flags(
+    s_handle: CK_SESSION_HANDLE,
+    flags_type: CK_SESSION_VALIDATION_FLAGS_TYPE,
+    pflags: CK_FLAGS_PTR,
+) -> CK_RV {
+    let flags: CK_FLAGS = if flags_type != CKS_LAST_VALIDATION_OK {
+        0
+    } else {
+        let rstate = global_rlock!(STATE);
+        let session = res_or_ret!(rstate.get_session(s_handle));
+
+        session.get_last_validation_flags()
+    };
+    unsafe { *pflags = flags };
+    CKR_OK
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_async_complete(
+    _s_handle: CK_SESSION_HANDLE,
+    _function_name: *mut CK_UTF8CHAR,
+    _result: *mut CK_ASYNC_DATA,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_async_get_id(
+    _s_handle: CK_SESSION_HANDLE,
+    _function_name: *mut CK_UTF8CHAR,
+    _operation_id: *mut CK_ULONG,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_async_join(
+    _s_handle: CK_SESSION_HANDLE,
+    _function_name: *mut CK_UTF8CHAR,
+    _operation_id: CK_ULONG,
+    _data: *mut CK_BYTE,
+    _data_len: CK_ULONG,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_wrap_key_authenticated(
+    _s_handle: CK_SESSION_HANDLE,
+    _mechptr: CK_MECHANISM_PTR,
+    _wrapping_key_handle: CK_OBJECT_HANDLE,
+    _key_handle: CK_OBJECT_HANDLE,
+    _auth_data: CK_BYTE_PTR,
+    _pul_auth_data_len: CK_ULONG_PTR,
+    _wrapped_key: CK_BYTE_PTR,
+    _pul_wrapped_key_len: CK_ULONG_PTR,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+extern "C" fn fn_unwrap_key_authenticated(
+    _s_handle: CK_SESSION_HANDLE,
+    _mechptr: CK_MECHANISM_PTR,
+    _unwrapping_key_handle: CK_OBJECT_HANDLE,
+    _wrapped_key: CK_BYTE_PTR,
+    _wrapped_key_len: CK_ULONG,
+    _template: CK_ATTRIBUTE_PTR,
+    _attribute_count: CK_ULONG,
+    _auth_data: CK_BYTE_PTR,
+    _auth_data_len: CK_ULONG,
+    _key_handle: CK_OBJECT_HANDLE_PTR,
+) -> CK_RV {
+    CKR_FUNCTION_NOT_SUPPORTED
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
+    version: CK_VERSION { major: 3, minor: 2 },
+    C_Initialize: Some(fn_initialize),
+    C_Finalize: Some(fn_finalize),
+    C_GetInfo: Some(fn_get_info),
+    C_GetFunctionList: Some(C_GetFunctionList),
+    C_GetSlotList: Some(fn_get_slot_list),
+    C_GetSlotInfo: Some(fn_get_slot_info),
+    C_GetTokenInfo: Some(fn_get_token_info),
+    C_GetMechanismList: Some(fn_get_mechanism_list),
+    C_GetMechanismInfo: Some(fn_get_mechanism_info),
+    C_InitToken: Some(fn_init_token),
+    C_InitPIN: Some(fn_init_pin),
+    C_SetPIN: Some(fn_set_pin),
+    C_OpenSession: Some(fn_open_session),
+    C_CloseSession: Some(fn_close_session),
+    C_CloseAllSessions: Some(fn_close_all_sessions),
+    C_GetSessionInfo: Some(fn_get_session_info),
+    C_GetOperationState: Some(fn_get_operation_state),
+    C_SetOperationState: Some(fn_set_operation_state),
+    C_Login: Some(fn_login),
+    C_Logout: Some(fn_logout),
+    C_CreateObject: Some(fn_create_object),
+    C_CopyObject: Some(fn_copy_object),
+    C_DestroyObject: Some(fn_destroy_object),
+    C_GetObjectSize: Some(fn_get_object_size),
+    C_GetAttributeValue: Some(fn_get_attribute_value),
+    C_SetAttributeValue: Some(fn_set_attribute_value),
+    C_FindObjectsInit: Some(fn_find_objects_init),
+    C_FindObjects: Some(fn_find_objects),
+    C_FindObjectsFinal: Some(fn_find_objects_final),
+    C_EncryptInit: Some(fn_encrypt_init),
+    C_Encrypt: Some(fn_encrypt),
+    C_EncryptUpdate: Some(fn_encrypt_update),
+    C_EncryptFinal: Some(fn_encrypt_final),
+    C_DecryptInit: Some(fn_decrypt_init),
+    C_Decrypt: Some(fn_decrypt),
+    C_DecryptUpdate: Some(fn_decrypt_update),
+    C_DecryptFinal: Some(fn_decrypt_final),
+    C_DigestInit: Some(fn_digest_init),
+    C_Digest: Some(fn_digest),
+    C_DigestUpdate: Some(fn_digest_update),
+    C_DigestKey: Some(fn_digest_key),
+    C_DigestFinal: Some(fn_digest_final),
+    C_SignInit: Some(fn_sign_init),
+    C_Sign: Some(fn_sign),
+    C_SignUpdate: Some(fn_sign_update),
+    C_SignFinal: Some(fn_sign_final),
+    C_SignRecoverInit: Some(fn_sign_recover_init),
+    C_SignRecover: Some(fn_sign_recover),
+    C_VerifyInit: Some(fn_verify_init),
+    C_Verify: Some(fn_verify),
+    C_VerifyUpdate: Some(fn_verify_update),
+    C_VerifyFinal: Some(fn_verify_final),
+    C_VerifyRecoverInit: Some(fn_verify_recover_init),
+    C_VerifyRecover: Some(fn_verify_recover),
+    C_DigestEncryptUpdate: Some(fn_digest_encrypt_update),
+    C_DecryptDigestUpdate: Some(fn_decrypt_digest_update),
+    C_SignEncryptUpdate: Some(fn_sign_encrypt_update),
+    C_DecryptVerifyUpdate: Some(fn_decrypt_verify_update),
+    C_GenerateKey: Some(fn_generate_key),
+    C_GenerateKeyPair: Some(fn_generate_key_pair),
+    C_WrapKey: Some(fn_wrap_key),
+    C_UnwrapKey: Some(fn_unwrap_key),
+    C_DeriveKey: Some(fn_derive_key),
+    C_SeedRandom: Some(fn_seed_random),
+    C_GenerateRandom: Some(fn_generate_random),
+    C_GetFunctionStatus: Some(fn_get_function_status),
+    C_CancelFunction: Some(fn_cancel_function),
+    C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
+    C_GetInterfaceList: Some(C_GetInterfaceList),
+    C_GetInterface: Some(C_GetInterface),
+    C_LoginUser: Some(fn_login_user),
+    C_SessionCancel: Some(fn_session_cancel),
+    C_MessageEncryptInit: Some(fn_message_encrypt_init),
+    C_EncryptMessage: Some(fn_encrypt_message),
+    C_EncryptMessageBegin: Some(fn_encrypt_message_begin),
+    C_EncryptMessageNext: Some(fn_encrypt_message_next),
+    C_MessageEncryptFinal: Some(fn_message_encrypt_final),
+    C_MessageDecryptInit: Some(fn_message_decrypt_init),
+    C_DecryptMessage: Some(fn_decrypt_message),
+    C_DecryptMessageBegin: Some(fn_decrypt_message_begin),
+    C_DecryptMessageNext: Some(fn_decrypt_message_next),
+    C_MessageDecryptFinal: Some(fn_message_decrypt_final),
+    C_MessageSignInit: Some(fn_message_sign_init),
+    C_SignMessage: Some(fn_sign_message),
+    C_SignMessageBegin: Some(fn_sign_message_begin),
+    C_SignMessageNext: Some(fn_sign_message_next),
+    C_MessageSignFinal: Some(fn_message_sign_final),
+    C_MessageVerifyInit: Some(fn_message_verify_init),
+    C_VerifyMessage: Some(fn_verify_message),
+    C_VerifyMessageBegin: Some(fn_verify_message_begin),
+    C_VerifyMessageNext: Some(fn_verify_message_next),
+    C_MessageVerifyFinal: Some(fn_message_verify_final),
+    C_EncapsulateKey: Some(fn_encapsulate_key),
+    C_DecapsulateKey: Some(fn_decapsulate_key),
+    C_VerifySignatureInit: Some(fn_verify_signature_init),
+    C_VerifySignature: Some(fn_verify_signature),
+    C_VerifySignatureUpdate: Some(fn_verify_signature_update),
+    C_VerifySignatureFinal: Some(fn_verify_signature_final),
+    C_GetSessionValidationFlags: Some(fn_get_session_validation_flags),
+    C_AsyncComplete: Some(fn_async_complete),
+    C_AsyncGetID: Some(fn_async_get_id),
+    C_AsyncJoin: Some(fn_async_join),
+    C_WrapKeyAuthenticated: Some(fn_wrap_key_authenticated),
+    C_UnwrapKeyAuthenticated: Some(fn_unwrap_key_authenticated),
+};
+
 static INTERFACE_NAME_STD_NUL: &str = "PKCS 11\0";
 
 static INTERFACE_240: CK_INTERFACE = CK_INTERFACE {
@@ -3800,8 +4052,12 @@ static INTERFACE_300: CK_INTERFACE = CK_INTERFACE {
     flags: 0,
 };
 
-#[cfg(feature = "fips")]
-include!("fips/interface.rs");
+#[cfg(feature = "pkcs11_3_2")]
+static INTERFACE_320: CK_INTERFACE = CK_INTERFACE {
+    pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
+    pFunctionList: &FNLIST_320 as *const _ as *const ::std::os::raw::c_void,
+    flags: 0,
+};
 
 #[derive(Debug, Copy, Clone)]
 struct InterfaceData {
@@ -3815,6 +4071,11 @@ unsafe impl Send for InterfaceData {}
 
 static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
     let mut v = Vec::with_capacity(3);
+    #[cfg(feature = "pkcs11_3_2")]
+    v.push(InterfaceData {
+        interface: std::ptr::addr_of!(INTERFACE_320),
+        version: FNLIST_320.version,
+    });
     v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_300),
         version: FNLIST_300.version,
@@ -3822,11 +4083,6 @@ static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
     v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_240),
         version: FNLIST_240.version,
-    });
-    #[cfg(feature = "fips")]
-    v.push(InterfaceData {
-        interface: std::ptr::addr_of!(INTERFACE_VAL),
-        version: FNLIST_VAL.version,
     });
     v
 });

@@ -262,11 +262,10 @@ pub fn is_db_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     NSS_KNOWN_ATTRIBUTES.contains(&attr)
 }
 
-pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 5] = [
+pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 4] = [
     CKA_UNIQUE_ID,
     CKA_COPYABLE,
     CKA_DESTROYABLE,
-    CKA_VALIDATION_FLAGS,
     CKA_ALLOWED_MECHANISMS,
 ];
 

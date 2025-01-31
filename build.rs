@@ -186,6 +186,9 @@ fn main() {
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* PKCS11 Headers */
+    #[cfg(feature = "pkcs11_3_2")]
+    let pkcs11_header = "pkcs11_headers/3.2-prerelease/pkcs11.h";
+    #[cfg(not(feature = "pkcs11_3_2"))]
     let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
     println!("cargo:rerun-if-changed={}", pkcs11_header);
     bindgen::Builder::default()
@@ -194,6 +197,7 @@ fn main() {
         .formatter(bindgen::Formatter::Prettyplease)
         .blocklist_type("CK_FUNCTION_LIST_PTR")
         .blocklist_type("CK_FUNCTION_LIST_3_0_PTR")
+        .blocklist_type("CK_FUNCTION_LIST_3_2_PTR")
         .blocklist_type("CK_INTERFACE")
         .blocklist_var("CK_UNAVAILABLE_INFORMATION")
         .parse_callbacks(Box::new(Pkcs11Callbacks))
