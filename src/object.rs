@@ -266,6 +266,10 @@ bitflags! {
 
         /* The attribute can be changed only during a Copy Operation */
         const ChangeOnCopy         = 0x00002400;
+
+        /* The attribute is epehmeral and should not be stored on
+         * permanent storage */
+        const Ephemeral            = 0x00008000;
     }
 }
 
@@ -327,6 +331,7 @@ macro_rules! bytes_attr_not_empty {
 pub struct ObjectFactoryData {
     attributes: Vec<ObjectAttr>,
     sensitive: Vec<CK_ATTRIBUTE_TYPE>,
+    ephemeral: Vec<CK_ATTRIBUTE_TYPE>,
     finalized: bool,
 }
 
@@ -346,10 +351,18 @@ impl ObjectFactoryData {
         &self.sensitive
     }
 
+    pub fn get_ephemeral(&self) -> &Vec<CK_ATTRIBUTE_TYPE> {
+        &self.ephemeral
+    }
+
     pub fn finalize(&mut self) {
-        match self.attributes.iter().find(|a| a.is(OAFlags::Sensitive)) {
-            Some(a) => self.sensitive.push(a.get_type()),
-            None => (),
+        for a in &self.attributes {
+            if a.is(OAFlags::Sensitive) {
+                self.sensitive.push(a.get_type());
+            }
+            if a.is(OAFlags::Ephemeral) {
+                self.ephemeral.push(a.get_type());
+            }
         }
         self.finalized = true;
     }
@@ -978,9 +991,10 @@ pub trait CommonKeyFactory: ObjectFactory {
             CKA_ALLOWED_MECHANISMS; OAFlags::empty(); Attribute::from_bytes;
             val Vec::new()));
 
-        #[cfg(feature = "fips")]
+        #[cfg(feature = "pkcs11_3_2")]
         attrs.push(attr_element!(
-            CKA_VALIDATION_FLAGS; OAFlags::NeverSettable;
+            CKA_VALIDATION_FLAGS;
+            OAFlags::NeverSettable | OAFlags::Ephemeral;
             Attribute::from_ulong; val 0));
     }
 }
