@@ -935,6 +935,12 @@ impl Storage for NSSStorage {
             return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
 
+        /* remove any ephemeral attributes before storage */
+        let factory = facilities.factories.get_object_factory(&obj)?;
+        for typ in factory.get_data().get_ephemeral() {
+            obj.del_attr(*typ);
+        }
+
         if table == NSS_PRIVATE_TABLE {
             for typ in NSS_SENSITIVE_ATTRIBUTES {
                 /* NOTE: this will not handle correctly empty attributes or
