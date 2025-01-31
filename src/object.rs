@@ -244,52 +244,52 @@ bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct OAFlags: u32 {
         /* the attribute is ignored and not copied from a template */
-        const Ignored              = 0b00000000000001;
+        const Ignored              = 0x00000001;
 
         /* The attribute is sensitive and will not be returned by a call
          * unless specifically authorized (like a key secret value) */
-        const Sensitive            = 0b00000000000010;
+        const Sensitive            = 0x00000002;
 
         /* The attribute has a default value that can be set when it is
          * required on object creation but not provided by a template */
-        const Defval               = 0b00000000000100;
+        const Defval               = 0x00000004;
 
         /* The attribute must be provided in the tempalate on object
          * creation or the operation will fail */
-        const RequiredOnCreate     = 0b00000000001000;
+        const RequiredOnCreate     = 0x00000008;
 
         /* The attribute must be provided in the tempalate on key
          * generation or the operation will fail */
-        const RequiredOnGenerate   = 0b00000000010000;
+        const RequiredOnGenerate   = 0x00000010;
 
         /* The attribute is always required or the operation will fail,
          * however combined with Defval it means it will be generated
          * automatically when absent from the template and will not
          * cause the operation to fail */
-        const AlwaysRequired       = 0b00000000100000;
+        const AlwaysRequired       = 0x00000020;
 
         /* The attribute can only be set in a template for create
          * (import) operations, if set for any other operation (copy,
          * generate, wrap, derive) it will cause a failure */
-        const SettableOnlyOnCreate = 0b00000010000000;
+        const SettableOnlyOnCreate = 0x00000080;
 
         /* This attribute can never be set in a template, if set the
          * operation will fail (they are only ever set by internal
          * functions) */
-        const NeverSettable        = 0b00000100000000;
+        const NeverSettable        = 0x00000100;
 
         /* The attribute cannot be changed once set (enforced from
          * changing via C_SetAttibuteValue or via C_CopyObject */
-        const Unchangeable         = 0b00010000000000;
+        const Unchangeable         = 0x00000400;
 
         /* The attribute can only be change True -> False */
-        const ChangeToFalse        = 0b00110000000000;
+        const ChangeToFalse        = 0x00000C00;
 
         /* The attribute can only be change False -> True */
-        const ChangeToTrue         = 0b01010000000000;
+        const ChangeToTrue         = 0x00001400;
 
         /* The attribute can be changed only during a Copy Operation */
-        const ChangeOnCopy         = 0b10010000000000;
+        const ChangeOnCopy         = 0x00002400;
     }
 }
 
