@@ -53,32 +53,32 @@ fn rsa_check_import(obj: &Object) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RSAPubFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl RSAPubFactory {
     pub fn new() -> RSAPubFactory {
-        let mut data: RSAPubFactory = RSAPubFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_public_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: RSAPubFactory = Default::default();
+
+        factory.add_common_public_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_MODULUS_BITS; OAFlags::RequiredOnGenerate
             | OAFlags::Unchangeable; Attribute::from_ulong; val 0));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data
+
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -91,8 +91,12 @@ impl ObjectFactory for RSAPubFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
@@ -149,45 +153,42 @@ impl RSAPrivateKey<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RSAPrivFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl RSAPrivFactory {
     pub fn new() -> RSAPrivFactory {
-        let mut data: RSAPrivFactory = RSAPrivFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: RSAPrivFactory = Default::default();
+
+        factory.add_common_private_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_MODULUS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_PUBLIC_EXPONENT; OAFlags::RequiredOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_PRIVATE_EXPONENT; OAFlags::Sensitive
             | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_PRIME_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_PRIME_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_EXPONENT_1; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_EXPONENT_2; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_COEFFICIENT; OAFlags::Sensitive | OAFlags::SettableOnlyOnCreate
             | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
 
@@ -195,16 +196,14 @@ impl RSAPrivFactory {
         let private = attr_element!(
             CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
             Attribute::from_bool; val true);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_PRIVATE)
-        {
-            Some(idx) => data.attributes[idx] = private,
-            None => data.attributes.push(private),
+        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
+            Some(idx) => attributes[idx] = private,
+            None => attributes.push(private),
         }
 
-        data
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -217,10 +216,6 @@ impl ObjectFactory for RSAPrivFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
@@ -231,6 +226,14 @@ impl ObjectFactory for RSAPrivFactory {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 

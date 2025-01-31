@@ -235,17 +235,18 @@ impl Storage for StdStorageFormat {
         }
 
         let mut obj = self.store.fetch_by_uid(&uid, attrs.as_slice())?;
-        let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+        let factory = facilities.factories.get_object_factory(&obj)?;
+        let ats = factory.get_data().get_sensitive();
         if self.aci.encrypts() {
             for typ in ats {
                 /* replace the encrypted val with the clear text one
                  * if the value was requested */
-                let encval = match obj.get_attr(typ) {
+                let encval = match obj.get_attr(*typ) {
                     Some(attr) => attr.get_value(),
                     None => continue,
                 };
                 let plain = self.aci.decrypt_value(facilities, uid, encval)?;
-                obj.set_attr(Attribute::from_bytes(typ, plain))?;
+                obj.set_attr(Attribute::from_bytes(*typ, plain))?;
             }
         }
 
@@ -260,15 +261,16 @@ impl Storage for StdStorageFormat {
     ) -> Result<CK_OBJECT_HANDLE> {
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
         if self.aci.encrypts() {
-            let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+            let factory = facilities.factories.get_object_factory(&obj)?;
+            let ats = factory.get_data().get_sensitive();
             for typ in ats {
                 /* replace the clear text val with the encrypted one */
-                let plain = match obj.get_attr(typ) {
+                let plain = match obj.get_attr(*typ) {
                     Some(attr) => attr.get_value(),
                     None => continue,
                 };
                 let encval = self.aci.encrypt_value(facilities, &uid, plain)?;
-                obj.set_attr(Attribute::from_bytes(typ, encval))?;
+                obj.set_attr(Attribute::from_bytes(*typ, encval))?;
             }
         }
         let mut handle = obj.get_handle();
@@ -296,10 +298,11 @@ impl Storage for StdStorageFormat {
         let mut attrs = CkAttrs::from(template);
 
         if self.aci.encrypts() {
-            let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+            let factory = facilities.factories.get_object_factory(&obj)?;
+            let ats = factory.get_data().get_sensitive();
             for typ in ats {
                 /* replace the clear text val with the encrypted one */
-                match attrs.find_attr(typ) {
+                match attrs.find_attr(*typ) {
                     Some(a) => {
                         let plain = a.to_buf()?;
                         let encval =

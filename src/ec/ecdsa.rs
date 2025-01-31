@@ -17,25 +17,30 @@ use once_cell::sync::Lazy;
 pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
 pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ECCPubFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl ECCPubFactory {
     pub fn new() -> ECCPubFactory {
-        let mut data: ECCPubFactory = ECCPubFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_public_key_attrs());
-        data.attributes.push(attr_element!(CKA_EC_PARAMS; OAFlags::AlwaysRequired | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(CKA_EC_POINT; OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_bytes; val Vec::new()));
-        data
+        let mut factory: ECCPubFactory = Default::default();
+
+        factory.add_common_public_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
+            CKA_EC_PARAMS; OAFlags::AlwaysRequired | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
+        attributes.push(attr_element!(
+            CKA_EC_POINT; OAFlags::RequiredOnCreate
+            | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
+            Attribute::from_bytes; val Vec::new()));
+
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -74,8 +79,12 @@ impl ObjectFactory for ECCPubFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
@@ -83,26 +92,23 @@ impl CommonKeyFactory for ECCPubFactory {}
 
 impl PubKeyFactory for ECCPubFactory {}
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ECCPrivFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl ECCPrivFactory {
     pub fn new() -> ECCPrivFactory {
-        let mut data: ECCPrivFactory = ECCPrivFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_private_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: ECCPrivFactory = Default::default();
+
+        factory.add_common_private_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_EC_PARAMS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
             | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
@@ -111,16 +117,14 @@ impl ECCPrivFactory {
         let private = attr_element!(
             CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
             Attribute::from_bool; val true);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_PRIVATE)
-        {
-            Some(idx) => data.attributes[idx] = private,
-            None => data.attributes.push(private),
+        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
+            Some(idx) => attributes[idx] = private,
+            None => attributes.push(private),
         }
 
-        data
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -166,10 +170,6 @@ impl ObjectFactory for ECCPrivFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         PrivKeyFactory::export_for_wrapping(self, key)
     }
@@ -180,6 +180,14 @@ impl ObjectFactory for ECCPrivFactory {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         PrivKeyFactory::import_from_wrapped(self, data, template)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
