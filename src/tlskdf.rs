@@ -113,6 +113,14 @@ impl TLSPRF {
     }
 }
 
+#[cfg(feature = "fips")]
+fn is_hmac_fips_approved(prf: CK_MECHANISM_TYPE) -> Option<bool> {
+    match prf {
+        CKM_SHA256_HMAC | CKM_SHA384_HMAC | CKM_SHA512_HMAC => Some(true),
+        _ => Some(false),
+    }
+}
+
 #[cfg(test)]
 pub fn test_tlsprf(
     key: &Object,
@@ -326,6 +334,8 @@ struct TLSKDFOperation {
     keylen: CK_ULONG,
     ivlen: CK_ULONG,
     mat_out: Option<*mut CK_SSL3_KEY_MAT_OUT>,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 unsafe impl Send for TLSKDFOperation {}
@@ -392,6 +402,8 @@ impl TLSKDFOperation {
             keylen: 0,
             ivlen: 0,
             mat_out: None,
+            #[cfg(feature = "fips")]
+            fips_approved: is_hmac_fips_approved(prf),
         })
     }
 
@@ -451,6 +463,8 @@ impl TLSKDFOperation {
             },
             ivlen: ivlen,
             mat_out: Some(params.pReturnedKeyMaterial),
+            #[cfg(feature = "fips")]
+            fips_approved: is_hmac_fips_approved(prf),
         })
     }
 
@@ -500,6 +514,8 @@ impl TLSKDFOperation {
             keylen: 0,
             ivlen: 0,
             mat_out: None,
+            #[cfg(feature = "fips")]
+            fips_approved: is_hmac_fips_approved(prf),
         })
     }
 
@@ -817,6 +833,10 @@ impl MechOperation for TLSKDFOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approved
+    }
 }
 
 impl Derive for TLSKDFOperation {
@@ -898,7 +918,7 @@ impl TLSMACOperation {
             seed: label.to_vec(),
             tlsprf: TLSPRF::init(key, mac, prf)?,
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approved: is_hmac_fips_approved(prf),
         })
     }
 
@@ -930,11 +950,6 @@ impl TLSMACOperation {
 
         let out = self.tlsprf.finish(&self.seed, self.outputlen)?;
         output.copy_from_slice(out.as_slice());
-
-        #[cfg(feature = "fips")]
-        {
-            self.fips_approved = Some(true);
-        }
 
         Ok(())
     }

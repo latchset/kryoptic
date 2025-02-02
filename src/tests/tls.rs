@@ -573,11 +573,43 @@ fn test_tls_mechanisms() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
 
+    /* Try again with non-FIPS-approved hash */
+    let params = CK_TLS12_KEY_MAT_PARAMS {
+        ulMacSizeInBits: 0,
+        ulKeySizeInBits: 48 * 8,
+        ulIVSizeInBits: 10 * 8,
+        bIsExport: CK_FALSE,
+        RandomInfo: CK_SSL3_RANDOM_DATA {
+            pClientRandom: byte_ptr!(clirnd.as_ptr()),
+            ulClientRandomLen: clirnd.len() as CK_ULONG,
+            pServerRandom: byte_ptr!(srvrnd.as_ptr()),
+            ulServerRandomLen: srvrnd.len() as CK_ULONG,
+        },
+        pReturnedKeyMaterial: &mut mat_out,
+        prfHashMechanism: CKM_SHA3_256,
+    };
+    let paramslen = sizeof!(CK_TLS12_KEY_MAT_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_KEY_SAFE_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
     /* ensure IVs were ignored */
     assert_eq!(cliiv.as_slice(), &[0u8; 10]);
     assert_eq!(srviv.as_slice(), &[0u8; 10]);
 
-    /* Smoke test CKM_TLS12_KDF */
+    /* Smoke test CKM_TLS12_KDF (not FIPS) */
     let clirnd = [0u8; 32];
     let srvrnd = [0u8; 32];
     let label = "EXPERIMENTAL tls derive";
