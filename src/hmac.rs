@@ -7,9 +7,8 @@ use crate::error::{Error, Result};
 use crate::hash;
 use crate::interface::*;
 use crate::mechanism::*;
-use crate::misc::zeromem;
+use crate::misc::{sizeof, zeromem};
 use crate::object::*;
-use crate::sizeof;
 
 use once_cell::sync::Lazy;
 

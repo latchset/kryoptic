@@ -1,12 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use crate::attr_element;
 use crate::attribute::Attribute;
 use crate::ec::{get_oid_from_obj, oid_to_bits};
 use crate::error::Result;
 use crate::interface::*;
-use crate::object::{OAFlags, Object, ObjectAttr, ObjectFactory};
+use crate::object::{attr_element, OAFlags, Object, ObjectAttr, ObjectFactory};
 use crate::Token;
 
 use once_cell::sync::Lazy;

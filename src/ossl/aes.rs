@@ -5,16 +5,17 @@ use std::ffi::{c_char, c_int, c_void};
 
 use crate::aes::*;
 use crate::error;
-use crate::error::Result;
+use crate::error::{map_err, Result};
 use crate::interface::*;
 use crate::mechanism::*;
-use crate::misc::zeromem;
+use crate::misc::{
+    bytes_to_slice, bytes_to_vec, cast_params, void_ptr, zeromem,
+};
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
-use crate::{bytes_to_slice, bytes_to_vec, cast_params, map_err, void_ptr};
 
 use crate::get_random_data;
 
@@ -34,9 +35,14 @@ const AES_128_WRAP_PAD_NAME: &[u8; 17] = b"AES-128-WRAP-PAD\0";
 const AES_192_WRAP_PAD_NAME: &[u8; 17] = b"AES-192-WRAP-PAD\0";
 const AES_256_WRAP_PAD_NAME: &[u8; 17] = b"AES-256-WRAP-PAD\0";
 
-/* It is safe to share const ciphers as they do not change once they have been
- * created, and reference static function pointers and other data that is
- * always valid */
+/// AES EVP_CIPHER Object Wrapper
+///
+/// Gives access to the underlying OpenSSL Cipher context for a specific
+/// OpenSSL AES cipher mode.
+///
+/// It is safe to share const ciphers as they do not change once they have
+/// been created, and reference static function pointers and other data that
+/// is always valid
 struct AesCipher {
     cipher: Option<EvpCipher>,
 }
@@ -119,6 +125,10 @@ aes_cipher!(AES_128_WRAP_PAD; AES_128_WRAP_PAD_NAME);
 aes_cipher!(AES_192_WRAP_PAD; AES_192_WRAP_PAD_NAME);
 aes_cipher!(AES_256_WRAP_PAD; AES_256_WRAP_PAD_NAME);
 
+/// A raw AES Key wrapper
+///
+/// Ensures the data is zeroized on deallocation
+
 #[derive(Debug)]
 struct AesKey {
     raw: Vec<u8>,
@@ -130,12 +140,14 @@ impl Drop for AesKey {
     }
 }
 
+/// Returns an allocated [AesKey] object, given a AES Key Object
 fn object_to_raw_key(key: &Object) -> Result<AesKey> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
     check_key_len(val.len())?;
     Ok(AesKey { raw: val.clone() })
 }
 
+/// Helper function to allocate AesMechanism definition objects
 fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
     Box::new(AesMechanism::new(
         CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
@@ -143,6 +155,11 @@ fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
         flags,
     ))
 }
+
+/// AES Initialization Vector Object
+///
+/// Defines the characteristics of the IV to be used in the AES operation
+/// it is referenced from. Size, generation method, counter, etc..
 
 #[derive(Debug)]
 struct AesIvData {
@@ -180,6 +197,13 @@ impl Drop for AesIvData {
     }
 }
 
+/// AES Parameters Object
+///
+/// Defines the parameters used for the associated AES operation. Holds
+/// the IV definitions, maximum number of blocks that can be encrypted,
+/// whether Cipher stealing mode is on. As well as data length, Additional
+/// Authenticated Data and the Tag length for authenticated modes.
+
 #[derive(Debug)]
 struct AesParams {
     iv: AesIvData,
@@ -197,6 +221,11 @@ impl AesParams {
         zeromem(self.aad.as_mut_slice());
     }
 }
+
+/// The Generic AES Operation data structure
+///
+/// Provides access to all the low level encryption/decryption/etc functions
+/// required to implement the AES cryptosystem
 
 #[derive(Debug)]
 pub struct AesOperation {
@@ -220,6 +249,7 @@ impl Drop for AesOperation {
 }
 
 impl AesOperation {
+    /// Helper function to register all AES Mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[
             CKM_AES_ECB,
@@ -266,6 +296,8 @@ impl AesOperation {
         mechs.add_mechanism(CKM_AES_KEY_GEN, new_mechanism(CKF_GENERATE));
     }
 
+    /// Helper function to initialize the AES operation parameters based on
+    /// the provided CK_MECHANISM structure
     fn init_params(mech: &CK_MECHANISM) -> Result<AesParams> {
         match mech.mechanism {
             CKM_AES_CCM => {
@@ -487,6 +519,8 @@ impl AesOperation {
         }
     }
 
+    /// Helper function to get the correct EVP_CIPHER context from the
+    /// provided AES mechanism type.
     fn get_cipher(
         mech: CK_MECHANISM_TYPE,
         keylen: usize,
@@ -578,6 +612,11 @@ impl AesOperation {
         })
     }
 
+    /// Helper function that generate IVs according to the parameters
+    /// stored in the object.
+    ///
+    /// Each call returns the next IV and updates counters or any other
+    /// data in the operation object as needed.
     fn generate_iv(&mut self) -> Result<()> {
         let genbits = self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
         if self.params.iv.counter == 0 {
@@ -643,6 +682,9 @@ impl AesOperation {
         Ok(())
     }
 
+    /// Helper function to prepare the IV for the next operation.
+    /// It may generate a new IV or use what is provided (eg in the
+    /// decryption case)
     fn prep_iv(&mut self) -> Result<()> {
         if self.params.iv.gen != CKG_NO_GENERATE {
             self.generate_iv()?;
@@ -663,6 +705,8 @@ impl AesOperation {
         Ok(())
     }
 
+    /// Helper function to add CTS mode to the parameters
+    /// array to be passed to OpenSSL functions.
     fn cts_params(&mut self, params: &mut OsslParam) -> Result<()> {
         params.add_const_c_string(
             name_as_char(OSSL_CIPHER_PARAM_CTS_MODE),
@@ -675,6 +719,8 @@ impl AesOperation {
         )
     }
 
+    /// Helper function for setting up CCM tag lengths on the
+    /// underlying EVP_CIPHER_CTX OpenSSL context.
     fn ccm_tag_len(&mut self) -> Result<()> {
         let res = unsafe {
             EVP_CIPHER_CTX_ctrl(
@@ -691,6 +737,11 @@ impl AesOperation {
         }
     }
 
+    /// Encryption/Decryption Initialization helper
+    ///
+    /// Sets up all the required context or parameters setting to direct
+    /// the underlying OpenSSL crypto library, based on the configured
+    /// mechanism and all the parameters stored on the object.
     fn cipher_initialize(&mut self, enc: bool) -> Result<()> {
         let evpcipher = match Self::get_cipher(self.mech, self.key.raw.len()) {
             Ok(c) => c,
@@ -804,6 +855,7 @@ impl AesOperation {
         Ok(())
     }
 
+    /// Instantiates a new Encryption AES Operation
     pub fn encrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -823,6 +875,7 @@ impl AesOperation {
         })
     }
 
+    /// Instantiates a new Decryption AES Operation
     pub fn decrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -842,6 +895,7 @@ impl AesOperation {
         })
     }
 
+    /// Instantiates a new AES Key-Wrap Operation
     pub fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
@@ -878,6 +932,7 @@ impl AesOperation {
         result
     }
 
+    /// Instantiates a new AES Key-Unwrap Operation
     pub fn unwrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
@@ -890,12 +945,15 @@ impl AesOperation {
         Ok(result)
     }
 
+    /// Internal helper for dealing with fatal errors
     fn op_err(&mut self, err: CK_RV) -> error::Error {
         self.finalized = true;
         error::Error::ck_rv(err)
     }
 
-    /* returns pointer to IV */
+    /// Helper to set parameters for message based operations
+    ///
+    /// Returns a pointer to the IV/Nonce buffer provided by the application
     fn init_msg_params(
         &mut self,
         parameter: CK_VOID_PTR,
@@ -1058,7 +1116,9 @@ impl AesOperation {
         }
     }
 
-    /* returns pointer to tag */
+    /// Verifies the message encryption parameters on subsequent calls
+    ///
+    /// Returns a pointer to the Tag/Mac buffer provided by the application
     fn check_msg_params(
         &mut self,
         parameter: CK_VOID_PTR,
@@ -1144,6 +1204,7 @@ impl AesOperation {
         }
     }
 
+    /// Instantiates a Messaged Based encryption operation
     pub fn msg_encrypt_init(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -1168,6 +1229,7 @@ impl AesOperation {
         })
     }
 
+    /// Initializes a new messaged-based encryption
     fn msg_encrypt_new(
         &mut self,
         parameter: CK_VOID_PTR,
@@ -1210,6 +1272,7 @@ impl AesOperation {
         Ok(())
     }
 
+    /// Instantiates a messaged-based decryption operation
     pub fn msg_decrypt_init(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -1234,6 +1297,7 @@ impl AesOperation {
         })
     }
 
+    /// Initializes a new messaged-based decryption
     fn msg_decrypt_new(
         &mut self,
         parameter: CK_VOID_PTR,
@@ -1271,6 +1335,7 @@ impl AesOperation {
         Ok(())
     }
 
+    /// AEAD specific FIPS checks
     #[cfg(feature = "fips")]
     fn fips_approval_aead(&mut self) -> Result<()> {
         /* For AEAD we handle indicators directly because OpenSSL has an
@@ -1332,6 +1397,10 @@ impl MechOperation for AesOperation {
 }
 
 impl Encryption for AesOperation {
+    /// One shot encryption implementation
+    ///
+    /// Internally calls [AesOperation::encrypt_update] and
+    /// [AesOperation::encrypt_final]
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -1343,6 +1412,8 @@ impl Encryption for AesOperation {
         Ok(outl + self.encrypt_final(&mut cipher[outl..])?)
     }
 
+    /// Calls the underlying OpenSSL function to encrypt the plaintext buffer
+    /// provided, according to the configured mode
     fn encrypt_update(
         &mut self,
         plain: &[u8],
@@ -1449,6 +1520,10 @@ impl Encryption for AesOperation {
         Ok(usize::try_from(outl)?)
     }
 
+    /// Calls the underlying OpenSSL function to finalize the encryption
+    /// operation, according to the configured mode
+    ///
+    /// May return additional data in the cipher buffer
     fn encrypt_final(&mut self, cipher: &mut [u8]) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -1572,6 +1647,11 @@ impl Encryption for AesOperation {
         Ok(outlen)
     }
 
+    /// Provides the expected output buffer size for the provided input
+    /// plaintext length based on the selected mode of operation.
+    ///
+    /// May return different values depending on the internal status and the
+    /// mode of operation.
     fn encryption_len(&mut self, data_len: usize, fin: bool) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -1634,6 +1714,10 @@ impl Encryption for AesOperation {
 }
 
 impl Decryption for AesOperation {
+    /// One shot decryption implementation
+    ///
+    /// Internally calls [AesOperation::decrypt_update] and
+    /// [AesOperation::decrypt_final]
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -1652,6 +1736,8 @@ impl Decryption for AesOperation {
         Ok(outlen + self.decrypt_final(&mut plain[outlen..])?)
     }
 
+    /// Calls the underlying OpenSSL function to decrypt the ciphertext buffer
+    /// provided, according to the configured mode
     fn decrypt_update(
         &mut self,
         cipher: &[u8],
@@ -1851,6 +1937,10 @@ impl Decryption for AesOperation {
         Ok(outlen)
     }
 
+    /// Calls the underlying OpenSSL function to finalize the decryption
+    /// operation, according to the configured mode
+    ///
+    /// May return additional data in the plain buffer
     fn decrypt_final(&mut self, plain: &mut [u8]) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -1967,6 +2057,11 @@ impl Decryption for AesOperation {
         Ok(outlen)
     }
 
+    /// Provides the expected output buffer size for the provided input
+    /// cpihertext length based on the selected mode of operation.
+    ///
+    /// May return different values depending on the internal status and the
+    /// mode of operation.
     fn decryption_len(&mut self, data_len: usize, fin: bool) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2053,6 +2148,10 @@ impl MessageOperation for AesOperation {
 }
 
 impl MsgEncryption for AesOperation {
+    /// One Shot message based encryption implementation
+    ///
+    /// Internally calls [AesOperation::msg_encrypt_begin] and
+    /// [AesOperation::msg_encrypt_final]
     fn msg_encrypt(
         &mut self,
         param: CK_VOID_PTR,
@@ -2065,6 +2164,7 @@ impl MsgEncryption for AesOperation {
         self.msg_encrypt_final(param, paramlen, plain, cipher)
     }
 
+    /// Begin a new message based encryption
     fn msg_encrypt_begin(
         &mut self,
         param: CK_VOID_PTR,
@@ -2077,6 +2177,9 @@ impl MsgEncryption for AesOperation {
         self.msg_encrypt_new(param, paramlen, aad)
     }
 
+    /// Feeds in the next plaintext buffer to be encrypted
+    ///
+    /// Returns output data in the provided cipher buffer
     fn msg_encrypt_next(
         &mut self,
         param: CK_VOID_PTR,
@@ -2129,6 +2232,9 @@ impl MsgEncryption for AesOperation {
         Ok(usize::try_from(outl)?)
     }
 
+    /// Feeds the final plaintext buffer to be encrypted
+    ///
+    /// Returns output data in the provided cipher buffer
     fn msg_encrypt_final(
         &mut self,
         param: CK_VOID_PTR,
@@ -2221,6 +2327,8 @@ impl MsgEncryption for AesOperation {
         Ok(outlen)
     }
 
+    /// Provides the expected output buffer size for the provided input
+    /// plaintext length based on the selected mode of operation.
     fn msg_encryption_len(
         &mut self,
         data_len: usize,
@@ -2238,6 +2346,10 @@ impl MsgEncryption for AesOperation {
 }
 
 impl MsgDecryption for AesOperation {
+    /// One Shot message based decryption implementation
+    ///
+    /// Internally calls [AesOperation::msg_decrypt_begin] and
+    /// [AesOperation::msg_decrypt_final]
     fn msg_decrypt(
         &mut self,
         param: CK_VOID_PTR,
@@ -2250,6 +2362,7 @@ impl MsgDecryption for AesOperation {
         self.msg_decrypt_final(param, paramlen, cipher, plain)
     }
 
+    /// Begin a new message based decryption
     fn msg_decrypt_begin(
         &mut self,
         param: CK_VOID_PTR,
@@ -2262,6 +2375,9 @@ impl MsgDecryption for AesOperation {
         self.msg_decrypt_new(param, paramlen, aad)
     }
 
+    /// Feeds in the next ciphertext buffer to be decrypted
+    ///
+    /// Returns output data in the provided plain buffer
     fn msg_decrypt_next(
         &mut self,
         param: CK_VOID_PTR,
@@ -2314,6 +2430,9 @@ impl MsgDecryption for AesOperation {
         Ok(usize::try_from(outl)?)
     }
 
+    /// Feeds in the final ciphertext buffer to be decrypted
+    ///
+    /// Returns output data in the provided plain buffer
     fn msg_decrypt_final(
         &mut self,
         param: CK_VOID_PTR,
@@ -2410,6 +2529,8 @@ impl MsgDecryption for AesOperation {
         Ok(outlen)
     }
 
+    /// Provides the expected output buffer size for the provided input
+    /// plaintext length based on the selected mode of operation.
     fn msg_decryption_len(
         &mut self,
         data_len: usize,
@@ -2443,12 +2564,14 @@ pub struct AesCmacOperation {
 }
 
 impl AesCmacOperation {
+    /// Helper to register the CMAC mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[CKM_AES_CMAC, CKM_AES_CMAC_GENERAL] {
             mechs.add_mechanism(*ckm, new_mechanism(CKF_SIGN | CKF_VERIFY));
         }
     }
 
+    /// Initializes and returns a CMAC operation
     pub fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesCmacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_CMAC_GENERAL => {
@@ -2504,6 +2627,7 @@ impl AesCmacOperation {
         })
     }
 
+    /// Begins a CMAC computation
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2511,6 +2635,7 @@ impl AesCmacOperation {
         Ok(())
     }
 
+    /// Feeds in the next data buffer into the CMAC computation
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2527,6 +2652,8 @@ impl AesCmacOperation {
         Ok(())
     }
 
+    /// Finalizes the CMAC computation and returns the output in the
+    /// provided buffer
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2561,6 +2688,7 @@ impl AesCmacOperation {
         Ok(())
     }
 
+    /// CMAC specific FIPS checks
     #[cfg(feature = "fips")]
     fn fips_approval_cmac(&mut self) -> Result<()> {
         /*
@@ -2590,6 +2718,9 @@ impl MechOperation for AesCmacOperation {
     }
 }
 
+/// Implements the (internal) Mac interface for the AES CMAC operation
+///
+/// All methods just call the related the internal method
 impl Mac for AesCmacOperation {
     fn mac(&mut self, data: &[u8], mac: &mut [u8]) -> Result<()> {
         self.begin()?;
@@ -2612,6 +2743,9 @@ impl Mac for AesCmacOperation {
     }
 }
 
+/// Implements the Sign interface for the AES CMAC operation
+///
+/// All methods just call the related the internal method
 impl Sign for AesCmacOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         self.begin()?;
@@ -2634,6 +2768,9 @@ impl Sign for AesCmacOperation {
     }
 }
 
+/// Implements the Verify interface for the AES CMAC operation
+///
+/// All methods just call the related the internal method
 impl Verify for AesCmacOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
@@ -2661,6 +2798,9 @@ impl Verify for AesCmacOperation {
     }
 }
 
+/// The AES MAC operation object
+///
+/// This object is used to hold data for any AES MAC operation
 #[derive(Debug)]
 pub struct AesMacOperation {
     mech: CK_MECHANISM_TYPE,
@@ -2684,12 +2824,14 @@ impl Drop for AesMacOperation {
 
 #[allow(dead_code)]
 impl AesMacOperation {
+    /// Helper to register the MAC mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[CKM_AES_MAC, CKM_AES_MAC_GENERAL] {
             mechs.add_mechanism(*ckm, new_mechanism(CKF_SIGN | CKF_VERIFY));
         }
     }
 
+    /// Initializes and returns a MAC operation
     pub fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesMacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_MAC_GENERAL => {
@@ -2730,6 +2872,7 @@ impl AesMacOperation {
         })
     }
 
+    /// Begins a MAC computation
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2737,6 +2880,7 @@ impl AesMacOperation {
         Ok(())
     }
 
+    /// Feeds in the next data buffer into the MAC computation
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2785,6 +2929,8 @@ impl AesMacOperation {
         Ok(())
     }
 
+    /// Finalizes the MAC computation and returns the output in the
+    /// provided buffer
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -2832,6 +2978,9 @@ impl MechOperation for AesMacOperation {
     }
 }
 
+/// Implements the Sign interface for the AES MAC operation
+///
+/// All methods just call the related the internal method
 impl Sign for AesMacOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         self.begin()?;
@@ -2852,6 +3001,9 @@ impl Sign for AesMacOperation {
     }
 }
 
+/// Implements the Verify interface for the AES MAC operation
+///
+/// All methods just call the related the internal method
 impl Verify for AesMacOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
