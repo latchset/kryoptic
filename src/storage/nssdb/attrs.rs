@@ -262,12 +262,18 @@ pub fn is_db_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     NSS_KNOWN_ATTRIBUTES.contains(&attr)
 }
 
-pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 5] = [
+#[cfg(feature = "pkcs11_3_2")]
+pub const NSS_SKIP_SIZE: usize = 5;
+#[cfg(not(feature = "pkcs11_3_2"))]
+pub const NSS_SKIP_SIZE: usize = 4;
+
+pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; NSS_SKIP_SIZE] = [
     CKA_UNIQUE_ID,
     CKA_COPYABLE,
     CKA_DESTROYABLE,
-    CKA_VALIDATION_FLAGS,
     CKA_ALLOWED_MECHANISMS,
+    #[cfg(feature = "pkcs11_3_2")]
+    CKA_OBJECT_VALIDATION_FLAGS,
 ];
 
 pub fn is_skippable_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
