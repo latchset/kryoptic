@@ -244,52 +244,56 @@ bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct OAFlags: u32 {
         /* the attribute is ignored and not copied from a template */
-        const Ignored              = 0b00000000000001;
+        const Ignored              = 0x00000001;
 
         /* The attribute is sensitive and will not be returned by a call
          * unless specifically authorized (like a key secret value) */
-        const Sensitive            = 0b00000000000010;
+        const Sensitive            = 0x00000002;
 
         /* The attribute has a default value that can be set when it is
          * required on object creation but not provided by a template */
-        const Defval               = 0b00000000000100;
+        const Defval               = 0x00000004;
 
         /* The attribute must be provided in the tempalate on object
          * creation or the operation will fail */
-        const RequiredOnCreate     = 0b00000000001000;
+        const RequiredOnCreate     = 0x00000008;
 
         /* The attribute must be provided in the tempalate on key
          * generation or the operation will fail */
-        const RequiredOnGenerate   = 0b00000000010000;
+        const RequiredOnGenerate   = 0x00000010;
 
         /* The attribute is always required or the operation will fail,
          * however combined with Defval it means it will be generated
          * automatically when absent from the template and will not
          * cause the operation to fail */
-        const AlwaysRequired       = 0b00000000100000;
+        const AlwaysRequired       = 0x00000020;
 
         /* The attribute can only be set in a template for create
          * (import) operations, if set for any other operation (copy,
          * generate, wrap, derive) it will cause a failure */
-        const SettableOnlyOnCreate = 0b00000010000000;
+        const SettableOnlyOnCreate = 0x00000080;
 
         /* This attribute can never be set in a template, if set the
          * operation will fail (they are only ever set by internal
          * functions) */
-        const NeverSettable        = 0b00000100000000;
+        const NeverSettable        = 0x00000100;
 
         /* The attribute cannot be changed once set (enforced from
          * changing via C_SetAttibuteValue or via C_CopyObject */
-        const Unchangeable         = 0b00010000000000;
+        const Unchangeable         = 0x00000400;
 
         /* The attribute can only be change True -> False */
-        const ChangeToFalse        = 0b00110000000000;
+        const ChangeToFalse        = 0x00000C00;
 
         /* The attribute can only be change False -> True */
-        const ChangeToTrue         = 0b01010000000000;
+        const ChangeToTrue         = 0x00001400;
 
         /* The attribute can be changed only during a Copy Operation */
-        const ChangeOnCopy         = 0b10010000000000;
+        const ChangeOnCopy         = 0x00002400;
+
+        /* The attribute is epehmeral and should not be stored on
+         * permanent storage */
+        const Ephemeral            = 0x00008000;
     }
 }
 
@@ -359,6 +363,47 @@ pub(crate) use bytes_attr_not_empty;
 /// specific object/key type, and any special behaviors for object
 /// creation/import or other manipulation.
 
+#[derive(Debug, Default)]
+pub struct ObjectFactoryData {
+    attributes: Vec<ObjectAttr>,
+    sensitive: Vec<CK_ATTRIBUTE_TYPE>,
+    ephemeral: Vec<CK_ATTRIBUTE_TYPE>,
+    finalized: bool,
+}
+
+impl ObjectFactoryData {
+    pub fn get_attributes(&self) -> &Vec<ObjectAttr> {
+        &self.attributes
+    }
+
+    pub fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
+        if self.finalized {
+            panic!("Attempted modification after finalization");
+        }
+        &mut self.attributes
+    }
+
+    pub fn get_sensitive(&self) -> &Vec<CK_ATTRIBUTE_TYPE> {
+        &self.sensitive
+    }
+
+    pub fn get_ephemeral(&self) -> &Vec<CK_ATTRIBUTE_TYPE> {
+        &self.ephemeral
+    }
+
+    pub fn finalize(&mut self) {
+        for a in &self.attributes {
+            if a.is(OAFlags::Sensitive) {
+                self.sensitive.push(a.get_type());
+            }
+            if a.is(OAFlags::Ephemeral) {
+                self.ephemeral.push(a.get_type());
+            }
+        }
+        self.finalized = true;
+    }
+}
+
 pub trait ObjectFactory: Debug + Send + Sync {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
         return Err(CKR_GENERAL_ERROR)?;
@@ -368,36 +413,34 @@ pub trait ObjectFactory: Debug + Send + Sync {
         self.default_copy(obj, template)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr>;
-
-    fn init_common_object_attrs(&self) -> Vec<ObjectAttr> {
-        vec![attr_element!(
-            CKA_CLASS; OAFlags::RequiredOnCreate; Attribute::from_ulong; val 0)]
+    fn add_common_object_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(CKA_CLASS; OAFlags::RequiredOnCreate; Attribute::from_ulong; val 0));
     }
-    fn init_common_storage_attrs(&self) -> Vec<ObjectAttr> {
-        vec![
-            attr_element!(
-                CKA_TOKEN; OAFlags::Defval | OAFlags::ChangeOnCopy;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_MODIFIABLE; OAFlags::Defval | OAFlags::ChangeOnCopy;
-                Attribute::from_bool; val true),
-            attr_element!(
-                CKA_LABEL; OAFlags::empty(); Attribute::from_string;
-                val String::new()),
-            attr_element!(
-                CKA_COPYABLE; OAFlags::Defval | OAFlags::ChangeToFalse;
-                Attribute::from_bool; val true),
-            attr_element!(
-                CKA_DESTROYABLE; OAFlags::Defval; Attribute::from_bool;
-                val true),
-            attr_element!(
-                CKA_UNIQUE_ID; OAFlags::NeverSettable | OAFlags::Unchangeable;
-                Attribute::from_string; val String::new()),
-        ]
+
+    fn add_common_storage_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(
+            CKA_TOKEN; OAFlags::Defval | OAFlags::ChangeOnCopy;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_MODIFIABLE; OAFlags::Defval | OAFlags::ChangeOnCopy;
+            Attribute::from_bool; val true));
+        attrs.push(attr_element!(
+            CKA_LABEL; OAFlags::empty(); Attribute::from_string;
+            val String::new()));
+        attrs.push(attr_element!(
+            CKA_COPYABLE; OAFlags::Defval | OAFlags::ChangeToFalse;
+            Attribute::from_bool; val true));
+        attrs.push(attr_element!(
+            CKA_DESTROYABLE; OAFlags::Defval; Attribute::from_bool;
+            val true));
+        attrs.push(attr_element!(
+            CKA_UNIQUE_ID; OAFlags::NeverSettable | OAFlags::Unchangeable;
+            Attribute::from_string; val String::new()));
     }
 
     fn default_object_create(
@@ -509,7 +552,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         unacceptable_flags: OAFlags,
         required_flags: OAFlags,
     ) -> Result<Object> {
-        let attributes = self.get_attributes();
+        let attributes = self.get_data().get_attributes();
         let mut obj = Object::new();
 
         for ck_attr in template {
@@ -558,7 +601,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         attr: CK_ATTRIBUTE_TYPE,
         obj: &mut Object,
     ) -> Result<()> {
-        let attributes = self.get_attributes();
+        let attributes = self.get_data().get_attributes();
         match attributes.iter().find(|a| a.get_type() == attr) {
             Some(defattr) => {
                 if defattr.has_default() {
@@ -577,7 +620,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         origin: &Object,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let attributes = self.get_attributes();
+        let attributes = self.get_data().get_attributes();
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
@@ -687,7 +730,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         sensitive: bool,
     ) -> Result<()> {
         let mut result = CKR_OK;
-        let attrs = self.get_attributes();
+        let attrs = self.get_data().get_attributes();
         for ck_attr in template.iter_mut() {
             match attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
@@ -718,7 +761,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     /// If an attribute provided in the template cannot be changed an
     /// appropriate error is returned.
     fn check_set_attributes(&self, template: &[CK_ATTRIBUTE]) -> Result<()> {
-        let attrs = self.get_attributes();
+        let attrs = self.get_data().get_attributes();
         for ck_attr in template {
             match attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
@@ -769,6 +812,10 @@ pub trait ObjectFactory: Debug + Send + Sync {
 
         Ok(())
     }
+
+    fn get_data(&self) -> &ObjectFactoryData;
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData;
 }
 
 /// This is a specialized factory for objects of class CKO_DATA
@@ -776,29 +823,33 @@ pub trait ObjectFactory: Debug + Send + Sync {
 /// [Data Objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203218)
 /// (Version 3.1)
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct DataFactory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl DataFactory {
     fn new() -> DataFactory {
-        let mut data: DataFactory = DataFactory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: DataFactory = Default::default();
+
+        factory.add_common_object_attrs();
+        factory.add_common_storage_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_APPLICATION; OAFlags::Defval; Attribute::from_string;
             val String::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_OBJECT_ID; OAFlags::empty(); Attribute::from_bytes;
             val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Defval; Attribute::from_bytes;
             val Vec::new()));
-        data
+
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -815,8 +866,12 @@ impl ObjectFactory for DataFactory {
         self.default_copy(origin, template)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
@@ -826,32 +881,31 @@ impl ObjectFactory for DataFactory {
 /// [Certificate objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203221)
 /// (Version 3.1)
 
-pub trait CertFactory {
-    fn init_common_certificate_attrs(&self) -> Vec<ObjectAttr> {
-        vec![
-            attr_element!(
-                CKA_CERTIFICATE_TYPE; OAFlags::AlwaysRequired;
-                Attribute::from_ulong; val 0),
-            attr_element!(
-                CKA_TRUSTED; OAFlags::Defval; Attribute::from_bool;
-                val false),
-            attr_element!(
-                CKA_CERTIFICATE_CATEGORY; OAFlags::Defval;
-                Attribute::from_ulong;
-                val CK_CERTIFICATE_CATEGORY_UNSPECIFIED),
-            attr_element!(
-                CKA_CHECK_VALUE; OAFlags::Ignored; Attribute::from_ignore;
-                val None),
-            attr_element!(
-                CKA_START_DATE; OAFlags::empty(); Attribute::from_date_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_END_DATE; OAFlags::empty(); Attribute::from_date_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-        ]
+pub trait CertFactory: ObjectFactory {
+    fn add_common_certificate_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(
+            CKA_CERTIFICATE_TYPE; OAFlags::AlwaysRequired;
+            Attribute::from_ulong; val 0));
+        attrs.push(attr_element!(
+            CKA_TRUSTED; OAFlags::Defval; Attribute::from_bool;
+            val false));
+        attrs.push(attr_element!(
+            CKA_CERTIFICATE_CATEGORY; OAFlags::Defval;
+            Attribute::from_ulong;
+            val CK_CERTIFICATE_CATEGORY_UNSPECIFIED));
+        attrs.push(attr_element!(
+            CKA_CHECK_VALUE; OAFlags::Ignored; Attribute::from_ignore;
+            val None));
+        attrs.push(attr_element!(
+            CKA_START_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_END_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
     }
 
     fn basic_cert_object_create_checks(&self, obj: &mut Object) -> CK_RV {
@@ -885,51 +939,54 @@ pub trait CertFactory {
 /// [X.509 public key certificate objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203224)
 /// (Version 3.1)
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct X509Factory {
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl X509Factory {
     fn new() -> X509Factory {
-        let mut data: X509Factory = X509Factory {
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes
-            .append(&mut data.init_common_certificate_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: X509Factory = Default::default();
+
+        factory.add_common_object_attrs();
+        factory.add_common_storage_attrs();
+        factory.add_common_certificate_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_SUBJECT; OAFlags::AlwaysRequired; Attribute::from_bytes;
             val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_ID; OAFlags::Defval; Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_ISSUER; OAFlags::Defval; Attribute::from_bytes;
             val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_SERIAL_NUMBER; OAFlags::Defval; Attribute::from_bytes;
             val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::AlwaysRequired; Attribute::from_bytes;
             val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_URL; OAFlags::empty(); Attribute::from_string;
             val String::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_HASH_OF_SUBJECT_PUBLIC_KEY; OAFlags::Defval;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_HASH_OF_ISSUER_PUBLIC_KEY; OAFlags::Defval;
             Attribute::from_bytes; val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_JAVA_MIDP_SECURITY_DOMAIN; OAFlags::Defval;
             Attribute::from_ulong; val CK_SECURITY_DOMAIN_UNSPECIFIED));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_NAME_HASH_ALGORITHM; OAFlags::empty(); Attribute::from_ulong;
             val CKM_SHA_1));
-        data
+
+        factory.data.finalize();
+
+        factory
     }
 }
 
@@ -986,8 +1043,12 @@ impl ObjectFactory for X509Factory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
     }
 }
 
@@ -999,37 +1060,38 @@ impl CertFactory for X509Factory {}
 /// [Key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203227)
 /// (Version 3.1)
 
-pub trait CommonKeyFactory {
-    fn init_common_key_attrs(&self) -> Vec<ObjectAttr> {
-        vec![
-            attr_element!(
-                CKA_KEY_TYPE; OAFlags::RequiredOnCreate; Attribute::from_ulong;
-                val CK_UNAVAILABLE_INFORMATION),
-            attr_element!(
-                CKA_ID; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_START_DATE; OAFlags::empty(); Attribute::from_date_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_END_DATE; OAFlags::empty(); Attribute::from_date_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_DERIVE; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable;
-                Attribute::from_ulong; val CK_UNAVAILABLE_INFORMATION),
-            attr_element!(
-                CKA_ALLOWED_MECHANISMS; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            #[cfg(feature = "fips")]
-            attr_element!(
-                CKA_VALIDATION_FLAGS; OAFlags::NeverSettable;
-                Attribute::from_ulong; val 0),
-        ]
+pub trait CommonKeyFactory: ObjectFactory {
+    fn add_common_key_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(
+            CKA_KEY_TYPE; OAFlags::RequiredOnCreate; Attribute::from_ulong;
+            val CK_UNAVAILABLE_INFORMATION));
+        attrs.push(attr_element!(
+            CKA_ID; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_START_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_END_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_DERIVE; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable;
+            Attribute::from_ulong; val CK_UNAVAILABLE_INFORMATION));
+        attrs.push(attr_element!(
+            CKA_ALLOWED_MECHANISMS; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+
+        #[cfg(feature = "pkcs11_3_2")]
+        attrs.push(attr_element!(
+            CKA_OBJECT_VALIDATION_FLAGS;
+            OAFlags::NeverSettable | OAFlags::Ephemeral;
+            Attribute::from_ulong; val 0));
     }
 }
 
@@ -1040,31 +1102,30 @@ pub trait CommonKeyFactory {
 /// (Version 3.1)
 
 #[allow(dead_code)]
-pub trait PubKeyFactory {
-    fn init_common_public_key_attrs(&self) -> Vec<ObjectAttr> {
-        vec![
-            attr_element!(
-                CKA_SUBJECT; OAFlags::Defval; Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_ENCRYPT; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_VERIFY; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_VERIFY_RECOVER; OAFlags::Defval; Attribute::from_bool;
-                val false),
-            attr_element!(
-                CKA_WRAP; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-        ]
+pub trait PubKeyFactory: ObjectFactory {
+    fn add_common_public_key_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(
+            CKA_SUBJECT; OAFlags::Defval; Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_ENCRYPT; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_VERIFY; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_VERIFY_RECOVER; OAFlags::Defval; Attribute::from_bool;
+            val false));
+        attrs.push(attr_element!(
+            CKA_WRAP; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
     }
 }
 
@@ -1075,49 +1136,48 @@ pub trait PubKeyFactory {
 /// (Version 3.1)
 
 #[allow(dead_code)]
-pub trait PrivKeyFactory {
-    fn init_common_private_key_attrs(&self) -> Vec<ObjectAttr> {
-        vec![
-            attr_element!(
-                CKA_SUBJECT; OAFlags::Defval; Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue;
-                Attribute::from_bool; val true),
-            attr_element!(
-                CKA_DECRYPT; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_SIGN; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_SIGN_RECOVER; OAFlags::Defval; Attribute::from_bool;
-                val false),
-            attr_element!(
-                CKA_UNWRAP; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_EXTRACTABLE; OAFlags::ChangeToFalse | OAFlags::Defval;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_ALWAYS_AUTHENTICATE; OAFlags::Defval; Attribute::from_bool;
-                val false),
-            attr_element!(
-                CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-        ]
+pub trait PrivKeyFactory: ObjectFactory {
+    fn add_common_private_key_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(
+            CKA_SUBJECT; OAFlags::Defval; Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue;
+            Attribute::from_bool; val true));
+        attrs.push(attr_element!(
+            CKA_DECRYPT; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_SIGN; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_SIGN_RECOVER; OAFlags::Defval; Attribute::from_bool;
+            val false));
+        attrs.push(attr_element!(
+            CKA_UNWRAP; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_EXTRACTABLE; OAFlags::ChangeToFalse | OAFlags::Defval;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_ALWAYS_AUTHENTICATE; OAFlags::Defval; Attribute::from_bool;
+            val false));
+        attrs.push(attr_element!(
+            CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
     }
 
     fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
@@ -1151,52 +1211,51 @@ macro_rules! ok_or_clear {
 /// [Secret key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203232)
 /// (Version 3.1)
 
-pub trait SecretKeyFactory {
-    fn init_common_secret_key_attrs(&self) -> Vec<ObjectAttr> {
-        vec![
-            attr_element!(
-                CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue;
-                Attribute::from_bool; val true),
-            attr_element!(
-                CKA_ENCRYPT; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_DECRYPT; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_SIGN; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_VERIFY; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_WRAP; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_UNWRAP; OAFlags::Defval; Attribute::from_bool; val false),
-            attr_element!(
-                CKA_EXTRACTABLE; OAFlags::ChangeToFalse | OAFlags::Defval;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_CHECK_VALUE; OAFlags::Ignored; Attribute::from_ignore;
-                val None),
-            attr_element!(
-                CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval;
-                Attribute::from_bool; val false),
-            attr_element!(
-                CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-            attr_element!(
-                CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
-                val Vec::new()),
-        ]
+pub trait SecretKeyFactory: ObjectFactory {
+    fn add_common_secret_key_attrs(&mut self) {
+        let attrs = self.get_data_mut().get_attributes_mut();
+        attrs.push(attr_element!(
+            CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue;
+            Attribute::from_bool; val true));
+        attrs.push(attr_element!(
+            CKA_ENCRYPT; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_DECRYPT; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_SIGN; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_VERIFY; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_WRAP; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_UNWRAP; OAFlags::Defval; Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_EXTRACTABLE; OAFlags::ChangeToFalse | OAFlags::Defval;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_ALWAYS_SENSITIVE; OAFlags::NeverSettable;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_NEVER_EXTRACTABLE; OAFlags::NeverSettable;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_CHECK_VALUE; OAFlags::Ignored; Attribute::from_ignore;
+            val None));
+        attrs.push(attr_element!(
+            CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval;
+            Attribute::from_bool; val false));
+        attrs.push(attr_element!(
+            CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
+        attrs.push(attr_element!(
+            CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            val Vec::new()));
     }
 
     fn export_for_wrapping(&self, obj: &Object) -> Result<Vec<u8>> {
@@ -1219,11 +1278,6 @@ pub trait SecretKeyFactory {
         self.set_key(&mut obj, data)?;
         Ok(obj)
     }
-
-    fn default_object_unwrap(
-        &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object>;
 
     fn get_key_buffer_len(&self, obj: &Object) -> Result<usize> {
         Ok(obj
@@ -1291,45 +1345,42 @@ pub trait SecretKeyFactory {
 /// [Generic secret key](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203468)
 /// (Version 3.1)
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GenericSecretKeyFactory {
     keysize: usize,
-    attributes: Vec<ObjectAttr>,
+    data: ObjectFactoryData,
 }
 
 impl GenericSecretKeyFactory {
     pub fn new() -> GenericSecretKeyFactory {
-        let mut data: GenericSecretKeyFactory = GenericSecretKeyFactory {
-            keysize: 0,
-            attributes: Vec::new(),
-        };
-        data.attributes.append(&mut data.init_common_object_attrs());
-        data.attributes
-            .append(&mut data.init_common_storage_attrs());
-        data.attributes.append(&mut data.init_common_key_attrs());
-        data.attributes
-            .append(&mut data.init_common_secret_key_attrs());
-        data.attributes.push(attr_element!(
+        let mut factory: GenericSecretKeyFactory = Default::default();
+
+        factory.add_common_object_attrs();
+        factory.add_common_storage_attrs();
+        factory.add_common_key_attrs();
+        factory.add_common_secret_key_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
             | OAFlags::SettableOnlyOnCreate; Attribute::from_bytes;
             val Vec::new()));
-        data.attributes.push(attr_element!(
+        attributes.push(attr_element!(
             CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; Attribute::from_bytes;
             val Vec::new()));
 
         /* default to private */
         let private = attr_element!(
             CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy; Attribute::from_bool; val true);
-        match data
-            .attributes
-            .iter()
-            .position(|x| x.get_type() == CKA_PRIVATE)
-        {
-            Some(idx) => data.attributes[idx] = private,
-            None => data.attributes.push(private),
+        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
+            Some(idx) => attributes[idx] = private,
+            None => attributes.push(private),
         }
 
-        data
+        factory.data.finalize();
+
+        factory
     }
 
     pub fn with_key_size(size: usize) -> GenericSecretKeyFactory {
@@ -1357,10 +1408,6 @@ impl ObjectFactory for GenericSecretKeyFactory {
         Ok(obj)
     }
 
-    fn get_attributes(&self) -> &Vec<ObjectAttr> {
-        &self.attributes
-    }
-
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         SecretKeyFactory::export_for_wrapping(self, key)
     }
@@ -1376,18 +1423,19 @@ impl ObjectFactory for GenericSecretKeyFactory {
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Ok(self)
     }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
 }
 
 impl CommonKeyFactory for GenericSecretKeyFactory {}
 
 impl SecretKeyFactory for GenericSecretKeyFactory {
-    fn default_object_unwrap(
-        &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        ObjectFactory::default_object_unwrap(self, template)
-    }
-
     fn recommend_key_size(&self, max: usize) -> Result<usize> {
         if self.keysize != 0 {
             Ok(self.keysize)
@@ -1613,7 +1661,8 @@ impl ObjectFactories {
         obj: &Object,
         template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
-        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
+        let objtype_attrs =
+            self.get_object_factory(obj)?.get_data().get_attributes();
         for ck_attr in template {
             match objtype_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
@@ -1625,31 +1674,6 @@ impl ObjectFactories {
             }
         }
         Ok(())
-    }
-
-    /// Returns the list of attributes marked as sensitive for the object.
-    /// Sources the object specific factory to determine which attributes
-    /// are sensitive.
-    pub fn get_sensitive_attrs(
-        &self,
-        obj: &Object,
-    ) -> Result<Vec<CK_ATTRIBUTE_TYPE>> {
-        let mut v = Vec::<CK_ATTRIBUTE_TYPE>::new();
-        let objtype_attrs = self.get_object_factory(obj)?.get_attributes();
-        for attr in &obj.attributes {
-            match objtype_attrs
-                .iter()
-                .find(|a| a.get_type() == attr.get_type())
-            {
-                None => (),
-                Some(a) => {
-                    if a.is(OAFlags::Sensitive) {
-                        v.push(a.get_type());
-                    }
-                }
-            }
-        }
-        Ok(v)
     }
 
     /// Fills the template with the specified attributes from the provided

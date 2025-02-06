@@ -230,17 +230,18 @@ impl Storage for StdStorageFormat {
         }
 
         let mut obj = self.store.fetch_by_uid(&uid, attrs.as_slice())?;
-        let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+        let factory = facilities.factories.get_object_factory(&obj)?;
+        let ats = factory.get_data().get_sensitive();
         if self.aci.encrypts() {
             for typ in ats {
                 /* replace the encrypted val with the clear text one
                  * if the value was requested */
-                let encval = match obj.get_attr(typ) {
+                let encval = match obj.get_attr(*typ) {
                     Some(attr) => attr.get_value(),
                     None => continue,
                 };
                 let plain = self.aci.decrypt_value(facilities, uid, encval)?;
-                obj.set_attr(Attribute::from_bytes(typ, plain))?;
+                obj.set_attr(Attribute::from_bytes(*typ, plain))?;
             }
         }
 
@@ -253,16 +254,26 @@ impl Storage for StdStorageFormat {
         facilities: &mut TokenFacilities,
         mut obj: Object,
     ) -> Result<CK_OBJECT_HANDLE> {
+        let factory = facilities.factories.get_object_factory(&obj)?;
         let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
         if self.aci.encrypts() {
-            let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+            let ats = factory.get_data().get_sensitive();
             for typ in ats {
                 /* replace the clear text val with the encrypted one */
-                let plain = obj.get_attr_as_bytes(typ)?;
+                let plain = match obj.get_attr(*typ) {
+                    Some(attr) => attr.get_value(),
+                    None => continue,
+                };
                 let encval = self.aci.encrypt_value(facilities, &uid, plain)?;
-                obj.set_attr(Attribute::from_bytes(typ, encval))?;
+                obj.set_attr(Attribute::from_bytes(*typ, encval))?;
             }
         }
+
+        /* remove any ephemeral attributes before storage */
+        for typ in factory.get_data().get_ephemeral() {
+            obj.del_attr(*typ);
+        }
+
         let mut handle = obj.get_handle();
         if handle == CK_INVALID_HANDLE {
             handle = facilities.handles.next();
@@ -284,14 +295,15 @@ impl Storage for StdStorageFormat {
         };
 
         let mut obj = self.store.fetch_by_uid(&uid, &[])?;
+        let factory = facilities.factories.get_object_factory(&obj)?;
 
         let mut attrs = CkAttrs::from(template);
 
         if self.aci.encrypts() {
-            let ats = facilities.factories.get_sensitive_attrs(&obj)?;
+            let ats = factory.get_data().get_sensitive();
             for typ in ats {
                 /* replace the clear text val with the encrypted one */
-                match attrs.find_attr(typ) {
+                match attrs.find_attr(*typ) {
                     Some(a) => {
                         let plain = a.to_buf()?;
                         let encval =
@@ -306,6 +318,12 @@ impl Storage for StdStorageFormat {
         for ck_attr in attrs.as_slice() {
             obj.set_attr(ck_attr.to_attribute()?)?;
         }
+
+        /* remove any ephemeral attributes before storage */
+        for typ in factory.get_data().get_ephemeral() {
+            obj.del_attr(*typ);
+        }
+
         self.store.store_obj(obj)
     }
 

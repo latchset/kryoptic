@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::{Attribute, CkAttrs};
+use crate::attribute::*;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
 use crate::interface::*;
