@@ -15,6 +15,8 @@ use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
 
 #[cfg(feature = "fips")]
+use crate::fips::set_fips_error_state;
+#[cfg(feature = "fips")]
 use crate::hmac::test_get_hmac;
 
 macro_rules! as_ck_bbool {
@@ -178,6 +180,9 @@ static TLS_PRF_SELFTEST: Lazy<FIPSSelftest> = Lazy::new(|| {
     };
     if out == expect {
         status.result = CKR_OK;
+    }
+    if status.result == CKR_FIPS_SELF_TEST_FAILED {
+        set_fips_error_state();
     }
     status
 });

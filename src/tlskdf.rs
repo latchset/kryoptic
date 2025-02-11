@@ -9,6 +9,9 @@ use crate::mechanism::*;
 use crate::native::tlskdf::*;
 use crate::object::{Object, ObjectFactories};
 
+#[cfg(feature = "fips")]
+use crate::fips::check_fips_state_ok;
+
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     TLSPRFMechanism::register_mechanisms(mechs);
 }
@@ -99,6 +102,11 @@ impl Mechanism for TLSPRFMechanism {
     }
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+        #[cfg(feature = "fips")]
+        if !check_fips_state_ok() {
+            return Err(CKR_FIPS_SELF_TEST_FAILED)?;
+        }
+
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
@@ -119,6 +127,11 @@ impl Mechanism for TLSPRFMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
+        #[cfg(feature = "fips")]
+        if !check_fips_state_ok() {
+            return Err(CKR_FIPS_SELF_TEST_FAILED)?;
+        }
+
         if self.info.flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
@@ -134,6 +147,11 @@ impl Mechanism for TLSPRFMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
+        #[cfg(feature = "fips")]
+        if !check_fips_state_ok() {
+            return Err(CKR_FIPS_SELF_TEST_FAILED)?;
+        }
+
         if self.info.flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
