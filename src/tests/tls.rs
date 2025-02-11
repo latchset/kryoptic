@@ -6,9 +6,9 @@ use std::io::BufRead;
 
 use crate::attribute::Attribute;
 use crate::hmac;
+use crate::native::tlskdf;
 use crate::object;
 use crate::tests::*;
-use crate::tlskdf;
 
 use serial_test::parallel;
 
