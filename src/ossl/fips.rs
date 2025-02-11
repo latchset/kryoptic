@@ -905,9 +905,13 @@ check_ossl_fips_indicator!(kdf; KDF; Kdf);
 check_ossl_fips_indicator!(mac; MAC; Mac);
 check_ossl_fips_indicator!(cipher; CIPHER; Cipher);
 
-pub fn check_fips_in_error() -> bool {
+pub fn set_error_state() {
+    unsafe { ossl_set_error_state(name_as_char(OSSL_SELF_TEST_TYPE_PCT)) };
+}
+
+pub fn check_state_ok() -> bool {
     if unsafe { ossl_prov_is_running() } == 0 {
-        return true;
+        return false;
     }
-    return false;
+    return true;
 }

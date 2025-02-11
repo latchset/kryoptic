@@ -7,6 +7,8 @@
 #include "internal/provider.h"
 #include "internal/property.h"
 #include "../crypto/evp/evp_local.h"
+#include "../providers/common/include/prov/providercommon.h"
+#include "openssl/self_test.h"
 
 OSSL_LIB_CTX *ossl_prov_ctx_get0_libctx(OSSL_PROVIDER *ctx);
 int OSSL_provider_init_int(const OSSL_CORE_HANDLE *handle,
