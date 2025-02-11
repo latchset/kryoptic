@@ -904,3 +904,10 @@ macro_rules! check_ossl_fips_indicator {
 check_ossl_fips_indicator!(kdf; KDF; Kdf);
 check_ossl_fips_indicator!(mac; MAC; Mac);
 check_ossl_fips_indicator!(cipher; CIPHER; Cipher);
+
+pub fn check_fips_in_error() -> bool {
+    if unsafe { ossl_prov_is_running() } == 0 {
+        return true;
+    }
+    return false;
+}

@@ -9,3 +9,5 @@ pub mod pbkdf2;
 pub mod sp800_108;
 #[cfg(all(feature = "sshkdf", not(feature = "fips")))]
 pub mod sshkdf;
+#[cfg(feature = "tlskdf")]
+pub mod tlskdf;
