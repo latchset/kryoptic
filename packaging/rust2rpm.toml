@@ -1,7 +1,7 @@
 [package]
 source-url = "https://github.com/latchset/kryoptic/archive/%{revision}.zip"
 cargo-install-lib = true
-cargo-install-bin = false
+cargo-install-bin = true
 
 [features]
 enable = ["standard", "dynamic", "nssdb"]
