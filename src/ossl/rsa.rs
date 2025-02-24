@@ -373,19 +373,8 @@ impl RsaPKCSOperation {
         params.finalize();
 
         let evp_pkey = EvpPkey::generate(name_as_char(RSA_NAME), &params)?;
+        let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
-        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
-        let res = unsafe {
-            EVP_PKEY_todata(
-                evp_pkey.as_ptr(),
-                EVP_PKEY_KEYPAIR as std::os::raw::c_int,
-                &mut params,
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        let params = OsslParam::from_ptr(params)?;
         /* Public Key (has E already set) */
         pubkey.set_attr(Attribute::from_bytes(
             CKA_MODULUS,

@@ -235,6 +235,17 @@ impl EvpPkey {
         Ok(EvpPkey { ptr: pkey })
     }
 
+    pub fn todata(&self, selection: u32) -> Result<OsslParam> {
+        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
+        if unsafe {
+            EVP_PKEY_todata(self.ptr, c_int::try_from(selection)?, &mut params)
+        } != 1
+        {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        OsslParam::from_ptr(params)
+    }
+
     pub fn generate(
         pkey_name: *const c_char,
         params: &OsslParam,
@@ -438,6 +449,7 @@ pub struct OsslParam<'a> {
     p: Cow<'a, [OSSL_PARAM]>,
     finalized: bool,
     pub zeroize: bool,
+    pub freeptr: bool,
 }
 
 impl Drop for OsslParam<'_> {
@@ -445,6 +457,11 @@ impl Drop for OsslParam<'_> {
         if self.zeroize {
             while let Some(mut elem) = self.v.pop() {
                 zeromem(elem.as_mut_slice());
+            }
+        }
+        if self.freeptr {
+            unsafe {
+                OSSL_PARAM_free(self.p.as_ref().as_ptr() as *mut OSSL_PARAM);
             }
         }
     }
@@ -462,6 +479,7 @@ impl<'a> OsslParam<'a> {
             p: Cow::Owned(Vec::with_capacity(capacity + 1)),
             finalized: false,
             zeroize: false,
+            freeptr: false,
         }
     }
 
@@ -487,6 +505,7 @@ impl<'a> OsslParam<'a> {
             }),
             finalized: true,
             zeroize: false,
+            freeptr: true,
         })
     }
 
@@ -497,6 +516,7 @@ impl<'a> OsslParam<'a> {
             p: Cow::Owned(Vec::with_capacity(1)),
             finalized: false,
             zeroize: false,
+            freeptr: false,
         };
         p.finalize();
         p
