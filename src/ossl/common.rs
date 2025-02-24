@@ -468,14 +468,18 @@ impl<'a> OsslParam<'a> {
             size += 1;
         }
         let mut container = vec![0u8; size];
-        if unsafe {
+        let ret = unsafe {
             BN_bn2nativepad(
                 bn,
                 container.as_mut_ptr(),
                 c_int::try_from(container.len())?,
             )
-        } < 1
-        {
+        };
+        unsafe {
+            BN_free(bn);
+        }
+        drop(bn);
+        if ret < 1 {
             return Err(CKR_DEVICE_ERROR)?;
         }
         let param = unsafe {
