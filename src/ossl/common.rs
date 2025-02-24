@@ -362,9 +362,74 @@ pub fn name_as_char(name: &[u8]) -> *const c_char {
     name.as_ptr() as *const c_char
 }
 
-pub fn bn_num_bytes(a: *const BIGNUM) -> usize {
-    let x = unsafe { (BN_num_bits(a) + 7) / 8 };
-    usize::try_from(x).unwrap()
+#[derive(Debug)]
+struct BigNum {
+    bn: *const BIGNUM,
+}
+
+impl BigNum {
+    pub fn from_bigendian_vec(v: &Vec<u8>) -> Result<BigNum> {
+        let bn = unsafe {
+            BN_bin2bn(
+                v.as_ptr() as *mut u8,
+                c_int::try_from(v.len())?,
+                std::ptr::null_mut(),
+            )
+        };
+        if bn.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(BigNum {
+            bn: bn as *const BIGNUM,
+        })
+    }
+
+    pub fn len(&self) -> Result<usize> {
+        let x = unsafe { (BN_num_bits(self.bn) + 7) / 8 };
+        Ok(usize::try_from(x)?)
+    }
+
+    pub fn from_param(p: *const OSSL_PARAM) -> Result<BigNum> {
+        let mut bn: *mut BIGNUM = std::ptr::null_mut();
+        if unsafe { OSSL_PARAM_get_BN(p, &mut bn) } != 1 {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        Ok(BigNum {
+            bn: bn as *const BIGNUM,
+        })
+    }
+
+    pub fn to_native_vec(&self) -> Result<Vec<u8>> {
+        let mut v = vec![0u8; self.len()?];
+        if v.len() == 0 {
+            v.push(0);
+        }
+        if unsafe {
+            BN_bn2nativepad(self.bn, v.as_mut_ptr(), c_int::try_from(v.len())?)
+        } < 1
+        {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(v)
+    }
+
+    pub fn to_bigendian_vec(&self) -> Result<Vec<u8>> {
+        let len = self.len()?;
+        let mut v = vec![0u8; self.len()?];
+        let ret = unsafe { BN_bn2bin(self.bn, v.as_mut_ptr()) };
+        if usize::try_from(ret)? != len {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(v)
+    }
+}
+
+impl Drop for BigNum {
+    fn drop(&mut self) {
+        unsafe {
+            BN_free(self.bn as *mut BIGNUM);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -437,7 +502,6 @@ impl<'a> OsslParam<'a> {
         p
     }
 
-    #[allow(dead_code)]
     pub fn add_bn(&mut self, key: *const c_char, v: &Vec<u8>) -> Result<()> {
         if self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
@@ -453,35 +517,8 @@ impl<'a> OsslParam<'a> {
          * native endianness, ensuring the buffer we pass in
          * is in the correct order for openssl ...
          */
-        let bn = unsafe {
-            BN_bin2bn(
-                v.as_ptr() as *mut u8,
-                c_int::try_from(v.len())?,
-                std::ptr::null_mut(),
-            )
-        };
-        if bn.is_null() {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        let mut size = usize::try_from((unsafe { BN_num_bits(bn) } + 7) / 8)?;
-        if size == 0 {
-            size += 1;
-        }
-        let mut container = vec![0u8; size];
-        let ret = unsafe {
-            BN_bn2nativepad(
-                bn,
-                container.as_mut_ptr(),
-                c_int::try_from(container.len())?,
-            )
-        };
-        unsafe {
-            BN_free(bn);
-        }
-        drop(bn);
-        if ret < 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let bn = BigNum::from_bigendian_vec(v)?;
+        let container = bn.to_native_vec()?;
         let param = unsafe {
             OSSL_PARAM_construct_BN(
                 key,
@@ -769,7 +806,6 @@ impl<'a> OsslParam<'a> {
         Ok(val)
     }
 
-    #[allow(dead_code)]
     pub fn get_bn(&self, key: *const c_char) -> Result<Vec<u8>> {
         if !self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
@@ -780,26 +816,8 @@ impl<'a> OsslParam<'a> {
         if p.is_null() {
             return Err(CKR_GENERAL_ERROR)?;
         }
-        let mut bn: *mut BIGNUM = std::ptr::null_mut();
-        if unsafe { OSSL_PARAM_get_BN(p, &mut bn) } != 1 {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-        let len = bn_num_bytes(bn as *const BIGNUM);
-        let mut vec = Vec::<u8>::with_capacity(len);
-        if len
-            != usize::try_from(unsafe {
-                BN_bn2bin(
-                    bn as *const BIGNUM,
-                    vec.as_mut_ptr() as *mut std::os::raw::c_uchar,
-                )
-            })?
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        unsafe {
-            vec.set_len(len);
-        }
-        Ok(vec)
+        let bn = BigNum::from_param(p)?;
+        bn.to_bigendian_vec()
     }
 
     #[allow(dead_code)]
