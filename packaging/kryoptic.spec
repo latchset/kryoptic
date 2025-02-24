@@ -6,9 +6,9 @@
 # prevent library files from being installed
 %global cargo_install_lib 0
 
-%global revision 6166f28a939242ee454fc846de5ed87d2ac5a69c
-%global short_revision 6166f28a
-%global revision_date 20241219
+%global revision 662f5d87afe478b60c07a92d97d2c4c09f8fc7b4
+%global short_revision 662f5d87
+%global revision_date 20250224
 
 Name:           kryoptic
 Version:        0.1.0^%{revision_date}.git%{short_revision}
@@ -40,7 +40,7 @@ A PKCS #11 software token written in Rust.}
 %description %{_description}
 
 %prep
-%autosetup -n %{name}-%{revision} -p1
+%autosetup -n kryoptic-%{revision} -p1
 %cargo_prep
 
 %generate_buildrequires
@@ -64,7 +64,6 @@ install -Dp target/rpm/libkryoptic_pkcs11.so $RPM_BUILD_ROOT/%{_libdir}/libkryop
 %license LICENSE.txt
 %license LICENSE.dependencies
 %doc README.md
-%doc dummy.txt
 %{_libdir}/libkryoptic_pkcs11.so
 
 
