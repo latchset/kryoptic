@@ -1,7 +1,7 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
-use core::ffi::{c_char, c_int};
+use core::ffi::c_char;
 
 use crate::attribute::Attribute;
 use crate::ec::ecdsa::*;
@@ -235,19 +235,8 @@ impl EccOperation {
         params.finalize();
 
         let evp_pkey = EvpPkey::generate(name_as_char(EC_NAME), &params)?;
+        let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
-        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
-        let res = unsafe {
-            EVP_PKEY_todata(
-                evp_pkey.as_ptr(),
-                c_int::try_from(EVP_PKEY_KEYPAIR)?,
-                &mut params,
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        let params = OsslParam::from_ptr(params)?;
         /* Public Key */
         let point_encoded = match asn1::write_single(
             &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
