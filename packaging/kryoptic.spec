@@ -4,12 +4,8 @@
 # prevent library files from being installed
 %global cargo_install_lib 0
 
-%global commit b37f7ee15473f0b7c9546855136d8b5ec3db1750
-%global shortcommit %(c=%{commit}; echo ${c:0:7})
-%global revision_date 20250225
-
 Name:           kryoptic
-Version:        0.1.0^%{revision_date}.git%{shortcommit}
+Version:        0.1.0
 Release:        %autorelease
 Summary:        PKCS #11 software token written in Rust
 
@@ -28,7 +24,7 @@ License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD
 # LICENSE.dependencies contains a full license breakdown
 
 URL:            https://github.com/latchset/kryoptic
-Source:         https://github.com/latchset/%{name}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
+Source:         https://github.com/latchset/%{name}/archive/%{commit}/%{name}-%{version}.crate
 
 BuildRequires:  cargo-rpm-macros >= 26
 BuildRequires:  openssl-devel
@@ -47,7 +43,7 @@ Supporting tools for kryoptic software token.
 Most notably a migration tool for the SoftHSM database.
 
 %prep
-%autosetup -n kryoptic-%{commit} -p1
+%autosetup -n kryoptic-%{version} -p1
 %cargo_prep
 
 %generate_buildrequires

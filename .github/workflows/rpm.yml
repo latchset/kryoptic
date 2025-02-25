@@ -1,0 +1,42 @@
+---
+name: RPM build
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  rpmbuild:
+    name: Generate crate and run RPM Build
+    runs-on: ubuntu-22.04
+    container: fedora:rawhide
+    steps:
+      - name: Configure container to install docs (#2312825)
+        run: sed -i -e 's/tsflags=nodocs//g' /etc/dnf/dnf.conf
+
+      - name: Install Dependencies
+        run: |
+          dnf -y install rustc rpm-build cargo-rpm-macros openssl-devel \
+              'crate(asn1/default)' 'crate(bimap/default)' \
+              'crate(bindgen/default)' 'crate(bitflags/default)' 'crate(cfg-if/default)' \
+              'crate(clap)' 'crate(clap/cargo)' 'crate(clap/derive)' 'crate(clap/help)' \
+              'crate(clap/std)' 'crate(clap/usage)' 'crate(constant_time_eq/default)' \
+              'crate(data-encoding/default)' 'crate(getrandom/default)' 'crate(hex/default)' \
+              'crate(itertools/default)' 'crate(libc/default)' 'crate(num-bigint/default)' \
+              'crate(num-integer/default)' 'crate(num-traits/default)' 'crate(once_cell/default)' \
+              'crate(paste/default)' 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
+              'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
+              'crate(serial_test/default)' 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' \
+              'crate(uuid/default)' 'crate(uuid/v4)'
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: RPM Build
+        run: |
+          cargo package --features=standard,dynamic,nssdb
+          mkdir -p rpmbuild/SOURCES
+          cp target/package/kryoptic-*.crate rpmbuild/SOURCES/
+          rpmbuild --define "_topdir $PWD/rpmbuild" -ba \
+              packaging/kryoptic.spec
+
