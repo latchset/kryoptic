@@ -4,7 +4,7 @@ CODESPELL="codespell --ignore-words-list=gost,sorce,clen,ot,crate,aci"
 
 result=0
 echo "Running codespell on source code..."
-$CODESPELL --skip **/bindings.rs src || result=1
+$CODESPELL src || result=1
 
 # assuming the main branch is there
 for COMMIT in $(git rev-list origin/main.. --); do
