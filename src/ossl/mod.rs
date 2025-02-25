@@ -6,7 +6,7 @@ pub mod bindings {
     #![allow(non_camel_case_types)]
     #![allow(dead_code)]
     #![allow(non_snake_case)]
-    include!("bindings.rs");
+    include!(concat!(env!("OUT_DIR"), "/ossl_bindings.rs"));
 }
 
 use once_cell::sync::Lazy;

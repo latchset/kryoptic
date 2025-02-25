@@ -1,9 +1,6 @@
 /target
 /test
 /Cargo.lock
-/src/pkcs11/bindings.rs
-/src/ossl/bindings.rs
-/src/fips/bindings.rs
 *.o
 *.a
 *.d

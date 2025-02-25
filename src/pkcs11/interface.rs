@@ -1,7 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-include!("bindings.rs");
+include!(concat!(env!("OUT_DIR"), "/pkcs11_bindings.rs"));
 
 // types that need different mutability than bindgen provides
 pub type CK_FUNCTION_LIST_PTR = *const CK_FUNCTION_LIST;

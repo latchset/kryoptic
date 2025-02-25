@@ -13,10 +13,10 @@ check-fips:
 	cargo test --features fips
 
 check-format:
-	@find . -not \( -path ./target -prune \) -type f -name '*.rs' ! -name 'bindings.rs' | xargs rustfmt --check --color auto
+	@find . -not \( -path ./target -prune \) -type f -name '*.rs' | xargs rustfmt --check --color auto
 
 fix-format:
-	@find . -not \( -path ./target -prune \) -type f -name '*.rs' ! -name 'bindings.rs' | xargs rustfmt
+	@find . -not \( -path ./target -prune \) -type f -name '*.rs' | xargs rustfmt
 
 check-spell:
 	@.github/codespell.sh

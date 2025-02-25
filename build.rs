@@ -1,6 +1,9 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::env;
+use std::path::PathBuf;
+
 #[derive(Debug)]
 pub struct Pkcs11Callbacks;
 
@@ -32,6 +35,8 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
 }
 
 fn ossl_bindings(header: &str, args: &[&str]) {
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     bindgen::Builder::default()
         .header(header)
         .clang_args(args)
@@ -49,7 +54,7 @@ fn ossl_bindings(header: &str, args: &[&str]) {
         .allowlist_item("LN_aes.*")
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("src/ossl/bindings.rs")
+        .write_to_file(out_path.join("ossl_bindings.rs"))
         .expect("Couldn't write bindings!");
 }
 
@@ -152,6 +157,8 @@ fn main() {
     #[cfg(all(feature = "dynamic", feature = "fips"))]
     compile_error!("features `dynamic` and `fips` are mutually exclusive");
 
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+
     /* PKCS11 Headers */
     let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
     println!("cargo:rerun-if-changed={}", pkcs11_header);
@@ -166,7 +173,7 @@ fn main() {
         .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file("src/pkcs11/bindings.rs")
+        .write_to_file(out_path.join("pkcs11_bindings.rs"))
         .expect("Couldn't write bindings!");
 
     /* OpenSSL Cryptography */
