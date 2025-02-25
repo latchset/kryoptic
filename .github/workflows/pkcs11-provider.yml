@@ -30,7 +30,7 @@ jobs:
         run: |
             dnf -y install clang git meson cargo expect pkgconf-pkg-config \
               openssl-devel openssl opensc p11-kit-devel gnutls-utils \
-              gcc g++ sqlite-devel python3-six which
+              gcc g++ sqlite-devel python3-six which valgrind
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -75,6 +75,7 @@ jobs:
           meson setup builddir
           meson compile -C builddir
           meson test --num-processes 1 -C builddir
+          meson test --num-processes 1 -C builddir --setup=valgrind
 
       - uses: actions/upload-artifact@v4
         if: failure()
