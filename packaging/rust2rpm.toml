@@ -1,5 +1,5 @@
 [package]
-source-url = "https://github.com/latchset/kryoptic/archive/%{revision}.zip"
+source-url = "https://github.com/latchset/%{name}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz"
 cargo-install-lib = true
 cargo-install-bin = true
 
