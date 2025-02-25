@@ -464,6 +464,15 @@ impl RsaPKCSOperation {
     fn rsa_sig_params(&self) -> Vec<OSSL_PARAM> {
         let mut params = Vec::<OSSL_PARAM>::new();
         match self.mech {
+            CKM_RSA_X_509 => {
+                params.push(unsafe {
+                    OSSL_PARAM_construct_utf8_string(
+                        OSSL_SIGNATURE_PARAM_PAD_MODE.as_ptr() as *const c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_NONE.as_ptr() as *mut c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_NONE.len(),
+                    )
+                });
+            }
             CKM_RSA_PKCS
             | CKM_SHA1_RSA_PKCS
             | CKM_SHA224_RSA_PKCS
@@ -533,6 +542,15 @@ impl RsaPKCSOperation {
     fn rsa_enc_params(&self) -> Vec<OSSL_PARAM> {
         let mut params = Vec::<OSSL_PARAM>::new();
         match self.mech {
+            CKM_RSA_X_509 => {
+                params.push(unsafe {
+                    OSSL_PARAM_construct_utf8_string(
+                        OSSL_SIGNATURE_PARAM_PAD_MODE.as_ptr() as *const c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_NONE.as_ptr() as *mut c_char,
+                        OSSL_PKEY_RSA_PAD_MODE_NONE.len(),
+                    )
+                });
+            }
             CKM_RSA_PKCS => {
                 params.push(unsafe {
                     OSSL_PARAM_construct_utf8_string(
