@@ -203,10 +203,9 @@ pub fn verify_prf_key(mech: CK_MECHANISM_TYPE, key: &Object) -> Result<()> {
     match check_key_op(key, CKK_GENERIC_SECRET) {
         Ok(_) => match mech {
             CKM_SHA_1_HMAC | CKM_SHA224_HMAC | CKM_SHA256_HMAC
-            | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_224_HMAC
-            | CKM_SHA3_256_HMAC | CKM_SHA3_384_HMAC | CKM_SHA3_512_HMAC => {
-                return Ok(())
-            }
+            | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA512_224_HMAC
+            | CKM_SHA512_256_HMAC | CKM_SHA3_224_HMAC | CKM_SHA3_256_HMAC
+            | CKM_SHA3_384_HMAC | CKM_SHA3_512_HMAC => return Ok(()),
             _ => (),
         },
         Err(_) => (),
@@ -222,6 +221,8 @@ pub fn verify_prf_key(mech: CK_MECHANISM_TYPE, key: &Object) -> Result<()> {
         CKM_SHA3_256_HMAC => check_key_op(key, CKK_SHA3_256_HMAC),
         CKM_SHA3_384_HMAC => check_key_op(key, CKK_SHA3_384_HMAC),
         CKM_SHA3_512_HMAC => check_key_op(key, CKK_SHA3_512_HMAC),
+        CKM_SHA512_224_HMAC => check_key_op(key, CKK_SHA512_224_HMAC),
+        CKM_SHA512_256_HMAC => check_key_op(key, CKK_SHA512_256_HMAC),
         CKM_AES_CMAC => check_key_op(key, CKK_AES),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }

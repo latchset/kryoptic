@@ -26,7 +26,7 @@ pub struct HashBasedOp {
     pub block_size: usize,
 }
 
-pub static HASH_MECH_SET: [HashBasedOp; 9] = [
+pub static HASH_MECH_SET: [HashBasedOp; 11] = [
     HashBasedOp {
         hash: CKM_SHA_1,
         key_type: CKK_SHA_1_HMAC,
@@ -116,6 +116,26 @@ pub static HASH_MECH_SET: [HashBasedOp; 9] = [
         mac_general: CKM_SHA3_512_HMAC_GENERAL,
         hash_size: 64,
         block_size: 72,
+    },
+    HashBasedOp {
+        hash: CKM_SHA512_224,
+        key_type: CKK_SHA512_224_HMAC,
+        key_gen: CKM_SHA512_224_KEY_GEN,
+        key_derive: CKM_SHA512_224_KEY_DERIVATION,
+        mac: CKM_SHA512_224_HMAC,
+        mac_general: CKM_SHA512_224_HMAC_GENERAL,
+        hash_size: 28,
+        block_size: 128,
+    },
+    HashBasedOp {
+        hash: CKM_SHA512_256,
+        key_type: CKK_SHA512_256_HMAC,
+        key_gen: CKM_SHA512_256_KEY_GEN,
+        key_derive: CKM_SHA512_256_KEY_DERIVATION,
+        mac: CKM_SHA512_256_HMAC,
+        mac_general: CKM_SHA512_256_HMAC_GENERAL,
+        hash_size: 32,
+        block_size: 128,
     },
 ];
 

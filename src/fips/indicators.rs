@@ -244,7 +244,7 @@ struct FipsMechanism {
 
 struct FipsChecks {
     keys: [FipsKeyType; 15],
-    mechs: [FipsMechanism; 71],
+    mechs: [FipsMechanism; 73],
 }
 
 /* TODO: double check the values, this is just an initial
@@ -670,6 +670,24 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [
                 restrict!(CKK_SHA512_HMAC, range!(112, 512)),
                 restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+            ],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_224_HMAC,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [
+                restrict!(CKK_SHA512_224_HMAC, range!(112, 224)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+            ],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_256_HMAC,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [
+                restrict!(CKK_SHA512_256_HMAC, range!(112, 256)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
             ],
             genflags: 0,
         },

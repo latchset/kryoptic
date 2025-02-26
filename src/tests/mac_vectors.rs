@@ -96,6 +96,10 @@ fn parse_mac_vector(filename: &str) -> Vec<TestUnit> {
         if line.starts_with("[L=") {
             if line.contains("[L=20]") {
                 mech = CKM_SHA_1_HMAC_GENERAL;
+            } else if line.contains("[L=28,TRUNC]") {
+                mech = CKM_SHA512_224_HMAC_GENERAL;
+            } else if line.contains("[L=32,TRUNC]") {
+                mech = CKM_SHA512_256_HMAC_GENERAL;
             } else if line.contains("[L=28]") {
                 mech = CKM_SHA224_HMAC_GENERAL;
             } else if line.contains("[L=32]") {
