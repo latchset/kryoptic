@@ -43,7 +43,7 @@ unsafe extern "C" fn fips_get_entropy(
         return 0;
     }
     let r = slice::from_raw_parts_mut(out as *mut u8, len);
-    if getrandom::getrandom(r).is_err() {
+    if getrandom::fill(r).is_err() {
         fips_clear_free(out, len, std::ptr::null(), 0);
         return 0;
     }
