@@ -921,6 +921,12 @@ pub fn mech_type_to_digest_name(mech: CK_MECHANISM_TYPE) -> *const c_char {
         | CKM_SHA3_512_HMAC
         | CKM_SHA3_512_HMAC_GENERAL
         | CKM_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512.as_ptr(),
+        CKM_SHA512_224_HMAC | CKM_SHA512_224_HMAC_GENERAL | CKM_SHA512_224 => {
+            OSSL_DIGEST_NAME_SHA2_512_224.as_ptr()
+        }
+        CKM_SHA512_256_HMAC | CKM_SHA512_256_HMAC_GENERAL | CKM_SHA512_256 => {
+            OSSL_DIGEST_NAME_SHA2_512_256.as_ptr()
+        }
         _ => std::ptr::null(),
     }) as *const c_char
 }

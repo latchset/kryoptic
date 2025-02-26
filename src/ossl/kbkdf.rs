@@ -267,6 +267,8 @@ fn get_segment_size(
             CKM_SHA3_256_HMAC => CKM_SHA3_256,
             CKM_SHA3_384_HMAC => CKM_SHA3_384,
             CKM_SHA3_512_HMAC => CKM_SHA3_512,
+            CKM_SHA512_224_HMAC => CKM_SHA512_224,
+            CKM_SHA512_256_HMAC => CKM_SHA512_256,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         },
         pParameter: std::ptr::null_mut(),
@@ -410,7 +412,8 @@ impl Derive for Sp800Operation {
         let (prf_alg_param, prf_alg_value) = match self.prf {
             CKM_SHA_1_HMAC | CKM_SHA224_HMAC | CKM_SHA256_HMAC
             | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_224_HMAC
-            | CKM_SHA3_256_HMAC | CKM_SHA3_384_HMAC | CKM_SHA3_512_HMAC => (
+            | CKM_SHA512_224_HMAC | CKM_SHA512_256_HMAC | CKM_SHA3_256_HMAC
+            | CKM_SHA3_384_HMAC | CKM_SHA3_512_HMAC => (
                 name_as_char(OSSL_KDF_PARAM_DIGEST),
                 mech_type_to_digest_name(self.prf),
             ),

@@ -96,6 +96,8 @@ impl Mechanism for PBKDF2Mechanism {
             CKP_PKCS5_PBKD2_HMAC_SHA256 => CKM_SHA256_HMAC,
             CKP_PKCS5_PBKD2_HMAC_SHA384 => CKM_SHA384_HMAC,
             CKP_PKCS5_PBKD2_HMAC_SHA512 => CKM_SHA512_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA512_224 => CKM_SHA512_224_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA512_256 => CKM_SHA512_256_HMAC,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
         let pass = self.mock_password_object(bytes_to_vec!(
