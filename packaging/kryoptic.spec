@@ -60,6 +60,9 @@ export CONFDIR=%{_sysconfdir}
 install -Dp target/rpm/libkryoptic_pkcs11.so $RPM_BUILD_ROOT/%{_libdir}/pkcs11/libkryoptic_pkcs11.so
 rm -f $RPM_BUILD_ROOT/%{_bindir}/conformance
 
+mkdir -p $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/
+echo "module: libkryoptic_pkcs11.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryoptic.module
+
 %if %{with check}
 %check
 %cargo_test -f dynamic,nssdb,standard
@@ -71,6 +74,11 @@ rm -f $RPM_BUILD_ROOT/%{_bindir}/conformance
 %doc README.md
 %%dir %{_libdir}/pkcs11
 %{_libdir}/pkcs11/libkryoptic_pkcs11.so
+# Co-owned with p11-kit so it is not hard dependency
+%dir %{_datadir}/p11-kit
+%dir %{_datadir}/p11-kit/modules
+%{_datadir}/p11-kit/modules/kryoptic.module
+
 
 %files tools
 %{_bindir}/softhsm_migrate
