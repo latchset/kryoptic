@@ -24,9 +24,9 @@ pub struct HashState {
 }
 
 impl HashState {
-    pub fn new(alg: &[u8]) -> Result<HashState> {
+    pub fn new(alg: *const c_char) -> Result<HashState> {
         Ok(HashState {
-            md: EvpMd::new(alg.as_ptr() as *const c_char)?,
+            md: EvpMd::new(alg)?,
             ctx: EvpMdCtx::new()?,
         })
     }
@@ -37,20 +37,10 @@ unsafe impl Sync for HashState {}
 
 impl HashOperation {
     pub fn new(mech: CK_MECHANISM_TYPE) -> Result<HashOperation> {
-        let alg: &[u8] = match mech {
-            CKM_SHA_1 => OSSL_DIGEST_NAME_SHA1,
-            CKM_SHA224 => OSSL_DIGEST_NAME_SHA2_224,
-            CKM_SHA256 => OSSL_DIGEST_NAME_SHA2_256,
-            CKM_SHA384 => OSSL_DIGEST_NAME_SHA2_384,
-            CKM_SHA512 => OSSL_DIGEST_NAME_SHA2_512,
-            CKM_SHA512_224 => OSSL_DIGEST_NAME_SHA2_512_224,
-            CKM_SHA512_256 => OSSL_DIGEST_NAME_SHA2_512_256,
-            CKM_SHA3_224 => OSSL_DIGEST_NAME_SHA3_224,
-            CKM_SHA3_256 => OSSL_DIGEST_NAME_SHA3_256,
-            CKM_SHA3_384 => OSSL_DIGEST_NAME_SHA3_384,
-            CKM_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512,
-            _ => return Err(CKR_MECHANISM_INVALID)?,
-        };
+        let alg: *const c_char = mech_type_to_digest_name(mech);
+        if alg.is_null() {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
         Ok(HashOperation {
             mech: mech,
             state: HashState::new(alg)?,
