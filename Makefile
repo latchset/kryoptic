@@ -26,3 +26,9 @@ tests: build
 
 docs:
 	cargo doc --features standard,nssdb,jsondb,fips --document-private-items
+
+tags:
+	ctags -R src/
+
+clean:
+	cargo clean
