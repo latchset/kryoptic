@@ -6,8 +6,10 @@ use std::ffi::{c_char, c_int, c_uint, c_void};
 
 use crate::error::Result;
 use crate::interface::*;
+#[cfg(feature = "ecc")]
 use crate::kasn1::oid;
 use crate::misc::{byte_ptr, void_ptr};
+#[cfg(any(feature = "ecc", feature = "rsa"))]
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
@@ -22,8 +24,6 @@ use crate::ossl::eddsa;
 use crate::ossl::montgomery as ecm;
 #[cfg(feature = "rsa")]
 use crate::ossl::rsa;
-
-use asn1;
 
 macro_rules! ptr_wrapper_struct {
     ($name:ident; $ctx:ident) => {
