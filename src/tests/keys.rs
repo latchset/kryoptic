@@ -34,7 +34,7 @@ fn test_secret_key() {
         session,
         handle,
         &[(CKA_KEY_GEN_MECHANISM, CKM_GENERIC_SECRET_KEY_GEN)],
-        &[],
+        &[(CKA_ALLOWED_MECHANISMS, &[])],
         &[(CKA_LOCAL, true)],
     ) {
         panic!("{}", err);
