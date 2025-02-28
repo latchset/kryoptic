@@ -699,6 +699,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
                     }
                 }
                 None => {
+                    /* This attribute is not valid for given object type */
                     ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
                     if result == CKR_OK {
                         result = CKR_ATTRIBUTE_TYPE_INVALID;
@@ -1676,10 +1677,8 @@ impl ObjectFactories {
         for ck_attr in template.iter_mut() {
             match obj_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => {
+                    /* This attribute is not available on given object */
                     ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    if result == CKR_OK {
-                        result = CKR_ATTRIBUTE_TYPE_INVALID;
-                    }
                     continue;
                 }
                 Some(attr) => {
