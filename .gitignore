@@ -10,3 +10,4 @@
 /*.sql
 cscope.*
 tags
+.generated_files

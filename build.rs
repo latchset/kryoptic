@@ -2,7 +2,7 @@
 // See LICENSE.txt file for terms
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct Pkcs11Callbacks;
@@ -34,9 +34,7 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     }
 }
 
-fn ossl_bindings(header: &str, args: &[&str]) {
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-
+fn ossl_bindings(header: &str, args: &[&str], out_file: &Path) {
     bindgen::Builder::default()
         .header(header)
         .clang_args(args)
@@ -54,12 +52,12 @@ fn ossl_bindings(header: &str, args: &[&str]) {
         .allowlist_item("LN_aes.*")
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file(out_path.join("ossl_bindings.rs"))
+        .write_to_file(out_file)
         .expect("Couldn't write bindings!");
 }
 
 #[cfg(not(feature = "dynamic"))]
-fn build_ossl() {
+fn build_ossl(out_file: &Path) {
     let openssl_path = std::path::PathBuf::from("openssl")
         .canonicalize()
         .expect("cannot canonicalize path");
@@ -144,13 +142,13 @@ fn build_ossl() {
 
     let args = [&format!("-I{}", include_path.to_str().unwrap()), "-std=c90"];
 
-    ossl_bindings(header, &args);
+    ossl_bindings(header, &args, out_file);
 }
 
 #[cfg(feature = "dynamic")]
-fn use_system_ossl() {
+fn use_system_ossl(out_file: &Path) {
     println!("cargo:rustc-link-lib=crypto");
-    ossl_bindings("ossl.h", &["-std=c90"]);
+    ossl_bindings("ossl.h", &["-std=c90"], out_file);
 }
 
 fn main() {
@@ -158,6 +156,8 @@ fn main() {
     compile_error!("features `dynamic` and `fips` are mutually exclusive");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let pkcs11_bindings = out_path.join("pkcs11_bindings.rs");
+    let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* PKCS11 Headers */
     let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
@@ -173,18 +173,18 @@ fn main() {
         .parse_callbacks(Box::new(Pkcs11Callbacks))
         .generate()
         .expect("Unable to generate bindings")
-        .write_to_file(out_path.join("pkcs11_bindings.rs"))
+        .write_to_file(&pkcs11_bindings)
         .expect("Couldn't write bindings!");
 
     /* OpenSSL Cryptography */
     #[cfg(feature = "dynamic")]
-    use_system_ossl();
+    use_system_ossl(&ossl_bindings);
 
     #[cfg(not(feature = "dynamic"))]
     println!("cargo:rerun-if-changed={}", ".git/modules/openssl/HEAD");
 
     #[cfg(not(feature = "dynamic"))]
-    build_ossl();
+    build_ossl(&ossl_bindings);
 
     println!("cargo:rerun-if-changed=build.rs");
 }

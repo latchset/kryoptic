@@ -27,7 +27,22 @@ tests: build
 docs:
 	cargo doc --features standard,nssdb,jsondb,fips --document-private-items
 
-tags:
+.ONESHELL:
+SHELL = /bin/bash
+scope:
+	@if [ -x "$$(command -v scope)" ]; then
+		PKCSFILES=$$(find ./ -name pkcs11_bindings.rs)
+		if [[ -n "$$PKCSFILES" ]]; then
+			read PKCSFILE < <(ls -t $$PKCSFILES)
+		fi
+		OSSLFILES=$$(find ./ -name pkcs11_bindings.rs)
+		if [[ -n "$$OSSLFILES" ]]; then
+			read OSSLFILE < <(ls -t $$OSSLFILES)
+		fi
+		scope -- src $$PKCSFILE $$OSSLFILE
+	fi
+
+tags: scope
 	ctags -R src/
 
 clean:
