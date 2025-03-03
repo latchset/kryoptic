@@ -363,6 +363,7 @@ macro_rules! global_wlock {
     }};
 }
 
+/// tests helper
 #[cfg(test)]
 pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
     let state = match STATE.read() {
@@ -430,6 +431,7 @@ static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
     RwLock::new(global_conf)
 });
 
+/// tests helper
 #[cfg(test)]
 pub fn add_slot(slot: config::Slot) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck CONFIG);
