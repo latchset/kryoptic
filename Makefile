@@ -1,16 +1,16 @@
 all: build
 
 build:
-	cargo build --features standard,nssdb
+	cargo build --features nssdb
 
 fips:
-	cargo build --features fips
+	cargo build --no-default-features --features fips,sqlitedb,nssdb
 
 check:
-	cargo test --features standard,nssdb
+	cargo test --features nssdb
 
 check-fips:
-	cargo test --features fips
+	cargo test --no-default-features --features fips,sqlitedb,nssdb
 
 check-format:
 	@find . -not \( -path ./target -prune \) -type f -name '*.rs' | xargs rustfmt --check --color auto

@@ -69,20 +69,20 @@ tlskdf = []
 # Databases
 jsondb = ["memorydb"]
 memorydb = ["aes", "hkdf", "pbkdf2"] # for encryption
-sqlitedb = [ "dep:rusqlite", "aes", "hkdf", "pbkdf2" ]
-nssdb = [ "dep:rusqlite", "aes", "hmac", "pbkdf2" ]
+sqlitedb = ["dep:rusqlite", "aes", "hkdf", "pbkdf2"]
+nssdb = ["dep:rusqlite", "aes", "hmac", "pbkdf2"]
 
-default = [ "sqlitedb" ]
+default = ["standard"]
 
 ecc_all = ["ecdsa", "ec_montgomery", "eddsa", "ecdh"]
 hash_all = ["hash", "hmac"]
-kdf_all = [ "hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf" ]
+kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf"]
 
-standard = [ "ecc_all", "hash_all", "kdf_all", "rsa"]
+standard = ["sqlitedb", "ecc_all", "hash_all", "kdf_all", "rsa"]
 
 ecc_fips = ["ecdsa", "ecdh"]
-fips = [ "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
+fips = ["rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
 
-dynamic = [ ] # Builds against system libcrypto.so
+dynamic = [] # Builds against system libcrypto.so
 
 slow = [] # Enables slow tests
