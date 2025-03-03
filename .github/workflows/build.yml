@@ -82,6 +82,7 @@ jobs:
           OPTS=""
 
           if [ "${{ matrix.name }}" = "fips" ]; then
+            OPTS="--no-default-features"
             FEATURES="${FEATURES},fips"
           elif [ "${{ matrix.name }}" = "ossl3" ]; then
             FEATURES="${FEATURES},standard"
