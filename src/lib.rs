@@ -1016,12 +1016,12 @@ extern "C" fn fn_get_attribute_value(
     template: CK_ATTRIBUTE_PTR,
     count: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
-    let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
     let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let mut tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
 
+    /* must do this before we lock STATE or risk deadlocking in tests with
+     * a parallel thread calling fn_initialize() */
     #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
     let ec_point_len = match tmpl.iter().find(|a| a.type_ == CKA_EC_POINT) {
         Some(a) => {
@@ -1039,6 +1039,8 @@ extern "C" fn fn_get_attribute_value(
         None => None,
     };
 
+    let rstate = global_rlock!(STATE);
+    let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
     let result = ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl));
 
     #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
