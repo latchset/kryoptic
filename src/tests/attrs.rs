@@ -171,10 +171,24 @@ fn test_set_attr_rsa() {
         fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
     assert_eq!(ret, CKR_SESSION_READ_ONLY);
 
-    let session = testtokn.get_session(true);
+    /* Open second, read-write, session. Keep the first around to make
+     * sure the token does not logout */
+    let mut session2 = CK_INVALID_HANDLE;
+    let ret = fn_open_session(
+        testtokn.get_slot(),
+        CKF_SERIAL_SESSION | CKF_RW_SESSION,
+        std::ptr::null_mut(),
+        None,
+        &mut session2,
+    );
+    assert_eq!(ret, CKR_OK);
 
-    let ret =
-        fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
+    let ret = fn_set_attribute_value(
+        session2,
+        handle,
+        template.as_ptr() as *mut _,
+        1,
+    );
     assert_eq!(ret, CKR_OK);
 
     let unique = "unsettable";
@@ -184,9 +198,16 @@ fn test_set_attr_rsa() {
         unique.as_bytes().len(),
     )]);
 
-    let ret =
-        fn_set_attribute_value(session, handle, template.as_ptr() as *mut _, 1);
+    let ret = fn_set_attribute_value(
+        session2,
+        handle,
+        template.as_ptr() as *mut _,
+        1,
+    );
     assert_eq!(ret, CKR_ATTRIBUTE_READ_ONLY);
+
+    let ret = fn_close_session(session2);
+    assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
 }
