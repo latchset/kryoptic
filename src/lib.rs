@@ -256,6 +256,10 @@ impl State {
         };
         self.get_slot_mut(slot_id)?.drop_session(handle);
         self.sessionmap.remove(&handle);
+        /* The specs requires the last session to logout the token */
+        if !self.has_sessions(slot_id)? {
+            self.get_token_from_slot_mut(slot_id)?.logout();
+        }
         Ok(())
     }
 
