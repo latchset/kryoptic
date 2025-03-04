@@ -731,6 +731,8 @@ extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
     for handle in dropped_sessions {
         token.drop_session_objects(handle);
     }
+    /* The spec requires the token to logout once the last session is closed */
+    token.logout();
     CKR_OK
 }
 
