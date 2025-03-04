@@ -24,8 +24,8 @@ jobs:
           echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
         shell: bash
 
-      - name: Store DNF cache
-        uses: actions/cache@v4
+      - name: Restore DNF cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             /var/cache/libdnf5
@@ -116,3 +116,11 @@ jobs:
           path: |
             openssl/
           key: ${{ runner.os }}-ossl-${{ hashFiles('.git/modules/openssl/HEAD') }}
+
+      - if: ${{ matrix.name == 'i686' && steps.cache.outputs.cache-hit != 'true' }}
+        name: Store DNF cache -- the i686 has the most dependencies
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
