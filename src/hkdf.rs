@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::interface::*;
-use crate::mechanism::{Mechanism, Mechanisms, Operation};
+use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::object::{GenericSecretKeyMechanism, ObjectFactories};
 use crate::ossl::hkdf::HKDFOperation;
 
@@ -52,14 +52,14 @@ impl Mechanism for HKDFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 
         match mech.mechanism {
             CKM_HKDF_DERIVE | CKM_HKDF_DATA => {
-                Ok(Operation::Derive(Box::new(HKDFOperation::new(mech)?)))
+                Ok(Box::new(HKDFOperation::new(mech)?))
             }
             _ => Err(CKR_MECHANISM_INVALID)?,
         }

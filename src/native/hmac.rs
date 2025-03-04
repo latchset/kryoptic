@@ -24,14 +24,13 @@ const OPAD_INIT: [u8; MAX_BSZ] = [0x5c; MAX_BSZ];
 pub struct HMACOperation {
     mech: CK_MECHANISM_TYPE,
     key: HmacKey,
-    hash: CK_MECHANISM_TYPE,
     hashlen: usize,
     blocklen: usize,
     outputlen: usize,
     state: [u8; MAX_BSZ],
     ipad: [u8; MAX_BSZ],
     opad: [u8; MAX_BSZ],
-    inner: Operation,
+    inner: Box<dyn Digest>,
     finalized: bool,
     in_use: bool,
 }
@@ -53,17 +52,17 @@ impl HMACOperation {
         let hash = hmac_mech_to_hash_mech(mech)?;
         let hashlen = hash::hash_size(hash);
         let blocklen = hash::block_size(hash);
+        let op = hash::internal_hash_op(hash)?;
         let mut hmac = HMACOperation {
             mech: mech,
             key: key,
-            hash: hash,
             hashlen: hashlen,
             blocklen: blocklen,
             outputlen: outputlen,
             state: [0u8; MAX_BSZ],
             ipad: IPAD_INIT,
             opad: OPAD_INIT,
-            inner: Operation::Empty,
+            inner: op,
             finalized: false,
             in_use: false,
         };
@@ -72,23 +71,15 @@ impl HMACOperation {
     }
 
     fn init(&mut self) -> Result<()> {
-        /* The hash mechanism is unimportant here,
-         * what matters is the psecdef algorithm */
-        let hashop = hash::internal_hash_op(self.hash)?;
-        self.inner = Operation::Digest(hashop);
-
         /* K0 */
         if self.key.raw.len() <= self.blocklen {
             self.state[0..self.key.raw.len()]
                 .copy_from_slice(self.key.raw.as_slice());
         } else {
-            match &mut self.inner {
-                Operation::Digest(op) => op.digest(
-                    self.key.raw.as_slice(),
-                    &mut self.state[..self.hashlen],
-                )?,
-                _ => return Err(CKR_GENERAL_ERROR)?,
-            }
+            self.inner.digest(
+                self.key.raw.as_slice(),
+                &mut self.state[..self.hashlen],
+            )?;
         }
         let ipad = &mut self.ipad[..self.blocklen];
         let opad = &mut self.opad[..self.blocklen];
@@ -100,13 +91,9 @@ impl HMACOperation {
             opad[i] ^= state[i];
         }
         /* H((K0 ^ ipad) || .. ) */
-        match &mut self.inner {
-            Operation::Digest(op) => {
-                op.reset()?;
-                op.digest_update(ipad)?;
-            }
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        }
+        self.inner.reset()?;
+        self.inner.digest_update(ipad)?;
+
         Ok(())
     }
 
@@ -124,10 +111,7 @@ impl HMACOperation {
         self.in_use = true;
 
         /* H( .. || text ..) */
-        let ret = match &mut self.inner {
-            Operation::Digest(op) => op.digest_update(data),
-            _ => Err(CKR_GENERAL_ERROR)?,
-        };
+        let ret = self.inner.digest_update(data);
         if ret.is_err() {
             self.finalized = true;
         }
@@ -147,22 +131,14 @@ impl HMACOperation {
         }
 
         /* state = H((K0 ^ ipad) || text) */
-        match &mut self.inner {
-            Operation::Digest(op) => {
-                op.digest_final(&mut self.state[..self.hashlen])?;
-            }
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        }
+        self.inner.digest_final(&mut self.state[..self.hashlen])?;
+
         /* state = H((K0 ^ opad) || H((K0 ^ ipad) || text)) */
-        match &mut self.inner {
-            Operation::Digest(op) => {
-                op.reset()?;
-                op.digest_update(&self.opad[..self.blocklen])?;
-                op.digest_update(&self.state[..self.hashlen])?;
-                op.digest_final(&mut self.state[..self.hashlen])?;
-            }
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        }
+        self.inner.reset()?;
+        self.inner.digest_update(&self.opad[..self.blocklen])?;
+        self.inner.digest_update(&self.state[..self.hashlen])?;
+        self.inner.digest_final(&mut self.state[..self.hashlen])?;
+
         /* state -> output */
         output.copy_from_slice(&self.state[..output.len()]);
         Ok(())
@@ -172,7 +148,7 @@ impl HMACOperation {
         zeromem(&mut self.state);
         self.ipad.copy_from_slice(&IPAD_INIT);
         self.opad.copy_from_slice(&OPAD_INIT);
-        self.inner = Operation::Empty;
+        self.inner.reset()?;
         self.finalized = false;
         self.in_use = false;
         self.init()

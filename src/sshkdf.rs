@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::interface::*;
-use crate::mechanism::{Mechanism, Mechanisms, Operation};
+use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::object::ObjectFactories;
 
 #[cfg(not(feature = "fips"))]
@@ -42,15 +42,13 @@ impl Mechanism for SSHKDFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 
         match mech.mechanism {
-            KRM_SSHKDF_DERIVE => {
-                Ok(Operation::Derive(Box::new(SSHKDFOperation::new(mech)?)))
-            }
+            KRM_SSHKDF_DERIVE => Ok(Box::new(SSHKDFOperation::new(mech)?)),
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }

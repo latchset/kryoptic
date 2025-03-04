@@ -88,7 +88,7 @@ pub trait Mechanism: Debug + Send + Sync {
         Err(CKR_MECHANISM_INVALID)?
     }
 
-    fn derive_operation(&self, _: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, _: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         Err(CKR_MECHANISM_INVALID)?
     }
 
@@ -408,37 +408,6 @@ pub trait MsgDecryption: MessageOperation {
         _final: bool,
     ) -> Result<usize> {
         Err(CKR_GENERAL_ERROR)?
-    }
-}
-
-#[derive(Debug)]
-pub enum Operation {
-    Empty,
-    Search(Box<dyn SearchOperation>),
-    Encryption(Box<dyn Encryption>),
-    Decryption(Box<dyn Decryption>),
-    Digest(Box<dyn Digest>),
-    Sign(Box<dyn Sign>),
-    Verify(Box<dyn Verify>),
-    Derive(Box<dyn Derive>),
-    MsgEncryption(Box<dyn MsgEncryption>),
-    MsgDecryption(Box<dyn MsgDecryption>),
-}
-
-impl Operation {
-    pub fn finalized(&self) -> bool {
-        match self {
-            Operation::Empty => true,
-            Operation::Search(op) => op.finalized(),
-            Operation::Encryption(op) => op.finalized(),
-            Operation::Decryption(op) => op.finalized(),
-            Operation::Digest(op) => op.finalized(),
-            Operation::Sign(op) => op.finalized(),
-            Operation::Verify(op) => op.finalized(),
-            Operation::Derive(op) => op.finalized(),
-            Operation::MsgEncryption(op) => op.finalized(),
-            Operation::MsgDecryption(op) => op.finalized(),
-        }
     }
 }
 

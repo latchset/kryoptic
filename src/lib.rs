@@ -36,7 +36,7 @@ mod token;
 use config::Config;
 use error::Result;
 use interface::*;
-use mechanism::Operation;
+use mechanism::*;
 use rng::RNG;
 use session::Session;
 use slot::Slot;
@@ -804,12 +804,12 @@ extern "C" fn fn_login(
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     if user_type == CKU_CONTEXT_SPECIFIC {
         let session = res_or_ret!(rstate.get_session_mut(s_handle));
-        match session.get_operation() {
+        match session.check_login_status() {
             Err(e) => match e.rv() {
                 CKR_USER_NOT_LOGGED_IN => (),
                 _ => return CKR_OPERATION_NOT_INITIALIZED,
             },
-            Ok(_) => return CKR_OPERATION_NOT_INITIALIZED,
+            Ok(()) => return CKR_OPERATION_NOT_INITIALIZED,
         }
     }
 
@@ -1161,11 +1161,7 @@ extern "C" fn fn_find_objects(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Search(op) => op,
-        Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
-        _ => return CKR_OPERATION_ACTIVE,
-    };
+    let operation = res_or_ret!(session.get_operation::<dyn SearchOperation>());
     let moc = cast_or_ret!(usize from max_object_count => CKR_ARGUMENTS_BAD);
     let handles = res_or_ret!(operation.results(moc));
     let hlen = handles.len();
@@ -1193,30 +1189,17 @@ extern "C" fn fn_find_objects(
 extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    match res_or_ret!(session.get_operation_mut()) {
-        Operation::Search(_) => (),
-        Operation::Empty => return CKR_OPERATION_NOT_INITIALIZED,
-        _ => return CKR_OPERATION_ACTIVE,
-    };
-    session.set_operation(Operation::Empty, false);
+    res_or_ret!(session.cancel_operation::<dyn SearchOperation>());
     CKR_OK
 }
 
 macro_rules! check_op_empty_or_fail {
-    ($sess:expr; $optype:ident; $ptr:expr) => {
-        let op = $sess.get_operation_nocheck();
-        if !op.finalized() {
-            if $ptr.is_null() {
-                match op {
-                    Operation::$optype(_) => {
-                        $sess.set_operation(Operation::Empty, false);
-                        return CKR_OK;
-                    }
-                    _ => (),
-                }
-            }
-            return CKR_OPERATION_ACTIVE;
+    ($sess:expr; $op:ident; $ptr:expr) => {
+        if $ptr.is_null() {
+            res_or_ret!($sess.cancel_operation::<dyn $op>());
+            return CKR_OK;
         }
+        res_or_ret!($sess.check_no_op::<dyn $op>());
     };
 }
 
@@ -1275,8 +1258,7 @@ extern "C" fn fn_encrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
         let operation = res_or_ret!(mech.encryption_new(mechanism, &key));
-
-        session.set_operation(Operation::Encryption(operation), false);
+        session.set_operation::<dyn Encryption>(operation, false);
 
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
@@ -1303,13 +1285,7 @@ extern "C" fn fn_encrypt(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Encryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
     let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
     if encrypted_data.is_null() {
         let encryption_len = cast_or_ret!(
@@ -1353,13 +1329,7 @@ extern "C" fn fn_encrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Encryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
     let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
     if encrypted_part.is_null() {
         let encryption_len = cast_or_ret!(
@@ -1395,13 +1365,7 @@ extern "C" fn fn_encrypt_final(
         return CKR_ARGUMENTS_BAD;
     }
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Encryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
     let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
     let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
     if last_encrypted_part.is_null() {
@@ -1447,8 +1411,7 @@ extern "C" fn fn_decrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
         let operation = res_or_ret!(mech.decryption_new(mechanism, &key));
-        session
-            .set_operation(Operation::Decryption(operation), key.always_auth());
+        session.set_operation::<dyn Decryption>(operation, key.always_auth());
 
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);
@@ -1475,13 +1438,7 @@ extern "C" fn fn_decrypt(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Decryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     let elen = cast_or_ret!(usize from encrypted_data_len => CKR_ARGUMENTS_BAD);
     if data.is_null() {
         let decryption_len = cast_or_ret!(
@@ -1526,13 +1483,7 @@ extern "C" fn fn_decrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Decryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     let elen = cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
     if part.is_null() {
         let decryption_len = cast_or_ret!(
@@ -1569,13 +1520,7 @@ extern "C" fn fn_decrypt_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Decryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     let pplen = unsafe { *pul_last_part_len as CK_ULONG };
     let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
     if last_part.is_null() {
@@ -1617,7 +1562,7 @@ extern "C" fn fn_digest_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
         let operation = res_or_ret!(mech.digest_new(mechanism));
-        session.set_operation(Operation::Digest(operation), false);
+        session.set_operation::<dyn Digest>(operation, false);
 
         CKR_OK
     } else {
@@ -1641,13 +1586,7 @@ extern "C" fn fn_digest(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Digest(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let digest_len = res_or_ret!(operation.digest_len());
     let dgst_len = cast_or_ret!(CK_ULONG from digest_len);
     if pdigest.is_null() {
@@ -1694,13 +1633,7 @@ extern "C" fn fn_digest_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Digest(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let plen = cast_or_ret!(usize from part_len);
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.digest_update(data))
@@ -1717,13 +1650,7 @@ extern "C" fn fn_digest_key(
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Digest(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let key = res_or_ret!(token.get_object_by_handle(key_handle));
     if res_or_ret!(key.get_attr_as_ulong(CKA_CLASS)) != CKO_SECRET_KEY {
@@ -1761,13 +1688,7 @@ extern "C" fn fn_digest_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Digest(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let digest_len = res_or_ret!(operation.digest_len());
     let dgst_len = cast_or_ret!(CK_ULONG from digest_len);
     if pdigest.is_null() {
@@ -1818,7 +1739,7 @@ extern "C" fn fn_sign_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
         let operation = res_or_ret!(mech.sign_new(mechanism, &key));
-        session.set_operation(Operation::Sign(operation), key.always_auth());
+        session.set_operation::<dyn Sign>(operation, key.always_auth());
 
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_SIGN, &key);
@@ -1845,13 +1766,7 @@ extern "C" fn fn_sign(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Sign(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let signature_len = res_or_ret!(operation.signature_len());
     let sig_len = cast_or_ret!(CK_ULONG from signature_len);
     if psignature.is_null() {
@@ -1899,13 +1814,7 @@ extern "C" fn fn_sign_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Sign(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let plen = cast_or_ret!(usize from part_len);
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.sign_update(data))
@@ -1925,13 +1834,7 @@ extern "C" fn fn_sign_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Sign(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let signature_len = res_or_ret!(operation.signature_len());
     let sig_len = cast_or_ret!(CK_ULONG from signature_len);
     if psignature.is_null() {
@@ -2008,7 +1911,7 @@ extern "C" fn fn_verify_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
         let operation = res_or_ret!(mech.verify_new(mechanism, &key));
-        session.set_operation(Operation::Verify(operation), false);
+        session.set_operation::<dyn Verify>(operation, false);
 
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
@@ -2035,13 +1938,7 @@ extern "C" fn fn_verify(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Verify(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let signature_len = res_or_ret!(operation.signature_len());
     let sig_len = cast_or_ret!(CK_ULONG from signature_len);
     if psignature_len != sig_len {
@@ -2076,13 +1973,7 @@ extern "C" fn fn_verify_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Verify(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let plen = cast_or_ret!(usize from part_len);
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     ret_to_rv!(operation.verify_update(data))
@@ -2102,13 +1993,7 @@ extern "C" fn fn_verify_final(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::Verify(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let signature_len = res_or_ret!(operation.signature_len());
     let sig_len = cast_or_ret!(CK_ULONG from signature_len);
     if psignature_len != sig_len {
@@ -2538,10 +2423,7 @@ extern "C" fn fn_derive_key(
         return CKR_MECHANISM_INVALID;
     }
 
-    let mut operation = match res_or_ret!(mech.derive_operation(mechanism)) {
-        Operation::Derive(op) => op,
-        _ => return CKR_MECHANISM_INVALID,
-    };
+    let mut operation = res_or_ret!(mech.derive_operation(mechanism));
 
     /* some derive operation requires additional keys */
     match operation.requires_objects() {
@@ -3023,7 +2905,7 @@ extern "C" fn fn_message_encrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_MESSAGE_ENCRYPT != 0 {
         let operation = res_or_ret!(mech.msg_encryption_op(mechanism, &key));
-        session.set_operation(Operation::MsgEncryption(operation), false);
+        session.set_operation::<dyn MsgEncryption>(operation, false);
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
 
@@ -3066,13 +2948,7 @@ extern "C" fn fn_encrypt_message(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgEncryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if operation.busy() {
         return CKR_OPERATION_ACTIVE;
     }
@@ -3139,13 +3015,7 @@ extern "C" fn fn_encrypt_message_begin(
     #[cfg(feature = "fips")]
     session.reset_fips_indicator();
 
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgEncryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if operation.busy() {
         return CKR_OPERATION_ACTIVE;
     }
@@ -3193,13 +3063,7 @@ extern "C" fn fn_encrypt_message_next(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgEncryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if !operation.busy() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
@@ -3251,13 +3115,7 @@ extern "C" fn fn_encrypt_message_next(
 extern "C" fn fn_message_encrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgEncryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     ret_to_rv!(operation.finalize())
 }
 
@@ -3281,7 +3139,7 @@ extern "C" fn fn_message_decrypt_init(
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
     if mech.info().flags & CKF_MESSAGE_DECRYPT != 0 {
         let operation = res_or_ret!(mech.msg_decryption_op(mechanism, &key));
-        session.set_operation(Operation::MsgDecryption(operation), false);
+        session.set_operation::<dyn MsgDecryption>(operation, false);
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);
 
@@ -3324,13 +3182,7 @@ extern "C" fn fn_decrypt_message(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgDecryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if operation.busy() {
         return CKR_OPERATION_ACTIVE;
     }
@@ -3397,13 +3249,7 @@ extern "C" fn fn_decrypt_message_begin(
     #[cfg(feature = "fips")]
     session.reset_fips_indicator();
 
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgDecryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if operation.busy() {
         return CKR_OPERATION_ACTIVE;
     }
@@ -3452,13 +3298,7 @@ extern "C" fn fn_decrypt_message_next(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgDecryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if !operation.busy() {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
@@ -3510,13 +3350,7 @@ extern "C" fn fn_decrypt_message_next(
 extern "C" fn fn_message_decrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = match res_or_ret!(session.get_operation_mut()) {
-        Operation::MsgDecryption(op) => op,
-        _ => return CKR_OPERATION_NOT_INITIALIZED,
-    };
-    if operation.finalized() {
-        return CKR_OPERATION_NOT_INITIALIZED;
-    }
+    let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     ret_to_rv!(operation.finalize())
 }
 

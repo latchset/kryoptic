@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use crate::error::{map_err, Result};
 use crate::interface::*;
-use crate::mechanism::{Mechanism, Mechanisms, Operation};
+use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, cast_params, sizeof};
 use crate::object::{Object, ObjectFactories};
 
@@ -50,7 +50,7 @@ impl Mechanism for Sp800KDFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
@@ -70,7 +70,7 @@ impl Mechanism for Sp800KDFMechanism {
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
-        Ok(Operation::Derive(Box::new(kdf)))
+        Ok(Box::new(kdf))
     }
 }
 

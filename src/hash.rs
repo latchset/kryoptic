@@ -212,17 +212,17 @@ impl Mechanism for HashMechanism {
         Ok(Box::new(HashOperation::new(mech.mechanism)?))
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 
         for hs in &HASH_MECH_SET {
             if hs.key_derive == mech.mechanism {
-                return Ok(Operation::Derive(Box::new(HashKDFOperation::new(
+                return Ok(Box::new(HashKDFOperation::new(
                     mech.mechanism,
                     hs.hash,
-                )?)));
+                )?));
             }
         }
 

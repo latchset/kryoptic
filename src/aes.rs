@@ -348,7 +348,7 @@ impl Mechanism for AesMechanism {
     /// [Key derivation by data encryption – DES & AES](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203514)
     /// (Version 3.1)
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
@@ -364,7 +364,7 @@ impl Mechanism for AesMechanism {
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
-        Ok(Operation::Derive(Box::new(kdf)))
+        Ok(Box::new(kdf))
     }
 
     /// Internal interface for MAC operations required by other mechanisms
