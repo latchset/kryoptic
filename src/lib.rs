@@ -2743,20 +2743,22 @@ extern "C" fn fn_generate_random(
     ret_to_rv!(get_random_data(data))
 }
 
-/// Implementation of C_GetFunctionStatus function (Not Implemented Yet)
+/// Implementation of C_GetFunctionStatus function
+/// (Legacy function. Always returns `CKR_FUNCTION_NOT_PARALLEL`)
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203361](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203361)
 
 extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    CKR_FUNCTION_NOT_PARALLEL
 }
 
-/// Implementation of C_CancelFunction function (Not Implemented Yet)
+/// Implementation of C_CancelFunction function
+/// (Legacy function. Always returns `CKR_FUNCTION_NOT_PARALLEL`)
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203362](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203362)
 
 extern "C" fn fn_cancel_function(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    CKR_FUNCTION_NOT_PARALLEL
 }
 
 /// Implementation of C_WaitForSlotEvent function (Not Implemented Yet)
