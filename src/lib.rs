@@ -2874,15 +2874,67 @@ extern "C" fn fn_login_user(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-/// Implementation of C_SessionCancel function (Not Implemented Yet)
+/// Implementation of C_SessionCancel function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203276](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203276)
 
 extern "C" fn fn_session_cancel(
-    _session: CK_SESSION_HANDLE,
-    _flags: CK_FLAGS,
+    s_handle: CK_SESSION_HANDLE,
+    flags: CK_FLAGS,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let mut res = CKR_OK;
+
+    if flags & CKF_MESSAGE_ENCRYPT != 0 {
+        if session.cancel_operation::<dyn MsgEncryption>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_MESSAGE_DECRYPT != 0 {
+        if session.cancel_operation::<dyn MsgDecryption>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_MESSAGE_SIGN != 0 {
+        /* TODO */
+        res = CKR_OPERATION_CANCEL_FAILED;
+    }
+    if flags & CKF_MESSAGE_VERIFY != 0 {
+        /* TODO */
+        res = CKR_OPERATION_CANCEL_FAILED;
+    }
+    if flags & CKF_FIND_OBJECTS != 0 {
+        if session.cancel_operation::<dyn SearchOperation>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_ENCRYPT != 0 {
+        if session.cancel_operation::<dyn Encryption>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_DECRYPT != 0 {
+        if session.cancel_operation::<dyn Decryption>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_DIGEST != 0 {
+        if session.cancel_operation::<dyn Digest>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_SIGN != 0 {
+        if session.cancel_operation::<dyn Sign>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    if flags & CKF_VERIFY != 0 {
+        if session.cancel_operation::<dyn Verify>().is_err() {
+            res = CKR_OPERATION_CANCEL_FAILED;
+        }
+    }
+    res
 }
 
 /// Implementation of C_MessageEncryptInit function
