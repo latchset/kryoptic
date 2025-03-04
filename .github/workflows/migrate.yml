@@ -23,8 +23,8 @@ jobs:
           echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
         shell: bash
 
-      - name: Store DNF cache
-        uses: actions/cache@v4
+      - name: Restore DNF cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             /var/cache/libdnf5
