@@ -127,3 +127,89 @@ fn test_session_objects() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+#[cfg(feature = "aes")]
+fn test_operations() {
+    let mut testtokn = TestToken::initialized("test_operations", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* generate a key that can be used to start an operation */
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut data = [0xAu8; 16];
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* begin 2 operations in parallel */
+
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    /* ensure both work */
+
+    let mut enc: [u8; 16] = [0; 16];
+    let mut enc_len: CK_ULONG = 16;
+    let ret = fn_encrypt_update(
+        session,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut dec: [u8; 16] = [0; 16];
+    let mut dec_len: CK_ULONG = 16;
+    let ret = fn_decrypt_update(
+        session,
+        enc.as_mut_ptr(),
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* cancel both operations at once */
+    let ret = fn_session_cancel(session, CKF_ENCRYPT | CKF_DECRYPT);
+    assert_eq!(ret, CKR_OK);
+
+    /* ensure both stopped working */
+    let ret = fn_encrypt_update(
+        session,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    let ret = fn_decrypt_update(
+        session,
+        enc.as_mut_ptr(),
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+    testtokn.finalize();
+}
