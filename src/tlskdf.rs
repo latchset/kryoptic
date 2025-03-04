@@ -101,7 +101,7 @@ impl Mechanism for TLSPRFMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         #[cfg(feature = "fips")]
         if !check_fips_state_ok() {
             return Err(CKR_FIPS_SELF_TEST_FAILED)?;
@@ -116,9 +116,7 @@ impl Mechanism for TLSPRFMechanism {
             | CKM_TLS12_KEY_AND_MAC_DERIVE
             | CKM_TLS12_KEY_SAFE_DERIVE
             | CKM_TLS12_KDF
-            | CKM_TLS_KDF => {
-                Ok(Operation::Derive(Box::new(TLSKDFOperation::new(mech)?)))
-            }
+            | CKM_TLS_KDF => Ok(Box::new(TLSKDFOperation::new(mech)?)),
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }

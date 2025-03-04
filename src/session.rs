@@ -5,7 +5,7 @@ use std::vec::Vec;
 
 use crate::error::Result;
 use crate::interface::*;
-use crate::mechanism::{Operation, SearchOperation};
+use crate::mechanism::*;
 use crate::token::Token;
 
 #[cfg(feature = "fips")]
@@ -30,7 +30,7 @@ impl SearchOperation for SessionSearch {
     }
 
     fn finalized(&self) -> bool {
-        self.handles.len() == 0
+        false
     }
 }
 
@@ -42,12 +42,92 @@ pub enum OpLoginStatus {
     LoginOk,
 }
 
+pub trait ManageOperation {
+    fn cancel_operation(so: &mut SessionOperations) -> Result<()>;
+    fn check_no_op(so: &SessionOperations) -> Result<()>;
+    fn get_op(so: &mut SessionOperations) -> Result<&mut Self>;
+    fn set_op(so: &mut SessionOperations, op: Box<Self>);
+}
+
+macro_rules! impl_mop {
+    ($optype:ident, $($opname:ident).+) => {
+        impl ManageOperation for dyn $optype {
+            fn cancel_operation(so: &mut SessionOperations) -> Result<()> {
+                so.$($opname).+ = None;
+                Ok(())
+            }
+
+            fn check_no_op(so: &SessionOperations) -> Result<()> {
+                if let Some(ref o) = so.$($opname).+ {
+                    if ! o.finalized() {
+                        return Err(CKR_OPERATION_ACTIVE)?;
+                    }
+                }
+                Ok(())
+            }
+
+            fn get_op(so: &mut SessionOperations) -> Result<&mut Self> {
+                match so.$($opname).+ {
+                    Some(ref mut o) => if o.finalized() {
+                        Err(CKR_OPERATION_NOT_INITIALIZED)?
+                    } else {
+                        Ok(&mut **o)
+                    },
+                    None => Err(CKR_OPERATION_NOT_INITIALIZED)?,
+                }
+            }
+
+            fn set_op(so: &mut SessionOperations, op: Box<Self>) {
+                so.$($opname).+ = Some(op);
+            }
+        }
+    };
+}
+
+/// Operations that span more than one function call and that
+/// can be in flight at the same time in the same session
+#[derive(Debug)]
+pub struct SessionOperations {
+    msg_encryption: Option<Box<dyn MsgEncryption>>,
+    msg_decryption: Option<Box<dyn MsgDecryption>>,
+    search: Option<Box<dyn SearchOperation>>,
+    encryption: Option<Box<dyn Encryption>>,
+    decryption: Option<Box<dyn Decryption>>,
+    digest: Option<Box<dyn Digest>>,
+    sign: Option<Box<dyn Sign>>,
+    verify: Option<Box<dyn Verify>>,
+}
+
+impl_mop!(MsgEncryption, msg_encryption);
+impl_mop!(MsgDecryption, msg_decryption);
+impl_mop!(SearchOperation, search);
+impl_mop!(Encryption, encryption);
+impl_mop!(Decryption, decryption);
+impl_mop!(Digest, digest);
+impl_mop!(Sign, sign);
+impl_mop!(Verify, verify);
+
+impl SessionOperations {
+    pub fn new() -> SessionOperations {
+        SessionOperations {
+            msg_encryption: None,
+            msg_decryption: None,
+            search: None,
+            encryption: None,
+            decryption: None,
+            digest: None,
+            sign: None,
+            verify: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Session {
     info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
-    operation: Operation,
+    operations: SessionOperations,
     login_status: OpLoginStatus,
     fips_indicator: Option<bool>,
 }
@@ -95,7 +175,7 @@ impl Session {
             },
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
-            operation: Operation::Empty,
+            operations: SessionOperations::new(),
             login_status: OpLoginStatus::NotInitialized,
             fips_indicator: None,
         })
@@ -211,48 +291,56 @@ impl Session {
         token: &mut Token,
         template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
-        if !self.operation.finalized() {
-            return Err(CKR_OPERATION_ACTIVE)?;
-        }
-        self.operation = Operation::Search(Box::new(SessionSearch {
-            handles: token.search_objects(template)?,
-            in_use: true,
-        }));
-        self.login_status = OpLoginStatus::NotRequired;
-        self.fips_indicator = None;
+        self.check_no_op::<dyn SearchOperation>()?;
+        self.set_operation::<dyn SearchOperation>(
+            Box::new(SessionSearch {
+                handles: token.search_objects(template)?,
+                in_use: true,
+            }),
+            false,
+        );
         Ok(())
     }
 
-    pub fn get_operation_nocheck(&self) -> &Operation {
-        &self.operation
+    pub fn cancel_operation<O: ManageOperation + ?Sized>(
+        &mut self,
+    ) -> Result<()> {
+        O::cancel_operation(&mut self.operations)
     }
 
-    pub fn get_operation(&self) -> Result<&Operation> {
+    pub fn check_no_op<O: ManageOperation + ?Sized>(&self) -> Result<()> {
+        O::check_no_op(&self.operations)
+    }
+
+    pub fn check_login_status(&self) -> Result<()> {
         match self.login_status {
             OpLoginStatus::NotInitialized => Err(CKR_GENERAL_ERROR)?,
-            OpLoginStatus::NotRequired => Ok(&self.operation),
+            OpLoginStatus::NotRequired => Ok(()),
             OpLoginStatus::Required => Err(CKR_USER_NOT_LOGGED_IN)?,
-            OpLoginStatus::LoginOk => Ok(&self.operation),
+            OpLoginStatus::LoginOk => Ok(()),
         }
     }
 
-    pub fn get_operation_mut(&mut self) -> Result<&mut Operation> {
-        match self.login_status {
-            OpLoginStatus::NotInitialized => Err(CKR_GENERAL_ERROR)?,
-            OpLoginStatus::NotRequired => Ok(&mut self.operation),
-            OpLoginStatus::Required => Err(CKR_USER_NOT_LOGGED_IN)?,
-            OpLoginStatus::LoginOk => Ok(&mut self.operation),
-        }
+    pub fn get_operation<O: ManageOperation + ?Sized>(
+        &mut self,
+    ) -> Result<&mut O> {
+        self.check_login_status()?;
+        O::get_op(&mut self.operations)
     }
 
-    pub fn set_operation(&mut self, op: Operation, needs_login: bool) {
-        self.fips_indicator = None;
-        self.operation = op;
+    pub fn set_operation<O: ManageOperation + ?Sized>(
+        &mut self,
+        op: Box<O>,
+        needs_login: bool,
+    ) {
+        self.fips_indicator = None; /* FIXME: per operation ? */
         self.login_status = if needs_login {
             OpLoginStatus::Required
         } else {
             OpLoginStatus::NotRequired
         };
+
+        O::set_op(&mut self.operations, op);
     }
 
     pub fn set_login_ok(&mut self) {

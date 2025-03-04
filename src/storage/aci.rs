@@ -11,7 +11,6 @@ use crate::kasn1::*;
 use crate::misc::{byte_ptr, sizeof, void_ptr, zeromem};
 use crate::object::Object;
 use crate::token::TokenFacilities;
-use crate::Operation;
 use crate::CSPRNG;
 
 use asn1;
@@ -72,14 +71,11 @@ fn hkdf_expand(
         ulInfoLen: params.info.len() as CK_ULONG,
     };
 
-    let mut op = match mech.derive_operation(&CK_MECHANISM {
+    let mut op = mech.derive_operation(&CK_MECHANISM {
         mechanism: CKM_HKDF_DERIVE,
         pParameter: void_ptr!(&hkdf_params),
         ulParameterLen: sizeof!(CK_HKDF_PARAMS),
-    })? {
-        Operation::Derive(op) => op,
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    };
+    })?;
 
     let mut vobj = op.derive(
         key,

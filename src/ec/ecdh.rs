@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use crate::ec::ecdsa::{MAX_EC_SIZE_BITS, MIN_EC_SIZE_BITS};
 use crate::error::Result;
 use crate::interface::*;
-use crate::mechanism::{Mechanism, Mechanisms, Operation};
+use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::cast_params;
 use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
@@ -43,7 +43,7 @@ impl Mechanism for ECDHMechanism {
         &self.info
     }
 
-    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Operation> {
+    fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
@@ -54,6 +54,6 @@ impl Mechanism for ECDHMechanism {
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
-        Ok(Operation::Derive(Box::new(kdf)))
+        Ok(Box::new(kdf))
     }
 }
