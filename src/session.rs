@@ -44,6 +44,7 @@ pub enum OpLoginStatus {
 
 pub trait ManageOperation {
     fn cancel_operation(so: &mut SessionOperations) -> Result<()>;
+    fn check_op(so: &SessionOperations) -> Result<()>;
     fn check_no_op(so: &SessionOperations) -> Result<()>;
     fn get_op(so: &mut SessionOperations) -> Result<&mut Self>;
     fn set_op(so: &mut SessionOperations, op: Box<Self>);
@@ -55,6 +56,15 @@ macro_rules! impl_mop {
             fn cancel_operation(so: &mut SessionOperations) -> Result<()> {
                 so.$($opname).+ = None;
                 Ok(())
+            }
+
+            fn check_op(so: &SessionOperations) -> Result<()> {
+                if let Some(ref o) = so.$($opname).+ {
+                    if ! o.finalized() {
+                        return Ok(());
+                    }
+                }
+                Err(CKR_OPERATION_NOT_INITIALIZED)?
             }
 
             fn check_no_op(so: &SessionOperations) -> Result<()> {
@@ -306,6 +316,10 @@ impl Session {
         &mut self,
     ) -> Result<()> {
         O::cancel_operation(&mut self.operations)
+    }
+
+    pub fn check_op<O: ManageOperation + ?Sized>(&self) -> Result<()> {
+        O::check_op(&self.operations)
     }
 
     pub fn check_no_op<O: ManageOperation + ?Sized>(&self) -> Result<()> {
