@@ -247,6 +247,13 @@ where
     Error::ck_rv_from_error(interface::CKR_DEVICE_ERROR, error)
 }
 
+pub fn arg_bad<E>(error: E) -> Error
+where
+    E: Into<Box<dyn error::Error>>,
+{
+    Error::ck_rv_from_error(interface::CKR_ARGUMENTS_BAD, error)
+}
+
 macro_rules! map_err {
     ($map:expr, $err:tt) => {{
         use crate::error::Error;
