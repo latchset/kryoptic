@@ -34,7 +34,7 @@ mod storage;
 mod token;
 
 use config::Config;
-use error::Result;
+use error::{arg_bad, Result};
 use interface::*;
 use mechanism::*;
 use rng::RNG;
@@ -1313,6 +1313,32 @@ extern "C" fn fn_encrypt(
     CKR_OK
 }
 
+/// Helper to perform "encrypt_update" in multiple places,
+
+fn internal_encrypt_update(
+    session: &mut RwLockWriteGuard<'_, Session>,
+    part: CK_BYTE_PTR,
+    part_len: CK_ULONG,
+    encrypted_part: CK_BYTE_PTR,
+    pul_encrypted_part_len: CK_ULONG_PTR,
+) -> Result<()> {
+    let operation = session.get_operation::<dyn Encryption>()?;
+    let plen = usize::try_from(part_len).map_err(arg_bad)?;
+    let len = if encrypted_part.is_null() {
+        operation.encryption_len(plen, false)?
+    } else {
+        let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+        let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
+        let enclen = usize::try_from(penclen).map_err(arg_bad)?;
+        let encpart: &mut [u8] =
+            unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
+        operation.encrypt_update(data, encpart)?
+    };
+    let cklen = CK_ULONG::try_from(len).map_err(arg_bad)?;
+    unsafe { *pul_encrypted_part_len = cklen };
+    Ok(())
+}
+
 /// Implementation of C_EncryptUpdate function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203295](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203295)
@@ -1329,26 +1355,13 @@ extern "C" fn fn_encrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
-    let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
-    if encrypted_part.is_null() {
-        let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(plen, false))
-        );
-        unsafe {
-            *pul_encrypted_part_len = encryption_len;
-        }
-        return CKR_OK;
-    }
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
-    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
-    let encpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
-    let outlen = res_or_ret!(operation.encrypt_update(data, encpart));
-    let retlen = cast_or_ret!(CK_ULONG from outlen);
-    unsafe { *pul_encrypted_part_len = retlen };
-    CKR_OK
+    ret_to_rv!(internal_encrypt_update(
+        &mut session,
+        part,
+        part_len,
+        encrypted_part,
+        pul_encrypted_part_len,
+    ))
 }
 
 /// Implementation of C_EncryptFinal function
@@ -1467,6 +1480,33 @@ extern "C" fn fn_decrypt(
     CKR_OK
 }
 
+/// Helper to perform "decrypt_update" in multiple places,
+
+fn internal_decrypt_update(
+    session: &mut RwLockWriteGuard<'_, Session>,
+    encrypted_part: CK_BYTE_PTR,
+    encrypted_part_len: CK_ULONG,
+    part: CK_BYTE_PTR,
+    pul_part_len: CK_ULONG_PTR,
+) -> Result<()> {
+    let operation = session.get_operation::<dyn Decryption>()?;
+    let elen = usize::try_from(encrypted_part_len).map_err(arg_bad)?;
+    let len = if part.is_null() {
+        operation.decryption_len(elen, false)?
+    } else {
+        let enc: &[u8] =
+            unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
+        let pplen = unsafe { *pul_part_len as CK_ULONG };
+        let plen = usize::try_from(pplen).map_err(arg_bad)?;
+        let dpart: &mut [u8] =
+            unsafe { std::slice::from_raw_parts_mut(part, plen) };
+        operation.decrypt_update(enc, dpart)?
+    };
+    let cklen = CK_ULONG::try_from(len).map_err(arg_bad)?;
+    unsafe { *pul_part_len = cklen };
+    Ok(())
+}
+
 /// Implementation of C_DecryptUpdate function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203306](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203306)
@@ -1483,27 +1523,13 @@ extern "C" fn fn_decrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
-    let elen = cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
-    if part.is_null() {
-        let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(elen, false))
-        );
-        unsafe {
-            *pul_part_len = decryption_len;
-        }
-        return CKR_OK;
-    }
-    let enc: &[u8] =
-        unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
-    let pplen = unsafe { *pul_part_len as CK_ULONG };
-    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
-    let dpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(part, plen) };
-    let outlen = res_or_ret!(operation.decrypt_update(enc, dpart));
-    let retlen = cast_or_ret!(CK_ULONG from outlen);
-    unsafe { *pul_part_len = retlen };
-    CKR_OK
+    ret_to_rv!(internal_decrypt_update(
+        &mut session,
+        encrypted_part,
+        encrypted_part_len,
+        part,
+        pul_part_len,
+    ))
 }
 
 /// Implementation of C_DecryptFinal function
@@ -1619,6 +1645,19 @@ extern "C" fn fn_digest(
     ret
 }
 
+/// Helper to perform "digest_update" in multiple places,
+
+fn internal_digest_update(
+    session: &mut RwLockWriteGuard<'_, Session>,
+    part: CK_BYTE_PTR,
+    part_len: CK_ULONG,
+) -> Result<()> {
+    let operation = session.get_operation::<dyn Digest>()?;
+    let plen = usize::try_from(part_len).map_err(arg_bad)?;
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    operation.digest_update(data)
+}
+
 /// Implementation of C_DigestUpdate function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203317](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203317)
@@ -1633,10 +1672,7 @@ extern "C" fn fn_digest_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
-    let plen = cast_or_ret!(usize from part_len);
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    ret_to_rv!(operation.digest_update(data))
+    ret_to_rv!(internal_digest_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_DigestKey function
@@ -1800,6 +1836,19 @@ extern "C" fn fn_sign(
     ret
 }
 
+/// Helper to perform "sign_update" in multiple places,
+
+fn internal_sign_update(
+    session: &mut RwLockWriteGuard<'_, Session>,
+    part: CK_BYTE_PTR,
+    part_len: CK_ULONG,
+) -> Result<()> {
+    let operation = session.get_operation::<dyn Sign>()?;
+    let plen = usize::try_from(part_len).map_err(arg_bad)?;
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    operation.sign_update(data)
+}
+
 /// Implementation of C_SignUpdate function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203323](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203323)
@@ -1814,10 +1863,7 @@ extern "C" fn fn_sign_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = res_or_ret!(session.get_operation::<dyn Sign>());
-    let plen = cast_or_ret!(usize from part_len);
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    ret_to_rv!(operation.sign_update(data))
+    ret_to_rv!(internal_sign_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_SignFinal function
@@ -1959,6 +2005,19 @@ extern "C" fn fn_verify(
     ret
 }
 
+/// Helper to perform "verify_update" in multiple places,
+
+fn internal_verify_update(
+    session: &mut RwLockWriteGuard<'_, Session>,
+    part: CK_BYTE_PTR,
+    part_len: CK_ULONG,
+) -> Result<()> {
+    let operation = session.get_operation::<dyn Verify>()?;
+    let plen = usize::try_from(part_len).map_err(arg_bad)?;
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    operation.verify_update(data)
+}
+
 /// Implementation of C_VerifyUpdate function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203336](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203336)
@@ -1973,10 +2032,7 @@ extern "C" fn fn_verify_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
-    let operation = res_or_ret!(session.get_operation::<dyn Verify>());
-    let plen = cast_or_ret!(usize from part_len);
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    ret_to_rv!(operation.verify_update(data))
+    ret_to_rv!(internal_verify_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_VerifyFinal function
@@ -2054,28 +2110,21 @@ extern "C" fn fn_digest_encrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+
     res_or_ret!(session.check_op::<dyn Digest>());
-    let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
-    let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
+
+    res_or_ret!(internal_encrypt_update(
+        &mut session,
+        part,
+        part_len,
+        encrypted_part,
+        pul_encrypted_part_len,
+    ));
     if encrypted_part.is_null() {
-        let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(plen, false))
-        );
-        unsafe {
-            *pul_encrypted_part_len = encryption_len;
-        }
         return CKR_OK;
     }
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
-    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
-    let encpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
-    let outlen = res_or_ret!(operation.encrypt_update(data, encpart));
-    let retlen = cast_or_ret!(CK_ULONG from outlen);
-    unsafe { *pul_encrypted_part_len = retlen };
-    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
-    ret_to_rv!(operation.digest_update(data))
+
+    ret_to_rv!(internal_digest_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_DecryptDigestUpdate function
@@ -2094,31 +2143,22 @@ extern "C" fn fn_decrypt_digest_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+
     res_or_ret!(session.check_op::<dyn Digest>());
-    let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
-    let elen = cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
+
+    res_or_ret!(internal_decrypt_update(
+        &mut session,
+        encrypted_part,
+        encrypted_part_len,
+        part,
+        pul_part_len,
+    ));
     if part.is_null() {
-        let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(elen, false))
-        );
-        unsafe {
-            *pul_part_len = decryption_len;
-        }
         return CKR_OK;
     }
-    let enc: &[u8] =
-        unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
-    let pplen = unsafe { *pul_part_len as CK_ULONG };
-    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
-    let dpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(part, plen) };
-    let outlen = res_or_ret!(operation.decrypt_update(enc, dpart));
-    let retlen = cast_or_ret!(CK_ULONG from outlen);
-    unsafe { *pul_part_len = retlen };
-    let retpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(part, outlen) };
-    let operation = res_or_ret!(session.get_operation::<dyn Digest>());
-    ret_to_rv!(operation.digest_update(retpart))
+
+    let part_len: CK_ULONG = unsafe { *pul_part_len };
+    ret_to_rv!(internal_digest_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_SignEncryptUpdate function
@@ -2137,28 +2177,21 @@ extern "C" fn fn_sign_encrypt_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+
     res_or_ret!(session.check_op::<dyn Sign>());
-    let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
-    let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
+
+    res_or_ret!(internal_encrypt_update(
+        &mut session,
+        part,
+        part_len,
+        encrypted_part,
+        pul_encrypted_part_len,
+    ));
     if encrypted_part.is_null() {
-        let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(plen, false))
-        );
-        unsafe {
-            *pul_encrypted_part_len = encryption_len;
-        }
         return CKR_OK;
     }
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
-    let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
-    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
-    let encpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
-    let outlen = res_or_ret!(operation.encrypt_update(data, encpart));
-    let retlen = cast_or_ret!(CK_ULONG from outlen);
-    unsafe { *pul_encrypted_part_len = retlen };
-    let operation = res_or_ret!(session.get_operation::<dyn Sign>());
-    ret_to_rv!(operation.sign_update(data))
+
+    ret_to_rv!(internal_sign_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_DecryptVerifyUpdate function
@@ -2177,31 +2210,22 @@ extern "C" fn fn_decrypt_verify_update(
     }
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+
     res_or_ret!(session.check_op::<dyn Verify>());
-    let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
-    let elen = cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
+
+    res_or_ret!(internal_decrypt_update(
+        &mut session,
+        encrypted_part,
+        encrypted_part_len,
+        part,
+        pul_part_len,
+    ));
     if part.is_null() {
-        let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(elen, false))
-        );
-        unsafe {
-            *pul_part_len = decryption_len;
-        }
         return CKR_OK;
     }
-    let enc: &[u8] =
-        unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
-    let pplen = unsafe { *pul_part_len as CK_ULONG };
-    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
-    let dpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(part, plen) };
-    let outlen = res_or_ret!(operation.decrypt_update(enc, dpart));
-    let retlen = cast_or_ret!(CK_ULONG from outlen);
-    unsafe { *pul_part_len = retlen };
-    let retpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(part, outlen) };
-    let operation = res_or_ret!(session.get_operation::<dyn Verify>());
-    ret_to_rv!(operation.verify_update(retpart))
+
+    let part_len: CK_ULONG = unsafe { *pul_part_len };
+    ret_to_rv!(internal_verify_update(&mut session, part, part_len))
 }
 
 /// Implementation of C_GenerateKey function
