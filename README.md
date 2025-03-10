@@ -21,7 +21,7 @@ Build the rust project:
 
 For FIPS module, you need to generate hmac checksum:
 
-    $ ./hmacify.sh target/release/libkryoptic_pkcs11.so
+    $ ./misc/hmacify.sh target/release/libkryoptic_pkcs11.so
 
 The default build specifies "standard" as the default feature for
 ease of use. "Standard" pulls in all the standard algorithms and the
