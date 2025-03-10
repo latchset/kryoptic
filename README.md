@@ -6,6 +6,10 @@ This is a pkcs11 soft token written in rust
  * openssl dependencies
  * sqlite
 
+Note, the default feature links against the system installed openssl
+and does not use the openssl submodule, you need the openssl
+development package to build with the default features.
+
 # Setup
 
 First after cloning, we need to pull and update openssl submodule:
@@ -38,3 +42,32 @@ eg: cargo build --no-default-features --features fips,sqlitedb,nssdb
 To run test, run the check command:
 
     $ cargo test
+
+
+# License
+
+The license is currently set as the GPLv3.0+ as released by the FSF.
+
+This license is compatible with the OpenSSL ASL2.0 license and is a strong
+copyleft license which we find useful.
+
+Unlike other copyleft projects we are not dogmatic and chose this license
+for the benefits we think it will brings to a self-contained project like
+kryoptic. Namely that it strongly encourages modifications to be
+contributed back.
+
+If a party asks for it we will pragmatically evaluate a different license
+and will be open to make a change if we think that such change would in fact
+be in the best interest of the project. Note that requests of this kind
+need to come with a well reasoned rationale that shows benefits both for
+the requesting party and the upstream project.
+
+
+# Contributions
+
+Contributions to the project are made under the project's [License][License]
+unless otherwise explicitly indicated by the contributor at the time of the
+contribution.
+
+See also the [default agreement](https://developercertificate.org/) we assume
+for contribution which is currently enforced by the github DCO check.
