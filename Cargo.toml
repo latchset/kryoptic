@@ -72,7 +72,7 @@ memorydb = ["aes", "hkdf", "pbkdf2"] # for encryption
 sqlitedb = ["dep:rusqlite", "aes", "hkdf", "pbkdf2"]
 nssdb = ["dep:rusqlite", "aes", "hmac", "pbkdf2"]
 
-default = ["standard"]
+default = ["standard", "dynamic"]
 
 ecc_all = ["ecdsa", "ec_montgomery", "eddsa", "ecdh"]
 hash_all = ["hash", "hmac"]

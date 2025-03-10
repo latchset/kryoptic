@@ -79,10 +79,9 @@ jobs:
       - name: Build & test
         run: |
           FEATURES="${{ matrix.db }}"
-          OPTS=""
+          OPTS="--no-default-features"
 
           if [ "${{ matrix.name }}" = "fips" ]; then
-            OPTS="--no-default-features"
             FEATURES="${FEATURES},fips"
           elif [ "${{ matrix.name }}" = "ossl3" ]; then
             FEATURES="${FEATURES},standard"
@@ -96,7 +95,7 @@ jobs:
             FEATURES="${FEATURES},standard,dynamic"
             OPTS="--target i686-unknown-linux-gnu"
           elif [ "${{ matrix.name }}" = "minimal" ]; then
-            OPTS="--no-default-features"
+            FEATURES="${FEATURES},dynamic"
           fi
 
           cargo build -vv $OPTS --features "$FEATURES"

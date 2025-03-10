@@ -53,8 +53,8 @@ jobs:
 
       - name: Build & test
         run: |
-          cargo build --features dynamic,standard,nssdb
-          cargo test --features dynamic,standard,nssdb | tee testout.log 2>&1
+          cargo build --no-default-features --features dynamic,standard,nssdb
+          cargo test --no-default-features --features dynamic,standard,nssdb | tee testout.log 2>&1
           grep -q "0 failed" testout.log
 
       - name: Get pkcs11-provider
