@@ -7,6 +7,11 @@ homepage = "https://github.com/latchset/kryoptic"
 repository = "https://github.com/latchset/kryoptic"
 license = "GPL-3.0"
 
+exclude = [
+    ".github/*",
+    "openssl/*",
+]
+
 [lib]
 name = "kryoptic_pkcs11"
 crate-type = ["cdylib"]
