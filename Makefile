@@ -13,10 +13,10 @@ check-fips:
 	cargo test --no-default-features --features fips,sqlitedb,nssdb
 
 check-format:
-	@find . -not \( -path ./target -prune \) -type f -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./src build.rs -name '*.rs' | xargs rustfmt --check --color auto
 
 fix-format:
-	@find . -not \( -path ./target -prune \) -type f -name '*.rs' | xargs rustfmt
+	@find ./src build.rs -name '*.rs' | xargs rustfmt
 
 check-spell:
 	@.github/codespell.sh
