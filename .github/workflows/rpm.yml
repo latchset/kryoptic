@@ -37,6 +37,6 @@ jobs:
           cargo package --features=standard,dynamic,nssdb
           mkdir -p rpmbuild/SOURCES
           cp target/package/kryoptic-*.crate rpmbuild/SOURCES/
-          rpmbuild --define "_topdir $PWD/rpmbuild" -ba \
+          rpmbuild --define "_topdir $PWD/rpmbuild" -ba --without=gpgcheck \
               packaging/kryoptic.spec
 
