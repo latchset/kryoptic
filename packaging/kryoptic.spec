@@ -5,7 +5,7 @@
 %global cargo_install_lib 0
 
 Name:           kryoptic
-Version:        0.1.0
+Version:        1.0.0
 Release:        %autorelease
 Summary:        PKCS #11 software token written in Rust
 
