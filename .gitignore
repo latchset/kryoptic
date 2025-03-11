@@ -12,3 +12,4 @@
 cscope.*
 tags
 .generated_files
+*.tar.gz
