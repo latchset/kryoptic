@@ -77,7 +77,10 @@ fn build_ossl(out_file: &Path) {
             "no-ec2m",
             "no-sm2",
             "no-sm4",
-            "-DREDHAT_FIPS_VERSION=\\\"0.0.1-test\\\"",
+            "no-des",
+            "no-dsa",
+            "no-atexit",
+            "-DDEVRANDOM=\\\"/dev/urandom\\\" -DOPENSSL_PEDANTIC_ZEROIZATION -DFIPS_VENDOR=\\\"Kryoptic\\\" -DKRYOPTIC_FIPS_VERSION=\\\"1.0.0-test\\\"",
         ];
 
         println!(
@@ -94,12 +97,21 @@ fn build_ossl(out_file: &Path) {
     let (libpath, bldargs, header) = {
         let libcrypto =
             format!("{}/libcrypto.a", openssl_path.to_string_lossy());
+        let buildargs = [
+            "--debug",
+            "no-mdc2",
+            "no-ec2m",
+            "no-sm2",
+            "no-sm4",
+            "no-des",
+            "-DDEVRANDOM=\\\"/dev/urandom\\\"",
+        ];
 
         println!("cargo:rustc-link-search={}", openssl_path.to_str().unwrap());
         println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo:rerun-if-changed={}", libcrypto);
 
-        (libcrypto, ["--debug"], "ossl.h")
+        (libcrypto, buildargs, "ossl.h")
     };
 
     match std::path::Path::new(&libpath).try_exists() {
