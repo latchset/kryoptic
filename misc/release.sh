@@ -16,7 +16,7 @@ while getopts 'sh' opt; do
 done
 shift "$(($OPTIND -1))"
 
-if [ -z "$1"]; then
+if [ -z "$1" ]; then
     echo "Usage: $(basename $0) [-s] <version>"
     exit 1
 fi
@@ -35,7 +35,7 @@ fi
 echo "Creating archives"
 git archive --format=tar.gz --prefix kryoptic-${VERSION}/ -o kryoptic-${VERSION}.tar.gz ${TAG}
 cargo vendor
-tar --transform "s#^vendor#kryoptic-${VERSION}/vendor#" -czf kryoptic-vendor-${VERSION}.tar.gz vendor
+tar -czf kryoptic-vendor-${VERSION}.tar.gz vendor
 
 if [ "$SIGN" == "1" ]; then
     echo "Signing archives"
