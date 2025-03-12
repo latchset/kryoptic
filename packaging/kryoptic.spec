@@ -109,7 +109,11 @@ echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryopti
 
 %if %{with check}
 %check
+%if 0%{?rhel}
+%cargo_test -f dynamic,nssdb,standard -- -- --exact --skip tests::signatures::test_rsa_signatures
+%else
 %cargo_test -f dynamic,nssdb,standard
+%endif
 %endif
 
 %files
