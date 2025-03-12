@@ -293,6 +293,7 @@ pub struct Sp800Operation {
     params: Vec<Sp800Params>,
     iv: Vec<u8>,
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
+    #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
 
@@ -526,6 +527,9 @@ impl Derive for Sp800Operation {
             keys.push(obj);
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_KBKDF))?;
         let mut dkm = vec![0u8; slen];
         let res = unsafe {
@@ -540,7 +544,8 @@ impl Derive for Sp800Operation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
 
         let mut cursor = 0;
         for key in &mut keys {

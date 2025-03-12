@@ -21,6 +21,7 @@ pub struct SSHKDFOperation {
     key_type: u8,
     exchange_hash: Vec<u8>,
     session_id: Vec<u8>,
+    #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
     is_data: bool,
 }
@@ -123,6 +124,9 @@ impl Derive for SSHKDFOperation {
         )?;
         params.finalize();
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_SSHKDF))?;
         let mut dkm = vec![0u8; value_len];
         let res = unsafe {
@@ -137,7 +141,8 @@ impl Derive for SSHKDFOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
-        self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
+        #[cfg(feature = "fips")]
+        fips_approval_finalize(&mut self.fips_approved);
 
         dobj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
         Ok(vec![dobj])
