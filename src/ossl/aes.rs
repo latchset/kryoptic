@@ -759,6 +759,9 @@ impl AesOperation {
             }
         };
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         /* Need to initialize the cipher on the ctx first, as some modes
          * will attempt to set parameters that require it on the context,
          * before key and iv can be installed */
@@ -860,6 +863,9 @@ impl AesOperation {
                 return Err(CKR_DEVICE_ERROR)?;
             }
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
 
         Ok(())
     }
@@ -1261,6 +1267,7 @@ impl AesOperation {
         {
             self.params.zeroize();
             zeromem(self.buffer.as_mut_slice());
+            self.fips_approved = None;
         }
 
         let iv_ptr = self.init_msg_params(parameter, parameter_len, aad)?;
@@ -1330,6 +1337,7 @@ impl AesOperation {
         {
             self.params.zeroize();
             zeromem(self.buffer.as_mut_slice());
+            self.fips_approved = None;
         }
 
         let _ = self.init_msg_params(parameter, parameter_len, aad)?;
@@ -1354,6 +1362,16 @@ impl AesOperation {
     /// AEAD specific FIPS checks
     #[cfg(feature = "fips")]
     fn fips_approval_aead(&mut self) -> Result<()> {
+        if let Some(approved) = self.fips_approved {
+            /* if the indicator is already set as not approved,
+             * just return, there is no point testing further
+             * as we should never overwrite an unapproved state
+             */
+            if !approved {
+                return Ok(());
+            }
+        }
+
         /* For AEAD we handle indicators directly because OpenSSL has an
          * inflexible API that provides incorrect answers when we
          * generate the IV outside of that code */
@@ -1498,9 +1516,11 @@ impl Encryption for AesOperation {
             return Err(error::Error::buf_too_small(outlen));
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut cipher_buf = cipher.as_mut_ptr();
         let mut cipher_len = 0;
-
         let mut plain_buf = plain.as_ptr();
         let mut plain_len = plain.len();
         match self.mech {
@@ -1583,6 +1603,10 @@ impl Encryption for AesOperation {
                 self.buffer.clear();
             }
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
+
         Ok(cipher_len + usize::try_from(outl)?)
     }
 
@@ -1597,6 +1621,9 @@ impl Encryption for AesOperation {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
 
         let mut outlen = 0;
         match self.mech {
@@ -1715,9 +1742,8 @@ impl Encryption for AesOperation {
         };
 
         #[cfg(feature = "fips")]
-        {
-            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
-        }
+        fips_approval_finalize(&mut self.fips_approved);
+
         self.finalized = true;
         Ok(outlen)
     }
@@ -1914,6 +1940,9 @@ impl Decryption for AesOperation {
             return Err(error::Error::buf_too_small(outlen));
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut outlen = 0;
         let mut cipher_len = cipher.len();
 
@@ -2070,6 +2099,10 @@ impl Decryption for AesOperation {
                 _ => (),
             }
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
+
         Ok(outlen)
     }
 
@@ -2084,6 +2117,9 @@ impl Decryption for AesOperation {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
 
         let mut outlen = 0;
         match self.mech {
@@ -2176,9 +2212,8 @@ impl Decryption for AesOperation {
         }
 
         #[cfg(feature = "fips")]
-        {
-            self.fips_approved = check_cipher_fips_indicators(&mut self.ctx)?;
-        }
+        fips_approval_finalize(&mut self.fips_approved);
+
         self.finalized = true;
         Ok(outlen)
     }
@@ -2357,6 +2392,9 @@ impl MsgEncryption for AesOperation {
             return Err(error::Error::buf_too_small(plain.len()));
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut outl: c_int = 0;
         if plain.len() > 0 {
             let res = unsafe {
@@ -2372,6 +2410,10 @@ impl MsgEncryption for AesOperation {
                 return Err(self.op_err(CKR_DEVICE_ERROR));
             }
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
+
         Ok(usize::try_from(outl)?)
     }
 
@@ -2391,6 +2433,10 @@ impl MsgEncryption for AesOperation {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         if self.mech == CKM_AES_CCM {
             if plain.len() + self.buffer.len() != self.params.datalen {
                 return Err(self.op_err(CKR_DATA_LEN_RANGE));
@@ -2466,6 +2512,9 @@ impl MsgEncryption for AesOperation {
             zeromem(cipher);
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_finalize(&mut self.fips_approved);
 
         Ok(outlen)
     }
@@ -2555,6 +2604,9 @@ impl MsgDecryption for AesOperation {
             return Err(error::Error::buf_too_small(cipher.len()));
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut outl: c_int = 0;
         if cipher.len() > 0 {
             let res = unsafe {
@@ -2570,6 +2622,10 @@ impl MsgDecryption for AesOperation {
                 return Err(self.op_err(CKR_DEVICE_ERROR));
             }
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
+
         Ok(usize::try_from(outl)?)
     }
 
@@ -2589,6 +2645,10 @@ impl MsgDecryption for AesOperation {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         if self.mech == CKM_AES_CCM {
             if cipher.len() + self.buffer.len() != self.params.datalen {
                 return Err(self.op_err(CKR_DATA_LEN_RANGE));
@@ -2668,6 +2728,9 @@ impl MsgDecryption for AesOperation {
             _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
         };
 
+        #[cfg(feature = "fips")]
+        fips_approval_finalize(&mut self.fips_approved);
+
         self.in_use = false;
         Ok(outlen)
     }
@@ -2734,6 +2797,12 @@ impl AesCmacOperation {
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         let mackey = object_to_raw_key(key)?;
+
+        #[cfg(feature = "fips")]
+        let mut fips_approved: Option<bool> = None;
+        #[cfg(feature = "fips")]
+        fips_approval_init_checks(&mut fips_approved);
+
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_CMAC))?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
@@ -2758,6 +2827,10 @@ impl AesCmacOperation {
         {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut fips_approved);
+
         Ok(AesCmacOperation {
             mech: mech.mechanism,
             finalized: false,
@@ -2766,7 +2839,7 @@ impl AesCmacOperation {
             ctx: ctx,
             maclen: maclen,
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approved: fips_approved,
         })
     }
 
@@ -2785,12 +2858,18 @@ impl AesCmacOperation {
         }
         self.in_use = true;
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         if unsafe {
             EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
         } != 1
         {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
 
         Ok(())
     }
@@ -2804,6 +2883,9 @@ impl AesCmacOperation {
         /* It is valid to finalize without any update */
         self.in_use = true;
         self.finalized = true;
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
 
         let mut buf = [0u8; AES_BLOCK_SIZE];
         let mut outlen: usize = 0;
@@ -2826,14 +2908,14 @@ impl AesCmacOperation {
         zeromem(&mut buf);
 
         #[cfg(feature = "fips")]
-        self.fips_approval_cmac()?;
+        self.fips_approval_cmac();
 
         Ok(())
     }
 
     /// CMAC specific FIPS checks
     #[cfg(feature = "fips")]
-    fn fips_approval_cmac(&mut self) -> Result<()> {
+    fn fips_approval_cmac(&mut self) {
         /*
          * NIST SP 800-38B A.2:
          * > For most applications, a value for Tlen that is at least 64
@@ -2841,9 +2923,10 @@ impl AesCmacOperation {
          *
          * 64b == 8B
          */
-        self.fips_approved = Some(self.maclen >= 8);
-
-        Ok(())
+        if self.maclen < 8 {
+            self.fips_approved = Some(false);
+        }
+        fips_approval_finalize(&mut self.fips_approved);
     }
 }
 

@@ -23,6 +23,7 @@ pub struct HMACOperation {
     maclen: usize,
     key: HmacKey,
     ctx: EvpMacCtx,
+    #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
 
@@ -32,6 +33,11 @@ impl HMACOperation {
         key: HmacKey,
         outputlen: usize,
     ) -> Result<HMACOperation> {
+        #[cfg(feature = "fips")]
+        let mut fips_approved: Option<bool> = None;
+        #[cfg(feature = "fips")]
+        fips_approval_init_checks(&mut fips_approved);
+
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
         let hash = hmac_mech_to_hash_mech(mech)?;
         let mut params = OsslParam::with_capacity(1);
@@ -52,6 +58,10 @@ impl HMACOperation {
         {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut fips_approved);
+
         Ok(HMACOperation {
             mech: mech,
             finalized: false,
@@ -60,7 +70,8 @@ impl HMACOperation {
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
             key: key,
             ctx: ctx,
-            fips_approved: None,
+            #[cfg(feature = "fips")]
+            fips_approved: fips_approved,
         })
     }
 
@@ -77,12 +88,18 @@ impl HMACOperation {
         }
         self.in_use = true;
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         if unsafe {
             EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
         } != 1
         {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
 
         Ok(())
     }
@@ -98,6 +115,9 @@ impl HMACOperation {
         if output.len() != self.outputlen {
             return Err(CKR_GENERAL_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
 
         let mut buf = vec![0u8; self.maclen];
         let mut outlen: usize = 0;
@@ -120,14 +140,20 @@ impl HMACOperation {
         output.copy_from_slice(&buf[..output.len()]);
         zeromem(buf.as_mut_slice());
 
-        /* The OpenSSL implementation verifies the truncation is > 112b according to the
-         * FIPS 140-3 IG, C.D Use of a Truncated HMAC
+        /*
+         * The OpenSSL implementation verifies the truncation is > 112b
+         * according to the FIPS 140-3 IG, C.D Use of a Truncated HMAC
          */
-        self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
+        #[cfg(feature = "fips")]
+        fips_approval_finalize(&mut self.fips_approved);
+
         Ok(())
     }
 
     fn reinit(&mut self) -> Result<()> {
+        #[cfg(feature = "fips")]
+        fips_approval_init_checks(&mut self.fips_approved);
+
         if unsafe {
             EVP_MAC_init(
                 self.ctx.as_mut_ptr(),
@@ -139,9 +165,12 @@ impl HMACOperation {
         {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
+
         self.finalized = false;
         self.in_use = false;
-        self.fips_approved = None;
         Ok(())
     }
 }

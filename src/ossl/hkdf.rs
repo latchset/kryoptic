@@ -265,6 +265,9 @@ impl Derive for HKDFOperation {
         }
         params.finalize();
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];
         let res = unsafe {
@@ -280,9 +283,7 @@ impl Derive for HKDFOperation {
         }
 
         #[cfg(feature = "fips")]
-        {
-            self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
-        }
+        fips_approval_finalize(&mut self.fips_approved);
 
         obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
 

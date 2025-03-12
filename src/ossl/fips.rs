@@ -1,8 +1,9 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::cell::Cell;
 use std::ffi::CStr;
-use std::ffi::{c_char, c_int, c_uchar, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_uchar, c_void};
 use std::fs::File;
 use std::io::Read;
 use std::io::Seek;
@@ -859,51 +860,100 @@ impl ProviderSignatureCtx {
 unsafe impl Send for ProviderSignatureCtx {}
 unsafe impl Sync for ProviderSignatureCtx {}
 
-macro_rules! check_ossl_fips_indicator {
-    ($lo:ident; $up:ident; $mix:ident) => {
-        paste::paste! {
-            pub fn [<check_ $lo _fips_indicators>](
-                ctx: &mut [<Evp $mix Ctx>]
-            ) -> Result<Option<bool>> {
-                let mut params = OsslParam::with_capacity(1);
-                params.add_owned_int(
-                    name_as_char(
-                        [<OSSL_ $up _PARAM_REDHAT_FIPS_INDICATOR>]
-                    ),
-                    c_int::try_from(
-                        [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>]
-                    )?,
-                )?;
-                params.finalize();
-                unsafe {
-                    [<EVP_ $up _CTX_get_params>](
-                        ctx.as_mut_ptr(),
-                        params.as_mut_ptr()
-                    )
-                };
-
-                let indicator = c_uint::try_from(
-                    params.get_int(
-                        name_as_char(
-                            [<OSSL_ $up _PARAM_REDHAT_FIPS_INDICATOR>]
-                        )
-                    )?,
-                )?;
-                /* in case of error it will remain undetermined */
-                Ok(match indicator {
-                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_UNDETERMINED>] => None,
-                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_APPROVED>] => Some(true),
-                    [<EVP_ $up _REDHAT_FIPS_INDICATOR_NOT_APPROVED>] => Some(false),
-                    _ => return Err(CKR_DEVICE_ERROR)?,
-                })
-            }
-        }
-    };
+/* The Openssl FIPS indicator callback is inadequate for easily
+ * accessing individual indicators in the context of a single
+ * operation because it is tied to the general library context,
+ * which can be shared across multiple threads in an application.
+ * Therefore the only way to make this work in a thread safe way
+ * is to use thread local variables */
+thread_local! {
+    static FIPS_INDICATOR: Cell<u32> = Cell::new(0);
 }
 
-check_ossl_fips_indicator!(kdf; KDF; Kdf);
-check_ossl_fips_indicator!(mac; MAC; Mac);
-check_ossl_fips_indicator!(cipher; CIPHER; Cipher);
+unsafe extern "C" fn fips_indicator_callback(
+    _type_: *const ::std::os::raw::c_char,
+    _desc: *const ::std::os::raw::c_char,
+    _params: *const OSSL_PARAM,
+) -> ::std::os::raw::c_int {
+    /* We ignore type, desc, params, for now, and just register
+     * if a change in state occurred.
+     *
+     * We could track individual events in the callback, but
+     * a) it is really hard to know what they are because the
+     *    "type" is an arbitrary string and you need to go and
+     *    find in the specific openssl fips provider sources to
+     *    figure out what it is...
+     * b) it is expensive as it ends up having to do a bunch
+     *    of string compares, and based on that then modify
+     *    some slot in a preallocated vector ...
+     *
+     * Within the context of a thread only one operation at
+     * a time is performed, so, as long as the code correctly
+     * resets the indicator before an operation is started and
+     * immediately checks it at the end, tracking the status in
+     * th operation context, it can get away with tracking
+     * everything in a single per-thread variable and count on
+     * the serial nature of code executing within a thread.
+     *
+     * Note that the callback is called only when the
+     * underlying OpenSSL code believes there was an unapproved
+     * condition. In strict mode the callback is not called and
+     * the underlying function fails directly.
+     */
+
+    /* Set the indicator up, this means there was an unapproved
+     * use. */
+    FIPS_INDICATOR.set(1);
+
+    /* Returning 1, allows OpenSSL to continue the operation.
+     * Unless and until we implement a strict FIPS mode we never
+     * want to cause a failure for an unapproved use, so we just
+     * return all ok, FIPS_INDICATOR will allow us to propagate the
+     * fact that the operation was unapproved by setting PKCS#11
+     * indicators */
+    return 1;
+}
+
+fn clear_ossl_fips_indicator() {
+    FIPS_INDICATOR.set(0);
+}
+
+fn ossl_fips_indicator_is_set() -> bool {
+    if FIPS_INDICATOR.get() == 0 {
+        return false;
+    }
+    return true;
+}
+
+fn fips_approval(fips_approved: &mut Option<bool>, finalize: bool) {
+    if ossl_fips_indicator_is_set() {
+        /* The indicator was set, therefore there was an unapproved use */
+        *fips_approved = Some(false);
+    }
+    if finalize {
+        /* this is the last check, mark approval as true if not set so far */
+        if fips_approved.is_none() {
+            *fips_approved = Some(true);
+        }
+    }
+}
+
+pub fn fips_approval_init_checks(fips_approved: &mut Option<bool>) {
+    *fips_approved = None;
+    clear_ossl_fips_indicator();
+}
+
+pub fn fips_approval_prep_check() {
+    clear_ossl_fips_indicator();
+}
+
+pub fn fips_approval_check(fips_approved: &mut Option<bool>) {
+    fips_approval(fips_approved, false);
+}
+
+pub fn fips_approval_finalize(fips_approved: &mut Option<bool>) {
+    fips_approval(fips_approved, true);
+}
 
 pub fn set_error_state() {
     unsafe { ossl_set_error_state(name_as_char(OSSL_SELF_TEST_TYPE_PCT)) };
