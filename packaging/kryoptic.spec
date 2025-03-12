@@ -9,6 +9,16 @@
 
 %global soname libkryoptic_pkcs11
 
+%if 0%{?rhel}
+# RHEL: Use bundled deps as it doesn't ship Rust libraries
+%global bundled_rust_deps 1
+%global __brp_mangle_shebangs_exclude_from ^/usr/src/debug/.*$
+%else
+# Fedora: Use only system Rust libraries
+%global bundled_rust_deps 0
+%endif
+
+
 Name:           kryoptic
 Version:        1.0.0
 Release:        %autorelease
@@ -29,17 +39,28 @@ License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD
 # LICENSE.dependencies contains a full license breakdown
 
 URL:            https://github.com/latchset/kryoptic
-Source0:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-%{version}.tar.xz
+Source0:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-%{version}.tar.gz
+Source1:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-vendor-%{version}.tar.gz
 %if %{with gpgcheck}
-Source1:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-%{version}.tar.xz.asc
-Source2:        https://people.redhat.com/~ssorce/simo_redhat.asc
+Source2:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-%{version}.tar.gz.asc
+Source3:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-vendor-%{version}.tar.gz.asc
+Source4:        https://people.redhat.com/~ssorce/simo_redhat.asc
 %endif
 
-BuildRequires:  cargo-rpm-macros >= 26
 BuildRequires:  openssl-devel
 %if %{with gpgcheck}
 BuildRequires: gnupg2
 %endif
+
+%if 0%{?bundled_rust_deps}
+BuildRequires:  rust-toolset
+BuildRequires:  clang
+# vendored rustqlite
+BuildRequires:  sqlite-devel
+%else
+BuildRequires:  cargo-rpm-macros >= 26
+%endif
+
 
 %global _description %{expand:
 A PKCS #11 software token written in Rust.}
@@ -56,13 +77,21 @@ Most notably a migration tool for the SoftHSM database.
 
 %prep
 %if %{with gpgcheck}
-%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE2}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE1}'
 %endif
-%autosetup -p1
+%autosetup -p1 -N %{?bundled_rust_deps:-a1}
+%if 0%{?bundled_rust_deps}
+%cargo_prep -v vendor
+
+# don't lock the dependencies
+rm -f Cargo.lock
+%else
 %cargo_prep
 
 %generate_buildrequires
 %cargo_generate_buildrequires -f dynamic,nssdb,standard
+%endif
 
 %build
 export CONFDIR=%{_sysconfdir}

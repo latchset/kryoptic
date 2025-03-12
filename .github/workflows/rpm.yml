@@ -5,38 +5,68 @@ on:
   pull_request:
     branches: ["main"]
 
+env:
+  VERSION: 1.0.0
+
 jobs:
   rpmbuild:
-    name: Generate crate and run RPM Build
+    name: Release tarball and run RPM Build
     runs-on: ubuntu-22.04
-    container: fedora:rawhide
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [fedora, centos10]
+        include:
+          - name: fedora
+            container: fedora:rawhide
+          - name: centos10
+            container: quay.io/centos/centos:stream10
+    container: ${{ matrix.container }}
     steps:
       - name: Configure container to install docs (#2312825)
         run: sed -i -e 's/tsflags=nodocs//g' /etc/dnf/dnf.conf
 
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Cache DNF packages (separate from the main job -- different dependencies)
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+            /var/cache/dnf
+          key: ${{ runner.os }}-${{ matrix.container }}-dnf-${{ steps.get-date.outputs.date }}
+
       - name: Install Dependencies
         run: |
-          dnf -y install rustc rpm-build cargo-rpm-macros openssl-devel \
-              'crate(asn1/default)' 'crate(bimap/default)' \
-              'crate(bindgen/default)' 'crate(bitflags/default)' 'crate(cfg-if/default)' \
-              'crate(clap)' 'crate(clap/cargo)' 'crate(clap/derive)' 'crate(clap/help)' \
-              'crate(clap/std)' 'crate(clap/usage)' 'crate(constant_time_eq/default)' \
-              'crate(data-encoding/default)' 'crate(getrandom/default)' 'crate(hex/default)' \
-              'crate(itertools/default)' 'crate(libc/default)' 'crate(num-bigint/default)' \
-              'crate(num-integer/default)' 'crate(num-traits/default)' 'crate(once_cell/default)' \
-              'crate(paste/default)' 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
-              'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
-              'crate(serial_test/default)' 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' \
-              'crate(uuid/default)' 'crate(uuid/v4)'
+          if [ "${{ matrix.name }}" = "centos10" ]; then
+            dnf -y install rustc rpm-build openssl-devel cargo rust-toolset sqlite-devel clang git
+          else
+            dnf -y install rustc rpm-build cargo-rpm-macros openssl-devel git \
+                'crate(asn1/default)' 'crate(bimap/default)' \
+                'crate(bindgen/default)' 'crate(bitflags/default)' 'crate(cfg-if/default)' \
+                'crate(clap)' 'crate(clap/cargo)' 'crate(clap/derive)' 'crate(clap/help)' \
+                'crate(clap/std)' 'crate(clap/usage)' 'crate(constant_time_eq/default)' \
+                'crate(data-encoding/default)' 'crate(getrandom/default)' 'crate(hex/default)' \
+                'crate(itertools/default)' 'crate(libc/default)' 'crate(num-bigint/default)' \
+                'crate(num-integer/default)' 'crate(num-traits/default)' 'crate(once_cell/default)' \
+                'crate(paste/default)' 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
+                'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
+                'crate(serial_test/default)' 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' \
+                'crate(uuid/default)' 'crate(uuid/v4)'
+          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: RPM Build
         run: |
-          cargo package --features=standard,dynamic,nssdb
+          git config --global --add safe.directory /__w/kryoptic/kryoptic
+          ./misc/release.sh ${VERSION}
           mkdir -p rpmbuild/SOURCES
-          cp target/package/kryoptic-*.crate rpmbuild/SOURCES/
+          cp kryoptic-${VERSION}.tar.gz kryoptic-vendor-${VERSION}.tar.gz rpmbuild/SOURCES/
           rpmbuild --define "_topdir $PWD/rpmbuild" -ba --without=gpgcheck \
               packaging/kryoptic.spec
-
