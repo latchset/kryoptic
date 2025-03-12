@@ -6,11 +6,17 @@ build:
 fips:
 	cargo build --no-default-features --features fips,sqlitedb,nssdb
 
+static:
+	cargo build --no-default-features --features standard
+
 check:
 	cargo test --features nssdb
 
 check-fips:
 	cargo test --no-default-features --features fips,sqlitedb,nssdb
+
+check-static:
+	cargo test --no-default-features --features standard
 
 check-format:
 	@find ./src build.rs -name '*.rs' | xargs rustfmt --check --color auto
@@ -35,7 +41,7 @@ scope:
 		if [[ -n "$$PKCSFILES" ]]; then
 			read PKCSFILE < <(ls -t $$PKCSFILES)
 		fi
-		OSSLFILES=$$(find ./ -name pkcs11_bindings.rs)
+		OSSLFILES=$$(find ./ -name ossl_bindings.rs)
 		if [[ -n "$$OSSLFILES" ]]; then
 			read OSSLFILE < <(ls -t $$OSSLFILES)
 		fi
