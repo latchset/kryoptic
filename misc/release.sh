@@ -22,14 +22,16 @@ if [ -z "$1" ]; then
 fi
 
 VERSION="$1"
-TAG="v${VERSION}"
 
 #Ensure the release is correct
 git grep "version = \"${VERSION}\"" || (echo "version mismatch, check Cargo.toml" && false)
 
 if [ "$SIGN" == "1" ]; then
     echo "Creating version tag"
+    TAG="v${VERSION}"
     git tag -s ${TAG} -m "Release \"${VERSION}\""
+else
+    TAG="HEAD"
 fi
 
 echo "Creating archives"
