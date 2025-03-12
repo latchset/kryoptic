@@ -415,7 +415,9 @@ fn test_rsa_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
-    #[cfg(not(feature = "fips"))]
+    /* Raw sig is disabled in the openssl submodule */
+
+    #[cfg(feature = "dynamic")]
     {
         /* RSA PKCS Sig */
         let pri_key_handle = match get_test_key_handle(
