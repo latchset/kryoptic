@@ -130,6 +130,7 @@ fn test_rsa_signatures() {
 
     /* get test data */
     let mut testcase = get_test_case_data("CKM_RSA_PKCS");
+    #[allow(unused_variables)]
     let pri_key_handle =
         match get_test_key_handle(session, "SigGen15_186-2", CKO_PRIVATE_KEY) {
             Ok(k) => k,

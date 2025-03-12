@@ -234,6 +234,7 @@ pub fn sig_gen(
     Ok(signature)
 }
 
+#[allow(dead_code)]
 pub fn sig_gen_multipart(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
