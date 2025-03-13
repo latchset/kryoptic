@@ -1441,16 +1441,14 @@ pub fn default_key_attributes(
     key.set_attr(Attribute::from_bool(CKA_LOCAL, true))?;
     key.set_attr(Attribute::from_ulong(CKA_KEY_GEN_MECHANISM, mech))?;
 
-    let extractable = if let Ok(b) = key.get_attr_as_bool(CKA_EXTRACTABLE) {
-        b
-    } else {
-        true
+    let extractable = match key.get_attr_as_bool(CKA_EXTRACTABLE) {
+        Ok(b) => b,
+        _ => true,
     };
     key.set_attr(Attribute::from_bool(CKA_NEVER_EXTRACTABLE, !extractable))?;
-    let sensitive = if let Ok(b) = key.get_attr_as_bool(CKA_SENSITIVE) {
-        b
-    } else {
-        false
+    let sensitive = match key.get_attr_as_bool(CKA_SENSITIVE) {
+        Ok(b) => b,
+        _ => false,
     };
     key.set_attr(Attribute::from_bool(CKA_ALWAYS_SENSITIVE, sensitive))?;
 

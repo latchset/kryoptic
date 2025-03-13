@@ -263,12 +263,12 @@ fn decrypt_key(
     };
 
     let kkbps1 = match &pdata.algorithm.params {
-        KAlgorithmParameters::Kkbps1(ref params) => params,
+        KAlgorithmParameters::Kkbps1(params) => params,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
 
     let key = match &kkbps1.key_derivation_func.params {
-        KAlgorithmParameters::Pbkdf2(ref params) => {
+        KAlgorithmParameters::Pbkdf2(params) => {
             if let Some(keylen) = params.key_length {
                 if keylen != AES_KEYLEN as u64 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -281,9 +281,9 @@ fn decrypt_key(
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     let params = match &kkbps1.encryption_scheme.params {
-        KAlgorithmParameters::Aes128Gcm(ref gcm) => gcm,
-        KAlgorithmParameters::Aes192Gcm(ref gcm) => gcm,
-        KAlgorithmParameters::Aes256Gcm(ref gcm) => gcm,
+        KAlgorithmParameters::Aes128Gcm(gcm) => gcm,
+        KAlgorithmParameters::Aes192Gcm(gcm) => gcm,
+        KAlgorithmParameters::Aes256Gcm(gcm) => gcm,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     Ok((
@@ -356,7 +356,7 @@ fn decrypt_data(
     };
 
     let kkbps1 = match &pdata.algorithm.params {
-        KAlgorithmParameters::Kkbps1(ref params) => params,
+        KAlgorithmParameters::Kkbps1(params) => params,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     if kkbps1.key_version_number != key_version {
@@ -364,7 +364,7 @@ fn decrypt_data(
     }
 
     let dek = match &kkbps1.key_derivation_func.params {
-        KAlgorithmParameters::Kkdf1(ref params) => {
+        KAlgorithmParameters::Kkdf1(params) => {
             if params.key_length != AES_KEYLEN as u64 {
                 return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
@@ -375,9 +375,9 @@ fn decrypt_data(
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     let params = match &kkbps1.encryption_scheme.params {
-        KAlgorithmParameters::Aes128Gcm(ref gcm) => gcm,
-        KAlgorithmParameters::Aes192Gcm(ref gcm) => gcm,
-        KAlgorithmParameters::Aes256Gcm(ref gcm) => gcm,
+        KAlgorithmParameters::Aes128Gcm(gcm) => gcm,
+        KAlgorithmParameters::Aes192Gcm(gcm) => gcm,
+        KAlgorithmParameters::Aes256Gcm(gcm) => gcm,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     aes_gcm_decrypt(facilities, &dek, params, data_id.as_bytes(), pdata.data)
@@ -475,16 +475,17 @@ impl StorageACI {
         uid: &String,
         val: &Vec<u8>,
     ) -> Result<Vec<u8>> {
-        if let Some(ref key) = self.key {
-            encrypt_data(
+        match self.key {
+            Some(ref key) => encrypt_data(
                 facilities,
                 self.key_version,
                 key,
                 uid.as_str(),
                 val.as_slice(),
-            )
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
+            ),
+            _ => {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
         }
     }
 
@@ -494,16 +495,17 @@ impl StorageACI {
         uid: &String,
         val: &Vec<u8>,
     ) -> Result<Vec<u8>> {
-        if let Some(ref key) = self.key {
-            decrypt_data(
+        match self.key {
+            Some(ref key) => decrypt_data(
                 facilities,
                 self.key_version,
                 key,
                 uid.as_str(),
                 val.as_slice(),
-            )
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
+            ),
+            _ => {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
         }
     }
 

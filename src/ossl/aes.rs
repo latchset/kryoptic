@@ -58,10 +58,11 @@ impl AesCipher {
     }
 
     pub fn get_cipher(&self) -> Result<&EvpCipher> {
-        if let Some(ref ec) = self.cipher {
-            Ok(ec)
-        } else {
-            return Err(CKR_MECHANISM_INVALID)?;
+        match self.cipher {
+            Some(ref ec) => Ok(ec),
+            _ => {
+                return Err(CKR_MECHANISM_INVALID)?;
+            }
         }
     }
 }
@@ -165,7 +166,7 @@ fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
 struct AesIvData {
     buf: Vec<u8>,
     fixedbits: usize,
-    gen: CK_GENERATOR_FUNCTION,
+    generator: CK_GENERATOR_FUNCTION,
     counter: u64,
     maxcount: u64,
 }
@@ -175,7 +176,7 @@ impl AesIvData {
         Ok(AesIvData {
             buf: Vec::new(),
             fixedbits: 0,
-            gen: CKG_NO_GENERATE,
+            generator: CKG_NO_GENERATE,
             counter: 0,
             maxcount: 0,
         })
@@ -185,7 +186,7 @@ impl AesIvData {
         Ok(AesIvData {
             buf: iv,
             fixedbits: 0,
-            gen: CKG_NO_GENERATE,
+            generator: CKG_NO_GENERATE,
             counter: 0,
             maxcount: 0,
         })
@@ -635,7 +636,7 @@ impl AesOperation {
         let mask = u8::try_from(genbits % 8)?;
         let genbytes = (genbits + 7) / 8;
 
-        match self.params.iv.gen {
+        match self.params.iv.generator {
             CKG_GENERATE | CKG_GENERATE_COUNTER => {
                 let cntbuf = self.params.iv.counter.to_be_bytes();
                 self.params.iv.buf[genidx] &= !mask;
@@ -686,7 +687,7 @@ impl AesOperation {
     /// It may generate a new IV or use what is provided (eg in the
     /// decryption case)
     fn prep_iv(&mut self) -> Result<()> {
-        if self.params.iv.gen != CKG_NO_GENERATE {
+        if self.params.iv.generator != CKG_NO_GENERATE {
             self.generate_iv()?;
         }
 
@@ -1017,7 +1018,7 @@ impl AesOperation {
                     self.params.iv = AesIvData {
                         buf: bytes_to_vec!(params.pNonce, noncelen),
                         fixedbits: noncefixedbits,
-                        gen: params.nonceGenerator,
+                        generator: params.nonceGenerator,
                         counter: 0,
                         maxcount: 0,
                     };
@@ -1025,7 +1026,7 @@ impl AesOperation {
                     self.params.iv = AesIvData {
                         buf: bytes_to_vec!(params.pNonce, noncelen),
                         fixedbits: 0,
-                        gen: CKG_NO_GENERATE,
+                        generator: CKG_NO_GENERATE,
                         counter: 0,
                         maxcount: 0,
                     };
@@ -1092,7 +1093,7 @@ impl AesOperation {
                     self.params.iv = AesIvData {
                         buf: bytes_to_vec!(params.pIv, ivlen),
                         fixedbits: ivfixedbits,
-                        gen: params.ivGenerator,
+                        generator: params.ivGenerator,
                         counter: 0,
                         maxcount: 0,
                     };
@@ -1100,7 +1101,7 @@ impl AesOperation {
                     self.params.iv = AesIvData {
                         buf: bytes_to_vec!(params.pIv, ivlen),
                         fixedbits: 0,
-                        gen: CKG_NO_GENERATE,
+                        generator: CKG_NO_GENERATE,
                         counter: 0,
                         maxcount: 0,
                     };
@@ -1149,7 +1150,7 @@ impl AesOperation {
                     if self.params.iv.fixedbits != noncefixedbits {
                         return Err(self.op_err(CKR_ARGUMENTS_BAD));
                     }
-                    if self.params.iv.gen != params.nonceGenerator {
+                    if self.params.iv.generator != params.nonceGenerator {
                         return Err(self.op_err(CKR_ARGUMENTS_BAD));
                     }
                 }
@@ -1191,7 +1192,7 @@ impl AesOperation {
                     if self.params.iv.fixedbits != ivfixedbits {
                         return Err(self.op_err(CKR_ARGUMENTS_BAD));
                     }
-                    if self.params.iv.gen != params.ivGenerator {
+                    if self.params.iv.generator != params.ivGenerator {
                         return Err(self.op_err(CKR_ARGUMENTS_BAD));
                     }
                 }
@@ -1261,7 +1262,7 @@ impl AesOperation {
 
         self.cipher_initialize(true)?;
 
-        if self.params.iv.gen != CKG_NO_GENERATE {
+        if self.params.iv.generator != CKG_NO_GENERATE {
             let iv = bytes_to_slice!(mut iv_ptr, self.params.iv.buf.len(), u8);
             iv.copy_from_slice(&self.params.iv.buf);
         }
@@ -1349,7 +1350,7 @@ impl AesOperation {
         }
 
         /* The IV must be generated in FIPS mode */
-        self.fips_approved = match self.params.iv.gen {
+        self.fips_approved = match self.params.iv.generator {
             CKG_NO_GENERATE => match self.op {
                 CKF_MESSAGE_ENCRYPT => Some(false),
                 CKF_MESSAGE_DECRYPT => Some(true),

@@ -2983,7 +2983,7 @@ extern "C" fn fn_get_info(info: CK_INFO_PTR) -> CK_RV {
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258)
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
     unsafe {
         *fnlist = &FNLIST_240 as *const _ as *mut _;
@@ -3821,7 +3821,7 @@ static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259)
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn C_GetInterfaceList(
     interfaces_list: CK_INTERFACE_PTR,
     count: CK_ULONG_PTR,
@@ -3864,7 +3864,7 @@ pub extern "C" fn C_GetInterfaceList(
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260)
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn C_GetInterface(
     interface_name: CK_UTF8CHAR_PTR,
     version: CK_VERSION_PTR,

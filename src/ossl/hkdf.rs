@@ -36,36 +36,40 @@ pub struct HKDFOperation {
 
 impl HKDFOperation {
     fn verify_key(&self, key: &Object, matchlen: usize) -> Result<()> {
-        if let Ok(class) = key.get_attr_as_ulong(CKA_CLASS) {
-            match class {
-                CKO_SECRET_KEY => {
-                    if let Ok(kt) = key.get_attr_as_ulong(CKA_KEY_TYPE) {
-                        match kt {
-                            CKK_GENERIC_SECRET | CKK_HKDF => key
-                                .check_key_ops(
-                                    CKO_SECRET_KEY,
-                                    CK_UNAVAILABLE_INFORMATION,
-                                    CKA_DERIVE,
-                                )?,
-                            _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+        match key.get_attr_as_ulong(CKA_CLASS) {
+            Ok(class) => {
+                match class {
+                    CKO_SECRET_KEY => {
+                        match key.get_attr_as_ulong(CKA_KEY_TYPE) {
+                            Ok(kt) => match kt {
+                                CKK_GENERIC_SECRET | CKK_HKDF => key
+                                    .check_key_ops(
+                                        CKO_SECRET_KEY,
+                                        CK_UNAVAILABLE_INFORMATION,
+                                        CKA_DERIVE,
+                                    )?,
+                                _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+                            },
+                            _ => {
+                                return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+                            }
                         }
-                    } else {
-                        return Err(CKR_KEY_TYPE_INCONSISTENT)?;
                     }
-                }
-                CKO_DATA => {
-                    /* HKDF also allow a DATA object as input key ... */
-                    if !self.extract
-                        || self.salt_type == CKF_HKDF_SALT_NULL
-                        || self.salt.len() == 0
-                    {
-                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                    CKO_DATA => {
+                        /* HKDF also allow a DATA object as input key ... */
+                        if !self.extract
+                            || self.salt_type == CKF_HKDF_SALT_NULL
+                            || self.salt.len() == 0
+                        {
+                            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                        }
                     }
+                    _ => return Err(CKR_KEY_HANDLE_INVALID)?,
                 }
-                _ => return Err(CKR_KEY_HANDLE_INVALID)?,
             }
-        } else {
-            return Err(CKR_KEY_HANDLE_INVALID)?;
+            _ => {
+                return Err(CKR_KEY_HANDLE_INVALID)?;
+            }
         }
 
         if matchlen > 0 {
@@ -180,11 +184,12 @@ impl MechOperation for HKDFOperation {
             return Err(CKR_GENERAL_ERROR)?;
         }
         self.verify_key(objs[0], 0)?;
-        if let Ok(salt) = objs[0].get_attr_as_bytes(CKA_VALUE) {
-            self.salt.clone_from(salt);
-            Ok(())
-        } else {
-            Err(CKR_KEY_HANDLE_INVALID)?
+        match objs[0].get_attr_as_bytes(CKA_VALUE) {
+            Ok(salt) => {
+                self.salt.clone_from(salt);
+                Ok(())
+            }
+            _ => Err(CKR_KEY_HANDLE_INVALID)?,
         }
     }
 }
