@@ -62,12 +62,25 @@ fn build_ossl(out_file: &Path) {
         .canonicalize()
         .expect("cannot canonicalize path");
 
+    let str_defines;
+
     #[cfg(feature = "fips")]
     let (libpath, bldargs, header) = {
         let providers_path = openssl_path
             .join("providers")
             .canonicalize()
             .expect("OpenSSL providers path unavailable");
+
+        let version = env!("CARGO_PKG_VERSION");
+        let ver_define =
+            format!("-DKRYOPTIC_FIPS_VERSION=\\\"{}-test\\\"", version);
+        let defines = [
+            "-DDEVRANDOM=\\\"/dev/urandom\\\"",
+            "-DOPENSSL_PEDANTIC_ZEROIZATION",
+            "-DFIPS_VENDOR=\\\"Kryoptic\\\"",
+            &ver_define,
+        ];
+        str_defines = defines.join(" ");
 
         let libfips = format!("{}/libfips.a", providers_path.to_string_lossy());
         let buildargs = [
@@ -80,7 +93,7 @@ fn build_ossl(out_file: &Path) {
             "no-des",
             "no-dsa",
             "no-atexit",
-            "-DDEVRANDOM=\\\"/dev/urandom\\\" -DOPENSSL_PEDANTIC_ZEROIZATION -DFIPS_VENDOR=\\\"Kryoptic\\\" -DKRYOPTIC_FIPS_VERSION=\\\"1.0.0-test\\\"",
+            &str_defines,
         ];
 
         println!(
@@ -97,6 +110,7 @@ fn build_ossl(out_file: &Path) {
     let (libpath, bldargs, header) = {
         let libcrypto =
             format!("{}/libcrypto.a", openssl_path.to_string_lossy());
+        str_defines = format!("-DDEVRANDOM=\\\"/dev/urandom\\\"");
         let buildargs = [
             "--debug",
             "no-mdc2",
@@ -104,7 +118,7 @@ fn build_ossl(out_file: &Path) {
             "no-sm2",
             "no-sm4",
             "no-des",
-            "-DDEVRANDOM=\\\"/dev/urandom\\\"",
+            &str_defines,
         ];
 
         println!("cargo:rustc-link-search={}", openssl_path.to_str().unwrap());
