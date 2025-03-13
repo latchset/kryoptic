@@ -70,14 +70,15 @@ pub fn check_table(
     };
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(rusqlite::params![])?;
-    if let Some(row) = rows.next()? {
-        match row.get(0)? {
+    match rows.next()? {
+        Some(row) => match row.get(0)? {
             1 => (),
             0 => return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?,
             _ => return Err(CKR_DEVICE_ERROR)?,
+        },
+        _ => {
+            return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
         }
-    } else {
-        return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
     }
     match rows.next() {
         Ok(None) => Ok(()),

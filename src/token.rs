@@ -529,10 +529,13 @@ impl Token {
     }
 
     pub fn get_object_size(&self, o_handle: CK_OBJECT_HANDLE) -> Result<usize> {
-        let obj = if let Some(o) = self.session_objects.get(&o_handle) {
-            Cow::Borrowed(o)
-        } else {
-            Cow::Owned(self.storage.fetch(&self.facilities, o_handle, &[])?)
+        let obj = match self.session_objects.get(&o_handle) {
+            Some(o) => Cow::Borrowed(o),
+            _ => Cow::Owned(self.storage.fetch(
+                &self.facilities,
+                o_handle,
+                &[],
+            )?),
         };
         obj.rough_size()
     }
@@ -543,14 +546,16 @@ impl Token {
         o_handle: CK_OBJECT_HANDLE,
         template: &[CK_ATTRIBUTE],
     ) -> Result<CK_OBJECT_HANDLE> {
-        let obj = if let Some(o) = self.session_objects.get_mut(&o_handle) {
-            Cow::Borrowed(o)
-        } else {
-            let o = self.storage.fetch(&mut self.facilities, o_handle, &[])?;
-            if !self.is_logged_in(KRY_UNSPEC) && o.is_private() {
-                return Err(CKR_USER_NOT_LOGGED_IN)?;
+        let obj = match self.session_objects.get_mut(&o_handle) {
+            Some(o) => Cow::Borrowed(o),
+            _ => {
+                let o =
+                    self.storage.fetch(&mut self.facilities, o_handle, &[])?;
+                if !self.is_logged_in(KRY_UNSPEC) && o.is_private() {
+                    return Err(CKR_USER_NOT_LOGGED_IN)?;
+                }
+                Cow::Owned(o)
             }
-            Cow::Owned(o)
         };
         let newobj = self.facilities.factories.copy(&obj, template)?;
         self.insert_object(s_handle, newobj)

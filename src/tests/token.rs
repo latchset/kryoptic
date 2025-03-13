@@ -376,11 +376,13 @@ fn test_config_multiple_tokens() {
     /* try to init this token now */
     let mut args = TestToken::make_init_args(None);
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    env::set_var("KRYOPTIC_CONF", confname);
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("KRYOPTIC_CONF", confname) };
     let ret = force_load_config();
     assert_eq!(ret, CKR_OK);
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    env::remove_var("KRYOPTIC_CONF");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::remove_var("KRYOPTIC_CONF") };
     assert_eq!(ret, CKR_OK);
 
     /* check slots and tokens */
