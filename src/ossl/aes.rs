@@ -2113,11 +2113,12 @@ impl Decryption for AesOperation {
                 if self.buffer.len() != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
+                self.buffer.resize(AES_BLOCK_SIZE, 0);
                 let mut outl: c_int = 0;
                 let res = unsafe {
                     EVP_DecryptFinal_ex(
                         self.ctx.as_mut_ptr(),
-                        std::ptr::null_mut(),
+                        self.buffer.as_mut_ptr(),
                         &mut outl,
                     )
                 };
@@ -2127,6 +2128,8 @@ impl Decryption for AesOperation {
                 if outl != 0 {
                     return Err(self.op_err(CKR_DEVICE_ERROR));
                 }
+                zeromem(self.buffer.as_mut_slice());
+                self.buffer.clear();
             }
             CKM_AES_CBC_PAD => {
                 if self.buffer.len() != 0 {
