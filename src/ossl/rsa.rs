@@ -679,20 +679,10 @@ impl Encryption for RsaPKCSOperation {
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
-    fn encryption_len(&mut self, _: usize, fin: bool) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if fin {
-            self.finalized = true;
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
+    fn encryption_len(&mut self, _: usize, _: bool) -> Result<usize> {
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
-            _ => {
-                self.finalized = true;
-                Err(CKR_GENERAL_ERROR)?
-            }
+            _ => Err(CKR_GENERAL_ERROR)?,
         }
     }
 }
@@ -792,20 +782,10 @@ impl Decryption for RsaPKCSOperation {
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
-    fn decryption_len(&mut self, _: usize, fin: bool) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if fin {
-            self.finalized = true;
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
+    fn decryption_len(&mut self, _: usize, _: bool) -> Result<usize> {
         match self.mech {
             CKM_RSA_PKCS | CKM_RSA_PKCS_OAEP => Ok(self.output_len),
-            _ => {
-                self.finalized = true;
-                Err(CKR_GENERAL_ERROR)?
-            }
+            _ => Err(CKR_GENERAL_ERROR)?,
         }
     }
 }
