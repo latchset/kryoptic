@@ -217,7 +217,7 @@ fn aes_cbc_decrypt(
     };
     let mech = facilities.mechanisms.get(CKM_AES_CBC_PAD)?;
     let mut op = mech.decryption_new(&ck_mech, key)?;
-    let mut plain = vec![0u8; op.decryption_len(data.len(), false)?];
+    let mut plain = vec![0u8; op.decryption_len(data.len(), true)?];
     let len = op.decrypt(data, &mut plain)?;
     plain.resize(len, 0);
     Ok(plain)
@@ -243,7 +243,7 @@ fn aes_cbc_encrypt(
     };
     let mech = facilities.mechanisms.get(CKM_AES_CBC_PAD)?;
     let mut op = mech.encryption_new(&ck_mech, key)?;
-    let mut encdata = vec![0u8; op.encryption_len(data.len(), false)?];
+    let mut encdata = vec![0u8; op.encryption_len(data.len(), true)?];
     let len = op.encrypt(data, &mut encdata)?;
     encdata.resize(len, 0);
 
