@@ -2388,6 +2388,12 @@ extern "C" fn fn_wrap_key(
     wrapped_key: CK_BYTE_PTR,
     pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
+    if wrapped_key.is_null() {
+        /* FIXME: Stop gap measure to avoid crashing,
+         * needs to be addressed with an extension to
+         * ask mechanisms for the size */
+        return CKR_GENERAL_ERROR;
+    }
     let rstate = global_rlock!(STATE);
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
