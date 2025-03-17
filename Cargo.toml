@@ -5,7 +5,7 @@ edition = "2021"
 description = "A PKCS #11 software token written in Rust"
 homepage = "https://github.com/latchset/kryoptic"
 repository = "https://github.com/latchset/kryoptic"
-license = "GPL-3.0"
+license = "GPL-3.0-or-later"
 
 exclude = [
     ".github/*",
