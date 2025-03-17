@@ -30,12 +30,12 @@ SourceLicense:  GPL-3.0-or-later
 # Apache-2.0 OR MIT
 # BSD-2-Clause OR Apache-2.0 OR MIT
 # BSD-3-Clause
-# GPL-3.0
+# GPL-3.0-or-later
 # MIT
 # MIT OR Apache-2.0
 # MIT-0 OR Apache-2.0
 # Unlicense OR MIT
-License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD-2-Clause OR Apache-2.0 OR MIT) AND (BSD-3-Clause) AND (GPL-3.0) AND (MIT) AND (MIT OR Apache-2.0) AND (MIT-0 OR Apache-2.0) AND (Unlicense OR MIT)
+License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD-2-Clause OR Apache-2.0 OR MIT) AND (BSD-3-Clause) AND (GPL-3.0-or-later) AND (MIT) AND (MIT OR Apache-2.0) AND (MIT-0 OR Apache-2.0) AND (Unlicense OR MIT)
 # LICENSE.dependencies contains a full license breakdown
 
 URL:            https://github.com/latchset/kryoptic
