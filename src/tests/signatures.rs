@@ -132,6 +132,7 @@ fn test_rsa_signatures() {
 
     /* get test data */
     let mut testcase = get_test_case_data("CKM_RSA_PKCS");
+    #[allow(unused_variables)]
     let pri_key_handle =
         match get_test_key_handle(session, "Example 15", CKO_PRIVATE_KEY) {
             Ok(k) => k,
@@ -156,29 +157,37 @@ fn test_rsa_signatures() {
         &mut testcase.result,
         &mut mechanism,
     );
-    assert_eq!(ret, CKR_OK);
+    #[cfg(not(feature = "dynamic"))]
+    assert_ne!(ret, CKR_OK);
 
-    let result = match sig_gen(
-        session,
-        pri_key_handle,
-        &mut testcase.value,
-        &mut mechanism,
-    ) {
-        Ok(r) => r,
-        Err(e) => panic!("f{e}"),
-    };
-    assert_eq!(testcase.result, result);
+    /* SHA1 is disabled in the openssl submodule */
 
-    let result = match sig_gen_multipart(
-        session,
-        pri_key_handle,
-        &mut testcase.value,
-        &mut mechanism,
-    ) {
-        Ok(r) => r,
-        Err(e) => panic!("f{e}"),
-    };
-    assert_eq!(testcase.result, result);
+    #[cfg(feature = "dynamic")]
+    {
+        assert_eq!(ret, CKR_OK);
+
+        let result = match sig_gen(
+            session,
+            pri_key_handle,
+            &mut testcase.value,
+            &mut mechanism,
+        ) {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+        assert_eq!(testcase.result, result);
+
+        let result = match sig_gen_multipart(
+            session,
+            pri_key_handle,
+            &mut testcase.value,
+            &mut mechanism,
+        ) {
+            Ok(r) => r,
+            Err(e) => panic!("f{e}"),
+        };
+        assert_eq!(testcase.result, result);
+    }
 
     testtokn.finalize();
 }

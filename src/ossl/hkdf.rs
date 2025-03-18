@@ -265,6 +265,9 @@ impl Derive for HKDFOperation {
         }
         params.finalize();
 
+        #[cfg(feature = "fips")]
+        clear_ossl_fips_indicator();
+
         let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];
         let res = unsafe {
@@ -281,7 +284,12 @@ impl Derive for HKDFOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.fips_approved = check_kdf_fips_indicators(&mut kctx)?;
+            if ossl_fips_indicator_is_set() {
+                self.fips_approved = Some(false);
+            }
+            if self.fips_approved.is_none() {
+                self.fips_approved = Some(true);
+            }
         }
 
         obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
