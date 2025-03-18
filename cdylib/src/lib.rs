@@ -44,7 +44,7 @@ pub extern "C" fn C_GetInterfaceList(
 /// provider
 
 #[cfg(feature = "fips")]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn OSSL_provider_init(
     handle: *const ::ossl::bindings::OSSL_CORE_HANDLE,
     in_: *const ::ossl::bindings::OSSL_DISPATCH,

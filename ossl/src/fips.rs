@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use crate::bindings::*;
 use crate::pkey::EvpPkey;
 use crate::signature::SigAlg;
-use crate::{cstr, void_ptr, Error, ErrorKind, OsslContext};
+use crate::{cstr, Error, ErrorKind, OsslContext};
 
 use getrandom;
 use libc;
@@ -41,16 +41,16 @@ unsafe extern "C" fn fips_get_entropy(
         len = max_len;
     }
     /* FIXME: use secure alloc */
-    let out = fips_malloc(len, std::ptr::null(), 0);
+    let out = unsafe { fips_malloc(len, std::ptr::null(), 0) };
     if out == std::ptr::null_mut() {
         return 0;
     }
-    let r = slice::from_raw_parts_mut(out as *mut u8, len);
+    let r = unsafe { slice::from_raw_parts_mut(out as *mut u8, len) };
     if getrandom::fill(r).is_err() {
-        fips_clear_free(out, len, std::ptr::null(), 0);
+        unsafe { fips_clear_free(out, len, std::ptr::null(), 0) };
         return 0;
     }
-    *pout = out as *mut u8;
+    unsafe { *pout = out as *mut u8 };
     len
 }
 
@@ -59,12 +59,14 @@ unsafe extern "C" fn fips_cleanup_entropy(
     buf: *mut ::std::os::raw::c_uchar,
     len: usize,
 ) {
-    fips_clear_free(
-        buf as *mut ::std::os::raw::c_void,
-        len,
-        std::ptr::null(),
-        0,
-    );
+    unsafe {
+        fips_clear_free(
+            buf as *mut ::std::os::raw::c_void,
+            len,
+            std::ptr::null(),
+            0,
+        )
+    }
 }
 
 unsafe extern "C" fn fips_get_nonce(
@@ -83,13 +85,16 @@ unsafe extern "C" fn fips_get_nonce(
         return 0;
     };
 
-    let out = fips_get_entropy(handle, pout, entropy, min_len, max_len);
+    let out =
+        unsafe { fips_get_entropy(handle, pout, entropy, min_len, max_len) };
     if out == 0 {
         return 0;
     }
     if out < min_len {
-        fips_cleanup_entropy(handle, *pout, out);
-        *pout = std::ptr::null_mut();
+        unsafe {
+            fips_cleanup_entropy(handle, *pout, out);
+            *pout = std::ptr::null_mut();
+        }
         return 0;
     }
 
@@ -98,8 +103,8 @@ unsafe extern "C" fn fips_get_nonce(
         len = salt_len;
     }
 
-    let r = slice::from_raw_parts_mut(*pout as *mut u8, len);
-    let s = slice::from_raw_parts(salt as *const u8, len);
+    let r = unsafe { slice::from_raw_parts_mut(*pout as *mut u8, len) };
+    let s = unsafe { slice::from_raw_parts(salt as *const u8, len) };
 
     for p in r.iter_mut().zip(s.iter()) {
         *p.0 |= *p.1;
@@ -279,7 +284,7 @@ unsafe extern "C" fn fips_vset_error(
         use vsprintf::vsprintf;
 
         if !fmt.is_null() {
-            match vsprintf(fmt, args) {
+            match unsafe { vsprintf(fmt, args) } {
                 Ok(s) => error!("Openssl Error({}): {:?}", reason, s),
                 Err(e) => error!("Openssl Reason: {} [{:?}]", reason, e),
             }
@@ -378,7 +383,8 @@ unsafe extern "C" fn fips_bio_new_file(
     if filename == std::ptr::null_mut() {
         return std::ptr::null_mut();
     }
-    let name = match CStr::from_ptr(filename as *const _).to_str() {
+    let cstr_filename = unsafe { CStr::from_ptr(filename) };
+    let name = match cstr_filename.to_str() {
         Ok(n) => n,
         Err(_) => return std::ptr::null_mut(),
     };
@@ -398,11 +404,11 @@ unsafe extern "C" fn fips_bio_new_membuf(
     let size = if len > 0 {
         usize::try_from(len).unwrap()
     } else if len < 0 {
-        usize::try_from(libc::strlen(buf as *const c_char)).unwrap()
+        unsafe { libc::strlen(buf as *const c_char) }
     } else {
         return std::ptr::null_mut();
     };
-    let v = slice::from_raw_parts_mut(buf as *mut u8, size);
+    let v = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size) };
     Box::into_raw(Box::new(FipsBio {
         op: Bio::MemOp(MemBio::new(v)),
     })) as *mut OSSL_CORE_BIO
@@ -418,14 +424,15 @@ unsafe extern "C" fn fips_bio_read_ex(
     if bio == std::ptr::null_mut() {
         return ret;
     }
-    let mut readvec = slice::from_raw_parts_mut(data as *mut u8, data_len);
-    let mut fbio: Box<FipsBio> = Box::from_raw(bio as *mut FipsBio);
+    let mut readvec =
+        unsafe { slice::from_raw_parts_mut(data as *mut u8, data_len) };
+    let mut fbio: Box<FipsBio> = unsafe { Box::from_raw(bio as *mut FipsBio) };
     match fbio.op {
         Bio::FileOp(ref mut op) => match op.read(&mut readvec) {
             Ok(b) => {
                 if b != 0 {
                     ret = 1;
-                    *bytes_read = b;
+                    unsafe { *bytes_read = b };
                 }
             }
             Err(_) => ret = 0,
@@ -434,7 +441,7 @@ unsafe extern "C" fn fips_bio_read_ex(
             Ok(b) => {
                 if b != 0 {
                     ret = 1;
-                    *bytes_read = b
+                    unsafe { *bytes_read = b };
                 }
             }
             Err(_) => ret = 0,
@@ -452,7 +459,7 @@ unsafe extern "C" fn fips_bio_free(
     if bio != std::ptr::null_mut() {
         /* take control of the Bio again,
          * this will free it once it goes out of scope */
-        let _: Box<FipsBio> = Box::from_raw(bio as *mut FipsBio);
+        let _: Box<FipsBio> = unsafe { Box::from_raw(bio as *mut FipsBio) };
     }
     return 1;
 }
@@ -472,10 +479,7 @@ unsafe fn fips_cleanse(
     pos: usize,
     len: usize,
 ) {
-    let slice: &mut [u8] =
-        slice::from_raw_parts_mut(addr as *mut u8, pos + len);
-    let (_, clear) = slice.split_at_mut(pos);
-    OPENSSL_cleanse(void_ptr!(clear.as_ptr()), clear.len());
+    unsafe { OPENSSL_cleanse(addr.wrapping_add(pos), len) }
 }
 
 unsafe extern "C" fn fips_malloc(
@@ -483,7 +487,7 @@ unsafe extern "C" fn fips_malloc(
     _file: *const std::os::raw::c_char,
     _line: std::os::raw::c_int,
 ) -> *mut std::os::raw::c_void {
-    libc::malloc(num)
+    unsafe { libc::malloc(num) }
 }
 
 unsafe extern "C" fn fips_zalloc(
@@ -491,7 +495,7 @@ unsafe extern "C" fn fips_zalloc(
     _file: *const std::os::raw::c_char,
     _line: std::os::raw::c_int,
 ) -> *mut std::os::raw::c_void {
-    libc::calloc(1, num)
+    unsafe { libc::calloc(1, num) }
 }
 
 unsafe extern "C" fn fips_free(
@@ -499,7 +503,7 @@ unsafe extern "C" fn fips_free(
     _file: *const ::std::os::raw::c_char,
     _line: ::std::os::raw::c_int,
 ) {
-    libc::free(ptr);
+    unsafe { libc::free(ptr) };
 }
 
 unsafe extern "C" fn fips_clear_free(
@@ -510,9 +514,9 @@ unsafe extern "C" fn fips_clear_free(
 ) {
     if ptr != std::ptr::null_mut() {
         if num != 0 {
-            fips_cleanse(ptr, 0, num);
+            unsafe { fips_cleanse(ptr, 0, num) };
         }
-        fips_free(ptr, file, line)
+        unsafe { fips_free(ptr, file, line) }
     }
 }
 
@@ -523,13 +527,13 @@ unsafe extern "C" fn fips_realloc(
     line: ::std::os::raw::c_int,
 ) -> *mut ::std::os::raw::c_void {
     if addr == std::ptr::null_mut() {
-        return fips_malloc(num, file, line);
+        return unsafe { fips_malloc(num, file, line) };
     }
     if num == 0 {
-        fips_free(addr, file, line);
+        unsafe { fips_free(addr, file, line) };
         return std::ptr::null_mut();
     }
-    libc::realloc(addr, num)
+    unsafe { libc::realloc(addr, num) }
 }
 
 unsafe extern "C" fn fips_clear_realloc(
@@ -540,21 +544,23 @@ unsafe extern "C" fn fips_clear_realloc(
     line: ::std::os::raw::c_int,
 ) -> *mut ::std::os::raw::c_void {
     if addr == std::ptr::null_mut() {
-        return fips_malloc(num, file, line);
+        return unsafe { fips_malloc(num, file, line) };
     }
     if num == 0 {
-        fips_clear_free(addr, old_num, file, line);
+        unsafe { fips_clear_free(addr, old_num, file, line) };
         return std::ptr::null_mut();
     }
     if num < old_num {
-        fips_cleanse(addr, num, old_num - num);
+        unsafe { fips_cleanse(addr, num, old_num - num) };
         return addr;
     }
 
-    let ret = fips_malloc(num, file, line);
+    let ret = unsafe { fips_malloc(num, file, line) };
     if ret != std::ptr::null_mut() {
-        libc::memcpy(ret, addr, old_num);
-        fips_clear_free(addr, old_num, file, line);
+        unsafe {
+            libc::memcpy(ret, addr, old_num);
+            fips_clear_free(addr, old_num, file, line)
+        };
     }
     ret
 }
