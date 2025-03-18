@@ -163,6 +163,41 @@ fn test_aes_operations() {
         ));
         assert_eq!(dec.len(), data.len());
         assert_eq!(data.as_bytes(), dec.as_slice());
+
+        /* verify we can get out the padding only on final, when feeding block
+         * sized input/output on C_EncryptUpdate */
+        let iv = "FEDCBA0987654321";
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_AES_CBC_PAD,
+            pParameter: void_ptr!(iv.as_bytes()),
+            ulParameterLen: iv.len() as CK_ULONG,
+        };
+
+        let ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let data = vec![0x0Au8; 64];
+        let enc = vec![0u8; 80];
+        let mut enc_len = data.len() as CK_ULONG;
+        let ret = fn_encrypt_update(
+            session,
+            data.as_ptr() as *mut _,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, data.len());
+
+        let offset = enc_len as isize;
+        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
+        let ret = fn_encrypt_final(
+            session,
+            unsafe { enc.as_ptr().offset(offset) } as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, enc.len() - data.len());
     }
 
     #[cfg(not(feature = "fips"))]
