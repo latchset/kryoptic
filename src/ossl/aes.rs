@@ -35,6 +35,8 @@ const AES_128_WRAP_PAD_NAME: &[u8; 17] = b"AES-128-WRAP-PAD\0";
 const AES_192_WRAP_PAD_NAME: &[u8; 17] = b"AES-192-WRAP-PAD\0";
 const AES_256_WRAP_PAD_NAME: &[u8; 17] = b"AES-256-WRAP-PAD\0";
 
+const AES_KWP_BLOCK: usize = AES_BLOCK_SIZE / 2;
+
 /// AES EVP_CIPHER Object Wrapper
 ///
 /// Gives access to the underlying OpenSSL Cipher context for a specific
@@ -1472,7 +1474,7 @@ impl Encryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP => {
-                if plain.len() % 8 != 0 {
+                if plain.len() % AES_KWP_BLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
             }
@@ -1740,13 +1742,16 @@ impl Encryption for AesOperation {
                         * AES_BLOCK_SIZE
                 }
                 CKM_AES_KEY_WRAP => {
-                    if data_len % 8 != 0 {
+                    if data_len % AES_KWP_BLOCK != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     } else {
-                        data_len + 8
+                        data_len + AES_KWP_BLOCK
                     }
                 }
-                CKM_AES_KEY_WRAP_KWP => ((data_len + 15) / 8) * 8,
+                CKM_AES_KEY_WRAP_KWP => {
+                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
+                        * AES_KWP_BLOCK
+                }
                 #[cfg(not(feature = "fips"))]
                 CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                     data_len
@@ -1767,13 +1772,16 @@ impl Encryption for AesOperation {
                     data_len
                 }
                 CKM_AES_KEY_WRAP => {
-                    if data_len % 8 != 0 {
+                    if data_len % AES_KWP_BLOCK != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     } else {
-                        data_len + 8
+                        data_len + AES_KWP_BLOCK
                     }
                 }
-                CKM_AES_KEY_WRAP_KWP => ((data_len + 15) / 8) * 8,
+                CKM_AES_KEY_WRAP_KWP => {
+                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
+                        * AES_KWP_BLOCK
+                }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };
@@ -1830,7 +1838,7 @@ impl Decryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                if cipher.len() % (AES_BLOCK_SIZE / 2) != 0 {
+                if cipher.len() % AES_KWP_BLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
             }
@@ -2202,7 +2210,7 @@ impl Decryption for AesOperation {
                     self.buffer.len() + data_len
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                    if data_len % (AES_BLOCK_SIZE / 2) != 0 {
+                    if data_len % AES_KWP_BLOCK != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     }
                     self.buffer.len() + data_len
@@ -2234,7 +2242,7 @@ impl Decryption for AesOperation {
                     data_len
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                    if data_len % (AES_BLOCK_SIZE / 2) != 0 {
+                    if data_len % AES_KWP_BLOCK != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     } else {
                         /* Originally this was ((data_len / 8) * 8) - 8
@@ -2246,7 +2254,7 @@ impl Decryption for AesOperation {
                          * as the input buffer regardless of the actual final
                          * length, and needs to be a multiple of 8.
                          */
-                        (data_len / 8) * 8
+                        (data_len / AES_KWP_BLOCK) * AES_KWP_BLOCK
                     }
                 }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
