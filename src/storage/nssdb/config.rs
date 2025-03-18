@@ -209,7 +209,7 @@ impl NSSConfig {
         #[cfg(not(feature = "fips"))]
         let label = &self.token_db_description;
         match label {
-            Some(ref s) => s.as_bytes(),
+            Some(s) => s.as_bytes(),
             None => storage::TOKEN_LABEL.as_bytes(),
         }
     }
