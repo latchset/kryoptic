@@ -844,10 +844,10 @@ pub trait CertFactory {
                 CKA_CHECK_VALUE; OAFlags::Ignored; Attribute::from_ignore;
                 val None),
             attr_element!(
-                CKA_START_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+                CKA_START_DATE; OAFlags::Defval; Attribute::from_date_bytes;
                 val Vec::new()),
             attr_element!(
-                CKA_END_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+                CKA_END_DATE; OAFlags::Defval; Attribute::from_date_bytes;
                 val Vec::new()),
             attr_element!(
                 CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
@@ -1010,10 +1010,10 @@ pub trait CommonKeyFactory {
                 CKA_ID; OAFlags::empty(); Attribute::from_bytes;
                 val Vec::new()),
             attr_element!(
-                CKA_START_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+                CKA_START_DATE; OAFlags::Defval; Attribute::from_date_bytes;
                 val Vec::new()),
             attr_element!(
-                CKA_END_DATE; OAFlags::empty(); Attribute::from_date_bytes;
+                CKA_END_DATE; OAFlags::Defval; Attribute::from_date_bytes;
                 val Vec::new()),
             attr_element!(
                 CKA_DERIVE; OAFlags::Defval; Attribute::from_bool; val false),
