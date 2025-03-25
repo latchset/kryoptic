@@ -113,10 +113,20 @@ impl SqliteStorage {
                         }
                         AttrType::DateType => {
                             match val.as_str_or_null().map_err(bad_storage)? {
-                                Some(s) => Attribute::from_date(
-                                    atype,
-                                    string_to_ck_date(s)?,
-                                ),
+                                Some(s) => {
+                                    if s.len() == 0 {
+                                        /* special case for default empty value */
+                                        Attribute::from_date_bytes(
+                                            atype,
+                                            Vec::new(),
+                                        )
+                                    } else {
+                                        Attribute::from_date(
+                                            atype,
+                                            string_to_ck_date(s)?,
+                                        )
+                                    }
+                                }
                                 None => {
                                     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?
                                 }

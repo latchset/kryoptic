@@ -250,6 +250,9 @@ impl Attribute {
     }
 
     pub fn to_date_string(&self) -> Result<String> {
+        if self.value.len() == 0 {
+            return Ok(String::new()); /* empty default value */
+        }
         if self.value.len() != 8 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
