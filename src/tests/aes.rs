@@ -479,6 +479,29 @@ fn test_aes_operations() {
 
         /* test that we can get correct indicators based on inputs */
         assert_eq!(check_validation(session, 0), true);
+
+        /* GCM without TAG should fail */
+        let iv = "BA0987654321";
+        let param = CK_GCM_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvBits: (iv.len() * 8) as CK_ULONG,
+            pAAD: std::ptr::null_mut() as *mut CK_BYTE,
+            ulAADLen: 0,
+            ulTagBits: 0,
+        };
+
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: void_ptr!(&param),
+            ulParameterLen: sizeof!(CK_GCM_PARAMS),
+        };
+
+        let ret = fn_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+
+        let ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
     }
 
     {
@@ -982,6 +1005,31 @@ fn test_aes_operations() {
 
         /* test that we can get correct indicators based on inputs */
         assert_eq!(check_validation(session, 1), true);
+
+        let ret = fn_message_encrypt_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* GCM without TAG should fail */
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvFixedBits: 0,
+            ivGenerator: CKG_NO_GENERATE,
+            pTag: std::ptr::null_mut(),
+            ulTagBits: 0,
+        };
+
+        let ret = fn_encrypt_message_begin(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            std::ptr::null_mut(),
+            0,
+        );
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
 
         let ret = fn_message_encrypt_final(session);
         assert_eq!(ret, CKR_OK);
