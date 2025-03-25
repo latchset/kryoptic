@@ -353,6 +353,11 @@ impl AesOperation {
                 if params.ulTagBits > 128 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
+                // The PKCS#11 specification allows 0-length tags, but OpenSSL
+                // does not so we restrict the params to sensible values only
+                if params.ulTagBits < 8 {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
                 if params.ulIvLen < 1 || params.pIv == std::ptr::null_mut() {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
@@ -1063,6 +1068,11 @@ impl AesOperation {
                 if params.ulTagBits > 128 {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
+                // The PKCS#11 specification allows 0-length tags, but OpenSSL
+                // does not so we restrict the params to sensible values only
+                if params.ulTagBits < 8 {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
                 let tagbits = map_err!(
                     usize::try_from(params.ulTagBits),
                     CKR_ARGUMENTS_BAD
@@ -1251,10 +1261,11 @@ impl AesOperation {
             self.params.zeroize();
             zeromem(self.buffer.as_mut_slice());
         }
-        self.finalized = false;
-        self.in_use = true;
 
         let iv_ptr = self.init_msg_params(parameter, parameter_len, aad)?;
+
+        self.finalized = false;
+        self.in_use = true;
 
         /* reset ctx */
         let res = unsafe { EVP_CIPHER_CTX_reset(self.ctx.as_mut_ptr()) };
@@ -1319,10 +1330,11 @@ impl AesOperation {
             self.params.zeroize();
             zeromem(self.buffer.as_mut_slice());
         }
-        self.finalized = false;
-        self.in_use = true;
 
         let _ = self.init_msg_params(parameter, parameter_len, aad)?;
+
+        self.finalized = false;
+        self.in_use = true;
 
         /* reset ctx */
         let res = unsafe { EVP_CIPHER_CTX_reset(self.ctx.as_mut_ptr()) };
