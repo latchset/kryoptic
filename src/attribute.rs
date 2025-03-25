@@ -414,6 +414,14 @@ const ASCII_DASH: u8 = 0x2D;
 const MIN_ASCII_DIGIT: u8 = 0x30;
 const MAX_ASCII_DIGIT: u8 = 0x39;
 
+fn empty_date() -> CK_DATE {
+    CK_DATE {
+        year: [0x30, 0x30, 0x30, 0x30],
+        month: [0x30, 0x30],
+        day: [0x30, 0x30],
+    }
+}
+
 fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE> {
     if val.len() != 8 {
         return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
@@ -522,11 +530,7 @@ impl CK_ATTRIBUTE {
     pub fn to_date(&self) -> Result<CK_DATE> {
         if self.ulValueLen == 0 {
             /* set 0000-00-00 */
-            return Ok(CK_DATE {
-                year: [0x30, 0x30, 0x30, 0x30],
-                month: [0x30, 0x30],
-                day: [0x30, 0x30],
-            });
+            return Ok(empty_date());
         }
         if self.pValue.is_null() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
