@@ -675,3 +675,48 @@ fn test_eddsa_key() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_secret_key_defaults() {
+    let mut testtokn = TestToken::initialized("test_secret_key_defaults", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* Generate AES key */
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16)],
+        &[(CKA_LABEL, b"test AES")],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+        ],
+    ));
+
+    let start_date = vec![0x00; 8];
+    let mut tmpl = Vec::<CK_ATTRIBUTE>::with_capacity(1);
+    tmpl.push(CK_ATTRIBUTE {
+        type_: CKA_START_DATE,
+        pValue: start_date.as_ptr() as CK_VOID_PTR,
+        ulValueLen: start_date.len() as CK_ULONG,
+    });
+    /* check some attributes */
+    let ret = fn_get_attribute_value(
+        session,
+        handle,
+        tmpl.as_mut_ptr(),
+        tmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
