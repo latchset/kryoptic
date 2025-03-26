@@ -3203,6 +3203,7 @@ extern "C" fn fn_encrypt_message_begin(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
     session.reset_fips_indicator();
@@ -3210,6 +3211,13 @@ extern "C" fn fn_encrypt_message_begin(
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if operation.busy() {
         return CKR_OPERATION_ACTIVE;
+    }
+
+    let token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let mechanism = res_or_ret!(operation.mechanism());
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism));
+    if mech.info().flags & CKF_MULTI_MESSAGE == 0 {
+        return CKR_MECHANISM_INVALID;
     }
 
     let adata: &[u8] = if associated_data.is_null() {
@@ -3437,6 +3445,7 @@ extern "C" fn fn_decrypt_message_begin(
 
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
     session.reset_fips_indicator();
@@ -3444,6 +3453,13 @@ extern "C" fn fn_decrypt_message_begin(
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if operation.busy() {
         return CKR_OPERATION_ACTIVE;
+    }
+
+    let token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let mechanism = res_or_ret!(operation.mechanism());
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism));
+    if mech.info().flags & CKF_MULTI_MESSAGE == 0 {
+        return CKR_MECHANISM_INVALID;
     }
 
     let adata: &[u8] = if associated_data.is_null() {

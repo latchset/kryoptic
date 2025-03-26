@@ -280,7 +280,8 @@ impl AesOperation {
                         | CKF_WRAP
                         | CKF_UNWRAP
                         | CKF_MESSAGE_ENCRYPT
-                        | CKF_MESSAGE_DECRYPT,
+                        | CKF_MESSAGE_DECRYPT
+                        | CKF_MULTI_MESSAGE,
                 ),
             );
         }
