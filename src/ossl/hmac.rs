@@ -23,6 +23,7 @@ pub struct HMACOperation {
     maclen: usize,
     key: HmacKey,
     ctx: EvpMacCtx,
+    #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
 
@@ -32,6 +33,9 @@ impl HMACOperation {
         key: HmacKey,
         outputlen: usize,
     ) -> Result<HMACOperation> {
+        #[cfg(feature = "fips")]
+        clear_ossl_fips_indicator();
+
         let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
         let hash = hmac_mech_to_hash_mech(mech)?;
         let mut params = OsslParam::with_capacity(1);
@@ -60,7 +64,12 @@ impl HMACOperation {
             maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
             key: key,
             ctx: ctx,
-            fips_approved: None,
+            #[cfg(feature = "fips")]
+            fips_approved: if ossl_fips_indicator_is_set() {
+                Some(false)
+            } else {
+                None
+            },
         })
     }
 
@@ -77,11 +86,19 @@ impl HMACOperation {
         }
         self.in_use = true;
 
+        #[cfg(feature = "fips")]
+        clear_ossl_fips_indicator();
+
         if unsafe {
             EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
         } != 1
         {
             return Err(CKR_DEVICE_ERROR)?;
+        }
+
+        #[cfg(feature = "fips")]
+        if ossl_fips_indicator_is_set() {
+            self.fips_approved = Some(false);
         }
 
         Ok(())
@@ -98,6 +115,9 @@ impl HMACOperation {
         if output.len() != self.outputlen {
             return Err(CKR_GENERAL_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        clear_ossl_fips_indicator();
 
         let mut buf = vec![0u8; self.maclen];
         let mut outlen: usize = 0;
@@ -120,14 +140,30 @@ impl HMACOperation {
         output.copy_from_slice(&buf[..output.len()]);
         zeromem(buf.as_mut_slice());
 
-        /* The OpenSSL implementation verifies the truncation is > 112b according to the
-         * FIPS 140-3 IG, C.D Use of a Truncated HMAC
+        /*
+         * The OpenSSL implementation verifies the truncation is > 112b
+         * according to the FIPS 140-3 IG, C.D Use of a Truncated HMAC
          */
-        self.fips_approved = check_mac_fips_indicators(&mut self.ctx)?;
+        #[cfg(feature = "fips")]
+        {
+            if ossl_fips_indicator_is_set() {
+                self.fips_approved = Some(false);
+            }
+            if self.fips_approved.is_none() {
+                self.fips_approved = Some(true);
+            }
+        }
+
         Ok(())
     }
 
     fn reinit(&mut self) -> Result<()> {
+        #[cfg(feature = "fips")]
+        {
+            self.fips_approved = None;
+            clear_ossl_fips_indicator();
+        }
+
         if unsafe {
             EVP_MAC_init(
                 self.ctx.as_mut_ptr(),
@@ -139,9 +175,14 @@ impl HMACOperation {
         {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        if ossl_fips_indicator_is_set() {
+            self.fips_approved = Some(false);
+        }
+
         self.finalized = false;
         self.in_use = false;
-        self.fips_approved = None;
         Ok(())
     }
 }
