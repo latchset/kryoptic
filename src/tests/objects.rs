@@ -226,5 +226,41 @@ fn test_create_objects() {
     let ret = fn_destroy_object(session, secret_key);
     assert_eq!(ret, CKR_OK);
 
+    /* Test create secret key object on token so that
+     * the value is extracatable */
+    let mut value = [0u8; 16];
+    let secret_key = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[
+            (CKA_VALUE, &mut value),
+            (CKA_LABEL, "Test Generic Secret".as_bytes())
+        ],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_DESTROYABLE, true)
+        ],
+    ));
+
+    let mut extract_template = make_ptrs_template(&[(
+        CKA_VALUE,
+        void_ptr!(value.as_mut_ptr()),
+        value.len(),
+    )]);
+
+    let ret = fn_get_attribute_value(
+        session,
+        secret_key,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_destroy_object(session, secret_key);
+    assert_eq!(ret, CKR_OK);
+
     testtokn.finalize();
 }
