@@ -328,7 +328,9 @@ impl Session {
 
     pub fn check_login_status(&self) -> Result<()> {
         match self.login_status {
-            OpLoginStatus::NotInitialized => Err(CKR_GENERAL_ERROR)?,
+            OpLoginStatus::NotInitialized => {
+                Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
             OpLoginStatus::NotRequired => Ok(()),
             OpLoginStatus::Required => Err(CKR_USER_NOT_LOGGED_IN)?,
             OpLoginStatus::LoginOk => Ok(()),
