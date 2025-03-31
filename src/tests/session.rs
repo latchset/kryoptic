@@ -156,6 +156,19 @@ fn test_operations() {
         ulParameterLen: 0,
     };
 
+    /* Ensure that trying to call an operation w/o initialization returns
+     * the proper error
+     */
+    let mut test_len: CK_ULONG = 0;
+    let ret = fn_encrypt_update(
+        session,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        data.as_mut_ptr(),
+        &mut test_len,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
     /* begin 2 operations in parallel */
 
     let ret = fn_encrypt_init(session, &mut mechanism, handle);
