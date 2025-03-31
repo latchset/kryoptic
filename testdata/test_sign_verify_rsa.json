@@ -36,4 +36,37 @@
         "CKA_TOKEN": true,
         "CKA_SIGN": true
     }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "12",
+        "CKA_CLASS": 2,
+        "CKA_KEY_TYPE": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_ID": "U2lnR2VuMTVfMTg2LTI=",
+        "CKA_LABEL": "SigGen15_186-2 [mod = 2048] (Public Key)",
+        "CKA_MODIFIABLE": false,
+        "CKA_MODULUS": "4LFLmc1hzT25wgdmaIQTJPoxdPM85m/9UUOU00F40ppJSTJ2tndyM+fUaj5ovHyn6JnpAdVPbe4HScPkjd9oaFhn7irmbfiOtWP22xN6n2sXWhEuDtqDaOiORe/hzhS8YBbVJjlicGavGHLHL2C5FhwdI37rNLD4QbPwiW+f4OFrD3Q1LRASksxGSn54YbvrhvbfYVHLJlQXxmxWXtiXS9j8mE1d39TrkaPVI0zhtUZ/Ot43X4AuwHKT8SNu+jBovJGxWFUch1xdwKnW+jIb+UIfCN6skQ41wcKFSe6O7YMwz3BZX/cLlLSZB+J2mKnZEfesBwavyxpKOf6ziwqASQ==",
+        "CKA_PRIVATE": false,
+        "CKA_PUBLIC_EXPONENT": "AQAB",
+        "CKA_TOKEN": true,
+        "CKA_VERIFY": true
+    }
+}, {
+    "attributes": {
+        "CKA_UNIQUE_ID": "13",
+        "CKA_CLASS": 3,
+        "CKA_KEY_TYPE": 0,
+        "CKA_DESTROYABLE": false,
+        "CKA_ID": "U2lnR2VuMTVfMTg2LTI=",
+        "CKA_LABEL": "SigGen15_186-2 [mod = 2048] (Private Key)",
+        "CKA_MODIFIABLE": false,
+        "CKA_MODULUS": "4LFLmc1hzT25wgdmaIQTJPoxdPM85m/9UUOU00F40ppJSTJ2tndyM+fUaj5ovHyn6JnpAdVPbe4HScPkjd9oaFhn7irmbfiOtWP22xN6n2sXWhEuDtqDaOiORe/hzhS8YBbVJjlicGavGHLHL2C5FhwdI37rNLD4QbPwiW+f4OFrD3Q1LRASksxGSn54YbvrhvbfYVHLJlQXxmxWXtiXS9j8mE1d39TrkaPVI0zhtUZ/Ot43X4AuwHKT8SNu+jBovJGxWFUch1xdwKnW+jIb+UIfCN6skQ41wcKFSe6O7YMwz3BZX/cLlLSZB+J2mKnZEfesBwavyxpKOf6ziwqASQ==",
+        "CKA_PRIVATE": true,
+        "CKA_SENSITIVE": true,
+        "CKA_EXTRACTABLE": false,
+        "CKA_PUBLIC_EXPONENT": "AQAB",
+        "CKA_PRIVATE_EXPONENT": "HbypLkJFwtV7+6diEMwGAptQJ1O3yCGjK3mfvTPJi0nbECJrHqwBQ8hXTvZSgzuWN00DTvhNqlVZxpPz8CjUlxa4Loej9oLyVCRWO9lAnc+dCBEFAPc/dAdvKOdeAZmx8p+i9wuaMRkN7FTocqdA56Gx44w9EbyoJn3rhCzvQmIjesh1clBo8yVjtHisqNapnzTLiHa5cUWy6FKeyK3qg+rU7GPj/y0Xov/vsFyQLKepIWg3jIn3XJKPxPBwfkNIek9H33DK6H4kJywTbT6Yz1kGbUGj0DiFfQc9i00sJ7jw6mv6UNJjCRpKGMY/RGvJph6MSmiDR7JDXsjnLt2upw==",
+        "CKA_TOKEN": true,
+        "CKA_SIGN": true
+    }
 }]}

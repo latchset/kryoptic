@@ -15,25 +15,21 @@ fn get_test_case_data(name: &str) -> TestCase {
         "CKM_RSA_PKCS" => {
             TestCase {
                 value: hex::decode(
-                    "f45d55f35551e975d6a8dc7ea9f488593940cc75694a278f27e578a163d839b3\
-                     4040841808cf9c58c9b8728bf5f9ce8ee811ea91714f47bab92d0f6d5a26fcfe\
-                     ea6cd93b910c0a2c963e64eb1823f102753d41f0335910ad3a977104f1aaf6c3\
-                     742716a9755d11b8eed690477f445c5d27208b2e284330fa3d301423fa7f2d08\
-                     6e0ad0b892b9db544e456d3f0dab85d953c12d340aa873eda727c8a649db7fa6\
-                     3740e25e9af1533b307e61329993110e95194e039399c3824d24c51f22b26bde\
-                     1024cd395958a2dfeb4816a6e8adedb50b1f6b56d0b3060ff0f1c4cb0d0e001d\
-                     d59d73be12"
+                    "6504921a97cd57aa8f3863dc32e1f2d0b57aff63106e59f6afc3f9726b459388\
+                     bae16b3e224f6aa7f4f471f13606eda6e1f1ac2b4df9ef8de921c07c2f4c8598\
+                     d7a3d6ec4b368cb85ce61a74338221118a303e821c0f277b591af6795f50c402\
+                     26127a2efacce4662fd7076c109eb59b18005e7165f6294a6976436ee397774e"
                 )
                 .expect("failed to decode value"),
                 result: hex::decode(
-                    "b75a5466b65d0f300ef53833f2175c8a347a3804fc63451dc902f0b71f908345\
-                     9ed37a5179a3b723a53f1051642d77374c4c6c8dbb1ca20525f5c9f32db77695\
-                     3556da31290e22197482ceb69906c46a758fb0e7409ba801077d2a0a20eae7d1\
-                     d6d392ab4957e86b76f0652d68b83988a78f26e11172ea609bf849fbbd78ad7e\
-                     dce21de662a081368c040607cee29db0627227f44963ad171d2293b633a392e3\
-                     31dca54fe3082752f43f63c161b447a4c65a6875670d5f6600fcc860a1caeb0a\
-                     88f8fdec4e564398a5c46c87f68ce07001f6213abe0ab5625f87d19025f08d81\
-                     dac7bd4586bc9382191f6d2880f6227e5df3eed21e7792d249480487f3655261"
+                    "335ffadc0b1b8bd2b1eb670dd246e76dcccdc955a1687a15f74aa3e1596ebd43\
+                     e607c640525f89dda95809cfd065f1be4e4a249477d24f400d4d4c9438a0af95\
+                     b26b28b416e42aa950e2a52851b52132048f1b1ce944322fc99c1aabb49b7fae\
+                     4c2f0fef674b50adee3bbb5c6c33822b608e4b9577275ca20c710af9fc41b1c0\
+                     1d9c0ff6f0d8324dc08e1a76e232d8feaa06c73bbf64053bea35f1c528b27227\
+                     64822ef1ff06246e75a9a22a10da4ea84fc2441bea24b35506f8447fcf69093c\
+                     5d21ab0305cce2c7ea9ffac357c664b491fc55f2919ec490c38accbab378c252\
+                     ac2df3845acff575ec7524cd2f586cca1497c74f24b299d6d6254c8cdb1d227d"
                 )
                 .expect("failed to decode result"),
             }
@@ -118,7 +114,9 @@ fn get_test_case_data(name: &str) -> TestCase {
 #[test]
 #[parallel]
 fn test_rsa_signatures() {
-    /* Test Vectors from python cryptography's pkcs1v15sign-vectors.txt */
+    /* Test Vector from NIST's test vectors:
+     * http://csrc.nist.gov/groups/STM/cavp/documents/dss/186-2rsatestvectors.zip
+     */
     let mut testtokn = TestToken::initialized(
         "test_rsa_signatures",
         Some("testdata/test_sign_verify_rsa.json"),
@@ -133,19 +131,19 @@ fn test_rsa_signatures() {
     /* get test data */
     let mut testcase = get_test_case_data("CKM_RSA_PKCS");
     let pri_key_handle =
-        match get_test_key_handle(session, "Example 15", CKO_PRIVATE_KEY) {
+        match get_test_key_handle(session, "SigGen15_186-2", CKO_PRIVATE_KEY) {
             Ok(k) => k,
             Err(e) => panic!("{}", e),
         };
     let pub_key_handle =
-        match get_test_key_handle(session, "Example 15", CKO_PUBLIC_KEY) {
+        match get_test_key_handle(session, "SigGen15_186-2", CKO_PUBLIC_KEY) {
             Ok(k) => k,
             Err(e) => panic!("{}", e),
         };
 
     /* verify test vector */
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_SHA1_RSA_PKCS,
+        mechanism: CKM_SHA256_RSA_PKCS,
         pParameter: std::ptr::null_mut(),
         ulParameterLen: 0,
     };
