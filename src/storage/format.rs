@@ -227,6 +227,11 @@ impl Storage for StdStorageFormat {
              * not be returned in that case */
             attrs.add_missing_ulong(CKA_KEY_TYPE, &dnm);
             attrs.add_missing_ulong(CKA_CERTIFICATE_TYPE, &dnm);
+            /* We also need to know whether the object is sensible/extractable
+             * so that the token code can decide whether it is ok to return
+             * some attributes or not */
+            attrs.add_missing_ulong(CKA_SENSITIVE, &dnm);
+            attrs.add_missing_ulong(CKA_EXTRACTABLE, &dnm);
         }
 
         let mut obj = self.store.fetch_by_uid(&uid, attrs.as_slice())?;
