@@ -86,7 +86,7 @@ kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf"]
 standard = ["sqlitedb", "ecc_all", "hash_all", "kdf_all", "rsa"]
 
 ecc_fips = ["ecdsa", "ecdh"]
-fips = ["rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
+fips = ["sqlitedb", "rusqlite/bundled", "aes", "ecc_fips", "hash_all", "kdf_all", "rsa"]
 
 dynamic = [] # Builds against system libcrypto.so
 
