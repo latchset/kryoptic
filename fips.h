@@ -8,10 +8,10 @@
 #include "internal/property.h"
 #include "../crypto/evp/evp_local.h"
 #include "../providers/common/include/prov/providercommon.h"
+#include "../providers/common/include/prov/provider_ctx.h"
 #include "openssl/self_test.h"
 #include "openssl/indicator.h"
 
-OSSL_LIB_CTX *ossl_prov_ctx_get0_libctx(OSSL_PROVIDER *ctx);
 int OSSL_provider_init_int(const OSSL_CORE_HANDLE *handle,
                            const OSSL_DISPATCH *in,
                            const OSSL_DISPATCH **out,
