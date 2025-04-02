@@ -215,8 +215,13 @@ unsafe extern "C" fn fips_get_params(
 }
 
 unsafe extern "C" fn fips_get_libctx(
-    _prov: *const OSSL_CORE_HANDLE,
+    prov: *const OSSL_CORE_HANDLE,
 ) -> *mut OPENSSL_CORE_CTX {
+    /* avoid looping during initialization, when FIPS_CANARY
+     * is not yet set as the core handle */
+    if prov.is_null() {
+        return std::ptr::null_mut();
+    }
     get_libctx() as *mut OPENSSL_CORE_CTX
 }
 
@@ -525,10 +530,32 @@ unsafe extern "C" fn fips_secure_allocated(
     return 0;
 }
 
-/* FIPS Provider wrapping an initialization */
+unsafe extern "C" fn fips_get_indicator_cb(
+    _ptr: *mut OPENSSL_CORE_CTX,
+    cb: *mut OSSL_INDICATOR_CALLBACK,
+) {
+    /* This is the function that is called by libfips.a to source
+     * the fips indicator callback. Within the kryoptic's pkcs#11
+     * driver we always return our own callback */
+
+    if !cb.is_null() {
+        unsafe {
+            *cb = Some(fips_indicator_callback);
+        }
+    }
+}
+
+/* FIPS Provider wrapping and initialization */
+
+#[repr(C)]
+struct FipsCanary {
+    unused: [u8; 0],
+}
+
+static FIPS_CANARY: FipsCanary = FipsCanary { unused: [0u8; 0] };
 
 struct FipsProvider {
-    provider: *mut OSSL_PROVIDER,
+    provider: *mut PROV_CTX,
     #[allow(dead_code)]
     dispatch: *const OSSL_DISPATCH,
 }
@@ -634,10 +661,12 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
         dispatcher_struct!(args3; OSSL_FUNC_CRYPTO_SECURE_FREE; fips_free),
         dispatcher_struct!(args4; OSSL_FUNC_CRYPTO_SECURE_CLEAR_FREE; fips_clear_free),
         dispatcher_struct!(args1; OSSL_FUNC_CRYPTO_SECURE_ALLOCATED; fips_secure_allocated),
+        /* Indicator function */
+        dispatcher_struct!(args2; OSSL_FUNC_INDICATOR_CB; fips_get_indicator_cb),
     ];
 
-    let mut provider: *mut OSSL_PROVIDER = std::ptr::null_mut();
-    let provider_ptr: *mut *mut OSSL_PROVIDER = &mut provider;
+    let mut provider: *mut PROV_CTX = std::ptr::null_mut();
+    let provider_ptr: *mut *mut PROV_CTX = &mut provider;
 
     let mut fips_dispatch: *const OSSL_DISPATCH = std::ptr::null_mut();
 
@@ -648,6 +677,11 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
         provider_ptr as *mut *mut std::os::raw::c_void,
     );
     assert!(ret == 1);
+
+    ossl_prov_ctx_set0_handle(
+        provider,
+        &FIPS_CANARY as *const _ as *const ossl_core_handle_st,
+    );
 
     FipsProvider {
         provider: provider,
