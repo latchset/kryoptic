@@ -107,6 +107,28 @@ pub trait Mechanism: Debug + Send + Sync {
     ) -> Result<Box<dyn MsgDecryption>> {
         Err(CKR_MECHANISM_INVALID)?
     }
+
+    fn encapsulate(
+        &self,
+        _: &CK_MECHANISM,
+        _: &Object,
+        _: &Box<dyn ObjectFactory>,
+        _: &[CK_ATTRIBUTE],
+        _: &mut [u8],
+    ) -> Result<(Object, usize)> {
+        Err(CKR_MECHANISM_INVALID)?
+    }
+
+    fn decapsulate(
+        &self,
+        _: &CK_MECHANISM,
+        _: &Object,
+        _: &Box<dyn ObjectFactory>,
+        _: &[CK_ATTRIBUTE],
+        _: &[u8],
+    ) -> Result<Object> {
+        Err(CKR_MECHANISM_INVALID)?
+    }
 }
 
 #[derive(Debug)]
