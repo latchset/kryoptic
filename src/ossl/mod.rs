@@ -67,3 +67,6 @@ pub mod rsa;
 
 #[cfg(all(feature = "sshkdf", feature = "fips"))]
 pub mod sshkdf;
+
+#[cfg(feature = "mlkem")]
+pub mod mlkem;
