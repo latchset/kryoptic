@@ -2,9 +2,9 @@
 // See LICENSE.txt file for terms
 
 use std::borrow::Cow;
-use std::ffi::{c_char, c_int, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interface::*;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
@@ -20,6 +20,8 @@ use crate::ec::get_oid_from_obj;
 use crate::ossl::ecdsa;
 #[cfg(feature = "eddsa")]
 use crate::ossl::eddsa;
+#[cfg(feature = "mlkem")]
+use crate::ossl::mlkem;
 #[cfg(feature = "ec_montgomery")]
 use crate::ossl::montgomery as ecm;
 #[cfg(feature = "rsa")]
@@ -269,6 +271,7 @@ impl EvpPkey {
         Ok(EvpPkey { ptr: pkey })
     }
 
+    /* TODO: change to &self */
     pub fn new_ctx(&mut self) -> Result<EvpPkeyCtx> {
         /* this function takes care of checking for NULL */
         unsafe {
@@ -310,17 +313,19 @@ impl EvpPkey {
             CKK_EC_MONTGOMERY => ecm::ecm_object_to_params(obj, class)?,
             #[cfg(feature = "rsa")]
             CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
+            #[cfg(feature = "mlkem")]
+            CKK_ML_KEM => mlkem::mlkem_object_to_params(obj, class)?,
             _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
         };
         Self::fromdata(name, key_class, &params)
     }
 
-    #[cfg(any(feature = "ecc", feature = "rsa"))]
+    #[cfg(any(feature = "ecc", feature = "rsa", feature = "mlkem"))]
     pub fn pubkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PUBLIC_KEY)
     }
 
-    #[cfg(any(feature = "ecc", feature = "rsa"))]
+    #[cfg(any(feature = "ecc", feature = "rsa", feature = "mlkem"))]
     pub fn privkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PRIVATE_KEY)
     }
@@ -849,7 +854,9 @@ impl<'a> OsslParam<'a> {
             OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
         };
         if p.is_null() {
-            return Err(CKR_GENERAL_ERROR)?;
+            let keyname =
+                unsafe { String::from(CStr::from_ptr(key).to_str().unwrap()) };
+            return Err(Error::not_found(keyname));
         }
         let mut buf: *const c_void = std::ptr::null_mut();
         let mut buf_len: usize = 0;

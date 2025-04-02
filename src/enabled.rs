@@ -40,6 +40,9 @@ mod sshkdf;
 #[cfg(feature = "tlskdf")]
 mod tlskdf;
 
+#[cfg(feature = "mlkem")]
+mod mlkem;
+
 use mechanism::Mechanisms;
 use object::ObjectFactories;
 
@@ -84,6 +87,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "tlskdf")]
     tlskdf::register(mechs, ot);
+
+    #[cfg(feature = "mlkem")]
+    mlkem::register(mechs, ot);
 
     #[cfg(feature = "fips")]
     fips::register(mechs, ot);

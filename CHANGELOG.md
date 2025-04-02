@@ -9,6 +9,10 @@ All notable changes to this project should be documented in this file.
 * Added support for PKCS#11 3.2 interfaces
   [Pkcs11 3.2 Draft](https://github.com/latchset/kryoptic/pull/149)
 
+* Added support for Key Encapdulation/Decapsulation and ML-KEM Support
+  [Add Encapsulation/Decapsulation and ML-KEM support](https://github.com/latchset/kryoptic/pull/197)
+
+
 # [1.0.0]
 ## 2025-03-11
 
