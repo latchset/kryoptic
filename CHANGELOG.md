@@ -6,6 +6,8 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* Added support for PKCS#11 3.2 interfaces
+  [Pkcs11 3.2 Draft](https://github.com/latchset/kryoptic/pull/149)
 
 # [1.0.0]
 ## 2025-03-11
