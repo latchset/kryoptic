@@ -1130,6 +1130,11 @@ pub trait PubKeyFactory: CommonKeyFactory {
         attrs.push(attr_element!(
             CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
             val Vec::new()));
+
+        #[cfg(feature = "pkcs11_3_2")]
+        attrs.push(attr_element!(
+            CKA_ENCAPSULATE; OAFlags::Defval; Attribute::from_bool;
+            val false));
     }
 }
 
@@ -1183,6 +1188,11 @@ pub trait PrivKeyFactory: CommonKeyFactory {
         attrs.push(attr_element!(
             CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
             val Vec::new()));
+
+        #[cfg(feature = "pkcs11_3_2")]
+        attrs.push(attr_element!(
+            CKA_DECAPSULATE; OAFlags::Defval; Attribute::from_bool;
+            val false));
     }
 
     fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
