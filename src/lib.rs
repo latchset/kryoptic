@@ -3790,32 +3790,148 @@ static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     C_MessageVerifyFinal: Some(fn_message_verify_final),
 };
 
+/// Implementation of C_EncapsulateKey function
+///
+/// Version 3.2 Specification: [link TBD]
+
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_encapsulate_key(
-    _s_handle: CK_SESSION_HANDLE,
-    _mechptr: *mut CK_MECHANISM,
-    _pubkey_handle: CK_OBJECT_HANDLE,
-    _template: *mut CK_ATTRIBUTE,
-    _attribute_count: CK_ULONG,
-    _encrypted_part: *mut CK_BYTE,
-    _encrypted_part_len: *mut CK_ULONG,
-    _key_handle: *mut CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    mechptr: *mut CK_MECHANISM,
+    pubkey_handle: CK_OBJECT_HANDLE,
+    template: *mut CK_ATTRIBUTE,
+    attribute_count: CK_ULONG,
+    encrypted_part: *mut CK_BYTE,
+    encrypted_part_len: *mut CK_ULONG,
+    key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let cnt = cast_or_ret!(usize from attribute_count);
+    let tmpl: &[CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts(template, cnt) };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(tmpl);
+    }
+
+    let penclen = unsafe { *encrypted_part_len as CK_ULONG };
+    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
+    let encpart: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
+
+    let slot_id = session.get_slot_id();
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let key = res_or_ret!(token.get_object_by_handle(pubkey_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let factories = token.get_object_factories();
+    let factory =
+        res_or_ret!(factories.get_obj_factory_from_key_template(tmpl));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
+    if mech.info().flags & CKF_ENCAPSULATE != CKF_ENCAPSULATE {
+        return CKR_MECHANISM_INVALID;
+    }
+
+    let (mut obj, outlen) =
+        res_or_ret!(mech.encapsulate(mechanism, &key, factory, tmpl, encpart));
+
+    #[cfg(feature = "fips")]
+    {
+        /* must drop here or we deadlock trying to re-acquire for writing */
+        drop(session);
+
+        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        session.reset_fips_indicator();
+
+        session.set_fips_indicator(fips::indicators::is_approved(
+            mechanism.mechanism,
+            CKF_ENCAPSULATE,
+            Some(&key),
+            Some(&mut obj),
+        ));
+    }
+    let retlen = cast_or_ret!(CK_ULONG from outlen);
+
+    let kh = res_or_ret!(token.insert_object(s_handle, obj));
+    unsafe {
+        *key_handle = kh;
+        *encrypted_part_len = retlen;
+    }
+    CKR_OK
 }
+
+/// Implementation of C_DecapsulateKey function
+///
+/// Version 3.2 Specification: [link TBD]
 
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_decapsulate_key(
-    _s_handle: CK_SESSION_HANDLE,
-    _mechptr: *mut CK_MECHANISM,
-    _privkey_handle: CK_OBJECT_HANDLE,
-    _template: *mut CK_ATTRIBUTE,
-    _attribute_count: CK_ULONG,
-    _encrypted_part: *mut CK_BYTE,
-    _encrypted_part_len: CK_ULONG,
-    _key_handle: *mut CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    mechptr: *mut CK_MECHANISM,
+    privkey_handle: CK_OBJECT_HANDLE,
+    template: *mut CK_ATTRIBUTE,
+    attribute_count: CK_ULONG,
+    encrypted_part: *mut CK_BYTE,
+    encrypted_part_len: CK_ULONG,
+    key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let session = res_or_ret!(rstate.get_session(s_handle));
+
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let cnt = cast_or_ret!(usize from attribute_count);
+    let tmpl: &[CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts(template, cnt) };
+    if !session.is_writable() {
+        fail_if_cka_token_true!(tmpl);
+    }
+
+    let enclen =
+        cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
+    let encpart: &[u8] =
+        unsafe { std::slice::from_raw_parts(encrypted_part, enclen) };
+
+    let slot_id = session.get_slot_id();
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let key = res_or_ret!(token.get_object_by_handle(privkey_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let factories = token.get_object_factories();
+    let factory =
+        res_or_ret!(factories.get_obj_factory_from_key_template(tmpl));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
+    if mech.info().flags & CKF_DECAPSULATE != CKF_DECAPSULATE {
+        return CKR_MECHANISM_INVALID;
+    }
+
+    let mut obj =
+        res_or_ret!(mech.decapsulate(mechanism, &key, factory, tmpl, encpart));
+
+    #[cfg(feature = "fips")]
+    {
+        /* must drop here or we deadlock trying to re-acquire for writing */
+        drop(session);
+
+        let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+        /* ensure we reset the fips indicator which may be left dirty by
+         * a previous operation */
+        session.reset_fips_indicator();
+
+        session.set_fips_indicator(fips::indicators::is_approved(
+            mechanism.mechanism,
+            CKF_DECAPSULATE,
+            Some(&key),
+            Some(&mut obj),
+        ));
+    }
+
+    let kh = res_or_ret!(token.insert_object(s_handle, obj));
+    unsafe {
+        *key_handle = kh;
+    }
+    CKR_OK
 }
 
 #[cfg(feature = "pkcs11_3_2")]
