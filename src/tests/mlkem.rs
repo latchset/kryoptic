@@ -142,6 +142,7 @@ fn test_mlkem_operations() {
         &[
             (CKA_ENCRYPT, true),
             (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
         ],
     );
@@ -323,7 +324,7 @@ fn test_groups(session: CK_SESSION_HANDLE, data: Value) {
             (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
 
     let test_groups: &Vec<Value> = match data["testGroups"].as_array() {

@@ -71,6 +71,7 @@ fn test_ecc_derive_plain() {
         &[
             (CKA_ENCRYPT, true),
             (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
         ],
     );
@@ -191,7 +192,7 @@ fn test_ecc_derive_plain() {
     let derive_template = make_attr_template(
         &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -228,7 +229,7 @@ fn test_ecc_derive_plain() {
             (CKA_VALUE_LEN, 33),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -265,7 +266,7 @@ fn test_ecc_derive_plain() {
             (CKA_VALUE_LEN, 16),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -345,7 +346,7 @@ fn test_ecc_derive_x963() {
             (CKA_VALUE_LEN, 32),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
 
     let mut s_handle = CK_INVALID_HANDLE;
@@ -426,7 +427,7 @@ fn test_ecc_derive_nist() {
             (CKA_VALUE_LEN, 32),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
 
     let mut s_handle = CK_INVALID_HANDLE;

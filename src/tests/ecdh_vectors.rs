@@ -269,7 +269,7 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
                 (CKA_VALUE_LEN, unit.z.len() as CK_ULONG),
             ],
             &[],
-            &[(CKA_EXTRACTABLE, true)],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
         );
 
         let mut dk_handle = CK_INVALID_HANDLE;

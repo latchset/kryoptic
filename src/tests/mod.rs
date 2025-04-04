@@ -217,6 +217,14 @@ impl TestToken<'_> {
         let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
         let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
         assert_eq!(ret, CKR_OK);
+
+        /* By default we force relaxed behavior so tests can access
+         * data to check results */
+        #[cfg(feature = "fips")]
+        set_fips_behavior(config::FipsBehavior {
+            keys_always_sensitive: false,
+        });
+
         td
     }
 

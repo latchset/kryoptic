@@ -1698,7 +1698,7 @@ impl ObjectFactories {
         obj: &Object,
         template: &mut [CK_ATTRIBUTE],
     ) -> Result<()> {
-        let sensitive = obj.is_sensitive() & !obj.is_extractable();
+        let sensitive = obj.is_sensitive() || !obj.is_extractable();
         let mut result = match self
             .get_object_factory(obj)?
             .check_get_attributes(template, sensitive)
