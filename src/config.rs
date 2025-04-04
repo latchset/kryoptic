@@ -119,7 +119,7 @@ impl Default for EcPointEncoding {
 /// always forced sensitive by default.
 
 #[cfg(feature = "fips")]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FipsBehavior {
     pub keys_always_sensitive: bool,
 }
