@@ -294,7 +294,7 @@ fn test_tlskdf_units(
                     (CKA_VALUE_LEN, unit.ms.len() as CK_ULONG),
                 ],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
 
             let (params, paramslen) = match section.kdf {
@@ -360,7 +360,7 @@ fn test_tlskdf_units(
                     (CKA_VALUE_LEN, keylen as CK_ULONG),
                 ],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
 
             let mut cliiv = vec![0u8; ivlen];
