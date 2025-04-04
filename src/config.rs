@@ -113,6 +113,29 @@ impl Default for EcPointEncoding {
     }
 }
 
+/// Add tweaks for behavior in FIPS mode.
+/// NSS generally marks all keys as sensitive and forbids creation or
+/// extraction of secret keys in FIPS mode. So for NSS keys are
+/// always forced sensitive by default.
+
+#[cfg(feature = "fips")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FipsBehavior {
+    pub keys_always_sensitive: bool,
+}
+
+#[cfg(feature = "fips")]
+impl Default for FipsBehavior {
+    fn default() -> Self {
+        FipsBehavior {
+            #[cfg(not(feature = "nssdb"))]
+            keys_always_sensitive: false,
+            #[cfg(feature = "nssdb")]
+            keys_always_sensitive: true,
+        }
+    }
+}
+
 /// Main configuration structure
 ///
 /// The main config structure is comprised of two elements, a general
@@ -123,6 +146,9 @@ pub struct Config {
     #[serde(default)]
     pub ec_point_encoding: EcPointEncoding,
     pub slots: Vec<Slot>,
+    #[cfg(feature = "fips")]
+    #[serde(default)]
+    pub fips_behavior: FipsBehavior,
 }
 
 fn config_error<E: de::Error + 'static>(error: E) -> Error {
@@ -136,6 +162,8 @@ impl Config {
         Config {
             ec_point_encoding: EcPointEncoding::default(),
             slots: Vec::new(),
+            #[cfg(feature = "fips")]
+            fips_behavior: FipsBehavior::default(),
         }
     }
 
@@ -217,10 +245,8 @@ impl Config {
     /// A valid argument is the path of a file for the sqlite storage driver
     /// which must end with a .sql suffix
     fn from_legacy_conf_string(name: &str) -> Result<Config> {
-        let mut conf = Config {
-            ec_point_encoding: EcPointEncoding::default(),
-            slots: Vec::new(),
-        };
+        let mut conf = Self::new();
+
         /* backwards compatibility where we used to only specify
          * a file, this does not support all older options, just
          * the more common one of specifying a .sql file with no
@@ -318,10 +344,7 @@ impl Config {
     /// the `C_Intialize()` function.
     #[cfg(feature = "nssdb")]
     fn from_nss_init_args(args: &str) -> Result<Config> {
-        let mut conf = Config {
-            ec_point_encoding: EcPointEncoding::default(),
-            slots: Vec::new(),
-        };
+        let mut conf = Self::new();
         let mut slot = Slot::new();
 
         slot.dbtype = Some(storage::nssdb::DBINFO.dbtype().to_string());
