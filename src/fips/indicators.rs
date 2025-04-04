@@ -1125,11 +1125,16 @@ pub fn is_approved(
                 {
                     if (f & KRF_FIPS) == KRF_FIPS {
                         valid_key = true;
-                    } else if let Ok(class) = obj.get_attr_as_ulong(CKA_CLASS) {
-                        if class == CKO_PUBLIC_KEY {
-                            /* Public keys may be imported, so we check if they
-                             * meet the criteria, and that is good enough */
-                            valid_key = check_key(obj, op, None, None);
+                    } else {
+                        match obj.get_attr_as_ulong(CKA_CLASS) {
+                            Ok(class) => {
+                                if class == CKO_PUBLIC_KEY {
+                                    /* Public keys may be imported, so we check if they
+                                     * meet the criteria, and that is good enough */
+                                    valid_key = check_key(obj, op, None, None);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
