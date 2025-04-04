@@ -3,7 +3,7 @@
 
 use crate::tests::*;
 
-use serial_test::parallel;
+use serial_test::{parallel, serial};
 
 #[test]
 #[parallel]
@@ -102,8 +102,9 @@ fn test_nssdb_token() {
     testtokn.finalize();
 }
 
+// This test must be run serially as it changes global configuration
 #[test]
-#[parallel]
+#[serial]
 fn test_nssdb_init_token() {
     let name = String::from("test_nssdb_init_token");
     let datadir = format!("{}/{}", TESTDIR, name);
@@ -162,14 +163,32 @@ fn test_nssdb_init_token() {
     );
     assert_eq!(ret, CKR_OK);
 
+    #[cfg(feature = "fips")]
+    /* Set default NSSDB Behavior for this test */
+    let saved_config = {
+        let mut save = config::FipsBehavior::default();
+        let ret = get_fips_behavior(&mut save);
+        assert_eq!(ret, CKR_OK);
+        let ret = set_fips_behavior(config::FipsBehavior {
+            keys_always_sensitive: true,
+        });
+        assert_eq!(ret, CKR_OK);
+        save
+    };
+
+    /* In FIPS mode by NSSDB databases enforce keys are
+     * always sensitive, so import with CKA_SENSITIVE = false
+     * will result in an error */
+
     /* import a key on the token */
-    let handle = ret_or_panic!(import_object(
+    #[allow(unused_variables)]
+    let handle = match import_object(
         session,
         CKO_SECRET_KEY,
         &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
         &[
             (CKA_VALUE, "Secret".as_bytes()),
-            (CKA_LABEL, "Test Generic Secret".as_bytes())
+            (CKA_LABEL, "Test Generic Secret".as_bytes()),
         ],
         &[
             (CKA_TOKEN, true),
@@ -177,32 +196,59 @@ fn test_nssdb_init_token() {
             (CKA_EXTRACTABLE, true),
             (CKA_DERIVE, true),
         ],
-    ));
+    ) {
+        Ok(h) => {
+            #[cfg(feature = "fips")]
+            panic!("Should not be able to set CKA_SENSITIVE to false, but got handle {h}");
+            #[cfg(not(feature = "fips"))]
+            h
+        }
+        Err(e) => {
+            #[cfg(feature = "fips")]
+            if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
+                panic!("Incorrect error in fips mode: {e}")
+            } else {
+                CK_INVALID_HANDLE
+            }
+            #[cfg(not(feature = "fips"))]
+            panic!("Failed to import key: {e}");
+        }
+    };
 
-    /* fetch value */
-    let mut template =
-        make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
-    let ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(template[0].ulValueLen, 6);
-    let mut value = vec![0u8; 6];
-    template[0].pValue = void_ptr!(value.as_mut_ptr());
-    let ret = fn_get_attribute_value(
-        session,
-        handle,
-        template.as_mut_ptr(),
-        template.len() as CK_ULONG,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(value.as_slice(), "Secret".as_bytes());
+    #[cfg(not(feature = "fips"))]
+    {
+        /* fetch value */
+        let mut template =
+            make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
+        let ret = fn_get_attribute_value(
+            session,
+            handle,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(template[0].ulValueLen, 6);
+        let mut value = vec![0u8; 6];
+        template[0].pValue = void_ptr!(value.as_mut_ptr());
+        let ret = fn_get_attribute_value(
+            session,
+            handle,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(value.as_slice(), "Secret".as_bytes());
 
-    let ret = fn_destroy_object(session, handle);
-    assert_eq!(ret, CKR_OK);
+        let ret = fn_destroy_object(session, handle);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    #[cfg(feature = "fips")]
+    {
+        /* Restore default FIPS  Behavior */
+        let ret = set_fips_behavior(saved_config);
+        assert_eq!(ret, CKR_OK);
+    }
 
     /* add a public object to ensure attributes are handled correctly
      * CKA_VALUE is encrypted only for private objects */
