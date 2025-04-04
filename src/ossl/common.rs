@@ -20,6 +20,8 @@ use crate::ec::get_oid_from_obj;
 use crate::ossl::ecdsa;
 #[cfg(feature = "eddsa")]
 use crate::ossl::eddsa;
+#[cfg(feature = "mldsa")]
+use crate::ossl::mldsa;
 #[cfg(feature = "mlkem")]
 use crate::ossl::mlkem;
 #[cfg(feature = "ec_montgomery")]
@@ -315,17 +317,29 @@ impl EvpPkey {
             CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
             #[cfg(feature = "mlkem")]
             CKK_ML_KEM => mlkem::mlkem_object_to_params(obj, class)?,
+            #[cfg(feature = "mldsa")]
+            CKK_ML_DSA => mldsa::mldsa_object_to_params(obj, class)?,
             _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
         };
         Self::fromdata(name, key_class, &params)
     }
 
-    #[cfg(any(feature = "ecc", feature = "rsa", feature = "mlkem"))]
+    #[cfg(any(
+        feature = "ecc",
+        feature = "rsa",
+        feature = "mlkem",
+        feature = "mldsa"
+    ))]
     pub fn pubkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PUBLIC_KEY)
     }
 
-    #[cfg(any(feature = "ecc", feature = "rsa", feature = "mlkem"))]
+    #[cfg(any(
+        feature = "ecc",
+        feature = "rsa",
+        feature = "mlkem",
+        feature = "mldsa"
+    ))]
     pub fn privkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PRIVATE_KEY)
     }
@@ -981,5 +995,41 @@ pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
 pub fn zeromem(mem: &mut [u8]) {
     unsafe {
         OPENSSL_cleanse(void_ptr!(mem.as_mut_ptr()), mem.len());
+    }
+}
+
+#[cfg(feature = "mldsa")]
+pub struct EvpSignature {
+    ptr: *mut EVP_SIGNATURE,
+}
+
+#[cfg(feature = "mldsa")]
+impl EvpSignature {
+    pub fn new(name: *const c_char) -> Result<EvpSignature> {
+        let ptr: *mut EVP_SIGNATURE = unsafe {
+            EVP_SIGNATURE_fetch(get_libctx(), name, std::ptr::null_mut())
+        };
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(EvpSignature { ptr })
+    }
+
+    #[allow(dead_code)]
+    pub fn as_ptr(&self) -> *const EVP_SIGNATURE {
+        self.ptr
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut EVP_SIGNATURE {
+        self.ptr
+    }
+}
+
+#[cfg(feature = "mldsa")]
+impl Drop for EvpSignature {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_SIGNATURE_free(self.ptr);
+        }
     }
 }
