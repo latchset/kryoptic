@@ -328,3 +328,6 @@ mod tls;
 mod nssdb;
 
 mod combined;
+
+#[cfg(feature = "mlkem")]
+mod mlkem;

@@ -96,3 +96,5 @@ pkcs11_3_2 = [ ] # Exposes PKCS#11 3.2 Interfaces and new functions
 slow = [] # Enables slow tests
 
 mlkem = ["pkcs11_3_2"]
+
+pqc = ["mlkem"]
