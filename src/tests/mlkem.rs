@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+use serde_json::{from_reader, Value};
 
 use serial_test::parallel;
 
@@ -308,4 +309,150 @@ fn test_mlkem_operations() {
     assert_eq!(ret, CKR_OK);
 
     assert_ne!(value_enc, value_dec);
+}
+
+fn test_groups(session: CK_SESSION_HANDLE, data: Value) {
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_KEM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let key_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
+
+    let test_groups: &Vec<Value> = match data["testGroups"].as_array() {
+        Some(g) => g,
+        None => panic!("No testGroups value"),
+    };
+    for group in test_groups {
+        let gnum = match group["tgId"].as_u64() {
+            Some(n) => n,
+            None => panic!("No tgId value"),
+        };
+        match group["testType"].as_str() {
+            Some(s) => {
+                if s != "AFT" {
+                    continue;
+                }
+            }
+            None => panic!("No testType value"),
+        }
+        let parameter_set = match group["parameterSet"].as_str() {
+            Some(p) => p,
+            None => panic!("No parameterSet value"),
+        };
+        println!("Executing Test group: {}, paramset:{}", gnum, parameter_set);
+        let ckp = if parameter_set == "ML-KEM-512" {
+            CKP_ML_KEM_512
+        } else if parameter_set == "ML-KEM-768" {
+            CKP_ML_KEM_768
+        } else if parameter_set == "ML-KEM-1024" {
+            CKP_ML_KEM_1024
+        } else {
+            println!("Unknown set, skipping!");
+            continue;
+        };
+
+        let tests = match group["tests"].as_array() {
+            Some(t) => t,
+            None => panic!("No tests value"),
+        };
+        for test in tests {
+            let tnum = match test["tcId"].as_u64() {
+                Some(n) => n,
+                None => panic!("No tcId value"),
+            };
+            println!("Executing Test: {}", tnum);
+
+            /* only positive test for now */
+            match test["reason"].as_str() {
+                Some(r) => {
+                    if r != "valid decapsulation" {
+                        println!("Skipping fail test with reason: {}", r);
+                        continue;
+                    }
+                }
+                None => panic!("No reason value"),
+            }
+
+            /* we check only decapsulation here, sop no need for the public key */
+            let dk = if let Some(dk_str) = test["dk"].as_str() {
+                hex::decode(dk_str)
+                    .expect("failed to decode ML-KEM private key")
+            } else {
+                panic!("no dk value");
+            };
+            let ciphertext = if let Some(ct_str) = test["c"].as_str() {
+                hex::decode(ct_str).expect("failed to decode ciphertext")
+            } else {
+                panic!("no c value");
+            };
+            let keyval = if let Some(k_str) = test["k"].as_str() {
+                hex::decode(k_str).expect("failed to decode key value")
+            } else {
+                panic!("no k value");
+            };
+
+            let priv_handle = ret_or_panic!(import_object(
+                session,
+                CKO_PRIVATE_KEY,
+                &[(CKA_KEY_TYPE, CKK_ML_KEM), (CKA_PARAMETER_SET, ckp),],
+                &[(CKA_VALUE, &dk)],
+                &[(CKA_DECAPSULATE, true)],
+            ));
+
+            let mut handle_dec = CK_INVALID_HANDLE;
+            let ret = fn_decapsulate_key(
+                session,
+                &mut mechanism,
+                priv_handle,
+                key_template.as_ptr() as *mut _,
+                key_template.len() as CK_ULONG,
+                ciphertext.as_ptr() as *mut _,
+                ciphertext.len() as CK_ULONG,
+                &mut handle_dec,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut value_dec = vec![0u8; keyval.len()];
+            let mut extract_template_dec = make_ptrs_template(&[(
+                CKA_VALUE,
+                void_ptr!(value_dec.as_mut_ptr()),
+                value_dec.len(),
+            )]);
+
+            let ret = fn_get_attribute_value(
+                session,
+                handle_dec,
+                extract_template_dec.as_mut_ptr(),
+                extract_template_dec.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            assert_eq!(keyval, value_dec);
+        }
+    }
+}
+
+#[test]
+#[parallel]
+fn test_mlkem_decap_vector() {
+    let file = std::fs::File::open("testdata/acvp-ml-kem-decap.json").unwrap();
+    let data = from_reader(file).unwrap();
+
+    let mut testtokn = TestToken::initialized("test_mlkem_decap_vector", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    test_groups(session, data);
+
+    testtokn.finalize();
 }
