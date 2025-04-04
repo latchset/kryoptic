@@ -329,7 +329,7 @@ fn test_hash_kdf() {
             let derive_template = make_attr_template(
                 &[(CKA_CLASS, CKO_SECRET_KEY)],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
 
             let mut derive_mech = CK_MECHANISM {
@@ -368,7 +368,7 @@ fn test_hash_kdf() {
             let derive_template = make_attr_template(
                 &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, hopt.1 + 10)],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
 
             let mut hashkey2 = CK_INVALID_HANDLE;
@@ -386,7 +386,7 @@ fn test_hash_kdf() {
             let derive_template = make_attr_template(
                 &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_VALUE_LEN, hopt.1 - 10)],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
             let mut hashkey2 = CK_INVALID_HANDLE;
             let ret = fn_derive_key(
@@ -414,7 +414,7 @@ fn test_hash_kdf() {
             let derive_template = make_attr_template(
                 &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
             let mut hashkey3 = CK_INVALID_HANDLE;
             let ret = fn_derive_key(
@@ -459,7 +459,7 @@ fn test_hash_kdf() {
                 (CKA_VALUE_LEN, 42),
             ],
             &[],
-            &[(CKA_EXTRACTABLE, true)],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
         );
 
         let mut hashkey4 = CK_INVALID_HANDLE;
@@ -481,7 +481,7 @@ fn test_hash_kdf() {
                 (CKA_VALUE_LEN, 32),
             ],
             &[],
-            &[(CKA_EXTRACTABLE, true)],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
         );
         let mut hashkey4 = CK_INVALID_HANDLE;
         let ret = fn_derive_key(
@@ -580,7 +580,7 @@ fn test_hkdf() {
                             (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
                         ],
                         &[],
-                        &[(CKA_EXTRACTABLE, true)],
+                        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
                     ),
                 ),
                 CKM_HKDF_DATA => (
@@ -880,6 +880,7 @@ fn test_pbkdf2() {
             &[
                 (CKA_WRAP, true),
                 (CKA_UNWRAP, true),
+                (CKA_SENSITIVE, false),
                 (CKA_EXTRACTABLE, true),
             ],
         ));
@@ -1137,7 +1138,7 @@ fn test_sshkdf() {
                         (CKA_VALUE_LEN, kt.1.len() as CK_ULONG),
                     ],
                     &[],
-                    &[(CKA_EXTRACTABLE, true)],
+                    &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
                 ),
                 _ => panic!("What?"),
             };

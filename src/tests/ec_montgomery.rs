@@ -184,6 +184,7 @@ fn test_ec_montgomery_derive(t: TestUnit) {
         &[
             (CKA_ENCRYPT, true),
             (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
         ],
     );
@@ -332,7 +333,7 @@ fn test_ec_montgomery_derive(t: TestUnit) {
     let derive_template = make_attr_template(
         &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -369,7 +370,7 @@ fn test_ec_montgomery_derive(t: TestUnit) {
             (CKA_VALUE_LEN, ref_value.len() as CK_ULONG + 1),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true)],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
     );
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(

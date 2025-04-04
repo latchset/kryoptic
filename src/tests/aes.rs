@@ -783,7 +783,7 @@ fn test_aes_operations() {
                 (CKA_VALUE_LEN, 16),
             ],
             &[],
-            &[(CKA_EXTRACTABLE, true)],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
         );
 
         let mut wp_handle2 = CK_INVALID_HANDLE;
