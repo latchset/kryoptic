@@ -342,7 +342,7 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                     (CKA_VALUE_LEN, unit.ko.len() as CK_ULONG),
                 ],
                 &[],
-                &[(CKA_EXTRACTABLE, true)],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
             );
 
             let mut dk_handle = CK_INVALID_HANDLE;

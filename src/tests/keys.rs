@@ -25,6 +25,7 @@ fn test_secret_key() {
         &[
             (CKA_WRAP, true),
             (CKA_UNWRAP, true),
+            (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
         ],
     ));
@@ -148,6 +149,7 @@ fn test_rsa_key() {
         &[
             (CKA_WRAP, true),
             (CKA_UNWRAP, true),
+            (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
         ],
     ));
@@ -412,6 +414,7 @@ fn test_ecc_key() {
         &[
             (CKA_WRAP, true),
             (CKA_UNWRAP, true),
+            (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
         ],
     ));
