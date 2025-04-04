@@ -70,3 +70,6 @@ pub mod sshkdf;
 
 #[cfg(feature = "mlkem")]
 pub mod mlkem;
+
+#[cfg(feature = "mldsa")]
+pub mod mldsa;

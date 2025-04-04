@@ -6,6 +6,9 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* Added support for ML-DSA signature scheme
+
+
 # [1.1.0]
 ## 2025-04-14
 
