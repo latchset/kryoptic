@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic, i686, minimal]
+        name: [ossl3, fips, release, dynamic, i686, minimal, pqc]
         db: [jsondb, sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
     container: fedora:latest
     steps:
@@ -96,6 +96,8 @@ jobs:
             OPTS="--target i686-unknown-linux-gnu"
           elif [ "${{ matrix.name }}" = "minimal" ]; then
             FEATURES="${FEATURES},dynamic"
+          elif [ "${{ matrix.name }}" = "pqc" ]; then
+            FEATURES="${FEATURES},standard,pqc"
           fi
 
           cargo build -vv $OPTS --features "$FEATURES"
