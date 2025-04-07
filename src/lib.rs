@@ -2431,12 +2431,6 @@ extern "C" fn fn_wrap_key(
     wrapped_key: CK_BYTE_PTR,
     pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    if wrapped_key.is_null() {
-        /* FIXME: Stop gap measure to avoid crashing,
-         * needs to be addressed with an extension to
-         * ask mechanisms for the size */
-        return CKR_GENERAL_ERROR;
-    }
     let rstate = global_rlock!(STATE);
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
@@ -2475,9 +2469,12 @@ extern "C" fn fn_wrap_key(
     }
 
     let pwraplen = unsafe { *pul_wrapped_key_len as CK_ULONG };
-    let wraplen = cast_or_ret!(usize from pwraplen => CKR_ARGUMENTS_BAD);
-    let wrapped: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) };
+    let wrapped: &mut [u8] = if wrapped_key.is_null() {
+        &mut [] /* empty buffer will be always too small */
+    } else {
+        let wraplen = cast_or_ret!(usize from pwraplen => CKR_ARGUMENTS_BAD);
+        unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) }
+    };
     let outlen = match mech.wrap_key(mechanism, &wkey, &key, wrapped, factory) {
         Ok(len) => {
             #[cfg(feature = "fips")]

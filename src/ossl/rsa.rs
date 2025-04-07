@@ -431,6 +431,15 @@ impl RsaPKCSOperation {
                 return Err(e);
             }
         };
+        let needed_len = op.encryption_len(keydata.len(), true)?;
+        if output.len() == 0 {
+            zeromem(keydata.as_mut_slice());
+            return Ok(needed_len);
+        }
+        if output.len() < needed_len {
+            zeromem(keydata.as_mut_slice());
+            return Err(Error::buf_too_small(needed_len));
+        }
         let result = op.encrypt(&keydata, output);
         zeromem(keydata.as_mut_slice());
         result
