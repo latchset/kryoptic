@@ -937,11 +937,23 @@ impl AesOperation {
                 /* Check the data length in CCM matches the provided data -- this is one-shot
                  * operation only */
                 if op.params.datalen != keydata.len() {
+                    zeromem(keydata.as_mut_slice());
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
             }
             _ => (),
         }
+
+        let needed_len = op.encryption_len(keydata.len(), true)?;
+        if output.len() == 0 {
+            zeromem(keydata.as_mut_slice());
+            return Ok(needed_len);
+        }
+        if output.len() < needed_len {
+            zeromem(keydata.as_mut_slice());
+            return Err(error::Error::buf_too_small(needed_len));
+        }
+
         let result = op.encrypt(&keydata, output);
         zeromem(keydata.as_mut_slice());
         result
