@@ -5,6 +5,8 @@ use crate::tests::*;
 
 use serial_test::parallel;
 
+const AES_BLOCK_SIZE: usize = 16;
+
 #[test]
 #[parallel]
 fn test_rsa_operations() {
@@ -480,6 +482,63 @@ fn test_rsa_operations() {
         );
         assert_eq!(ret, CKR_OK);
     }
+
+    /* Key Wrap/Unwrap operation of AES key using RSA key */
+
+    /* key to be wrapped */
+    let data = [0x55u8; AES_BLOCK_SIZE];
+    let wp_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &data)],
+        &[(CKA_EXTRACTABLE, true)],
+    ));
+
+    let params = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA512,
+        mgf: CKG_MGF1_SHA512,
+        source: CKZ_DATA_SPECIFIED,
+        pSourceData: std::ptr::null_mut(),
+        ulSourceDataLen: 0,
+    };
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS_OAEP,
+        pParameter: &params as *const _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_RSA_PKCS_OAEP_PARAMS),
+    };
+
+    /* get length */
+    let mut wraplen = 0;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        pub_key_handle,
+        wp_handle,
+        std::ptr::null_mut(),
+        &mut wraplen,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut wrapped = vec![0; wraplen as usize];
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        pub_key_handle,
+        wp_handle,
+        wrapped.as_mut_ptr(),
+        &mut wraplen,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Do the decryption trick */
+    let dec = ret_or_panic!(decrypt(
+        session,
+        pri_key_handle,
+        &wrapped[..(wraplen as usize)],
+        &mechanism,
+    ));
+    assert_eq!(data, dec.as_slice());
 
     testtokn.finalize();
 }

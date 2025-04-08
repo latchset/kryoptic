@@ -161,9 +161,20 @@ fn test_rsa_key() {
     };
 
     let mut wrapped = vec![0u8; 65536];
-    let mut wrapped_len = wrapped.len() as CK_ULONG;
 
-    let mut ret = fn_wrap_key(
+    /* Get length */
+    let mut wrapped_len = 0;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        handle,
+        prikey,
+        std::ptr::null_mut(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_wrap_key(
         session,
         &mut mechanism,
         handle,
@@ -188,7 +199,7 @@ fn test_rsa_key() {
     );
 
     let mut prikey2 = CK_INVALID_HANDLE;
-    ret = fn_unwrap_key(
+    let ret = fn_unwrap_key(
         session,
         &mut mechanism,
         handle,
@@ -240,7 +251,7 @@ fn test_rsa_key() {
         };
         let mut wrapped_len = wrapped.len() as CK_ULONG;
 
-        ret = fn_wrap_key(
+        let ret = fn_wrap_key(
             session,
             &mut mechanism,
             pubkey,
@@ -263,7 +274,7 @@ fn test_rsa_key() {
         );
 
         let mut handle2 = CK_INVALID_HANDLE;
-        ret = fn_unwrap_key(
+        let ret = fn_unwrap_key(
             session,
             &mut mechanism,
             prikey,
@@ -282,12 +293,12 @@ fn test_rsa_key() {
             ulParameterLen: 0,
         };
 
-        ret = fn_encrypt_init(session, &mut mechanism, handle2);
+        let ret = fn_encrypt_init(session, &mut mechanism, handle2);
         assert_eq!(ret, CKR_OK);
 
         /* init is sufficient to ensure the key is well formed,
          * terminate current operation */
-        ret = fn_encrypt_init(session, std::ptr::null_mut(), handle2);
+        let ret = fn_encrypt_init(session, std::ptr::null_mut(), handle2);
         assert_eq!(ret, CKR_OK);
     }
 

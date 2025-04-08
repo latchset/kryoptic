@@ -740,7 +740,6 @@ fn test_aes_operations() {
         };
 
         let mut wrapped = [0u8; AES_BLOCK_SIZE * 2];
-        let mut wraplen = wrapped.len() as CK_ULONG;
         let mut mechanism = CK_MECHANISM {
             mechanism: mech,
             pParameter: void_ptr!(&iv),
@@ -755,6 +754,18 @@ fn test_aes_operations() {
             &[(CKA_VALUE, &data)],
             &[(CKA_EXTRACTABLE, true)],
         ));
+
+        /* get length */
+        let mut wraplen = 0;
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            handle,
+            wp_handle,
+            std::ptr::null_mut(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
         let ret = fn_wrap_key(
             session,
             &mut mechanism,
