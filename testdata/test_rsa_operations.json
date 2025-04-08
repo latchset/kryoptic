@@ -158,7 +158,8 @@
         "CKA_PRIVATE": false,
         "CKA_PUBLIC_EXPONENT": "AQAB",
         "CKA_TOKEN": true,
-        "CKA_ENCRYPT": true
+        "CKA_ENCRYPT": true,
+        "CKA_WRAP": true
     }
 }, {
     "attributes": {
