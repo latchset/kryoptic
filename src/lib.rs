@@ -1716,9 +1716,10 @@ extern "C" fn fn_digest_key(
     if res_or_ret!(key.get_attr_as_ulong(CKA_CLASS)) != CKO_SECRET_KEY {
         return CKR_KEY_HANDLE_INVALID;
     }
-    if res_or_ret!(key.get_attr_as_ulong(CKA_KEY_TYPE)) != CKK_GENERIC_SECRET {
-        return CKR_KEY_INDIGESTIBLE;
-    }
+    match res_or_ret!(key.get_attr_as_ulong(CKA_KEY_TYPE)) {
+        CKK_GENERIC_SECRET | CKK_AES => (),
+        _ => return CKR_KEY_INDIGESTIBLE,
+    };
 
     let data = res_or_ret!(key.get_attr_as_bytes(CKA_VALUE));
     res_or_ret!(operation.digest_update(data));

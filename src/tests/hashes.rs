@@ -153,3 +153,77 @@ fn test_hashes_digest() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_hashes_digest_key() {
+    let mut testtokn = TestToken::initialized("test_hashes_key", None);
+    let session = testtokn.get_session(true);
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let mut key = [0x55u8; 16];
+    let hash = hex::decode(
+        "b1bfaa407f70c80c650379dfeafaa40f29b753b076f9ae8fc7f6eddb1941e904",
+    )
+    .expect("failed to decode hash");
+
+    /* Sanity */
+    let mut ret = fn_digest_init(session, &mut mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    let mut digest: [u8; 32] = [0; 32];
+    let mut digest_len: CK_ULONG = digest.len() as CK_ULONG;
+    ret = fn_digest(
+        session,
+        key.as_mut_ptr(),
+        key.len() as CK_ULONG,
+        digest.as_mut_ptr(),
+        &mut digest_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(hash, digest);
+
+    /* login */
+    testtokn.login();
+
+    /* Import AES key */
+    let handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &key)],
+        &[(CKA_EXTRACTABLE, true), (CKA_TOKEN, true)],
+    ));
+
+    let ret = fn_digest_init(session, &mut mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_digest_key(session, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut digest_len: CK_ULONG = 0;
+    let ret = fn_digest_final(session, std::ptr::null_mut(), &mut digest_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(digest_len, 32);
+
+    let mut digest: [u8; 32] = [0; 32];
+    let ret = fn_digest_final(session, digest.as_mut_ptr(), &mut digest_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(hash, digest);
+
+    /* This should not work without login */
+    testtokn.logout();
+
+    let ret = fn_digest_init(session, &mut mechanism);
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_digest_key(session, handle);
+    /* The NSSDB returns CKR_USER_NOT_LOGGED_IN, but other backends CKR_GENERAL_ERROR */
+    assert_ne!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
