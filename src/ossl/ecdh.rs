@@ -131,7 +131,7 @@ impl Derive for ECDHOperation {
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
 
-        let raw_max = 2 * ((pkey.get_bits()? + 7) / 8);
+        let raw_max = (pkey.get_bits()? + 7) / 8;
         /* the raw ECDH results have length of bit field length */
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => {
@@ -195,7 +195,7 @@ impl Derive for ECDHOperation {
         }
 
         let ec_point = {
-            if self.public.len() > raw_max + 1 {
+            if self.public.len() > (2 * raw_max) + 1 {
                 /* try to see if it is a DER encoded point */
                 match asn1::parse_single::<&[u8]>(self.public.as_slice()) {
                     Ok(pt) => Cow::Owned(pt.to_vec()),
