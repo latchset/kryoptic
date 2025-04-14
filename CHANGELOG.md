@@ -88,4 +88,5 @@ shortcut commands for common tasks, use `make docs` to build documentation
 that includes non public interfaces.
 
 [1.0.0]: https://github.com/latchset/kryoptic/releases/tag/v1.0.0
+[1.1.0]: https://github.com/latchset/kryoptic/releases/tag/v1.1.0
 
