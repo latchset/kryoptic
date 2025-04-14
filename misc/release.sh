@@ -24,7 +24,9 @@ fi
 VERSION="$1"
 
 #Ensure the release is correct
-git grep "version = \"${VERSION}\"" || (echo "version mismatch, check Cargo.toml" && false)
+git grep "version = \"${VERSION}\"" >/dev/null || (echo "version mismatch, check Cargo.toml" && false)
+git grep "\[${VERSION}\]" CHANGELOG.md >/dev/null || (echo "missing version from CHANGELOG.md?" && false)
+git grep "^Version:.*${VERSION}" packaging/kryoptic.spec >/dev/null|| (echo "version mismatch in packaging files" && false)
 
 if [ "$SIGN" == "1" ]; then
     echo "Creating version tag"
