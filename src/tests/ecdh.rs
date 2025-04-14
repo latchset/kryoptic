@@ -221,6 +221,37 @@ fn test_ecc_derive_plain() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(value, ref_value_full[(ref_value_full.len() - 32)..]);
 
+    /* With GENERIC_SECRET without explicit CKA_VALUE_LEN should
+     * create keys of ECDH derive output (ec group size = 32B) */
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+    let mut s_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut s_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let ret = fn_get_attribute_value(
+        session,
+        s_handle,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(value.len(), ref_value_full.len());
+    assert_eq!(value, ref_value_full);
+
     /* With GENERIC_SECRET and explicit CKA_VALUE_LEN larger than field size we should fail */
     let derive_template = make_attr_template(
         &[
