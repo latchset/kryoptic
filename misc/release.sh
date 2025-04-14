@@ -25,7 +25,8 @@ VERSION="$1"
 
 #Ensure the release is correct
 git grep "version = \"${VERSION}\"" >/dev/null || (echo "version mismatch, check Cargo.toml" && false)
-git grep "\[${VERSION}\]" CHANGELOG.md >/dev/null || (echo "missing version from CHANGELOG.md?" && false)
+git grep "\[${VERSION}\]" CHANGELOG.md >/dev/null || (echo "missing version from CHANGELOG.md" && false)
+git grep "\[${VERSION}\]: https://github.com/latchset/kryoptic/releases/tag/v${VERSION}" CHANGELOG.md >/dev/null || (echo "missing release link from CHANGELOG.m" && false)
 git grep "^Version:.*${VERSION}" packaging/kryoptic.spec >/dev/null|| (echo "version mismatch in packaging files" && false)
 
 if [ "$SIGN" == "1" ]; then
