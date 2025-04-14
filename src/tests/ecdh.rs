@@ -249,7 +249,6 @@ fn test_ecc_derive_plain() {
         extract_template.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
-    assert_eq!(value.len(), ref_value_full.len());
     assert_eq!(value, ref_value_full);
 
     /* With GENERIC_SECRET and explicit CKA_VALUE_LEN larger than field size we should fail */
