@@ -108,6 +108,7 @@ pub trait Mechanism: Debug + Send + Sync {
         Err(CKR_MECHANISM_INVALID)?
     }
 
+    #[cfg(feature = "pkcs11_3_2")]
     fn encapsulate(
         &self,
         _: &CK_MECHANISM,
@@ -119,6 +120,7 @@ pub trait Mechanism: Debug + Send + Sync {
         Err(CKR_MECHANISM_INVALID)?
     }
 
+    #[cfg(feature = "pkcs11_3_2")]
     fn decapsulate(
         &self,
         _: &CK_MECHANISM,
