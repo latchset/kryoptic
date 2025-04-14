@@ -6,11 +6,37 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+# [1.1.0]
+## 2025-04-14
+
+This release fixes several issues found by 3rd party testing, and adds
+preliminary support for PKCS#11 3.2 APIs.
+The PKCS#11 3.2 API allows us to add Post Quantum algorithms.
+This release adds support for the first PQ algorithm (ML-KEM).
+Both the pkcs#11 3.2 API and ML-KEM are optional features and can be
+both enabled by passing --feature mlkem at build time.
+
+### What Changed
+
 * Added support for PKCS#11 3.2 interfaces
   [Pkcs11 3.2 Draft](https://github.com/latchset/kryoptic/pull/149)
 
 * Added support for Key Encapdulation/Decapsulation and ML-KEM Support
   [Add Encapsulation/Decapsulation and ML-KEM support](https://github.com/latchset/kryoptic/pull/197)
+
+* Sundry fixes that result in minor, but visible, behavior changes:
+  [Deal with length query issues](https://github.com/latchset/kryoptic/pull/185)
+  [aes: Restrict AES-GCM to at least 1B tag length](https://github.com/latchset/kryoptic/pull/189)
+  [Fix incorrect error returned on un-initialized operations](https://github.com/latchset/kryoptic/pull/192)
+  [Ensure token store objects can be extracted if the right booleans are
+set](https://github.com/latchset/kryoptic/pull/194)
+  [Fix check for object sensitivity as per spec](https://github.com/latchset/kryoptic/pull/198)
+  [ecdh: Fix max ECDH output size](https://github.com/latchset/kryoptic/pull/203)
+  [Fix C_WrapKey size query](https://github.com/latchset/kryoptic/pull/202)
+
+* Minor enhancements:
+  [Add Stricter FIPS options to configuration](https://github.com/latchset/kryoptic/pull/199)
+  [Allow digesting AES keys and add test coverage.](https://github.com/latchset/kryoptic/pull/204)
 
 
 # [1.0.0]
