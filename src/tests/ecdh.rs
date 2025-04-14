@@ -219,7 +219,7 @@ fn test_ecc_derive_plain() {
         extract_template.len() as CK_ULONG,
     );
     assert_eq!(ret, CKR_OK);
-    assert_eq!(value, ref_value_full[(ref_value_full.len() - 32)..]);
+    assert_eq!(value, ref_value_full);
 
     /* With GENERIC_SECRET without explicit CKA_VALUE_LEN should
      * create keys of ECDH derive output (ec group size = 32B) */
