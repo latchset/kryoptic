@@ -339,3 +339,6 @@ mod combined;
 
 #[cfg(feature = "mlkem")]
 mod mlkem;
+
+#[cfg(feature = "mldsa")]
+mod mldsa;
