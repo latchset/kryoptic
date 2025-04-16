@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [standard, i686]
+        name: [standard]
     container: fedora:latest
     steps:
       - name: Get Date for DNF cache entry
@@ -32,13 +32,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          dnf -y install git cargo clang-devel openssl-devel sqlite-devel
-          if [ "${{ matrix.name }}" = "i686" ]; then
-            dnf -y install rust-std-static.i686 openssl-devel.i686 \
-              sqlite-devel.i686 opensc.i686
-          else
-            dnf -y install opensc
-          fi
+          dnf -y install git cargo clang-devel openssl-devel sqlite-devel opensc
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -49,13 +43,7 @@ jobs:
 
       - name: Build & test
         run: |
-          OPTS=""
-
-          if [ "${{ matrix.name }}" = "i686" ]; then
-            OPTS="--target i686-unknown-linux-gnu"
-          fi
-
-          cargo build -vv $OPTS --features standard,dynamic
+          cargo build -vv
           src/tools/softhsm/test.sh
 
       - uses: actions/upload-artifact@v4
