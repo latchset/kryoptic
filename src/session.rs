@@ -106,6 +106,7 @@ pub struct SessionOperations {
     digest: Option<Box<dyn Digest>>,
     sign: Option<Box<dyn Sign>>,
     verify: Option<Box<dyn Verify>>,
+    verifysig: Option<Box<dyn VerifySignature>>,
 }
 
 impl_mop!(MsgEncryption, msg_encryption);
@@ -116,6 +117,7 @@ impl_mop!(Decryption, decryption);
 impl_mop!(Digest, digest);
 impl_mop!(Sign, sign);
 impl_mop!(Verify, verify);
+impl_mop!(VerifySignature, verifysig);
 
 impl SessionOperations {
     pub fn new() -> SessionOperations {
@@ -128,6 +130,7 @@ impl SessionOperations {
             digest: None,
             sign: None,
             verify: None,
+            verifysig: None,
         }
     }
 }

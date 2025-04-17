@@ -446,4 +446,14 @@ fn test_mldsa_operations() {
         &mechanism
     ));
     assert_eq!(out, signature);
+
+    /* re-test but using the C_VerifySignature API */
+    let ret = sig_verifysig(
+        session,
+        pub_handle,
+        msg.as_slice(),
+        signature.as_slice(),
+        &mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
 }

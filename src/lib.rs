@@ -4014,36 +4014,94 @@ extern "C" fn fn_decapsulate_key(
 
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_init(
-    _s_handle: CK_SESSION_HANDLE,
-    _mechptr: *mut CK_MECHANISM,
-    _key_handle: CK_OBJECT_HANDLE,
-    _signature: *mut CK_BYTE,
-    _singature_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    mechptr: *mut CK_MECHANISM,
+    key_handle: CK_OBJECT_HANDLE,
+    psignature: *mut CK_BYTE,
+    psignature_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    check_op_empty_or_fail!(session; Verify; mechptr);
+    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let slot_id = session.get_slot_id();
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+    let key = res_or_ret!(token.get_object_by_handle(key_handle));
+    ok_or_ret!(check_allowed_mechs(mechanism, &key));
+    let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
+    if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
+        let sig_len = cast_or_ret!(usize from psignature_len);
+        let signature: &[u8] =
+            unsafe { std::slice::from_raw_parts(psignature, sig_len) };
+        let operation =
+            res_or_ret!(mech.verify_signature_new(mechanism, &key, signature));
+        session.set_operation::<dyn VerifySignature>(operation, false);
+
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
+
+        CKR_OK
+    } else {
+        CKR_MECHANISM_INVALID
+    }
 }
 
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature(
-    _s_handle: CK_SESSION_HANDLE,
-    _data: *mut CK_BYTE,
-    _data_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    pdata: *mut CK_BYTE,
+    data_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if pdata.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
+    let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
+    let ret = ret_to_rv!(operation.verify(data));
+
+    #[cfg(feature = "fips")]
+    if ret == CKR_OK {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
+
+    ret
 }
 
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_update(
-    _s_handle: CK_SESSION_HANDLE,
-    _data: *mut CK_BYTE,
-    _data_len: CK_ULONG,
+    s_handle: CK_SESSION_HANDLE,
+    part: *mut CK_BYTE,
+    part_len: CK_ULONG,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if part.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
+    let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    ret_to_rv!(operation.verify_update(data))
 }
 
 #[cfg(feature = "pkcs11_3_2")]
-extern "C" fn fn_verify_signature_final(_s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+extern "C" fn fn_verify_signature_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
+    let rstate = global_rlock!(STATE);
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
+    let ret = ret_to_rv!(operation.verify_final());
+
+    #[cfg(feature = "fips")]
+    if ret == CKR_OK {
+        let approved = operation.fips_approved();
+        finalize_fips_approval(session, approved);
+    }
+
+    ret
 }
 
 #[cfg(feature = "pkcs11_3_2")]

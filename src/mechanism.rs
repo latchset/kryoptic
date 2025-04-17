@@ -131,6 +131,16 @@ pub trait Mechanism: Debug + Send + Sync {
     ) -> Result<Object> {
         Err(CKR_MECHANISM_INVALID)?
     }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    fn verify_signature_new(
+        &self,
+        _: &CK_MECHANISM,
+        _: &Object,
+        _: &[u8],
+    ) -> Result<Box<dyn VerifySignature>> {
+        Err(CKR_MECHANISM_INVALID)?
+    }
 }
 
 #[derive(Debug)]
@@ -310,7 +320,6 @@ pub trait Verify: MechOperation {
     fn verify_final(&mut self, _signature: &[u8]) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
-
     fn signature_len(&self) -> Result<usize> {
         Err(CKR_GENERAL_ERROR)?
     }
@@ -448,6 +457,18 @@ pub trait DRBG: Debug + Send + Sync {
         Err(CKR_GENERAL_ERROR)?
     }
     fn generate(&mut self, _addtl: &[u8], _output: &mut [u8]) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+}
+
+pub trait VerifySignature: MechOperation {
+    fn verify(&mut self, _data: &[u8]) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn verify_update(&mut self, _data: &[u8]) -> Result<()> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+    fn verify_final(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
 }

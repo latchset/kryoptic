@@ -7,7 +7,7 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
-use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify};
+use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
 use crate::ossl::mldsa;
 
@@ -280,7 +280,9 @@ impl Mechanism for MlDsaMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(mldsa::MlDsaOperation::sign_new(mech, key)?))
+        Ok(Box::new(mldsa::MlDsaOperation::sigver_new(
+            mech, key, CKF_SIGN, None,
+        )?))
     }
     fn verify_new(
         &self,
@@ -294,7 +296,30 @@ impl Mechanism for MlDsaMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(mldsa::MlDsaOperation::verify_new(mech, key)?))
+        Ok(Box::new(mldsa::MlDsaOperation::sigver_new(
+            mech, key, CKF_VERIFY, None,
+        )?))
+    }
+
+    fn verify_signature_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: &[u8],
+    ) -> Result<Box<dyn VerifySignature>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        match key.check_key_ops(CKO_PUBLIC_KEY, CKK_ML_DSA, CKA_VERIFY) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(mldsa::MlDsaOperation::sigver_new(
+            mech,
+            key,
+            CKF_VERIFY,
+            Some(signature),
+        )?))
     }
 
     fn generate_keypair(
