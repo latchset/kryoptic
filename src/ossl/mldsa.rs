@@ -6,7 +6,7 @@ use std::ffi::c_char;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
-use crate::mechanism::{MechOperation, Sign, Verify};
+use crate::mechanism::{MechOperation, Sign, Verify, VerifySignature};
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
@@ -186,6 +186,7 @@ pub struct MlDsaOperation {
     in_use: bool,
     params: MlDsaParams,
     sigctx: EvpPkeyCtx,
+    signature: Option<Vec<u8>>,
     data: Option<Vec<u8>>,
 }
 
@@ -204,41 +205,203 @@ impl MechOperation for MlDsaOperation {
     }
 }
 
+fn check_signature(
+    pset: CK_ML_DSA_PARAMETER_SET_TYPE,
+    sig: Option<&[u8]>,
+) -> Result<Option<Vec<u8>>> {
+    Ok(if let Some(s) = sig {
+        if s.len()
+            != match pset {
+                CKP_ML_DSA_44 => ML_DSA_44_SIG_SIZE,
+                CKP_ML_DSA_65 => ML_DSA_65_SIG_SIZE,
+                CKP_ML_DSA_87 => ML_DSA_87_SIG_SIZE,
+                _ => return Err(CKR_GENERAL_ERROR)?,
+            }
+        {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
+        Some(s.to_vec())
+    } else {
+        None
+    })
+}
+
 impl MlDsaOperation {
-    pub fn sign_new(
+    pub fn sigver_new(
         mech: &CK_MECHANISM,
         key: &Object,
+        flag: CK_FLAGS,
+        signature: Option<&[u8]>,
     ) -> Result<MlDsaOperation> {
         let param_set = key.get_attr_as_ulong(CKA_PARAMETER_SET)?;
         let mldsa_params = MlDsaParams::new(mech, param_set)?;
-        let mut privkey = EvpPkey::privkey_from_object(key)?;
-        let sigctx = privkey.new_ctx()?;
+        let sigctx = match flag {
+            CKF_SIGN => {
+                let mut privkey = EvpPkey::privkey_from_object(key)?;
+                privkey.new_ctx()?
+            }
+            CKF_VERIFY => {
+                let mut pubkey = EvpPkey::pubkey_from_object(key)?;
+                pubkey.new_ctx()?
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
+        let sig = check_signature(param_set, signature)?;
+
         Ok(MlDsaOperation {
             mech: mech.mechanism,
             finalized: false,
             in_use: false,
             params: mldsa_params,
             sigctx: sigctx,
+            signature: sig,
             data: None,
         })
     }
 
-    pub fn verify_new(
-        mech: &CK_MECHANISM,
-        key: &Object,
-    ) -> Result<MlDsaOperation> {
-        let param_set = key.get_attr_as_ulong(CKA_PARAMETER_SET)?;
-        let mldsa_params = MlDsaParams::new(mech, param_set)?;
-        let mut pubkey = EvpPkey::pubkey_from_object(key)?;
-        let sigctx = pubkey.new_ctx()?;
-        Ok(MlDsaOperation {
-            mech: mech.mechanism,
-            finalized: false,
-            in_use: false,
-            params: mldsa_params,
-            sigctx: sigctx,
-            data: None,
-        })
+    fn verify_internal(
+        &mut self,
+        data: &[u8],
+        signature: Option<&[u8]>,
+    ) -> Result<()> {
+        if self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.verify_int_update(data)?;
+        self.verify_int_final(signature)
+    }
+
+    fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if !self.in_use {
+            self.in_use = true;
+
+            let mut params = OsslParam::with_capacity(1);
+            if let Some(ctx) = &self.params.context {
+                params.add_octet_string(
+                    name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+                    ctx,
+                )?;
+            }
+            params.finalize();
+
+            let mut sig_alg = EvpSignature::new(mldsa_param_set_to_name(
+                self.params.param_set,
+            )?)?;
+
+            let res = unsafe {
+                EVP_PKEY_verify_message_init(
+                    self.sigctx.as_mut_ptr(),
+                    sig_alg.as_mut_ptr(),
+                    self.params.ossl_params(false)?.as_ptr(),
+                )
+            };
+            if res != 1 {
+                return Err(CKR_DEVICE_ERROR)?;
+            }
+
+            /* OpenSSL 3.5 implements only one shot ML-DSA,
+             * while later implementations can deal with
+             * update()/final() operations. Probe here, and
+             * set up a backup buffer if update()s are not
+             * supported.
+             */
+            if unsafe {
+                EVP_PKEY_verify_message_update(
+                    self.sigctx.as_mut_ptr(),
+                    std::ptr::null(),
+                    0,
+                )
+            } != 1
+            {
+                self.data = Some(Vec::<u8>::new());
+            }
+        }
+
+        if let Some(buffer) = &mut self.data {
+            /* No support for update()s, try to accumulate */
+            if buffer.len() + data.len() > MAX_BUFFER_LEN {
+                self.finalized = true;
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+            buffer.extend_from_slice(data);
+        } else {
+            if unsafe {
+                EVP_PKEY_verify_message_update(
+                    self.sigctx.as_mut_ptr(),
+                    data.as_ptr(),
+                    data.len(),
+                )
+            } != 1
+            {
+                self.finalized = true;
+                return Err(CKR_DEVICE_ERROR)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
+        if !self.in_use {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+
+        self.finalized = true;
+
+        let sig = match signature {
+            Some(s) => match &self.signature {
+                Some(_) => return Err(CKR_GENERAL_ERROR)?,
+                None => s,
+            },
+            None => match &self.signature {
+                Some(s) => s,
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
+
+        if let Some(buffer) = &self.data {
+            /* No support for final()s, must use EVP_PKEY_verify */
+            if unsafe {
+                EVP_PKEY_verify(
+                    self.sigctx.as_mut_ptr(),
+                    sig.as_ptr(),
+                    sig.len(),
+                    buffer.as_ptr(),
+                    buffer.len(),
+                )
+            } != 1
+            {
+                return Err(CKR_DEVICE_ERROR)?;
+            }
+        } else {
+            if unsafe {
+                EVP_PKEY_CTX_set_signature(
+                    self.sigctx.as_mut_ptr(),
+                    sig.as_ptr(),
+                    sig.len(),
+                )
+            } != 1
+            {
+                return Err(CKR_DEVICE_ERROR)?;
+            }
+            if unsafe {
+                EVP_PKEY_verify_message_final(self.sigctx.as_mut_ptr())
+            } != 1
+            {
+                return Err(CKR_DEVICE_ERROR)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -370,137 +533,33 @@ impl Sign for MlDsaOperation {
 
 impl Verify for MlDsaOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.verify_update(data)?;
-        self.verify_final(signature)
+        self.verify_internal(data, Some(signature))
     }
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
-            self.in_use = true;
-
-            let mut params = OsslParam::with_capacity(1);
-            if let Some(ctx) = &self.params.context {
-                params.add_octet_string(
-                    name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
-                    ctx,
-                )?;
-            }
-            params.finalize();
-
-            let mut sig_alg = EvpSignature::new(mldsa_param_set_to_name(
-                self.params.param_set,
-            )?)?;
-
-            let res = unsafe {
-                EVP_PKEY_verify_message_init(
-                    self.sigctx.as_mut_ptr(),
-                    sig_alg.as_mut_ptr(),
-                    self.params.ossl_params(false)?.as_ptr(),
-                )
-            };
-            if res != 1 {
-                return Err(CKR_DEVICE_ERROR)?;
-            }
-
-            /* OpenSSL 3.5 implements only one shot ML-DSA,
-             * while later implementations can deal with
-             * update()/final() operations. Probe here, and
-             * set up a backup buffer if update()s are not
-             * supported.
-             */
-            if unsafe {
-                EVP_PKEY_verify_message_update(
-                    self.sigctx.as_mut_ptr(),
-                    std::ptr::null(),
-                    0,
-                )
-            } != 1
-            {
-                self.data = Some(Vec::<u8>::new());
-            }
-        }
-
-        if let Some(buffer) = &mut self.data {
-            /* No support for update()s, try to accumulate */
-            if buffer.len() + data.len() > MAX_BUFFER_LEN {
-                self.finalized = true;
-                return Err(CKR_GENERAL_ERROR)?;
-            }
-            buffer.extend_from_slice(data);
-        } else {
-            if unsafe {
-                EVP_PKEY_verify_message_update(
-                    self.sigctx.as_mut_ptr(),
-                    data.as_ptr(),
-                    data.len(),
-                )
-            } != 1
-            {
-                self.finalized = true;
-                return Err(CKR_DEVICE_ERROR)?;
-            }
-        }
-
-        Ok(())
+        self.verify_int_update(data)
     }
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-
-        self.finalized = true;
-
-        if let Some(buffer) = &self.data {
-            /* No support for final()s, must use EVP_PKEY_verify */
-            if unsafe {
-                EVP_PKEY_verify(
-                    self.sigctx.as_mut_ptr(),
-                    signature.as_ptr(),
-                    signature.len(),
-                    buffer.as_ptr(),
-                    buffer.len(),
-                )
-            } != 1
-            {
-                return Err(CKR_DEVICE_ERROR)?;
-            }
-        } else {
-            if unsafe {
-                EVP_PKEY_CTX_set_signature(
-                    self.sigctx.as_mut_ptr(),
-                    signature.as_ptr(),
-                    signature.len(),
-                )
-            } != 1
-            {
-                return Err(CKR_DEVICE_ERROR)?;
-            }
-            if unsafe {
-                EVP_PKEY_verify_message_final(self.sigctx.as_mut_ptr())
-            } != 1
-            {
-                return Err(CKR_DEVICE_ERROR)?;
-            }
-        }
-
-        Ok(())
+        self.verify_int_final(Some(signature))
     }
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.params.sigsize)
+    }
+}
+
+impl VerifySignature for MlDsaOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_internal(data, None)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+
+    fn verify_final(&mut self) -> Result<()> {
+        self.verify_int_final(None)
     }
 }
 
