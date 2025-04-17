@@ -251,10 +251,12 @@ impl MlDsaMechanism {
     }
 
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_ML_DSA,
-            Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
-        );
+        for ckm in &[CKM_ML_DSA, CKM_HASH_ML_DSA] {
+            mechs.add_mechanism(
+                *ckm,
+                Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
+            );
+        }
 
         mechs.add_mechanism(
             CKM_ML_DSA_KEY_PAIR_GEN,

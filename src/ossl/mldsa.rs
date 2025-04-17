@@ -6,11 +6,15 @@ use std::ffi::c_char;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
+use crate::kasn1::oid::*;
 use crate::mechanism::{MechOperation, Sign, Verify, VerifySignature};
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::{bytes_to_vec, cast_params};
+
+use asn1;
+use bitflags::bitflags;
 
 /* Max buffer size when OpenSSL does not support the
  * message_update() interfaces and we need to accumulate */
@@ -24,6 +28,11 @@ static ML_DSA_87_TYPE: &[u8; 10] = b"ML-DSA-87\0";
 const ML_DSA_44_SIG_SIZE: usize = 2420;
 const ML_DSA_65_SIG_SIZE: usize = 3309;
 const ML_DSA_87_SIG_SIZE: usize = 4627;
+
+const MAX_CONTEXT_LEN: usize = 255;
+/* 17 is probably sufficient, but we put some headroom here */
+const MAX_OID_DER_LEN: usize = 20;
+const MAX_HASH_LEN: usize = 64;
 
 pub fn mldsa_param_set_to_name(
     pset: CK_ML_DSA_PARAMETER_SET_TYPE,
@@ -76,6 +85,15 @@ pub fn mldsa_object_to_params(
     Ok((mldsa_param_set_to_name(param_set)?, params))
 }
 
+bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    struct ParmFlags: u8 {
+        const Sign        = 0x01;
+        const Verify      = 0x02;
+        const RawEncoding = 0x04;
+    }
+}
+
 #[derive(Debug)]
 struct MlDsaParams {
     param_set: CK_ML_DSA_PARAMETER_SET_TYPE,
@@ -105,23 +123,7 @@ impl MlDsaParams {
 
         if !mech.pParameter.is_null() {
             match mech.mechanism {
-                CKM_ML_DSA => {
-                    let params = cast_params!(mech, CK_SIGN_ADDITIONAL_CONTEXT);
-                    match params.hedgeVariant {
-                        CKH_HEDGE_PREFERRED
-                        | CKH_HEDGE_REQUIRED
-                        | CKH_DETERMINISTIC_REQUIRED => (),
-                        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-                    }
-                    mldsa_params.hedge = params.hedgeVariant;
-                    if params.ulContextLen > 0 {
-                        mldsa_params.context = Some(bytes_to_vec!(
-                            params.pContext,
-                            params.ulContextLen
-                        ));
-                    }
-                }
-                CKM_HASH_ML_DSA
+                CKM_ML_DSA
                 | CKM_HASH_ML_DSA_SHA224
                 | CKM_HASH_ML_DSA_SHA256
                 | CKM_HASH_ML_DSA_SHA384
@@ -132,6 +134,25 @@ impl MlDsaParams {
                 | CKM_HASH_ML_DSA_SHA3_512
                 | CKM_HASH_ML_DSA_SHAKE128
                 | CKM_HASH_ML_DSA_SHAKE256 => {
+                    let params = cast_params!(mech, CK_SIGN_ADDITIONAL_CONTEXT);
+                    match params.hedgeVariant {
+                        CKH_HEDGE_PREFERRED
+                        | CKH_HEDGE_REQUIRED
+                        | CKH_DETERMINISTIC_REQUIRED => (),
+                        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+                    }
+                    mldsa_params.hedge = params.hedgeVariant;
+                    if params.ulContextLen > 0 {
+                        if params.ulContextLen > MAX_CONTEXT_LEN as CK_ULONG {
+                            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                        }
+                        mldsa_params.context = Some(bytes_to_vec!(
+                            params.pContext,
+                            params.ulContextLen
+                        ));
+                    }
+                }
+                CKM_HASH_ML_DSA => {
                     let params =
                         cast_params!(mech, CK_HASH_SIGN_ADDITIONAL_CONTEXT);
                     match params.hedgeVariant {
@@ -142,6 +163,9 @@ impl MlDsaParams {
                     }
                     mldsa_params.hedge = params.hedgeVariant;
                     if params.ulContextLen > 0 {
+                        if params.ulContextLen > MAX_CONTEXT_LEN as CK_ULONG {
+                            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                        }
                         mldsa_params.context = Some(bytes_to_vec!(
                             params.pContext,
                             params.ulContextLen
@@ -155,17 +179,24 @@ impl MlDsaParams {
         Ok(mldsa_params)
     }
 
-    fn ossl_params(&self, sign: bool) -> Result<OsslParam> {
-        let mut params = OsslParam::with_capacity(1);
-        if let Some(ctx) = &self.context {
-            params.add_octet_string(
-                name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
-                ctx,
+    fn ossl_params(&self, flags: ParmFlags) -> Result<OsslParam> {
+        let mut params = OsslParam::with_capacity(3);
+        if flags.contains(ParmFlags::RawEncoding) {
+            params.add_owned_int(
+                name_as_char(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING),
+                0,
             )?;
+        } else {
+            if let Some(ctx) = &self.context {
+                params.add_octet_string(
+                    name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+                    ctx,
+                )?;
+            }
         }
         /* from the spec:
          * On verification the hedgeVariant parameter is ignored. */
-        if sign {
+        if flags.contains(ParmFlags::Sign) {
             if self.hedge == CKH_DETERMINISTIC_REQUIRED {
                 params.add_owned_int(
                     name_as_char(OSSL_SIGNATURE_PARAM_DETERMINISTIC),
@@ -259,6 +290,54 @@ impl MlDsaOperation {
         })
     }
 
+    /// Compute M' for Hash-ML-DSA
+    ///
+    /// For Hash-ML-DSA the encoding is:
+    /// M' = 01 || ctx_len || ctx || OID || Hash(msg)
+    /// See FIPS-204 Algorithm 4 Step 23 (and Algorithm 5 Step 18)
+    fn hash_mldsa_m_prime(&self, hmsg: &[u8]) -> Result<Vec<u8>> {
+        let mut mp = Vec::<u8>::with_capacity(
+            1 + 1 + MAX_CONTEXT_LEN + MAX_OID_DER_LEN + MAX_HASH_LEN,
+        );
+
+        /* 01 */
+        mp.push(1);
+
+        /* || ctx_len || ctx */
+        if let Some(ctx) = &self.params.context {
+            mp.push(u8::try_from(ctx.len())?);
+            mp.extend_from_slice(ctx.as_slice());
+        } else {
+            mp.push(0);
+        }
+        let (oid, size) = match self.params.hash {
+            CKM_SHA224 => (SHA224_OID, 28),
+            CKM_SHA256 => (SHA256_OID, 32),
+            CKM_SHA384 => (SHA384_OID, 48),
+            CKM_SHA512 => (SHA512_OID, 64),
+            CKM_SHA3_224 => (SHA3_224_OID, 28),
+            CKM_SHA3_256 => (SHA3_256_OID, 32),
+            CKM_SHA3_384 => (SHA3_384_OID, 48),
+            CKM_SHA3_512 => (SHA3_512_OID, 64),
+            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+        };
+        if hmsg.len() != size {
+            return Err(CKR_DATA_LEN_RANGE)?;
+        }
+
+        /* || OID */
+        let oid_encoded = match asn1::write_single(&oid) {
+            Ok(b) => b,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        };
+        mp.extend_from_slice(oid_encoded.as_slice());
+
+        /* || Hash(msg) */
+        mp.extend_from_slice(hmsg);
+
+        Ok(mp)
+    }
+
     fn verify_internal(
         &mut self,
         data: &[u8],
@@ -270,11 +349,76 @@ impl MlDsaOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.verify_int_update(data)?;
+        match self.mech {
+            CKM_ML_DSA => self.verify_int_update(data)?,
+            CKM_HASH_ML_DSA => {
+                /* CKM_HASH_ML_DSA is single-part only */
+                self.finalized = true;
+
+                let mut sig_alg = EvpSignature::new(mldsa_param_set_to_name(
+                    self.params.param_set,
+                )?)?;
+
+                /* OpenSSL 3.5.0 does not offer HashML-DSA, so we'll
+                 * have to compute the context on our own via raw
+                 * encoding.
+                 * For CKM_HASH_ML_DSA the data is the hash! */
+                let mp = self.hash_mldsa_m_prime(data)?;
+
+                let res = unsafe {
+                    EVP_PKEY_verify_message_init(
+                        self.sigctx.as_mut_ptr(),
+                        sig_alg.as_mut_ptr(),
+                        self.params
+                            .ossl_params(
+                                ParmFlags::Verify | ParmFlags::RawEncoding,
+                            )?
+                            .as_ptr(),
+                    )
+                };
+                if res != 1 {
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+
+                let sig = match signature {
+                    Some(s) => match &self.signature {
+                        Some(_) => return Err(CKR_GENERAL_ERROR)?,
+                        None => s,
+                    },
+                    None => match &self.signature {
+                        Some(s) => s,
+                        None => return Err(CKR_GENERAL_ERROR)?,
+                    },
+                };
+
+                if unsafe {
+                    EVP_PKEY_verify(
+                        self.sigctx.as_mut_ptr(),
+                        sig.as_ptr(),
+                        sig.len(),
+                        mp.as_ptr(),
+                        mp.len(),
+                    )
+                } != 1
+                {
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+
+                return Ok(());
+            }
+            _ => {
+                self.finalized = true;
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+        }
         self.verify_int_final(signature)
     }
 
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
+        if self.mech != CKM_ML_DSA {
+            self.finalized = true;
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -298,7 +442,7 @@ impl MlDsaOperation {
                 EVP_PKEY_verify_message_init(
                     self.sigctx.as_mut_ptr(),
                     sig_alg.as_mut_ptr(),
-                    self.params.ossl_params(false)?.as_ptr(),
+                    self.params.ossl_params(ParmFlags::Verify)?.as_ptr(),
                 )
             };
             if res != 1 {
@@ -348,6 +492,10 @@ impl MlDsaOperation {
     }
 
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
+        if self.mech != CKM_ML_DSA {
+            self.finalized = true;
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -413,11 +561,72 @@ impl Sign for MlDsaOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.sign_update(data)?;
+        match self.mech {
+            CKM_ML_DSA => self.sign_update(data)?,
+            CKM_HASH_ML_DSA => {
+                /* CKM_HASH_ML_DSA is single-part only */
+                self.finalized = true;
+
+                let mut sig_alg = EvpSignature::new(mldsa_param_set_to_name(
+                    self.params.param_set,
+                )?)?;
+
+                /* OpenSSL 3.5.0 does not offer HashML-DSA, so we'll
+                 * have to compute the context on our own via raw
+                 * encoding.
+                 * For CKM_HASH_ML_DSA the data is the hash! */
+                let mp = self.hash_mldsa_m_prime(data)?;
+
+                let res = unsafe {
+                    EVP_PKEY_sign_message_init(
+                        self.sigctx.as_mut_ptr(),
+                        sig_alg.as_mut_ptr(),
+                        self.params
+                            .ossl_params(
+                                ParmFlags::Sign | ParmFlags::RawEncoding,
+                            )?
+                            .as_ptr(),
+                    )
+                };
+                if res != 1 {
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+
+                let mut siglen = signature.len();
+                let siglen_ptr: *mut usize = &mut siglen;
+
+                if unsafe {
+                    EVP_PKEY_sign(
+                        self.sigctx.as_mut_ptr(),
+                        signature.as_mut_ptr(),
+                        siglen_ptr,
+                        mp.as_ptr(),
+                        mp.len(),
+                    )
+                } != 1
+                {
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+
+                if siglen != signature.len() {
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+
+                return Ok(());
+            }
+            _ => {
+                self.finalized = true;
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+        }
         self.sign_final(signature)
     }
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
+        if self.mech != CKM_ML_DSA {
+            self.finalized = true;
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -432,7 +641,7 @@ impl Sign for MlDsaOperation {
                 EVP_PKEY_sign_message_init(
                     self.sigctx.as_mut_ptr(),
                     sig_alg.as_mut_ptr(),
-                    self.params.ossl_params(true)?.as_ptr(),
+                    self.params.ossl_params(ParmFlags::Sign)?.as_ptr(),
                 )
             };
             if res != 1 {
@@ -481,6 +690,10 @@ impl Sign for MlDsaOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
+        if self.mech != CKM_ML_DSA {
+            self.finalized = true;
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
