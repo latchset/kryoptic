@@ -330,7 +330,6 @@ impl Derive for HashKDFOperation {
     }
 }
 
-#[cfg(not(feature = "fips"))]
 pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
 }

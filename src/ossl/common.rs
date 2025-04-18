@@ -529,6 +529,35 @@ impl<'a> OsslParam<'a> {
     }
 
     #[allow(dead_code)]
+    pub fn from_const_ptr(
+        ptr: *const OSSL_PARAM,
+    ) -> Result<OsslParam<'static>> {
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        /* get num of elements */
+        let mut nelem = 0;
+        let mut counter = ptr;
+        unsafe {
+            while !(*counter).key.is_null() {
+                nelem += 1;
+                counter = counter.offset(1);
+            }
+        }
+        /* Mark as finalized as no changes are allowed to imported params */
+        Ok(OsslParam {
+            v: Vec::new(),
+            p: Cow::Borrowed(unsafe {
+                std::slice::from_raw_parts(ptr, nelem + 1)
+            }),
+            finalized: true,
+            zeroize: false,
+            /* this is a const ptr, must not free it */
+            freeptr: false,
+        })
+    }
+
+    #[allow(dead_code)]
     pub fn empty() -> OsslParam<'static> {
         let mut p = OsslParam {
             v: Vec::new(),
@@ -883,6 +912,21 @@ impl<'a> OsslParam<'a> {
         let octet =
             unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) };
         Ok(octet)
+    }
+
+    #[allow(dead_code)]
+    pub fn has_param(&self, key: *const c_char) -> Result<bool> {
+        if !self.finalized {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        let p = unsafe {
+            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
+        };
+        if p.is_null() {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
     }
 }
 
