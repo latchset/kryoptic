@@ -32,7 +32,11 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          dnf -y install git cargo clang-devel openssl-devel sqlite-devel opensc
+          dnf -y install git cargo clang-devel openssl-devel sqlite-devel
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            dnf -y install rust-std-static.i686 openssl-devel.i686 \
+              sqlite-devel.i686
+          fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4

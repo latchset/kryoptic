@@ -102,7 +102,7 @@ export CONFDIR=%{_sysconfdir}
 %install
 %cargo_install -f dynamic,nssdb,standard
 install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
-rm -f $RPM_BUILD_ROOT%{_bindir}/conformance
+rm -f $RPM_BUILD_ROOT%{_bindir}/{conformance,kryoptic_init,test_signature}
 
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/
 echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryoptic.module
