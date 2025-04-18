@@ -989,4 +989,56 @@ fn test_mldsa_operations() {
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+
+    /* Test message digesting variant of HashML-DSA */
+
+    let params = CK_SIGN_ADDITIONAL_CONTEXT {
+        hedgeVariant: CKH_DETERMINISTIC_REQUIRED,
+        pContext: byte_ptr!(context.as_ptr()),
+        ulContextLen: context.len() as CK_ULONG,
+    };
+
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_HASH_ML_DSA_SHA256,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: sizeof!(CK_SIGN_ADDITIONAL_CONTEXT),
+    };
+
+    let ret = fn_verify_signature_init(
+        session,
+        &mechanism as *const _ as CK_MECHANISM_PTR,
+        pub_handle,
+        byte_ptr!(signature.as_ptr()),
+        signature.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* ingest msg in chunks to verify update functions work correctly */
+    let mut cursor: usize = 0;
+    let mut avail: usize = msg.len();
+    while avail > 0 {
+        let size = if avail > 100 { 100 } else { avail };
+        avail -= size;
+
+        let ret = fn_verify_signature_update(
+            session,
+            byte_ptr!(msg[cursor..(cursor + size)].as_ptr()),
+            size as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        cursor += size;
+    }
+
+    let ret = fn_verify_signature_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* test signature code too */
+    let out = ret_or_panic!(sig_gen(
+        session,
+        priv_handle,
+        msg.as_slice(),
+        &mechanism
+    ));
+    assert_eq!(out, signature);
 }
