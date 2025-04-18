@@ -251,7 +251,18 @@ impl MlDsaMechanism {
     }
 
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[CKM_ML_DSA, CKM_HASH_ML_DSA] {
+        for ckm in &[
+            CKM_ML_DSA,
+            CKM_HASH_ML_DSA,
+            CKM_HASH_ML_DSA_SHA224,
+            CKM_HASH_ML_DSA_SHA256,
+            CKM_HASH_ML_DSA_SHA384,
+            CKM_HASH_ML_DSA_SHA512,
+            CKM_HASH_ML_DSA_SHA3_224,
+            CKM_HASH_ML_DSA_SHA3_256,
+            CKM_HASH_ML_DSA_SHA3_384,
+            CKM_HASH_ML_DSA_SHA3_512,
+        ] {
             mechs.add_mechanism(
                 *ckm,
                 Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
