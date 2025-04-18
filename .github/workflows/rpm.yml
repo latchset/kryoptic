@@ -46,7 +46,7 @@ jobs:
             dnf -y install rustc rpm-build openssl-devel cargo rust-toolset sqlite-devel clang git
           else
             dnf -y install rustc rpm-build cargo-rpm-macros openssl-devel git \
-                'crate(asn1/default)' 'crate(bimap/default)' \
+                'crate(asn1/default)' 'crate(bimap/default)' 'crate(bindgen/default) >= 0.69.0' \
                 'crate(bindgen/default)' 'crate(bitflags/default)' 'crate(cfg-if/default)' \
                 'crate(clap)' 'crate(clap/cargo)' 'crate(clap/derive)' 'crate(clap/help)' \
                 'crate(clap/std)' 'crate(clap/usage)' 'crate(constant_time_eq/default)' \
@@ -56,7 +56,7 @@ jobs:
                 'crate(paste/default)' 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
                 'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
                 'crate(serial_test/default)' 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' \
-                'crate(uuid/default)' 'crate(uuid/v4)'
+                'crate(uuid/default)' 'crate(uuid/v4)' 'crate(cryptoki/default)'
           fi
 
       - name: Checkout Repository

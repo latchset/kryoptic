@@ -48,27 +48,11 @@ export TOKENLABELURI="${TOKENLABELURI:-Kryoptic%20Token}"
 export LOGFILE="${LOGFILE:-$TOKDIR/migration.log}"
 export SOFTHSM_TOKEN="${SOFTHSM_TOKEN:-testdata/softhsm/tokens/9a19985a-9037-e9df-657d-9947f7ba2120}"
 
-# init token
-pkcs11-tool --module "${P11LIB}" --init-token \
-    --label "${TOKENLABEL}" --so-pin "${PINVALUE}" >>${LOGFILE} 2>&1
-
-# set user pin
-pkcs11-tool --module "${P11LIB}" --so-pin "${PINVALUE}" \
-    --login --login-type so --init-pin --pin "${PINVALUE}" >>${LOGFILE} 2>&1
+$TARGET_DIR/kryoptic_init -m "${P11LIB}" -s "${PINVALUE}" -p "${PINVALUE}" -l "${TOKENLABEL}" >>${LOGFILE} 2>&1
 
 $TARGET_DIR/softhsm_migrate -m "${P11LIB}" -i "${KRYOPTIC_CONF}" \
     -p "${PINVALUE}" -q "${PINVALUE}" "${SOFTHSM_TOKEN}" >>${LOGFILE} 2>&1
 
-P11DEFARGS=("--module=${P11LIB}" "--login" "--pin=${PINVALUE}" "--token-label=${TOKENLABEL}")
+$TARGET_DIR/test_signature -m "${P11LIB}" -p "${PINVALUE}" >>${LOGFILE} 2>&1
 
-# Check that some imported data exists
-pkcs11-tool "${P11DEFARGS[@]}" -O -a testCert 2>&1 |grep testCert >>${LOGFILE} 2>&1
-
-echo "Signature Test" | \
-    pkcs11-tool "${P11DEFARGS[@]}" --sign --id '0001' --mechanism RSA-PKCS \
-                --output-file ${TOKDIR}/data.sig >>${LOGFILE} 2>&1
-
-echo "Signature Test" | \
-    pkcs11-tool "${P11DEFARGS[@]}" --verify --id '0001' --mechanism RSA-PKCS \
-                --signature-file ${TOKDIR}/data.sig >>${LOGFILE} 2>&1
-
+echo "all ok"
