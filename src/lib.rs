@@ -4029,21 +4029,21 @@ extern "C" fn fn_verify_signature_init(
     let key = res_or_ret!(token.get_object_by_handle(key_handle));
     ok_or_ret!(check_allowed_mechs(mechanism, &key));
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
-    if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
-        let sig_len = cast_or_ret!(usize from psignature_len);
-        let signature: &[u8] =
-            unsafe { std::slice::from_raw_parts(psignature, sig_len) };
-        let operation =
-            res_or_ret!(mech.verify_signature_new(mechanism, &key, signature));
-        session.set_operation::<dyn VerifySignature>(operation, false);
-
-        #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
-
-        CKR_OK
-    } else {
-        CKR_MECHANISM_INVALID
+    if mech.info().flags & CKF_VERIFY != CKF_VERIFY {
+        return CKR_MECHANISM_INVALID;
     }
+
+    let sig_len = cast_or_ret!(usize from psignature_len);
+    let signature: &[u8] =
+        unsafe { std::slice::from_raw_parts(psignature, sig_len) };
+    let operation =
+        res_or_ret!(mech.verify_signature_new(mechanism, &key, signature));
+    session.set_operation::<dyn VerifySignature>(operation, false);
+
+    #[cfg(feature = "fips")]
+    init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
+
+    CKR_OK
 }
 
 #[cfg(feature = "pkcs11_3_2")]
