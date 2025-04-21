@@ -34,9 +34,9 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     }
 }
 
-fn ossl_bindings(header: &str, args: &[&str], out_file: &Path) {
+fn ossl_bindings(args: &[&str], out_file: &Path) {
     bindgen::Builder::default()
-        .header(header)
+        .header("ossl.h")
         .clang_args(args)
         .derive_default(true)
         .formatter(bindgen::Formatter::Prettyplease)
@@ -65,7 +65,7 @@ fn build_ossl(out_file: &Path) {
     let str_defines;
 
     #[cfg(feature = "fips")]
-    let (libpath, bldargs, header) = {
+    let (libpath, bldargs) = {
         let providers_path = openssl_path
             .join("providers")
             .canonicalize()
@@ -103,11 +103,11 @@ fn build_ossl(out_file: &Path) {
         println!("cargo:rustc-link-lib=static=fips");
         println!("cargo:rerun-if-changed={}", libfips);
 
-        (libfips, buildargs, "fips.h")
+        (libfips, buildargs)
     };
 
     #[cfg(not(feature = "fips"))]
-    let (libpath, bldargs, header) = {
+    let (libpath, bldargs) = {
         let libcrypto =
             format!("{}/libcrypto.a", openssl_path.to_string_lossy());
         str_defines = format!("-DDEVRANDOM=\\\"/dev/urandom\\\"");
@@ -125,7 +125,7 @@ fn build_ossl(out_file: &Path) {
         println!("cargo:rustc-link-lib=static=crypto");
         println!("cargo:rerun-if-changed={}", libcrypto);
 
-        (libcrypto, buildargs, "ossl.h")
+        (libcrypto, buildargs)
     };
 
     match std::path::Path::new(&libpath).try_exists() {
@@ -161,20 +161,27 @@ fn build_ossl(out_file: &Path) {
         }
     }
 
-    let include_path = openssl_path
-        .join("include")
-        .canonicalize()
-        .expect("OpenSSL include path unavailable");
+    let include_path = format!(
+        "-I{}",
+        openssl_path
+            .join("include")
+            .canonicalize()
+            .expect("OpenSSL include path unavailable")
+            .to_str()
+            .unwrap()
+    );
 
-    let args = [&format!("-I{}", include_path.to_str().unwrap()), "-std=c90"];
+    let mut args = vec![&include_path, "-std=c90"];
+    #[cfg(feature = "fips")]
+    args.push("-D_KRYOPTIC_FIPS_");
 
-    ossl_bindings(header, &args, out_file);
+    ossl_bindings(args.as_slice(), out_file);
 }
 
 #[cfg(feature = "dynamic")]
 fn use_system_ossl(out_file: &Path) {
     println!("cargo:rustc-link-lib=crypto");
-    ossl_bindings("ossl.h", &["-std=c90"], out_file);
+    ossl_bindings(&["-std=c90"], out_file);
 }
 
 fn main() {
