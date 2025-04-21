@@ -298,7 +298,6 @@ impl EvpPkey {
         self.ptr
     }
 
-    #[cfg(any(feature = "ecc", feature = "rsa"))]
     fn from_object(obj: &Object, class: CK_OBJECT_CLASS) -> Result<EvpPkey> {
         let key_class = match class {
             CKO_PUBLIC_KEY => EVP_PKEY_PUBLIC_KEY,
@@ -324,22 +323,12 @@ impl EvpPkey {
         Self::fromdata(name, key_class, &params)
     }
 
-    #[cfg(any(
-        feature = "ecc",
-        feature = "rsa",
-        feature = "mlkem",
-        feature = "mldsa"
-    ))]
+    #[allow(dead_code)]
     pub fn pubkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PUBLIC_KEY)
     }
 
-    #[cfg(any(
-        feature = "ecc",
-        feature = "rsa",
-        feature = "mlkem",
-        feature = "mldsa"
-    ))]
+    #[allow(dead_code)]
     pub fn privkey_from_object(obj: &Object) -> Result<EvpPkey> {
         Self::from_object(obj, CKO_PRIVATE_KEY)
     }
