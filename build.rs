@@ -58,76 +58,75 @@ fn ossl_bindings(args: &[&str], out_file: &Path) {
 
 #[cfg(not(feature = "dynamic"))]
 fn build_ossl(out_file: &Path) {
-    let sources = env!("KRYOPTIC_OPENSSL_SOURCES");
-    let openssl_path = std::path::PathBuf::from(sources)
-        .canonicalize()
-        .expect("cannot canonicalize path");
+    let openssl_path =
+        std::path::PathBuf::from(env!("KRYOPTIC_OPENSSL_SOURCES"))
+            .canonicalize()
+            .expect("cannot canonicalize OpenSSL path");
 
-    let str_defines;
+    let mut buildargs = vec![
+        "no-deprecated",
+        "no-aria",
+        "no-argon2",
+        "no-atexit",
+        "no-des",
+        "no-dsa",
+        "no-cast",
+        "no-mdc2",
+        "no-ec2m",
+        "no-rc2",
+        "no-rc4",
+        "no-rc5",
+        "no-rmd160",
+        "no-seed",
+        "no-sm2",
+        "no-sm3",
+        "no-sm4",
+        "enable-ec_nistp_64_gcc_128",
+    ];
+
+    if env::var("PROFILE").unwrap().as_str() == "debug" {
+        buildargs.push("--debug");
+    }
+
+    let mut defines = "-DDEVRANDOM=\\\"/dev/urandom\\\"".to_string();
+
+    let ar_path: std::path::PathBuf;
+    let ar_name: &str;
+
+    #[cfg(not(feature = "fips"))]
+    {
+        ar_path = openssl_path.clone();
+        ar_name = "crypto";
+    }
 
     #[cfg(feature = "fips")]
-    let (libpath, bldargs) = {
-        let providers_path = openssl_path
+    {
+        buildargs.push("enable-fips");
+
+        defines.push_str(" -DOPENSSL_PEDANTIC_ZEROIZATION");
+        defines.push_str(&format!(
+            " -DFIPS_VENDOR=\\\"{}\\\"",
+            env!("CARGO_PKG_NAME")
+        ));
+        defines.push_str(&format!(
+            " -DKRYOPTIC_FIPS_VERSION=\\\"{}-test\\\"",
+            env!("CARGO_PKG_VERSION")
+        ));
+
+        ar_name = "fips";
+        ar_path = openssl_path
             .join("providers")
             .canonicalize()
             .expect("OpenSSL providers path unavailable");
+    }
 
-        let version = env!("CARGO_PKG_VERSION");
-        let ver_define =
-            format!("-DKRYOPTIC_FIPS_VERSION=\\\"{}-test\\\"", version);
-        let defines = [
-            "-DDEVRANDOM=\\\"/dev/urandom\\\"",
-            "-DOPENSSL_PEDANTIC_ZEROIZATION",
-            "-DFIPS_VENDOR=\\\"Kryoptic\\\"",
-            &ver_define,
-        ];
-        str_defines = defines.join(" ");
+    buildargs.push(&defines);
 
-        let libfips = format!("{}/libfips.a", providers_path.to_string_lossy());
-        let buildargs = [
-            "--debug",
-            "enable-fips",
-            "no-mdc2",
-            "no-ec2m",
-            "no-sm2",
-            "no-sm4",
-            "no-des",
-            "no-dsa",
-            "no-atexit",
-            &str_defines,
-        ];
+    let libpath = format!("{}/lib{}.a", ar_path.to_string_lossy(), ar_name);
 
-        println!(
-            "cargo:rustc-link-search={}",
-            providers_path.to_string_lossy()
-        );
-        println!("cargo:rustc-link-lib=static=fips");
-        println!("cargo:rerun-if-changed={}", libfips);
-
-        (libfips, buildargs)
-    };
-
-    #[cfg(not(feature = "fips"))]
-    let (libpath, bldargs) = {
-        let libcrypto =
-            format!("{}/libcrypto.a", openssl_path.to_string_lossy());
-        str_defines = format!("-DDEVRANDOM=\\\"/dev/urandom\\\"");
-        let buildargs = [
-            "--debug",
-            "no-mdc2",
-            "no-ec2m",
-            "no-sm2",
-            "no-sm4",
-            "no-des",
-            &str_defines,
-        ];
-
-        println!("cargo:rustc-link-search={}", openssl_path.to_str().unwrap());
-        println!("cargo:rustc-link-lib=static=crypto");
-        println!("cargo:rerun-if-changed={}", libcrypto);
-
-        (libcrypto, buildargs)
-    };
+    println!("cargo:rustc-link-search={}", ar_path.to_string_lossy());
+    println!("cargo:rustc-link-lib=static={}", ar_name);
+    println!("cargo:rerun-if-changed={}", libpath);
 
     match std::path::Path::new(&libpath).try_exists() {
         Ok(true) => (),
@@ -135,7 +134,7 @@ fn build_ossl(out_file: &Path) {
             /* openssl: ./Configure --debug enable-fips */
             if !std::process::Command::new("./Configure")
                 .current_dir(&openssl_path)
-                .args(bldargs)
+                .args(buildargs)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
                 .output()
@@ -217,9 +216,6 @@ fn main() {
     /* OpenSSL Cryptography */
     #[cfg(feature = "dynamic")]
     use_system_ossl(&ossl_bindings);
-
-    #[cfg(not(feature = "dynamic"))]
-    println!("cargo:rerun-if-changed={}", ".git/modules/openssl/HEAD");
 
     #[cfg(not(feature = "dynamic"))]
     build_ossl(&ossl_bindings);
