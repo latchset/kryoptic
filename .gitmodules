@@ -1,4 +1,0 @@
-[submodule "openssl"]
-	path = openssl
-	url = https://github.com/simo5/openssl
-	branch = kryoptic_ossl35

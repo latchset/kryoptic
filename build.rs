@@ -58,7 +58,8 @@ fn ossl_bindings(args: &[&str], out_file: &Path) {
 
 #[cfg(not(feature = "dynamic"))]
 fn build_ossl(out_file: &Path) {
-    let openssl_path = std::path::PathBuf::from("openssl")
+    let sources = env!("KRYOPTIC_OPENSSL_SOURCES");
+    let openssl_path = std::path::PathBuf::from(sources)
         .canonicalize()
         .expect("cannot canonicalize path");
 
