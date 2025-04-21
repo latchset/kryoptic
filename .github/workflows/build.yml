@@ -7,6 +7,9 @@ on:
   push:
     branches: ["main"]
 
+env:
+  OPENSSL_BRANCH: kryoptic_ossl35
+
 jobs:
   build:
     name: Build
@@ -48,19 +51,23 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup
+      - name: Setup OpenSSL
+        id: ossl-setup
         run: |
-          git config --global --add safe.directory /__w/kryoptic/kryoptic
-          git submodule init
-          git submodule update
+          git config --global --add safe.directory /__w/kryoptic
+          cd ..
+          git clone https://github.com/simo5/openssl.git \
+                    --single-branch --branch $OPENSSL_BRANCH openssl
+          cd openssl
+          echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
+          echo "cacheid=${{ runner.os }}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Restore OpenSSL build
         uses: actions/cache/restore@v4
         id: cache
         with:
-          path: |
-            openssl/
-          key: ${{ runner.os }}-ossl-${{ hashFiles('.git/modules/openssl/HEAD') }}
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
 
       - name: Generate lock file
         run: cargo generate-lockfile
@@ -114,9 +121,8 @@ jobs:
         name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
         uses: actions/cache/save@v4
         with:
-          path: |
-            openssl/
-          key: ${{ runner.os }}-ossl-${{ hashFiles('.git/modules/openssl/HEAD') }}
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
 
       - if: ${{ matrix.name == 'i686' && steps.cache.outputs.cache-hit != 'true' }}
         name: Store DNF cache -- the i686 has the most dependencies
