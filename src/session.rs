@@ -106,6 +106,7 @@ pub struct SessionOperations {
     digest: Option<Box<dyn Digest>>,
     sign: Option<Box<dyn Sign>>,
     verify: Option<Box<dyn Verify>>,
+    #[cfg(feature = "pkcs11_3_2")]
     verifysig: Option<Box<dyn VerifySignature>>,
 }
 
@@ -117,6 +118,7 @@ impl_mop!(Decryption, decryption);
 impl_mop!(Digest, digest);
 impl_mop!(Sign, sign);
 impl_mop!(Verify, verify);
+#[cfg(feature = "pkcs11_3_2")]
 impl_mop!(VerifySignature, verifysig);
 
 impl SessionOperations {
@@ -130,6 +132,7 @@ impl SessionOperations {
             digest: None,
             sign: None,
             verify: None,
+            #[cfg(feature = "pkcs11_3_2")]
             verifysig: None,
         }
     }

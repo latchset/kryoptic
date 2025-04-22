@@ -461,6 +461,7 @@ pub trait DRBG: Debug + Send + Sync {
     }
 }
 
+#[cfg(feature = "pkcs11_3_2")]
 pub trait VerifySignature: MechOperation {
     fn verify(&mut self, _data: &[u8]) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
