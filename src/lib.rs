@@ -518,7 +518,7 @@ fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
     CKR_OK
 }
 
-#[cfg(all(test, feature = "fips"))]
+#[cfg(all(test, feature = "fips", feature = "nssdb"))]
 fn get_fips_behavior(save: &mut config::FipsBehavior) -> CK_RV {
     let gconf = global_rlock!(noinitcheck CONFIG);
     *save = gconf.conf.fips_behavior.clone();
@@ -3902,6 +3902,7 @@ extern "C" fn fn_encapsulate_key(
         return CKR_MECHANISM_INVALID;
     }
 
+    #[allow(unused_mut)]
     let (mut obj, outlen) =
         res_or_ret!(mech.encapsulate(mechanism, &key, factory, tmpl, encpart));
 
@@ -3984,6 +3985,7 @@ extern "C" fn fn_decapsulate_key(
         return CKR_MECHANISM_INVALID;
     }
 
+    #[allow(unused_mut)]
     let mut obj =
         res_or_ret!(mech.decapsulate(mechanism, &key, factory, tmpl, encpart));
 
