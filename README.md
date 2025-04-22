@@ -74,7 +74,7 @@ the requesting party and the upstream project.
 
 # Contributions
 
-Contributions to the project are made under the project's [License][License]
+Contributions to the project are made under the project's [License](LICENSE.txt)
 unless otherwise explicitly indicated by the contributor at the time of the
 contribution.
 
