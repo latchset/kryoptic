@@ -159,6 +159,7 @@ impl HMACMechanism {
         mech: &CK_MECHANISM,
         keyobj: &Object,
         op_type: CK_FLAGS,
+        signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
         /* the mechanism advertises only SIGN/VERIFY to the callers
          * DERIVE is a mediated operation so it is not advertised
@@ -183,6 +184,7 @@ impl HMACMechanism {
             mech.mechanism,
             self.check_and_fetch_key(keyobj, op_attr)?,
             self.check_and_fetch_param(mech)?,
+            signature,
         )
     }
 }
@@ -198,7 +200,7 @@ impl Mechanism for HMACMechanism {
         keyobj: &Object,
         op_type: CK_FLAGS,
     ) -> Result<Box<dyn Mac>> {
-        Ok(Box::new(self.new_op(mech, keyobj, op_type)?))
+        Ok(Box::new(self.new_op(mech, keyobj, op_type, None)?))
     }
 
     fn sign_new(
@@ -206,7 +208,7 @@ impl Mechanism for HMACMechanism {
         mech: &CK_MECHANISM,
         keyobj: &Object,
     ) -> Result<Box<dyn Sign>> {
-        Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN)?))
+        Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN, None)?))
     }
 
     fn verify_new(
@@ -214,7 +216,22 @@ impl Mechanism for HMACMechanism {
         mech: &CK_MECHANISM,
         keyobj: &Object,
     ) -> Result<Box<dyn Verify>> {
-        Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY)?))
+        Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY, None)?))
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    fn verify_signature_new(
+        &self,
+        mech: &CK_MECHANISM,
+        keyobj: &Object,
+        signature: &[u8],
+    ) -> Result<Box<dyn VerifySignature>> {
+        Ok(Box::new(self.new_op(
+            mech,
+            keyobj,
+            CKF_VERIFY,
+            Some(signature),
+        )?))
     }
 }
 

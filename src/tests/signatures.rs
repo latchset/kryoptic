@@ -419,6 +419,19 @@ fn test_hmac_signatures() {
     );
     assert_eq!(ret, CKR_OK);
 
+    #[cfg(feature = "pkcs11_3_2")]
+    {
+        /* check SignatureVErify API too */
+        let ret = sig_verifysig(
+            session,
+            key_handle,
+            &mut testcase.value,
+            &mut testcase.result,
+            &mut mechanism,
+        );
+        assert_eq!(ret, CKR_OK);
+    }
+
     let result =
         match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
         {
