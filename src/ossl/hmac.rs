@@ -25,6 +25,7 @@ pub struct HMACOperation {
     ctx: EvpMacCtx,
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+    signature: Option<Vec<u8>>,
 }
 
 impl HMACOperation {
@@ -32,6 +33,7 @@ impl HMACOperation {
         mech: CK_MECHANISM_TYPE,
         key: HmacKey,
         outputlen: usize,
+        signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
         #[cfg(feature = "fips")]
         let mut fips_approved: Option<bool> = None;
@@ -72,6 +74,15 @@ impl HMACOperation {
             ctx: ctx,
             #[cfg(feature = "fips")]
             fips_approved: fips_approved,
+            signature: match signature {
+                Some(s) => {
+                    if s.len() != outputlen {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
+                    Some(s.to_vec())
+                }
+                None => None,
+            },
         })
     }
 
@@ -235,7 +246,7 @@ impl Verify for HMACOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
-        self.verify_final(signature)
+        Verify::verify_final(self, signature)
     }
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
@@ -253,5 +264,32 @@ impl Verify for HMACOperation {
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.outputlen)
+    }
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+impl VerifySignature for HMACOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        VerifySignature::verify_final(self)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn verify_final(&mut self) -> Result<()> {
+        let mut verify: Vec<u8> = vec![0; self.outputlen];
+        self.finalize(verify.as_mut_slice())?;
+        match &self.signature {
+            Some(sig) => {
+                if !constant_time_eq(&verify, sig.as_slice()) {
+                    return Err(CKR_SIGNATURE_INVALID)?;
+                }
+                Ok(())
+            }
+            None => Err(CKR_GENERAL_ERROR)?,
+        }
     }
 }
