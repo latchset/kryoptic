@@ -376,7 +376,7 @@ impl Mechanism for AesMechanism {
         }
         match mech.mechanism {
             CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
-                Ok(Box::new(AesCmacOperation::init(mech, key)?))
+                Ok(Box::new(AesCmacOperation::init(mech, key, None)?))
             }
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
@@ -403,10 +403,10 @@ impl Mechanism for AesMechanism {
         match mech.mechanism {
             #[cfg(not(feature = "fips"))]
             CKM_AES_MAC | CKM_AES_MAC_GENERAL => {
-                Ok(Box::new(AesMacOperation::init(mech, key)?))
+                Ok(Box::new(AesMacOperation::init(mech, key, None)?))
             }
             CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
-                Ok(Box::new(AesCmacOperation::init(mech, key)?))
+                Ok(Box::new(AesCmacOperation::init(mech, key, None)?))
             }
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
@@ -433,11 +433,37 @@ impl Mechanism for AesMechanism {
         match mech.mechanism {
             #[cfg(not(feature = "fips"))]
             CKM_AES_MAC | CKM_AES_MAC_GENERAL => {
-                Ok(Box::new(AesMacOperation::init(mech, key)?))
+                Ok(Box::new(AesMacOperation::init(mech, key, None)?))
             }
             CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => {
-                Ok(Box::new(AesCmacOperation::init(mech, key)?))
+                Ok(Box::new(AesCmacOperation::init(mech, key, None)?))
             }
+            _ => Err(CKR_MECHANISM_INVALID)?,
+        }
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    fn verify_signature_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: &[u8],
+    ) -> Result<Box<dyn VerifySignature>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_VERIFY) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        match mech.mechanism {
+            #[cfg(not(feature = "fips"))]
+            CKM_AES_MAC | CKM_AES_MAC_GENERAL => {
+                Ok(Box::new(AesMacOperation::init(mech, key, Some(signature))?))
+            }
+            CKM_AES_CMAC | CKM_AES_CMAC_GENERAL => Ok(Box::new(
+                AesCmacOperation::init(mech, key, Some(signature))?,
+            )),
             _ => Err(CKR_MECHANISM_INVALID)?,
         }
     }
