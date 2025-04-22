@@ -310,6 +310,14 @@ fn test_eddsa_operations() {
         sign_len,
     );
     assert_eq!(ret, CKR_OK);
+
+    #[cfg(feature = "pkcs11_3_2")]
+    {
+        /* Re-Verify using the SignatureVerification APIs */
+        let ret =
+            sig_verifysig(session, handle, data.as_bytes(), &sign, &mechanism);
+        assert_eq!(ret, CKR_OK);
+    }
 }
 
 #[derive(Debug)]
