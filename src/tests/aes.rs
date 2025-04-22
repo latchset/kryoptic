@@ -1247,6 +1247,23 @@ fn test_aes_macs() {
                 }
             )
         );
+
+        /* Again with SignatureVerify API */
+        #[cfg(feature = "pkcs11_3_2")]
+        assert_eq!(
+            CKR_OK,
+            sig_verifysig(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_MAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            )
+        );
     }
 
     {
@@ -1364,6 +1381,23 @@ fn test_aes_macs() {
 
         /* test that we can get correct indicators based on inputs */
         assert_eq!(check_validation(session, 0), true);
+
+        /* Again with SignatureVerify API */
+        #[cfg(feature = "pkcs11_3_2")]
+        assert_eq!(
+            CKR_OK,
+            sig_verifysig(
+                session,
+                handle,
+                data.as_bytes(),
+                mac.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CMAC_GENERAL,
+                    pParameter: void_ptr!(&size),
+                    ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+                }
+            )
+        );
     }
 
     testtokn.finalize();

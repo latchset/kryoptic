@@ -2779,6 +2779,7 @@ pub struct AesCmacOperation {
     maclen: usize,
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+    signature: Option<Vec<u8>>,
 }
 
 impl AesCmacOperation {
@@ -2790,7 +2791,11 @@ impl AesCmacOperation {
     }
 
     /// Initializes and returns a CMAC operation
-    pub fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesCmacOperation> {
+    pub fn init(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: Option<&[u8]>,
+    ) -> Result<AesCmacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_CMAC_GENERAL => {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
@@ -2852,6 +2857,15 @@ impl AesCmacOperation {
             maclen: maclen,
             #[cfg(feature = "fips")]
             fips_approved: fips_approved,
+            signature: match signature {
+                Some(s) => {
+                    if s.len() != maclen {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
+                    Some(s.to_vec())
+                }
+                None => None,
+            },
         })
     }
 
@@ -2940,6 +2954,24 @@ impl AesCmacOperation {
         }
         fips_approval_finalize(&mut self.fips_approved);
     }
+
+    /// Finalizes the CMAC computation and checks the signature
+    fn finalize_ver(&mut self, signature: Option<&[u8]>) -> Result<()> {
+        let mut computed = vec![0u8; self.maclen];
+        self.finalize(computed.as_mut_slice())?;
+
+        let sig = match signature {
+            Some(sig) => sig,
+            None => match &self.signature {
+                Some(sig) => sig.as_slice(),
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
+        if !constant_time_eq(&computed, sig) {
+            return Err(CKR_SIGNATURE_INVALID)?;
+        }
+        Ok(())
+    }
 }
 
 impl MechOperation for AesCmacOperation {
@@ -3015,7 +3047,7 @@ impl Verify for AesCmacOperation {
         if data.len() > 0 {
             self.update(data)?;
         }
-        self.verify_final(signature)
+        Verify::verify_final(self, signature)
     }
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
@@ -3023,16 +3055,34 @@ impl Verify for AesCmacOperation {
     }
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
-        let mut verify: Vec<u8> = vec![0; self.maclen];
-        self.finalize(verify.as_mut_slice())?;
-        if !constant_time_eq(&verify, signature) {
-            return Err(CKR_SIGNATURE_INVALID)?;
-        }
-        Ok(())
+        self.finalize_ver(Some(signature))
     }
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.maclen)
+    }
+}
+
+/// Implements the VerifySignature interface for the AES CMAC operation
+///
+/// All methods call the internal methods for computation, and then compare
+/// the result with the signature stashed by the init function
+#[cfg(feature = "pkcs11_3_2")]
+impl VerifySignature for AesCmacOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.begin()?;
+        if data.len() > 0 {
+            self.update(data)?;
+        }
+        VerifySignature::verify_final(self)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn verify_final(&mut self) -> Result<()> {
+        self.finalize_ver(None)
     }
 }
 
@@ -3051,6 +3101,7 @@ pub struct AesMacOperation {
     op: AesOperation,
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+    signature: Option<Vec<u8>>,
 }
 
 impl Drop for AesMacOperation {
@@ -3070,7 +3121,11 @@ impl AesMacOperation {
     }
 
     /// Initializes and returns a MAC operation
-    pub fn init(mech: &CK_MECHANISM, key: &Object) -> Result<AesMacOperation> {
+    pub fn init(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: Option<&[u8]>,
+    ) -> Result<AesMacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_MAC_GENERAL => {
                 let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
@@ -3107,6 +3162,15 @@ impl AesMacOperation {
             )?,
             #[cfg(feature = "fips")]
             fips_approved: None,
+            signature: match signature {
+                Some(s) => {
+                    if s.len() != maclen {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
+                    Some(s.to_vec())
+                }
+                None => None,
+            },
         })
     }
 
@@ -3200,6 +3264,24 @@ impl AesMacOperation {
         }
         Ok(())
     }
+
+    /// Finalizes the MAC computation and checks the signature
+    fn finalize_ver(&mut self, signature: Option<&[u8]>) -> Result<()> {
+        let mut computed = vec![0u8; self.maclen];
+        self.finalize(computed.as_mut_slice())?;
+
+        let sig = match signature {
+            Some(sig) => sig,
+            None => match &self.signature {
+                Some(sig) => sig.as_slice(),
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
+        if !constant_time_eq(&computed, sig) {
+            return Err(CKR_SIGNATURE_INVALID)?;
+        }
+        Ok(())
+    }
 }
 
 impl MechOperation for AesMacOperation {
@@ -3246,7 +3328,7 @@ impl Verify for AesMacOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.begin()?;
         self.update(data)?;
-        self.verify_final(signature)
+        Verify::verify_final(self, signature)
     }
 
     fn verify_update(&mut self, data: &[u8]) -> Result<()> {
@@ -3254,15 +3336,31 @@ impl Verify for AesMacOperation {
     }
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
-        let mut verify: Vec<u8> = vec![0; self.maclen];
-        self.finalize(verify.as_mut_slice())?;
-        if !constant_time_eq(&verify, signature) {
-            return Err(CKR_SIGNATURE_INVALID)?;
-        }
-        Ok(())
+        self.finalize_ver(Some(signature))
     }
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.maclen)
+    }
+}
+
+/// Implements the VerifySignature interface for the AES MAC operation
+///
+/// All methods call the internal methods for computation, and then compare
+/// the result with the signature stashed by the init function
+#[cfg(feature = "pkcs11_3_2")]
+impl VerifySignature for AesMacOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.begin()?;
+        self.update(data)?;
+        VerifySignature::verify_final(self)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.update(data)
+    }
+
+    fn verify_final(&mut self) -> Result<()> {
+        self.finalize_ver(None)
     }
 }
