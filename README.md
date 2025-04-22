@@ -40,10 +40,10 @@ ease of use. "Standard" pulls in all the standard algorithms and the
 sqlitedb storage backend.
 
 In order to make a different selection you need to use the cargo
-switch to disable default features (--no-default-features) and then
-specify the features you want to build with:
+switch to disable default features (`--no-default-features`) and then
+specify the features you want to build with, eg:
 
-eg: cargo build --no-default-features --features fips,sqlitedb,nssdb
+    $ cargo build --no-default-features --features fips,sqlitedb,nssdb
 
 # Tests
 
