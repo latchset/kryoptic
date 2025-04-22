@@ -1,4 +1,4 @@
-This is a pkcs11 soft token written in rust
+This is a pkcs11 soft token written in rust.
 
 # Dependencies
 
@@ -47,7 +47,7 @@ specify the features you want to build with, eg:
 
 # Tests
 
-To run test, run the check command:
+To run the tests, run the test command:
 
     $ cargo test
 
@@ -58,17 +58,17 @@ This command accepts the same feature set as the build command
 The license is currently set as the GPLv3.0+ as released by the FSF.
 
 This license is compatible with the OpenSSL ASL2.0 license and is a strong
-copyleft license which we find useful.
+copyleft license, which we find useful.
 
 Unlike other copyleft projects we are not dogmatic and chose this license
-for the benefits we think it will brings to a self-contained project like
+for the benefits we think it will bring to a self-contained project like
 kryoptic. Namely that it strongly encourages modifications to be
 contributed back.
 
-If a party asks for it we will pragmatically evaluate a different license
-and will be open to make a change if we think that such change would in fact
+If a party asks for it, we will pragmatically evaluate a different license
+and will be open to making a change if we think that such a change would in fact
 be in the best interest of the project. Note that requests of this kind
-need to come with a well reasoned rationale that shows benefits both for
+need to come with a well-reasoned rationale that shows benefits both for
 the requesting party and the upstream project.
 
 
@@ -78,5 +78,5 @@ Contributions to the project are made under the project's [License](LICENSE.txt)
 unless otherwise explicitly indicated by the contributor at the time of the
 contribution.
 
-See also the [default agreement](https://developercertificate.org/) we assume
-for contribution which is currently enforced by the github DCO check.
+See also the [default agreement](https://developercertificate.org/), which we assume
+for contribution, and which is currently enforced by the github DCO check.
