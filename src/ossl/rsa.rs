@@ -217,6 +217,7 @@ pub struct RsaPKCSOperation {
     oaep: RsaOaepParams,
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+    signature: Option<Vec<u8>>,
 }
 
 impl RsaPKCSOperation {
@@ -278,6 +279,7 @@ impl RsaPKCSOperation {
             oaep: oaep_params,
             #[cfg(feature = "fips")]
             fips_approved: None,
+            signature: None,
         })
     }
 
@@ -307,6 +309,7 @@ impl RsaPKCSOperation {
         pubkey: Option<EvpPkey>,
         privkey: Option<EvpPkey>,
         keysize: usize,
+        signature: Option<&[u8]>,
     ) -> Result<RsaPKCSOperation> {
         let pss_params = parse_pss_params(mech)?;
         Ok(RsaPKCSOperation {
@@ -333,6 +336,10 @@ impl RsaPKCSOperation {
             oaep: no_oaep_params(),
             #[cfg(feature = "fips")]
             fips_approved: None,
+            signature: match signature {
+                Some(s) => Some(s.to_vec()),
+                None => None,
+            },
         })
     }
 
@@ -344,7 +351,7 @@ impl RsaPKCSOperation {
         let keysize = Self::get_key_size(key, info)?;
         let pubkey = EvpPkey::pubkey_from_object(key)?;
         let privkey = EvpPkey::privkey_from_object(key)?;
-        Self::sigver_new(mech, Some(pubkey), Some(privkey), keysize)
+        Self::sigver_new(mech, Some(pubkey), Some(privkey), keysize, None)
     }
 
     pub fn verify_new(
@@ -354,7 +361,22 @@ impl RsaPKCSOperation {
     ) -> Result<RsaPKCSOperation> {
         let keysize = Self::get_key_size(key, info)?;
         let pubkey = EvpPkey::pubkey_from_object(key)?;
-        Self::sigver_new(mech, Some(pubkey), None, keysize)
+        Self::sigver_new(mech, Some(pubkey), None, keysize, None)
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    pub fn verify_signature_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+        signature: &[u8],
+    ) -> Result<RsaPKCSOperation> {
+        let keysize = Self::get_key_size(key, info)?;
+        if signature.len() != keysize {
+            return Err(CKR_SIGNATURE_LEN_RANGE)?;
+        }
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        Self::sigver_new(mech, Some(pubkey), None, keysize, Some(signature))
     }
 
     pub fn generate_keypair(
@@ -977,22 +999,35 @@ impl Sign for RsaPKCSOperation {
     }
 }
 
-impl Verify for RsaPKCSOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+impl RsaPKCSOperation {
+    fn verify_internal(
+        &mut self,
+        data: &[u8],
+        signature: Option<&[u8]>,
+    ) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+
+        let sig = match signature {
+            Some(s) => s,
+            None => match &self.signature {
+                Some(s) => s.as_slice(),
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
+
         match self.mech {
             CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
                 self.finalized = true;
                 if data.len() > self.max_input {
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
-                if signature.len() != self.output_len {
-                    return Err(CKR_GENERAL_ERROR)?;
+                if sig.len() != self.output_len {
+                    return Err(CKR_SIGNATURE_LEN_RANGE)?;
                 }
                 let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
                 let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
@@ -1010,8 +1045,8 @@ impl Verify for RsaPKCSOperation {
                 let res = unsafe {
                     EVP_PKEY_verify(
                         ctx.as_mut_ptr(),
-                        signature.as_ptr(),
-                        signature.len(),
+                        sig.as_ptr(),
+                        sig.len(),
                         data.as_ptr(),
                         data.len(),
                     )
@@ -1022,19 +1057,22 @@ impl Verify for RsaPKCSOperation {
                 Ok(())
             }
             _ => {
-                self.verify_update(data)?;
-                self.verify_final(signature)
+                self.verify_int_update(data)?;
+                self.verify_int_final(signature)
             }
         }
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+    fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if !self.in_use {
-            if self.mech == CKM_RSA_PKCS {
-                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+            match self.mech {
+                CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                _ => (),
             }
             self.in_use = true;
 
@@ -1082,7 +1120,7 @@ impl Verify for RsaPKCSOperation {
         }
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+    fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -1091,16 +1129,24 @@ impl Verify for RsaPKCSOperation {
         }
         self.finalized = true;
 
+        let sig = match signature {
+            Some(s) => s,
+            None => match &self.signature {
+                Some(s) => s.as_slice(),
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
+
         #[cfg(feature = "fips")]
         {
-            self.sigctx.as_mut().unwrap().digest_verify_final(signature)
+            self.sigctx.as_mut().unwrap().digest_verify_final(sig)
         }
         #[cfg(not(feature = "fips"))]
         unsafe {
             let res = EVP_DigestVerifyFinal(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                signature.as_ptr(),
-                signature.len(),
+                sig.as_ptr(),
+                sig.len(),
             );
             if res != 1 {
                 Err(CKR_SIGNATURE_INVALID)?
@@ -1109,8 +1155,35 @@ impl Verify for RsaPKCSOperation {
             }
         }
     }
+}
+
+impl Verify for RsaPKCSOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+        self.verify_internal(data, Some(signature))
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+        self.verify_int_final(Some(signature))
+    }
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
+    }
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+impl VerifySignature for RsaPKCSOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_internal(data, None)
+    }
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+    fn verify_final(&mut self) -> Result<()> {
+        self.verify_int_final(None)
     }
 }

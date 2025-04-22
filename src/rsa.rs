@@ -473,6 +473,7 @@ impl Mechanism for RsaPKCSMechanism {
             mech, key, &self.info,
         )?))
     }
+
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
@@ -487,6 +488,7 @@ impl Mechanism for RsaPKCSMechanism {
         }
         Ok(Box::new(RsaPKCSOperation::sign_new(mech, key, &self.info)?))
     }
+
     fn verify_new(
         &self,
         mech: &CK_MECHANISM,
@@ -501,6 +503,25 @@ impl Mechanism for RsaPKCSMechanism {
         }
         Ok(Box::new(RsaPKCSOperation::verify_new(
             mech, key, &self.info,
+        )?))
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    fn verify_signature_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: &[u8],
+    ) -> Result<Box<dyn VerifySignature>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_VERIFY) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(RsaPKCSOperation::verify_signature_new(
+            mech, key, &self.info, signature,
         )?))
     }
 
