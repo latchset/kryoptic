@@ -7,6 +7,33 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 pub struct Pkcs11Callbacks;
 
+struct Features {
+    fips: bool,
+    dynamic: bool,
+    pkcs11_3_2: bool,
+}
+
+impl Features {
+    fn to_bools() -> Features {
+        #[cfg(all(feature = "dynamic", feature = "fips"))]
+        compile_error!("features `dynamic` and `fips` are mutually exclusive");
+        Features {
+            #[cfg(feature = "fips")]
+            fips: true,
+            #[cfg(not(feature = "fips"))]
+            fips: false,
+            #[cfg(feature = "dynamic")]
+            dynamic: true,
+            #[cfg(not(feature = "dynamic"))]
+            dynamic: false,
+            #[cfg(feature = "pkcs11_3_2")]
+            pkcs11_3_2: true,
+            #[cfg(not(feature = "pkcs11_3_2"))]
+            pkcs11_3_2: false,
+        }
+    }
+}
+
 impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     fn int_macro(
         &self,
@@ -56,12 +83,11 @@ fn ossl_bindings(args: &[&str], out_file: &Path) {
         .expect("Couldn't write bindings!");
 }
 
-#[cfg(not(feature = "dynamic"))]
-fn build_ossl(out_file: &Path) {
-    let openssl_path =
-        std::path::PathBuf::from(env!("KRYOPTIC_OPENSSL_SOURCES"))
-            .canonicalize()
-            .expect("cannot canonicalize OpenSSL path");
+fn build_ossl(features: &Features, out_file: &Path) {
+    let sources = std::env::var("KRYOPTIC_OPENSSL_SOURCES").unwrap();
+    let openssl_path = std::path::PathBuf::from(sources)
+        .canonicalize()
+        .expect("cannot canonicalize OpenSSL path");
 
     let mut buildargs = vec![
         "no-deprecated",
@@ -93,14 +119,7 @@ fn build_ossl(out_file: &Path) {
     let ar_path: std::path::PathBuf;
     let ar_name: &str;
 
-    #[cfg(not(feature = "fips"))]
-    {
-        ar_path = openssl_path.clone();
-        ar_name = "crypto";
-    }
-
-    #[cfg(feature = "fips")]
-    {
+    if features.fips {
         buildargs.push("enable-fips");
 
         defines.push_str(" -DOPENSSL_PEDANTIC_ZEROIZATION");
@@ -118,6 +137,9 @@ fn build_ossl(out_file: &Path) {
             .join("providers")
             .canonicalize()
             .expect("OpenSSL providers path unavailable");
+    } else {
+        ar_path = openssl_path.clone();
+        ar_name = "crypto";
     }
 
     buildargs.push(&defines);
@@ -172,31 +194,31 @@ fn build_ossl(out_file: &Path) {
     );
 
     let mut args = vec![&include_path, "-std=c90"];
-    #[cfg(feature = "fips")]
-    args.push("-D_KRYOPTIC_FIPS_");
+    if features.fips {
+        args.push("-D_KRYOPTIC_FIPS_");
+    }
 
-    ossl_bindings(args.as_slice(), out_file);
+    ossl_bindings(&args, out_file);
 }
 
-#[cfg(feature = "dynamic")]
 fn use_system_ossl(out_file: &Path) {
     println!("cargo:rustc-link-lib=crypto");
     ossl_bindings(&["-std=c90"], out_file);
 }
 
 fn main() {
-    #[cfg(all(feature = "dynamic", feature = "fips"))]
-    compile_error!("features `dynamic` and `fips` are mutually exclusive");
+    let features = Features::to_bools();
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let pkcs11_bindings = out_path.join("pkcs11_bindings.rs");
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* PKCS11 Headers */
-    #[cfg(feature = "pkcs11_3_2")]
-    let pkcs11_header = "pkcs11_headers/3.2-prerelease/pkcs11.h";
-    #[cfg(not(feature = "pkcs11_3_2"))]
-    let pkcs11_header = "pkcs11_headers/3.1/pkcs11.h";
+    let pkcs11_header = if features.pkcs11_3_2 {
+        "pkcs11_headers/3.2-prerelease/pkcs11.h"
+    } else {
+        "pkcs11_headers/3.1/pkcs11.h"
+    };
     println!("cargo:rerun-if-changed={}", pkcs11_header);
     bindgen::Builder::default()
         .header(pkcs11_header)
@@ -214,11 +236,11 @@ fn main() {
         .expect("Couldn't write bindings!");
 
     /* OpenSSL Cryptography */
-    #[cfg(feature = "dynamic")]
-    use_system_ossl(&ossl_bindings);
-
-    #[cfg(not(feature = "dynamic"))]
-    build_ossl(&ossl_bindings);
+    if features.dynamic {
+        use_system_ossl(&ossl_bindings);
+    } else {
+        build_ossl(&features, &ossl_bindings);
+    }
 
     println!("cargo:rerun-if-changed=build.rs");
 }
