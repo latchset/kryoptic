@@ -214,10 +214,18 @@ fn test_rsa_operations() {
     let ret = sig_verify(session, pub_key_handle, &msg, &sig, &mechanism);
     assert_eq!(ret, CKR_OK);
 
+    #[cfg(feature = "pkcs11_3_2")]
+    {
+        /* Re-Verify using the SignatureVerification APIs */
+        let ret =
+            sig_verifysig(session, pub_key_handle, &msg, &sig, &mechanism);
+        assert_eq!(ret, CKR_OK);
+    }
+
     let signed =
         ret_or_panic!(sig_gen(session, pri_key_handle, &msg, &mechanism));
     /* PSS is non deterministic because saltlen > 0,
-     * so we can compare the result
+     * so we can't compare the result
      * assert_eq!(sig, result); */
     assert_eq!(sig.len(), signed.len());
     /* but we can verify again to ensure signing produced
