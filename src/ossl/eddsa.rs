@@ -129,6 +129,7 @@ pub struct EddsaOperation {
     sigctx: Option<EvpMdCtx>,
     #[cfg(feature = "fips")]
     sigctx: Option<ProviderSignatureCtx>,
+    signature: Option<Vec<u8>>,
 }
 
 impl EddsaOperation {
@@ -149,6 +150,7 @@ impl EddsaOperation {
             finalized: false,
             in_use: false,
             sigctx: get_sig_ctx!(key),
+            signature: None,
         })
     }
 
@@ -169,6 +171,33 @@ impl EddsaOperation {
             finalized: false,
             in_use: false,
             sigctx: get_sig_ctx!(key),
+            signature: None,
+        })
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    pub fn verify_signature_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        _: &CK_MECHANISM_INFO,
+        signature: &[u8],
+    ) -> Result<EddsaOperation> {
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
+        if signature.len() != outlen {
+            return Err(CKR_SIGNATURE_LEN_RANGE)?;
+        }
+        Ok(EddsaOperation {
+            mech: mech.mechanism,
+            output_len: outlen,
+            public_key: Some(pubkey),
+            private_key: None,
+            params: parse_params(mech, outlen)?,
+            data: Vec::new(),
+            finalized: false,
+            in_use: false,
+            sigctx: get_sig_ctx!(key),
+            signature: Some(signature.to_vec()),
         })
     }
 
@@ -358,19 +387,23 @@ impl Sign for EddsaOperation {
     }
 }
 
-impl Verify for EddsaOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+impl EddsaOperation {
+    fn verify_internal(
+        &mut self,
+        data: &[u8],
+        signature: Option<&[u8]>,
+    ) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.verify_update(data)?;
-        self.verify_final(signature)
+        self.verify_int_update(data)?;
+        self.verify_int_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+    fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -408,7 +441,7 @@ impl Verify for EddsaOperation {
         Ok(())
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+    fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -418,12 +451,20 @@ impl Verify for EddsaOperation {
 
         self.finalized = true;
 
+        let sig = match signature {
+            Some(s) => s,
+            None => match &self.signature {
+                Some(s) => s.as_slice(),
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
+
         #[cfg(not(feature = "fips"))]
         if unsafe {
             EVP_DigestVerify(
                 self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                signature.as_ptr(),
-                signature.len(),
+                sig.as_ptr(),
+                sig.len(),
                 self.data.as_ptr(),
                 self.data.len(),
             )
@@ -436,12 +477,41 @@ impl Verify for EddsaOperation {
         self.sigctx
             .as_mut()
             .unwrap()
-            .digest_verify(&signature, &mut self.data.as_slice())?;
+            .digest_verify(sig.as_ptr(), &mut self.data.as_slice())?;
 
         Ok(())
+    }
+}
+
+impl Verify for EddsaOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+        self.verify_internal(data, Some(signature))
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+        self.verify_int_final(Some(signature))
     }
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
+    }
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+impl VerifySignature for EddsaOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_internal(data, None)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+
+    fn verify_final(&mut self) -> Result<()> {
+        self.verify_int_final(None)
     }
 }
