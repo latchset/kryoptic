@@ -138,6 +138,7 @@ pub struct EccOperation {
     sigctx: Option<EvpMdCtx>,
     #[cfg(feature = "fips")]
     sigctx: Option<ProviderSignatureCtx>,
+    signature: Option<Vec<u8>>,
 }
 
 impl EccOperation {
@@ -196,6 +197,7 @@ impl EccOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::new()?),
             },
+            signature: None,
         })
     }
 
@@ -220,6 +222,37 @@ impl EccOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::new()?),
             },
+            signature: None,
+        })
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    pub fn verify_signature_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        _: &CK_MECHANISM_INFO,
+        signature: &[u8],
+    ) -> Result<EccOperation> {
+        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
+        if signature.len() != outlen {
+            return Err(CKR_SIGNATURE_LEN_RANGE)?;
+        }
+        Ok(EccOperation {
+            mech: mech.mechanism,
+            output_len: outlen,
+            public_key: Some(pubkey),
+            private_key: None,
+            finalized: false,
+            in_use: false,
+            sigctx: match mech.mechanism {
+                CKM_ECDSA => None,
+                #[cfg(feature = "fips")]
+                _ => Some(ProviderSignatureCtx::new(name_as_char(ECDSA_NAME))?),
+                #[cfg(not(feature = "fips"))]
+                _ => Some(EvpMdCtx::new()?),
+            },
+            signature: Some(signature.to_vec()),
         })
     }
 
@@ -276,7 +309,7 @@ impl Sign for EccOperation {
         if self.mech == CKM_ECDSA {
             self.finalized = true;
             if signature.len() != self.output_len {
-                return Err(CKR_GENERAL_ERROR)?;
+                return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
             let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
@@ -427,8 +460,12 @@ impl Sign for EccOperation {
     }
 }
 
-impl Verify for EccOperation {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+impl EccOperation {
+    fn verify_internal(
+        &mut self,
+        data: &[u8],
+        signature: Option<&[u8]>,
+    ) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -436,9 +473,6 @@ impl Verify for EccOperation {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_ECDSA {
-            if signature.len() != self.output_len {
-                return Err(CKR_GENERAL_ERROR)?; // already checked in fn_verify
-            }
             let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
@@ -446,7 +480,18 @@ impl Verify for EccOperation {
             }
 
             // convert PKCS #11 signature to OpenSSL format
-            let mut ossl_sign = pkcs11_to_ossl_signature(signature)?;
+            let mut ossl_sign = match signature {
+                Some(s) => {
+                    if s.len() != self.output_len {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
+                    pkcs11_to_ossl_signature(s)?
+                }
+                None => match &self.signature {
+                    Some(s) => pkcs11_to_ossl_signature(s.as_slice())?,
+                    None => return Err(CKR_GENERAL_ERROR)?,
+                },
+            };
 
             self.finalized = true;
 
@@ -465,11 +510,11 @@ impl Verify for EccOperation {
             zeromem(ossl_sign.as_mut_slice());
             return Ok(());
         }
-        self.verify_update(data)?;
-        self.verify_final(signature)
+        self.verify_int_update(data)?;
+        self.verify_int_final(signature)
     }
 
-    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+    fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -521,7 +566,7 @@ impl Verify for EccOperation {
         self.sigctx.as_mut().unwrap().digest_verify_update(data)
     }
 
-    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+    fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -530,7 +575,18 @@ impl Verify for EccOperation {
         }
 
         // convert PKCS #11 signature to OpenSSL format
-        let mut ossl_sign = pkcs11_to_ossl_signature(signature)?;
+        let mut ossl_sign = match signature {
+            Some(s) => {
+                if s.len() != self.output_len {
+                    return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                }
+                pkcs11_to_ossl_signature(s)?
+            }
+            None => match &self.signature {
+                Some(s) => pkcs11_to_ossl_signature(s.as_slice())?,
+                None => return Err(CKR_GENERAL_ERROR)?,
+            },
+        };
 
         self.finalized = true;
 
@@ -555,8 +611,37 @@ impl Verify for EccOperation {
         zeromem(ossl_sign.as_mut_slice());
         Ok(())
     }
+}
+
+impl Verify for EccOperation {
+    fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+        self.verify_internal(data, Some(signature))
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+
+    fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
+        self.verify_int_final(Some(signature))
+    }
 
     fn signature_len(&self) -> Result<usize> {
         Ok(self.output_len)
+    }
+}
+
+#[cfg(feature = "pkcs11_3_2")]
+impl VerifySignature for EccOperation {
+    fn verify(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_internal(data, None)
+    }
+
+    fn verify_update(&mut self, data: &[u8]) -> Result<()> {
+        self.verify_int_update(data)
+    }
+
+    fn verify_final(&mut self) -> Result<()> {
+        self.verify_int_final(None)
     }
 }

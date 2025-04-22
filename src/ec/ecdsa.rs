@@ -324,6 +324,7 @@ impl Mechanism for EccMechanism {
         }
         Ok(Box::new(EccOperation::sign_new(mech, key, &self.info)?))
     }
+
     fn verify_new(
         &self,
         mech: &CK_MECHANISM,
@@ -337,6 +338,25 @@ impl Mechanism for EccMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
+    }
+
+    #[cfg(feature = "pkcs11_3_2")]
+    fn verify_signature_new(
+        &self,
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: &[u8],
+    ) -> Result<Box<dyn VerifySignature>> {
+        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC, CKA_VERIFY) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+        Ok(Box::new(EccOperation::verify_signature_new(
+            mech, key, &self.info, signature,
+        )?))
     }
 
     fn generate_keypair(
