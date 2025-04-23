@@ -281,16 +281,16 @@ impl MlDsaOperation {
             ParmFlags::Empty
         };
 
-        let mut sig_alg =
-            EvpSignature::new(mldsa_param_set_to_name(op.params.param_set)?)?;
-
         match flag {
             CKF_SIGN => {
                 pflags = pflags | ParmFlags::Sign;
                 let res = unsafe {
                     EVP_PKEY_sign_message_init(
                         op.sigctx.as_mut_ptr(),
-                        sig_alg.as_mut_ptr(),
+                        EvpSignature::new(mldsa_param_set_to_name(
+                            op.params.param_set,
+                        )?)?
+                        .as_mut_ptr(),
                         op.params.ossl_params(pflags)?.as_ptr(),
                     )
                 };
@@ -304,7 +304,10 @@ impl MlDsaOperation {
                 let res = unsafe {
                     EVP_PKEY_verify_message_init(
                         op.sigctx.as_mut_ptr(),
-                        sig_alg.as_mut_ptr(),
+                        EvpSignature::new(mldsa_param_set_to_name(
+                            op.params.param_set,
+                        )?)?
+                        .as_mut_ptr(),
                         op.params.ossl_params(pflags)?.as_ptr(),
                     )
                 };
@@ -313,7 +316,7 @@ impl MlDsaOperation {
                 }
 
                 match signature {
-                    Some(sig) => op.set_signature(&sig_alg, sig)?,
+                    Some(sig) => op.set_signature(sig)?,
                     None => (),
                 }
             }
@@ -377,11 +380,7 @@ impl MlDsaOperation {
         Ok(op)
     }
 
-    fn set_signature(
-        &mut self,
-        sig_alg: &EvpSignature,
-        signature: &[u8],
-    ) -> Result<()> {
+    fn set_signature(&mut self, signature: &[u8]) -> Result<()> {
         let size = match self.params.param_set {
             CKP_ML_DSA_44 => ML_DSA_44_SIG_SIZE,
             CKP_ML_DSA_65 => ML_DSA_65_SIG_SIZE,
@@ -405,7 +404,7 @@ impl MlDsaOperation {
         if self.mech == CKM_ML_DSA {
             let params = {
                 let ptr = unsafe {
-                    EVP_SIGNATURE_settable_ctx_params(sig_alg.as_ptr())
+                    EVP_PKEY_CTX_settable_params(self.sigctx.as_ptr())
                 };
                 OsslParam::from_const_ptr(ptr)?
             };
@@ -637,6 +636,21 @@ impl MlDsaOperation {
                 return Err(CKR_DEVICE_ERROR)?;
             }
         } else {
+            match signature {
+                Some(sig) => {
+                    let ret = unsafe {
+                        EVP_PKEY_CTX_set_signature(
+                            self.sigctx.as_mut_ptr(),
+                            sig.as_ptr(),
+                            sig.len(),
+                        )
+                    };
+                    if ret != 1 {
+                        return Err(CKR_DEVICE_ERROR)?;
+                    }
+                }
+                None => (),
+            }
             if unsafe {
                 EVP_PKEY_verify_message_final(self.sigctx.as_mut_ptr())
             } != 1
