@@ -133,25 +133,55 @@ pub struct EddsaOperation {
 }
 
 impl EddsaOperation {
+    fn new_op(
+        flag: CK_FLAGS,
+        mech: &CK_MECHANISM,
+        key: &Object,
+        signature: Option<Vec<u8>>,
+    ) -> Result<EddsaOperation> {
+        let public_key: Option<EvpPkey>;
+        let private_key: Option<EvpPkey>;
+        let output_len: usize;
+        match flag {
+            CKF_SIGN => {
+                public_key = None;
+                let privkey = EvpPkey::privkey_from_object(key)?;
+                output_len = 2 * ((privkey.get_bits()? + 7) / 8);
+                private_key = Some(privkey);
+            }
+            CKF_VERIFY => {
+                private_key = None;
+                let pubkey = EvpPkey::pubkey_from_object(key)?;
+                output_len = 2 * ((pubkey.get_bits()? + 7) / 8);
+                if let Some(s) = &signature {
+                    if s.len() != output_len {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
+                }
+                public_key = Some(pubkey);
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        }
+        Ok(EddsaOperation {
+            mech: mech.mechanism,
+            output_len: output_len,
+            public_key: public_key,
+            private_key: private_key,
+            params: parse_params(mech, output_len)?,
+            data: Vec::new(),
+            finalized: false,
+            in_use: false,
+            sigctx: get_sig_ctx!(key),
+            signature: signature,
+        })
+    }
+
     pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EddsaOperation> {
-        let privkey = EvpPkey::privkey_from_object(key)?;
-        let outlen = 2 * ((privkey.get_bits()? + 7) / 8);
-        Ok(EddsaOperation {
-            mech: mech.mechanism,
-            output_len: outlen,
-            public_key: None,
-            private_key: Some(privkey),
-            params: parse_params(mech, outlen)?,
-            data: Vec::new(),
-            finalized: false,
-            in_use: false,
-            sigctx: get_sig_ctx!(key),
-            signature: None,
-        })
+        Self::new_op(CKF_SIGN, mech, key, None)
     }
 
     pub fn verify_new(
@@ -159,20 +189,7 @@ impl EddsaOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EddsaOperation> {
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
-        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
-        Ok(EddsaOperation {
-            mech: mech.mechanism,
-            output_len: outlen,
-            public_key: Some(pubkey),
-            private_key: None,
-            params: parse_params(mech, outlen)?,
-            data: Vec::new(),
-            finalized: false,
-            in_use: false,
-            sigctx: get_sig_ctx!(key),
-            signature: None,
-        })
+        Self::new_op(CKF_VERIFY, mech, key, None)
     }
 
     #[cfg(feature = "pkcs11_3_2")]
@@ -182,23 +199,7 @@ impl EddsaOperation {
         _: &CK_MECHANISM_INFO,
         signature: &[u8],
     ) -> Result<EddsaOperation> {
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
-        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
-        if signature.len() != outlen {
-            return Err(CKR_SIGNATURE_LEN_RANGE)?;
-        }
-        Ok(EddsaOperation {
-            mech: mech.mechanism,
-            output_len: outlen,
-            public_key: Some(pubkey),
-            private_key: None,
-            params: parse_params(mech, outlen)?,
-            data: Vec::new(),
-            finalized: false,
-            in_use: false,
-            sigctx: get_sig_ctx!(key),
-            signature: Some(signature.to_vec()),
-        })
+        Self::new_op(CKF_VERIFY, mech, key, Some(signature.to_vec()))
     }
 
     pub fn generate_keypair(

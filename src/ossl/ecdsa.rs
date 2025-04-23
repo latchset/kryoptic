@@ -176,18 +176,40 @@ impl EccOperation {
         );
     }
 
-    pub fn sign_new(
+    fn new_op(
+        flag: CK_FLAGS,
         mech: &CK_MECHANISM,
         key: &Object,
-        _: &CK_MECHANISM_INFO,
+        signature: Option<Vec<u8>>,
     ) -> Result<EccOperation> {
-        let privkey = EvpPkey::privkey_from_object(key)?;
-        let outlen = 2 * ((privkey.get_bits()? + 7) / 8);
+        let public_key: Option<EvpPkey>;
+        let private_key: Option<EvpPkey>;
+        let output_len: usize;
+        match flag {
+            CKF_SIGN => {
+                public_key = None;
+                let privkey = EvpPkey::privkey_from_object(key)?;
+                output_len = 2 * ((privkey.get_bits()? + 7) / 8);
+                private_key = Some(privkey);
+            }
+            CKF_VERIFY => {
+                private_key = None;
+                let pubkey = EvpPkey::pubkey_from_object(key)?;
+                output_len = 2 * ((pubkey.get_bits()? + 7) / 8);
+                if let Some(s) = &signature {
+                    if s.len() != output_len {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
+                }
+                public_key = Some(pubkey);
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        }
         Ok(EccOperation {
             mech: mech.mechanism,
-            output_len: outlen,
-            public_key: None,
-            private_key: Some(privkey),
+            output_len: output_len,
+            public_key: public_key,
+            private_key: private_key,
             finalized: false,
             in_use: false,
             sigctx: match mech.mechanism {
@@ -197,8 +219,16 @@ impl EccOperation {
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::new()?),
             },
-            signature: None,
+            signature: signature,
         })
+    }
+
+    pub fn sign_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+        _: &CK_MECHANISM_INFO,
+    ) -> Result<EccOperation> {
+        Self::new_op(CKF_SIGN, mech, key, None)
     }
 
     pub fn verify_new(
@@ -206,24 +236,7 @@ impl EccOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
     ) -> Result<EccOperation> {
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
-        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
-        Ok(EccOperation {
-            mech: mech.mechanism,
-            output_len: outlen,
-            public_key: Some(pubkey),
-            private_key: None,
-            finalized: false,
-            in_use: false,
-            sigctx: match mech.mechanism {
-                CKM_ECDSA => None,
-                #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(name_as_char(ECDSA_NAME))?),
-                #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::new()?),
-            },
-            signature: None,
-        })
+        Self::new_op(CKF_VERIFY, mech, key, None)
     }
 
     #[cfg(feature = "pkcs11_3_2")]
@@ -233,27 +246,7 @@ impl EccOperation {
         _: &CK_MECHANISM_INFO,
         signature: &[u8],
     ) -> Result<EccOperation> {
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
-        let outlen = 2 * ((pubkey.get_bits()? + 7) / 8);
-        if signature.len() != outlen {
-            return Err(CKR_SIGNATURE_LEN_RANGE)?;
-        }
-        Ok(EccOperation {
-            mech: mech.mechanism,
-            output_len: outlen,
-            public_key: Some(pubkey),
-            private_key: None,
-            finalized: false,
-            in_use: false,
-            sigctx: match mech.mechanism {
-                CKM_ECDSA => None,
-                #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(name_as_char(ECDSA_NAME))?),
-                #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::new()?),
-            },
-            signature: Some(signature.to_vec()),
-        })
+        Self::new_op(CKF_VERIFY, mech, key, Some(signature.to_vec()))
     }
 
     pub fn generate_keypair(
