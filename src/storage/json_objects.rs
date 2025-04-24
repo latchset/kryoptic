@@ -35,6 +35,16 @@ fn to_json_value(a: &Attribute) -> Value {
             Err(_) => Value::String(BASE64.encode(a.get_value())),
         },
         AttrType::BytesType => Value::String(BASE64.encode(a.get_value())),
+        AttrType::UlongArrayType => match a.to_ulong_array() {
+            Ok(array) => {
+                let mut numvec = Vec::<Value>::with_capacity(array.len());
+                for elem in array.iter() {
+                    numvec.push(Value::Number(Number::from(*elem)));
+                }
+                Value::Array(numvec)
+            }
+            Err(_) => Value::Null,
+        },
         AttrType::DateType => match a.to_date_string() {
             Ok(d) => Value::String(d),
             Err(_) => Value::String(String::new()),
@@ -198,6 +208,23 @@ impl JsonObjects {
                                 }
                                 Err(_) => return Err(CKR_GENERAL_ERROR)?,
                             }
+                        }
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                    },
+                    AttrType::UlongArrayType => match val.as_array() {
+                        Some(a) => {
+                            let mut v = Vec::<CK_ULONG>::with_capacity(a.len());
+                            for elem in a.iter() {
+                                match elem.as_u64() {
+                                    Some(n) => v.push(CK_ULONG::try_from(n)?),
+                                    None => {
+                                        return Err(
+                                            CKR_ATTRIBUTE_VALUE_INVALID,
+                                        )?
+                                    }
+                                }
+                            }
+                            Attribute::from_ulong_array(id, v)
                         }
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
