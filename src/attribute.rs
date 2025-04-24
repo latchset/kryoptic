@@ -13,6 +13,7 @@ pub enum AttrType {
     NumType,
     StringType,
     BytesType,
+    UlongArrayType,
     DateType,
     DenyType,
     IgnoreType,
@@ -110,9 +111,9 @@ static ATTRMAP: [Attrmap<'_>; ATTRMAP_SIZE] = {
     amap[63] = attrmap_element!(CKA_EC_POINT; as BytesType);
     amap[64] = attrmap_element!(CKA_ALWAYS_AUTHENTICATE; as BoolType);
     amap[65] = attrmap_element!(CKA_WRAP_WITH_TRUSTED; as BoolType);
-    amap[66] = attrmap_element!(CKA_WRAP_TEMPLATE; as BytesType);
-    amap[67] = attrmap_element!(CKA_UNWRAP_TEMPLATE; as BytesType);
-    amap[68] = attrmap_element!(CKA_DERIVE_TEMPLATE; as BytesType);
+    amap[66] = attrmap_element!(CKA_WRAP_TEMPLATE; as DenyType);
+    amap[67] = attrmap_element!(CKA_UNWRAP_TEMPLATE; as DenyType);
+    amap[68] = attrmap_element!(CKA_DERIVE_TEMPLATE; as DenyType);
     amap[69] = attrmap_element!(CKA_OTP_FORMAT; as NumType);
     amap[70] = attrmap_element!(CKA_OTP_LENGTH; as NumType);
     amap[71] = attrmap_element!(CKA_OTP_TIME_INTERVAL; as NumType);
@@ -147,7 +148,7 @@ static ATTRMAP: [Attrmap<'_>; ATTRMAP_SIZE] = {
     amap[100] = attrmap_element!(CKA_REQUIRED_CMS_ATTRIBUTES; as BytesType);
     amap[101] = attrmap_element!(CKA_DEFAULT_CMS_ATTRIBUTES; as BytesType);
     amap[102] = attrmap_element!(CKA_SUPPORTED_CMS_ATTRIBUTES; as BytesType);
-    amap[103] = attrmap_element!(CKA_ALLOWED_MECHANISMS; as BytesType);
+    amap[103] = attrmap_element!(CKA_ALLOWED_MECHANISMS; as UlongArrayType);
     amap[104] = attrmap_element!(CKA_PROFILE_ID; as NumType);
     amap[105] = attrmap_element!(CKA_X2RATCHET_BAG; as BytesType);
     amap[106] = attrmap_element!(CKA_X2RATCHET_BAGSIZE; as NumType);
@@ -194,8 +195,8 @@ static ATTRMAP: [Attrmap<'_>; ATTRMAP_SIZE] = {
         amap[139] = attrmap_element!(CKA_VALIDATION_VENDOR_URI; as StringType);
         amap[140] = attrmap_element!(CKA_VALIDATION_PROFILE; as StringType);
         amap[141] = attrmap_element!(CKA_OBJECT_VALIDATION_FLAGS; as NumType);
-        amap[142] = attrmap_element!(CKA_ENCAPSULATE_TEMPLATE; as BytesType);
-        amap[143] = attrmap_element!(CKA_DECAPSULATE_TEMPLATE; as BytesType);
+        amap[142] = attrmap_element!(CKA_ENCAPSULATE_TEMPLATE; as DenyType);
+        amap[143] = attrmap_element!(CKA_DECAPSULATE_TEMPLATE; as DenyType);
         amap[144] = attrmap_element!(CKA_TRUST_SERVER_AUTH; as NumType);
         amap[145] = attrmap_element!(CKA_TRUST_CLIENT_AUTH; as NumType);
         amap[146] = attrmap_element!(CKA_TRUST_CODE_SIGNING; as NumType);
@@ -286,6 +287,24 @@ impl Attribute {
         Ok(&self.value)
     }
 
+    pub fn to_ulong_array(&self) -> Result<Vec<CK_ULONG>> {
+        let ulen = std::mem::size_of::<CK_ULONG>();
+        if self.value.len() % ulen != 0 {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        let vlen = self.value.len() / ulen;
+        let mut v = Vec::<CK_ULONG>::with_capacity(vlen);
+
+        let mut idx = 0;
+        while idx < self.value.len() {
+            let elem = &self.value[idx..(idx + ulen)];
+            idx += ulen;
+            let ulongval = CK_ULONG::from_ne_bytes(elem.try_into()?);
+            v.push(ulongval);
+        }
+        Ok(v)
+    }
+
     pub fn to_date_string(&self) -> Result<String> {
         if self.value.len() == 0 {
             return Ok(String::new()); /* empty default value */
@@ -358,6 +377,14 @@ impl Attribute {
             value: val.to_vec(),
         }
     }
+
+    pub fn from_ulong_bytevec(id: CK_ULONG, val: Vec<u8>) -> Attribute {
+        Attribute {
+            ck_type: id,
+            attrtype: AttrType::UlongArrayType,
+            value: val,
+        }
+    }
 }
 
 macro_rules! conversion_from_type {
@@ -426,6 +453,20 @@ fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
     val
 }
 conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
+
+/* convert array of ulongs into an array of bytes where ulong is converted to
+ * an array of bytes in native endian order */
+fn ulong_array_to_vec(val: Vec<CK_ULONG>) -> Vec<u8> {
+    let ulen = std::mem::size_of::<CK_ULONG>();
+    let mut v = Vec::<u8>::with_capacity(val.len() * ulen);
+    for e in val.iter() {
+        for b in e.to_ne_bytes().iter() {
+            v.push(*b);
+        }
+    }
+    v
+}
+conversion_from_type! {make from_ulong_array; from_type_ulong_array; from_string_ulong_bytes; from Vec<CK_ULONG>; as UlongArrayType; via ulong_array_to_vec}
 
 fn date_to_vec(val: CK_DATE) -> Vec<u8> {
     let mut v = vec![0u8; 8];
@@ -601,6 +642,9 @@ impl CK_ATTRIBUTE {
             }
             AttrType::BytesType => {
                 Ok(Attribute::from_bytes(self.type_, self.to_buf()?))
+            }
+            AttrType::UlongArrayType => {
+                Ok(Attribute::from_ulong_bytevec(self.type_, self.to_buf()?))
             }
             AttrType::DateType => {
                 Ok(Attribute::from_date(self.type_, self.to_date()?))

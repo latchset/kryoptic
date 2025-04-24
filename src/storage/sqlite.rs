@@ -58,12 +58,101 @@ pub struct SqliteStorage {
 }
 
 impl SqliteStorage {
+    fn add_bool(
+        obj: &mut Object,
+        atype: CK_ATTRIBUTE_TYPE,
+        val: ValueRef,
+    ) -> Result<()> {
+        obj.set_attr(match val.as_i64_or_null().map_err(bad_storage)? {
+            Some(b) => Attribute::from_bool(atype, b != 0),
+            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        })
+    }
+
+    fn add_num(
+        obj: &mut Object,
+        atype: CK_ATTRIBUTE_TYPE,
+        val: ValueRef,
+    ) -> Result<()> {
+        obj.set_attr(match val.as_i64_or_null().map_err(bad_storage)? {
+            Some(n) => Attribute::from_ulong(atype, Self::val_to_ulong(n)?),
+            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        })
+    }
+
+    fn add_string(
+        obj: &mut Object,
+        atype: CK_ATTRIBUTE_TYPE,
+        val: ValueRef,
+    ) -> Result<()> {
+        obj.set_attr(match val.as_str_or_null().map_err(bad_storage)? {
+            Some(s) => Attribute::from_string(atype, s.to_string()),
+            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        })
+    }
+
+    fn add_byte_array(
+        obj: &mut Object,
+        atype: CK_ATTRIBUTE_TYPE,
+        val: ValueRef,
+    ) -> Result<()> {
+        obj.set_attr(match val.as_blob_or_null().map_err(bad_storage)? {
+            Some(v) => Attribute::from_bytes(atype, v.to_vec()),
+            None => Attribute::from_bytes(atype, Vec::new()),
+        })
+    }
+
+    fn add_ulong_array(
+        obj: &mut Object,
+        atype: CK_ATTRIBUTE_TYPE,
+        val: ValueRef,
+    ) -> Result<()> {
+        obj.set_attr(match val.as_blob_or_null().map_err(bad_storage)? {
+            Some(blob) => {
+                let ulen = std::mem::size_of::<u64>();
+                if blob.len() % ulen != 0 {
+                    return Err(CKR_DEVICE_MEMORY)?;
+                }
+                let vlen = blob.len() / ulen;
+                let mut v = Vec::with_capacity(vlen);
+
+                let mut idx = 0;
+                while idx < blob.len() {
+                    let chunk = &blob[idx..(idx + ulen)];
+                    idx += ulen;
+                    let u64val = u64::from_le_bytes(chunk.try_into()?);
+                    v.push(CK_ULONG::try_from(u64val)?);
+                }
+                Attribute::from_ulong_array(atype, v)
+            }
+            None => Attribute::from_ulong_array(atype, Vec::new()),
+        })
+    }
+
+    fn add_date(
+        obj: &mut Object,
+        atype: CK_ATTRIBUTE_TYPE,
+        val: ValueRef,
+    ) -> Result<()> {
+        obj.set_attr(match val.as_str_or_null().map_err(bad_storage)? {
+            Some(s) => {
+                if s.len() == 0 {
+                    /* special case for default empty value */
+                    Attribute::from_date_bytes(atype, Vec::new())
+                } else {
+                    Attribute::from_date(atype, string_to_ck_date(s)?)
+                }
+            }
+            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        })
+    }
+
     fn rows_to_objects(mut rows: Rows) -> Result<Vec<Object>> {
         let mut objid = 0;
         let mut objects = Vec::<Object>::new();
         while let Some(row) = rows.next().map_err(bad_storage)? {
             let id: i32 = row.get(0).map_err(bad_storage)?;
-            let atype: CK_ULONG = row.get(1).map_err(bad_storage)?;
+            let atype: CK_ATTRIBUTE_TYPE = row.get(1).map_err(bad_storage)?;
             let val = row.get_ref(2).map_err(bad_storage)?;
             if objid != id {
                 objid = id;
@@ -72,71 +161,23 @@ impl SqliteStorage {
             match objects.last_mut() {
                 Some(obj) => {
                     let attrtype = AttrType::attr_id_to_attrtype(atype)?;
-                    let attr = match attrtype {
-                        AttrType::BoolType => {
-                            match val.as_i64_or_null().map_err(bad_storage)? {
-                                Some(b) => Attribute::from_bool(atype, b != 0),
-                                None => {
-                                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?
-                                }
-                            }
+                    match attrtype {
+                        AttrType::BoolType => Self::add_bool(obj, atype, val)?,
+                        AttrType::NumType => Self::add_num(obj, atype, val)?,
+                        AttrType::StringType => {
+                            Self::add_string(obj, atype, val)?
                         }
-                        AttrType::NumType => {
-                            match val.as_i64_or_null().map_err(bad_storage)? {
-                                Some(n) => {
-                                    let val = Self::val_to_ulong(n)?;
-                                    Attribute::from_ulong(atype, val)
-                                }
-                                None => {
-                                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?
-                                }
-                            }
-                        }
-                        AttrType::StringType => match val
-                            .as_str_or_null()
-                            .map_err(bad_storage)?
-                        {
-                            Some(s) => {
-                                Attribute::from_string(atype, s.to_string())
-                            }
-                            None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-                        },
                         AttrType::BytesType => {
-                            match val.as_blob_or_null().map_err(bad_storage)? {
-                                Some(v) => {
-                                    Attribute::from_bytes(atype, v.to_vec())
-                                }
-                                None => {
-                                    Attribute::from_bytes(atype, Vec::new())
-                                }
-                            }
+                            Self::add_byte_array(obj, atype, val)?
                         }
-                        AttrType::DateType => {
-                            match val.as_str_or_null().map_err(bad_storage)? {
-                                Some(s) => {
-                                    if s.len() == 0 {
-                                        /* special case for default empty value */
-                                        Attribute::from_date_bytes(
-                                            atype,
-                                            Vec::new(),
-                                        )
-                                    } else {
-                                        Attribute::from_date(
-                                            atype,
-                                            string_to_ck_date(s)?,
-                                        )
-                                    }
-                                }
-                                None => {
-                                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?
-                                }
-                            }
+                        AttrType::UlongArrayType => {
+                            Self::add_ulong_array(obj, atype, val)?
                         }
+                        AttrType::DateType => Self::add_date(obj, atype, val)?,
                         AttrType::DenyType | AttrType::IgnoreType => {
                             return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
                         }
                     };
-                    obj.set_attr(attr)?;
                 }
                 _ => {
                     return Err(CKR_GENERAL_ERROR)?;
@@ -209,6 +250,16 @@ impl SqliteStorage {
                 AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
                 AttrType::StringType => Value::from(a.to_string()?),
                 AttrType::BytesType => Value::from(a.to_bytes()?.clone()),
+                AttrType::UlongArrayType => Value::from({
+                    let ulen = std::mem::size_of::<u64>();
+                    let vu = a.to_ulong_array()?;
+                    let mut v = Vec::<u8>::with_capacity(vu.len() * ulen);
+                    for elem in vu.iter() {
+                        let el64 = u64::try_from(*elem)?;
+                        v.extend_from_slice(&el64.to_le_bytes());
+                    }
+                    v
+                }),
                 AttrType::DateType => Value::from(a.to_date_string()?),
                 AttrType::DenyType | AttrType::IgnoreType => continue,
             };
@@ -367,6 +418,26 @@ impl StorageRaw for SqliteStorage {
                 AttrType::NumType => Self::num_to_val(a.to_ulong()?)?,
                 AttrType::StringType => Value::from(a.to_string()?),
                 AttrType::BytesType => Value::from(a.to_buf()?),
+                AttrType::UlongArrayType => Value::from({
+                    let su = a.to_slice()?;
+                    let slen = std::mem::size_of::<CK_ULONG>();
+                    if su.len() % slen != 0 {
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                    }
+                    let ulen = std::mem::size_of::<u64>();
+                    let mut v =
+                        Vec::<u8>::with_capacity((su.len() / slen) * ulen);
+
+                    let mut idx = 0;
+                    while idx < su.len() {
+                        let elem = &su[idx..(idx + slen)];
+                        idx += slen;
+                        let sval = CK_ULONG::from_ne_bytes(elem.try_into()?);
+                        let u64val = u64::try_from(sval)?;
+                        v.extend_from_slice(&u64val.to_le_bytes());
+                    }
+                    v
+                }),
                 AttrType::DateType => {
                     Value::from(a.to_attribute()?.to_date_string()?)
                 }

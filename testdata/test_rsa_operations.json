@@ -96,7 +96,7 @@
         "CKA_LABEL": "SigVerPSS_186-3.rsp [mod = 3072]",
         "CKA_MODIFIABLE": false,
         "CKA_MODULUS": "pfPaCq9UtF+ZpdcIXyE8NyHL5+g7Pmw/4PWoTH44e6UTOSwoqQENO2GMA4R+axG7u+TV5H/JfqaWJQaZ6W7NkRQE97gGlXA4pou1mlIPLZAYLRg+A1IEqRTmrAPCvG0/nXhWsl+QQbVt8xDeP+swqkaKBmih5dqc2xhZVsql114c3KwtuCMXNJVhkQU2cjG38t51KKinnsn9u6tgEXiiBKWqThl1nrFupLq4e/SLsXkPn8brTVZ00/vBG5IlWNTlaORUsmpxePPhR76wyMpuz/XlKvJIrAfWoYk5PhcjKt/y90I/VrlLmn1h/eI6lVisejvHwGdIpdoRdZ+SuvTjhrsCElZbW+7PMdBjz6txr4lrPXNHUNm8oHNDv7PChkUibp2tMHD8JHxxwHjpdJNJQQAKedAaurFNIfXmCMTk0T3uwa7ymOEkfFC0e/7mFi81L0HNuoYo0dYohIyHbPsQLazOf6FgwE06q8hmehQqcQt/SV/TUMSGKmU9FcM9kmb9",
-        "CKA_ALLOWED_MECHANISMS": "RAAAAAAAAAA=",
+        "CKA_ALLOWED_MECHANISMS": [68],
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
         "CKA_EXTRACTABLE": false,

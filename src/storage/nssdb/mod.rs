@@ -349,6 +349,10 @@ impl NSSStorage {
                     AttrType::DenyType => {
                         return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
                     }
+                    AttrType::UlongArrayType => {
+                        /* currently unsupported */
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+                    }
                 };
                 obj.set_attr(attr)?;
             }
