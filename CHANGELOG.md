@@ -8,6 +8,12 @@ All notable changes to this project should be documented in this file.
 
 * Added support for ML-DSA signature scheme
 
+* Added support for SignatureVerify APIs with all algorithms
+  [Support SignatureVerify APIs with all algorithms](https://github.com/latchset/kryoptic/pull/216)
+
+* Fixed a database format bug that would affect cross-platform portability
+  [Add better support for array of attributes](https://github.com/latchset/kryoptic/pull/219)
+
 
 # [1.1.0]
 ## 2025-04-14
