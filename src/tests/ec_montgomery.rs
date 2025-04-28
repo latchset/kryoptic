@@ -385,3 +385,83 @@ fn test_ec_montgomery_derive(t: TestUnit) {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_ec_motgomery_key() {
+    let mut testtokn = TestToken::initialized("test_ecmontgomery_key", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* EC key pair */
+    let ec_params = hex::decode(
+        "130a63757276653235353139", // x25519
+    )
+    .expect("Failed to decode hex ec_params");
+
+    let (_pubkey, prikey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_KEY_TYPE, CKK_EC_MONTGOMERY),
+        ],
+        &[(CKA_EC_PARAMS, ec_params.as_slice())],
+        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_CLASS, CKO_PRIVATE_KEY),
+            (CKA_KEY_TYPE, CKK_EC_MONTGOMERY),
+        ],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
+
+    // Peer Public point
+    let peer_point = hex::decode(
+        "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a",
+    )
+    .expect("Failed to decode hex peer public point");
+
+    let mut params = CK_ECDH1_DERIVE_PARAMS {
+        kdf: CKD_NULL,
+        ulSharedDataLen: 0,
+        pSharedData: std::ptr::null_mut(),
+        ulPublicDataLen: peer_point.len() as CK_ULONG,
+        pPublicData: byte_ptr!(peer_point.as_ptr()),
+    };
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
+
+    let mut s_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        prikey,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut s_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
