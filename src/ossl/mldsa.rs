@@ -17,6 +17,9 @@ use crate::{bytes_to_vec, cast_params};
 use asn1;
 use bitflags::bitflags;
 
+#[cfg(feature = "fips")]
+use crate::ossl::fips::*;
+
 /* Max buffer size when OpenSSL does not support the
  * message_update() interfaces and we need to accumulate */
 const MAX_BUFFER_LEN: usize = 1024 * 1024;
@@ -223,6 +226,9 @@ pub struct MlDsaOperation {
     hashsize: usize,
     hasher: Option<Box<dyn Digest>>,
     signature: Option<Vec<u8>>,
+    supports_updates: bool,
+    #[cfg(feature = "fips")]
+    fips_approved: Option<bool>,
 }
 
 impl MechOperation for MlDsaOperation {
@@ -236,7 +242,7 @@ impl MechOperation for MlDsaOperation {
 
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        Some(true)
+        self.fips_approved
     }
 }
 
@@ -247,6 +253,12 @@ impl MlDsaOperation {
         flag: CK_FLAGS,
         signature: Option<&[u8]>,
     ) -> Result<MlDsaOperation> {
+        #[cfg(feature = "fips")]
+        let fips_approved: Option<bool> = {
+            let mut fa: Option<bool> = None;
+            fips_approval_init_checks(&mut fa);
+            fa
+        };
         let mut op = MlDsaOperation {
             mech: mech.mechanism,
             finalized: false,
@@ -270,6 +282,9 @@ impl MlDsaOperation {
             hashsize: 0,
             hasher: None,
             signature: None,
+            supports_updates: false,
+            #[cfg(feature = "fips")]
+            fips_approved: fips_approved,
         };
 
         /* OpenSSL 3.5.0 does not offer HashML-DSA, so we'll
@@ -314,11 +329,6 @@ impl MlDsaOperation {
                 if res != 1 {
                     return Err(CKR_DEVICE_ERROR)?;
                 }
-
-                match signature {
-                    Some(sig) => op.set_signature(sig)?,
-                    None => (),
-                }
             }
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
@@ -338,9 +348,9 @@ impl MlDsaOperation {
                             std::ptr::null(),
                             0,
                         )
-                    } != 1
+                    } == 1
                     {
-                        op.data = Some(Vec::<u8>::new());
+                        op.supports_updates = true;
                     }
                 }
                 CKF_VERIFY => {
@@ -350,9 +360,9 @@ impl MlDsaOperation {
                             std::ptr::null(),
                             0,
                         )
-                    } != 1
+                    } == 1
                     {
-                        op.data = Some(Vec::<u8>::new());
+                        op.supports_updates = true;
                     }
                 }
                 _ => return Err(CKR_GENERAL_ERROR)?,
@@ -376,6 +386,21 @@ impl MlDsaOperation {
             CKM_HASH_ML_DSA_SHA3_512 => op.setup_digest(CKM_SHA3_512)?,
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
+
+        if flag == CKF_VERIFY {
+            /* Can try to set the signature only after we probed updates.
+             * Unfortunately EVP_PKEY_CTX_settable_params() is not available
+             * directly in the FIPS provider so we avoid using that function
+             * to probe and infer support from the fact this change went in
+             * at the same time the update() functions were added */
+            match signature {
+                Some(sig) => op.set_signature(sig)?,
+                None => (),
+            }
+        }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut op.fips_approved);
 
         Ok(op)
     }
@@ -401,26 +426,16 @@ impl MlDsaOperation {
          *   HashML-DSA at all, so we always store the signature
          *   to provide it later to EVP_PKEY_verify()
          */
-        if self.mech == CKM_ML_DSA {
-            let params = {
-                let ptr = unsafe {
-                    EVP_PKEY_CTX_settable_params(self.sigctx.as_ptr())
-                };
-                OsslParam::from_const_ptr(ptr)?
+        if self.mech == CKM_ML_DSA && self.supports_updates {
+            let ret = unsafe {
+                EVP_PKEY_CTX_set_signature(
+                    self.sigctx.as_mut_ptr(),
+                    signature.as_ptr(),
+                    signature.len(),
+                )
             };
-            if params.has_param(name_as_char(OSSL_SIGNATURE_PARAM_SIGNATURE))? {
-                let ret = unsafe {
-                    EVP_PKEY_CTX_set_signature(
-                        self.sigctx.as_mut_ptr(),
-                        signature.as_ptr(),
-                        signature.len(),
-                    )
-                };
-                if ret != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-            } else {
-                self.signature = Some(signature.to_vec())
+            if ret != 1 {
+                return Err(CKR_DEVICE_ERROR)?;
             }
         } else {
             self.signature = Some(signature.to_vec())
@@ -541,16 +556,12 @@ impl MlDsaOperation {
             self.in_use = true;
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         match self.mech {
             CKM_ML_DSA => {
-                if let Some(buffer) = &mut self.data {
-                    /* No support for update()s, try to accumulate */
-                    if buffer.len() + data.len() > MAX_BUFFER_LEN {
-                        self.finalized = true;
-                        return Err(CKR_GENERAL_ERROR)?;
-                    }
-                    buffer.extend_from_slice(data);
-                } else {
+                if self.supports_updates {
                     if unsafe {
                         EVP_PKEY_verify_message_update(
                             self.sigctx.as_mut_ptr(),
@@ -561,6 +572,23 @@ impl MlDsaOperation {
                     {
                         self.finalized = true;
                         return Err(CKR_DEVICE_ERROR)?;
+                    }
+                } else {
+                    match &mut self.data {
+                        Some(buffer) => {
+                            if buffer.len() + data.len() > MAX_BUFFER_LEN {
+                                self.finalized = true;
+                                return Err(CKR_GENERAL_ERROR)?;
+                            }
+                            buffer.extend_from_slice(data);
+                        }
+                        None => {
+                            if data.len() > MAX_BUFFER_LEN {
+                                self.finalized = true;
+                                return Err(CKR_GENERAL_ERROR)?;
+                            }
+                            self.data = Some(data.to_vec());
+                        }
                     }
                 }
             }
@@ -580,6 +608,9 @@ impl MlDsaOperation {
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_finalize(&mut self.fips_approved);
+
         Ok(())
     }
 
@@ -592,6 +623,9 @@ impl MlDsaOperation {
         }
 
         self.finalized = true;
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
 
         match self.mech {
             CKM_ML_DSA | CKM_HASH_ML_DSA => (),
@@ -636,6 +670,9 @@ impl MlDsaOperation {
                 return Err(CKR_DEVICE_ERROR)?;
             }
         } else {
+            if !self.supports_updates {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
             match signature {
                 Some(sig) => {
                     let ret = unsafe {
@@ -658,6 +695,9 @@ impl MlDsaOperation {
                 return Err(CKR_DEVICE_ERROR)?;
             }
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
 
         Ok(())
     }
@@ -695,16 +735,12 @@ impl Sign for MlDsaOperation {
             self.in_use = true;
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
+
         match self.mech {
             CKM_ML_DSA => {
-                if let Some(buffer) = &mut self.data {
-                    /* No support for update()s, try to accumulate */
-                    if buffer.len() + data.len() > MAX_BUFFER_LEN {
-                        self.finalized = true;
-                        return Err(CKR_GENERAL_ERROR)?;
-                    }
-                    buffer.extend_from_slice(data);
-                } else {
+                if self.supports_updates {
                     let ret = unsafe {
                         EVP_PKEY_sign_message_update(
                             self.sigctx.as_mut_ptr(),
@@ -715,6 +751,23 @@ impl Sign for MlDsaOperation {
                     if ret != 1 {
                         self.finalized = true;
                         return Err(CKR_DEVICE_ERROR)?;
+                    }
+                } else {
+                    match &mut self.data {
+                        Some(buffer) => {
+                            if buffer.len() + data.len() > MAX_BUFFER_LEN {
+                                self.finalized = true;
+                                return Err(CKR_GENERAL_ERROR)?;
+                            }
+                            buffer.extend_from_slice(data);
+                        }
+                        None => {
+                            if data.len() > MAX_BUFFER_LEN {
+                                self.finalized = true;
+                                return Err(CKR_GENERAL_ERROR)?;
+                            }
+                            self.data = Some(data.to_vec());
+                        }
                     }
                 }
             }
@@ -733,6 +786,10 @@ impl Sign for MlDsaOperation {
             | CKM_HASH_ML_DSA_SHA3_512 => self.digest_int_update(data)?,
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
+
         Ok(())
     }
 
@@ -744,6 +801,9 @@ impl Sign for MlDsaOperation {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
+
+        #[cfg(feature = "fips")]
+        fips_approval_prep_check();
 
         match self.mech {
             CKM_ML_DSA | CKM_HASH_ML_DSA => (),
@@ -782,6 +842,9 @@ impl Sign for MlDsaOperation {
                 return Err(CKR_DEVICE_ERROR)?;
             }
         } else {
+            if !self.supports_updates {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
             if unsafe {
                 EVP_PKEY_sign_message_final(
                     self.sigctx.as_mut_ptr(),
@@ -797,6 +860,9 @@ impl Sign for MlDsaOperation {
         if siglen != signature.len() {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval_check(&mut self.fips_approved);
 
         Ok(())
     }

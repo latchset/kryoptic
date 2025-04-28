@@ -250,8 +250,8 @@ struct FipsMechanism {
 }
 
 struct FipsChecks {
-    keys: [FipsKeyType; 15],
-    mechs: [FipsMechanism; 73],
+    keys: [FipsKeyType; 17],
+    mechs: [FipsMechanism; 86],
 }
 
 /* TODO: double check the values, this is just an initial
@@ -343,6 +343,16 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             keytype: CKK_HKDF,
             operations: CKF_DERIVE,
             sizes: range!(112, 512),
+        },
+        FipsKeyType {
+            keytype: CKK_ML_KEM,
+            operations: CKF_ENCAPSULATE | CKF_DECAPSULATE,
+            sizes: step!(1632, 2400, 3168),
+        },
+        FipsKeyType {
+            keytype: CKK_ML_DSA,
+            operations: CKF_SIGN | CKF_VERIFY,
+            sizes: step!(2560, 4032, 4896),
         },
     ],
     mechs: [
@@ -488,25 +498,25 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         FipsMechanism {
             mechanism: CKM_ECDSA_SHA224,
             operations: CKF_SIGN | CKF_VERIFY,
-            restrictions: [restrict!(CKK_RSA), restrict!()],
+            restrictions: [restrict!(CKK_EC), restrict!()],
             genflags: 0,
         },
         FipsMechanism {
             mechanism: CKM_ECDSA_SHA256,
             operations: CKF_SIGN | CKF_VERIFY,
-            restrictions: [restrict!(CKK_RSA), restrict!()],
+            restrictions: [restrict!(CKK_EC), restrict!()],
             genflags: 0,
         },
         FipsMechanism {
             mechanism: CKM_ECDSA_SHA384,
             operations: CKF_SIGN | CKF_VERIFY,
-            restrictions: [restrict!(CKK_RSA), restrict!()],
+            restrictions: [restrict!(CKK_EC), restrict!()],
             genflags: 0,
         },
         FipsMechanism {
             mechanism: CKM_ECDSA_SHA512,
             operations: CKF_SIGN | CKF_VERIFY,
-            restrictions: [restrict!(CKK_RSA), restrict!()],
+            restrictions: [restrict!(CKK_EC), restrict!()],
             genflags: 0,
         },
         /* AES */
@@ -942,6 +952,86 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
                 | CKF_WRAP
                 | CKF_UNWRAP
                 | CKF_DERIVE,
+        },
+        /* ML-KEM */
+        FipsMechanism {
+            mechanism: CKM_ML_KEM_KEY_PAIR_GEN,
+            operations: CKF_GENERATE_KEY_PAIR,
+            restrictions: [restrict!(CKK_ML_KEM), restrict!()],
+            genflags: CKF_ENCAPSULATE | CKF_DECAPSULATE,
+        },
+        FipsMechanism {
+            mechanism: CKM_ML_KEM,
+            operations: CKF_ENCAPSULATE | CKF_DECAPSULATE,
+            restrictions: [restrict!(CKK_ML_KEM), restrict!()],
+            genflags: 0,
+        },
+        /* ML-DSA */
+        FipsMechanism {
+            mechanism: CKM_ML_DSA_KEY_PAIR_GEN,
+            operations: CKF_GENERATE_KEY_PAIR,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: CKF_SIGN | CKF_VERIFY,
+        },
+        FipsMechanism {
+            mechanism: CKM_ML_DSA,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA224,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA256,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA384,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA512,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA3_224,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA3_256,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA3_384,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_ML_DSA_SHA3_512,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_ML_DSA), restrict!()],
+            genflags: 0,
         },
     ],
 };
