@@ -250,7 +250,7 @@ impl Mechanism for ECMontgomeryMechanism {
         }
         if !pubkey.check_or_set_attr(Attribute::from_ulong(
             CKA_KEY_TYPE,
-            CKK_EC_EDWARDS,
+            CKK_EC_MONTGOMERY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
@@ -265,7 +265,7 @@ impl Mechanism for ECMontgomeryMechanism {
         }
         if !privkey.check_or_set_attr(Attribute::from_ulong(
             CKA_KEY_TYPE,
-            CKK_EC_EDWARDS,
+            CKK_EC_MONTGOMERY,
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
