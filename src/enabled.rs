@@ -1,15 +1,6 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-#[cfg(all(feature = "dynamic", feature = "fips"))]
-compile_error!("Feature 'dynamic' and 'fips' are mutually exclusive and cannot be enabled together");
-
-#[cfg(all(
-    feature = "ecdh",
-    not(any(feature = "ecdsa", feature = "ec_montgomery"))
-))]
-compile_error!("Feature 'ecdh' requires either 'ecdsa' or 'ec_montgomery'");
-
 #[cfg(feature = "aes")]
 mod aes;
 

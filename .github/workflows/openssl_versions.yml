@@ -1,0 +1,175 @@
+---
+name: OpenSSL Versions
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Versions
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [ossl30, ossl32, ossl35, debian, centos10]
+        include:
+          - name: ossl30
+            build: true
+            version: "3.0"
+            repotype: "dnf"
+            repocachepath: "/var/cache/libdnf5"
+            container: fedora:latest
+          - name: ossl32
+            build: true
+            version: "3.2"
+            repotype: "dnf"
+            repocachepath: "/var/cache/libdnf5"
+            container: fedora:latest
+          - name: ossl35
+            build: true
+            version: "3.5"
+            repotype: "dnf"
+            repocachepath: "/var/cache/libdnf5"
+            container: fedora:latest
+          - name: debian
+            build: false
+            version: "3.5"
+            repotype: "apt"
+            container: debian:testing
+          - name: centos10
+            build: false
+            version: "3.5"
+            repotype: "dnf"
+            repocachepath: "/var/cache/dnf"
+            container: quay.io/centos/centos:stream10
+    container: ${{ matrix.container }}
+    steps:
+      - name: Get Date for DNF cache entry
+        if: ${{ matrix.repotype == 'dnf' }}
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Restore DNF cache
+        if: ${{ matrix.repotype == 'dnf' }}
+        uses: actions/cache/restore@v4
+        id: cache-dnf
+        with:
+          path: ${{ matrix.repocachepath }}
+          key: ${{ matrix.container }}-dnf-${{ steps.get-date.outputs.date }}
+
+      - name: Install Dependencies
+        run: |
+          if [ "${{ matrix.repotype }}" = "dnf" ]; then
+            if [ "${{ matrix.name }}" = "centos" ]; then
+              dnf_opts="--enablerepo=crb"
+            fi
+            dnf -y install git cargo clang-devel
+            if [ "${{ matrix.build }}" = "false" ]; then
+              dnf -y install openssl-devel sqlite-devel
+            else
+              dnf -y install openssl-devel sqlite-devel \
+                'perl(FindBin)' 'perl(lib)' 'perl(File::Compare)' \
+                'perl(File::Copy)' 'perl(bigint)' 'perl(Time::HiRes)' \
+                'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
+                'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
+                'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
+                zlib-devel sed sqlite-devel
+            fi
+          elif [ "${{ matrix.repotype }}" = "apt" ]; then
+            apt-get -q update
+            apt-get -yq install git clang rustc libsqlite3-dev libssl-dev
+          fi
+
+      - name: DNF cache
+        if: ${{ matrix.repotype == 'dnf' && steps.cache-dnf.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ matrix.repocachepath }}
+          key: ${{ matrix.container }}-dnf-${{ steps.get-date.outputs.date }}
+
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup OpenSSL ${{ matrix.version }}
+        if: ${{ matrix.build == true }}
+        id: ossl-setup
+        run: |
+          OPENSSL_BRANCH="openssl-${{ matrix.version }}"
+
+          git config --global --add safe.directory /__w/kryoptic
+          cd ..
+          git clone https://github.com/openssl/openssl.git \
+                    --single-branch --branch $OPENSSL_BRANCH openssl
+          cd openssl
+          echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
+          echo "cacheid=${{ runner.os }}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore OpenSSL build if cached
+        if: ${{ matrix.build == true }}
+        uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
+
+      - name: Build OpenSSL
+        if: ${{ matrix.build == true && steps.cache.outputs.cache-hit != 'true' }}
+        run: |
+          pushd ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          ./Configure
+          make
+
+      - name: Cache OpenSSL ${{ matrix.version }} build
+        if: ${{ matrix.build == true && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
+
+      - name: Generate lock file
+        run: cargo generate-lockfile
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.container }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build & test
+        run: |
+          FEATURES="none"
+          OPTS="--no-default-features"
+
+          if [ "${{ matrix.version }}" = "3.0" ]; then
+            FEATURES="minimal"
+          elif [ "${{ matrix.version }}" = "3.2" ]; then
+            FEATURES="minimal,eddsa"
+          elif [ "${{ matrix.version }}" = "3.5" ]; then
+            FEATURES="minimal,eddsa,mldsa"
+          fi
+
+          if [ "${{ matrix.build }}" = "false" ]; then
+            FEATURES="$FEATURES,dynamic"
+          fi
+
+          cargo build -vv $OPTS --features "$FEATURES"
+          cargo test -vv $OPTS --features "$FEATURES"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Build logs OpenSSL version ${{ matrix.name }}
+          path: |
+            target/debug/build/*/output
+
