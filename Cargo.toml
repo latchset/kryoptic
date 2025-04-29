@@ -91,7 +91,8 @@ nssdb = ["dep:rusqlite", "aes", "hmac", "pbkdf2"]
 
 default = ["standard", "dynamic"]
 
-ecc_all = ["ecdsa", "ec_montgomery", "eddsa", "ecdh"]
+ecc_min = ["ecdsa", "ecdh"]
+ecc_all = ["ecc_min", "ec_montgomery", "eddsa"]
 hash_all = ["hash", "hmac"]
 kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf"]
 
@@ -110,3 +111,5 @@ mlkem = ["pkcs11_3_2"]
 mldsa = ["pkcs11_3_2", "hash"]
 
 pqc = ["mlkem", "mldsa"]
+
+minimal = ["sqlitedb", "aes", "ecc_min", "hash_all", "rsa"]

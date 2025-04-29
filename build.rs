@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use std::env;
+use std::panic::set_hook;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -17,6 +18,15 @@ impl Features {
     fn to_bools() -> Features {
         #[cfg(all(feature = "dynamic", feature = "fips"))]
         compile_error!("features `dynamic` and `fips` are mutually exclusive");
+
+        #[cfg(all(
+            feature = "ecdh",
+            not(any(feature = "ecdsa", feature = "ec_montgomery"))
+        ))]
+        compile_error!(
+            "Feature 'ecdh' requires either 'ecdsa' or 'ec_montgomery'"
+        );
+
         Features {
             #[cfg(feature = "fips")]
             fips: true,
@@ -61,6 +71,42 @@ impl bindgen::callbacks::ParseCallbacks for Pkcs11Callbacks {
     }
 }
 
+#[derive(Debug)]
+pub struct OsslCallbacks;
+const OPENSSL_3_0_7: i64 = 0x30000070;
+const OPENSSL_3_2_0: i64 = 0x30200000;
+const OPENSSL_3_5_0: i64 = 0x30500000;
+
+impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
+    fn int_macro(
+        &self,
+        name: &str,
+        value: i64,
+    ) -> Option<bindgen::callbacks::IntKind> {
+        if name == "OPENSSL_VERSION_NUMBER" {
+            if value < OPENSSL_3_5_0 {
+                #[cfg(any(
+                    feature = "mlkem",
+                    feature = "mldsa",
+                    feature = "fips"
+                ))]
+                panic!("OpenSSL 3.5.0 or later is required for mlkem, mldsa or fips");
+            }
+            if value < OPENSSL_3_2_0 {
+                #[cfg(feature = "eddsa")]
+                panic!("OpenSSL 3.2.0 or later is required for eddsa");
+            }
+            if value < OPENSSL_3_0_7 {
+                panic!(
+                    "OpenSSL 3.0.7 is the minimum viable version. Found {:x}",
+                    value
+                );
+            }
+        }
+        None
+    }
+}
+
 fn ossl_bindings(args: &[&str], out_file: &Path) {
     bindgen::Builder::default()
         .header("ossl.h")
@@ -77,6 +123,7 @@ fn ossl_bindings(args: &[&str], out_file: &Path) {
         .allowlist_item("evp_.*")
         .allowlist_item("BN_.*")
         .allowlist_item("LN_aes.*")
+        .parse_callbacks(Box::new(OsslCallbacks))
         .generate()
         .expect("Unable to generate bindings")
         .write_to_file(out_file)
@@ -84,7 +131,8 @@ fn ossl_bindings(args: &[&str], out_file: &Path) {
 }
 
 fn build_ossl(features: &Features, out_file: &Path) {
-    let sources = std::env::var("KRYOPTIC_OPENSSL_SOURCES").unwrap();
+    let sources = std::env::var("KRYOPTIC_OPENSSL_SOURCES")
+        .expect("Env var KRYOPTIC_OPENSSL_SOURCES is not defined");
     let openssl_path = std::path::PathBuf::from(sources)
         .canonicalize()
         .expect("cannot canonicalize OpenSSL path");
@@ -206,7 +254,33 @@ fn use_system_ossl(out_file: &Path) {
     ossl_bindings(&["-std=c90"], out_file);
 }
 
+fn set_pretty_panic() {
+    set_hook(Box::new(|panic_info| {
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            if s != &"panic in a function that cannot unwind" {
+                println!("Compile Error: {s:?}");
+            }
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            if s != "panic in a function that cannot unwind" {
+                println!("Compile Error: {s:?}");
+            }
+        } else {
+            if let Some(location) = panic_info.location() {
+                println!(
+                    "Unrecognized compile error in file '{}' at line {}",
+                    location.file(),
+                    location.line(),
+                );
+            } else {
+                println!("Unknown panic with no location information...");
+            }
+        }
+    }));
+}
+
 fn main() {
+    set_pretty_panic();
+
     let features = Features::to_bools();
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
