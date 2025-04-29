@@ -25,6 +25,13 @@ Example:
 
     export KRYOPTIC_OPENSSL_SOURCES=/path/to/src/openssl
 
+When building, you'll need to disable the dynamic feature.  Since
+features are additive in `Cargo`, you'll need to disable the default
+features and then select the features that you need.  For instance, if
+you want the standard features, you can do:
+
+    cargo build --no-default-features --features standard
+
 # Build
 
 Build the rust project:
