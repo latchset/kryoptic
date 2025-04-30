@@ -50,7 +50,7 @@ pub const DEFAULT_CONF_NAME: &str = "token.conf";
 ///
 /// \[\[slots\]\]
 ///  slot = 1
-///  dbtype = "sql"
+///  dbtype = "sqlite"
 ///  dbargs = "/var/lib/kryoptic/token.sql"
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
