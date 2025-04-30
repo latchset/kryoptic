@@ -1,6 +1,10 @@
 // Copyright 2024 Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for key derivation using
+//! Montgomery curves (Curve25519/X25519, Curve448/X448) as specified in
+//! [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748)
+
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
@@ -17,12 +21,14 @@ use once_cell::sync::Lazy;
 pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X25519;
 pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X448;
 
+/// The EC-Montgomery Public-Key Factory
 #[derive(Debug, Default)]
 pub struct ECMontgomeryPubFactory {
     data: ObjectFactoryData,
 }
 
 impl ECMontgomeryPubFactory {
+    /// Initializes a new EC-Montgomery Public-Key factory
     pub fn new() -> ECMontgomeryPubFactory {
         let mut factory: ECMontgomeryPubFactory = Default::default();
 
@@ -45,6 +51,13 @@ impl ECMontgomeryPubFactory {
 }
 
 impl ObjectFactory for ECMontgomeryPubFactory {
+    /// Creates an EC-Montgomery Public-Key Object from a template
+    ///
+    /// Validates that the provided attributes are consistent with the
+    /// factory via [ObjectFactory::default_object_create()]
+    ///
+    /// Additionally validates the Public Point Format and that its size
+    /// is consistent with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -92,12 +105,14 @@ impl CommonKeyFactory for ECMontgomeryPubFactory {}
 
 impl PubKeyFactory for ECMontgomeryPubFactory {}
 
+/// The EC-Montgomery Private-Key Factory
 #[derive(Debug, Default)]
 pub struct ECMontgomeryPrivFactory {
     data: ObjectFactoryData,
 }
 
 impl ECMontgomeryPrivFactory {
+    /// Initializes a new EC-Montgomery Private-Key factory
     pub fn new() -> ECMontgomeryPrivFactory {
         let mut factory: ECMontgomeryPrivFactory = Default::default();
 
@@ -129,6 +144,13 @@ impl ECMontgomeryPrivFactory {
 }
 
 impl ObjectFactory for ECMontgomeryPrivFactory {
+    /// Creates an EC-Montgomery Private-Key Object from a template
+    ///
+    /// Validates that the provided attributes are consistent with the
+    /// factory via [ObjectFactory::default_object_create()]
+    ///
+    /// Additionally validates that the private key size is consistent
+    /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
@@ -195,18 +217,28 @@ impl CommonKeyFactory for ECMontgomeryPrivFactory {}
 
 impl PrivKeyFactory for ECMontgomeryPrivFactory {}
 
+/// The static Public Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECMontgomeryPubFactory::new()));
 
+/// The static Private Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECMontgomeryPrivFactory::new()));
 
+/// Object that represents CKK_EC_MONTGOMERY related mechanisms
 #[derive(Debug)]
 struct ECMontgomeryMechanism {
     info: CK_MECHANISM_INFO,
 }
 
 impl ECMontgomeryMechanism {
+    /// Actual implementation of mechanism registration
     fn register_mechanisms(mechs: &mut Mechanisms) {
         /* TODO PKCS #11 defines also CKM_XEDDSA for signatures, but it is not implemented by
          * OpenSSL */
@@ -291,6 +323,7 @@ impl Mechanism for ECMontgomeryMechanism {
     }
 }
 
+/// Registers all CKK_EC_MONTGOMERY related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     ECMontgomeryMechanism::register_mechanisms(mechs);
 

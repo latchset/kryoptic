@@ -1,6 +1,10 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for ECDSA (Elliptic Curve
+//! Digital Signature Algorithm), including key pair generation, signing,
+//! and verification for standard NIST curves (e.g., P-256, P-384, P-521).
+
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
@@ -14,15 +18,19 @@ use crate::ossl::ecdsa::EccOperation;
 use asn1;
 use once_cell::sync::Lazy;
 
+/// Minimum ECDSA key size
 pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
+/// Maximum ECDSA key size
 pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
 
+/// The EC Public-Key Factory
 #[derive(Debug, Default)]
 pub struct ECCPubFactory {
     data: ObjectFactoryData,
 }
 
 impl ECCPubFactory {
+    /// Initializes a new EC Public-Key factory
     pub fn new() -> ECCPubFactory {
         let mut factory: ECCPubFactory = Default::default();
 
@@ -45,6 +53,13 @@ impl ECCPubFactory {
 }
 
 impl ObjectFactory for ECCPubFactory {
+    /// Creates an EC Public-Key Object from a template
+    ///
+    /// Validates that the provided attributes are consistent with the
+    /// factory via [ObjectFactory::default_object_create()]
+    ///
+    /// Additionally validates the Public Point Format and that its size
+    /// is consistent with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -92,12 +107,14 @@ impl CommonKeyFactory for ECCPubFactory {}
 
 impl PubKeyFactory for ECCPubFactory {}
 
+/// The EC Private-Key Factory
 #[derive(Debug, Default)]
 pub struct ECCPrivFactory {
     data: ObjectFactoryData,
 }
 
 impl ECCPrivFactory {
+    /// Initializes a new EC Private-Key factory
     pub fn new() -> ECCPrivFactory {
         let mut factory: ECCPrivFactory = Default::default();
 
@@ -129,6 +146,13 @@ impl ECCPrivFactory {
 }
 
 impl ObjectFactory for ECCPrivFactory {
+    /// Creates an EC Private-Key Object from a template
+    ///
+    /// Validates that the provided attributes are consistent with the
+    /// factory via [ObjectFactory::default_object_create()]
+    ///
+    /// Additionally validates that the private key size is consistent
+    /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
@@ -282,18 +306,28 @@ impl PrivKeyFactory for ECCPrivFactory {
     }
 }
 
+/// The static Public Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECCPubFactory::new()));
 
+/// The static Private Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ECCPrivFactory::new()));
 
+/// Object that represents CKK_EC related mechanisms
 #[derive(Debug)]
 pub struct EccMechanism {
     info: CK_MECHANISM_INFO,
 }
 
 impl EccMechanism {
+    /// Instantiates a new ECC Mechanism
     pub fn new(min: CK_ULONG, max: CK_ULONG, flags: CK_FLAGS) -> EccMechanism {
         EccMechanism {
             info: CK_MECHANISM_INFO {
@@ -310,6 +344,7 @@ impl Mechanism for EccMechanism {
         &self.info
     }
 
+    /// Initializes a signing operation using CKK_EC keys
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
@@ -325,6 +360,7 @@ impl Mechanism for EccMechanism {
         Ok(Box::new(EccOperation::sign_new(mech, key, &self.info)?))
     }
 
+    /// Initializes a verification operation using CKK_EC keys
     fn verify_new(
         &self,
         mech: &CK_MECHANISM,
@@ -340,6 +376,8 @@ impl Mechanism for EccMechanism {
         Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
     }
 
+    /// Initializes a PKCS#11 3.2 signature verification operation using
+    /// CKK_EC keys
     #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
@@ -359,6 +397,7 @@ impl Mechanism for EccMechanism {
         )?))
     }
 
+    /// Generates a CKK_EC Key Pair
     fn generate_keypair(
         &self,
         mech: &CK_MECHANISM,
@@ -414,6 +453,7 @@ impl Mechanism for EccMechanism {
     }
 }
 
+/// Registers all CKK_EC related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     EccOperation::register_mechanisms(mechs);
 
