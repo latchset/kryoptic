@@ -25,6 +25,28 @@ pub enum AttrType {
     IgnoreType,
 }
 
+impl AttrType {
+    /// Finds and return the attribute id and type from the spec name
+    pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
+        for a in &ATTRMAP {
+            if a.name == s {
+                return Ok((a.id, a.atype));
+            }
+        }
+        Err(Error::not_found(s.clone()))
+    }
+
+    /// Finds the attribute type from the attribute id
+    pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
+        for a in &ATTRMAP {
+            if a.id == id {
+                return Ok(a.atype);
+            }
+        }
+        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+    }
+}
+
 /// Struct to map a PKCS#11 attribute to a type and a printable name
 #[derive(Clone, Copy, Debug)]
 struct Attrmap<'a> {
@@ -587,28 +609,6 @@ pub fn string_to_ck_date(date: &str) -> Result<CK_DATE> {
     buf[6] = s[8];
     buf[7] = s[9];
     vec_to_date_validate(buf)
-}
-
-impl AttrType {
-    /// Finds and return the attribute id and type from the spec name
-    pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
-        for a in &ATTRMAP {
-            if a.name == s {
-                return Ok((a.id, a.atype));
-            }
-        }
-        Err(Error::not_found(s.clone()))
-    }
-
-    /// Finds the attribute type from the attribute id
-    pub fn attr_id_to_attrtype(id: CK_ULONG) -> Result<AttrType> {
-        for a in &ATTRMAP {
-            if a.id == id {
-                return Ok(a.atype);
-            }
-        }
-        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
-    }
 }
 
 impl CK_ATTRIBUTE {
