@@ -10,22 +10,26 @@ use crate::Token;
 
 use once_cell::sync::Lazy;
 
-/* The CKA_VALIDATION_FLAG used to define the validation is always
- * vendor specific and have no fixed value in the spec.
- * Each CKO_VALIDATION object must define a bit flag that should not
- * conflict with other validation objects (in case multiple validations
- * are achieved for the same token); and that flag is what is then used
- * to mark operations. Applications need to get the flag value after
- * token initialization and use that value thereafter to check against
- * objects and session CKA_VALIDATION_FLAGS attributes. */
+/// The flag returned in the CKA_VALIDATION_FLAG attribute
+///
+/// The CKA_VALIDATION_FLAG used to define the validation is always
+/// vendor specific and have no fixed value in the spec.
+/// Each CKO_VALIDATION object must define a bit flag that should not
+/// conflict with other validation objects (in case multiple validations
+/// are achieved for the same token); and that flag is what is then used
+/// to mark operations. Applications need to get the flag value after
+/// token initialization and use that value thereafter to check against
+/// objects and session CKA_VALIDATION_FLAGS attributes.
 pub const KRF_FIPS: CK_ULONG = 1;
 
+/// The Validation Object factory
 #[derive(Debug, Default)]
 pub struct ValidationFactory {
     data: ObjectFactoryData,
 }
 
 impl ValidationFactory {
+    /// Initializes the validation object factory
     fn new() -> ValidationFactory {
         let mut factory: ValidationFactory = Default::default();
 
@@ -85,20 +89,28 @@ impl ValidationFactory {
 }
 
 impl ObjectFactory for ValidationFactory {
+    /// Helper method to get a reference to the ObjectFactoryData
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
 
+    /// Helper method to get a mutable reference to the ObjectFactoryData
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
 }
 
+/// The static Validation Object factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 pub static VALIDATION_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(ValidationFactory::new()));
 
+/// Synthesize a FIPS CKO_VALIDATION object
+///
+/// This is generally done only once at token initialization
 pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
-    /* Synthesize a FIPS CKO_VALIDATION object */
     let mut obj = Object::new();
     obj.set_attr(Attribute::from_bool(CKA_TOKEN, false))?;
     obj.set_attr(Attribute::from_bool(CKA_DESTROYABLE, false))?;
@@ -157,13 +169,14 @@ pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
     Ok(())
 }
 
-/* bits to bytes */
+/// Helper to convert bits to bytes
 macro_rules! btb {
     ($val:expr) => {
         ($val + 7) / 8
     };
 }
 
+/// Helper to initialize sizes for algorithms definitions
 macro_rules! step {
     ($s1:expr) => {
         ([btb!($s1), 0, 0, 0], (0, 0))
@@ -179,12 +192,14 @@ macro_rules! step {
     };
 }
 
+/// Helper to initialize key size ranges
 macro_rules! range {
     ($r1:expr, $r2:expr) => {
         ([0, 0, 0, 0], (btb!($r1), btb!($r2)))
     };
 }
 
+/// Helper to initialize combined discrete key sizes and ranges
 macro_rules! step_and_range {
     () => {
         ([0, 0, 0, 0], (0, 0))
@@ -206,6 +221,7 @@ macro_rules! step_and_range {
     };
 }
 
+/// Helper to initialize key restrictions
 macro_rules! restrict {
     () => {
         (KRY_UNSPEC, step_and_range!())
@@ -218,6 +234,7 @@ macro_rules! restrict {
     };
 }
 
+/// Converts a CK_FLAGS entry to the corresponding operation attribute type
 fn flag_to_op(flag: CK_FLAGS) -> Result<CK_ATTRIBUTE_TYPE> {
     Ok(match flag {
         CKF_SIGN => CKA_SIGN,
@@ -231,31 +248,46 @@ fn flag_to_op(flag: CK_FLAGS) -> Result<CK_ATTRIBUTE_TYPE> {
     })
 }
 
+/// Object that represents the FIPS properties of a key
 struct FipsKeyType {
+    /// The Key type these properties apply to
     keytype: CK_KEY_TYPE,
+    /// The operations allowed for this key type
     operations: CK_FLAGS,
+    /// The allowed step key sizes or key size range
     sizes: ([usize; 4], (usize, usize)),
 }
 
+/// Object that represents the FIPS properties of a mechanism
 struct FipsMechanism {
+    /// The mechanism type these properties apply to
     mechanism: CK_MECHANISM_TYPE,
+    /// The operations allowed for this mechanism
     operations: CK_FLAGS,
-    /* Only filled if the mechanism itself has additional
-     * restriction wrt accepted key sizes/outputs for one
-     * or all key types.
-     * Lists of discrete sizes, and/or list of intervals.
-     */
+    /// Mechanism key type and size restrictions
+    ///
+    /// Only filled if the mechanism itself has additional
+    /// restriction wrt accepted key sizes/outputs for one
+    /// or all key types.
+    ///
+    /// Lists of discrete sizes, and/or list of intervals.
     restrictions: [(CK_KEY_TYPE, ([usize; 4], (usize, usize))); 2],
+    /// Flags allowed to be set on generated keys
+    ///
+    /// Only used on mechanisms that create keys in the token,
+    /// via generation, derivation, unwrapping, decapsulation, etc...
     genflags: CK_FLAGS,
 }
 
+/// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 17],
     mechs: [FipsMechanism; 86],
 }
 
-/* TODO: double check the values, this is just an initial
- * rough table */
+/// A constant instantiation of FIPS properties with a list
+/// of all FIPS allowed key types and mechanisms and their
+/// associated restrictions
 const FIPS_CHECKS: FipsChecks = FipsChecks {
     keys: [
         FipsKeyType {
@@ -1036,6 +1068,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
     ],
 };
 
+/// Helper to test a key length for restrictions
 fn size_check(len: usize, sizes: ([usize; 4], (usize, usize))) -> Option<bool> {
     let mut size_check: Option<bool> = None;
     for size in sizes.0 {
@@ -1060,6 +1093,10 @@ fn size_check(len: usize, sizes: ([usize; 4], (usize, usize))) -> Option<bool> {
     size_check
 }
 
+/// Helper to check a key object
+///
+/// The object is tested for the known restrictions and returns whether
+/// the key is considered FIPS allowed or not allowed
 fn check_key(
     obj: &Object,
     op: CK_FLAGS,
@@ -1171,6 +1208,10 @@ fn check_key(
     false
 }
 
+/// Helper to check if an operation is approved
+///
+/// Applies key checks as well as mechanism checks according to the
+/// restrictions stored on the FIPS_CHECKS object
 pub fn is_approved(
     mechanism: CK_MECHANISM_TYPE,
     op: CK_FLAGS,
