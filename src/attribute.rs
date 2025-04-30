@@ -432,87 +432,97 @@ impl Attribute {
             value: val,
         }
     }
-}
 
-/// Helper macro to create Attributes from various types
-macro_rules! conversion_from_type {
-    (make $fn1:ident; $fn2:ident; $fn3:ident; from $rtype:ty; as $atype:ident; via $conv:ident) => {
-        impl Attribute {
-            #[doc = concat!("Creates an attribute of type `", stringify!($atype), "` from a `", stringify!($rtype), "` value")]
-            #[doc = ""]
-            #[doc = "Does not verify the attribute type is correct"]
-            #[allow(dead_code)]
-            pub fn $fn1(attr_id: CK_ULONG, val: $rtype) -> Attribute {
-                Attribute {
-                    ck_type: attr_id,
-                    attrtype: AttrType::$atype,
-                    value: $conv(val),
-                }
-            }
-        }
-    };
-}
-
-/// Returns a bool as a CK_BBOOL value linearized as a vector of 1 byte
-fn bool_to_vec(val: bool) -> Vec<u8> {
-    Vec::from(if val { &[1u8][..] } else { &[0u8][..] })
-}
-conversion_from_type! {make from_bool; from_type_bool; from_string_bool; from bool; as BoolType; via bool_to_vec}
-
-/// Returns a CK_ULONG value linearized in a vector of bytes in the platfrom byte order
-fn ulong_to_vec(val: CK_ULONG) -> Vec<u8> {
-    Vec::from(val.to_ne_bytes())
-}
-conversion_from_type! {make from_ulong; from_type_ulong; from_string_ulong; from CK_ULONG; as NumType; via ulong_to_vec}
-
-/// Returns a u64 as a CK_ULONG value linearized in a vector of bytes in the platfrom byte order
-fn u64_to_vec(val: u64) -> Vec<u8> {
-    let inval = CK_ULONG::try_from(val).unwrap();
-    Vec::from(inval.to_ne_bytes())
-}
-conversion_from_type! {make from_u64; from_type_u64; from_string_u64; from u64; as NumType; via u64_to_vec}
-
-/// Returns a string copied as a vector of bytes
-fn string_to_vec(val: String) -> Vec<u8> {
-    Vec::from(val.as_bytes())
-}
-conversion_from_type! {make from_string; from_type_string; from_string_string; from String; as StringType; via string_to_vec}
-
-/// Returns the passed in vector unchanged
-fn bytes_to_vec(val: Vec<u8>) -> Vec<u8> {
-    val
-}
-conversion_from_type! {make from_bytes; from_type_bytes; from_string_bytes; from Vec<u8>; as BytesType; via bytes_to_vec}
-
-/// Converts an array of ulongs into an array of bytes where each ulong is
-/// linerized in native endian order */
-fn ulong_array_to_vec(val: Vec<CK_ULONG>) -> Vec<u8> {
-    let ulen = std::mem::size_of::<CK_ULONG>();
-    let mut v = Vec::<u8>::with_capacity(val.len() * ulen);
-    for e in val.iter() {
-        for b in e.to_ne_bytes().iter() {
-            v.push(*b);
+    /// Creates an attribute of type AttrType::BoolType from a bool
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_bool(t: CK_ULONG, val: bool) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::BoolType,
+            value: Vec::from(if val { &[1u8][..] } else { &[0u8][..] }),
         }
     }
-    v
-}
-conversion_from_type! {make from_ulong_array; from_type_ulong_array; from_string_ulong_bytes; from Vec<CK_ULONG>; as UlongArrayType; via ulong_array_to_vec}
 
-/// Converts a CK_DATE value as a linearized vector of bytes
-fn date_to_vec(val: CK_DATE) -> Vec<u8> {
-    let mut v = vec![0u8; 8];
-    v[0] = val.year[0];
-    v[1] = val.year[1];
-    v[2] = val.year[2];
-    v[3] = val.year[3];
-    v[4] = val.month[0];
-    v[5] = val.month[1];
-    v[6] = val.day[0];
-    v[7] = val.day[1];
-    v
-}
+    /// Creates an attribute of type AttrType::NumType from a CK_ULONG
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_ulong(t: CK_ULONG, val: CK_ULONG) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::NumType,
+            value: Vec::from(val.to_ne_bytes()),
+        }
+    }
 
-conversion_from_type! {make from_date; from_type_date; from_string_date; from CK_DATE; as DateType; via date_to_vec}
+    /// Creates an attribute of type AttrType::NumType from a u64
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_u64(t: CK_ULONG, val: u64) -> Attribute {
+        let inval = CK_ULONG::try_from(val).unwrap();
+        Self::from_ulong(t, inval)
+    }
+
+    /// Creates an attribute of type AttrType::StringType from a String
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_string(t: CK_ULONG, val: String) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::StringType,
+            value: Vec::from(val.as_bytes()),
+        }
+    }
+
+    /// Creates an attribute of type AttrType::BytesType from a `Vec<u8>`
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::BytesType,
+            value: val,
+        }
+    }
+
+    /// Creates an attribute of type AttrType::UlongArrayType from a Vec<CK_ULONG>
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_ulong_array(t: CK_ULONG, val: Vec<CK_ULONG>) -> Attribute {
+        let ulen = std::mem::size_of::<CK_ULONG>();
+        let mut v = Vec::<u8>::with_capacity(val.len() * ulen);
+        for e in val.iter() {
+            for b in e.to_ne_bytes().iter() {
+                v.push(*b);
+            }
+        }
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::UlongArrayType,
+            value: v,
+        }
+    }
+
+    /// Creates an attribute of type AttrType::DateType from a CK_DATE
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_date(t: CK_ULONG, val: CK_DATE) -> Attribute {
+        let mut v = vec![0u8; 8];
+        v[0] = val.year[0];
+        v[1] = val.year[1];
+        v[2] = val.year[2];
+        v[3] = val.year[3];
+        v[4] = val.month[0];
+        v[5] = val.month[1];
+        v[6] = val.day[0];
+        v[7] = val.day[1];
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::DateType,
+            value: v,
+        }
+    }
+}
 
 /// Converts a vector of bytes into a CK_DATE structure with *no* validation
 fn vec_to_date(val: Vec<u8>) -> CK_DATE {
