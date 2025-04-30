@@ -1,6 +1,9 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module provides access to Eliipitic Curve Cryptography related
+//! operations
+
 use crate::attribute::Attribute;
 use crate::error::{device_error, general_error, Error, Result};
 use crate::interface::*;
@@ -22,7 +25,7 @@ pub mod eddsa;
 #[cfg(feature = "ec_montgomery")]
 pub mod montgomery;
 
-// Bit sized for curves
+/* Bit sizes for curves */
 pub const BITS_SECP256R1: usize = 256;
 #[allow(dead_code)]
 pub const BITS_SECP384R1: usize = 384;
@@ -57,6 +60,7 @@ pub const EDWARDS448: &str = "edwards448";
 pub const CURVE25519: &str = "curve25519";
 pub const CURVE448: &str = "curve448";
 
+/// Returns the Point size in bytes for the curve identified by the OID
 pub fn ec_point_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         &EC_SECP256R1 => Ok(EC_POINT_BYTES_SECP256R1),
@@ -70,6 +74,7 @@ pub fn ec_point_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
+/// Returns the Key size in bytes for the curve identified by the OID
 pub fn ec_key_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
         &EC_SECP256R1 => Ok(EC_KEY_BYTES_SECP256R1),
@@ -83,6 +88,7 @@ pub fn ec_key_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
+/// Returns the Key size in bits for the curve identified by the OID
 #[cfg(feature = "fips")]
 pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     match oid {
@@ -97,6 +103,7 @@ pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
     }
 }
 
+/// Return the OID for the given named curve
 fn curvename_to_oid(name: &str) -> Result<asn1::ObjectIdentifier> {
     match name {
         PRIME256V1 => Ok(EC_SECP256R1),
@@ -110,6 +117,7 @@ fn curvename_to_oid(name: &str) -> Result<asn1::ObjectIdentifier> {
     }
 }
 
+/// Returns the curve OID for the key object
 pub fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
     let params = key.get_attr_as_bytes(CKA_EC_PARAMS)?;
     let ecp = asn1::parse_single::<ECParameters>(params)
@@ -121,6 +129,7 @@ pub fn get_oid_from_obj(key: &Object) -> Result<asn1::ObjectIdentifier> {
     }
 }
 
+/// returns the public EC point for the key object
 pub fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     let point = key.get_attr_as_bytes(CKA_EC_POINT)?;
     let octet = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
@@ -149,6 +158,8 @@ pub fn curvename_to_ec_params(name: &str) -> Result<Vec<u8>> {
  * expected encoding in applications following the 3.0 spec vs applications
  * following 3.1. It is not pretty, but it is the simplest way to handle
  * this issue for now */
+
+/// Converts the point len to the len of the DER encoded point
 #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
 pub fn point_len_to_der(len: usize) -> usize {
     match len {
@@ -159,6 +170,7 @@ pub fn point_len_to_der(len: usize) -> usize {
     }
 }
 
+/// Returns the ASN.1 DER Encoded buffer for a point
 #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
 pub fn point_buf_to_der(buf: &[u8], bufsize: usize) -> Result<Option<Vec<u8>>> {
     match buf.len() {
@@ -174,6 +186,8 @@ pub fn point_buf_to_der(buf: &[u8], bufsize: usize) -> Result<Option<Vec<u8>>> {
     }
 }
 
+/// Verifies that the public point on the key object has an acceptable
+/// encoding and converts to the canonical encoding if necessary
 #[cfg(feature = "ecc")]
 pub fn check_ec_point_from_obj(
     oid: &asn1::ObjectIdentifier,

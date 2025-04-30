@@ -1,6 +1,11 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for EdDSA (Edwards-curve
+//! Digital Signature Algorithm), including key pair generation, signing,
+//! and verification for Edwards curves (Ed25519, Ed448) as defined in
+//! [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032).
+
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
@@ -16,12 +21,14 @@ use once_cell::sync::Lazy;
 pub const MIN_EDDSA_SIZE_BITS: usize = BITS_ED25519;
 pub const MAX_EDDSA_SIZE_BITS: usize = BITS_ED448;
 
+/// The EdDSA-Edwards Public-Key Factory
 #[derive(Debug, Default)]
 pub struct EDDSAPubFactory {
     data: ObjectFactoryData,
 }
 
 impl EDDSAPubFactory {
+    /// Initializes a new EdDSA Public-Key factory
     pub fn new() -> EDDSAPubFactory {
         let mut factory: EDDSAPubFactory = Default::default();
 
@@ -44,6 +51,13 @@ impl EDDSAPubFactory {
 }
 
 impl ObjectFactory for EDDSAPubFactory {
+    /// Creates a CKK_EC_EDWARDS Public-Key Object from a template
+    ///
+    /// Validates that the provided attributes are consistent with the
+    /// factory via [ObjectFactory::default_object_create()]
+    ///
+    /// Additionally validates the Public Point Format and that its size
+    /// is consistent with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -91,12 +105,14 @@ impl CommonKeyFactory for EDDSAPubFactory {}
 
 impl PubKeyFactory for EDDSAPubFactory {}
 
+/// The EdDSA Private-Key Factory
 #[derive(Debug, Default)]
 pub struct EDDSAPrivFactory {
     data: ObjectFactoryData,
 }
 
 impl EDDSAPrivFactory {
+    /// Initializes a new EdDSA Private-Key factory
     pub fn new() -> EDDSAPrivFactory {
         let mut factory: EDDSAPrivFactory = Default::default();
 
@@ -128,6 +144,13 @@ impl EDDSAPrivFactory {
 }
 
 impl ObjectFactory for EDDSAPrivFactory {
+    /// Creates an EdDSA Private-Key Object from a template
+    ///
+    /// Validates that the provided attributes are consistent with the
+    /// factory via [ObjectFactory::default_object_create()]
+    ///
+    /// Additionally validates that the private key size is consistent
+    /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
 
@@ -194,18 +217,28 @@ impl CommonKeyFactory for EDDSAPrivFactory {}
 
 impl PrivKeyFactory for EDDSAPrivFactory {}
 
+/// The static Public Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(EDDSAPubFactory::new()));
 
+/// The static Private Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(EDDSAPrivFactory::new()));
 
+/// Object that represents EdDSA related mechanisms
 #[derive(Debug)]
 struct EddsaMechanism {
     info: CK_MECHANISM_INFO,
 }
 
 impl EddsaMechanism {
+    /// Actual implementation of mechanism registration
     fn register_mechanisms(mechs: &mut Mechanisms) {
         mechs.add_mechanism(
             CKM_EDDSA,
@@ -346,6 +379,7 @@ impl Mechanism for EddsaMechanism {
     }
 }
 
+/// Registers all EdDSA related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     EddsaMechanism::register_mechanisms(mechs);
 
