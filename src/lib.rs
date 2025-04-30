@@ -499,15 +499,18 @@ struct GlobalConfig {
 
 /// Global, lazily initialized, read-write locked configuration instance.
 static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
+    #[cfg(test)]
+    let conf = Config::new();
+
+    #[cfg(not(test))]
+    let conf = match Config::default_config() {
+        Ok(conf) => conf,
+        Err(_) => Config::new(),
+    };
     /* if there is no config file or the configuration is malformed,
      * set an empty config, an error will be returned later at
      * fn_initialize() time */
-    let mut global_conf = GlobalConfig {
-        conf: match Config::default_config() {
-            Ok(conf) => conf,
-            Err(_) => Config::new(),
-        },
-    };
+    let mut global_conf = GlobalConfig { conf: conf };
     global_conf.conf.load_env_vars_overrides();
     RwLock::new(global_conf)
 });
