@@ -71,7 +71,6 @@ jobs:
           cd pkcs11-provider
           git config --global --add safe.directory \
               /__w/pkcs11-provider/pkcs11-provider
-          git submodule update --init
           meson setup builddir
           meson compile -C builddir
           meson test --num-processes 1 -C builddir
