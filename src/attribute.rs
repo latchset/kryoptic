@@ -409,25 +409,6 @@ impl Attribute {
         }
     }
 
-    pub fn string_from_sized(t: CK_ULONG, val: &[u8]) -> Attribute {
-        let mut value = Vec::from(val);
-        let mut len = value.len();
-        for i in (0..len).rev() {
-            if value[i] != b' ' {
-                break;
-            }
-            len -= 1;
-        }
-        value.resize(len, 0);
-        /* trailing null byte of a string */
-        value.push(0);
-        Attribute {
-            ck_type: t,
-            attrtype: AttrType::StringType,
-            value: value,
-        }
-    }
-
     /// Constructs an attribute passing in the value as a slice
     pub fn from_attr_slice(
         id: CK_ULONG,
@@ -467,39 +448,6 @@ macro_rules! conversion_from_type {
                     attrtype: AttrType::$atype,
                     value: $conv(val),
                 }
-            }
-
-            #[doc = concat!("Creates an attribute of type `", stringify!($atype), "` from a `", stringify!($rtype), "` value")]
-            #[doc = ""]
-            #[doc = concat!("Ensures that the attribute type is a `", stringify!($atype), "` and errors if not")]
-            #[allow(dead_code)]
-            pub fn $fn2(attr_id: CK_ULONG, val: $rtype) -> Result<Attribute> {
-                for a in &ATTRMAP {
-                    if a.id == attr_id {
-                        if a.atype == AttrType::$atype {
-                            return Ok(Self::$fn1(attr_id, val));
-                        }
-                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-                    }
-                }
-                Err(Error::not_found((attr_id.to_string())))
-            }
-
-            #[doc = concat!("Creates an attribute of type `", stringify!($atype), "` from a `", stringify!($rtype), "` value")]
-            #[doc = ""]
-            #[doc = concat!("Ensures that the attribute type is a `", stringify!($atype), "` and errors if not")]
-            #[doc = "Identifies the attribute id by the spec name as a string"]
-            #[allow(dead_code)]
-            pub fn $fn3(attr_name: String, val: $rtype) -> Result<Attribute> {
-                for a in &ATTRMAP {
-                    if a.name == &attr_name {
-                        if a.atype == AttrType::$atype {
-                            return Ok(Self::$fn1(a.id, val));
-                        }
-                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-                    }
-                }
-                Err(Error::not_found((attr_name)))
             }
         }
     };
