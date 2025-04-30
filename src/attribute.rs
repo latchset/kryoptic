@@ -282,6 +282,9 @@ impl Attribute {
     /// Returns a CKR_ATTRIBUTE_VALUE_INVALID error if the value is
     /// not a boolean
     pub fn to_bool(&self) -> Result<bool> {
+        if self.attrtype != AttrType::BoolType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
         if self.value.len() != 1 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
@@ -296,6 +299,9 @@ impl Attribute {
     /// Returns a CKR_ATTRIBUTE_VALUE_INVALID error if the value is
     /// not a ulong
     pub fn to_ulong(&self) -> Result<CK_ULONG> {
+        if self.attrtype != AttrType::NumType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
         if self.value.len() != std::mem::size_of::<CK_ULONG>() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
@@ -309,6 +315,9 @@ impl Attribute {
     /// Returns a CKR_ATTRIBUTE_VALUE_INVALID error if the value is
     /// not parseable as a string
     pub fn to_string(&self) -> Result<String> {
+        if self.attrtype != AttrType::StringType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
         match std::str::from_utf8(&self.value) {
             Ok(s) => Ok(s.to_string()),
             Err(_) => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
@@ -317,6 +326,9 @@ impl Attribute {
 
     /// Returns a reference to the internal value wrapped in a Result
     pub fn to_bytes(&self) -> Result<&Vec<u8>> {
+        if self.attrtype != AttrType::BytesType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
         Ok(&self.value)
     }
 
@@ -325,6 +337,9 @@ impl Attribute {
     /// Returns a CKR_ATTRIBUTE_VALUE_INVALID error if the value is
     /// not parseable as an array
     pub fn to_ulong_array(&self) -> Result<Vec<CK_ULONG>> {
+        if self.attrtype != AttrType::UlongArrayType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
         let ulen = std::mem::size_of::<CK_ULONG>();
         if self.value.len() % ulen != 0 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
@@ -347,6 +362,9 @@ impl Attribute {
     /// Returns a CKR_ATTRIBUTE_VALUE_INVALID error if the value is
     /// not parseable as a CK_DATE type
     pub fn to_date_string(&self) -> Result<String> {
+        if self.attrtype != AttrType::DateType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
         if self.value.len() == 0 {
             return Ok(String::new()); /* empty default value */
         }
