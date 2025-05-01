@@ -1,6 +1,9 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms to access the Secure
+//! Hash Algorithm Standards (SHA1, SHA2, SHA3) operations.
+
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::interface::*;
@@ -12,20 +15,35 @@ use std::fmt::Debug;
 
 pub const INVALID_HASH_SIZE: usize = CK_UNAVAILABLE_INFORMATION as usize;
 
+/// The Hash Based Operation object
+///
+/// This object is used to map different mechanisms that reference
+/// a specific hash so that a Mech->Hash lookups becomes easier.
 #[derive(Debug)]
 pub struct HashBasedOp {
+    /// The actual Hash mechanism
     pub hash: CK_MECHANISM_TYPE,
+    /// HMAC Keys for the HMAC based on the above hash
     pub key_type: CK_KEY_TYPE,
+    /// Key Generation mechanism for the above key type
     pub key_gen: CK_MECHANISM_TYPE,
+    /// Hash based key derivation mechanism
     pub key_derive: CK_MECHANISM_TYPE,
+    /// The HMAC Mechanism using the above hash
     pub mac: CK_MECHANISM_TYPE,
+    /// The corresponding general HMAC mechanism
     pub mac_general: CK_MECHANISM_TYPE,
+    /// Size of the hash function output
     pub hash_size: usize,
-    /* not used in FIPS builds */
+    /// Size of the internal block_size.
+    ///
+    /// Used only by the native HMAC implementation
     #[allow(dead_code)]
     pub block_size: usize,
 }
 
+/// A table referencing all of the supported hash mechanisms used for
+/// mapping purposes
 pub static HASH_MECH_SET: [HashBasedOp; 11] = [
     HashBasedOp {
         hash: CKM_SHA_1,
@@ -139,6 +157,9 @@ pub static HASH_MECH_SET: [HashBasedOp; 11] = [
     },
 ];
 
+/// function to validate that the hash mechanism is a valid one
+///
+/// Used only by sshkdf
 #[cfg(feature = "sshkdf")]
 pub fn is_valid_hash(hash: CK_MECHANISM_TYPE) -> bool {
     for hs in &HASH_MECH_SET {
@@ -149,6 +170,10 @@ pub fn is_valid_hash(hash: CK_MECHANISM_TYPE) -> bool {
     return false;
 }
 
+/// Returns the hash output size for the specified mechanism
+///
+/// If the mechanism is not a valid hash INVALID_HASH_SIZE is
+/// returned instead
 pub fn hash_size(hash: CK_MECHANISM_TYPE) -> usize {
     for hs in &HASH_MECH_SET {
         if hs.hash == hash {
@@ -158,6 +183,7 @@ pub fn hash_size(hash: CK_MECHANISM_TYPE) -> usize {
     INVALID_HASH_SIZE
 }
 
+/// Returns the internal block size for the specified mechanism
 #[cfg(not(feature = "fips"))]
 pub fn block_size(hash: CK_MECHANISM_TYPE) -> usize {
     for hs in &HASH_MECH_SET {
@@ -168,12 +194,14 @@ pub fn block_size(hash: CK_MECHANISM_TYPE) -> usize {
     INVALID_HASH_SIZE
 }
 
+/// Object that represents a Hash mechanism
 #[derive(Debug)]
 struct HashMechanism {
     info: CK_MECHANISM_INFO,
 }
 
 impl HashMechanism {
+    /// Internally register all hash mechanisms listed in `HASH_MECH_SET`
     fn register_mechanisms(mechs: &mut Mechanisms) {
         for hs in &HASH_MECH_SET {
             mechs.add_mechanism(
@@ -201,10 +229,12 @@ impl HashMechanism {
 }
 
 impl Mechanism for HashMechanism {
+    /// Returns a reference to the mechanism info
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
     }
 
+    /// Initializes a Digest operation
     fn digest_new(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Digest>> {
         if self.info.flags & CKF_DIGEST != CKF_DIGEST {
             return Err(CKR_MECHANISM_INVALID)?;
@@ -212,6 +242,7 @@ impl Mechanism for HashMechanism {
         Ok(Box::new(HashOperation::new(mech.mechanism)?))
     }
 
+    /// Initializes a Hash based Key Derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
@@ -230,14 +261,20 @@ impl Mechanism for HashMechanism {
     }
 }
 
+/// Object that represents a Hash based Key Derivation Operation
 #[derive(Debug)]
 struct HashKDFOperation {
+    /// The key derivation mechanism
     mech: CK_MECHANISM_TYPE,
+    /// The corresponding hash mechanism
     prf: CK_MECHANISM_TYPE,
+    /// Finalization guard, prevents further processing once the
+    /// operation is finalized
     finalized: bool,
 }
 
 impl HashKDFOperation {
+    /// Instantiates a new Key Derivation Object
     fn new(
         mech: CK_MECHANISM_TYPE,
         prf: CK_MECHANISM_TYPE,
@@ -330,10 +367,12 @@ impl Derive for HashKDFOperation {
     }
 }
 
+/// Public internal function to initialize a digest operation directly
 pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
 }
 
+/// Registers all Hash related mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     HashMechanism::register_mechanisms(mechs);
 }
