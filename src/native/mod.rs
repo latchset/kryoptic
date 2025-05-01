@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This is a meta crate to provide access to native Rust implementations
+//! of cryptographic mechanisms
+
 #[cfg(all(feature = "hmac", not(feature = "fips")))]
 pub mod hmac;
 #[cfg(all(feature = "pbkdf2", not(feature = "fips")))]

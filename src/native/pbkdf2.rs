@@ -1,6 +1,10 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the Password Based Key Derivation Function v2
+//! operation defined in [RFC 8018](https://www.rfc-editor.org/rfc/rfc8018)
+//! Section 5.2
+
 use std::mem::swap;
 
 use crate::error::Result;
@@ -9,6 +13,8 @@ use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::object::Object;
 
+/// Helper function to generate the HMAC of the input data
+/// Using a "password" object for the secret key
 fn prf_fn(
     mech: &Box<dyn Mechanism>,
     prf: CK_MECHANISM_TYPE,
@@ -28,6 +34,7 @@ fn prf_fn(
     .mac(i, o)
 }
 
+/// Computes the Password Based Key Derivation Function v2
 pub fn pbkdf2_derive(
     mechanisms: &Mechanisms,
     prf: CK_MECHANISM_TYPE,

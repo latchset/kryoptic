@@ -1,6 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements TLS Key Derivation Functions (KDF) and MAC
+//! operations, primarily focusing on the TLS 1.2 PRF (Pseudo-Random
+//! Function) based on HMAC, as defined in
+//! [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246).
+
 use std::fmt::Debug;
 
 #[cfg(feature = "fips")]
@@ -21,6 +26,12 @@ use crate::fips::set_fips_error_state;
 #[cfg(feature = "fips")]
 use crate::hmac::test_get_hmac;
 
+/// Macro to safely get a boolean attribute value or a default for a
+/// specific attribute of a key object.
+///
+/// Returns an error if the attribute is missing and no default is provided.
+///
+/// Converts Rust bool to CK_BOOL.
 macro_rules! as_ck_bbool {
     ($key:expr, $attr:expr, $def:expr) => {{
         let b = match $key.get_attr_as_bool($attr) {
@@ -43,6 +54,7 @@ macro_rules! as_ck_bbool {
 
 pub const TLS_MASTER_SECRET_SIZE: CK_ULONG = 48;
 const TLS_RANDOM_SEED_SIZE: usize = 32;
+/// List of mechanisms allowed for a key derived as a TLS Master Secret.
 const TLS_MASTER_SECRET_ALLOWED_MECHS: [CK_ULONG; 6] = [
     CKM_TLS12_KEY_AND_MAC_DERIVE,
     CKM_TLS12_KEY_SAFE_DERIVE,
@@ -56,12 +68,15 @@ const TLS_KEY_EXPANSION_LABEL: &[u8; 13] = b"key expansion";
 const TLS_SERVER_FINISHED: &[u8; 15] = b"server finished";
 const TLS_CLIENT_FINISHED: &[u8; 15] = b"client finished";
 
+/// Represents the TLS Pseudo-Random Function (PRF) based on HMAC
+/// (RFC 5246 Section 5)
 #[derive(Debug)]
 struct TLSPRF {
     op: Box<dyn Mac>,
 }
 
 impl TLSPRF {
+    /// Initializes a new TLS PRF instance using the specified HMAC mechanism
     fn init(
         key: &Object,
         mech: &Box<dyn Mechanism>,
@@ -80,6 +95,13 @@ impl TLSPRF {
         })
     }
 
+    /// Computes the TLS PRF output (P_hash function) for a given seed and
+    /// required length.
+    ///
+    /// Implements the P_hash expansion:
+    ///     P_hash(secret, seed) = HMAC_hash(secret, A(1) + seed) +
+    ///                            HMAC_hash(secret, A(2) + seed) + ...
+    ///     where A(0) = seed, A(i) = HMAC_hash(secret, A(i-1))
     fn finish(&mut self, seed: &Vec<u8>, reqlen: usize) -> Result<Vec<u8>> {
         let maclen = self.op.mac_len()?;
 
@@ -112,6 +134,7 @@ impl TLSPRF {
     }
 }
 
+/// Checks if a given HMAC mechanism is FIPS approved for use in TLS KDF.
 #[cfg(feature = "fips")]
 fn is_hmac_fips_approved(prf: CK_MECHANISM_TYPE) -> Option<bool> {
     match prf {
@@ -120,6 +143,7 @@ fn is_hmac_fips_approved(prf: CK_MECHANISM_TYPE) -> Option<bool> {
     }
 }
 
+/// Test helper function to directly invoke the TLS PRF logic.
 #[cfg(test)]
 pub fn test_tlsprf(
     key: &Object,
@@ -132,11 +156,20 @@ pub fn test_tlsprf(
     tlsprf.finish(seed, reqlen)
 }
 
+/// Holds the result of the FIPS self-test for the TLS PRF.
 #[cfg(feature = "fips")]
 struct FIPSSelftest {
     result: CK_RV,
 }
 
+/// Static Lazy variable to run FIPS Known Answer Tests (KATs) for the TLS PRF
+/// on initialization
+///
+/// Uses a test vector from OpenSSL.
+///
+/// If the calculated output does not match the expected output, it sets the
+/// FIPS error state and stores `CKR_FIPS_SELF_TEST_FAILED` in
+/// [FIPSSelfTest.result].
 #[cfg(feature = "fips")]
 static TLS_PRF_SELFTEST: Lazy<FIPSSelftest> = Lazy::new(|| {
     let mut status = FIPSSelftest {
@@ -145,14 +178,28 @@ static TLS_PRF_SELFTEST: Lazy<FIPSSelftest> = Lazy::new(|| {
 
     /* Test vector taken from OpenSSL selftest */
     let prf: CK_MECHANISM_TYPE = CKM_SHA256_HMAC;
-    let secret = hex::decode("202c88c00f84a17a20027079604787461176455539e705be730890602c289a5001e34eeb3a043e5d52a65e66125188bf").unwrap();
+    let secret = hex::decode(
+        "202c88c00f84a17a20027079604787461176455539e705be\
+         730890602c289a5001e34eeb3a043e5d52a65e66125188bf",
+    )
+    .unwrap();
     let label: &[u8] = b"key expansion";
-    let randoms = hex::decode("ae6c806f8ad4d80784549dff28a4b58fd837681a51d928c3e30ee5ff14f3986862e1fd91f23f558a605f28478c58cf72637b89784d959df7e946d3f07bd1b616").unwrap();
+    let randoms = hex::decode(
+        "ae6c806f8ad4d80784549dff28a4b58fd837681a51d928c3e30ee5ff14f39868\
+         62e1fd91f23f558a605f28478c58cf72637b89784d959df7e946d3f07bd1b616",
+    )
+    .unwrap();
     let mut seed = Vec::<u8>::with_capacity(label.len() + randoms.len());
     seed.extend_from_slice(&label);
     seed.extend_from_slice(&randoms);
 
-    let expect = hex::decode("d06139889fffac1e3a71865f504aa5d0d2a2e89506c6f2279b670c3e1b74f531016a2530c51a3a0f7e1d6590d0f0566b2f387f8d11fd4f731cdd572d2eae927f6f2f81410b25e6960be68985add6c38445ad9f8c64bf8068bf9a6679485d966f1ad6f68b43495b10a683755ea2b858d70ccac7ec8b053c6bd41ca299d4e51928").unwrap();
+    let expect = hex::decode(
+        "d06139889fffac1e3a71865f504aa5d0d2a2e89506c6f2279b670c3e1b74f531\
+         016a2530c51a3a0f7e1d6590d0f0566b2f387f8d11fd4f731cdd572d2eae927f\
+         6f2f81410b25e6960be68985add6c38445ad9f8c64bf8068bf9a6679485d966f\
+         1ad6f68b43495b10a683755ea2b858d70ccac7ec8b053c6bd41ca299d4e51928",
+    )
+    .unwrap();
 
     /* mock key */
     let mut key = Object::new();
@@ -189,20 +236,42 @@ static TLS_PRF_SELFTEST: Lazy<FIPSSelftest> = Lazy::new(|| {
     status
 });
 
+/// Represents a TLS Key Derivation Function (KDF) operation
+///
+/// This handles mechanisms like `CKM_TLS12_MASTER_KEY_DERIVE`,
+/// `CKM_TLS12_KEY_AND_MAC_DERIVE`, and `CKM_TLS_KDF`.
 #[derive(Debug)]
 pub struct TLSKDFOperation {
+    /// Tracks if the derive operation has been completed
     finalized: bool,
+    /// The specific PKCS#11 TLS KDF mechanism being used
     mech: CK_MECHANISM_TYPE,
+    /// Client random bytes.
     client_random: Vec<u8>,
+    /// Server random bytes.
     server_random: Vec<u8>,
+    /// Optional pointer to store the negotiated TLS version (used by
+    /// CKM_TLS12_MASTER_KEY_DERIVE)
     version: Option<*mut CK_VERSION>,
+    /// The underlying PRF mechanism (e.g., CKM_SHA256_HMAC)
     prf: CK_MECHANISM_TYPE,
+    /// Label used in the PRF seed (e.g., "master secret", "key expansion")
     label: &'static [u8],
+    /// Optional context data used in the PRF seed (for CKM_TLS_KDF)
     context: &'static [u8],
+    /// Requested length for derived MAC keys (in bytes)
     maclen: CK_ULONG,
+    /// Requested length for derived encryption keys (in bytes)
     keylen: CK_ULONG,
+    /// Required length for derived IVs (in bytes)
     ivlen: CK_ULONG,
+    /// Optional pointer to the output structure for key material
+    /// (CKM_TLS12_KEY_AND_MAC_DERIVE)
     mat_out: Option<*mut CK_SSL3_KEY_MAT_OUT>,
+    /// Option that holds the FIPS indicator
+    /// - Some(true) = approved
+    /// - Some(false) = not-approved
+    /// - None = undetermined
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
@@ -211,6 +280,12 @@ unsafe impl Send for TLSKDFOperation {}
 unsafe impl Sync for TLSKDFOperation {}
 
 impl TLSKDFOperation {
+    /// Creates a new TLS KDF operation based on the provided mechanism
+    ///
+    /// Dispatches to specific constructors based on the mechanism type.
+    ///
+    /// Errors out if FIPS self-tests result is an error when the "fips"
+    /// feature is enabled.
     pub fn new(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         #[cfg(feature = "fips")]
         if TLS_PRF_SELFTEST.result != CKR_OK {
@@ -229,6 +304,10 @@ impl TLSKDFOperation {
         }
     }
 
+    /// Constructor for the `CKM_TLS12_MASTER_KEY_DERIVE` mechanism
+    ///
+    /// Parses `CK_TLS12_MASTER_KEY_DERIVE_PARAMS`, validates inputs, and sets
+    /// up the operation context for deriving the master secret.
     fn new_tls12_mk_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
 
@@ -276,6 +355,13 @@ impl TLSKDFOperation {
         })
     }
 
+    /// Constructor for `CKM_TLS12_KEY_AND_MAC_DERIVE` and
+    /// `CKM_TLS12_KEY_SAFE_DERIVE`
+    ///
+    /// Parses `CK_TLS12_KEY_MAT_PARAMS`, calculates required output lengths,
+    /// validates inputs (randoms, export flag), checks the output structure
+    /// pointer, and sets up the operation context for deriving MAC keys,
+    /// write keys, and IVs.
     fn new_tls12_keymac_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS12_KEY_MAT_PARAMS);
 
@@ -337,6 +423,10 @@ impl TLSKDFOperation {
         })
     }
 
+    /// Constructor for `CKM_TLS_KDF` (and its alias `CKM_TLS12_KDF`)
+    ///
+    /// Parses `CK_TLS_KDF_PARAMS`, validates inputs (label, randoms), and
+    /// sets up the operation context for generic labeled PRF derivation.
     fn new_tls_generic_key_derive(
         mech: &CK_MECHANISM,
     ) -> Result<TLSKDFOperation> {
@@ -388,6 +478,10 @@ impl TLSKDFOperation {
         })
     }
 
+    /// Verifies that the base key object is suitable for TLS KDF operations
+    ///
+    /// Checks CKA_CLASS, CKA_KEY_TYPE, CKA_DERIVE, and that CKA_VALUE_LEN
+    /// matches exactly TLS_MASTER_SECRET_SIZE.
     fn verify_key(&self, key: &Object) -> Result<()> {
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
         match key.get_attr(CKA_VALUE_LEN) {
@@ -404,6 +498,13 @@ impl TLSKDFOperation {
         }
     }
 
+    /// Verifies and augments the template attributes for deriving a TLS master
+    /// secret key
+    ///
+    /// Ensures CKA_CLASS, CKA_KEY_TYPE, CKA_VALUE_LEN, and
+    /// CKA_ALLOWED_MECHANISMS are consistent with a standard TLS master secret.
+    ///
+    /// Adds missing defaults.
     fn verify_mk_template<'a>(
         &self,
         template: &'a [CK_ATTRIBUTE],
@@ -454,6 +555,13 @@ impl TLSKDFOperation {
         Ok(tmpl)
     }
 
+    /// Constructs the seed input for the TLS PRF calculation
+    ///
+    /// Concatenates label + client_random + server_random
+    /// or label + server_random + client_random,
+    /// plus optional context data.
+    ///
+    /// The client secret comes first if `cli_first` is true.
     fn tls_prf_seed(&self, cli_first: bool) -> Vec<u8> {
         let mut seed = Vec::<u8>::with_capacity(
             self.label.len()
@@ -475,6 +583,16 @@ impl TLSKDFOperation {
         seed
     }
 
+    /// Performs the derivation for `CKM_TLS12_MASTER_KEY_DERIVE`
+    ///
+    /// Verifies the base key and template.
+    ///
+    /// Calls the TLS PRF with the "master secret" label and combined randoms.
+    ///
+    /// Sets the derived key value in the new object.
+    ///
+    /// Optionally fills the TLS version structure provided in the mechanism
+    /// parameters.
     fn derive_master_key(
         &mut self,
         key: &Object,
@@ -520,6 +638,12 @@ impl TLSKDFOperation {
         Ok(vec![dkey])
     }
 
+    /// Verifies and augments the template for deriving TLS key expansion
+    /// keys (write/MAC keys)
+    ///
+    /// Ensures consistency for attributes like CKA_CLASS, CKA_KEY_TYPE,
+    /// CKA_VALUE_LEN, CKA_SENSITIVE, and CKA_EXTRACTABLE based on the base
+    /// master secret key.
     fn verify_key_expansion_template<'a>(
         &'a self,
         key: &Object,
@@ -572,6 +696,19 @@ impl TLSKDFOperation {
         Ok(tmpl)
     }
 
+    /// Performs the derivation for `CKM_TLS12_KEY_AND_MAC_DERIVE` /
+    /// `CKM_TLS12_KEY_SAFE_DERIVE`
+    ///
+    /// Verifies the base key and template for the encryption key.
+    ///
+    /// Calls the TLS PRF with the "key expansion" label and combined
+    /// randoms to generate a block of key material.
+    ///
+    /// Parses this block to extract client/server MAC keys and write keys,
+    /// creating new key objects for them.
+    ///
+    /// If IVs are required, extracts and copies them into the
+    /// `CK_SSL3_KEY_MAT_OUT` structure provided in the mechanism parameters.
     fn derive_mac_key(
         &mut self,
         key: &Object,
@@ -664,6 +801,10 @@ impl TLSKDFOperation {
         Ok(keys)
     }
 
+    /// Performs the derivation for `CKM_TLS_KDF`
+    ///
+    /// Note: `CKM_TLS12_KDF` is considered just an alias of `CKM_TLS_KDF` and
+    /// is deprecated as of PKCS#11 v3.2
     fn derive_generic_key(
         &mut self,
         key: &Object,
@@ -709,6 +850,10 @@ impl MechOperation for TLSKDFOperation {
 }
 
 impl Derive for TLSKDFOperation {
+    /// Performs the appropriate TLS KDF derivation based on the mechanism used
+    ///
+    /// Dispatches to internal methods like `derive_master_key`,
+    /// `derive_mac_key`, etc.
     fn derive(
         &mut self,
         key: &Object,
@@ -736,12 +881,17 @@ impl Derive for TLSKDFOperation {
     }
 }
 
+/// Static collection of registered HMAC mechanisms for internal TLS MAC use
 static MAC_MECHANISMS: Lazy<Mechanisms> = Lazy::new(|| {
     let mut mechanisms = Mechanisms::new();
     register_mechs_only(&mut mechanisms);
     mechanisms
 });
 
+/// Represents a TLS MAC operation
+///
+/// Used for mechanisms like `CKM_TLS_MAC` and `CKM_TLS12_MAC` (typically for
+/// calculating the MAC for TLS Finished messages).
 #[derive(Debug)]
 pub struct TLSMACOperation {
     mech: CK_MECHANISM_TYPE,
@@ -755,6 +905,11 @@ pub struct TLSMACOperation {
 }
 
 impl TLSMACOperation {
+    /// Creates a new TLS MAC operation
+    ///
+    /// Parses `CK_TLS_MAC_PARAMS`, validates the PRF mechanism and label
+    /// choice (server/client finished), initializes the internal TLS PRF,
+    /// and stores parameters.
     pub fn new(mech: &CK_MECHANISM, key: &Object) -> Result<TLSMACOperation> {
         #[cfg(feature = "fips")]
         if TLS_PRF_SELFTEST.result != CKR_OK {
@@ -791,12 +946,15 @@ impl TLSMACOperation {
         })
     }
 
+    /// Internal helper to check state before starting/updating
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
     }
+
+    /// Internal helper to update the data being MAC'd
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -805,6 +963,8 @@ impl TLSMACOperation {
         self.seed.extend_from_slice(data);
         Ok(())
     }
+
+    /// Internal helper to finalize the MAC calculation
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;

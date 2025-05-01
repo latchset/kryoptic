@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the Keyed-Hash Message Authentication Code (HMAC)
+//! operation defined in [FIPS 198-1](https://doi.org/10.6028/NIST.FIPS.198-1)
+
 use std::fmt::Debug;
 
 use crate::error::Result;
@@ -12,27 +15,45 @@ use crate::misc::zeromem;
 
 use constant_time_eq::constant_time_eq;
 
-/* max algo right now is SHA3_224 with 144 bytes blocksize,
- * use slightly larger for good measure (and alignment) */
+/// Maximum size for internal buffers
+///
+/// Currently the algorithm with the largest block size is SHA3_224 with
+/// a blocksize of 144 bytes, we use slightly larger maximum for good
+/// measure (and memory alignment) */
 const MAX_BSZ: usize = 160;
+/// Initial value for the ipad buffer
 const IPAD_INIT: [u8; MAX_BSZ] = [0x36; MAX_BSZ];
+/// Initial value for the opad buffer
 const OPAD_INIT: [u8; MAX_BSZ] = [0x5c; MAX_BSZ];
 
-/* HMAC spec From FIPS 198-1 */
-
+/// Object that represents the HMAC operation
 #[derive(Debug)]
 pub struct HMACOperation {
+    /// The Specific HMAC mechanism
     mech: CK_MECHANISM_TYPE,
+    /// The raw key to be used in the HMAC operation
     key: HmacKey,
+    /// The associated Hash output size
     hashlen: usize,
+    /// The associated Hash internal block size
     blocklen: usize,
+    /// The request HMAC output length
     outputlen: usize,
+    /// Internal state buffer
     state: [u8; MAX_BSZ],
+    /// Inner pad buffer
     ipad: [u8; MAX_BSZ],
+    /// Outer pad buffer
     opad: [u8; MAX_BSZ],
+    /// The digest 'inner' operation
     inner: Box<dyn Digest>,
+    /// Flag that marks the operation as finalized
     finalized: bool,
+    /// Flag that marks that the operation has started
     in_use: bool,
+    /// Optional signature holding vector
+    ///
+    /// This is used by the VerifySignature API
     #[allow(dead_code)]
     signature: Option<Vec<u8>>,
 }
@@ -46,6 +67,7 @@ impl Drop for HMACOperation {
 }
 
 impl HMACOperation {
+    /// Instantiates a new HMAC operation
     pub fn new(
         mech: CK_MECHANISM_TYPE,
         key: HmacKey,
@@ -82,6 +104,11 @@ impl HMACOperation {
         Ok(hmac)
     }
 
+    /// Internal initialization function
+    ///
+    /// Performs the initial step of the HMAC algorithm
+    ///
+    /// Called by [Self::new()] and [Self::reinit()]
     fn init(&mut self) -> Result<()> {
         /* K0 */
         if self.key.raw.len() <= self.blocklen {
@@ -109,6 +136,7 @@ impl HMACOperation {
         Ok(())
     }
 
+    /// Marks that the operation has commenced
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -116,6 +144,7 @@ impl HMACOperation {
         Ok(())
     }
 
+    /// Feeds data into the HMAC algorithm
     fn update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -130,6 +159,7 @@ impl HMACOperation {
         ret
     }
 
+    /// Finalizes the HMAC operation and produces the HMAC output
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -156,6 +186,7 @@ impl HMACOperation {
         Ok(())
     }
 
+    /// Reinitializes an HMAC Operation
     fn reinit(&mut self) -> Result<()> {
         zeromem(&mut self.state);
         self.ipad.copy_from_slice(&IPAD_INIT);
