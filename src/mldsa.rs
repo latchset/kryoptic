@@ -1,6 +1,12 @@
 // Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for ML-DSA, providing
+//! post-quantum digital signatures based on lattice cryptography. It
+//! handles key pair generation, signing, and verification operations
+//! according to [FIPS 204](https://doi.org/10.6028/NIST.FIPS.204):
+//! _Module-Lattice-Based Digital Signature Standard_
+
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
@@ -19,6 +25,8 @@ pub const ML_DSA_65_PK_SIZE: usize = 1952;
 pub const ML_DSA_87_SK_SIZE: usize = 4896;
 pub const ML_DSA_87_PK_SIZE: usize = 2592;
 
+/// Helper to check that the public key value size matches the
+/// declared ML-DSA parameter set
 fn mldsa_pub_check_import(obj: &Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
         Ok(p) => p,
@@ -49,12 +57,14 @@ fn mldsa_pub_check_import(obj: &Object) -> Result<()> {
     Ok(())
 }
 
+/// The ML-DSA Public Key Factory
 #[derive(Debug, Default)]
 pub struct MlDsaPubFactory {
     data: ObjectFactoryData,
 }
 
 impl MlDsaPubFactory {
+    /// Initializes a ML-DSA Public Key Factory
     pub fn new() -> MlDsaPubFactory {
         let mut factory: MlDsaPubFactory = Default::default();
 
@@ -76,6 +86,11 @@ impl MlDsaPubFactory {
 }
 
 impl ObjectFactory for MlDsaPubFactory {
+    /// Creates a ML-DSA public key object
+    ///
+    /// Uses [ObjectFactory::default_object_create()]
+    ///
+    /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -97,9 +112,18 @@ impl CommonKeyFactory for MlDsaPubFactory {}
 
 impl PubKeyFactory for MlDsaPubFactory {}
 
+/// The static Public Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(MlDsaPubFactory::new()));
 
+/// Helper to check that the private key value size (if provided)
+/// matches the declared ML-DSA parameter set, and that the generation
+/// seed value (if provided) is of the correct size.
+///
+/// Finally checks that at least one of CKA_VALUE and CKA_SEED are provided
 fn mldsa_priv_check_import(obj: &Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
         Ok(p) => p,
@@ -145,12 +169,14 @@ fn mldsa_priv_check_import(obj: &Object) -> Result<()> {
     Ok(())
 }
 
+/// The ML-DSA Private Key Factory
 #[derive(Debug, Default)]
 pub struct MlDsaPrivFactory {
     data: ObjectFactoryData,
 }
 
 impl MlDsaPrivFactory {
+    /// Initializes a ML-DSA Private Key Factory
     pub fn new() -> MlDsaPrivFactory {
         let mut factory: MlDsaPrivFactory = Default::default();
 
@@ -184,6 +210,11 @@ impl MlDsaPrivFactory {
 }
 
 impl ObjectFactory for MlDsaPrivFactory {
+    /// Creates a ML-DSA private key object
+    ///
+    /// Uses [ObjectFactory::default_object_create()]
+    ///
+    /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -231,15 +262,21 @@ impl PrivKeyFactory for MlDsaPrivFactory {
     }
 }
 
+/// The static Private Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(MlDsaPrivFactory::new()));
 
+/// Object that represents ML-DSA related mechanisms
 #[derive(Debug)]
 struct MlDsaMechanism {
     info: CK_MECHANISM_INFO,
 }
 
 impl MlDsaMechanism {
+    /// Instantiates a new ML-DSA Mechanism
     fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
         Box::new(MlDsaMechanism {
             info: CK_MECHANISM_INFO {
@@ -250,6 +287,7 @@ impl MlDsaMechanism {
         })
     }
 
+    /// Registers all ML-DSA related mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[
             CKM_ML_DSA,
@@ -393,6 +431,7 @@ impl Mechanism for MlDsaMechanism {
     }
 }
 
+/// Registers all ML-DSA related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     MlDsaMechanism::register_mechanisms(mechs);
 
