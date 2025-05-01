@@ -72,6 +72,10 @@ pub const INHIBIT_ANY_POLICY_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 5, 29, 54);
 pub const ACCEPTABLE_RESPONSES_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 3, 6, 1, 5, 5, 7, 48, 1, 4);
+pub const ADMISSIONS_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 3, 36, 8, 3, 3);
+pub const PRIVATE_KEY_USAGE_PERIOD_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 5, 29, 16);
 
 // Public key identifiers
 pub const EC_OID: asn1::ObjectIdentifier = asn1::oid!(1, 2, 840, 10045, 2, 1);
@@ -214,18 +218,33 @@ pub const PBES2_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 5, 13);
 pub const PBKDF2_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 5, 12);
+pub const SCRYPT_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 3, 6, 1, 4, 1, 11591, 4, 11);
 
 pub const PBES1_WITH_SHA_AND_3KEY_TRIPLEDES_CBC: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 12, 1, 3);
+pub const PBES1_WITH_SHA_AND_40_BIT_RC2_CBC: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 1, 12, 1, 6);
 
-pub const AES_256_CBC_OID: asn1::ObjectIdentifier =
-    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 1, 42);
-pub const AES_192_CBC_OID: asn1::ObjectIdentifier =
-    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 1, 22);
 pub const AES_128_CBC_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 1, 2);
+pub const AES_192_CBC_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 1, 22);
+pub const AES_256_CBC_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 1, 42);
+
+pub const DES_EDE3_CBC_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 3, 7);
+
+pub const RC2_CBC: asn1::ObjectIdentifier = asn1::oid!(1, 2, 840, 113549, 3, 2);
 
 pub const HMAC_WITH_SHA1_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 2, 7);
+pub const HMAC_WITH_SHA224_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 2, 8);
 pub const HMAC_WITH_SHA256_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 2, 9);
+pub const HMAC_WITH_SHA384_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 2, 10);
+pub const HMAC_WITH_SHA512_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 2, 11);
