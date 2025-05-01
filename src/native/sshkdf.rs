@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the SSH Key Derivation Function (KDF)
+//! as specified in RFC 4253, Section 7.2.
+
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
@@ -11,18 +14,31 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
 
+/// Represents an SSH Key Derivation Function (KDF) operation
+/// ([RFC 4253](https://www.rfc-editor.org/rfc/rfc4253) Section 7.2)
 #[derive(Debug)]
 pub struct SSHKDFOperation {
+    /// The base PKCS#11 mechanism type for this KDF.
     mech: CK_MECHANISM_TYPE,
+    /// Tracks if the derive operation has been completed.
     finalized: bool,
+    /// The underlying hash mechanism used as the PRF (e.g., CKM_SHA256).
     prf: CK_MECHANISM_TYPE,
+    /// The specific key/IV type requested ('A' through 'F').
     key_type: u8,
+    /// The exchange hash (H).
     exchange_hash: Vec<u8>,
+    /// The session ID (usually H, unless overridden).
     session_id: Vec<u8>,
+    /// Indicates that the derived output is a data object not a key.
     is_data: bool,
 }
 
 impl SSHKDFOperation {
+    /// Initializes a new SSH KDF operation from the provided mechanism.
+    ///
+    /// Parses the `KR_SSHKDF_PARAMS` and validates parameters like the PRF
+    /// hash mechanism and the derived key type.
     pub fn new(mech: &CK_MECHANISM) -> Result<SSHKDFOperation> {
         let params = misc::cast_params!(mech, KR_SSHKDF_PARAMS);
 
@@ -69,6 +85,11 @@ impl MechOperation for SSHKDFOperation {
 }
 
 impl Derive for SSHKDFOperation {
+    /// Performs the SSH KDF key derivation according to RFC 4253, Section 7.2
+    ///
+    /// Takes the base secret key (K), validates its suitability, prepares the
+    /// output object template (key or data), and iteratively computes the
+    /// derived key material (DKM) using the specified PRF hash.
     fn derive(
         &mut self,
         key: &Object,

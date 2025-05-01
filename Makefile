@@ -31,7 +31,10 @@ tests: build
 	src/tools/softhsm/test.sh
 
 docs:
-	cargo doc --no-default-features --features nssdb,jsondb,fips,ecc_all --document-private-items
+	cargo doc --no-default-features --features standard,pqc,nssdb,jsondb --document-private-items
+
+docs-fips:
+	cargo doc --no-default-features --features fips --document-private-items
 
 .ONESHELL:
 SHELL = /bin/bash

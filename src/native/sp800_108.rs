@@ -1,6 +1,10 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements a set of key derivations functions operations
+//! defined in [NIST Special Publication 800-108 Revision 1](https://doi.org/10.6028/NIST.SP.800-108r1-upd1)
+//! _Recommendation for Key Derivation Using Pseudorandom Functions_
+
 use crate::attribute::Attribute;
 use crate::error::{map_err, Result};
 use crate::interface::*;
@@ -9,6 +13,8 @@ use crate::misc::{bytes_to_slice, bytes_to_vec};
 use crate::object::{Object, ObjectFactories};
 use crate::sp800_108::*;
 
+/// Helper macro to return the maximum value `size` bits can express,
+/// up to a maximum of 64 bit
 macro_rules! maxsize {
     ($size: expr) => {
         match $size {
@@ -19,6 +25,8 @@ macro_rules! maxsize {
     };
 }
 
+/// Helper macro to return the maximum value `size` bits can express,
+/// in increments of 8 bits, up to a maximum of 32 bits
 macro_rules! maxsize32 {
     ($size: expr) => {
         match $size {
@@ -29,13 +37,24 @@ macro_rules! maxsize32 {
     };
 }
 
+/// The SP 800-108 Derivation Operation
+///
+/// Implements the Key derivation operation defined in
+/// [NIST SP 800-108 Rev. 1](https://doi.org/10.6028/NIST.SP.800-108r1-upd1)
 #[derive(Debug)]
 pub struct Sp800Operation {
+    /// The specific SP800 mechanism
     mech: CK_MECHANISM_TYPE,
+    /// The digest function to be used
     prf: CK_MECHANISM_TYPE,
+    /// Flag that marks the operation as finalized
     finalized: bool,
+    /// A Vector containing the list of SP800 Parameters
     params: Vec<Sp800Params>,
+    /// Initialization Vector
     iv: Vec<u8>,
+    /// Vector containing a set of structures defining the templates for
+    /// the additional keys to derive
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
 }
 
@@ -43,6 +62,7 @@ unsafe impl Send for Sp800Operation {}
 unsafe impl Sync for Sp800Operation {}
 
 impl Sp800Operation {
+    /// Instantiates the Counter Mode KDF
     pub fn counter_kdf_new(
         params: CK_SP800_108_KDF_PARAMS,
     ) -> Result<Sp800Operation> {
@@ -68,6 +88,7 @@ impl Sp800Operation {
         })
     }
 
+    /// Instantiates the Feedback Mode KDF
     pub fn feedback_kdf_new(
         params: CK_SP800_108_FEEDBACK_KDF_PARAMS,
     ) -> Result<Sp800Operation> {
@@ -100,12 +121,16 @@ impl Sp800Operation {
         })
     }
 
+    /// Space needed to hold the key with a minimum size granularity given
+    /// by the `segment` parameter
     fn key_to_segment_size(key: usize, segment: usize) -> usize {
         ((key + segment - 1) / segment) * segment
     }
 
-    /* NOTE: In this function the ctr is intentionally truncated by
-     * casting, do not convert with try_from() */
+    /// Feed the counter to the HMAC function
+    ///
+    /// NOTE: In this function the ctr is intentionally truncated by
+    /// casting, do not convert with try_from()
     fn ctr_update(
         param: &Sp800CounterFormat,
         ctr: usize,
@@ -158,8 +183,11 @@ impl Sp800Operation {
         }
     }
 
-    /* NOTE: In this function the len is intentionally truncated by
-     * casting, do not convert with try_from() */
+    /// Feed the length of the sum of the segments or of the keys
+    /// to be produced
+    ///
+    /// NOTE: In this function the len is intentionally truncated by
+    /// casting, do not convert with try_from()
     fn dkm_update(
         param: &Sp800DKMLengthFormat,
         klen: usize,
@@ -244,6 +272,12 @@ impl Sp800Operation {
         }
     }
 
+    /// Feeds the data contained in the SP800Params in the order they
+    /// are provided.
+    ///
+    /// This function handles the data types valid for the Counter KDF
+    /// and enforces any ordering or presence rules required by the
+    /// Counter KDF algorithm.
     fn counter_updates(
         params: &Vec<Sp800Params>,
         op: &mut Box<dyn Mac>,
@@ -283,6 +317,12 @@ impl Sp800Operation {
         Ok(())
     }
 
+    /// Feeds the data contained in the SP800Params in the order they
+    /// are provided.
+    ///
+    /// This function handles the data types valid for the Feedback KDF
+    /// and enforces any ordering or presence rules required by the
+    /// Feedback KDF algorithm.
     fn feedback_updates(
         params: &Vec<Sp800Params>,
         op: &mut Box<dyn Mac>,
