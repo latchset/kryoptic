@@ -1,6 +1,10 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for HMAC (Hash-based
+//! Message Authentication Code) as defined in
+//! [RFC 2104](https://www.rfc-editor.org/rfc/rfc2104)
+
 use std::fmt::Debug;
 
 use crate::error::{Error, Result};
@@ -18,8 +22,10 @@ use crate::native::hmac::HMACOperation;
 #[cfg(feature = "fips")]
 use crate::ossl::hmac::HMACOperation;
 
+/// Structure that represents an HMAC Key
 #[derive(Debug)]
 pub struct HmacKey {
+    /// A vector containing the raw key in bytes
     pub raw: Vec<u8>,
 }
 
@@ -29,6 +35,10 @@ impl Drop for HmacKey {
     }
 }
 
+/// Helper function that returns the underlying hash output size
+///
+/// Uses the hash module's `HASH_MECH_SET` map to retrieve the data.
+/// `mech` can be the Hash or any of the HMAC mechanism types
 pub fn hmac_size(mech: CK_MECHANISM_TYPE) -> usize {
     for hs in &hash::HASH_MECH_SET {
         if hs.hash == mech || hs.mac == mech || hs.mac_general == mech {
@@ -38,6 +48,7 @@ pub fn hmac_size(mech: CK_MECHANISM_TYPE) -> usize {
     hash::INVALID_HASH_SIZE
 }
 
+/// Returns the underlying hash mechanism type from the HMAC mechanism type
 pub fn hmac_mech_to_hash_mech(
     mech: CK_MECHANISM_TYPE,
 ) -> Result<CK_MECHANISM_TYPE> {
@@ -57,6 +68,7 @@ pub fn hmac_mech_to_hash_mech(
     })
 }
 
+/// Returns the standard HMAC mechanism associated to the provided hash
 #[cfg(feature = "tlskdf")]
 pub fn hash_to_hmac_mech(mech: CK_MECHANISM_TYPE) -> Result<CK_MECHANISM_TYPE> {
     Ok(match mech {
@@ -75,15 +87,21 @@ pub fn hash_to_hmac_mech(mech: CK_MECHANISM_TYPE) -> Result<CK_MECHANISM_TYPE> {
     })
 }
 
+/// Object that represents an HMAC Mechanism
 #[derive(Debug)]
 struct HMACMechanism {
+    /// General mechanism information
     info: CK_MECHANISM_INFO,
+    /// Associated Key Type
     keytype: CK_KEY_TYPE,
+    /// Minimum output length
     minlen: usize,
+    /// Maximum output length
     maxlen: usize,
 }
 
 impl HMACMechanism {
+    /// Internally register all HMAC mechanisms listed in `HASH_MECH_SET`
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for hs in &hash::HASH_MECH_SET {
             mechs.add_mechanism(
@@ -115,6 +133,15 @@ impl HMACMechanism {
         }
     }
 
+    /// Checks that a key object is usable by the HMAc mechanism and returns
+    /// the internal raw key
+    ///
+    /// The only valid key types are the corresponding mechanism key
+    /// (eg CKK_SHA256_HMAC for CKM_SHA256_HMAC) or the generic secret
+    /// key type (CKK_GENERIC_SECRET).
+    ///
+    /// Also ensures that the key is marked as allowed for the requested
+    /// operation by checking the corresponding attribute on the key object.
     fn check_and_fetch_key(
         &self,
         key: &Object,
@@ -135,6 +162,8 @@ impl HMACMechanism {
         })
     }
 
+    /// Fetches the mechanism parameters and checks them for
+    /// consistency with the allowed options
     fn check_and_fetch_param(&self, mech: &CK_MECHANISM) -> Result<usize> {
         if self.minlen == self.maxlen {
             if mech.ulParameterLen != 0 {
@@ -154,6 +183,11 @@ impl HMACMechanism {
         Ok(genlen)
     }
 
+    /// Initializes a new HMAC Operation
+    ///
+    /// The mechanism advertises only SIGN/VERIFY to the callers.
+    /// DERIVE is a mediated operation so it is not advertised
+    /// and we do not check it against the allowed flags */
     fn new_op(
         &self,
         mech: &CK_MECHANISM,
@@ -161,9 +195,6 @@ impl HMACMechanism {
         op_type: CK_FLAGS,
         signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
-        /* the mechanism advertises only SIGN/VERIFY to the callers
-         * DERIVE is a mediated operation so it is not advertised
-         * and we do not check it */
         let op_attr = match op_type {
             CKF_SIGN => {
                 if self.info.flags & CKF_SIGN != CKF_SIGN {
@@ -190,10 +221,12 @@ impl HMACMechanism {
 }
 
 impl Mechanism for HMACMechanism {
+    /// Returns a reference to the mechanism info
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
     }
 
+    /// Initializes a pure MAC operation, used internally only
     fn mac_new(
         &self,
         mech: &CK_MECHANISM,
@@ -203,6 +236,7 @@ impl Mechanism for HMACMechanism {
         Ok(Box::new(self.new_op(mech, keyobj, op_type, None)?))
     }
 
+    /// Initializes an HMAC operation for the Sign operation
     fn sign_new(
         &self,
         mech: &CK_MECHANISM,
@@ -211,6 +245,7 @@ impl Mechanism for HMACMechanism {
         Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN, None)?))
     }
 
+    /// Initializes an HMAC operation for the Verify operation
     fn verify_new(
         &self,
         mech: &CK_MECHANISM,
@@ -219,6 +254,7 @@ impl Mechanism for HMACMechanism {
         Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY, None)?))
     }
 
+    /// Initializes an HMAC operation for the VerifySignature operation
     #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
@@ -235,6 +271,8 @@ impl Mechanism for HMACMechanism {
     }
 }
 
+/// Creates static key factories for each key type in HASH_MECH_SET
+/// at process initialization or on first use
 static HMAC_SECRET_KEY_FACTORIES: Lazy<
     Vec<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>,
 > = Lazy::new(|| {
@@ -250,11 +288,16 @@ static HMAC_SECRET_KEY_FACTORIES: Lazy<
     v
 });
 
+/// Internal function to register only the HMAC mechanisms
+///
+/// This is used to provide the `tlskdf` module internal direct
+/// access to HMAC primitives
 #[cfg(feature = "tlskdf")]
 pub fn register_mechs_only(mechs: &mut Mechanisms) {
     HMACMechanism::register_mechanisms(mechs);
 }
 
+/// Registers all HMAC related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     HMACMechanism::register_mechanisms(mechs);
 
@@ -270,6 +313,9 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     }
 }
 
+/// Internal helper for to get a mechanism operation directly without
+/// having to go through a registry. This is used for unit tests and
+/// for the FIPS self-test in the native tlskdf implementation.
 #[cfg(any(feature = "fips", test))]
 pub fn test_get_hmac(mech: CK_MECHANISM_TYPE) -> Box<dyn Mechanism> {
     for hs in &hash::HASH_MECH_SET {
