@@ -1,6 +1,13 @@
 // Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for ML-KEM, providing a
+//! post-quantum Key Encapsulation Mechanism based on lattice cryptography,
+//! as specified in [FIPS 203](https://doi.org/10.6028/NIST.FIPS.203):
+//! _Module-Lattice-Based Key-Encapsulation Mechanism Standard_.
+//! It handles key pair generation, key encapsulation, and key
+//! decapsulation operations.
+
 use once_cell::sync::Lazy;
 use std::fmt::Debug;
 
@@ -24,6 +31,8 @@ pub const ML_KEM_512_CIPHERTEXT_BYTES: usize = 768;
 pub const ML_KEM_768_CIPHERTEXT_BYTES: usize = 1088;
 pub const ML_KEM_1024_CIPHERTEXT_BYTES: usize = 1568;
 
+/// Helper to check that the public key value size matches the
+/// declared ML-KEM parameter set
 fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
         Ok(p) => p,
@@ -54,12 +63,14 @@ fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
     Ok(())
 }
 
+/// The ML-KEM Public Key Factory
 #[derive(Debug, Default)]
 pub struct MlKemPubFactory {
     data: ObjectFactoryData,
 }
 
 impl MlKemPubFactory {
+    /// Initializes a ML-KEM Public Key Factory
     pub fn new() -> MlKemPubFactory {
         let mut factory: MlKemPubFactory = Default::default();
 
@@ -81,6 +92,11 @@ impl MlKemPubFactory {
 }
 
 impl ObjectFactory for MlKemPubFactory {
+    /// Creates a ML-KEM public key object
+    ///
+    /// Uses [ObjectFactory::default_object_create()]
+    ///
+    /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -102,9 +118,18 @@ impl CommonKeyFactory for MlKemPubFactory {}
 
 impl PubKeyFactory for MlKemPubFactory {}
 
+/// The static Public Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(MlKemPubFactory::new()));
 
+/// Helper to check that the private key value size (if provided)
+/// matches the declared ML-KEM parameter set, and that the generation
+/// seed value (if provided) is of the correct size.
+///
+/// Finally checks that at least one of CKA_VALUE and CKA_SEED are provided
 fn mlkem_priv_check_import(obj: &Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
         Ok(p) => p,
@@ -150,12 +175,14 @@ fn mlkem_priv_check_import(obj: &Object) -> Result<()> {
     Ok(())
 }
 
+/// The ML-KEM Private Key Factory
 #[derive(Debug, Default)]
 pub struct MlKemPrivFactory {
     data: ObjectFactoryData,
 }
 
 impl MlKemPrivFactory {
+    /// Initializes a ML-KEM Private Key Factory
     pub fn new() -> MlKemPrivFactory {
         let mut factory: MlKemPrivFactory = Default::default();
 
@@ -189,6 +216,11 @@ impl MlKemPrivFactory {
 }
 
 impl ObjectFactory for MlKemPrivFactory {
+    /// Creates a ML-KEM private key object
+    ///
+    /// Uses [ObjectFactory::default_object_create()]
+    ///
+    /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -236,15 +268,21 @@ impl PrivKeyFactory for MlKemPrivFactory {
     }
 }
 
+/// The static Private Key factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(MlKemPrivFactory::new()));
 
+/// Object that represents ML-KEM related mechanisms
 #[derive(Debug)]
 struct MlKemMechanism {
     info: CK_MECHANISM_INFO,
 }
 
 impl MlKemMechanism {
+    /// Instantiates a new ML-KEM Mechanism
     fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
         Box::new(MlKemMechanism {
             info: CK_MECHANISM_INFO {
@@ -255,6 +293,7 @@ impl MlKemMechanism {
         })
     }
 
+    /// Registers all ML-KEM related mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         mechs.add_mechanism(
             CKM_ML_KEM,
@@ -388,6 +427,7 @@ impl Mechanism for MlKemMechanism {
     }
 }
 
+/// Registers all ML-KEM related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     MlKemMechanism::register_mechanisms(mechs);
 
