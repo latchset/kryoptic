@@ -17,11 +17,6 @@ pub const AES_192_GCM_OID: asn1::ObjectIdentifier =
 pub const AES_256_GCM_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 1, 46);
 
-pub const HMAC_WITH_SHA384_OID: asn1::ObjectIdentifier =
-    asn1::oid!(1, 2, 840, 113549, 2, 10);
-pub const HMAC_WITH_SHA512_OID: asn1::ObjectIdentifier =
-    asn1::oid!(1, 2, 840, 113549, 2, 11);
-
 /// Kryoptic Key Derivation Function v1
 pub const KKDF1_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 3, 6, 1, 4, 1, 2312, 20, 1, 1);
