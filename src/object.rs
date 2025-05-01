@@ -15,8 +15,11 @@ use bitflags::bitflags;
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
+/// Helper macro that generates methods to check specific boolean
+/// attributes on objects
 macro_rules! create_bool_checker {
     (make $name:ident; from $id:expr; def $def:expr) => {
+        #[doc = concat!("Returns the value of [", stringify!($id), "] as a boolean")]
         #[allow(dead_code)]
         pub fn $name(&self) -> bool {
             for a in &self.attributes {
@@ -29,8 +32,11 @@ macro_rules! create_bool_checker {
     };
 }
 
+/// Helper macro that generates methods to retrieve attributes
+/// values of a specific type from objects
 macro_rules! attr_as_type {
     (make $name:ident; with $r:ty; $atype:ident; via $conv:ident) => {
+        #[doc = concat!("Returns the value of the attribute as a `", stringify!($r), "`")]
         pub fn $name(&self, t: CK_ULONG) -> Result<$r> {
             for attr in &self.attributes {
                 if attr.get_type() == t {
@@ -45,6 +51,7 @@ macro_rules! attr_as_type {
     };
 }
 
+/// Helper to map errors to CKR_TEMPLATE_INCOMPLETE
 fn incomplete(e: Error) -> Error {
     if e.attr_not_found() {
         Error::ck_rv(CKR_TEMPLATE_INCOMPLETE)
@@ -59,9 +66,20 @@ fn incomplete(e: Error) -> Error {
 
 #[derive(Debug, Clone)]
 pub struct Object {
+    /// The object handle value
+    ///
+    /// Can be CK_INVALID_HANDLE on new objects
     handle: CK_OBJECT_HANDLE,
+    /// The session this object is associated to
+    ///
+    /// Set to CK_INVALID_HANDLE when the object is not tied to
+    /// a session or is new
     session: CK_SESSION_HANDLE,
+    /// The object attributes as vector of [Attribute] values
     attributes: Vec<Attribute>,
+    /// Flag to indicate if the object needs to be zeroized when it is
+    /// drop()ed. Generally set to true for objects containing sensitive
+    /// values like private or secret keys
     zeroize: bool,
 }
 
@@ -76,6 +94,7 @@ impl Drop for Object {
 }
 
 impl Object {
+    /// Creates a new empty Object
     pub fn new() -> Object {
         Object {
             handle: CK_INVALID_HANDLE,
@@ -125,6 +144,7 @@ impl Object {
         self.handle = h
     }
 
+    /// Gets the object's handle
     pub fn get_handle(&self) -> CK_OBJECT_HANDLE {
         self.handle
     }
@@ -134,6 +154,7 @@ impl Object {
         self.session = s
     }
 
+    /// Gets the object's Session handle
     pub fn get_session(&self) -> CK_SESSION_HANDLE {
         self.session
     }
@@ -147,10 +168,12 @@ impl Object {
     create_bool_checker! {make is_extractable; from CKA_EXTRACTABLE; def false}
     create_bool_checker! {make always_auth; from CKA_ALWAYS_AUTHENTICATE; def false}
 
+    /// Get an attribute from the object by attribute id
     pub fn get_attr(&self, ck_type: CK_ULONG) -> Option<&Attribute> {
         self.attributes.iter().find(|r| r.get_type() == ck_type)
     }
 
+    /// Sets or Replaces an attribute on the object
     pub fn set_attr(&mut self, a: Attribute) -> Result<()> {
         let atype = a.get_type();
         match self.attributes.iter().position(|r| r.get_type() == atype) {
@@ -177,11 +200,12 @@ impl Object {
         Ok(true)
     }
 
-    #[allow(dead_code)]
+    /// Deletes an attribute from the object by attribute id
     pub fn del_attr(&mut self, ck_type: CK_ULONG) {
         self.attributes.retain(|a| a.get_type() != ck_type);
     }
 
+    /// Gets a reference to the internal vector of object attributes
     pub fn get_attributes(&self) -> &Vec<Attribute> {
         return &self.attributes;
     }
@@ -241,58 +265,59 @@ impl Object {
 }
 
 bitflags! {
+    /// A bitflag set that defines attribute properties and behaviors
     #[derive(Debug, Clone, Copy)]
     pub struct OAFlags: u32 {
-        /* the attribute is ignored and not copied from a template */
+        /// the attribute is ignored and not copied from a template
         const Ignored              = 0x00000001;
 
-        /* The attribute is sensitive and will not be returned by a call
-         * unless specifically authorized (like a key secret value) */
+        /// The attribute is sensitive and will not be returned by a call
+        /// unless specifically authorized (like a key secret value)
         const Sensitive            = 0x00000002;
 
-        /* The attribute has a default value that can be set when it is
-         * required on object creation but not provided by a template */
+        /// The attribute has a default value that can be set when it is
+        /// required on object creation but not provided by a template
         const Defval               = 0x00000004;
 
-        /* The attribute must be provided in the tempalate on object
-         * creation or the operation will fail */
+        /// The attribute must be provided in the template on object
+        /// creation or the operation will fail
         const RequiredOnCreate     = 0x00000008;
 
-        /* The attribute must be provided in the tempalate on key
-         * generation or the operation will fail */
+        /// The attribute must be provided in the template on key
+        /// generation or the operation will fail
         const RequiredOnGenerate   = 0x00000010;
 
-        /* The attribute is always required or the operation will fail,
-         * however combined with Defval it means it will be generated
-         * automatically when absent from the template and will not
-         * cause the operation to fail */
+        /// The attribute is always required or the operation will fail,
+        /// however combined with Defval it means it will be generated
+        /// automatically when absent from the template and will not
+        /// cause the operation to fail
         const AlwaysRequired       = 0x00000020;
 
-        /* The attribute can only be set in a template for create
-         * (import) operations, if set for any other operation (copy,
-         * generate, wrap, derive) it will cause a failure */
+        /// The attribute can only be set in a template for create
+        /// (import) operations, if set for any other operation (copy,
+        /// generate, wrap, derive) it will cause a failure
         const SettableOnlyOnCreate = 0x00000080;
 
-        /* This attribute can never be set in a template, if set the
-         * operation will fail (they are only ever set by internal
-         * functions) */
+        /// This attribute can never be set in a template, if set the
+        /// operation will fail (they are only ever set by internal
+        /// functions)
         const NeverSettable        = 0x00000100;
 
-        /* The attribute cannot be changed once set (enforced from
-         * changing via C_SetAttibuteValue or via C_CopyObject */
+        /// The attribute cannot be changed once set (enforced from
+        /// changing via C_SetAttibuteValue or via C_CopyObject
         const Unchangeable         = 0x00000400;
 
-        /* The attribute can only be change True -> False */
+        /// The attribute can only be changed from `True` to `False`
         const ChangeToFalse        = 0x00000C00;
 
-        /* The attribute can only be change False -> True */
+        /// The attribute can only be changed from `False` to `True`
         const ChangeToTrue         = 0x00001400;
 
-        /* The attribute can be changed only during a Copy Operation */
+        /// The attribute can be changed only during a Copy Operation
         const ChangeOnCopy         = 0x00002400;
 
-        /* The attribute is ephemeral and should not be stored on
-         * permanent storage */
+        /// The attribute is ephemeral and should not be stored on
+        /// permanent storage
         const Ephemeral            = 0x00008000;
     }
 }
@@ -303,11 +328,15 @@ bitflags! {
 
 #[derive(Debug, Clone)]
 pub struct ObjectAttr {
+    /// The reference attribute, may contain a default value
     attribute: Attribute,
+    /// The flags that define the attribute properties for the object
+    /// class this ObjectAttr is applied to
     flags: OAFlags,
 }
 
 impl ObjectAttr {
+    /// Creates a new ObjectAttr
     pub fn new(a: Attribute, f: OAFlags) -> ObjectAttr {
         ObjectAttr {
             attribute: a,
@@ -315,19 +344,23 @@ impl ObjectAttr {
         }
     }
 
+    /// Gets the internal attribute id (type)
     pub fn get_type(&self) -> CK_ULONG {
         self.attribute.get_type()
     }
 
+    /// Check if a specific flag is present on the ObjectAttr
     pub fn is(&self, val: OAFlags) -> bool {
         self.flags.contains(val)
     }
 
+    /// Checks if the ObjectAttr has a default value
     pub fn has_default(&self) -> bool {
         self.flags.contains(OAFlags::Defval)
     }
 }
 
+/// Helper to quickly instantiate an ObjectAttr element
 macro_rules! attr_element {
     ($id:expr; $flags:expr; $from_type:expr; val $defval:expr) => {
         ObjectAttr::new($from_type($id, $defval), $flags)
@@ -335,6 +368,8 @@ macro_rules! attr_element {
 }
 pub(crate) use attr_element;
 
+/// Macro to check that an attribute that contains a vector of bytes
+/// exists and contains a vector of length greater than 0
 #[allow(unused_macros)]
 macro_rules! bytes_attr_not_empty {
     ($obj:expr; $id:expr) => {
@@ -365,17 +400,28 @@ pub(crate) use bytes_attr_not_empty;
 
 #[derive(Debug, Default)]
 pub struct ObjectFactoryData {
+    /// List of valid attributes and their properties for this factory
     attributes: Vec<ObjectAttr>,
+    /// List of attributes considered sensitive
     sensitive: Vec<CK_ATTRIBUTE_TYPE>,
+    /// List of attributes that should never be saved in token storage
     ephemeral: Vec<CK_ATTRIBUTE_TYPE>,
+    /// Flag that indicates this factory data has been finalized and cannot
+    /// be further modified
     finalized: bool,
 }
 
 impl ObjectFactoryData {
+    /// Returns a reference to factory valid attributes and their properties
     pub fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
     }
 
+    /// Returns a mutable reference to factory valid attributes and
+    /// their properties
+    ///
+    /// This method panics if it is called after the factory data has
+    /// been finalized.
     pub fn get_attributes_mut(&mut self) -> &mut Vec<ObjectAttr> {
         if self.finalized {
             panic!("Attempted modification after finalization");
@@ -383,14 +429,22 @@ impl ObjectFactoryData {
         &mut self.attributes
     }
 
+    /// Get the list of sensitive attributes
+    ///
+    /// Empty until the factory data is finalized
     pub fn get_sensitive(&self) -> &Vec<CK_ATTRIBUTE_TYPE> {
         &self.sensitive
     }
 
+    /// Get the list of ephemeral attributes
+    ///
+    /// Empty until the factory data is finalized
     pub fn get_ephemeral(&self) -> &Vec<CK_ATTRIBUTE_TYPE> {
         &self.ephemeral
     }
 
+    /// Finalizes the factory data and populates the sensitive
+    /// and ephemeral lists
     pub fn finalize(&mut self) {
         for a in &self.attributes {
             if a.is(OAFlags::Sensitive) {
@@ -404,15 +458,31 @@ impl ObjectFactoryData {
     }
 }
 
+/// This is a common trait to define common methods all objects implement
+/// and common attributes all objects posses
+///
+/// [Common attributes](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203203)
+/// and
+/// [Storage Objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203216)
+/// (Version 3.1)
+
 pub trait ObjectFactory: Debug + Send + Sync {
+    /// Creates a new object from the template
+    ///
+    /// Mechanism implementations that can create objects must implement
+    /// this function, the default implementation returns a general error.
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
         return Err(CKR_GENERAL_ERROR)?;
     }
 
+    /// Creates a copy of the object
+    ///
+    /// Uses the default_copy() internal method by default.
     fn copy(&self, obj: &Object, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         self.default_copy(obj, template)
     }
 
+    /// Adds the common object attributes defined in spec
     fn add_common_object_attrs(&mut self) {
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
@@ -420,6 +490,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
             Attribute::from_ulong; val 0));
     }
 
+    /// Adds the storage object attributes defined in the spec
     fn add_common_storage_attrs(&mut self) {
         self.add_common_object_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
@@ -446,6 +517,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
             Attribute::from_string; val String::new()));
     }
 
+    /// Default object creation function
+    ///
+    /// Uses `internal_object_create()` with appropriate flags.
     fn default_object_create(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -457,6 +531,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
         )
     }
 
+    /// Default key object generation function
+    ///
+    /// Uses `internal_object_create()` with appropriate flags.
+    ///
+    /// Marks the object for zeroization.
     fn default_object_generate(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -470,6 +549,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(key)
     }
 
+    /// Default key object unwrapping function
+    ///
+    /// Uses `internal_object_create()` with appropriate flags.
     fn default_object_unwrap(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -481,6 +563,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
         )
     }
 
+    /// Default key object derivation function
+    ///
+    /// Uses `internal_object_derive()`
     fn default_object_derive(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -489,6 +574,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
         self.internal_object_derive(template, origin)
     }
 
+    /// The internal key object derivation function
+    ///
+    /// Uses `internal_object_create()` with appropriate flags.
+    ///
+    /// Sets appropate default values for [CKA_LOCAL],
+    /// [CKA_ALWAYS_SENSITIVE], [CKA_NEVER_EXTRACTABLE] as
+    /// required by spec.
     fn internal_object_derive(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -598,6 +690,8 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
+    /// Adds an attribute to an object using the default value defined
+    /// for the attribute type in the factory
     #[allow(dead_code)]
     fn set_attribute_default(
         &self,
@@ -696,7 +790,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(obj)
     }
 
-    /// Helpers to allow serialization to export key material.
+    /// Helper to allow serialization to export key material.
     /// A key type factory should implement this function only if a
     /// standardized serialization format specified in PKCS#11 exists.
     fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
@@ -817,8 +911,10 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Ok(())
     }
 
+    /// Helper method to get a reference to the ObjectFactoryData
     fn get_data(&self) -> &ObjectFactoryData;
 
+    /// Helper method to get a mutable reference to the ObjectFactoryData
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData;
 }
 
@@ -833,6 +929,7 @@ struct DataFactory {
 }
 
 impl DataFactory {
+    /// Initializes a new DataFactory object
     fn new() -> DataFactory {
         let mut factory: DataFactory = Default::default();
 
@@ -857,6 +954,9 @@ impl DataFactory {
 }
 
 impl ObjectFactory for DataFactory {
+    /// Creates a new Data Object from the template
+    ///
+    /// Uses `default_object_create()`
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         self.default_object_create(template)
     }
@@ -885,6 +985,7 @@ impl ObjectFactory for DataFactory {
 /// (Version 3.1)
 
 pub trait CertFactory: ObjectFactory {
+    /// Adds the certificate object attributes defined in the spec
     fn add_common_certificate_attrs(&mut self) {
         self.add_common_storage_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
@@ -912,6 +1013,14 @@ pub trait CertFactory: ObjectFactory {
             val Vec::new()));
     }
 
+    /// Validates values of basic certificate attribute conform to
+    /// the spec on object creation
+    ///
+    /// Specifically prevents setting CKA_TRUSTED to true until we
+    /// can properly check that the logged in user is the SO.
+    ///
+    /// Also ensures that CKA_CERTIFICATE_CATEGORY contains only
+    /// valid values.
     fn basic_cert_object_create_checks(&self, obj: &mut Object) -> CK_RV {
         match obj.get_attr_as_bool(CKA_TRUSTED) {
             Ok(t) => {
@@ -949,6 +1058,7 @@ struct X509Factory {
 }
 
 impl X509Factory {
+    /// Initializes a new X509Factory object
     fn new() -> X509Factory {
         let mut factory: X509Factory = Default::default();
 
@@ -993,6 +1103,10 @@ impl X509Factory {
 }
 
 impl ObjectFactory for X509Factory {
+    /// Creates a new X509 Certificate object
+    ///
+    /// Validates that the resulting object conforms to the spec
+    /// requirements or returns an appropriate error.
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
@@ -1063,6 +1177,7 @@ impl CertFactory for X509Factory {}
 /// (Version 3.1)
 
 pub trait CommonKeyFactory: ObjectFactory {
+    /// Adds the key objects attributes defined for all keys in the spec
     fn add_common_key_attrs(&mut self) {
         self.add_common_storage_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
@@ -1106,6 +1221,7 @@ pub trait CommonKeyFactory: ObjectFactory {
 
 #[allow(dead_code)]
 pub trait PubKeyFactory: CommonKeyFactory {
+    /// Adds the public key attributes defined in the spec
     fn add_common_public_key_attrs(&mut self) {
         self.add_common_key_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
@@ -1146,6 +1262,7 @@ pub trait PubKeyFactory: CommonKeyFactory {
 
 #[allow(dead_code)]
 pub trait PrivKeyFactory: CommonKeyFactory {
+    /// Adds the private key attributes defined in the spec
     fn add_common_private_key_attrs(&mut self) {
         self.add_common_key_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
@@ -1208,6 +1325,10 @@ pub trait PrivKeyFactory: CommonKeyFactory {
     }
 }
 
+/// Helper to zeroize data if a function call returns an error
+///
+/// Allows to use ? error propagation on error while transparently
+/// handling data cleanup from memory
 macro_rules! ok_or_clear {
     ($clear:expr; $exp:expr) => {
         match $exp {
@@ -1227,6 +1348,7 @@ macro_rules! ok_or_clear {
 /// (Version 3.1)
 
 pub trait SecretKeyFactory: CommonKeyFactory {
+    /// Adds the secret key attributes defined in the spec
     fn add_common_secret_key_attrs(&mut self) {
         self.add_common_key_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
@@ -1295,6 +1417,7 @@ pub trait SecretKeyFactory: CommonKeyFactory {
         Ok(obj)
     }
 
+    /// Returns the actual secret value length in bytes
     fn get_key_buffer_len(&self, obj: &Object) -> Result<usize> {
         Ok(obj
             .get_attr_as_bytes(CKA_VALUE)
@@ -1302,6 +1425,7 @@ pub trait SecretKeyFactory: CommonKeyFactory {
             .len())
     }
 
+    /// returns the key length as stored in CKA_VALUE_LEN
     fn get_key_len(&self, obj: &Object) -> usize {
         let Ok(len) = obj.get_attr_as_ulong(CKA_VALUE_LEN) else {
             return 0;
@@ -1312,6 +1436,11 @@ pub trait SecretKeyFactory: CommonKeyFactory {
         len
     }
 
+    /// Checks the secret value length and populates the CKA_VALUE_LEN
+    /// object attribute from it
+    ///
+    /// Ensures the secret value len actually matches the expected length
+    /// provided in the `len` parameter.
     fn set_key_len(&self, obj: &mut Object, len: usize) -> Result<()> {
         match self.get_key_buffer_len(obj) {
             Ok(blen) => {
@@ -1368,6 +1497,7 @@ pub struct GenericSecretKeyFactory {
 }
 
 impl GenericSecretKeyFactory {
+    /// Initializes a new GenericSecretKeyFactory object
     pub fn new() -> GenericSecretKeyFactory {
         let mut factory: GenericSecretKeyFactory = Default::default();
 
@@ -1396,6 +1526,8 @@ impl GenericSecretKeyFactory {
         factory
     }
 
+    /// Initializes a new GenericSecretKeyFactory object that enforces
+    /// a defined key size
     pub fn with_key_size(size: usize) -> GenericSecretKeyFactory {
         let mut factory = Self::new();
         factory.keysize = size;
@@ -1404,6 +1536,12 @@ impl GenericSecretKeyFactory {
 }
 
 impl ObjectFactory for GenericSecretKeyFactory {
+    /// Creates a new secret key from the template
+    ///
+    /// Ensures that the key length matches the defined size if any
+    /// and is not 0 otherwise
+    ///
+    /// Sets the CKA_VALUE_LEN attribute from the key length, if missing.
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
@@ -1433,6 +1571,7 @@ impl ObjectFactory for GenericSecretKeyFactory {
         SecretKeyFactory::import_from_wrapped(self, data, template)
     }
 
+    /// Returns a cast to the SecretKeyFactory trait for this object
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Ok(self)
     }
@@ -1449,22 +1588,31 @@ impl ObjectFactory for GenericSecretKeyFactory {
 impl CommonKeyFactory for GenericSecretKeyFactory {}
 
 impl SecretKeyFactory for GenericSecretKeyFactory {
-    fn recommend_key_size(&self, max: usize) -> Result<usize> {
+    /// Provides the recommended key size for this object if available,
+    /// otherwise reflects back the provided default
+    fn recommend_key_size(&self, default: usize) -> Result<usize> {
         if self.keysize != 0 {
             Ok(self.keysize)
         } else {
-            Ok(max)
+            Ok(default)
         }
     }
 }
 
+/// Generic reusable object to represent mechanisms associated
+/// with symmetric key objects
 #[derive(Debug)]
 pub struct GenericSecretKeyMechanism {
+    /// Generic mechanism info
     info: CK_MECHANISM_INFO,
+    /// The actual key type for this mechanism
+    ///
+    /// Must be a key type of class CKO_SECRET_KEY
     keytype: CK_KEY_TYPE,
 }
 
 impl GenericSecretKeyMechanism {
+    /// Instantiates a mechanism info for a specified symmetric key type
     pub fn new(keytype: CK_KEY_TYPE) -> GenericSecretKeyMechanism {
         GenericSecretKeyMechanism {
             info: CK_MECHANISM_INFO {
@@ -1475,11 +1623,22 @@ impl GenericSecretKeyMechanism {
             keytype: keytype,
         }
     }
+
+    /// Returns the keytype associated with this mechanism
     fn keytype(&self) -> CK_KEY_TYPE {
         self.keytype
     }
 }
 
+/// The generic and default implementation of symmetric key generation
+///
+/// Uses the internal CSPRNG to generate a high entropy random symmetric key.
+///
+/// The key length must be specified in the CKA_VALUE_LEN attribute of the
+/// provided object.
+///
+/// The object will be modified to store the secret raw key in the CKA_VALUE
+/// attribute.
 pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
     let value_len = usize::try_from(key.get_attr_as_ulong(CKA_VALUE_LEN)?)?;
 
@@ -1494,6 +1653,8 @@ pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
     Ok(())
 }
 
+/// Helper function to set generic attributes applicable to all keys
+/// to their defaults based on the mechanism that generated the key
 pub fn default_key_attributes(
     key: &mut Object,
     mech: CK_MECHANISM_TYPE,
@@ -1553,6 +1714,11 @@ impl Mechanism for GenericSecretKeyMechanism {
     }
 }
 
+/// Structure that defines an Object Type
+///
+/// Holds a Class type and the underlying type.
+///
+/// For object classes that have no underlying type `type_` is set to 0.
 #[derive(Debug, Eq, Hash, PartialEq)]
 pub struct ObjectType {
     class: CK_ULONG,
@@ -1560,6 +1726,7 @@ pub struct ObjectType {
 }
 
 impl ObjectType {
+    /// Initializes and returns a new ObjectType
     pub fn new(class: CK_ULONG, type_: CK_ULONG) -> ObjectType {
         ObjectType {
             class: class,
@@ -1580,12 +1747,14 @@ pub struct ObjectFactories {
 }
 
 impl ObjectFactories {
+    /// Crates a new Object Factory registry
     pub fn new() -> ObjectFactories {
         ObjectFactories {
             factories: HashMap::new(),
         }
     }
 
+    /// Adds a factory to the registry
     pub fn add_factory(
         &mut self,
         otype: ObjectType,
@@ -1594,6 +1763,7 @@ impl ObjectFactories {
         self.factories.insert(otype, templ);
     }
 
+    /// Retrieves a factory for the specified object type from the registry
     pub fn get_factory(
         &self,
         otype: ObjectType,
@@ -1604,6 +1774,8 @@ impl ObjectFactories {
         }
     }
 
+    /// Crates a new object using the appropriate factory based on the
+    /// data in the template.
     pub fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let class = match template.iter().find(|a| a.type_ == CKA_CLASS) {
             Some(c) => c.to_ulong()?,
@@ -1790,15 +1962,29 @@ impl ObjectFactories {
     }
 }
 
+/// The static Data Object factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static DATA_OBJECT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(DataFactory::new()));
 
+/// The static X509 Certificate factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static X509_CERT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(X509Factory::new()));
 
+/// The static Generic Secret factory
+///
+/// This is instantiated only once and finalized to make it unchangeable
+/// after process startup
 static GENERIC_SECRET_FACTORY: Lazy<Box<dyn ObjectFactory>> =
     Lazy::new(|| Box::new(GenericSecretKeyFactory::new()));
 
+/// Registers mechanisms and key factories for Data Objects, X509
+/// Certificates and Generic Secret Keys
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     mechs.add_mechanism(
         CKM_GENERIC_SECRET_KEY_GEN,
