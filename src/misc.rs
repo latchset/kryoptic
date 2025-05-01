@@ -7,8 +7,12 @@ use crate::error::Result;
 use crate::interface::*;
 use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::ossl::common::zeromem as ossl_zeromem;
+
+/// Constant containing the size of a CK_ULONG on this architecture
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 
+/// Convenience helper to copy a pointer+length obtained via FFI into a
+/// valid Vector of bytes.
 macro_rules! bytes_to_vec {
     ($ptr:expr, $len:expr) => {{
         let ptr = $ptr as *const u8;
@@ -27,6 +31,7 @@ macro_rules! bytes_to_vec {
 }
 pub(crate) use bytes_to_vec;
 
+/// Convenience macro to type cast any pointer into a CK_VOID_PTR
 macro_rules! void_ptr {
     ($ptr:expr) => {
         $ptr as *const _ as CK_VOID_PTR
@@ -34,6 +39,7 @@ macro_rules! void_ptr {
 }
 pub(crate) use void_ptr;
 
+/// Convenience macro to type cast any pointer into a CK_BYTE_PTR
 macro_rules! byte_ptr {
     ($ptr:expr) => {
         $ptr as *const _ as CK_BYTE_PTR
@@ -41,6 +47,14 @@ macro_rules! byte_ptr {
 }
 pub(crate) use byte_ptr;
 
+/// Convenience macro to cast mechanism parameters passed as pointer
+/// into the structure they represent.
+///
+/// A length check on ulParameterLen is performed to validate that
+/// the correct parameter structure is being casted.
+///
+/// No other validation is performed, this is an UNSAFE operation
+/// that requires further content validation
 macro_rules! cast_params {
     ($mech:expr, $params:ty) => {{
         let Ok(len) = usize::try_from($mech.ulParameterLen) else {
@@ -74,6 +88,8 @@ macro_rules! cast_params {
 }
 pub(crate) use cast_params;
 
+/// Convenience function to obtain the size of a type as a [CK_ULONG]
+/// instead of a [usize]
 macro_rules! sizeof {
     ($type:ty) => {
         CK_ULONG::try_from(std::mem::size_of::<$type>()).unwrap()
@@ -81,6 +97,14 @@ macro_rules! sizeof {
 }
 pub(crate) use sizeof;
 
+/// Convenience macro to return a (mutable) reference to a slice from
+/// a pointer+length obtained via FFI
+///
+/// Uses unsafe functions:
+/// - std::slice::from_raw_parts()
+/// - std::slice::from_raw_parts_mut()
+///
+/// If len is 0 and empty slice reference is returned
 macro_rules! bytes_to_slice {
     ($ptr: expr, $len:expr, $typ:ty) => {
         if $len > 0 {
@@ -110,6 +134,14 @@ macro_rules! bytes_to_slice {
 }
 pub(crate) use bytes_to_slice;
 
+/// Helper function to prepare a Data Object as result of a derivation
+/// function
+///
+/// Uses the DataFactory create() method after removing the incompatible
+/// CKA_VALUE_LEN attribute that is required to be present in the template
+/// by the derivation function
+///
+/// Adds other potentially missing required attributes like CKA_CLASS
 #[allow(dead_code)]
 pub fn common_derive_data_object(
     template: &[CK_ATTRIBUTE],
@@ -137,6 +169,15 @@ pub fn common_derive_data_object(
     Ok((obj, value_len))
 }
 
+/// Helper function to derive a Key Object
+///
+/// Uses the relevant "Secret Key Factory" creation method via
+/// derive_key_from_template().
+///
+/// Handles the case where a CKA_VALUE_LEN attribute was not provided
+/// in the template.
+///
+/// Adds other potentially missing required attributes like CKA_CLASS
 #[allow(dead_code)]
 pub fn common_derive_key_object(
     key: &Object,
@@ -165,6 +206,18 @@ pub fn common_derive_key_object(
     Ok((obj, value_len))
 }
 
+/// Copies a ASCII/UTF8 source string into a fixed sized destination
+///
+/// Both the source and the destination are provided as slices of
+/// raw bytes
+///
+/// If the source string is longer than the destination, the string
+/// is truncated.
+///
+/// If the source string is shorter than the destination the remaining
+/// bytes are filled with the 'space' character (0x20)
+///
+/// Any Null (string termination) byte is removed
 pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
     let slen;
     match s.last() {
@@ -185,6 +238,10 @@ pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
     }
 }
 
+/// Helper function to abstract the zeromem function from the ossl
+/// module.
+///
+/// This future-proofs the ability to use an alternative crypto backend
 pub fn zeromem(mem: &mut [u8]) {
     ossl_zeromem(mem);
 }
