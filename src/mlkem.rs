@@ -15,9 +15,14 @@ use crate::ossl::mlkem;
 pub const ML_KEM_512_EK_SIZE: usize = 800;
 pub const ML_KEM_768_EK_SIZE: usize = 1184;
 pub const ML_KEM_1024_EK_SIZE: usize = 1568;
+
 pub const ML_KEM_512_DK_SIZE: usize = 1632;
 pub const ML_KEM_768_DK_SIZE: usize = 2400;
 pub const ML_KEM_1024_DK_SIZE: usize = 3168;
+
+pub const ML_KEM_512_CIPHERTEXT_BYTES: usize = 768;
+pub const ML_KEM_768_CIPHERTEXT_BYTES: usize = 1088;
+pub const ML_KEM_1024_CIPHERTEXT_BYTES: usize = 1568;
 
 fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
@@ -266,6 +271,25 @@ impl MlKemMechanism {
 impl Mechanism for MlKemMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
+    }
+
+    /// Get expected length of the encapsulated ciphertext for given key
+    ///
+    /// Returns the size in bytes or Err if the key is not ML-KEM
+    fn encapsulate_ciphertext_len(&self, key: &Object) -> Result<usize> {
+        let kt = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
+        if kt != CKK_ML_KEM {
+            return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+        }
+        match key.get_attr_as_ulong(CKA_PARAMETER_SET) {
+            Ok(p) => match p {
+                CKP_ML_KEM_512 => Ok(ML_KEM_512_CIPHERTEXT_BYTES),
+                CKP_ML_KEM_768 => Ok(ML_KEM_768_CIPHERTEXT_BYTES),
+                CKP_ML_KEM_1024 => Ok(ML_KEM_1024_CIPHERTEXT_BYTES),
+                _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            },
+            Err(e) => Err(e)?,
+        }
     }
 
     fn encapsulate(
