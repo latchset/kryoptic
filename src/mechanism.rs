@@ -120,6 +120,14 @@ pub trait Mechanism: Debug + Send + Sync {
         Err(CKR_MECHANISM_INVALID)?
     }
 
+    /// Get expected length of the encapsulated ciphertext for given key
+    ///
+    /// Returns the size in bytes or Err if the key does not support this operation
+    #[cfg(feature = "pkcs11_3_2")]
+    fn encapsulate_ciphertext_len(&self, _: &Object) -> Result<usize> {
+        Err(CKR_MECHANISM_INVALID)?
+    }
+
     #[cfg(feature = "pkcs11_3_2")]
     fn decapsulate(
         &self,

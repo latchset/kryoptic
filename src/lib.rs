@@ -3887,8 +3887,6 @@ extern "C" fn fn_encapsulate_key(
 
     let penclen = unsafe { *encrypted_part_len as CK_ULONG };
     let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
-    let encpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
 
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -3901,6 +3899,21 @@ extern "C" fn fn_encapsulate_key(
     if mech.info().flags & CKF_ENCAPSULATE != CKF_ENCAPSULATE {
         return CKR_MECHANISM_INVALID;
     }
+
+    let ciphertext_len = res_or_ret!(mech.encapsulate_ciphertext_len(&key));
+    let ctext_len = cast_or_ret!(CK_ULONG from ciphertext_len);
+    if encrypted_part.is_null() {
+        unsafe {
+            *encrypted_part_len = ctext_len;
+        }
+        return CKR_OK;
+    }
+    if ciphertext_len > enclen {
+        return CKR_BUFFER_TOO_SMALL;
+    }
+
+    let encpart: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
 
     #[allow(unused_mut)]
     let (mut obj, outlen) =
