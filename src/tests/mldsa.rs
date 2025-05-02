@@ -7,6 +7,54 @@ use serial_test::parallel;
 
 #[test]
 #[parallel]
+fn test_mldsa_generate() {
+    let mut testtokn = TestToken::initialized("test_mldsa_generate", None);
+
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let (pubkey, privkey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_DSA_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_PARAMETER_SET, CKP_ML_DSA_65),
+            (CKA_KEY_TYPE, CKK_ML_DSA),
+        ],
+        &[],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_DSA),],
+        &[],
+        &[(CKA_SIGN, true)],
+    ));
+
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_DSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let msg = hex::decode(
+        "1E5A78AD64DF229AA22FD794EC0E82D0F69953118C09D134DFA20F1CC64A3671",
+    )
+    .expect("failed to decode test input");
+    let signature =
+        ret_or_panic!(sig_gen(session, privkey, msg.as_slice(), &mechanism));
+
+    let ret = sig_verify(
+        session,
+        pubkey,
+        msg.as_slice(),
+        signature.as_slice(),
+        &mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+#[parallel]
 fn test_mldsa_operations() {
     let mut testtokn = TestToken::initialized("test_mldsa_operations", None);
 
