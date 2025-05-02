@@ -1,6 +1,10 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the PKCS#11 session concept (`Session`), manages
+//! session state (login status, active operations), and handles
+//! session-specific operations like object searching.
+
 use std::vec::Vec;
 
 use crate::error::Result;
@@ -11,13 +15,18 @@ use crate::token::Token;
 #[cfg(feature = "fips")]
 use crate::fips;
 
+/// Represents an active object search operation within a session.
 #[derive(Debug)]
 pub struct SessionSearch {
+    /// The handles found by the search.
     handles: Vec<CK_OBJECT_HANDLE>,
+    /// Flag indicating if the search has been initialized and results are
+    /// available.
     in_use: bool,
 }
 
 impl SearchOperation for SessionSearch {
+    /// Retrieves a subset of the search results.
     fn results(&mut self, max: usize) -> Result<Vec<CK_OBJECT_HANDLE>> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -29,19 +38,28 @@ impl SearchOperation for SessionSearch {
         Ok(self.handles.drain(0..amount).collect())
     }
 
+    /// Indicates if the search operation is finalized (always false for
+    /// search).
     fn finalized(&self) -> bool {
         false
     }
 }
 
+/// Represents the login status requirement for an active operation.
 #[derive(Debug)]
 pub enum OpLoginStatus {
+    /// No operation active.
     NotInitialized,
+    /// Active operation does not require login.
     NotRequired,
+    /// Active operation requires login, but user is not logged in.
     Required,
+    /// Active operation requires login, and user is logged in.
     LoginOk,
 }
 
+/// Trait defining helper methods for managing specific active operation types
+/// within a `SessionOperations` struct.
 pub trait ManageOperation {
     fn cancel_operation(so: &mut SessionOperations) -> Result<()>;
     fn check_op(so: &SessionOperations) -> Result<()>;
@@ -50,6 +68,8 @@ pub trait ManageOperation {
     fn set_op(so: &mut SessionOperations, op: Box<Self>);
 }
 
+/// Macro to implement the `ManageOperation` trait for a specific operation
+/// type.
 macro_rules! impl_mop {
     ($optype:ident, $($opname:ident).+) => {
         impl ManageOperation for dyn $optype {
@@ -122,6 +142,7 @@ impl_mop!(Verify, verify);
 impl_mop!(VerifySignature, verifysig);
 
 impl SessionOperations {
+    /// Creates a new, empty `SessionOperations` object.
     pub fn new() -> SessionOperations {
         SessionOperations {
             msg_encryption: None,
@@ -138,17 +159,23 @@ impl SessionOperations {
     }
 }
 
+/// Represents a PKCS#11 session.
 #[derive(Debug)]
 pub struct Session {
+    /// Session information (state, flags, slot ID).
     info: CK_SESSION_INFO,
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
+    /// Container for active cryptographic operations.
     operations: SessionOperations,
+    /// Tracks login requirement status for the current operation.
     login_status: OpLoginStatus,
+    /// Tracks FIPS approval status for the current operation.
     fips_indicator: Option<bool>,
 }
 
 impl Session {
+    /// Creates a new session for a given slot ID and flags.
     pub fn new(
         slotid: CK_SLOT_ID,
         user_type: CK_USER_TYPE,
@@ -197,10 +224,12 @@ impl Session {
         })
     }
 
+    /// Returns a reference to the session's information structure.
     pub fn get_session_info(&self) -> &CK_SESSION_INFO {
         &self.info
     }
 
+    /// Sets the FIPS indicator flag for the current operation.
     #[cfg(feature = "fips")]
     pub fn set_fips_indicator(&mut self, flag: bool) {
         /* only allow to downgrade to false, never upgrade to true */
@@ -215,11 +244,17 @@ impl Session {
         self.fips_indicator = Some(flag)
     }
 
+    /// Gets the current FIPS indicator flag status.
     #[cfg(feature = "fips")]
     pub fn get_fips_indicator(&self) -> Option<bool> {
         self.fips_indicator
     }
 
+    /// Gets the last validation flags.
+    ///
+    /// Sets the FIPS flag if the last operation was FIPS approved.
+    ///
+    /// No other validation types are support at this time.
     #[cfg(feature = "pkcs11_3_2")]
     pub fn get_last_validation_flags(&self) -> CK_FLAGS {
         #[cfg(feature = "fips")]
@@ -230,16 +265,20 @@ impl Session {
         0
     }
 
+    /// Resets the FIPS indicator (e.g., when starting a new operation).
     #[cfg(feature = "fips")]
     pub fn reset_fips_indicator(&mut self) {
         self.fips_indicator = None;
     }
 
+    /// Gets the slot ID associated with this session.
     pub fn get_slot_id(&self) -> CK_SLOT_ID {
         self.info.slotID
     }
 
-    /* a user type of CK_UNAVAILABLE_INFORMATION effects a "logout" to public */
+    /// Changes the session state based on the provided user type.
+    ///
+    /// A user type of CK_UNAVAILABLE_INFORMATION effects a "logout" to public
     pub fn change_session_state(&mut self, user_type: CK_USER_TYPE) -> CK_RV {
         match self.info.state {
             CKS_RO_PUBLIC_SESSION => match user_type {
@@ -294,6 +333,7 @@ impl Session {
         }
     }
 
+    /// Checks if the session is read-write.
     pub fn is_writable(&self) -> bool {
         match self.info.state {
             CKS_RW_PUBLIC_SESSION => true,
@@ -303,6 +343,7 @@ impl Session {
         }
     }
 
+    /// Initializes a new object search operation within the session.
     pub fn new_search_operation(
         &mut self,
         token: &mut Token,
@@ -319,20 +360,26 @@ impl Session {
         Ok(())
     }
 
+    /// Cancels the active operation of the specified type `O`.
     pub fn cancel_operation<O: ManageOperation + ?Sized>(
         &mut self,
     ) -> Result<()> {
         O::cancel_operation(&mut self.operations)
     }
 
+    /// Checks if an operation of type `O` is currently active.
     pub fn check_op<O: ManageOperation + ?Sized>(&self) -> Result<()> {
         O::check_op(&self.operations)
     }
 
+    /// Checks that *no* operation of type `O` is currently active.
     pub fn check_no_op<O: ManageOperation + ?Sized>(&self) -> Result<()> {
         O::check_no_op(&self.operations)
     }
 
+    /// Checks if the current login state permits the active operation.
+    ///
+    /// Returns `CKR_USER_NOT_LOGGED_IN` if login is required but not satisfied.
     pub fn check_login_status(&self) -> Result<()> {
         match self.login_status {
             OpLoginStatus::NotInitialized => {
@@ -344,6 +391,9 @@ impl Session {
         }
     }
 
+    /// Gets a mutable reference to the currently active operation of type `O`.
+    ///
+    /// Checks login status before returning the operation.
     pub fn get_operation<O: ManageOperation + ?Sized>(
         &mut self,
     ) -> Result<&mut O> {
@@ -351,6 +401,10 @@ impl Session {
         O::get_op(&mut self.operations)
     }
 
+    /// Sets the active operation of type `O`.
+    ///
+    /// Also resets the FIPS indicator and sets the login requirement status
+    /// based on `needs_login`.
     pub fn set_operation<O: ManageOperation + ?Sized>(
         &mut self,
         op: Box<O>,
@@ -366,6 +420,7 @@ impl Session {
         O::set_op(&mut self.operations, op);
     }
 
+    /// Marks the current operation's login requirement as satisfied.
     pub fn set_login_ok(&mut self) {
         self.login_status = OpLoginStatus::LoginOk;
     }
