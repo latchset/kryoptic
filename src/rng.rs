@@ -1,6 +1,9 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements interfaces needed to access a Random Number
+//! Generator
+
 use crate::error::Result;
 use crate::interface::*;
 use crate::mechanism;

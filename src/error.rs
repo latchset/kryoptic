@@ -1,6 +1,8 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements functions to manage errors
+
 use std::error;
 use std::fmt;
 

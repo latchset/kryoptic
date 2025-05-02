@@ -1,7 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-/* misc utilities that do not really belong in any module */
+//! This module implements miscellaneous utilities that do not really
+//! belong in any specific module
+
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::interface::*;
