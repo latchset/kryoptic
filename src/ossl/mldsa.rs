@@ -914,11 +914,7 @@ pub fn generate_keypair(
         &OsslParam::empty(),
     )?;
 
-    let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
-
-    let val = params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?;
-    pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;
-
+    let mut params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
     let val =
         params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?;
     privkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;
@@ -933,5 +929,20 @@ pub fn generate_keypair(
             }
         }
     }
+
+    // OpenSSL helpfully does not provide public key when we ask for key pair
+    // here so if it is not available, retry exporting just public key part
+    // https://github.com/openssl/openssl/issues/27542
+    let val = match params
+        .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))
+    {
+        Ok(v) => v,
+        Err(_) => {
+            params = evp_pkey.todata(EVP_PKEY_PUBLIC_KEY)?;
+            params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?
+        }
+    };
+    pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;
+
     Ok(())
 }
