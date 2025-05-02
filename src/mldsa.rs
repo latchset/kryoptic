@@ -378,6 +378,12 @@ impl Mechanism for MlDsaMechanism {
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
+        if !privkey.check_or_set_attr(Attribute::from_ulong(
+            CKA_PARAMETER_SET,
+            param_set,
+        ))? {
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        }
 
         mldsa::generate_keypair(param_set, &mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
