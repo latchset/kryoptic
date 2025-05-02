@@ -1,6 +1,10 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for deriving keys within
+//! the TLS protocol as defined in
+//! [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246).
+
 use std::fmt::Debug;
 
 use crate::error::Result;

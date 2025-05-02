@@ -1,6 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanism interfaces to access the Key
+//! Derivation Functions defined in [NIST Special Publication 800-108 Revision
+//! 1](https://doi.org/10.6028/NIST.SP.800-108r1-upd1):
+//! _Recommendation for Key Derivation Using Pseudorandom Functions_
+
 use std::fmt::Debug;
 
 use crate::error::{map_err, Result};

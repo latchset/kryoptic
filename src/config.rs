@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module provides parsing and management functions to read the
+//! configuration file.
+
 use std::env;
 use std::fs;
 use std::path::Path;

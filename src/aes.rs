@@ -1,6 +1,15 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for AES as defined in
+//! [FIPS 197](https://doi.org/10.6028/NIST.FIPS.197-upd1):
+//! _Advanced Encryption Standard (AES)_ and various NIST Special
+//! Publications (e.g., [SP 800-38A](https://doi.org/10.6028/NIST.SP.800-38A):
+//! _Recommendation for Block Cipher Modes of Operation: Methods and
+//! Techniques_, [SP 800-38D](https://doi.org/10.6028/NIST.SP.800-38D):
+//! _Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode
+//! (GCM) and GMAC_).
+
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;

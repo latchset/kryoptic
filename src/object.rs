@@ -1,6 +1,14 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the core representation of PKCS#11 objects (`Object`)
+//! and the associated factory system (`ObjectFactory` trait, `ObjectFactories`
+//! registry) used to manage object creation, attribute validation, and
+//! type-specific operations according to PKCS#11 specifications. It includes
+//! common traits for different object classes (keys, certificates) and actual
+//! factories for base types like Data objects, X.509 Certificates, and Generic
+//! Secret Keys.
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 

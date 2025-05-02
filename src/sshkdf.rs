@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for SSH Key Derivation
+//! Function (KDF) as specified in RFC 4253, Section 7.2.
+
 use std::fmt::Debug;
 
 use crate::error::Result;

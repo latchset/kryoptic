@@ -1,6 +1,10 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the PKCS#11 mechanisms for the Password Based Key
+//! Derivation Function v2 as defined in [RFC 8018](https://www.rfc-editor.org/rfc/rfc8018)
+//! Section 5.2
+
 use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};

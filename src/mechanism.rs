@@ -1,6 +1,15 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the core traits and structures for managing PKCS#11
+//! cryptographic mechanisms. It includes the central `Mechanism` trait that
+//! all specific mechanism implementations must adhere to, defining interfaces
+//! for various operations like encryption, signing, key generation,
+//! derivation, etc.
+//! It also provides the `Mechanisms` registry for discovering and accessing
+//! available mechanism implementations, along with traits representing active
+//! cryptographic operations (e.g., `Encryption`, `Sign`, `Derive`).
+
 use std::collections::BTreeMap;
 
 use crate::error::Result;
