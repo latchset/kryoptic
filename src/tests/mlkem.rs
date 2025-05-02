@@ -236,11 +236,7 @@ fn test_mlkem_operations() {
         ],
         &[],
         &[(CKA_ENCAPSULATE, true)],
-        &[
-            (CKA_CLASS, CKO_PRIVATE_KEY),
-            (CKA_KEY_TYPE, CKK_ML_KEM),
-            (CKA_PARAMETER_SET, CKP_ML_KEM_512)
-        ],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM),],
         &[],
         &[(CKA_DECAPSULATE, true),],
     ));
