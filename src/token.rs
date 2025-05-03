@@ -1,6 +1,11 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the `Token` structure, which represents a PKCS#11 token.
+//! It manages token information, login state, object storage interaction,
+//! object handles, session objects, and access to cryptographic facilities
+//! (mechanisms and object factories).
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::vec::Vec;
@@ -18,13 +23,19 @@ use crate::storage::*;
 
 use bimap;
 
+/// Manages the mapping between persistent internal object UIDs (String) and
+/// temporary object handles (`CK_OBJECT_HANDLE`) assigned during runtime.
+/// Also responsible for generating new unique handles.
 #[derive(Debug)]
 pub struct Handles {
+    /// Bidirectional map for handle <-> UID lookups.
     map: bimap::hash::BiHashMap<CK_OBJECT_HANDLE, String>,
+    /// The next available object handle ID.
     next: CK_OBJECT_HANDLE,
 }
 
 impl Handles {
+    /// Creates a new, empty handle manager.
     pub fn new() -> Handles {
         Handles {
             map: bimap::hash::BiHashMap::new(),
@@ -32,6 +43,8 @@ impl Handles {
         }
     }
 
+    /// Inserts a new handle-UID mapping.
+    /// Fails if the handle already exists.
     pub fn insert(
         &mut self,
         handle: CK_OBJECT_HANDLE,
@@ -43,18 +56,24 @@ impl Handles {
         }
     }
 
+    /// Gets the UID (String) associated with a given handle.
     pub fn get(&self, handle: CK_OBJECT_HANDLE) -> Option<&String> {
         self.map.get_by_left(&handle)
     }
 
+    /// Gets the handle associated with a given UID (String).
     pub fn get_by_uid(&self, uid: &String) -> Option<&CK_OBJECT_HANDLE> {
         self.map.get_by_right(uid)
     }
 
+    /// Removes a mapping by handle.
     pub fn remove(&mut self, handle: CK_OBJECT_HANDLE) {
         let _ = self.map.remove_by_left(&handle);
     }
 
+    /// Returns the next available unique handle ID and increments the internal
+    /// counter. Note: This may eventually wrap around, but the handle space
+    /// is large. Collisions are checked during insertion.
     pub fn next(&mut self) -> CK_OBJECT_HANDLE {
         let next = self.next;
         self.next += 1;
@@ -62,23 +81,40 @@ impl Handles {
     }
 }
 
+/// Container for token-wide cryptographic facilities like mechanism
+/// implementations, object factories, and the handle manager.
 #[derive(Debug)]
 pub struct TokenFacilities {
+    /// Registry of available cryptographic mechanisms.
     pub mechanisms: Mechanisms,
+    /// Registry of available object factories.
     pub factories: ObjectFactories,
+    /// Manager for object handles and UIDs.
     pub handles: Handles,
 }
 
+/// Represents a PKCS#11 Token, managing its state, information, storage,
+/// objects, and cryptographic facilities.
 #[derive(Debug)]
 pub struct Token {
+    /// Static token information (label, serial, flags, etc.).
     info: CK_TOKEN_INFO,
+    /// Cryptographic mechanisms, object factories, and handle manager.
     facilities: TokenFacilities,
+    /// Interface to the persistent storage backend (e.g., database).
     storage: Box<dyn Storage>,
+    /// Map of session objects created during the lifetime of sessions.
     session_objects: HashMap<CK_OBJECT_HANDLE, Object>,
+    /// Current login state (SO, User, or None).
     logged: CK_USER_TYPE,
 }
 
 impl Token {
+    /// Creates a new Token instance.
+    ///
+    /// Initializes storage based on `dbtype` and `dbargs`, registers all
+    /// cryptographic mechanisms and object factories, and attempts to open
+    /// the storage to load existing token information.
     pub fn new(dbtype: &str, dbargs: Option<String>) -> Result<Token> {
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
@@ -133,6 +169,8 @@ impl Token {
         Ok(token)
     }
 
+    /// Updates the internal `CK_TOKEN_INFO` from the storage backend's
+    /// information.
     fn fill_token_info(&mut self, info: &StorageTokenInfo) {
         self.info.label = info.label;
         self.info.manufacturerID = info.manufacturer;
@@ -141,14 +179,22 @@ impl Token {
         self.info.flags = info.flags | CKF_RNG;
     }
 
+    /// Returns a reference to the token's information structure.
     pub fn get_token_info(&self) -> &CK_TOKEN_INFO {
         &self.info
     }
 
+    /// Returns `true` if the token has been initialized
+    /// (CKF_TOKEN_INITIALIZED flag is set).
     pub fn is_initialized(&self) -> bool {
         self.info.flags & CKF_TOKEN_INITIALIZED == CKF_TOKEN_INITIALIZED
     }
 
+    /// Initializes the token.
+    ///
+    /// Requires SO authentication if already initialized. Clears existing
+    /// objects and handles. Reinitializes storage, sets the SO PIN (if supported
+    /// by storage), stores the new token label, and updates token flags.
     pub fn initialize(&mut self, pin: &[u8], label: &[u8]) -> Result<()> {
         if self.is_initialized() {
             self.auth_user(CKU_SO, pin, true)?;
@@ -196,6 +242,11 @@ impl Token {
         Ok(())
     }
 
+    /// Sets or changes the PIN for a given user type (SO or User).
+    ///
+    /// If changing an existing PIN (`old.len() != 0`), it first authenticates
+    /// the user with the old PIN. Updates the user's PIN in storage and sets
+    /// the `CKF_USER_PIN_INITIALIZED` flag if setting the User PIN.
     pub fn set_pin(
         &mut self,
         user_type: CK_USER_TYPE,
@@ -221,6 +272,7 @@ impl Token {
         Ok(())
     }
 
+    /// Checks if the specified user type (or any user) is currently logged in.
     pub fn is_logged_in(&self, user_type: CK_USER_TYPE) -> bool {
         match user_type {
             KRY_UNSPEC => self.logged == CKU_SO || self.logged == CKU_USER,
@@ -230,6 +282,7 @@ impl Token {
         }
     }
 
+    /// Updates token flags related to PIN status (locked, final try, count low).
     fn update_auth_flags(&mut self, user_type: CK_USER_TYPE, flags: CK_FLAGS) {
         match user_type {
             CKU_USER => {
@@ -248,6 +301,12 @@ impl Token {
         }
     }
 
+    /// Authenticates a user with the storage backend.
+    ///
+    /// If `check_only` is false, successfully authenticating also updates the
+    /// token's `logged` state. Updates PIN status flags based on the result
+    /// from the storage backend. Returns `Ok(())` on success, or an error
+    /// (e.g., `CKR_PIN_INCORRECT`, `CKR_PIN_LOCKED`) on failure.
     fn auth_user(
         &mut self,
         user_type: CK_USER_TYPE,
@@ -275,6 +334,12 @@ impl Token {
         Ok(())
     }
 
+    /// Attempts to log in a user (SO or User).
+    ///
+    /// Checks if the user type is valid and if another user is already logged
+    /// in. Calls `auth_user` to perform the authentication against storage.
+    /// Returns a `CK_RV` code indicating the result (e.g., `CKR_OK`,
+    /// `CKR_USER_ALREADY_LOGGED_IN`, `CKR_PIN_INCORRECT`).
     pub fn login(&mut self, user_type: CK_USER_TYPE, pin: &[u8]) -> CK_RV {
         let result = match user_type {
             CKU_SO | CKU_USER => {
@@ -295,6 +360,10 @@ impl Token {
         }
     }
 
+    /// Logs out the currently logged-in user.
+    ///
+    /// Clears private session objects, updates the `logged` state to
+    /// `KRY_UNSPEC`, and informs the storage backend.
     pub fn logout(&mut self) -> CK_RV {
         match self.logged {
             KRY_UNSPEC => CKR_USER_NOT_LOGGED_IN,
@@ -311,10 +380,14 @@ impl Token {
         }
     }
 
+    /// Flushes any buffered changes in the storage backend to persistent
+    /// storage.
     pub fn save(&mut self) -> Result<()> {
         self.storage.flush()
     }
 
+    /// Removes all private session objects from the in-memory map and
+    /// handle manager.
     fn clear_private_session_objects(&mut self) {
         let mut priv_handles = Vec::<CK_OBJECT_HANDLE>::new();
         for (handle, obj) in self.session_objects.iter() {
@@ -330,6 +403,8 @@ impl Token {
         }
     }
 
+    /// Removes all session objects associated with a specific session handle
+    /// from the in-memory map and handle manager.
     fn clear_session_objects(&mut self, session: CK_SESSION_HANDLE) {
         /* intentionally matches only valid handles, as we use invalid
          * handles in some places to preserve special internal objects
@@ -347,18 +422,23 @@ impl Token {
         }
     }
 
+    /// Drops all session objects associated with a specific session handle.
     pub fn drop_session_objects(&mut self, handle: CK_SESSION_HANDLE) {
         self.clear_session_objects(handle);
     }
 
+    /// Returns the number of mechanisms supported by the token.
     pub fn get_mechs_num(&self) -> usize {
         self.facilities.mechanisms.len()
     }
 
+    /// Returns a list of all mechanism types supported by the token.
     pub fn get_mechs_list(&self) -> Vec<CK_MECHANISM_TYPE> {
         self.facilities.mechanisms.list()
     }
 
+    /// Gets the `CK_MECHANISM_INFO` for a specific mechanism type.
+    /// Returns `CKR_MECHANISM_INVALID` if the type is not supported.
     pub fn get_mech_info(
         &self,
         typ: CK_MECHANISM_TYPE,
@@ -369,14 +449,22 @@ impl Token {
         }
     }
 
+    /// Gets a reference to the token's mechanism registry.
     pub fn get_mechanisms(&self) -> &Mechanisms {
         &self.facilities.mechanisms
     }
 
+    /// Gets a reference to the token's object factory registry.
     pub fn get_object_factories(&self) -> &ObjectFactories {
         &self.facilities.factories
     }
 
+    /// Retrieves an object by its handle.
+    ///
+    /// Checks the session object cache first, then falls back to fetching
+    /// from storage. Performs login checks for private token objects.
+    /// Marks sensitive objects for zeroization on drop. Returns
+    /// `CKR_OBJECT_HANDLE_INVALID` if not found or not accessible.
     pub fn get_object_by_handle(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
@@ -395,6 +483,14 @@ impl Token {
         Ok(obj)
     }
 
+    /// Inserts a new object into the token.
+    ///
+    /// If the object has `CKA_TOKEN=true`, it is stored persistently via the
+    /// storage backend. Otherwise (session object), it's added to the in-memory
+    /// session object map and assigned a new handle.
+    /// Requires login to store token objects.
+    ///
+    /// Returns the assigned handle.
     pub fn insert_object(
         &mut self,
         s_handle: CK_SESSION_HANDLE,
@@ -417,6 +513,13 @@ impl Token {
         Ok(handle)
     }
 
+    /// Creates a new object based on a template.
+    ///
+    /// Dispatches to the appropriate object factory via
+    /// [ObjectFactories::create] and then inserts the created object using
+    /// [Self::insert_object].
+    ///
+    /// Returns the handle of the newly created object.
     pub fn create_object(
         &mut self,
         s_handle: CK_SESSION_HANDLE,
@@ -426,6 +529,11 @@ impl Token {
         self.insert_object(s_handle, object)
     }
 
+    /// Destroys an object identified by its handle.
+    ///
+    /// Checks if the object is destroyable (`CKA_DESTROYABLE`). Removes the
+    /// object from the session cache or persistent storage and from the handle
+    /// map.
     pub fn destroy_object(&mut self, o_handle: CK_OBJECT_HANDLE) -> Result<()> {
         match self.session_objects.get(&o_handle) {
             Some(obj) => {
@@ -455,6 +563,13 @@ impl Token {
         Ok(())
     }
 
+    /// Retrieves specified attributes for an object identified by its handle.
+    ///
+    /// Checks session cache then storage. Performs login checks. Uses the
+    /// object factory to determine sensitivity and validity of requested
+    /// attributes.
+    ///
+    /// Fills the provided template array.
     pub fn get_object_attrs(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
@@ -488,6 +603,12 @@ impl Token {
             .get_object_attributes(&obj, template)
     }
 
+    /// Modifies attributes of an existing object.
+    ///
+    /// Checks if the object is modifiable. Locates the object (session or
+    /// token) and uses the appropriate object factory to validate and apply
+    /// the changes defined in the template. Updates storage if it's a token
+    /// object.
     pub fn set_object_attrs(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
@@ -528,6 +649,9 @@ impl Token {
         }
     }
 
+    /// Estimates the memory size of an object (primarily for C_GetInfo
+    /// reporting). Currently provides a rough estimate based on attribute
+    /// count and value sizes.
     pub fn get_object_size(&self, o_handle: CK_OBJECT_HANDLE) -> Result<usize> {
         let obj = match self.session_objects.get(&o_handle) {
             Some(o) => Cow::Borrowed(o),
@@ -540,6 +664,11 @@ impl Token {
         obj.rough_size()
     }
 
+    /// Creates a copy of an object.
+    ///
+    /// Checks if the original object is copyable (`CKA_COPYABLE`). Retrieves
+    /// the original object, dispatches to the appropriate object factory's
+    /// `copy` method, and inserts the new copy as a session or token object.
     pub fn copy_object(
         &mut self,
         s_handle: CK_SESSION_HANDLE,
@@ -561,6 +690,14 @@ impl Token {
         self.insert_object(s_handle, newobj)
     }
 
+    /// Searches for objects matching a given template.
+    ///
+    /// First searches in-memory session objects, applying sensitivity checks
+    /// if needed. Then, performs a search against the storage backend,
+    /// applying login checks (adding `CKA_PRIVATE=false` to the template if
+    /// not logged in).
+    ///
+    /// Returns a combined vector of matching object handles.
     pub fn search_objects(
         &mut self,
         template: &[CK_ATTRIBUTE],
