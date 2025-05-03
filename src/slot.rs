@@ -1,6 +1,9 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the `Slot` structure, which represents a PKCS#11 slot.
+//! It manages the associated token and the sessions opened against that token.
+
 use std::collections::HashMap;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -11,19 +14,29 @@ use crate::misc::copy_sized_string;
 use crate::session::Session;
 use crate::token::Token;
 
+/// Default slot description if not provided in configuration.
 static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] =
     *b"Kryoptic Slot                                                   ";
+/// Default manufacturer ID if not provided in configuration.
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic                        ";
 
+/// Represents a PKCS#11 Slot, containing information about the slot itself,
+/// the `Token` present in the slot, and currently open `Session`s.
 #[derive(Debug)]
 pub struct Slot {
+    /// Static information about the slot.
     slot_info: CK_SLOT_INFO,
+    /// The token associated with this slot, protected by a RwLock.
     token: RwLock<Token>,
+    /// Map of active sessions associated with this slot, keyed by session handle.
     sessions: HashMap<CK_SESSION_HANDLE, RwLock<Session>>,
 }
 
 impl Slot {
+    /// Creates a new Slot instance based on the provided configuration.
+    ///
+    /// Initializes the contained `Token` with its database backend.
     pub fn new(config: &config::Slot) -> Result<Slot> {
         let dbtype: &str;
         let dbargs: Option<String>;
@@ -67,15 +80,20 @@ impl Slot {
         Ok(slot)
     }
 
+    /// Returns a reference to the static slot information (`CK_SLOT_INFO`).
     pub fn get_slot_info(&self) -> &CK_SLOT_INFO {
         &self.slot_info
     }
 
+    /// Returns a copy of the token information (`CK_TOKEN_INFO`) for the
+    /// token within this slot. Acquires a read lock on the token.
     pub fn get_token_info(&self) -> CK_TOKEN_INFO {
         let tok = self.token.read().unwrap();
         *tok.get_token_info()
     }
 
+    /// Gets a read lock guard for the `Token` in this slot.
+    /// Returns an error if the token is not initialized.
     pub fn get_token(&self) -> Result<RwLockReadGuard<'_, Token>> {
         match self.token.read() {
             Ok(token) => {
@@ -91,6 +109,9 @@ impl Slot {
         }
     }
 
+    /// Gets a write lock guard for the `Token` in this slot.
+    /// Returns an error if the token is not initialized, unless `nochecks`
+    /// is true (used during initialization).
     pub fn get_token_mut(
         &self,
         nochecks: bool,
@@ -111,10 +132,13 @@ impl Slot {
         }
     }
 
+    /// Adds a newly created session to this slot's session map.
     pub fn add_session(&mut self, handle: CK_SESSION_HANDLE, session: Session) {
         self.sessions.insert(handle, RwLock::new(session));
     }
 
+    /// Gets a read lock guard for a specific `Session` identified by its
+    /// handle. Returns an error if the handle is invalid.
     pub fn get_session(
         &self,
         handle: CK_SESSION_HANDLE,
@@ -128,6 +152,9 @@ impl Slot {
         }
     }
 
+    /// Gets a write lock guard for a specific `Session` identified by its
+    /// handle. Returns an error if the handle is invalid or the lock cannot
+    /// be acquired.
     pub fn get_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
@@ -141,10 +168,13 @@ impl Slot {
         }
     }
 
+    /// Returns true if there are any active sessions associated with this slot.
     pub fn has_sessions(&self) -> bool {
         self.sessions.len() > 0
     }
 
+    /// Returns true if there are any active read-only sessions associated
+    /// with this slot.
     pub fn has_ro_sessions(&self) -> bool {
         for (_key, val) in self.sessions.iter() {
             match val.read().unwrap().get_session_info().state {
@@ -155,6 +185,8 @@ impl Slot {
         false
     }
 
+    /// Changes the session state for all active sessions associated with this
+    /// slot based on the provided user type.
     pub fn change_session_states(&self, user_type: CK_USER_TYPE) -> Result<()> {
         for (_key, val) in self.sessions.iter() {
             let ret = val.write().unwrap().change_session_state(user_type);
@@ -165,6 +197,7 @@ impl Slot {
         Ok(())
     }
 
+    /// Invalidates the session state for all sessions (sets them to public state).
     pub fn invalidate_session_states(&self) {
         for (_key, val) in self.sessions.iter() {
             let _ = val
@@ -174,10 +207,13 @@ impl Slot {
         }
     }
 
+    /// Removes a specific session identified by its handle.
     pub fn drop_session(&mut self, handle: CK_SESSION_HANDLE) {
         self.sessions.remove(&handle);
     }
 
+    /// Removes all sessions associated with this slot, returning a vector of
+    /// their handles.
     pub fn drop_all_sessions(&mut self) -> Vec<CK_SESSION_HANDLE> {
         let mut handles =
             Vec::<CK_SESSION_HANDLE>::with_capacity(self.sessions.len());
@@ -188,6 +224,8 @@ impl Slot {
         handles
     }
 
+    /// Finalizes the slot. This drops all sessions and attempts to save the
+    /// token state.
     pub fn finalize(&mut self) -> Result<()> {
         self.drop_all_sessions();
         self.token.write().unwrap().save()
