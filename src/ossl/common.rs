@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::interface::*;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
-use crate::misc::{byte_ptr, void_ptr};
+use crate::misc::{byte_ptr, void_ptr, BorrowedReference};
 #[cfg(any(feature = "ecc", feature = "rsa"))]
 use crate::object::Object;
 use crate::ossl::bindings::*;
@@ -523,6 +523,7 @@ impl Drop for BigNum {
 ///
 /// `OSSL_PARAM` is the primary way to pass detailed parameters (like key
 /// components, algorithm settings) to many OpenSSL 3.0+ EVP functions.
+///
 /// This struct handles memory management (including optional zeroization) and
 /// lifetime complexities when constructing these arrays from Rust types.
 #[derive(Debug)]
@@ -538,6 +539,9 @@ pub struct OsslParam<'a> {
     /// Flag indicating `p` contains an owned pointer we are responsible
     /// for freeing
     pub freeptr: bool,
+    /// Use an enum to hold references to data we need to keep around as
+    /// a pointer to their datais stored in the OSSL_PARAM array
+    br: Vec<BorrowedReference<'a>>,
 }
 
 impl Drop for OsslParam<'_> {
@@ -558,19 +562,20 @@ impl Drop for OsslParam<'_> {
 impl<'a> OsslParam<'a> {
     /// Creates a new, empty `OsslParam` builder.
     #[allow(dead_code)]
-    pub fn new() -> OsslParam<'static> {
+    pub fn new() -> OsslParam<'a> {
         Self::with_capacity(0)
     }
 
     /// Creates a new, empty `OsslParam` builder with a specific initial
     /// capacity.
-    pub fn with_capacity(capacity: usize) -> OsslParam<'static> {
+    pub fn with_capacity(capacity: usize) -> OsslParam<'a> {
         OsslParam {
             v: Vec::new(),
             p: Cow::Owned(Vec::with_capacity(capacity + 1)),
             finalized: false,
             zeroize: false,
             freeptr: false,
+            br: Vec::new(),
         }
     }
 
@@ -600,38 +605,7 @@ impl<'a> OsslParam<'a> {
             finalized: true,
             zeroize: false,
             freeptr: true,
-        })
-    }
-
-    /// Creates an `OsslParam` instance by borrowing an existing
-    /// `const OSSL_PARAM` array from OpenSSL. Does *not* take ownership and
-    /// will *not* free it on drop.
-    #[allow(dead_code)]
-    pub fn from_const_ptr(
-        ptr: *const OSSL_PARAM,
-    ) -> Result<OsslParam<'static>> {
-        if ptr.is_null() {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        /* get num of elements */
-        let mut nelem = 0;
-        let mut counter = ptr;
-        unsafe {
-            while !(*counter).key.is_null() {
-                nelem += 1;
-                counter = counter.offset(1);
-            }
-        }
-        /* Mark as finalized as no changes are allowed to imported params */
-        Ok(OsslParam {
-            v: Vec::new(),
-            p: Cow::Borrowed(unsafe {
-                std::slice::from_raw_parts(ptr, nelem + 1)
-            }),
-            finalized: true,
-            zeroize: false,
-            /* this is a const ptr, must not free it */
-            freeptr: false,
+            br: Vec::new(),
         })
     }
 
@@ -645,6 +619,7 @@ impl<'a> OsslParam<'a> {
             finalized: false,
             zeroize: false,
             freeptr: false,
+            br: Vec::new(),
         };
         p.finalize();
         p
@@ -684,8 +659,6 @@ impl<'a> OsslParam<'a> {
     }
 
     /// Adds a UTF-8 string parameter using a borrowed byte vector reference.
-    ///
-    /// The caller must ensure the lifetime of `v` exceeds the `OsslParam`'s usage.
     #[allow(dead_code)]
     pub fn add_utf8_string(
         &mut self,
@@ -704,6 +677,7 @@ impl<'a> OsslParam<'a> {
             )
         };
         self.p.to_mut().push(param);
+        self.br.push(BorrowedReference::Vector(v));
         Ok(())
     }
 
@@ -787,6 +761,7 @@ impl<'a> OsslParam<'a> {
             )
         };
         self.p.to_mut().push(param);
+        self.br.push(BorrowedReference::Vector(v));
         Ok(())
     }
 
@@ -839,6 +814,7 @@ impl<'a> OsslParam<'a> {
             OSSL_PARAM_construct_size_t(key, val as *const _ as *mut usize)
         };
         self.p.to_mut().push(param);
+        self.br.push(BorrowedReference::Usize(val));
         Ok(())
     }
 
@@ -864,6 +840,7 @@ impl<'a> OsslParam<'a> {
             OSSL_PARAM_construct_uint(key, val as *const _ as *mut c_uint)
         };
         self.p.to_mut().push(param);
+        self.br.push(BorrowedReference::Uint(val));
         Ok(())
     }
 
@@ -889,6 +866,7 @@ impl<'a> OsslParam<'a> {
             OSSL_PARAM_construct_int(key, val as *const _ as *mut c_int)
         };
         self.p.to_mut().push(param);
+        self.br.push(BorrowedReference::Int(val));
         Ok(())
     }
 
