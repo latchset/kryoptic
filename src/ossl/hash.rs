@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements PKCS#11 digest (hashing) mechanisms using the
+//! OpenSSL EVP_Digest interface.
+
 use std::os::raw::*;
 
 use crate::error::Result;
@@ -9,21 +12,31 @@ use crate::mechanism::{Digest, MechOperation};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+/// Represents an active hash (digest) operation.
 #[derive(Debug)]
 pub struct HashOperation {
+    /// The specific hash mechanism being used (e.g., CKM_SHA256).
     mech: CK_MECHANISM_TYPE,
+    /// The underlying OpenSSL state (algorithm and context).
     state: HashState,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
 }
 
+/// Holds the state for an OpenSSL EVP digest operation.
 #[derive(Debug)]
 pub struct HashState {
+    /// The OpenSSL message digest algorithm (`EVP_MD`).
     md: EvpMd,
+    /// The OpenSSL message digest context (`EVP_MD_CTX`).
     ctx: EvpMdCtx,
 }
 
 impl HashState {
+    /// Fetches a `EVP_MD` with the digest `alg` and crates a `HashState`
+    /// wrapper containing a EVP_MD and EVP_MD_CTX pointers
     pub fn new(alg: *const c_char) -> Result<HashState> {
         Ok(HashState {
             md: EvpMd::new(alg)?,
@@ -36,6 +49,8 @@ unsafe impl Send for HashState {}
 unsafe impl Sync for HashState {}
 
 impl HashOperation {
+    /// Creates a new `HashOperation` for the specified mechanism type.
+    /// Determines the OpenSSL algorithm name from the mechanism type.
     pub fn new(mech: CK_MECHANISM_TYPE) -> Result<HashOperation> {
         let alg: *const c_char = mech_type_to_digest_name(mech);
         if alg.is_null() {
@@ -48,6 +63,8 @@ impl HashOperation {
             in_use: false,
         })
     }
+
+    /// Initializes the underlying OpenSSL digest context (`EVP_DigestInit`).
     fn digest_init(&mut self) -> Result<()> {
         unsafe {
             match EVP_DigestInit(

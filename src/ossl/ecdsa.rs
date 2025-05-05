@@ -1,6 +1,10 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements ECDSA (Elliptic Curve Digital Signature Algorithm)
+//! functionalities using the OpenSSL EVP interface, including key generation,
+//! signing, verification, and signature format conversions.
+
 use core::ffi::c_char;
 
 use crate::attribute::Attribute;
@@ -21,6 +25,11 @@ use crate::ossl::fips::*;
 #[cfg(not(feature = "fips"))]
 use crate::ossl::get_libctx;
 
+/// Converts a PKCS#11 EC key `Object` into OpenSSL parameters (`OsslParam`).
+///
+/// Extracts the curve name and relevant key components (public point or private
+/// value) based on the object `class` and populates an `OsslParam` structure
+/// suitable for creating an OpenSSL `EvpPkey`.
 pub fn ecc_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
@@ -58,12 +67,16 @@ pub fn ecc_object_to_params(
     Ok((name_as_char(EC_NAME), params))
 }
 
+/// ASN.1 structure for an ECDSA signature value (SEQUENCE of two INTEGERs).
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 struct EcdsaSignature<'a> {
     r: DerEncBigUint<'a>,
     s: DerEncBigUint<'a>,
 }
 
+/// Copies one half (r or s) of an ECDSA signature from an input slice `hin`
+/// to an output slice `hout` of potentially different (but sufficient) length,
+/// handling necessary padding or truncation of leading zeros.
 fn slice_to_sig_half(hin: &[u8], hout: &mut [u8]) -> Result<()> {
     let mut len = hin.len();
     if len > hout.len() {
@@ -126,22 +139,34 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
     Ok(ossl_sign)
 }
 
+/// Represents an active ECDSA signing or verification operation.
 #[derive(Debug)]
 pub struct EccOperation {
+    /// The specific ECDSA mechanism type (e.g., CKM_ECDSA_SHA256).
     mech: CK_MECHANISM_TYPE,
+    /// Expected output length of the signature in bytes (2 * field size).
     output_len: usize,
+    /// The public key used for verification (wrapped `EvpPkey`).
     public_key: Option<EvpPkey>,
+    /// The private key used for signing (wrapped `EvpPkey`).
     private_key: Option<EvpPkey>,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress.
     in_use: bool,
+    /// The underlying EVP MD CTX (non fips builds)
     #[cfg(not(feature = "fips"))]
     sigctx: Option<EvpMdCtx>,
+    /// The underlying wrapped `EVP_SIGNATURE` context (fips builds)
     #[cfg(feature = "fips")]
     sigctx: Option<ProviderSignatureCtx>,
+    /// Optional storage for signatures, used when the signature to verify
+    /// is provided at initialization
     signature: Option<Vec<u8>>,
 }
 
 impl EccOperation {
+    /// Helper function to create a new boxed `EccMechanism`.
     fn new_mechanism() -> Box<dyn Mechanism> {
         Box::new(EccMechanism::new(
             CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
@@ -150,6 +175,7 @@ impl EccOperation {
         ))
     }
 
+    /// Registers all supported ECDSA mechanisms with the `Mechanisms` registry.
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[
             CKM_ECDSA,
@@ -176,6 +202,11 @@ impl EccOperation {
         );
     }
 
+    /// Internal constructor to create a new `EccOperation`.
+    ///
+    /// Sets up the internal state based on whether it's a signature or
+    /// verification operation, imports the provided key, and calculates
+    /// the expected signature length.
     fn new_op(
         flag: CK_FLAGS,
         mech: &CK_MECHANISM,
@@ -223,6 +254,7 @@ impl EccOperation {
         })
     }
 
+    /// Creates a new `EccOperation` for signing.
     pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -231,6 +263,7 @@ impl EccOperation {
         Self::new_op(CKF_SIGN, mech, key, None)
     }
 
+    /// Creates a new `EccOperation` for verification.
     pub fn verify_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -239,6 +272,8 @@ impl EccOperation {
         Self::new_op(CKF_VERIFY, mech, key, None)
     }
 
+    /// Creates a new `EccOperation` for verification with a pre-supplied
+    /// signature.
     #[cfg(feature = "pkcs11_3_2")]
     pub fn verify_signature_new(
         mech: &CK_MECHANISM,
@@ -249,6 +284,12 @@ impl EccOperation {
         Self::new_op(CKF_VERIFY, mech, key, Some(signature.to_vec()))
     }
 
+    /// Generates an EC key pair using OpenSSL.
+    ///
+    /// Takes mutable references to pre-created public and private key
+    /// `Object`s (which contain the desired curve in CKA_EC_PARAMS),
+    /// generates the key pair, and populates the CKA_EC_POINT and CKA_VALUE
+    /// attributes.
     pub fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,
@@ -454,6 +495,7 @@ impl Sign for EccOperation {
 }
 
 impl EccOperation {
+    /// Internal helper for performing one-shot or final verification step.
     fn verify_internal(
         &mut self,
         data: &[u8],
@@ -507,6 +549,7 @@ impl EccOperation {
         self.verify_int_final(signature)
     }
 
+    /// Internal helper for updating a multi-part verification.
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -559,6 +602,7 @@ impl EccOperation {
         self.sigctx.as_mut().unwrap().digest_verify_update(data)
     }
 
+    /// Internal helper for the final step of multi-part verification.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;

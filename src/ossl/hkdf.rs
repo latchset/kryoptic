@@ -1,6 +1,10 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the HMAC-based Key Derivation Function (HKDF)
+//! mechanism (CKM_HKDF) as specified in RFC 5869 and PKCS#11 v3.0+,
+//! using the OpenSSL EVP_KDF interface.
+
 use core::ffi::c_int;
 use std::fmt::Debug;
 
@@ -17,24 +21,43 @@ use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
 
+/// Represents an active HKDF operation state.
 #[derive(Debug)]
 pub struct HKDFOperation {
+    /// The specific HKDF mechanism type (CKM_HKDF or CKM_HKDF_DATA).
     mech: CK_MECHANISM_TYPE,
+    /// Flag indicating if the derive operation has been completed.
     finalized: bool,
+    /// Flag indicating if the extract phase should be performed.
     extract: bool,
+    /// Flag indicating if the expand phase should be performed.
     expand: bool,
+    /// The underlying PRF hash mechanism (e.g., CKM_SHA256).
     prf: CK_MECHANISM_TYPE,
+    /// The output length of the PRF hash in bytes.
     prflen: usize,
+    /// Type of salt provided (NULL, DATA, or KEY handle).
     salt_type: CK_ULONG,
+    /// Key handle if salt type is CKF_HKDF_SALT_KEY.
     salt_key: [CK_OBJECT_HANDLE; 1],
+    /// Salt data (either provided directly or loaded from salt_key).
     salt: Vec<u8>,
+    /// Optional info/context data for the expand phase.
     info: Vec<u8>,
+    /// Flag indicating if the output should be a CKO_DATA object.
     emit_data_obj: bool,
+    /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
 
 impl HKDFOperation {
+    /// Verifies if the input keying material (IKM) object is suitable.
+    ///
+    /// Allows CKO_SECRET_KEY (CKK_GENERIC_SECRET or CKK_HKDF) with
+    /// CKA_DERIVE=true. Also allows CKO_DATA if salt is explicitly provided
+    /// (not NULL or KEY). Optionally checks if the key length matches an
+    /// expected length (`matchlen`).
     fn verify_key(&self, key: &Object, matchlen: usize) -> Result<()> {
         match key.get_attr_as_ulong(CKA_CLASS) {
             Ok(class) => {
@@ -88,6 +111,10 @@ impl HKDFOperation {
         Ok(())
     }
 
+    /// Creates a new `HKDFOperation` instance.
+    ///
+    /// Parses the `CK_HKDF_PARAMS` from the mechanism, validates them,
+    /// determines the PRF length, and stores the initial state.
     pub fn new(mech: &CK_MECHANISM) -> Result<HKDFOperation> {
         let params = cast_params!(mech, CK_HKDF_PARAMS);
         if params.bExtract == CK_FALSE && params.bExpand == CK_FALSE {
@@ -194,6 +221,11 @@ impl MechOperation for HKDFOperation {
     }
 }
 impl Derive for HKDFOperation {
+    /// Performs the HKDF key derivation (Extract and/or Expand phases).
+    ///
+    /// Verifies the input keying material (`key`) and salt (if needed).
+    /// Sets up and executes the OpenSSL `EVP_KDF_derive` function with the
+    /// appropriate HKDF parameters. Creates the derived key or data object.
     fn derive(
         &mut self,
         key: &Object,

@@ -1,6 +1,10 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements EdDSA (Edwards-curve Digital Signature Algorithm)
+//! functionalities (Ed25519, Ed448) using the OpenSSL EVP interface,
+//! handling key generation, signing, verification, and parameter parsing.
+
 use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
@@ -19,9 +23,13 @@ use crate::ossl::fips::*;
 #[cfg(not(feature = "fips"))]
 use crate::ossl::get_libctx;
 
+/// Expected signature length for Ed25519 in bytes.
 pub const OUTLEN_ED25519: usize = 64;
+/// Expected signature length for Ed448 in bytes.
 pub const OUTLEN_ED448: usize = 114;
 
+/// Parses mechanism parameters for EdDSA operations.
+/// Handles both bare CKM_EDDSA and mechanisms with `CK_EDDSA_PARAMS`.
 fn parse_params(mech: &CK_MECHANISM, outlen: usize) -> Result<EddsaParams> {
     if mech.mechanism != CKM_EDDSA {
         return Err(CKR_MECHANISM_INVALID)?;
@@ -54,6 +62,11 @@ fn parse_params(mech: &CK_MECHANISM, outlen: usize) -> Result<EddsaParams> {
     }
 }
 
+/// Converts a PKCS#11 EdDSA key `Object` into OpenSSL parameters (`OsslParam`).
+///
+/// Extracts the curve name (Ed25519/Ed448) and relevant key components
+/// (public point or private value) based on the object `class` and populates
+/// an `OsslParam` structure suitable for creating an OpenSSL `EvpPkey`.
 pub fn eddsa_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
@@ -89,6 +102,7 @@ pub fn eddsa_object_to_params(
     Ok((name_as_char(name), params))
 }
 
+/// Helper function to create default (empty) `EddsaParams`.
 fn no_params() -> EddsaParams {
     EddsaParams {
         ph_flag: None,
@@ -96,6 +110,8 @@ fn no_params() -> EddsaParams {
     }
 }
 
+/// Macro to get the appropriate OpenSSL signature context based on whether
+/// the FIPS feature is enabled.
 macro_rules! get_sig_ctx {
     ($key:ident) => {
         /* needless match, but otherwise rust complains about experimental attributes on
@@ -109,30 +125,51 @@ macro_rules! get_sig_ctx {
     };
 }
 
+/// Holds parsed parameters specific to an EdDSA operation instance.
 #[derive(Debug)]
 struct EddsaParams {
+    /// Optional pre-hashing flag (phFlag from `CK_EDDSA_PARAMS`).
     ph_flag: Option<bool>,
+    /// Optional context data (from `CK_EDDSA_PARAMS`).
     context_data: Option<Vec<u8>>,
 }
 
+/// Represents an active EdDSA signing or verification operation.
 #[derive(Debug)]
 pub struct EddsaOperation {
+    /// The specific EdDSA mechanism type (always CKM_EDDSA).
     mech: CK_MECHANISM_TYPE,
+    /// Expected signature length (depends on the curve Ed25519/Ed448).
     output_len: usize,
+    /// The public key used for verification (wrapped `EvpPkey`).
     public_key: Option<EvpPkey>,
+    /// The private key used for signing (wrapped `EvpPkey`).
     private_key: Option<EvpPkey>,
+    /// Parsed EdDSA parameters (context, ph_flag).
     params: EddsaParams,
+    /// Buffer to accumulate data for multi-part operation emulation.
     data: Vec<u8>,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress.
     in_use: bool,
+    /// The underlying EVP MD CTX (non fips builds)
     #[cfg(not(feature = "fips"))]
     sigctx: Option<EvpMdCtx>,
+    /// The underlying wrapped `EVP_SIGNATURE` context (fips builds)
     #[cfg(feature = "fips")]
     sigctx: Option<ProviderSignatureCtx>,
+    /// Optional storage for signatures, used when the signature to verify
+    /// is provided at initialization
     signature: Option<Vec<u8>>,
 }
 
 impl EddsaOperation {
+    /// Internal constructor to create a new `EddsaOperation`.
+    ///
+    /// Sets up the internal state based on whether it's a signature or
+    /// verification operation, imports the provided key, calculates the
+    /// expected signature length, and parses mechanism parameters.
     fn new_op(
         flag: CK_FLAGS,
         mech: &CK_MECHANISM,
@@ -176,6 +213,7 @@ impl EddsaOperation {
         })
     }
 
+    /// Creates a new `EddsaOperation` for signing.
     pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -184,6 +222,7 @@ impl EddsaOperation {
         Self::new_op(CKF_SIGN, mech, key, None)
     }
 
+    /// Creates a new `EddsaOperation` for verification.
     pub fn verify_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -192,6 +231,8 @@ impl EddsaOperation {
         Self::new_op(CKF_VERIFY, mech, key, None)
     }
 
+    /// Creates a new `EddsaOperation` for verification with a pre-supplied
+    /// signature.
     #[cfg(feature = "pkcs11_3_2")]
     pub fn verify_signature_new(
         mech: &CK_MECHANISM,
@@ -202,6 +243,12 @@ impl EddsaOperation {
         Self::new_op(CKF_VERIFY, mech, key, Some(signature.to_vec()))
     }
 
+    /// Generates an EdDSA key pair (Ed25519 or Ed448) using OpenSSL.
+    ///
+    /// Takes mutable references to pre-created public and private key
+    /// `Object`s (which contain the desired curve in CKA_EC_PARAMS),
+    /// generates the key pair, and populates the CKA_EC_POINT and CKA_VALUE
+    /// attributes.
     pub fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,
@@ -238,6 +285,10 @@ impl EddsaOperation {
     }
 }
 
+/// Creates an `OsslParam` array containing EdDSA-specific parameters
+/// (context string, instance name like "Ed25519ph") based on the operation's
+/// `EddsaParams` and curve (`outlen`), suitable for passing to OpenSSL's
+/// EVP_DigestSign/VerifyInit functions.
 fn sig_params<'a>(
     eddsa_params: &'a EddsaParams,
     outlen: usize,
@@ -389,6 +440,7 @@ impl Sign for EddsaOperation {
 }
 
 impl EddsaOperation {
+    /// Internal helper for performing one-shot or final verification step.
     fn verify_internal(
         &mut self,
         data: &[u8],
@@ -404,6 +456,8 @@ impl EddsaOperation {
         self.verify_int_final(signature)
     }
 
+    /// Internal helper for updating a multi-part verification. Accumulates
+    /// data.
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -442,6 +496,8 @@ impl EddsaOperation {
         Ok(())
     }
 
+    /// Internal helper for the final step of multi-part verification using
+    /// accumulated data.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
