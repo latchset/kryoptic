@@ -72,10 +72,10 @@ impl ECMontgomeryOperation {
         }
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
-        let point_encoded = asn1::write_single(
-            &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
-        )?;
-        pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
+        let point = params
+            .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?
+            .to_vec();
+        pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point))?;
 
         /* Private Key */
         let value = params
