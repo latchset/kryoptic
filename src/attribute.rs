@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 
 use crate::error::{Error, Result};
 use crate::interface::*;
-use crate::misc::{bytes_to_vec, sizeof, void_ptr, zeromem};
+use crate::misc::{bytes_to_vec, sizeof, void_ptr, zeromem, BorrowedReference};
 
 /// List of attribute types we understand
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -802,9 +802,14 @@ impl CK_ATTRIBUTE {
 /// created on the fly, and the copy is then modified.
 #[derive(Debug)]
 pub struct CkAttrs<'a> {
+    /// Storage for owned byte buffers backing some parameters.
     v: Vec<Vec<u8>>,
+    /// The actual `CK_ATTRIBUTE` array, potentially borrowed or owned.
     p: Cow<'a, [CK_ATTRIBUTE]>,
     pub zeroize: bool,
+    /// Use an enum to hold references to data we need to keep around as
+    /// a pointer to their datais stored in the CK_ATTRIBUTE array
+    br: Vec<BorrowedReference<'a>>,
 }
 
 impl Drop for CkAttrs<'_> {
@@ -831,6 +836,7 @@ impl<'a> CkAttrs<'a> {
             v: Vec::new(),
             p: Cow::Owned(Vec::with_capacity(capacity)),
             zeroize: false,
+            br: Vec::new(),
         }
     }
 
@@ -849,6 +855,7 @@ impl<'a> CkAttrs<'a> {
                 std::slice::from_raw_parts(a, usize::try_from(l)?)
             }),
             zeroize: false,
+            br: Vec::new(),
         })
     }
 
@@ -858,6 +865,7 @@ impl<'a> CkAttrs<'a> {
             v: Vec::new(),
             p: Cow::Borrowed(a),
             zeroize: false,
+            br: Vec::new(),
         }
     }
 
@@ -943,6 +951,7 @@ impl<'a> CkAttrs<'a> {
             pValue: val.as_ptr() as *mut std::ffi::c_void,
             ulValueLen: CK_ULONG::try_from(val.len())?,
         });
+        self.br.push(BorrowedReference::Slice(val));
         Ok(())
     }
 
@@ -956,6 +965,7 @@ impl<'a> CkAttrs<'a> {
             pValue: val as *const CK_ULONG as *mut std::ffi::c_void,
             ulValueLen: sizeof!(CK_ULONG),
         });
+        self.br.push(BorrowedReference::Ulong(val));
     }
 
     /// Adds a new attribute to the array, the value is a ref to a CK_BBOOL
@@ -968,6 +978,7 @@ impl<'a> CkAttrs<'a> {
             pValue: val as *const CK_BBOOL as *mut std::ffi::c_void,
             ulValueLen: sizeof!(CK_BBOOL),
         });
+        self.br.push(BorrowedReference::CkBool(val));
     }
 
     /// Adds a new attribute but only if it does not already exist on
