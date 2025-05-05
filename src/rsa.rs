@@ -18,6 +18,28 @@ use crate::ossl::rsa::*;
 use asn1;
 use once_cell::sync::Lazy;
 
+/// Macro to check that an attribute that contains a vector of bytes
+/// exists and contains a vector of length greater than 0
+#[allow(unused_macros)]
+macro_rules! bytes_attr_not_empty {
+    ($obj:expr; $id:expr) => {
+        match $obj.get_attr_as_bytes($id) {
+            Ok(e) => {
+                if e.len() == 0 {
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                }
+            }
+            Err(e) => {
+                if e.attr_not_found() {
+                    return Err(CKR_TEMPLATE_INCOMPLETE)?;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    };
+}
+
 /// Performs common validation checks for RSA key attributes during object creation.
 ///
 /// Checks for:

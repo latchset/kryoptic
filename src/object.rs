@@ -376,30 +376,6 @@ macro_rules! attr_element {
 }
 pub(crate) use attr_element;
 
-/// Macro to check that an attribute that contains a vector of bytes
-/// exists and contains a vector of length greater than 0
-#[allow(unused_macros)]
-macro_rules! bytes_attr_not_empty {
-    ($obj:expr; $id:expr) => {
-        match $obj.get_attr_as_bytes($id) {
-            Ok(e) => {
-                if e.len() == 0 {
-                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-                }
-            }
-            Err(e) => {
-                if e.attr_not_found() {
-                    return Err(CKR_TEMPLATE_INCOMPLETE)?;
-                } else {
-                    return Err(e);
-                }
-            }
-        }
-    };
-}
-#[allow(unused_imports)]
-pub(crate) use bytes_attr_not_empty;
-
 /// This trait must be implemented by any mechanisms that defines an
 /// object type, like key object of a specific type. The ObjectFactory
 /// is responsible for defining what are the allowed attributes for the
