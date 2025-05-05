@@ -1,6 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module provides an in-memory storage backend implementation
+//! (`MemoryStorage`) that fulfills the `StorageRaw` trait. It's primarily
+//! used for testing, ephemeral tokens, or as a cache layer for other backends
+//! (like JSON).
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 
@@ -11,10 +16,15 @@ use crate::storage::aci;
 use crate::storage::format;
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
+/// In-memory implementation of the raw storage backend trait (`StorageRaw`).
+/// Uses HashMaps to store objects and user authentication info.
 #[derive(Debug)]
 struct MemoryStorage {
+    /// Map from internal UID (String) to the stored `Object`.
     objects: HashMap<String, Object>,
+    /// Stored token information.
     token_info: StorageTokenInfo,
+    /// Map from user ID ("SO" or "USER") to their authentication info.
     users: HashMap<String, aci::StorageAuthInfo>,
 }
 
@@ -94,6 +104,7 @@ impl format::StorageRaw for MemoryStorage {
     }
 }
 
+/// Factory function to create a new boxed `MemoryStorage` instance.
 pub fn raw_store() -> Box<dyn format::StorageRaw> {
     Box::new(MemoryStorage {
         objects: HashMap::new(),
@@ -102,12 +113,17 @@ pub fn raw_store() -> Box<dyn format::StorageRaw> {
     })
 }
 
+/// Information provider for the in-memory storage backend discovery.
 #[derive(Debug)]
 pub struct MemoryDBInfo {
+    /// The unique type name for this backend ("memory").
     db_type: &'static str,
 }
 
 impl StorageDBInfo for MemoryDBInfo {
+    /// Creates a new in-memory storage instance, wrapping it in the standard
+    /// ACI layer.  Optionally enables encryption via `conf` string
+    /// "flags=encrypt".
     fn new(&self, conf: &Option<String>) -> Result<Box<dyn Storage>> {
         let encrypt = match conf {
             Some(s) => match s.as_str() {
@@ -123,9 +139,11 @@ impl StorageDBInfo for MemoryDBInfo {
         )))
     }
 
+    /// Returns the type name "memory".
     fn dbtype(&self) -> &str {
         self.db_type
     }
 }
 
+/// Static instance of the in-memory storage backend information provider.
 pub static DBINFO: MemoryDBInfo = MemoryDBInfo { db_type: "memory" };

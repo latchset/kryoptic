@@ -1,3 +1,12 @@
+// Copyright 2024 Simo Sorce
+// See LICENSE.txt file for terms
+
+/// This file is included by `storage/json.rs` and `tests/ts.rs`.
+/// It defines the Serde structures (`JsonObjects`, `JsonObject`,
+/// `JsonTokenInfo`) used for serializing and deserializing the token state,
+/// objects, and user authentication information to/from a JSON file format.
+/// It also includes helper functions for converting between PKCS#11
+/// `Attribute`s and JSON values.
 use crate::attribute::string_to_ck_date;
 use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
@@ -12,6 +21,8 @@ use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string_pretty, Map, Number, Value};
 
+/// Helper function to convert IO errors, specifically mapping `NotFound` to
+/// `CKR_CRYPTOKI_NOT_INITIALIZED` for the storage loading case.
 fn uninit(e: std::io::Error) -> Error {
     if e.kind() == std::io::ErrorKind::NotFound {
         Error::ck_rv_from_error(CKR_CRYPTOKI_NOT_INITIALIZED, e)
@@ -20,6 +31,10 @@ fn uninit(e: std::io::Error) -> Error {
     }
 }
 
+/// Converts a PKCS#11 `Attribute` into a `serde_json::Value`.
+///
+/// Handles different attribute types, encoding binary data (Bytes, unknown
+/// String) as Base64 strings.
 fn to_json_value(a: &Attribute) -> Value {
     match a.get_attrtype() {
         AttrType::BoolType => match a.to_bool() {
@@ -54,12 +69,16 @@ fn to_json_value(a: &Attribute) -> Value {
     }
 }
 
+/// Serializable representation of a single PKCS#11 object.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonObject {
+    /// Map where keys are attribute names (e.g., "CKA_LABEL") and values
+    /// are JSON representations of the attribute values.
     attributes: Map<String, Value>,
 }
 
 impl JsonObject {
+    /// Creates a `JsonObject` from a PKCS#11 `Object`.
     pub fn from_object(o: &Object) -> JsonObject {
         let mut jo = JsonObject {
             attributes: Map::new(),
@@ -69,6 +88,8 @@ impl JsonObject {
         }
         jo
     }
+
+    /// Creates a `JsonObject` representing user authentication info.
     fn from_user(uid: &str, info: &aci::StorageAuthInfo) -> JsonObject {
         let mut ju = JsonObject {
             attributes: Map::new(),
@@ -91,23 +112,34 @@ impl JsonObject {
     }
 }
 
+/// Serializable representation of the `StorageTokenInfo` structure.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonTokenInfo {
+    /// Token label.
     label: String,
+    /// Manufacturer ID.
     manufacturer: String,
+    /// Token model description.
     model: String,
+    /// Token serial number.
     serial: String,
+    /// Token flags.
     flags: CK_ULONG,
 }
 
+/// Top-level structure representing the entire JSON database file content.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonObjects {
+    /// Vector of stored token objects.
     objects: Vec<JsonObject>,
+    /// Optional vector of stored user authentication objects (SO, User).
     users: Option<Vec<JsonObject>>,
+    /// Optional stored token information.
     token: Option<JsonTokenInfo>,
 }
 
 impl JsonObjects {
+    /// Loads json objects from a JSON database file
     pub fn load(filename: &str) -> Result<JsonObjects> {
         match std::fs::File::open(filename) {
             Ok(f) => Ok(from_reader::<std::fs::File, JsonObjects>(f)?),
@@ -115,6 +147,9 @@ impl JsonObjects {
         }
     }
 
+    /// Populates a `StorageRaw` backend (typically an in-memory cache)
+    /// with the data loaded from this `JsonObjects` instance (deserialized
+    /// from a JSON file).
     pub fn prime_store(
         &self,
         store: &mut Box<dyn format::StorageRaw>,
@@ -250,6 +285,9 @@ impl JsonObjects {
         Ok(())
     }
 
+    /// Creates a `JsonObjects` instance by reading all token objects, user
+    /// info, and token info from a `StorageRaw` backend (typically an in-memory
+    /// cache) and converting them into the serializable JSON format.
     pub fn from_store(store: &mut Box<dyn format::StorageRaw>) -> JsonObjects {
         let objs = store.search(&[]).unwrap();
         let mut jobjs = Vec::with_capacity(objs.len());
@@ -285,6 +323,8 @@ impl JsonObjects {
         }
     }
 
+    /// Serializes this `JsonObjects` instance to a pretty-printed JSON string
+    /// and saves it to the specified `filename`.
     pub fn save(&self, filename: &str) -> Result<()> {
         let jstr = match to_string_pretty(&self) {
             Ok(j) => j,

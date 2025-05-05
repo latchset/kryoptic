@@ -1,41 +1,74 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the `NSSConfig` struct and associated functions for
+//! parsing the configuration string used to initialize the NSSDB storage
+//! backend, mimicking the behavior of NSS's own module specification parsing.
+
 use crate::error::Result;
 use crate::interface::*;
 use crate::storage;
 
-/* Mostly documented at:
- * https://nss-crypto.org/reference/security/nss/legacy/pkcs11/module_specs/index.html
- */
+/// Holds configuration parameters for the NSSDB storage backend.
+///
+/// These parameters are typically parsed from a string provided during
+/// `C_Initialize` or via environment variables, similar to how NSS modules
+/// are configured.
+///
+/// Mostly documented at:
+/// <https://nss-crypto.org/reference/security/nss/legacy/pkcs11/module_specs/index.html>
 #[derive(Debug)]
 pub struct NSSConfig {
+    /// Path to the NSS database directory (e.g., `~/.pki/nssdb`).
     pub configdir: Option<String>,
+    /// Directory for update files (NSS specific, unused).
     pub updatedir: Option<String>,
+    /// ID for update mechanism (NSS specific, unused).
     pub updateid: Option<String>,
+    /// Name of the security module database file (usually `secmod.db`).
     pub secmod: String,
+    /// Manufacturer ID override for the token.
     pub manufacturer: Option<String>,
+    /// Library description override.
     pub library_description: Option<String>,
+    /// Prefix for certificate database filenames (e.g., "cert").
     pub cert_prefix: String,
+    /// Prefix for key database filenames (e.g., "key").
     pub key_prefix: String,
+    /// Description override for the PKCS#11 token ("Crypto Token").
     pub token_crypto_description: Option<String>,
+    /// Description override for the PKCS#11 token ("DB Token").
     pub token_db_description: Option<String>,
+    /// Description override for the PKCS#11 token ("FIPS Token").
     pub token_fips_description: Option<String>,
+    /// Description override for the PKCS#11 slot ("Crypto Slot").
     pub slot_crypto_description: Option<String>,
+    /// Description override for the PKCS#11 slot ("DB Slot").
     pub slot_db_description: Option<String>,
+    /// Description override for the PKCS#11 slot ("FIPS Slot").
     pub slot_fips_description: Option<String>,
+    /// Description override for the update token (likely unused).
     pub update_description: Option<String>,
+    /// Minimum PIN length requirement (parsed from `minPwLen`).
     pub min_pin_len: usize,
+    /// Flag indicating the database should be opened read-only.
     pub read_only: bool,
+    /// Flag to skip loading/using `secmod.db` (NSS specific).
     pub no_mod_db: bool,
+    /// Flag to prevent opening/using the certificate database (`certN.db`).
     pub no_cert_db: bool,
+    /// Flag to prevent opening/using the key database (`keyN.db`).
     pub no_key_db: bool,
+    /// Flag to force opening databases even if initialization seems incomplete.
     pub force_open: bool,
+    /// Flag indicating a password/PIN is required to access the token.
     pub password_required: bool,
+    /// Flag suggesting the backend should optimize for space (NSS specific).
     pub optimize_space: bool,
     /* tokens: currently unsupported */
 }
 
+/// Default values for `NSSConfig`.
 impl Default for NSSConfig {
     fn default() -> Self {
         NSSConfig {
@@ -66,9 +99,13 @@ impl Default for NSSConfig {
     }
 }
 
+/// Character used to detect the end of a parameter value if no quotes/braces
+/// are used.
 const END_VALUE: u8 = b' ';
 
 impl NSSConfig {
+    /// Parses comma-separated flags from the `flags=` parameter value.
+    /// Updates boolean fields like `read_only`, `no_cert_db`, etc.
     fn parse_flags(&mut self, args: &[u8]) -> Result<()> {
         let mut idx = 0;
         while idx < args.len() {
@@ -92,6 +129,12 @@ impl NSSConfig {
         Ok(())
     }
 
+    /// Parses a single key-value parameter from the configuration string.
+    ///
+    /// Handles different value delimiters ('"', '\'', '(', '{', '[', '<', or
+    /// space) and potential backslash escapes within quoted/bracketed values.
+    /// Updates the corresponding field in `self`. Returns the number of bytes
+    /// consumed from the input slice.
     fn parse_parameter(&mut self, args: &[u8]) -> Result<usize> {
         let name: String;
         let value: String;
@@ -190,7 +233,8 @@ impl NSSConfig {
         Ok(idx)
     }
 
-    /* parse nss configuration string */
+    /// Parses a complete NSS configuration string (e.g., from `C_Initialize` args)
+    /// into an `NSSConfig` structure.
     pub fn from_args(args: &str) -> Result<NSSConfig> {
         let mut config: NSSConfig = Default::default();
 
@@ -203,6 +247,9 @@ impl NSSConfig {
         Ok(config)
     }
 
+    /// Returns the appropriate token label as bytes based on the configuration
+    /// overrides (`token_fips_description` or `token_db_description`) and
+    /// whether the FIPS feature is enabled. Falls back to default labels.
     pub fn get_token_label_as_bytes(&self) -> &[u8] {
         #[cfg(feature = "fips")]
         let label = &self.token_fips_description;
