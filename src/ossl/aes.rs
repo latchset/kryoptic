@@ -1,6 +1,8 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements access to the OpenSSL implementation of AES
+
 use std::ffi::{c_char, c_int, c_void};
 
 use crate::aes::*;
@@ -22,7 +24,9 @@ use crate::get_random_data;
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
 
+/// Maximum buffer size for accumulating data in CCM mode (1 MiB).
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
+/// Minimum number of bits required for random IV generation.
 const MIN_RANDOM_IV_BITS: usize = 64;
 
 const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
@@ -50,6 +54,7 @@ struct AesCipher {
 }
 
 impl AesCipher {
+    /// Returns an OpenSSL EVP_CIPHER wrapper, or None if fetching fails.
     pub fn new(name: *const u8) -> AesCipher {
         AesCipher {
             cipher: match EvpCipher::new(name as *const c_char) {
@@ -59,6 +64,7 @@ impl AesCipher {
         }
     }
 
+    /// Returns a reference to the underlying `EvpCipher`.
     pub fn get_cipher(&self) -> Result<&EvpCipher> {
         match self.cipher {
             Some(ref ec) => Ok(ec),
@@ -72,6 +78,7 @@ impl AesCipher {
 unsafe impl Send for AesCipher {}
 unsafe impl Sync for AesCipher {}
 
+/// Macro to define static `Lazy<AesCipher>` instances for various AES modes.
 macro_rules! aes_cipher {
     ($mode:ident; $name:expr) => {
         static $mode: Lazy<AesCipher> =
@@ -131,9 +138,9 @@ aes_cipher!(AES_256_WRAP_PAD; AES_256_WRAP_PAD_NAME);
 /// A raw AES Key wrapper
 ///
 /// Ensures the data is zeroized on deallocation
-
 #[derive(Debug)]
 struct AesKey {
+    /// Raw key bytes.
     raw: Vec<u8>,
 }
 
@@ -143,7 +150,8 @@ impl Drop for AesKey {
     }
 }
 
-/// Returns an allocated [AesKey] object, given a AES Key Object
+/// Extracts the raw key bytes from a PKCS#11 `Object` into an `AesKey`.
+/// Validates the key length.
 fn object_to_raw_key(key: &Object) -> Result<AesKey> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
     check_key_len(val.len())?;
@@ -163,17 +171,22 @@ fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
 ///
 /// Defines the characteristics of the IV to be used in the AES operation
 /// it is referenced from. Size, generation method, counter, etc..
-
 #[derive(Debug)]
 struct AesIvData {
+    /// The IV buffer. May hold the initial value or be updated by a generator.
     buf: Vec<u8>,
+    /// Number of fixed bits at the start of the IV (for counter modes).
     fixedbits: usize,
+    /// IV generation method (e.g., `CKG_GENERATE_COUNTER`).
     generator: CK_GENERATOR_FUNCTION,
+    /// Current counter value (if applicable).
     counter: u64,
+    /// Maximum counter value before wrapping/error (if applicable).
     maxcount: u64,
 }
 
 impl AesIvData {
+    /// Returns an empty IV container
     fn none() -> Result<AesIvData> {
         Ok(AesIvData {
             buf: Vec::new(),
@@ -184,6 +197,7 @@ impl AesIvData {
         })
     }
 
+    /// Returns an IV container with the specified IV
     fn simple(iv: Vec<u8>) -> Result<AesIvData> {
         Ok(AesIvData {
             buf: iv,
@@ -194,6 +208,7 @@ impl AesIvData {
         })
     }
 }
+
 impl Drop for AesIvData {
     fn drop(&mut self) {
         zeromem(self.buf.as_mut_slice());
@@ -206,14 +221,19 @@ impl Drop for AesIvData {
 /// the IV definitions, maximum number of blocks that can be encrypted,
 /// whether Cipher stealing mode is on. As well as data length, Additional
 /// Authenticated Data and the Tag length for authenticated modes.
-
 #[derive(Debug)]
 struct AesParams {
+    /// Initialization Vector data and generation parameters.
     iv: AesIvData,
+    /// Maximum number of blocks allowed for CTR mode before counter wraps.
     maxblocks: u128,
+    /// Cipher Text Stealing mode (0=off, 1=CS1, 2=CS2, 3=CS3).
     ctsmode: u8,
+    /// Expected total data length for CCM mode.
     datalen: usize,
+    /// Additional Authenticated Data (AAD) for AEAD modes (GCM, CCM).
     aad: Vec<u8>,
+    /// Expected tag length for AEAD modes (GCM, CCM).
     taglen: usize,
 }
 
@@ -229,18 +249,27 @@ impl AesParams {
 ///
 /// Provides access to all the low level encryption/decryption/etc functions
 /// required to implement the AES cryptosystem
-
 #[derive(Debug)]
 pub struct AesOperation {
+    /// The specific AES mechanism being used (e.g., CKM_AES_CBC_PAD).
     mech: CK_MECHANISM_TYPE,
+    /// The operation type flags (CKF_ENCRYPT, CKF_DECRYPT, etc.).
     op: CK_FLAGS,
+    /// The wrapped AES key being used.
     key: AesKey,
+    /// Parameters specific to the current operation (IV, AAD, etc.).
     params: AesParams,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
+    /// The underlying OpenSSL EVP cipher context.
     ctx: EvpCipherCtx,
+    /// Internal buffer for handling partial blocks or accumulating data.
     buffer: Vec<u8>,
+    /// Counter for blocks processed (used for CTR mode limits).
     blockctr: u128,
+    /// Option to report fips indicator status
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
@@ -300,8 +329,8 @@ impl AesOperation {
         mechs.add_mechanism(CKM_AES_KEY_GEN, new_mechanism(CKF_GENERATE));
     }
 
-    /// Helper function to initialize the AES operation parameters based on
-    /// the provided CK_MECHANISM structure
+    /// Parses the PKCS#11 mechanism parameters (`CK_MECHANISM`) and initializes
+    /// an `AesParams` struct based on the specific AES mechanism type.
     fn init_params(mech: &CK_MECHANISM) -> Result<AesParams> {
         match mech.mechanism {
             CKM_AES_CCM => {
@@ -2765,20 +2794,31 @@ impl MsgDecryption for AesOperation {
     }
 }
 
-/* _key and _mac as stored in order to make sure the pointers they
- * hold survive for as long as the operations are going on, as we
- * can't be sure openssl is not holding live pointers to the
- * parameters passed into the init functions */
+/// Represents an active AES-CMAC operation (RFC 4493).
+///
+/// _key and _mac as stored in order to make sure the pointers they
+/// hold survive for as long as the operations are going on, as we
+/// can't be sure openssl is not holding live pointers to the
+/// parameters passed into the init functions
 #[derive(Debug)]
 pub struct AesCmacOperation {
+    /// The specific CMAC mechanism being used.
     mech: CK_MECHANISM_TYPE,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
+    /// The AES key used for CMAC.
     _key: AesKey,
+    /// The underlying OpenSSL EVP MAC context.
     ctx: EvpMacCtx,
+    /// The MAC length
     maclen: usize,
+    /// Option that holds the FIPS indicator
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+    /// Optional storage for signatures, used when the signature to verify
+    /// is provided at initialization
     signature: Option<Vec<u8>>,
 }
 
@@ -3091,16 +3131,27 @@ impl VerifySignature for AesCmacOperation {
 /// This object is used to hold data for any AES MAC operation
 #[derive(Debug)]
 pub struct AesMacOperation {
+    /// The specific MAC mechanism being used.
     mech: CK_MECHANISM_TYPE,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
+    /// Buffer to hold one full block of data, will be padded
     padbuf: [u8; AES_BLOCK_SIZE],
+    /// Size of the data stiore in the padbuf at any give time
     padlen: usize,
+    /// Temporary buffer to hold the output until the last block is returned
     macbuf: [u8; AES_BLOCK_SIZE],
+    /// Size of the requested MAC output
     maclen: usize,
+    /// Internal encryption operation
     op: AesOperation,
+    /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+    /// Optional storage for signatures, used when the signature to verify
+    /// is provided at initialization
     signature: Option<Vec<u8>>,
 }
 

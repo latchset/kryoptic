@@ -1,6 +1,10 @@
 // Copyright 2024 Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements functionalities related to Montgomery curves
+//! (Curve25519/X25519, Curve448/X448) using the OpenSSL EVP interface,
+//! primarily key generation and parameter conversion.
+
 use std::ffi::{c_char, c_int};
 
 use crate::attribute::Attribute;
@@ -11,6 +15,12 @@ use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+/// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into
+/// OpenSSL parameters (`OsslParam`).
+///
+/// Extracts the curve name and relevant key components (public point or
+/// private value) based on the object `class` and populates an `OsslParam`
+/// structure.
 pub fn ecm_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
@@ -46,10 +56,18 @@ pub fn ecm_object_to_params(
     Ok((name_as_char(name), params))
 }
 
+/// Represents state for Montgomery curve operations (currently mainly keygen).
+/// Placeholder for potential future stateful operations like key derivation.
 #[derive(Debug)]
 pub struct ECMontgomeryOperation {}
 
 impl ECMontgomeryOperation {
+    /// Generates a Montgomery curve key pair (X25519 or X448).
+    ///
+    /// Takes mutable references to pre-created public and private key
+    /// `Object`s (which define the curve via CKA_EC_PARAMS), generates the
+    /// key pair using OpenSSL, and populates the CKA_EC_POINT and CKA_VALUE
+    /// attributes.
     pub fn generate_keypair(
         pubkey: &mut Object,
         privkey: &mut Object,

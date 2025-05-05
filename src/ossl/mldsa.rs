@@ -1,6 +1,11 @@
 // Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements the ML-DSA signature mechanisms as defined in FIPS
+//! 204 using OpenSSL (3.5+) EVP_PKEY functions. It handles key generation,
+//! signing, verification, and parameter/context handling for different ML-DSA
+//! variants.
+
 use std::ffi::c_char;
 
 use crate::attribute::Attribute;
@@ -20,8 +25,8 @@ use bitflags::bitflags;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
 
-/* Max buffer size when OpenSSL does not support the
- * message_update() interfaces and we need to accumulate */
+/// Maximum buffer size for accumulating data when emulating multi-part
+/// operations for OpenSSL versions that only support one-shot ML-DSA.
 const MAX_BUFFER_LEN: usize = 1024 * 1024;
 
 /* Openssl Key types */
@@ -33,11 +38,17 @@ const ML_DSA_44_SIG_SIZE: usize = 2420;
 const ML_DSA_65_SIG_SIZE: usize = 3309;
 const ML_DSA_87_SIG_SIZE: usize = 4627;
 
+/// Maximum allowed context length.
 const MAX_CONTEXT_LEN: usize = 255;
-/* 17 is probably sufficient, but we put some headroom here */
+/// Maximum expected DER length for a hash OID used in Hash-ML-DSA M'
+/// construction. (17 bytes is probably sufficient, but we put some
+/// headroom here) */
 const MAX_OID_DER_LEN: usize = 20;
+/// Maximum expected hash output length used in Hash-ML-DSA M' construction.
 const MAX_HASH_LEN: usize = 64;
 
+/// Maps a PKCS#11 ML-DSA parameter set type (`CK_ML_DSA_PARAMETER_SET_TYPE`)
+/// to the corresponding OpenSSL algorithm name string.
 pub fn mldsa_param_set_to_name(
     pset: CK_ML_DSA_PARAMETER_SET_TYPE,
 ) -> Result<*const c_char> {
@@ -49,6 +60,13 @@ pub fn mldsa_param_set_to_name(
     }
 }
 
+/// Converts a PKCS#11 ML-DSA key `Object` into OpenSSL parameters
+/// (`OsslParam`).
+///
+/// Extracts the parameter set (`CKA_PARAMETER_SET`) to determine the algorithm
+/// name. Extracts key components (`CKA_VALUE` for public/private key,
+/// `CKA_SEED`) based on the object `class` and populates an `OsslParam`
+/// structure.
 pub fn mldsa_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
@@ -99,16 +117,23 @@ bitflags! {
     }
 }
 
+/// Holds parsed parameters specific to an ML-DSA operation instance.
 #[derive(Debug)]
 struct MlDsaParams {
+    /// The ML-DSA parameter set (e.g., CKP_ML_DSA_65).
     param_set: CK_ML_DSA_PARAMETER_SET_TYPE,
+    /// The hedging variant requested (e.g., CKH_HEDGE_PREFERRED).
     hedge: CK_HEDGE_TYPE,
+    /// Optional context string.
     context: Option<Vec<u8>>,
+    /// Hash mechanism for CKM_HASH_ML_DSA.
     hash: CK_MECHANISM_TYPE,
+    /// Expected signature size based on the parameter set.
     sigsize: usize,
 }
 
 impl MlDsaParams {
+    /// Creates a new `MlDsaParams` instance by parsing mechanism parameters.
     pub fn new(
         mech: &CK_MECHANISM,
         param_set: CK_ML_DSA_PARAMETER_SET_TYPE,
@@ -184,6 +209,10 @@ impl MlDsaParams {
         Ok(mldsa_params)
     }
 
+    /// Creates an `OsslParam` array suitable for passing to OpenSSL's
+    /// `EVP_PKEY_sign/verify_message_init` based on the stored parameters
+    /// and operation flags (sign/verify, raw encoding). Handles context string
+    /// and deterministic/hedging parameters.
     fn ossl_params(&self, flags: ParmFlags) -> Result<OsslParam> {
         let mut params = OsslParam::with_capacity(3);
         if flags.contains(ParmFlags::RawEncoding) {
@@ -215,18 +244,32 @@ impl MlDsaParams {
     }
 }
 
+/// Represents an active ML-DSA signing or verification operation.
 #[derive(Debug)]
 pub struct MlDsaOperation {
+    /// The specific ML-DSA mechanism being used.
     mech: CK_MECHANISM_TYPE,
+    /// Flag indicating if the operation has been finalized.
     finalized: bool,
+    /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
+    /// Parsed ML-DSA parameters for this operation instance.
     params: MlDsaParams,
+    /// The underlying OpenSSL EVP PKEY context.
     sigctx: EvpPkeyCtx,
+    /// Buffer to accumulate data for multi-part emulation if needed.
     data: Option<Vec<u8>>,
+    /// Size of the hash for Hash-ML-DSA variants.
     hashsize: usize,
+    /// Optional hasher instance for Hash-ML-DSA variants.
     hasher: Option<Box<dyn Digest>>,
+    /// Stored signature for VerifySignature operations if updates aren't
+    /// supported by the OpenSSL ML-DSA provider.
     signature: Option<Vec<u8>>,
+    /// Flag indicating if the current OpenSSL version supports multi-part
+    /// updates.
     supports_updates: bool,
+    /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
 }
@@ -247,6 +290,14 @@ impl MechOperation for MlDsaOperation {
 }
 
 impl MlDsaOperation {
+    /// Creates a new ML-DSA sign or verify operation context.
+    ///
+    /// Initializes the internal state, parses mechanism parameters, imports
+    /// the key into an OpenSSL `EVP_PKEY_CTX`, and initializes the context
+    /// for signing or verification using `EVP_PKEY_sign/verify_message_init`.
+    /// It also probes whether the OpenSSL version supports multi-part updates
+    /// for ML-DSA and sets up internal hashing if a Hash-ML-DSA variant is
+    /// used.
     pub fn sigver_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -405,6 +456,10 @@ impl MlDsaOperation {
         Ok(op)
     }
 
+    /// Sets the signature for a VerifySignature operation.
+    /// If the OpenSSL backend supports setting it early (via
+    /// `EVP_PKEY_CTX_set_signature`), it does so; otherwise, it stores the
+    /// signature internally for later use.
     fn set_signature(&mut self, signature: &[u8]) -> Result<()> {
         let size = match self.params.param_set {
             CKP_ML_DSA_44 => ML_DSA_44_SIG_SIZE,
@@ -444,6 +499,8 @@ impl MlDsaOperation {
         Ok(())
     }
 
+    /// Sets up the internal hasher for Hash-ML-DSA variants based on the
+    /// mechanism type.
     fn setup_digest(&mut self, hash: CK_MECHANISM_TYPE) -> Result<()> {
         self.hashsize = match hash::hash_size(hash) {
             hash::INVALID_HASH_SIZE => {
@@ -507,6 +564,7 @@ impl MlDsaOperation {
         Ok(mp)
     }
 
+    /// Internal helper to update the internal hasher for Hash-ML-DSA variants.
     fn digest_int_update(&mut self, data: &[u8]) -> Result<()> {
         match &mut self.hasher {
             Some(op) => op.digest_update(data),
@@ -514,6 +572,8 @@ impl MlDsaOperation {
         }
     }
 
+    /// Internal helper to finalize the internal hasher for Hash-ML-DSA
+    /// variants.
     fn digest_int_final(&mut self, digest: &mut [u8]) -> Result<()> {
         match &mut self.hasher {
             Some(op) => op.digest_final(digest),
@@ -521,6 +581,7 @@ impl MlDsaOperation {
         }
     }
 
+    /// Internal helper for performing one-shot or final verification step.
     fn verify_internal(
         &mut self,
         data: &[u8],
@@ -548,6 +609,8 @@ impl MlDsaOperation {
         self.verify_int_final(signature)
     }
 
+    /// Internal helper for updating a multi-part verification.
+    /// Handles data buffering.
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -614,6 +677,9 @@ impl MlDsaOperation {
         Ok(())
     }
 
+    /// Internal helper for the final step of multi-part verification.
+    /// Computes M' if necessary and performs the final OpenSSL verification
+    /// call.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
         if !self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -904,6 +970,9 @@ impl VerifySignature for MlDsaOperation {
     }
 }
 
+/// Generates an ML-DSA key pair for the specified parameter set.
+/// Populates the public (`CKA_VALUE`) and private (`CKA_VALUE`, `CKA_SEED`)
+/// key attributes in the provided `Object`s.
 pub fn generate_keypair(
     param_set: CK_ML_DSA_PARAMETER_SET_TYPE,
     pubkey: &mut Object,

@@ -1,6 +1,10 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+//! This module implements ECDH (Elliptic Curve Diffie-Hellman) key derivation
+//! functionalities according to PKCS#11 standards (CKM_ECDH1_DERIVE,
+//! CKM_ECDH1_COFACTOR_DERIVE) using the OpenSSL EVP_PKEY_derive API.
+
 use core::ffi::{c_char, c_int, c_uint};
 use std::borrow::Cow;
 
@@ -13,6 +17,8 @@ use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+/// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
+/// PKCS#11 hash mechanism type (`CK_MECHANISM_TYPE`).
 fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     match mech {
         CKD_SHA1_KDF => Ok(CKM_SHA_1),
@@ -28,6 +34,11 @@ fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
     }
 }
 
+/// Creates an OpenSSL `EvpPkey` representing the peer's public key.
+///
+/// Uses the provided local `key` object to determine the curve group and
+/// constructs the peer key using the supplied public point (`ec_point`) bytes
+/// via `OSSL_PARAM`s.
 fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
     let mut params = OsslParam::with_capacity(2);
     params.zeroize = true;
@@ -52,16 +63,26 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
     EvpPkey::fromdata(name_as_char(name), EVP_PKEY_PUBLIC_KEY, &params)
 }
 
+/// Represents an active ECDH key derivation operation.
 #[derive(Debug)]
 pub struct ECDHOperation {
+    /// The specific ECDH mechanism type (e.g., CKM_ECDH1_DERIVE).
     mech: CK_MECHANISM_TYPE,
+    /// The Key Derivation Function to apply (e.g., CKD_NULL, CKD_SHA256_KDF).
     kdf: CK_EC_KDF_TYPE,
+    /// Peer's public key point data.
     public: Vec<u8>,
+    /// Optional shared data for the KDF.
     shared: Vec<u8>,
+    /// Flag indicating if the derivation has been finalized.
     finalized: bool,
 }
 
 impl ECDHOperation {
+    /// Creates a new `ECDHOperation` instance.
+    ///
+    /// Parses the `CK_ECDH1_DERIVE_PARAMS` from the mechanism, validates them,
+    /// and stores the necessary parameters.
     pub fn derive_new<'a>(
         mechanism: CK_MECHANISM_TYPE,
         params: CK_ECDH1_DERIVE_PARAMS,
@@ -100,6 +121,13 @@ impl MechOperation for ECDHOperation {
 }
 
 impl Derive for ECDHOperation {
+    /// Performs the ECDH key derivation.
+    ///
+    /// Sets up the OpenSSL derivation context using the local private `key`,
+    /// imports the peer's public key point (`self.public`), performs the ECDH
+    /// derivation (potentially using cofactor mode), applies the specified KDF
+    /// (`self.kdf`) if needed, and creates the derived key object using the
+    /// template.
     fn derive(
         &mut self,
         key: &Object,
