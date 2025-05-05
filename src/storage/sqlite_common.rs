@@ -1,6 +1,9 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module provides common utilities and error handling conversions
+//! for storage backends implemented using the `rusqlite` crate.
+
 use std::sync::MutexGuard;
 
 use crate::error::{Error, Result};
@@ -9,6 +12,8 @@ use rusqlite::{Error as rlError, ErrorCode};
 
 use rusqlite;
 
+/// Converts `rusqlite::Error` into the crate's custom `Error` type, mapping
+/// specific SQLite error codes to appropriate PKCS#11 `CK_RV` return values.
 impl From<rlError> for Error {
     fn from(error: rlError) -> Error {
         match error {
@@ -52,12 +57,18 @@ impl From<rlError> for Error {
     }
 }
 
+/// Converts `std::sync::PoisonError` (from Mutex locking) into `CKR_CANT_LOCK`.
 impl<T> From<std::sync::PoisonError<std::sync::MutexGuard<'_, T>>> for Error {
     fn from(_: std::sync::PoisonError<std::sync::MutexGuard<'_, T>>) -> Error {
         Error::ck_rv(CKR_CANT_LOCK)
     }
 }
 
+/// Checks if a table exists within the specified schema (or main) in the
+/// SQLite database.
+///
+/// Returns `Ok(())` if the table exists, `CKR_CRYPTOKI_NOT_INITIALIZED` if
+/// not, or other errors for database issues.
 pub fn check_table(
     conn: &MutexGuard<'_, rusqlite::Connection>,
     schema: &str,
@@ -87,6 +98,8 @@ pub fn check_table(
     }
 }
 
+/// Enables the `secure_delete` pragma on the SQLite connection.
+/// This helps ensure deleted data is overwritten, enhancing security.
 pub fn set_secure_delete(
     conn: &MutexGuard<'_, rusqlite::Connection>,
 ) -> Result<()> {

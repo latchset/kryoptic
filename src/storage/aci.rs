@@ -1,6 +1,11 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements Authentication, Confidentiality, and Integrity (ACI)
+//! mechanisms for securing stored data, like private keys and potentially
+//! other sensitive information within a storage backend. It utilizes PBKDF2,
+//! HKDF, and AES-GCM.
+
 use std::fmt::Debug;
 
 use crate::aes;
@@ -15,6 +20,10 @@ use crate::CSPRNG;
 
 use asn1;
 
+/// Derives a key using PBKDF2 (CKM_PKCS5_PBKD2) based on PKCS#5 v2.1.
+///
+/// Uses the provided ASN.1 `PBKDF2Params` to configure the underlying
+/// PKCS#11 mechanism call.
 pub fn pbkdf2_derive(
     facilities: &TokenFacilities,
     params: &pkcs::PBKDF2Params,
@@ -51,6 +60,10 @@ pub fn pbkdf2_derive(
     )
 }
 
+/// Derives a key using the HKDF-Expand phase (CKM_HKDF_DERIVE).
+///
+/// Uses the provided ASN.1 `KKDF1Params` (specifically the `info` field)
+/// and the input `key` object (as the PRK) to configure the mechanism call.
 fn hkdf_expand(
     facilities: &TokenFacilities,
     params: &KKDF1Params,
@@ -92,6 +105,12 @@ fn hkdf_expand(
     }
 }
 
+/// Encrypts data using AES-GCM (CKM_AES_GCM).
+///
+/// Generates a random 12-byte IV. Uses the provided `key` object,
+/// `aad` (Additional Authenticated Data), and plaintext `data`.
+/// Returns the ASN.1 encoded `KGCMParams` (containing the IV and tag) and
+/// the resulting ciphertext.
 fn aes_gcm_encrypt(
     facilities: &TokenFacilities,
     key: &Object,
@@ -134,6 +153,11 @@ fn aes_gcm_encrypt(
     Ok((gcm_params, encrypted))
 }
 
+/// Decrypts data using AES-GCM (CKM_AES_GCM).
+///
+/// Uses the provided `key` object, `gcm_params` (containing IV and tag),
+/// `aad` (Additional Authenticated Data), and ciphertext `data`.
+/// Verifies the tag and returns the decrypted plaintext.
 fn aes_gcm_decrypt(
     facilities: &TokenFacilities,
     key: &Object,
@@ -177,6 +201,8 @@ const GEN_KEYTYP: CK_ULONG = CKK_GENERIC_SECRET;
 const AES_KEYTYP: CK_ULONG = CKK_AES;
 const AES_KEYLEN: CK_ULONG = aes::MAX_AES_SIZE_BYTES as CK_ULONG;
 
+/// Helper function to produce a template for a secret key to be
+/// used with PKCS#11 functions.
 fn secret_key_template<'a>(
     keytype: &'a CK_ULONG,
     keylen: &'a CK_ULONG,
@@ -196,6 +222,12 @@ fn secret_key_template<'a>(
     template
 }
 
+/// Encrypts a cryptographic key using a PIN-derived KEK.
+///
+/// Derives a KEK from the `pin` using PBKDF2 with the specified `iterations`
+/// and a random salt. Encrypts the input `key` using AES-GCM with the KEK,
+/// using the `id` string as AAD. Encodes the KDF parameters, GCM parameters
+/// (IV, tag), and ciphertext into a `KProtectedData` ASN.1 structure.
 fn encrypt_key(
     facilities: &TokenFacilities,
     id: &str,
@@ -251,6 +283,13 @@ fn encrypt_key(
     }
 }
 
+/// Decrypts a cryptographic key previously encrypted with `encrypt_key`.
+///
+/// Parses the `KProtectedData` structure from the input `data`. Re-derives
+/// the KEK using PBKDF2 with the provided `pin` and the parameters stored
+/// in the structure. Decrypts the ciphertext using AES-GCM with the KEK,
+/// verifying the tag and using the `id` string as AAD. Returns the key
+/// version number stored in the structure and the decrypted key bytes.
 fn decrypt_key(
     facilities: &TokenFacilities,
     id: &str,
@@ -292,6 +331,13 @@ fn decrypt_key(
     ))
 }
 
+/// Encrypts arbitrary data using a derived key encryption key (DEK).
+///
+/// Derives a DEK from the master `key` using HKDF-Expand (RFC 5869) with the
+/// `data_id` as the `info` parameter. Encrypts the input `data` using AES-GCM
+/// with the DEK, using the `data_id` as AAD. Encodes the KDF parameters, GCM
+/// parameters (IV, tag), key version, and ciphertext into a `KProtectedData`
+/// ASN.1 structure.
 fn encrypt_data(
     facilities: &TokenFacilities,
     key_version: u64,
@@ -343,6 +389,13 @@ fn encrypt_data(
     }
 }
 
+/// Decrypts data previously encrypted with `encrypt_data`.
+///
+/// Parses the `KProtectedData` structure from the input `data`. Verifies the
+/// `key_version`. Re-derives the DEK using HKDF-Expand with the master `key`
+/// and the parameters stored in the structure (using `data_id` as info).
+/// Decrypts the ciphertext using AES-GCM with the DEK, verifying the tag
+/// and using the `data_id` as AAD. Returns the decrypted data bytes.
 fn decrypt_data(
     facilities: &TokenFacilities,
     key_version: u64,
@@ -383,13 +436,20 @@ fn decrypt_data(
     aes_gcm_decrypt(facilities, &dek, params, data_id.as_bytes(), pdata.data)
 }
 
+/// Default maximum number of failed login attempts before locking.
 const MAX_LOGIN_ATTEMPTS: CK_ULONG = 10;
 
+/// Holds authentication information for a user (SO or User), typically
+/// stored persistently (though potentially encrypted).
 #[derive(Clone, Debug)]
 pub struct StorageAuthInfo {
+    /// Flag indicating if the PIN is the default one (not yet set by user).
     pub default_pin: bool,
+    /// Encrypted master key data (if encryption enabled) or placeholder.
     pub user_data: Option<Vec<u8>>,
+    /// Maximum allowed login attempts before locking.
     pub max_attempts: CK_ULONG,
+    /// Current number of failed login attempts since last success.
     pub cur_attempts: CK_ULONG,
 }
 
@@ -413,22 +473,33 @@ impl Drop for StorageAuthInfo {
 }
 
 impl StorageAuthInfo {
+    /// Returns `true` if the user account is currently locked due to too
+    /// many failed login attempts.
     pub fn locked(&self) -> bool {
         self.cur_attempts >= self.max_attempts
     }
 }
 
-/* Storage abstract Authentication, Confidentialiy, Integrity
- * functionality */
+/// Manages Authentication, Confidentiality, and Integrity for the storage
+/// backend.
+///
+/// Holds the master key (if encryption is enabled and user is authenticated)
+/// and provides methods to encrypt/decrypt data and manage user
+/// authentication based on PINs.
 #[derive(Debug)]
 pub struct StorageACI {
+    /// Default number of iterations for PBKDF2 when wrapping the master key.
     def_iterations: usize,
+    /// Current version number of the master key. Incremented on key change.
     key_version: u64,
+    /// The master key object (optional, only present when authenticated).
     key: Option<Object>,
+    /// Flag indicating if confidentiality (encryption) is enabled.
     encrypt: bool,
 }
 
 impl StorageACI {
+    /// Instantiate a new ACI manager
     pub fn new(encrypt: bool) -> StorageACI {
         StorageACI {
             def_iterations: 1000,
@@ -438,10 +509,13 @@ impl StorageACI {
         }
     }
 
+    /// Returns `true` if storage encryption is enabled.
     pub fn encrypts(&self) -> bool {
         self.encrypt
     }
 
+    /// Resets the ACI state, generating a new master key if encryption is
+    /// enabled.
     pub fn reset(&mut self, facilities: &TokenFacilities) -> Result<()> {
         if !self.encrypt {
             return Ok(());
@@ -465,10 +539,14 @@ impl StorageACI {
         Ok(())
     }
 
+    /// Clears the currently held master key (e.g., on logout).
     pub fn unauth(&mut self) {
         self.key = None;
     }
 
+    /// Encrypts a value using the current master key.
+    ///
+    /// Derives a DEK using HKDF and encrypts using AES-GCM. Uses `uid` as AAD.
     pub fn encrypt_value(
         &self,
         facilities: &TokenFacilities,
@@ -489,6 +567,10 @@ impl StorageACI {
         }
     }
 
+    /// Decrypts a value using the current master key.
+    ///
+    /// Derives the DEK using HKDF and decrypts using AES-GCM.
+    /// Uses `uid` as AAD and verifies the key version and tag.
     pub fn decrypt_value(
         &self,
         facilities: &TokenFacilities,
@@ -542,6 +624,14 @@ impl StorageACI {
         Ok(info)
     }
 
+    /// Authenticates a user against their stored `StorageAuthInfo` using a PIN.
+    ///
+    /// Decrypts the `user_data` using a key derived from the `pin` via PBKDF2.
+    /// If successful and encryption is enabled, it verifies the decrypted
+    /// master key (or placeholder) and optionally sets the active master key
+    /// (`self.key`) if `set_key` is true. Updates the attempt counter in
+    /// info`. Returns `Ok(true)` if the attempt counter changed, `Ok(false)`
+    /// otherwise, or an error.
     pub fn authenticate(
         &mut self,
         facilities: &TokenFacilities,

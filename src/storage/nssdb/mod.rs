@@ -1,6 +1,10 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module implements a NSS compatible database backend. It interacts
+//! with the SQLite databases used by NSS for storing certificates, public
+//! keys, private keys, and trust settings.
+
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -27,12 +31,14 @@ mod config;
 use ci::*;
 use config::*;
 
+/// Helper to convert `std::fmt::Error` to `crate::error::Error`.
 impl From<std::fmt::Error> for Error {
     fn from(_: std::fmt::Error) -> Error {
         Error::ck_rv(CKR_GENERAL_ERROR)
     }
 }
 
+/// Helper to convert `rusqlite::types::FromSqlError` to `crate::error::Error`.
 impl From<FromSqlError> for Error {
     fn from(_: FromSqlError) -> Error {
         Error::ck_rv(CKR_GENERAL_ERROR)
@@ -40,25 +46,36 @@ impl From<FromSqlError> for Error {
 }
 
 /* NSS db versions */
+/// NSS Certificate DB schema version expected.
 const CERT_DB_VERSION: usize = 9;
+/// NSS Key DB schema version expected.
 const KEY_DB_VERSION: usize = 4;
+/// NSS DB public table name (in certN.db).
 const NSS_PUBLIC_TABLE: &str = "nssPublic";
+/// NSS DB public schema name (for attaching certN.db).
 const NSS_PUBLIC_SCHEMA: &str = "public";
+/// NSS DB private table name (in keyN.db).
 const NSS_PRIVATE_TABLE: &str = "nssPrivate";
+/// NSS DB private schema name (for attaching keyN.db).
 const NSS_PRIVATE_SCHEMA: &str = "private";
+/// Special 3-byte value NSS uses to represent NULL/empty attributes in BLOB
+/// columns.
 const NSS_SPECIAL_NULL_VALUE: [u8; 3] = [0xa5, 0x0, 0x5a];
 
+/// Prefix used for internal UIDs representing NSS objects.
 const NSS_ID_PREFIX: &str = "NSSID";
 
-/* SFTK_MAX_PIN in NSS code */
+/// Maximum PIN length allowed by NSS (from SFTK_MAX_PIN).
 const NSS_PIN_MAX: usize = 500;
-/* SHA1_LENGTH in NSS code */
+/// Length of the salt used for NSS password hashing (from SHA1_LENGTH).
 const NSS_PIN_SALT_LEN: usize = 20;
 
+/// Formats an internal UID string from the table name and numeric NSS object ID.
 fn nss_id_format(table: &str, id: u32) -> String {
     format!("{}-{}-{}", NSS_ID_PREFIX, table, id)
 }
 
+/// Parses an internal UID string back into table name and numeric NSS object ID.
 fn nss_id_parse(nssid: &str) -> Result<(String, u32)> {
     let mut tokens = nssid.split('-');
     match tokens.next() {
@@ -84,10 +101,17 @@ fn nss_id_parse(nssid: &str) -> Result<(String, u32)> {
     Ok((table.to_string(), id))
 }
 
+/// Converts an NSS DB column name (e.g., "a81") to a PKCS#11 attribute type
+/// (`CK_ULONG`). The column name format is 'a' followed by the hex value of
+/// the attribute type.
 fn nss_col_to_type(col: &str) -> Result<CK_ULONG> {
     Ok(CK_ULONG::from_str_radix(&col[1..], 16)?)
 }
 
+/// Converts a `CK_ULONG` attribute value to a `rusqlite::Value` for storage.
+/// Handles the special case `CK_UNAVAILABLE_INFORMATION` and ensures values
+/// fit within NSS DB's typical u32 storage for numbers by storing as a 4-byte
+/// BE blob.
 fn num_to_val(ulong: CK_ULONG) -> Result<Value> {
     /* CK_UNAVAILABLE_INFORMATION need to be special cased */
     /* for storage compatibility CK_ULONGs can only be stored as u32
@@ -107,22 +131,34 @@ fn num_to_val(ulong: CK_ULONG) -> Result<Value> {
     Ok(Value::from(val.to_be_bytes().to_vec()))
 }
 
+/// Known plaintext used for NSS password verification.
 static NSS_PASS_CHECK: &[u8; 14] = b"password-check";
 
+/// Internal struct to hold components of a search query targeting NSS tables.
 struct NSSSearchQuery {
+    /// Optional SQL query part for the public table.
     public: Option<String>,
+    /// Optional SQL query part for the private table.
     private: Option<String>,
+    /// Parameter values corresponding to placeholders in the SQL queries.
     params: Vec<Value>,
 }
 
+/// Implements the `Storage` trait using NSS database files.
 #[derive(Debug)]
 pub struct NSSStorage {
+    /// NSS DB configuration parameters.
     config: NSSConfig,
+    /// Thread-safe connection to the underlying SQLite database(s).
     conn: Arc<Mutex<Connection>>,
+    /// Key cache and encryption/decryption context for authenticated
+    /// attributes.
     keys: KeysWithCaching,
 }
 
 impl NSSStorage {
+    /// Generates and returns a `StorageTokenInfo` structure from data stored
+    /// in configuration files.
     fn get_token_info(&self) -> Result<StorageTokenInfo> {
         let mut info = StorageTokenInfo {
             label: [0; 32],
@@ -153,6 +189,8 @@ impl NSSStorage {
         Ok(info)
     }
 
+    /// Constructs the file URI for an SQLite database, handling path encoding
+    /// and read-only mode.
     fn db_uri(path: &str, read_only: bool) -> Result<String> {
         let mut encoded_path = String::new();
         for c in path.as_bytes() {
@@ -168,6 +206,8 @@ impl NSSStorage {
         Ok(format!("file:{}?{}&cache=private", &encoded_path, mode))
     }
 
+    /// Attaches an NSS database file (certN.db or keyN.db) to the main SQLite
+    /// connection using the specified schema name.
     fn db_attach(
         conn: &mut MutexGuard<'_, rusqlite::Connection>,
         path: &str,
@@ -182,6 +222,9 @@ impl NSSStorage {
         Ok(())
     }
 
+    /// Creates the main object table (nssPublic or nssPrivate) and associated
+    /// indexes within a given schema inside a transaction. Drops the table
+    /// first if it exists.
     fn new_main_tables(
         tx: &mut Transaction,
         schema: &str,
@@ -226,6 +269,8 @@ impl NSSStorage {
         Ok(())
     }
 
+    /// Constructs the expected filename for the certificate database
+    /// (certN.db).
     fn certsfile(&self) -> Result<String> {
         let cdir = match self.config.configdir {
             Some(ref c) => c,
@@ -237,6 +282,7 @@ impl NSSStorage {
         ))
     }
 
+    /// Constructs the expected filename for the key database (keyN.db).
     fn keysfile(&self) -> Result<String> {
         let cdir = match self.config.configdir {
             Some(ref c) => c,
@@ -248,6 +294,8 @@ impl NSSStorage {
         ))
     }
 
+    /// Initializes the NSS database files and creates the necessary tables
+    /// and indexes. Assumes the databases are already attached.
     fn initialize(&mut self) -> Result<()> {
         let mut conn = self.conn.lock()?;
         let mut tx = conn.transaction()?;
@@ -286,6 +334,11 @@ impl NSSStorage {
         Ok(())
     }
 
+    /// Converts rows returned from an NSS DB query into a PKCS#11 `Object`.
+    ///
+    /// Maps NSS column names (e.g., "a81") to attribute types and converts
+    /// stored BLOBs/numbers back into `Attribute` values. Handles the
+    /// special NULL value.
     fn rows_to_object(mut rows: Rows, all_cols: bool) -> Result<Object> {
         let mut obj = Object::new();
 
@@ -368,6 +421,8 @@ impl NSSStorage {
         }
     }
 
+    /// Prepares the SQL query components for fetching a specific object by ID
+    /// from either the public or private table.
     fn prepare_fetch(
         table: &str,
         objid: u32,
@@ -402,6 +457,7 @@ impl NSSStorage {
         Ok(query)
     }
 
+    /// Fetches a single object by its parsed table name and numeric ID.
     fn fetch_by_nssid(
         &self,
         table: &str,
@@ -432,6 +488,7 @@ impl NSSStorage {
      * Unfortunately preprocessing is needed to find out whether the
      * certs or keys databases or both need to be searched.
      */
+    /// Prepares search statements
     fn prepare_search(template: &[CK_ATTRIBUTE]) -> Result<NSSSearchQuery> {
         let mut do_private = true;
         let mut do_public = true;
@@ -510,6 +567,8 @@ impl NSSStorage {
         Ok(query)
     }
 
+    /// Executes a prepared search query against a specific table (public or
+    /// private).
     fn search_with_params(
         conn: &mut MutexGuard<'_, rusqlite::Connection>,
         query: &str,
@@ -526,6 +585,9 @@ impl NSSStorage {
         Ok(result)
     }
 
+    /// Prepares and executes search queries against the appropriate database
+    /// tables based on the template, returning a list of matching internal
+    /// UIDs.
     fn search_databases(
         &self,
         template: &[CK_ATTRIBUTE],
@@ -554,6 +616,7 @@ impl NSSStorage {
         Ok(result)
     }
 
+    /// Fetches metadata associated with a given ID from the metaData table.
     fn fetch_metadata(&self, name: &str) -> Result<(Vec<u8>, Vec<u8>)> {
         static SQL: &str = "SELECT ALL item1, item2 FROM metaData WHERE id = ?";
         let conn = self.conn.lock()?;
@@ -572,6 +635,7 @@ impl NSSStorage {
         }
     }
 
+    /// Fetches the password check entry from metadata.
     fn fetch_password(&self) -> Result<(Vec<u8>, Vec<u8>)> {
         match self.fetch_metadata("password") {
             Ok((salt, value)) => Ok((salt, value)),
@@ -582,6 +646,8 @@ impl NSSStorage {
         }
     }
 
+    /// Fetches the stored signature for an authenticated attribute from
+    /// metadata.
     fn fetch_signature(
         &self,
         dbtype: &str,
@@ -593,6 +659,7 @@ impl NSSStorage {
         Ok(value)
     }
 
+    /// Saves a metadata entry (id, item1, item2) within a transaction.
     fn save_metadata(
         tx: &mut Transaction,
         name: &str,
@@ -610,6 +677,7 @@ impl NSSStorage {
         Ok(())
     }
 
+    /// Saves the password check entry (salt and encrypted data) to metadata.
     fn save_password(&mut self, item1: &[u8], item2: &[u8]) -> Result<()> {
         let mut conn = self.conn.lock()?;
         let mut tx = conn.transaction()?;
@@ -619,6 +687,8 @@ impl NSSStorage {
         Ok(())
     }
 
+    /// Finds the next available numeric ID within a given table (nssPublic or
+    /// nssPrivate) inside a transaction. Handles potential wrap-around.
     fn get_next_id(tx: &mut Transaction, table: &str) -> Result<u32> {
         let max_query = format!("select MAX(id) from {}", table);
         let mut id: u32;
@@ -655,6 +725,10 @@ impl NSSStorage {
         Ok(id)
     }
 
+    /// Stores a new object in the specified table within a transaction.
+    ///
+    /// Assigns the next available ID, converts attributes to the NSS column
+    /// format and SQLite values, and executes an INSERT statement.
     fn store_object(
         tx: &mut Transaction,
         table: &str,
@@ -712,6 +786,8 @@ impl NSSStorage {
         Ok(id)
     }
 
+    /// Stores the signature for an authenticated attribute in the metadata
+    /// table within a transaction.
     fn store_signature(
         tx: &mut Transaction,
         dbtype: &str,
@@ -723,6 +799,11 @@ impl NSSStorage {
         Self::save_metadata(tx, &name, val, &[])
     }
 
+    /// Updates attributes of an existing object in the specified table within
+    /// a transaction.
+    ///
+    /// Converts attributes to NSS column format and SQLite values, then
+    /// executes an UPDATE statement based on the object's numeric ID.
     fn store_attributes(
         tx: &mut Transaction,
         table: &str,
@@ -774,6 +855,8 @@ impl NSSStorage {
 }
 
 impl Storage for NSSStorage {
+    /// Opens the NSS database files by attaching them to an in-memory
+    /// connection.
     fn open(&mut self) -> Result<StorageTokenInfo> {
         let mut ret = CKR_OK;
         let mut conn = self.conn.lock()?;
@@ -819,6 +902,7 @@ impl Storage for NSSStorage {
         self.get_token_info()
     }
 
+    /// Initializes or re-initializes the NSS database files.
     fn reinit(
         &mut self,
         _facilities: &TokenFacilities,
@@ -828,10 +912,15 @@ impl Storage for NSSStorage {
         self.get_token_info()
     }
 
+    /// No-op for NSS DB as writes are typically direct (or handled by SQLite).
     fn flush(&mut self) -> Result<()> {
         Ok(())
     }
 
+    /// Fetches an object by handle.
+    ///
+    /// Parses the internal NSS ID, fetches raw object data, handles
+    /// decryption and authentication checks via the `KeysWithCaching` helper.
     fn fetch(
         &self,
         facilities: &TokenFacilities,
@@ -925,6 +1014,12 @@ impl Storage for NSSStorage {
         Ok(obj)
     }
 
+    /// Stores a new object.
+    ///
+    /// Determines the correct table (public/private), handles attribute
+    /// encryption and authentication via `KeysWithCaching`, assigns a new ID,
+    /// stores the object and any authenticated attribute signatures within a
+    /// transaction. Assigns handle.
     fn store(
         &mut self,
         facilities: &mut TokenFacilities,
@@ -1010,6 +1105,11 @@ impl Storage for NSSStorage {
         Ok(handle)
     }
 
+    /// Updates attributes of an existing object.
+    ///
+    /// Parses the internal NSS ID, handles attribute encryption and re-signing
+    /// via `KeysWithCaching`, and updates the object and associated signatures
+    /// in the database within a transaction.
     fn update(
         &mut self,
         facilities: &TokenFacilities,
@@ -1086,6 +1186,10 @@ impl Storage for NSSStorage {
         Ok(tx.commit()?)
     }
 
+    /// Searches for objects matching the template.
+    ///
+    /// Executes searches on the appropriate NSS tables and assigns handles to
+    /// results.
     fn search(
         &self,
         facilities: &mut TokenFacilities,
@@ -1107,6 +1211,7 @@ impl Storage for NSSStorage {
         Ok(result)
     }
 
+    /// Removes an object by handle (currently not supported for NSS DB).
     fn remove(
         &mut self,
         _facilities: &TokenFacilities,
@@ -1115,10 +1220,12 @@ impl Storage for NSSStorage {
         Err(CKR_FUNCTION_NOT_SUPPORTED)?
     }
 
+    /// Loads the token info (derived from configuration and DB state).
     fn load_token_info(&self) -> Result<StorageTokenInfo> {
         self.get_token_info()
     }
 
+    /// Stores token info (no-op for NSS DB, as info is mostly static/derived).
     fn store_token_info(&mut self, _info: &StorageTokenInfo) -> Result<()> {
         /* we can't store the token info back as NSSDB has
          * no place for that info and uses a mix of configuration
@@ -1127,6 +1234,10 @@ impl Storage for NSSStorage {
         Ok(())
     }
 
+    /// Authenticates a user (User or SO) using the NSS password mechanism.
+    ///
+    /// Derives the KEK from the PIN+salt, decrypts the password check value,
+    /// verifies it, and updates the internal key cache (`KeysWithCaching`).
     fn auth_user(
         &mut self,
         facilities: &TokenFacilities,
@@ -1194,10 +1305,17 @@ impl Storage for NSSStorage {
         Ok(())
     }
 
+    /// Unauthenticates the user by clearing the internal key cache.
     fn unauth_user(&mut self, _user_type: CK_USER_TYPE) -> Result<()> {
         Ok(self.keys.unset_key())
     }
 
+    /// Sets the user PIN.
+    ///
+    /// Derives a new KEK from the PIN+new salt, re-encrypts the password check
+    /// value, and potentially re-encrypts all sensitive/authenticated
+    /// attributes (FIXME).  Updates the stored salt and encrypted password
+    /// check value. Clears key cache.
     fn set_user_pin(
         &mut self,
         facilities: &TokenFacilities,
@@ -1241,12 +1359,17 @@ impl Storage for NSSStorage {
     }
 }
 
+/// Information provider for the NSS DB storage backend discovery.
 #[derive(Debug)]
 pub struct NSSDBInfo {
+    /// The unique type name for this backend ("nssdb").
     db_type: &'static str,
 }
 
 impl StorageDBInfo for NSSDBInfo {
+    /// Creates a new NSS DB storage instance. Parses configuration arguments,
+    /// creates/opens the necessary SQLite connection(s) (attaching DB files),
+    /// and returns the `NSSStorage` object.
     fn new(&self, conf: &Option<String>) -> Result<Box<dyn Storage>> {
         let args = match conf {
             Some(a) => {
@@ -1292,9 +1415,11 @@ impl StorageDBInfo for NSSDBInfo {
         }))
     }
 
+    /// Returns the type name "nssdb".
     fn dbtype(&self) -> &str {
         self.db_type
     }
 }
 
+/// Static instance of the NSS DB storage backend information provider.
 pub static DBINFO: NSSDBInfo = NSSDBInfo { db_type: "nssdb" };

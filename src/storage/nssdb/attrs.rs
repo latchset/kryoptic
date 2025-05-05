@@ -1,6 +1,13 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines PKCS#11 attribute type constants specific to or
+//! commonly used within NSS databases, including standard, vendor-defined
+//! (NSS), and trust object attributes. It also provides static lists grouping
+//! these attributes for different handling purposes (known, authenticated,
+//! sensitive, vendor, skippable) and helper functions to check attribute
+//! classifications.
+
 use crate::interface::*;
 
 const DEPRECATED_CKA_SECONDARY_AUTH: CK_ULONG = 512;
@@ -61,6 +68,8 @@ const NSS_KA_LEN: usize = 119;
 #[cfg(feature = "pkcs11_3_2")]
 const NSS_KA_LEN: usize = 121;
 
+/// Static array listing all standard and NSS vendor-specific attributes
+/// known and potentially stored by this NSS backend implementation.
 pub static NSS_KNOWN_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; NSS_KA_LEN] = [
     CKA_CLASS,
     CKA_TOKEN,
@@ -187,8 +196,12 @@ pub static NSS_KNOWN_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; NSS_KA_LEN] = [
     CKA_DECAPSULATE,
 ];
 
-/* NSS has a hardcoded list of attributes that are authenticated,
- * some are vendor defined attributes */
+/// Static array listing attributes that NSS protects with an internal
+/// signature mechanism (see `storage/nssdb/ci.rs`) when stored in the
+/// key database (keyN.db).
+///
+/// NSS has a hardcoded list of attributes that are authenticated,
+/// some are vendor defined attributes */
 pub static AUTHENTICATED_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 10] = [
     CKA_MODULUS,
     CKA_PUBLIC_EXPONENT,
@@ -202,6 +215,8 @@ pub static AUTHENTICATED_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 10] = [
     CKA_NSS_OVERRIDE_EXTENSIONS,
 ];
 
+/// Static array listing only the NSS vendor-specific attribute types
+/// (excluding standard PKCS#11 attributes).
 static NSS_VENDOR_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 36] = [
     CKA_NSS_TRUST,
     CKA_NSS_URL,
@@ -241,6 +256,8 @@ static NSS_VENDOR_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 36] = [
     CKA_NSS_DB,
 ];
 
+/// Checks if an attribute type is an NSS vendor-defined attribute or
+/// deprecated and should generally be ignored.
 pub fn ignore_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     if NSS_VENDOR_ATTRIBUTES.contains(&attr) {
         return true;
@@ -253,6 +270,8 @@ pub fn ignore_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     return false;
 }
 
+/// Static array listing attributes that NSS considers sensitive and encrypts
+/// when storing private or secret key objects in the key database (keyN.db).
 pub static NSS_SENSITIVE_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 7] = [
     CKA_VALUE,
     CKA_PRIVATE_EXPONENT,
@@ -263,14 +282,20 @@ pub static NSS_SENSITIVE_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 7] = [
     CKA_COEFFICIENT,
 ];
 
+/// Checks if an attribute type is considered sensitive by NSS (and should be
+/// encrypted).
 pub fn is_sensitive_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     NSS_SENSITIVE_ATTRIBUTES.contains(&attr)
 }
 
+/// Checks if an attribute type is known and potentially stored in the NSS DB.
 pub fn is_db_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     NSS_KNOWN_ATTRIBUTES.contains(&attr)
 }
 
+/// Static array listing attributes that are typically managed internally
+/// (like `CKA_UNIQUE_ID`) or derived/implicit (`CKA_ALLOWED_MECHANISMS`)
+/// and are not directly stored as columns in the NSS database tables.
 pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 4] = [
     CKA_UNIQUE_ID,
     CKA_COPYABLE,
@@ -278,6 +303,8 @@ pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 4] = [
     CKA_ALLOWED_MECHANISMS,
 ];
 
+/// Checks if an attribute type is one that should be skipped (not directly
+/// stored or retrieved as a column) when interacting with the NSS DB.
 pub fn is_skippable_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     NSS_SKIP_ATTRIBUTES.contains(&attr)
 }

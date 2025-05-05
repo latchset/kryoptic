@@ -1,6 +1,12 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+//! This module defines the standard storage format logic (`StdStorageFormat`).
+//! It acts as a bridge between the high-level `Storage` trait (used by `Token`)
+//! and the low-level `StorageRaw` trait (implemented by specific backends like
+//! JSON or SQLite), applying Authentication, Confidentiality, and Integrity
+//! (ACI) services via the `StorageACI` helper.
+
 use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
@@ -11,6 +17,11 @@ use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::{Storage, StorageTokenInfo};
 use crate::token::TokenFacilities;
 
+/// Calculates and sets PIN status flags based on authentication info.
+///
+/// Updates the provided `flag` variable with flags like `CKF_*_PIN_LOCKED`,
+/// `CKF_*_PIN_FINAL_TRY`, `CKF_*_PIN_COUNT_LOW`, `CKF_*_PIN_TO_BE_CHANGED`,
+/// and `CKF_USER_PIN_INITIALIZED` based on the user type and `StorageAuthInfo`.
 pub fn user_flags(
     user_type: CK_USER_TYPE,
     info: &StorageAuthInfo,
@@ -46,6 +57,8 @@ pub fn user_flags(
     }
 }
 
+/// Returns a default PIN for FIPS mode initialization if the input is empty.
+/// Otherwise, returns the input PIN slice.
 #[cfg(feature = "fips")]
 fn checked_pin(pin: &[u8]) -> &[u8] {
     const DEFAULT_PIN_FIPS: &str = "DEFAULT PIN FIPS";
@@ -55,6 +68,8 @@ fn checked_pin(pin: &[u8]) -> &[u8] {
         pin
     }
 }
+
+/// Returns the input PIN slice (no default in non-FIPS mode).
 #[cfg(not(feature = "fips"))]
 fn checked_pin(pin: &[u8]) -> &[u8] {
     pin
@@ -63,6 +78,7 @@ fn checked_pin(pin: &[u8]) -> &[u8] {
 pub const SO_ID: &str = "SO";
 pub const USER_ID: &str = "USER";
 
+/// Maps a PKCS#11 user type (`CK_USER_TYPE`) to its internal storage ID string.
 fn get_pin_uid(user_type: CK_USER_TYPE) -> Result<&'static str> {
     match user_type {
         CKU_SO => Ok(SO_ID),
@@ -71,19 +87,32 @@ fn get_pin_uid(user_type: CK_USER_TYPE) -> Result<&'static str> {
     }
 }
 
+/// Trait defining the low-level interface for specific storage backends
+/// (e.g., JSON file, SQLite database).
+///
+/// This trait deals with raw, potentially unencrypted data and basic
+/// database operations. The `StdStorageFormat` struct wraps an implementation
+/// of this trait to add the necessary ACI layer.
 pub trait StorageRaw: Debug + Send + Sync {
+    /// Checks if the underlying storage medium has been initialized.
     fn is_initialized(&self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Resets the storage backend to an uninitialized state, deleting all data.
     fn db_reset(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Opens the storage backend (e.g., opens file, connects to database).
     fn open(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Flushes any pending changes to the persistent storage medium.
     fn flush(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Fetches a raw object representation by its internal UID.
+    /// `attrs` can provide hints about needed attributes, but the backend
+    /// might return more attributes than requested.
     fn fetch_by_uid(
         &self,
         _uid: &String,
@@ -91,24 +120,35 @@ pub trait StorageRaw: Debug + Send + Sync {
     ) -> Result<Object> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Searches for raw objects matching the provided template.
     fn search(&self, _template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Stores a raw object representation persistently. Assumes the object's
+    /// UID is already set correctly. Overwrites if an object with the same
+    /// UID exists.
     fn store_obj(&mut self, _obj: Object) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Removes a raw object by its internal UID.
     fn remove_by_uid(&mut self, _uid: &String) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Fetches the raw token information structure from storage.
     fn fetch_token_info(&self) -> Result<StorageTokenInfo> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Stores the raw token information structure persistently.
     fn store_token_info(&mut self, _info: &StorageTokenInfo) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Fetches the raw authentication information for a specific user ID
+    /// ("SO" or "USER").
     fn fetch_user(&self, _uid: &str) -> Result<StorageAuthInfo> {
         Err(CKR_GENERAL_ERROR)?
     }
+    /// Stores the raw authentication information for a specific user ID
+    /// ("SO" or "USER").
     fn store_user(
         &mut self,
         _uid: &str,
@@ -118,13 +158,18 @@ pub trait StorageRaw: Debug + Send + Sync {
     }
 }
 
+/// Implements the standard `Storage` trait by wrapping a `StorageRaw` backend
+/// and applying Authentication, Confidentiality, and Integrity (ACI) services.
 #[derive(Debug)]
 pub struct StdStorageFormat {
+    /// The underlying raw storage implementation (e.g., JSON, SQLite).
     store: Box<dyn StorageRaw>,
+    /// The ACI helper managing encryption keys and authentication state.
     aci: StorageACI,
 }
 
 impl StdStorageFormat {
+    /// Instantiates a new storage manager
     pub fn new(
         store: Box<dyn StorageRaw>,
         aci: StorageACI,
@@ -135,6 +180,8 @@ impl StdStorageFormat {
         }
     }
 
+    /// Initializes PIN status flags by fetching auth info for SO and User
+    /// from the raw storage.
     fn init_pin_flags(&mut self) -> Result<CK_FLAGS> {
         let mut so_flags: CK_FLAGS = 0;
         let info = self.store.fetch_user(SO_ID)?;
@@ -157,6 +204,7 @@ impl StdStorageFormat {
         Ok(so_flags | usr_flags)
     }
 
+    /// Sets the default SO PIN during token initialization.
     fn default_so_pin(&mut self, facilities: &TokenFacilities) -> Result<()> {
         let data =
             self.aci
@@ -164,6 +212,7 @@ impl StdStorageFormat {
         self.store.store_user(SO_ID, &data)
     }
 
+    /// Creates and stores the default token info during initialization.
     fn default_token_info(
         &mut self,
         encrypted: bool,
@@ -180,6 +229,7 @@ impl StdStorageFormat {
 }
 
 impl Storage for StdStorageFormat {
+    /// Opens the underlying raw storage and populates token PIN flags.
     fn open(&mut self) -> Result<StorageTokenInfo> {
         self.store.open()?;
         self.store.is_initialized()?;
@@ -188,6 +238,8 @@ impl Storage for StdStorageFormat {
         Ok(info)
     }
 
+    /// Resets the raw storage, generates a new ACI master key, sets default
+    /// SO PIN.
     fn reinit(
         &mut self,
         facilities: &TokenFacilities,
@@ -201,10 +253,16 @@ impl Storage for StdStorageFormat {
         Ok(info)
     }
 
+    /// Flushes the underlying raw storage.
     fn flush(&mut self) -> Result<()> {
         self.store.flush()
     }
 
+    /// Fetches an object, handling potential decryption of sensitive
+    /// attributes.
+    ///
+    /// Retrieves the raw object using UID from handle map,
+    /// then uses ACI to decrypt.
     fn fetch(
         &self,
         facilities: &TokenFacilities,
@@ -254,6 +312,10 @@ impl Storage for StdStorageFormat {
         Ok(obj)
     }
 
+    /// Stores an object, handling potential encryption of sensitive attributes.
+    ///
+    /// Uses ACI to encrypt sensitive parts, then stores the raw object.
+    /// Assigns handle.
     fn store(
         &mut self,
         facilities: &mut TokenFacilities,
@@ -288,6 +350,10 @@ impl Storage for StdStorageFormat {
         Ok(handle)
     }
 
+    /// Updates object attributes, handling potential encryption.
+    ///
+    /// Fetches the object type, uses ACI to encrypt sensitive attributes in
+    /// the template, then updates the raw storage.
     fn update(
         &mut self,
         facilities: &TokenFacilities,
@@ -332,6 +398,11 @@ impl Storage for StdStorageFormat {
         self.store.store_obj(obj)
     }
 
+    /// Searches for objects matching the template.
+    ///
+    /// Performs the search on the raw storage backend, potentially adding
+    /// `CKA_PRIVATE=false` if the user is not logged in.
+    /// Assigns handles to results.
     fn search(
         &self,
         facilities: &mut TokenFacilities,
@@ -368,6 +439,7 @@ impl Storage for StdStorageFormat {
         Ok(result)
     }
 
+    /// Removes an object from storage by handle (via UID lookup).
     fn remove(
         &mut self,
         facilities: &TokenFacilities,
@@ -380,14 +452,20 @@ impl Storage for StdStorageFormat {
         self.store.remove_by_uid(&uid)
     }
 
+    /// Loads token info directly from raw storage.
     fn load_token_info(&self) -> Result<StorageTokenInfo> {
         self.store.fetch_token_info()
     }
 
+    /// Stores token info directly to raw storage.
     fn store_token_info(&mut self, info: &StorageTokenInfo) -> Result<()> {
         self.store.store_token_info(info)
     }
 
+    /// Authenticates a user via the ACI layer.
+    ///
+    /// Fetches raw auth info, calls `aci.authenticate`, updates stored auth
+    /// info if needed, and sets PIN status flags.
     fn auth_user(
         &mut self,
         facilities: &TokenFacilities,
@@ -422,6 +500,7 @@ impl Storage for StdStorageFormat {
         }
     }
 
+    /// Unauthenticates a user via the ACI layer (clears the master key).
     fn unauth_user(&mut self, user_type: CK_USER_TYPE) -> Result<()> {
         /* check it exists so we return the correct error */
         let _ = self.store.fetch_user(get_pin_uid(user_type)?)?;
@@ -429,6 +508,10 @@ impl Storage for StdStorageFormat {
         Ok(())
     }
 
+    /// Sets a user's PIN via the ACI layer.
+    ///
+    /// Creates new encrypted auth info using `aci.key_to_user_data` and
+    /// stores it.
     fn set_user_pin(
         &mut self,
         facilities: &TokenFacilities,
