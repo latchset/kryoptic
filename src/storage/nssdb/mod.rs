@@ -161,10 +161,10 @@ impl NSSStorage {
     /// in configuration files.
     fn get_token_info(&self) -> Result<StorageTokenInfo> {
         let mut info = StorageTokenInfo {
-            label: [0; 32],
-            manufacturer: [0; 32],
-            model: [0; 16],
-            serial: [0; 16],
+            label: [b' '; 32],
+            manufacturer: [b' '; 32],
+            model: [b' '; 16],
+            serial: [b' '; 16],
             flags: CKF_TOKEN_INITIALIZED,
         };
         copy_sized_string(

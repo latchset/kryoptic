@@ -30,10 +30,10 @@ pub struct StorageTokenInfo {
 impl Default for StorageTokenInfo {
     fn default() -> StorageTokenInfo {
         let mut def = StorageTokenInfo {
-            label: [0; 32],
-            manufacturer: [0; 32],
-            model: [0; 16],
-            serial: [0; 16],
+            label: [b' '; 32],
+            manufacturer: [b' '; 32],
+            model: [b' '; 16],
+            serial: [b' '; 16],
             flags: 0,
         };
         copy_sized_string(defaults::TOKEN_LABEL.as_bytes(), &mut def.label);
