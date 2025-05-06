@@ -13,7 +13,7 @@ use crate::error::{general_error, Error, Result};
 use crate::kasn1::{oid, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::ecdsa::EccOperation;
+use crate::ossl::ecdsa::EcdsaOperation;
 
 use asn1;
 use once_cell::sync::Lazy;
@@ -23,16 +23,16 @@ pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
 /// Maximum ECDSA key size
 pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
 
-/// The EC Public-Key Factory
+/// The ECDSA Public-Key Factory
 #[derive(Debug, Default)]
-pub struct ECCPubFactory {
+pub struct ECDSAPubFactory {
     data: ObjectFactoryData,
 }
 
-impl ECCPubFactory {
-    /// Initializes a new EC Public-Key factory
-    pub fn new() -> ECCPubFactory {
-        let mut factory: ECCPubFactory = Default::default();
+impl ECDSAPubFactory {
+    /// Initializes a new ECDSA Public-Key factory
+    pub fn new() -> ECDSAPubFactory {
+        let mut factory: ECDSAPubFactory = Default::default();
 
         factory.add_common_public_key_attrs();
 
@@ -52,7 +52,7 @@ impl ECCPubFactory {
     }
 }
 
-impl ObjectFactory for ECCPubFactory {
+impl ObjectFactory for ECDSAPubFactory {
     /// Creates an EC Public-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
@@ -103,20 +103,20 @@ impl ObjectFactory for ECCPubFactory {
     }
 }
 
-impl CommonKeyFactory for ECCPubFactory {}
+impl CommonKeyFactory for ECDSAPubFactory {}
 
-impl PubKeyFactory for ECCPubFactory {}
+impl PubKeyFactory for ECDSAPubFactory {}
 
-/// The EC Private-Key Factory
+/// The ECDSA Private-Key Factory
 #[derive(Debug, Default)]
-pub struct ECCPrivFactory {
+pub struct ECDSAPrivFactory {
     data: ObjectFactoryData,
 }
 
-impl ECCPrivFactory {
-    /// Initializes a new EC Private-Key factory
-    pub fn new() -> ECCPrivFactory {
-        let mut factory: ECCPrivFactory = Default::default();
+impl ECDSAPrivFactory {
+    /// Initializes a new ECDSA Private-Key factory
+    pub fn new() -> ECDSAPrivFactory {
+        let mut factory: ECDSAPrivFactory = Default::default();
 
         factory.add_common_private_key_attrs();
 
@@ -145,8 +145,8 @@ impl ECCPrivFactory {
     }
 }
 
-impl ObjectFactory for ECCPrivFactory {
-    /// Creates an EC Private-Key Object from a template
+impl ObjectFactory for ECDSAPrivFactory {
+    /// Creates an ECDSA Private-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
     /// factory via [ObjectFactory::default_object_create()]
@@ -215,9 +215,9 @@ impl ObjectFactory for ECCPrivFactory {
     }
 }
 
-impl CommonKeyFactory for ECCPrivFactory {}
+impl CommonKeyFactory for ECDSAPrivFactory {}
 
-impl PrivKeyFactory for ECCPrivFactory {
+impl PrivKeyFactory for ECDSAPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_EXTRACTABLE)?;
 
@@ -311,25 +311,29 @@ impl PrivKeyFactory for ECCPrivFactory {
 /// This is instantiated only once and finalized to make it unchangeable
 /// after process startup
 static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ECCPubFactory::new()));
+    Lazy::new(|| Box::new(ECDSAPubFactory::new()));
 
 /// The static Private Key factory
 ///
 /// This is instantiated only once and finalized to make it unchangeable
 /// after process startup
 static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ECCPrivFactory::new()));
+    Lazy::new(|| Box::new(ECDSAPrivFactory::new()));
 
 /// Object that represents CKK_EC related mechanisms
 #[derive(Debug)]
-pub struct EccMechanism {
+pub struct EcdsaMechanism {
     info: CK_MECHANISM_INFO,
 }
 
-impl EccMechanism {
-    /// Instantiates a new ECC Mechanism
-    pub fn new(min: CK_ULONG, max: CK_ULONG, flags: CK_FLAGS) -> EccMechanism {
-        EccMechanism {
+impl EcdsaMechanism {
+    /// Instantiates a new ECDSA Mechanism
+    pub fn new(
+        min: CK_ULONG,
+        max: CK_ULONG,
+        flags: CK_FLAGS,
+    ) -> EcdsaMechanism {
+        EcdsaMechanism {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: min,
                 ulMaxKeySize: max,
@@ -339,7 +343,7 @@ impl EccMechanism {
     }
 }
 
-impl Mechanism for EccMechanism {
+impl Mechanism for EcdsaMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
     }
@@ -357,7 +361,7 @@ impl Mechanism for EccMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EccOperation::sign_new(mech, key, &self.info)?))
+        Ok(Box::new(EcdsaOperation::sign_new(mech, key, &self.info)?))
     }
 
     /// Initializes a verification operation using CKK_EC keys
@@ -373,7 +377,7 @@ impl Mechanism for EccMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EccOperation::verify_new(mech, key, &self.info)?))
+        Ok(Box::new(EcdsaOperation::verify_new(mech, key, &self.info)?))
     }
 
     /// Initializes a PKCS#11 3.2 signature verification operation using
@@ -392,7 +396,7 @@ impl Mechanism for EccMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EccOperation::verify_signature_new(
+        Ok(Box::new(EcdsaOperation::verify_signature_new(
             mech, key, &self.info, signature,
         )?))
     }
@@ -445,7 +449,7 @@ impl Mechanism for EccMechanism {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
-        EccOperation::generate_keypair(&mut pubkey, &mut privkey)?;
+        EcdsaOperation::generate_keypair(&mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
 
@@ -455,7 +459,7 @@ impl Mechanism for EccMechanism {
 
 /// Registers all CKK_EC related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    EccOperation::register_mechanisms(mechs);
+    EcdsaOperation::register_mechanisms(mechs);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),
