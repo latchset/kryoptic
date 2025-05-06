@@ -21,16 +21,22 @@ use crate::native::pbkdf2::pbkdf2_derive;
 #[cfg(feature = "fips")]
 use crate::ossl::pbkdf2::pbkdf2_derive;
 
+/// Registers the PBKDF2 mechanism (`CKM_PKCS5_PBKD2`).
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     PBKDF2Mechanism::register_mechanisms(mechs);
 }
 
+/// Structure representing the CKM_PKCS5_PBKD2 mechanism implementation.
 #[derive(Debug)]
 struct PBKDF2Mechanism {
+    /// Mechanism information (flags, key size limits).
     info: CK_MECHANISM_INFO,
 }
 
 impl PBKDF2Mechanism {
+    /// Static method to register the CKM_PKCS5_PBKD2 mechanism.
+    /// Note: PKCS#11 defines this as a key generation mechanism (`CKF_GENERATE`),
+    /// even though it's functionally a derivation.
     fn register_mechanisms(mechs: &mut Mechanisms) {
         mechs.add_mechanism(
             CKM_PKCS5_PBKD2,
@@ -44,6 +50,10 @@ impl PBKDF2Mechanism {
         );
     }
 
+    /// Creates a temporary `Object` representing the input password/secret.
+    ///
+    /// This is needed because the underlying PBKDF2 implementation (native or
+    /// OpenSSL) expects a key object as input for the PRF (HMAC).
     fn mock_password_object(&self, key: Vec<u8>) -> Result<Object> {
         let mut obj = Object::new();
         obj.set_zeroize();
@@ -66,7 +76,6 @@ impl PBKDF2Mechanism {
  * backends, so we encapsulate the derivation function in a
  * small function and make implementations in the relevant
  * files for FIPS/non-FIPS */
-
 impl Mechanism for PBKDF2Mechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
         &self.info
