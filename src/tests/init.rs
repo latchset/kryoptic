@@ -62,6 +62,15 @@ fn test_init_token() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(token_info.label, label32);
 
+    let empty_serial: [u8; 16] = [b' '; 16];
+    if testtokn.dbtype == "nssdb" {
+        /* Check that the serial is empty as nssdb has no serial */
+        assert_eq!(token_info.serialNumber, empty_serial);
+    } else if testtokn.dbtype == "sqlite" {
+        /* Check that the serial is not empty */
+        assert_ne!(token_info.serialNumber, empty_serial);
+    }
+
     /* login as so */
     ret = fn_open_session(
         testtokn.get_slot(),

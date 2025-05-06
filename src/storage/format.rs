@@ -16,6 +16,9 @@ use crate::object::Object;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::{Storage, StorageTokenInfo};
 use crate::token::TokenFacilities;
+use crate::CSPRNG;
+
+use hex;
 
 /// Calculates and sets PIN status flags based on authentication info.
 ///
@@ -223,6 +226,10 @@ impl StdStorageFormat {
         if encrypted {
             info.flags |= CKF_LOGIN_REQUIRED;
         }
+        /* Generate and store a random serial number */
+        let mut value: [u8; 8] = [0u8; 8];
+        CSPRNG.with(|rng| rng.borrow_mut().generate_random(&mut value))?;
+        info.serial.copy_from_slice(hex::encode(value).as_bytes());
         self.store.store_token_info(&info)?;
         Ok(info)
     }

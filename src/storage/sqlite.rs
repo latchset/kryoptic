@@ -35,6 +35,7 @@ fn bad_storage<E: std::error::Error + 'static>(error: E) -> Error {
 
 const DB_VERSION_COL: &str = "version";
 const DB_VERSION: &str = "v1";
+const TOKEN_INFO_META: &str = "TOKEN INFO";
 
 const DROP_META_TABLE: &str = "DROP TABLE meta";
 const CREATE_META_TABLE: &str =
@@ -531,9 +532,10 @@ impl StorageRaw for SqliteStorage {
     fn fetch_token_info(&self) -> Result<StorageTokenInfo> {
         let mut info = StorageTokenInfo::default();
         let conn = self.conn.lock()?;
-        let mut stmt = conn
-            .prepare("SELECT value, data from meta WHERE name='TOKEN INFO'")?;
-        let mut rows = stmt.query(params![])?;
+        let mut stmt =
+            conn.prepare("SELECT value, data from meta WHERE name=?")?;
+        let mut rows =
+            stmt.query(params![Value::from(ValueRef::from(TOKEN_INFO_META))])?;
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
             let value: Vec<u8> = row.get(1)?;
@@ -564,28 +566,28 @@ impl StorageRaw for SqliteStorage {
 
         Self::store_meta(
             &mut tx,
-            "TOKEN INFO",
+            TOKEN_INFO_META,
             None,
             Some("label"),
             Some(&info.label as &[u8]),
         )?;
         Self::store_meta(
             &mut tx,
-            "TOKEN INFO",
+            TOKEN_INFO_META,
             None,
             Some("manufacturer"),
             Some(&info.manufacturer as &[u8]),
         )?;
         Self::store_meta(
             &mut tx,
-            "TOKEN INFO",
+            TOKEN_INFO_META,
             None,
             Some("model"),
             Some(&info.model as &[u8]),
         )?;
         Self::store_meta(
             &mut tx,
-            "TOKEN INFO",
+            TOKEN_INFO_META,
             None,
             Some("serial"),
             Some(&info.serial as &[u8]),
