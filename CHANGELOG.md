@@ -14,6 +14,8 @@ All notable changes to this project should be documented in this file.
 * Fixed a database format bug that would affect cross-platform portability
   [Add better support for array of attributes](https://github.com/latchset/kryoptic/pull/219)
 
+* Added doc string with Gemini's help to most files
+  [Add more documentation strings and cleanup changes](https://github.com/latchset/kryoptic/pull/229)
 
 # [1.1.0]
 ## 2025-04-14
