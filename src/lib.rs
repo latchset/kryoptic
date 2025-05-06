@@ -4030,6 +4030,10 @@ extern "C" fn fn_decapsulate_key(
     CKR_OK
 }
 
+/// Implementation of C_VerifySignatureInit
+///
+/// Version 3.2 Specification: [Link TBD]
+
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_init(
     s_handle: CK_SESSION_HANDLE,
@@ -4064,6 +4068,10 @@ extern "C" fn fn_verify_signature_init(
     CKR_OK
 }
 
+/// Implementation of C_VerifySignature
+///
+/// Version 3.2 Specification: [Link TBD]
+
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature(
     s_handle: CK_SESSION_HANDLE,
@@ -4089,6 +4097,10 @@ extern "C" fn fn_verify_signature(
     ret
 }
 
+/// Implementation of C_VerifySignatureUpdate
+///
+/// Version 3.2 Specification: [Link TBD]
+
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_update(
     s_handle: CK_SESSION_HANDLE,
@@ -4106,6 +4118,10 @@ extern "C" fn fn_verify_signature_update(
     ret_to_rv!(operation.verify_update(data))
 }
 
+/// Implementation of C_VerifySignatureFinal
+///
+/// Version 3.2 Specification: [Link TBD]
+
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
@@ -4121,6 +4137,10 @@ extern "C" fn fn_verify_signature_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
 
     ret
 }
+
+/// Implementation of C_GetSessionValidationFlags
+///
+/// Version 3.2 Specification: [Link TBD]
 
 #[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_get_session_validation_flags(

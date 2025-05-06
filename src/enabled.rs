@@ -40,6 +40,8 @@ mod mldsa;
 use mechanism::Mechanisms;
 use object::ObjectFactories;
 
+/// Registers all mechanisms and object factories that have been enabled
+/// at compile time. Called by [Token::new]
 fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     object::register(mechs, ot);
 
