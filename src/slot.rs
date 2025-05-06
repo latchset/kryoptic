@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::config;
+use crate::defaults;
 use crate::error::Result;
 use crate::interface::*;
 use crate::misc::copy_sized_string;
@@ -55,8 +56,8 @@ impl Slot {
                 slotDescription: [0; 64],
                 manufacturerID: [0; 32],
                 flags: CKF_TOKEN_PRESENT,
-                hardwareVersion: CK_VERSION { major: 0, minor: 0 },
-                firmwareVersion: CK_VERSION { major: 0, minor: 0 },
+                hardwareVersion: defaults::hardware_version(),
+                firmwareVersion: defaults::firmware_version(),
             },
             token: RwLock::new(Token::new(dbtype, dbargs)?),
             sessions: HashMap::new(),

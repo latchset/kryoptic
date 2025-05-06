@@ -27,6 +27,7 @@ mod interface {
 
 mod attribute;
 mod config;
+mod defaults;
 mod error;
 mod mechanism;
 mod object;

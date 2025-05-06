@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::vec::Vec;
 
 use crate::attribute::CkAttrs;
+use crate::defaults;
 use crate::error::Result;
 #[cfg(feature = "fips")]
 use crate::fips;
@@ -133,8 +134,8 @@ impl Token {
                 ulFreePublicMemory: CK_EFFECTIVELY_INFINITE,
                 ulTotalPrivateMemory: 0,
                 ulFreePrivateMemory: CK_EFFECTIVELY_INFINITE,
-                hardwareVersion: CK_VERSION { major: 0, minor: 0 },
-                firmwareVersion: CK_VERSION { major: 0, minor: 0 },
+                hardwareVersion: defaults::hardware_version(),
+                firmwareVersion: defaults::firmware_version(),
                 utcTime: *b"0000000000000000",
             },
             facilities: TokenFacilities {
