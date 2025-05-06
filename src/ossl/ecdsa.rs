@@ -141,7 +141,7 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
 
 /// Represents an active ECDSA signing or verification operation.
 #[derive(Debug)]
-pub struct EccOperation {
+pub struct EcdsaOperation {
     /// The specific ECDSA mechanism type (e.g., CKM_ECDSA_SHA256).
     mech: CK_MECHANISM_TYPE,
     /// Expected output length of the signature in bytes (2 * field size).
@@ -165,10 +165,10 @@ pub struct EccOperation {
     signature: Option<Vec<u8>>,
 }
 
-impl EccOperation {
-    /// Helper function to create a new boxed `EccMechanism`.
+impl EcdsaOperation {
+    /// Helper function to create a new boxed `EcdsaMechanism`.
     fn new_mechanism() -> Box<dyn Mechanism> {
-        Box::new(EccMechanism::new(
+        Box::new(EcdsaMechanism::new(
             CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
             CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
             CKF_SIGN | CKF_VERIFY,
@@ -194,7 +194,7 @@ impl EccOperation {
 
         mechs.add_mechanism(
             CKM_EC_KEY_PAIR_GEN,
-            Box::new(EccMechanism::new(
+            Box::new(EcdsaMechanism::new(
                 CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
                 CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
                 CKF_GENERATE_KEY_PAIR,
@@ -202,7 +202,7 @@ impl EccOperation {
         );
     }
 
-    /// Internal constructor to create a new `EccOperation`.
+    /// Internal constructor to create a new `EcdsaOperation`.
     ///
     /// Sets up the internal state based on whether it's a signature or
     /// verification operation, imports the provided key, and calculates
@@ -212,7 +212,7 @@ impl EccOperation {
         mech: &CK_MECHANISM,
         key: &Object,
         signature: Option<Vec<u8>>,
-    ) -> Result<EccOperation> {
+    ) -> Result<EcdsaOperation> {
         let public_key: Option<EvpPkey>;
         let private_key: Option<EvpPkey>;
         let output_len: usize;
@@ -236,7 +236,7 @@ impl EccOperation {
             }
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
-        Ok(EccOperation {
+        Ok(EcdsaOperation {
             mech: mech.mechanism,
             output_len: output_len,
             public_key: public_key,
@@ -254,25 +254,25 @@ impl EccOperation {
         })
     }
 
-    /// Creates a new `EccOperation` for signing.
+    /// Creates a new `EcdsaOperation` for signing.
     pub fn sign_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
-    ) -> Result<EccOperation> {
+    ) -> Result<EcdsaOperation> {
         Self::new_op(CKF_SIGN, mech, key, None)
     }
 
-    /// Creates a new `EccOperation` for verification.
+    /// Creates a new `EcdsaOperation` for verification.
     pub fn verify_new(
         mech: &CK_MECHANISM,
         key: &Object,
         _: &CK_MECHANISM_INFO,
-    ) -> Result<EccOperation> {
+    ) -> Result<EcdsaOperation> {
         Self::new_op(CKF_VERIFY, mech, key, None)
     }
 
-    /// Creates a new `EccOperation` for verification with a pre-supplied
+    /// Creates a new `EcdsaOperation` for verification with a pre-supplied
     /// signature.
     #[cfg(feature = "pkcs11_3_2")]
     pub fn verify_signature_new(
@@ -280,7 +280,7 @@ impl EccOperation {
         key: &Object,
         _: &CK_MECHANISM_INFO,
         signature: &[u8],
-    ) -> Result<EccOperation> {
+    ) -> Result<EcdsaOperation> {
         Self::new_op(CKF_VERIFY, mech, key, Some(signature.to_vec()))
     }
 
@@ -322,7 +322,7 @@ impl EccOperation {
     }
 }
 
-impl MechOperation for EccOperation {
+impl MechOperation for EcdsaOperation {
     fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
         Ok(self.mech)
     }
@@ -332,7 +332,7 @@ impl MechOperation for EccOperation {
     }
 }
 
-impl Sign for EccOperation {
+impl Sign for EcdsaOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -494,7 +494,7 @@ impl Sign for EccOperation {
     }
 }
 
-impl EccOperation {
+impl EcdsaOperation {
     /// Internal helper for performing one-shot or final verification step.
     fn verify_internal(
         &mut self,
@@ -650,7 +650,7 @@ impl EccOperation {
     }
 }
 
-impl Verify for EccOperation {
+impl Verify for EcdsaOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
         self.verify_internal(data, Some(signature))
     }
@@ -669,7 +669,7 @@ impl Verify for EccOperation {
 }
 
 #[cfg(feature = "pkcs11_3_2")]
-impl VerifySignature for EccOperation {
+impl VerifySignature for EcdsaOperation {
     fn verify(&mut self, data: &[u8]) -> Result<()> {
         self.verify_internal(data, None)
     }
