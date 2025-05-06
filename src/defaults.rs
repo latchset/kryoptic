@@ -8,6 +8,23 @@ use std::env;
 
 use crate::interface;
 
+/// Default slot description.
+pub const SLOT_DESCRIPTION: &str = "Kryoptic Slot";
+/// Default manufacturer ID string.
+pub const MANUFACTURER_ID: &str = "Kryoptic Project";
+/// Default token label (differs slightly if FIPS feature is enabled).
+#[cfg(feature = "fips")]
+pub const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
+/// Default token label.
+#[cfg(not(feature = "fips"))]
+pub const TOKEN_LABEL: &str = "Kryoptic Soft Token";
+/// Default token model string (differs slightly if FIPS feature is enabled).
+#[cfg(feature = "fips")]
+pub const TOKEN_MODEL: &str = "FIPS-140-3 v1";
+/// Default token model string.
+#[cfg(not(feature = "fips"))]
+pub const TOKEN_MODEL: &str = "v1";
+
 /// Returns the hardware version reported by Slots and Tokens
 ///
 /// It is hard coded to report 0.0 as there is no hardware involved here.
