@@ -15,13 +15,6 @@ use crate::misc::copy_sized_string;
 use crate::session::Session;
 use crate::token::Token;
 
-/// Default slot description if not provided in configuration.
-static SLOT_DESCRIPTION: [CK_UTF8CHAR; 64usize] =
-    *b"Kryoptic Slot                                                   ";
-/// Default manufacturer ID if not provided in configuration.
-static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
-    *b"Kryoptic                        ";
-
 /// Represents a PKCS#11 Slot, containing information about the slot itself,
 /// the `Token` present in the slot, and currently open `Session`s.
 #[derive(Debug)]
@@ -67,14 +60,14 @@ impl Slot {
         copy_sized_string(
             match &config.description {
                 Some(d) => d.as_bytes(),
-                None => &SLOT_DESCRIPTION,
+                None => defaults::SLOT_DESCRIPTION.as_bytes(),
             },
             &mut slot.slot_info.slotDescription,
         );
         copy_sized_string(
             match &config.manufacturer {
                 Some(m) => m.as_bytes(),
-                None => &MANUFACTURER_ID,
+                None => defaults::MANUFACTURER_ID.as_bytes(),
             },
             &mut slot.slot_info.manufacturerID,
         );

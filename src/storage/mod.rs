@@ -8,6 +8,7 @@
 
 use std::fmt::Debug;
 
+use crate::defaults;
 use crate::error::Result;
 use crate::interface::*;
 use crate::misc::copy_sized_string;
@@ -15,23 +16,6 @@ use crate::object::Object;
 use crate::token::TokenFacilities;
 
 use once_cell::sync::Lazy;
-
-/// Default token label (differs slightly if FIPS feature is enabled).
-#[cfg(feature = "fips")]
-const TOKEN_LABEL: &str = "Kryoptic FIPS Token";
-/// Default token label.
-#[cfg(not(feature = "fips"))]
-const TOKEN_LABEL: &str = "Kryoptic Soft Token";
-
-/// Default manufacturer ID string.
-const MANUFACTURER_ID: &str = "Kryoptic Project";
-
-/// Default token model string (differs slightly if FIPS feature is enabled).
-#[cfg(feature = "fips")]
-const TOKEN_MODEL: &str = "FIPS-140-3 v1";
-/// Default token model string.
-#[cfg(not(feature = "fips"))]
-const TOKEN_MODEL: &str = "v1";
 
 /// Structure holding basic token information stored persistently.
 #[derive(Clone, Debug)]
@@ -52,9 +36,12 @@ impl Default for StorageTokenInfo {
             serial: [0; 16],
             flags: 0,
         };
-        copy_sized_string(TOKEN_LABEL.as_bytes(), &mut def.label);
-        copy_sized_string(MANUFACTURER_ID.as_bytes(), &mut def.manufacturer);
-        copy_sized_string(TOKEN_MODEL.as_bytes(), &mut def.model);
+        copy_sized_string(defaults::TOKEN_LABEL.as_bytes(), &mut def.label);
+        copy_sized_string(
+            defaults::MANUFACTURER_ID.as_bytes(),
+            &mut def.manufacturer,
+        );
+        copy_sized_string(defaults::TOKEN_MODEL.as_bytes(), &mut def.model);
         def
     }
 }

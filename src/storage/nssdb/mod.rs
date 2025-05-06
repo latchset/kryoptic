@@ -10,11 +10,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::attribute::{AttrType, Attribute, CkAttrs};
+use crate::defaults;
 use crate::error::{Error, Result};
 use crate::interface::*;
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
-use crate::storage;
 use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 use crate::token::TokenFacilities;
@@ -172,7 +172,7 @@ impl NSSStorage {
             &mut info.label,
         );
         copy_sized_string(
-            storage::MANUFACTURER_ID.as_bytes(),
+            defaults::MANUFACTURER_ID.as_bytes(),
             &mut info.manufacturer,
         );
         if self.config.password_required {

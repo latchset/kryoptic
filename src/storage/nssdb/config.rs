@@ -5,9 +5,9 @@
 //! parsing the configuration string used to initialize the NSSDB storage
 //! backend, mimicking the behavior of NSS's own module specification parsing.
 
+use crate::defaults;
 use crate::error::Result;
 use crate::interface::*;
-use crate::storage;
 
 /// Holds configuration parameters for the NSSDB storage backend.
 ///
@@ -257,7 +257,7 @@ impl NSSConfig {
         let label = &self.token_db_description;
         match label {
             Some(ref s) => s.as_bytes(),
-            None => storage::TOKEN_LABEL.as_bytes(),
+            None => defaults::TOKEN_LABEL.as_bytes(),
         }
     }
 }
