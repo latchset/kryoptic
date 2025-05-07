@@ -13,7 +13,8 @@ want to know about when looking at the commit years later
 
 - [ ] Test suite updated with functionality tests
 - [ ] Test suite updated with negative tests
-- [ ] Documentation was updated
+- [ ] Rustdoc string were added or updated
+- [ ] CHANGELOG and/or other documentation added or updated
 - [ ] This is not a code change
 
 #### Reviewer's checklist:
@@ -24,3 +25,4 @@ want to know about when looking at the commit years later
 - [ ] A changelog entry is added if the change is significant
 - [ ] Code conform to coding style that today cannot yet be enforced via the check style test
 - [ ] Commits have short titles and sensible text
+- [ ] Doc string are properly updated
