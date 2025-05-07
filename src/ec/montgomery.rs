@@ -215,7 +215,23 @@ impl ObjectFactory for ECMontgomeryPrivFactory {
 
 impl CommonKeyFactory for ECMontgomeryPrivFactory {}
 
-impl PrivKeyFactory for ECMontgomeryPrivFactory {}
+impl PrivKeyFactory for ECMontgomeryPrivFactory {
+    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+        export_for_wrapping(key)
+    }
+
+    fn import_from_wrapped(
+        &self,
+        data: Vec<u8>,
+        template: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
+        import_from_wrapped(
+            CKK_EC_MONTGOMERY,
+            data,
+            self.default_object_unwrap(template)?,
+        )
+    }
+}
 
 /// The static Public Key factory
 ///

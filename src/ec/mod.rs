@@ -9,6 +9,8 @@ use crate::error::{device_error, general_error, Error, Result};
 use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
+use crate::kasn1::PrivateKeyInfo;
+use crate::misc::zeromem;
 use crate::object::Object;
 
 use asn1;
@@ -223,4 +225,142 @@ pub fn check_ec_point_from_obj(
     }
 
     Err(CKR_ATTRIBUTE_VALUE_INVALID)?
+}
+
+/// Common function to format a private EC key using PKCS#8 encoding
+pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
+    key.check_key_ops(
+        CKO_PRIVATE_KEY,
+        CK_UNAVAILABLE_INFORMATION,
+        CKA_EXTRACTABLE,
+    )?;
+
+    let key_type = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
+    match key_type {
+        CKK_EC | CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => (),
+        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    };
+
+    let oid = match get_oid_from_obj(key) {
+        Ok(o) => o,
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    let mut asn1_vec = {
+        let val = key.get_attr_as_bytes(CKA_VALUE)?;
+        match key_type {
+            CKK_EC => {
+                match asn1::write_single(&ECPrivateKey::new_owned(val)?) {
+                    Ok(p) => p,
+                    _ => return Err(CKR_GENERAL_ERROR)?,
+                }
+            }
+            CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => val.to_vec(),
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        }
+    };
+    let pkeyinfo = PrivateKeyInfo::new(
+        &asn1_vec.as_slice(),
+        match oid {
+            EC_SECP256R1 => EC_SECP256R1_ALG,
+            EC_SECP384R1 => EC_SECP384R1_ALG,
+            EC_SECP521R1 => EC_SECP521R1_ALG,
+            ED25519_OID => ED25519_ALG,
+            ED448_OID => ED448_ALG,
+            X25519_OID => X25519_ALG,
+            X448_OID => X448_ALG,
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        },
+    )?;
+    let ret = match asn1::write_single(&pkeyinfo) {
+        Ok(x) => Ok(x),
+        Err(_) => Err(CKR_GENERAL_ERROR)?,
+    };
+    drop(pkeyinfo);
+    zeromem(asn1_vec.as_mut_slice());
+    ret
+}
+
+/// Common function to parse a private EC key from PKCS#8 encoded data
+pub fn import_from_wrapped(
+    key_type: CK_KEY_TYPE,
+    data: Vec<u8>,
+    mut key: Object,
+) -> Result<Object> {
+    if !key
+        .check_or_set_attr(Attribute::from_ulong(CKA_CLASS, CKO_PRIVATE_KEY))?
+    {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    }
+    if !key.check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, key_type))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    }
+
+    let (tlv, extra) = match asn1::strip_tlv(&data) {
+        Ok(x) => x,
+        Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
+    };
+    /* Some Key Wrapping algorithms may 0 pad to match block size */
+    if !extra.iter().all(|b| *b == 0) {
+        return Err(CKR_WRAPPED_KEY_INVALID)?;
+    }
+    let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
+        Ok(k) => k,
+        Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
+    };
+    /* filter out unknown OIDs */
+    let oid = match pkeyinfo.get_algorithm() {
+        &EC_SECP256R1_ALG => &EC_SECP256R1,
+        &EC_SECP384R1_ALG => &EC_SECP384R1,
+        &EC_SECP521R1_ALG => &EC_SECP521R1,
+        &ED25519_ALG => &ED25519_OID,
+        &ED448_ALG => &ED448_OID,
+        &X25519_ALG => &X25519_OID,
+        &X448_ALG => &X448_OID,
+        _ => return Err(CKR_WRAPPED_KEY_INVALID)?,
+    };
+    let oid_encoded = match asn1::write_single(oid) {
+        Ok(b) => b,
+        Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
+    };
+
+    if !key.check_or_set_attr(Attribute::from_bytes(
+        CKA_EC_PARAMS,
+        oid_encoded.to_vec(),
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    }
+
+    let ecpkey: ECPrivateKey;
+    let pkeyval = pkeyinfo.get_private_key();
+    let value: &[u8] = match key_type {
+        CKK_EC => {
+            match oid {
+                &EC_SECP256R1 | &EC_SECP384R1 | &EC_SECP521R1 => (),
+                _ => return Err(CKR_TEMPLATE_INCONSISTENT)?,
+            }
+            ecpkey = match asn1::parse_single::<ECPrivateKey>(pkeyval) {
+                Ok(k) => k,
+                Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
+            };
+            ecpkey.private_key.as_bytes()
+        }
+        CKK_EC_EDWARDS => match oid {
+            &ED25519_OID | &ED448_OID => pkeyval,
+            _ => return Err(CKR_TEMPLATE_INCONSISTENT)?,
+        },
+        CKK_EC_MONTGOMERY => match oid {
+            &X25519_OID | &X448_OID => pkeyval,
+            _ => return Err(CKR_TEMPLATE_INCONSISTENT)?,
+        },
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    if !key
+        .check_or_set_attr(Attribute::from_bytes(CKA_VALUE, value.to_vec()))?
+    {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    }
+
+    Ok(key)
 }
