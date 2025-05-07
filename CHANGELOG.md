@@ -18,8 +18,11 @@ All notable changes to this project should be documented in this file.
   [Add more documentation strings and cleanup changes](https://github.com/latchset/kryoptic/pull/229)
 
 * Made Token Info more spec compliant and added relevant information like the
-  software releae version.
+  software release version.
   [Make token info a little more useful](https://github.com/latchset/kryoptic/pull/237)
+
+* Fix Asymmetric keys export format for Key Wrapping
+  [Fix PrivateKeyInfo ASN.1 structure](https://github.com/latchset/kryoptic/pull/238)
 
 # [1.1.0]
 ## 2025-04-14
