@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+use std::fs;
 
 use serial_test::parallel;
 
@@ -733,4 +734,63 @@ fn test_secret_key_defaults() {
     assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
+}
+
+#[cfg(feature = "rsa")]
+#[test]
+#[parallel]
+fn test_rsa_key_unwrap_vector() {
+    let mut testtokn =
+        TestToken::initialized("test_rsa_key_unwrap_vector", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let aes_key_val = [0x70u8; 32];
+    let wk_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &aes_key_val)],
+        &[(CKA_WRAP, true), (CKA_UNWRAP, true)],
+    ));
+
+    /* load wrapped key */
+    let mut data =
+        ret_or_panic!(fs::read("testdata/rsa_wrapped_key_softokn.data"));
+
+    let mut pri_template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA)],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
+
+    let iv = [0u8; 16];
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+
+    let mut prikey = CK_INVALID_HANDLE;
+    let ret = fn_unwrap_key(
+        session,
+        &mut mechanism,
+        wk_handle,
+        data.as_mut_ptr(),
+        data.len() as CK_ULONG,
+        pri_template.as_mut_ptr(),
+        pri_template.len() as CK_ULONG,
+        &mut prikey,
+    );
+    assert_eq!(ret, CKR_OK);
 }
