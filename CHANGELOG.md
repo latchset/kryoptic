@@ -17,6 +17,10 @@ All notable changes to this project should be documented in this file.
 * Added doc string with Gemini's help to most files
   [Add more documentation strings and cleanup changes](https://github.com/latchset/kryoptic/pull/229)
 
+* Made Token Info more spec compliant and added relevant information like the
+  software releae version.
+  [Make token info a little more useful](https://github.com/latchset/kryoptic/pull/237)
+
 # [1.1.0]
 ## 2025-04-14
 
