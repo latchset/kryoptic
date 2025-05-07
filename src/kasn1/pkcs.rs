@@ -90,3 +90,37 @@ pub const HMAC_SHA_256_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
     oid: asn1::DefinedByMarker::marker(),
     params: AlgorithmParameters::HmacWithSha256(Some(())),
 };
+
+/// RSA Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const RSA_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Rsa(Some(())),
+};
+
+/// P-256 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const EC_SECP256R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ec(EcParameters::NamedCurve(
+        oid::EC_SECP256R1,
+    )),
+};
+
+/// P-384 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const EC_SECP384R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ec(EcParameters::NamedCurve(
+        oid::EC_SECP384R1,
+    )),
+};
+
+/// P-521 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const EC_SECP521R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ec(EcParameters::NamedCurve(
+        oid::EC_SECP521R1,
+    )),
+};

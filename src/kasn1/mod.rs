@@ -185,7 +185,7 @@ type Attributes<'a> = asn1::SetOf<'a, Attribute<'a>>;
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 pub struct PrivateKeyInfo<'a> {
     version: Version,
-    private_key_algorithm: asn1::ObjectIdentifier,
+    algorithm: Box<pkcs::AlgorithmIdentifier<'a>>,
     private_key: DerEncOctetString<'a>,
     #[explicit(1)]
     attributes: Option<Attributes<'a>>,
@@ -196,19 +196,19 @@ impl PrivateKeyInfo<'_> {
     /// Wraps an encoded private key identified by the oid
     pub fn new<'a>(
         private_key_asn1: &'a [u8],
-        oid: asn1::ObjectIdentifier,
+        algorithm: pkcs::AlgorithmIdentifier<'a>,
     ) -> Result<PrivateKeyInfo<'a>> {
         Ok(PrivateKeyInfo {
             version: 0,
-            private_key_algorithm: oid,
+            algorithm: Box::new(algorithm),
             private_key: DerEncOctetString::new(private_key_asn1)?,
             attributes: None,
         })
     }
 
     /// Returns the key type (as an OID)
-    pub fn get_oid(&self) -> &asn1::ObjectIdentifier {
-        &self.private_key_algorithm
+    pub fn get_algorithm(&self) -> &pkcs::AlgorithmIdentifier {
+        &self.algorithm
     }
 
     /// Returns a reference to the encoded private key

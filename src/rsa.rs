@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::interface::*;
-use crate::kasn1::{oid, DerEncBigUint, PrivateKeyInfo};
+use crate::kasn1::{pkcs, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::rsa::*;
@@ -323,7 +323,7 @@ impl PrivKeyFactory for RSAPrivFactory {
             Ok(p) => p,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
-        let pkeyinfo = PrivateKeyInfo::new(&pkey.as_slice(), oid::RSA_OID)?;
+        let pkeyinfo = PrivateKeyInfo::new(&pkey.as_slice(), pkcs::RSA_ALG)?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -370,7 +370,7 @@ impl PrivKeyFactory for RSAPrivFactory {
             Ok(k) => k,
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
-        if pkeyinfo.get_oid() != &oid::RSA_OID {
+        if pkeyinfo.get_algorithm() != &pkcs::RSA_ALG {
             return Err(CKR_WRAPPED_KEY_INVALID)?;
         }
         let rsapkey = match asn1::parse_single::<RSAPrivateKey>(
