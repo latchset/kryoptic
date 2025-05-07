@@ -10,12 +10,11 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::ec::*;
 use crate::error::{general_error, Error, Result};
-use crate::kasn1::{oid, pkcs, PrivateKeyInfo};
+use crate::kasn1::oid;
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::ecdsa::EcdsaOperation;
 
-use asn1;
 use once_cell::sync::Lazy;
 
 /// Minimum ECDSA key size
@@ -219,32 +218,7 @@ impl CommonKeyFactory for ECDSAPrivFactory {}
 
 impl PrivKeyFactory for ECDSAPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
-        key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_EXTRACTABLE)?;
-
-        let oid = match get_oid_from_obj(key) {
-            Ok(o) => o,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        };
-        let ecpkey_asn1 = match asn1::write_single(&ECPrivateKey::new_owned(
-            key.get_attr_as_bytes(CKA_VALUE)?,
-        )?) {
-            Ok(p) => p,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        };
-        let pkeyinfo = PrivateKeyInfo::new(
-            &ecpkey_asn1.as_slice(),
-            match oid {
-                oid::EC_SECP256R1 => pkcs::EC_SECP256R1_ALG,
-                oid::EC_SECP384R1 => pkcs::EC_SECP384R1_ALG,
-                oid::EC_SECP521R1 => pkcs::EC_SECP521R1_ALG,
-                _ => return Err(CKR_GENERAL_ERROR)?,
-            },
-        )?;
-
-        match asn1::write_single(&pkeyinfo) {
-            Ok(x) => Ok(x),
-            Err(_) => Err(CKR_GENERAL_ERROR)?,
-        }
+        export_for_wrapping(key)
     }
 
     fn import_from_wrapped(
@@ -252,66 +226,7 @@ impl PrivKeyFactory for ECDSAPrivFactory {
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut key = self.default_object_unwrap(template)?;
-
-        if !key.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PRIVATE_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_EC))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-
-        let (tlv, extra) = match asn1::strip_tlv(&data) {
-            Ok(x) => x,
-            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
-        };
-        /* Some Key Wrapping algorithms may 0 pad to match block size */
-        if !extra.iter().all(|b| *b == 0) {
-            return Err(CKR_WRAPPED_KEY_INVALID)?;
-        }
-        let pkeyinfo = match tlv.parse::<PrivateKeyInfo>() {
-            Ok(k) => k,
-            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
-        };
-        /* filter out unknown OIDs */
-        let oid = match pkeyinfo.get_algorithm() {
-            &EC_SECP256R1_ALG => &EC_SECP256R1,
-            &EC_SECP384R1_ALG => &EC_SECP384R1,
-            &EC_SECP521R1_ALG => &EC_SECP521R1,
-            _ => return Err(CKR_WRAPPED_KEY_INVALID)?,
-        };
-        let oid_encoded = match asn1::write_single(oid) {
-            Ok(b) => b,
-            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
-        };
-
-        if !key.check_or_set_attr(Attribute::from_bytes(
-            CKA_EC_PARAMS,
-            oid_encoded.to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-
-        let ecpkey = match asn1::parse_single::<ECPrivateKey>(
-            pkeyinfo.get_private_key(),
-        ) {
-            Ok(k) => k,
-            Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
-        };
-
-        if !key.check_or_set_attr(Attribute::from_bytes(
-            CKA_VALUE,
-            ecpkey.private_key.as_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-
-        Ok(key)
+        import_from_wrapped(CKK_EC, data, self.default_object_unwrap(template)?)
     }
 }
 

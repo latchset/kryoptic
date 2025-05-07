@@ -124,3 +124,31 @@ pub const EC_SECP521R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
         oid::EC_SECP521R1,
     )),
 };
+
+/// Ed25519 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const ED25519_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ed25519,
+};
+
+/// Ed448 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const ED448_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ed448,
+};
+
+/// X25519 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const X25519_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::X25519,
+};
+
+/// X448  Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const X448_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::X448,
+};
