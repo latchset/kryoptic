@@ -10,7 +10,7 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::ec::*;
 use crate::error::{general_error, Error, Result};
-use crate::kasn1::{oid, PrivateKeyInfo};
+use crate::kasn1::{oid, pkcs, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::ecdsa::EcdsaOperation;
@@ -231,7 +231,15 @@ impl PrivKeyFactory for ECDSAPrivFactory {
             Ok(p) => p,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
-        let pkeyinfo = PrivateKeyInfo::new(&ecpkey_asn1.as_slice(), oid)?;
+        let pkeyinfo = PrivateKeyInfo::new(
+            &ecpkey_asn1.as_slice(),
+            match oid {
+                oid::EC_SECP256R1 => pkcs::EC_SECP256R1_ALG,
+                oid::EC_SECP384R1 => pkcs::EC_SECP384R1_ALG,
+                oid::EC_SECP521R1 => pkcs::EC_SECP521R1_ALG,
+                _ => return Err(CKR_GENERAL_ERROR)?,
+            },
+        )?;
 
         match asn1::write_single(&pkeyinfo) {
             Ok(x) => Ok(x),
@@ -270,13 +278,14 @@ impl PrivKeyFactory for ECDSAPrivFactory {
             Ok(k) => k,
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
-        let oid = pkeyinfo.get_oid();
         /* filter out unknown OIDs */
-        match oid {
-            &EC_SECP521R1 | &EC_SECP384R1 | &EC_SECP256R1 => (),
+        let oid = match pkeyinfo.get_algorithm() {
+            &EC_SECP256R1_ALG => &EC_SECP256R1,
+            &EC_SECP384R1_ALG => &EC_SECP384R1,
+            &EC_SECP521R1_ALG => &EC_SECP521R1,
             _ => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
-        let oid_encoded = match asn1::write_single(&oid) {
+        let oid_encoded = match asn1::write_single(oid) {
             Ok(b) => b,
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
