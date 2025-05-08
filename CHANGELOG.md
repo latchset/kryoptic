@@ -9,20 +9,28 @@ All notable changes to this project should be documented in this file.
 * Added support for ML-DSA signature scheme
 
 * Added support for SignatureVerify APIs with all algorithms
-  [Support SignatureVerify APIs with all algorithms](https://github.com/latchset/kryoptic/pull/216)
+  - [Support SignatureVerify APIs with all
+     algorithms](https://github.com/latchset/kryoptic/pull/216)
 
 * Fixed a database format bug that would affect cross-platform portability
-  [Add better support for array of attributes](https://github.com/latchset/kryoptic/pull/219)
+  - [Add better support for array of
+     attributes](https://github.com/latchset/kryoptic/pull/219)
 
 * Added doc string with Gemini's help to most files
-  [Add more documentation strings and cleanup changes](https://github.com/latchset/kryoptic/pull/229)
+  - [Add more documentation strings and cleanup
+     changes](https://github.com/latchset/kryoptic/pull/229)
 
 * Made Token Info more spec compliant and added relevant information like the
   software release version.
-  [Make token info a little more useful](https://github.com/latchset/kryoptic/pull/237)
+  - [Make token info a little more
+     useful](https://github.com/latchset/kryoptic/pull/237)
 
-* Fix Asymmetric keys export format for Key Wrapping
-  [Fix PrivateKeyInfo ASN.1 structure](https://github.com/latchset/kryoptic/pull/238)
+* Fix Asymmetric keys export format for Key Wrapping and extend it to all EC key
+  types
+  - [Fix PrivateKeyInfo ASN.1
+     structure](https://github.com/latchset/kryoptic/pull/238)
+  - [Add Key wrapping support and tests for all EC
+     keys](https://github.com/latchset/kryoptic/pull/239)
 
 # [1.1.0]
 ## 2025-04-14
@@ -37,24 +45,32 @@ both enabled by passing --feature mlkem at build time.
 ### What Changed
 
 * Added support for PKCS#11 3.2 interfaces
-  [Pkcs11 3.2 Draft](https://github.com/latchset/kryoptic/pull/149)
+  - [Pkcs11 3.2 Draft](https://github.com/latchset/kryoptic/pull/149)
 
 * Added support for Key Encapdulation/Decapsulation and ML-KEM Support
-  [Add Encapsulation/Decapsulation and ML-KEM support](https://github.com/latchset/kryoptic/pull/197)
+  - [Add Encapsulation/Decapsulation and ML-KEM
+     support](https://github.com/latchset/kryoptic/pull/197)
 
 * Sundry fixes that result in minor, but visible, behavior changes:
-  [Deal with length query issues](https://github.com/latchset/kryoptic/pull/185)
-  [aes: Restrict AES-GCM to at least 1B tag length](https://github.com/latchset/kryoptic/pull/189)
-  [Fix incorrect error returned on un-initialized operations](https://github.com/latchset/kryoptic/pull/192)
-  [Ensure token store objects can be extracted if the right booleans are
-set](https://github.com/latchset/kryoptic/pull/194)
-  [Fix check for object sensitivity as per spec](https://github.com/latchset/kryoptic/pull/198)
-  [ecdh: Fix max ECDH output size](https://github.com/latchset/kryoptic/pull/203)
-  [Fix C_WrapKey size query](https://github.com/latchset/kryoptic/pull/202)
+  - [Deal with length query
+     issues](https://github.com/latchset/kryoptic/pull/185)
+  - [aes: Restrict AES-GCM to at least 1B tag
+     length](https://github.com/latchset/kryoptic/pull/189)
+  - [Fix incorrect error returned on un-initialized
+     operations](https://github.com/latchset/kryoptic/pull/192)
+  - [Ensure token store objects can be extracted if the right booleans are
+     set](https://github.com/latchset/kryoptic/pull/194)
+  - [Fix check for object sensitivity as per
+     spec](https://github.com/latchset/kryoptic/pull/198)
+  - [ecdh: Fix max ECDH output
+     size](https://github.com/latchset/kryoptic/pull/203)
+  - [Fix C_WrapKey size query](https://github.com/latchset/kryoptic/pull/202)
 
 * Minor enhancements:
-  [Add Stricter FIPS options to configuration](https://github.com/latchset/kryoptic/pull/199)
-  [Allow digesting AES keys and add test coverage.](https://github.com/latchset/kryoptic/pull/204)
+  - [Add Stricter FIPS options to
+     configuration](https://github.com/latchset/kryoptic/pull/199)
+  - [Allow digesting AES keys and add test
+     coverage.](https://github.com/latchset/kryoptic/pull/204)
 
 
 # [1.0.0]
