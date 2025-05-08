@@ -90,3 +90,65 @@ pub const HMAC_SHA_256_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
     oid: asn1::DefinedByMarker::marker(),
     params: AlgorithmParameters::HmacWithSha256(Some(())),
 };
+
+/// RSA Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const RSA_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Rsa(Some(())),
+};
+
+/// P-256 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const EC_SECP256R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ec(EcParameters::NamedCurve(
+        oid::EC_SECP256R1,
+    )),
+};
+
+/// P-384 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const EC_SECP384R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ec(EcParameters::NamedCurve(
+        oid::EC_SECP384R1,
+    )),
+};
+
+/// P-521 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const EC_SECP521R1_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ec(EcParameters::NamedCurve(
+        oid::EC_SECP521R1,
+    )),
+};
+
+/// Ed25519  Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const ED25519_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ed25519,
+};
+
+/// Ed448  Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const ED448_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Ed448,
+};
+
+/// X25519  Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const X25519_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::X25519,
+};
+
+/// X448  Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo
+pub const X448_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::X448,
+};
