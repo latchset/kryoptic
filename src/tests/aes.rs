@@ -80,6 +80,108 @@ fn test_aes_operations() {
         ));
         assert_eq!(dec.len(), data.len());
         assert_eq!(data.as_bytes(), dec.as_slice());
+
+        /* When the AES buffer is partially full, verify that the
+         * check against AES_BLOCK_SIZE (that is, the "entire block"
+         * check) is '>=', not '>' */
+        let ret = fn_encrypt_init(
+            session,
+            &mut CK_MECHANISM {
+                mechanism: CKM_AES_ECB,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+            handle,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let data = vec![0x01u8; 1];
+        let enc = vec![0u8; 80];
+        let mut enc_len = data.len() as CK_ULONG;
+        let ret = fn_encrypt_update(
+            session,
+            data.as_ptr() as *mut _,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, 0);
+
+        let data = vec![0x0Fu8; 15];
+        let mut offset = enc_len as isize;
+        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
+        let ret = fn_encrypt_update(
+            session,
+            data.as_ptr() as *mut _,
+            data.len() as CK_ULONG,
+            enc.as_ptr() as *mut _,
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        /* Skip enc_len assert, to demonstrate subsequent
+         * CKR_DATA_LEN_RANGE error.  enc_len is 0 in the failure
+         * case, 16 when the check is correct */
+        /* assert_eq!(enc_len as usize, 16); */
+
+        offset = enc_len as isize;
+        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
+        let ret = fn_encrypt_final(
+            session,
+            unsafe { enc.as_ptr().offset(offset) } as *mut _,
+            &mut enc_len,
+        );
+        /* CKR_DATA_LEN_RANGE when the range check is '>' not '>=' */
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len as usize, 0);
+
+        let ret = fn_decrypt_init(
+            session,
+            &mut CK_MECHANISM {
+                mechanism: CKM_AES_ECB,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            },
+            handle,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let data = &enc[0..1];
+        let dec = vec![0u8; 80];
+        let mut dec_len = data.len() as CK_ULONG;
+        let ret = fn_decrypt_update(
+            session,
+            data.as_ptr() as *mut _,
+            data.len() as CK_ULONG,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, 0);
+
+        let data = &enc[1..=15];
+        let mut offset = dec_len as isize;
+        dec_len = dec.len() as CK_ULONG - offset as CK_ULONG;
+        let ret = fn_decrypt_update(
+            session,
+            data.as_ptr() as *mut _,
+            data.len() as CK_ULONG,
+            dec.as_ptr() as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        offset = dec_len as isize;
+        dec_len = dec.len() as CK_ULONG - offset as CK_ULONG;
+        let ret = fn_decrypt_final(
+            session,
+            unsafe { dec.as_ptr().offset(offset) } as *mut _,
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec_len as usize, 0);
+        assert_eq!(dec[0], 0x01u8);
+        assert_eq!(dec[1..offset as usize], vec![0x0Fu8; 15]);
     }
 
     {
