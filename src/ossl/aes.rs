@@ -1582,7 +1582,7 @@ impl Encryption for AesOperation {
                      * with the first block on the auxiliary buffer and
                      * then do the bulk of the data string from the caller
                      * provided buffer */
-                    if self.buffer.len() + plain_len > AES_BLOCK_SIZE {
+                    if self.buffer.len() + plain_len >= AES_BLOCK_SIZE {
                         let partlen = AES_BLOCK_SIZE - self.buffer.len();
                         self.buffer.extend_from_slice(&plain[..partlen]);
                         let mut outl: c_int = 0;
@@ -2070,7 +2070,7 @@ impl Decryption for AesOperation {
                      * with the first block on the auxiliary buffer and
                      * then do the bulk of the data string from the caller
                      * provided buffer */
-                    if self.buffer.len() + cipher_len > AES_BLOCK_SIZE {
+                    if self.buffer.len() + cipher_len >= AES_BLOCK_SIZE {
                         let partlen = AES_BLOCK_SIZE - self.buffer.len();
                         self.buffer.extend_from_slice(&cipher[..partlen]);
                         cipher_pos = partlen;
