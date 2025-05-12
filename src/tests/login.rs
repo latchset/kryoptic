@@ -3,10 +3,10 @@
 
 use crate::tests::*;
 
-use serial_test::parallel;
+use serial_test::{parallel, serial};
 
 #[test]
-#[parallel]
+#[serial]
 fn test_login() {
     let mut testtokn = TestToken::initialized("test_login", None);
     let session = testtokn.get_session(false);
