@@ -143,11 +143,13 @@ static FIPS_PARAM_DRBG_TRUNC_DIGEST: &str = "1\0";
 
 macro_rules! set_config_string {
     ($params:expr, $key:expr, $val:expr) => {
-        let p =
-            unsafe { OSSL_PARAM_locate($params, $key.as_ptr() as *const i8) };
+        let p = unsafe {
+            OSSL_PARAM_locate($params, $key.as_ptr() as *const c_char)
+        };
         if p != std::ptr::null_mut() {
             unsafe {
-                let _ = OSSL_PARAM_set_utf8_ptr(p, $val.as_ptr() as *const i8);
+                let _ =
+                    OSSL_PARAM_set_utf8_ptr(p, $val.as_ptr() as *const c_char);
             }
         }
     };
@@ -362,7 +364,7 @@ unsafe extern "C" fn fips_bio_new_membuf(
     let size = if len > 0 {
         usize::try_from(len).unwrap()
     } else if len < 0 {
-        usize::try_from(libc::strlen(buf as *const i8)).unwrap()
+        usize::try_from(libc::strlen(buf as *const c_char)).unwrap()
     } else {
         return std::ptr::null_mut();
     };
