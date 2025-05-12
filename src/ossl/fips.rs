@@ -251,7 +251,7 @@ unsafe extern "C" fn fips_vset_error(
     _prov: *const OSSL_CORE_HANDLE,
     _reason: u32,
     _fmt: *const ::std::os::raw::c_char,
-    _args: *mut __va_list_tag,
+    _args: *mut c_void,
 ) {
 }
 unsafe extern "C" fn fips_set_error_mark(
@@ -426,7 +426,7 @@ unsafe extern "C" fn fips_bio_vsnprintf(
     _buf: *mut ::std::os::raw::c_char,
     _n: usize,
     _fmt: *const ::std::os::raw::c_char,
-    _args: *mut __va_list_tag,
+    _args: *mut c_void,
 ) -> ::std::os::raw::c_int {
     return 0;
 }
