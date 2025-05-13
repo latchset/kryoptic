@@ -61,6 +61,7 @@ mod misc;
 
 use crate::misc::{bytes_to_slice, bytes_to_vec, cast_params};
 
+/// Macro to convert a `Result<()>` into a `CK_RV`, returning `CKR_OK` on Ok.
 macro_rules! ret_to_rv {
     ($ret:expr) => {
         match $ret {
@@ -70,6 +71,8 @@ macro_rules! ret_to_rv {
     };
 }
 
+/// Macro to unwrap a `Result<T>` or cause the function to return its `CK_RV`
+/// error code.
 macro_rules! res_or_ret {
     ($ret:expr) => {
         match $ret {
@@ -79,6 +82,8 @@ macro_rules! res_or_ret {
     };
 }
 
+/// Macro to check if a `CK_RV` is `CKR_OK`, otherwise cause the function to
+/// return the error code.
 macro_rules! ok_or_ret {
     ($ret:expr) => {
         match $ret {
@@ -88,6 +93,8 @@ macro_rules! ok_or_ret {
     };
 }
 
+/// Macro for `try_from` conversions, return the data in the proper format or
+/// causes the function to return a specified or general error on failure.
 macro_rules! cast_or_ret {
     ($type:tt from $val:expr) => {{
         match $type::try_from($val) {
@@ -103,6 +110,9 @@ macro_rules! cast_or_ret {
     }};
 }
 
+/// Thread-local instance of the Cryptographically Secure Pseudo-Random Number
+/// Generator (CSPRNG). This is used to avoid contention and locking between
+/// different threads.
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
 /// Fill a buffer with random data
@@ -121,13 +131,22 @@ fn random_add_seed(data: &[u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().add_seed(data))
 }
 
+/// Global state for the PKCS#11 library.
+/// Manages slots, sessions, and handle generation.
 struct State {
+    /// Hash map that stores actual slots, indexed by their Slot ID number.
     slots: HashMap<CK_SLOT_ID, Slot>,
+    /// Map that holds mappings between session handles and slot ids.
+    /// Sessions are stored in slots, so this allows to quickly find the
+    /// correct slot when there is a need to get a session from a handle.
     sessionmap: HashMap<CK_SESSION_HANDLE, CK_SLOT_ID>,
+    /// Holds the next available session handle number. Session handles are
+    /// unique and never repeating for the life time of the program.
     next_handle: CK_ULONG,
 }
 
 impl State {
+    /// Initializes the global state. Clears existing slots and sessions.
     fn initialize(&mut self) {
         #[cfg(feature = "fips")]
         ossl::fips::init();
@@ -137,6 +156,8 @@ impl State {
         self.next_handle = 1;
     }
 
+    /// Finalizes the global state. Finalizes all slots and clears state.
+    /// Returns the first error encountered during slot finalization, if any.
     fn finalize(&mut self) -> CK_RV {
         if !self.is_initialized() {
             return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -155,10 +176,12 @@ impl State {
         ret
     }
 
+    /// Checks if the global state has been initialized.
     fn is_initialized(&self) -> bool {
         self.next_handle != 0
     }
 
+    /// Gets a reference to a slot by its ID.
     fn get_slot(&self, slot_id: CK_SLOT_ID) -> Result<&Slot> {
         if !self.is_initialized() {
             return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
@@ -169,6 +192,7 @@ impl State {
         }
     }
 
+    /// Gets a mutable reference to a slot by its ID.
     fn get_slot_mut(&mut self, slot_id: CK_SLOT_ID) -> Result<&mut Slot> {
         if !self.is_initialized() {
             return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
@@ -179,6 +203,7 @@ impl State {
         }
     }
 
+    /// Returns a sorted vector of all configured slot IDs.
     fn get_slots_ids(&self) -> Vec<CK_SLOT_ID> {
         let mut slotids = Vec::<CK_SLOT_ID>::with_capacity(self.slots.len());
         for k in self.slots.keys() {
@@ -188,6 +213,7 @@ impl State {
         slotids
     }
 
+    /// Adds a new slot to the global state.
     fn add_slot(&mut self, slot_id: CK_SLOT_ID, slot: Slot) -> Result<()> {
         if self.slots.contains_key(&slot_id) {
             return Err(CKR_CRYPTOKI_ALREADY_INITIALIZED)?;
@@ -196,6 +222,7 @@ impl State {
         Ok(())
     }
 
+    /// Gets a read lock guard for a session by its handle.
     fn get_session(
         &self,
         handle: CK_SESSION_HANDLE,
@@ -207,6 +234,7 @@ impl State {
         self.get_slot(slot_id)?.get_session(handle)
     }
 
+    /// Gets a write lock guard for a session by its handle.
     fn get_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
@@ -218,6 +246,8 @@ impl State {
         self.get_slot(slot_id)?.get_session_mut(handle)
     }
 
+    /// Creates a new session on a specified slot and returns its handle.
+    /// Associates the session handle with the slot ID.
     fn new_session(
         &mut self,
         slot_id: CK_SLOT_ID,
@@ -232,14 +262,18 @@ impl State {
         Ok(handle)
     }
 
+    /// Checks if a slot has any active sessions.
     fn has_sessions(&self, slot_id: CK_SLOT_ID) -> Result<bool> {
         Ok(self.get_slot(slot_id)?.has_sessions())
     }
 
+    /// Checks if a slot has any active read-only sessions.
     fn has_ro_sessions(&self, slot_id: CK_SLOT_ID) -> Result<bool> {
         Ok(self.get_slot(slot_id)?.has_ro_sessions())
     }
 
+    /// Changes the state for all sessions associated with a given slot ID
+    /// based on the provided user type.
     pub fn change_session_states(
         &self,
         slot_id: CK_SLOT_ID,
@@ -248,11 +282,15 @@ impl State {
         self.get_slot(slot_id)?.change_session_states(user_type)
     }
 
+    /// Invalidates the session state for all sessions on a slot.
     pub fn invalidate_session_states(&self, slot_id: CK_SLOT_ID) -> Result<()> {
         self.get_slot(slot_id)?.invalidate_session_states();
         Ok(())
     }
 
+    /// Drops a session by its handle.
+    ///
+    /// Logs out the token if it's the last session.
     fn drop_session(&mut self, handle: CK_SESSION_HANDLE) -> Result<()> {
         let slot_id = match self.sessionmap.get(&handle) {
             Some(s) => *s,
@@ -267,6 +305,8 @@ impl State {
         Ok(())
     }
 
+    /// Drops all sessions associated with a specific slot and returns their
+    /// handles.
     fn drop_all_sessions_slot(
         &mut self,
         slot_id: CK_SLOT_ID,
@@ -275,6 +315,7 @@ impl State {
         Ok(self.get_slot_mut(slot_id)?.drop_all_sessions())
     }
 
+    /// Gets a read lock guard for the token on a specified slot.
     fn get_token_from_slot(
         &self,
         slot_id: CK_SLOT_ID,
@@ -282,6 +323,7 @@ impl State {
         self.get_slot(slot_id)?.get_token()
     }
 
+    /// Gets a write lock guard for the token on a specified slot.
     fn get_token_from_slot_mut(
         &self,
         slot_id: CK_SLOT_ID,
@@ -289,6 +331,8 @@ impl State {
         self.get_slot(slot_id)?.get_token_mut(false)
     }
 
+    /// Gets a write lock guard for the token on a specified slot, bypassing
+    /// initialization checks (used during initialization itself).
     fn get_token_from_slot_mut_nochecks(
         &self,
         slot_id: CK_SLOT_ID,
@@ -296,6 +340,7 @@ impl State {
         self.get_slot(slot_id)?.get_token_mut(true)
     }
 
+    /// Gets a read lock guard for the token associated with a session handle.
     fn get_token_from_session(
         &self,
         handle: CK_SESSION_HANDLE,
@@ -307,6 +352,7 @@ impl State {
         self.get_slot(slot_id)?.get_token()
     }
 
+    /// Gets a write lock guard for the token associated with a session handle.
     fn get_token_from_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
@@ -318,6 +364,7 @@ impl State {
         self.get_slot(slot_id)?.get_token_mut(false)
     }
 
+    /// Gets the FIPS behavior configuration for a specific slot.
     #[cfg(feature = "fips")]
     pub fn get_fips_behavior(
         &self,
@@ -326,6 +373,7 @@ impl State {
         Ok(self.get_slot(slot_id)?.get_fips_behavior())
     }
 
+    /// Sets the FIPS behavior configuration for a specific slot.
     #[cfg(feature = "fips")]
     pub fn set_fips_behavior(
         &mut self,
@@ -336,6 +384,7 @@ impl State {
     }
 }
 
+/// Global, lazily initialized, read-write locked state for the PKCS#11 library.
 static STATE: Lazy<RwLock<State>> = Lazy::new(|| {
     RwLock::new(State {
         slots: HashMap::new(),
@@ -344,6 +393,9 @@ static STATE: Lazy<RwLock<State>> = Lazy::new(|| {
     })
 });
 
+/// Macro to acquire a read lock on a global `RwLock<T>`. One variant checks
+/// the initialization status and the other explicitly does not (generally
+/// used during initialization).
 macro_rules! global_rlock {
     ($GLOBAL:expr) => {
         match $GLOBAL.read() {
@@ -364,6 +416,9 @@ macro_rules! global_rlock {
     }};
 }
 
+/// Macro to acquire a write lock on a global `RwLock<T>`. One variant checks
+/// the initialization status and the other explicitly does not (generally
+/// used during initialization).
 macro_rules! global_wlock {
     ($GLOBAL:expr) => {{
         match $GLOBAL.write() {
@@ -403,8 +458,9 @@ pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
     }
 }
 
-/* initial assessment on FIPS indicator, useful when an input key needs
- * to be checked at operation initialization */
+/// Initializes the FIPS approval indicator on a session based on the key and
+/// operation. Used at the beginning of a cryptographic operation.
+/// (useful when an input key needs to be checked at initialization) */
 #[cfg(feature = "fips")]
 fn init_fips_approval(
     mut session: RwLockWriteGuard<'_, Session>,
@@ -416,7 +472,9 @@ fn init_fips_approval(
     session.set_fips_indicator(key_ok);
 }
 
-/* final assessment on FIPS indicator, after the operation is complete */
+/// Finalizes the FIPS approval indicator on a session based on the outcome
+/// of the cryptographic operation. Used at the end of an operation.
+/// Only downgrades an approval status, never upgrades a non-approved status.
 #[cfg(feature = "fips")]
 fn finalize_fips_approval(
     mut session: RwLockWriteGuard<'_, Session>,
@@ -434,10 +492,12 @@ fn finalize_fips_approval(
     }
 }
 
+/// Global configuration holder for the library.
 struct GlobalConfig {
     conf: Config,
 }
 
+/// Global, lazily initialized, read-write locked configuration instance.
 static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
     /* if there is no config file or the configuration is malformed,
      * set an empty config, an error will be returned later at
