@@ -38,7 +38,7 @@ pub fn register(_: &mut Mechanisms, ot: &mut ObjectFactories) {
 /// checks whether the CKA_SENSITIVE attribute contains an appropriate value
 pub fn check_key_template(
     template: &[CK_ATTRIBUTE],
-    fips_opts: FipsBehavior,
+    fips_opts: &FipsBehavior,
 ) -> Result<()> {
     if !fips_opts.keys_always_sensitive {
         return Ok(());

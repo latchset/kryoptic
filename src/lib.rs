@@ -317,6 +317,23 @@ impl State {
         };
         self.get_slot(slot_id)?.get_token_mut(false)
     }
+
+    #[cfg(feature = "fips")]
+    pub fn get_fips_behavior(
+        &self,
+        slot_id: CK_SLOT_ID,
+    ) -> Result<&config::FipsBehavior> {
+        Ok(self.get_slot(slot_id)?.get_fips_behavior())
+    }
+
+    #[cfg(feature = "fips")]
+    pub fn set_fips_behavior(
+        &mut self,
+        slot_id: CK_SLOT_ID,
+        behavior: config::FipsBehavior,
+    ) -> Result<()> {
+        Ok(self.get_slot_mut(slot_id)?.set_fips_behavior(behavior))
+    }
 }
 
 static STATE: Lazy<RwLock<State>> = Lazy::new(|| {
@@ -523,17 +540,20 @@ fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
 }
 
 #[cfg(all(test, feature = "fips", feature = "nssdb"))]
-fn get_fips_behavior(save: &mut config::FipsBehavior) -> CK_RV {
-    let gconf = global_rlock!(noinitcheck CONFIG);
-    *save = gconf.conf.fips_behavior.clone();
+fn get_fips_behavior(
+    slot_id: CK_SLOT_ID,
+    save: &mut config::FipsBehavior,
+) -> CK_RV {
+    let rstate = global_rlock!(STATE);
+    let behavior = res_or_ret!(rstate.get_fips_behavior(slot_id));
+    *save = behavior.clone();
     CKR_OK
 }
 
 #[cfg(all(test, feature = "fips"))]
-fn set_fips_behavior(val: config::FipsBehavior) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck CONFIG);
-    gconf.conf.fips_behavior = val;
-    CKR_OK
+fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
+    let mut wstate = global_wlock!(STATE);
+    ret_to_rv!(wstate.set_fips_behavior(slot_id, val))
 }
 
 /// Implementation of C_Finalize function
@@ -901,12 +921,6 @@ extern "C" fn fn_create_object(
     count: CK_ULONG,
     object_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
@@ -925,10 +939,14 @@ extern "C" fn fn_create_object(
         fail_if_cka_token_true!(&*tmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(tmpl, fips_opts));
-
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        tmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
     let key_handle = match token.create_object(s_handle, tmpl) {
@@ -2268,12 +2286,6 @@ extern "C" fn fn_generate_key(
     count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
@@ -2294,10 +2306,14 @@ extern "C" fn fn_generate_key(
         fail_if_cka_token_true!(&*tmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(tmpl, fips_opts));
-
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        tmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
     let mechanisms = token.get_mechanisms();
@@ -2343,12 +2359,6 @@ extern "C" fn fn_generate_key_pair(
     public_key: CK_OBJECT_HANDLE_PTR,
     private_key: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
@@ -2373,10 +2383,14 @@ extern "C" fn fn_generate_key_pair(
         fail_if_cka_token_true!(&*pubtmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(pritmpl, fips_opts));
-
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        pritmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
 
     let mech = res_or_ret!(token.get_mechanisms().get(mechanism.mechanism));
@@ -2511,12 +2525,6 @@ extern "C" fn fn_unwrap_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
@@ -2537,10 +2545,14 @@ extern "C" fn fn_unwrap_key(
         fail_if_cka_token_true!(&*tmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(tmpl, fips_opts));
-
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        tmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let key = res_or_ret!(token.get_object_by_handle(unwrapping_key_handle));
     ok_or_ret!(check_allowed_mechs(mechanism, &key));
@@ -2592,12 +2604,6 @@ extern "C" fn fn_derive_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
 
@@ -2609,10 +2615,14 @@ extern "C" fn fn_derive_key(
         fail_if_cka_token_true!(&*tmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(tmpl, fips_opts));
-
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        tmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let key = res_or_ret!(token.get_object_by_handle(base_key_handle));
 
@@ -3869,12 +3879,6 @@ extern "C" fn fn_encapsulate_key(
     encrypted_part_len: *mut CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
 
@@ -3886,13 +3890,17 @@ extern "C" fn fn_encapsulate_key(
         fail_if_cka_token_true!(tmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(tmpl, fips_opts));
-
     let penclen = unsafe { *encrypted_part_len as CK_ULONG };
     let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
 
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        tmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let key = res_or_ret!(token.get_object_by_handle(pubkey_handle));
     ok_or_ret!(check_allowed_mechs(mechanism, &key));
@@ -3965,12 +3973,6 @@ extern "C" fn fn_decapsulate_key(
     encrypted_part_len: CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    #[cfg(feature = "fips")]
-    let fips_opts = {
-        let gconf = global_rlock!(noinitcheck CONFIG);
-        gconf.conf.fips_behavior.clone()
-    };
-
     let rstate = global_rlock!(STATE);
     let session = res_or_ret!(rstate.get_session(s_handle));
 
@@ -3982,15 +3984,19 @@ extern "C" fn fn_decapsulate_key(
         fail_if_cka_token_true!(tmpl);
     }
 
-    #[cfg(feature = "fips")]
-    res_or_ret!(fips::check_key_template(tmpl, fips_opts));
-
     let enclen =
         cast_or_ret!(usize from encrypted_part_len => CKR_ARGUMENTS_BAD);
     let encpart: &[u8] =
         unsafe { std::slice::from_raw_parts(encrypted_part, enclen) };
 
     let slot_id = session.get_slot_id();
+
+    #[cfg(feature = "fips")]
+    res_or_ret!(fips::check_key_template(
+        tmpl,
+        res_or_ret!(rstate.get_fips_behavior(slot_id))
+    ));
+
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let key = res_or_ret!(token.get_object_by_handle(privkey_handle));
     ok_or_ret!(check_allowed_mechs(mechanism, &key));

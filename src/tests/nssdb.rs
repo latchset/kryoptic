@@ -166,12 +166,16 @@ fn test_nssdb_init_token() {
     #[cfg(feature = "fips")]
     /* Set default NSSDB Behavior for this test */
     let saved_config = {
+        let slot_id = testtokn.get_slot();
         let mut save = config::FipsBehavior::default();
-        let ret = get_fips_behavior(&mut save);
+        let ret = get_fips_behavior(slot_id, &mut save);
         assert_eq!(ret, CKR_OK);
-        let ret = set_fips_behavior(config::FipsBehavior {
-            keys_always_sensitive: true,
-        });
+        let ret = set_fips_behavior(
+            slot_id,
+            config::FipsBehavior {
+                keys_always_sensitive: true,
+            },
+        );
         assert_eq!(ret, CKR_OK);
         save
     };
@@ -246,7 +250,7 @@ fn test_nssdb_init_token() {
     #[cfg(feature = "fips")]
     {
         /* Restore default FIPS  Behavior */
-        let ret = set_fips_behavior(saved_config);
+        let ret = set_fips_behavior(testtokn.get_slot(), saved_config);
         assert_eq!(ret, CKR_OK);
     }
 
