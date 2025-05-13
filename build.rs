@@ -171,13 +171,32 @@ fn build_ossl(features: &Features, out_file: &Path) {
         buildargs.push("enable-fips");
 
         defines.push_str(" -DOPENSSL_PEDANTIC_ZEROIZATION");
+
+        let fips_name = match std::env::var("KRYOPTIC_FIPS_VENDOR") {
+            Ok(name) => name,
+            Err(_) => env!("CARGO_PKG_NAME").to_string(),
+        };
         defines.push_str(&format!(
-            " -DFIPS_VENDOR=\\\"{}\\\"",
-            env!("CARGO_PKG_NAME")
+            " -DKRYOPTIC_FIPS_VENDOR=\\\"{}\\\"",
+            fips_name,
         ));
+
+        let fips_ver = match std::env::var("KRYOPTIC_FIPS_VERSION") {
+            Ok(ver) => ver,
+            Err(_) => env!("CARGO_PKG_VERSION").to_string(),
+        };
         defines.push_str(&format!(
-            " -DKRYOPTIC_FIPS_VERSION=\\\"{}-test\\\"",
-            env!("CARGO_PKG_VERSION")
+            " -DKRYOPTIC_FIPS_VERSION=\\\"{}\\\"",
+            fips_ver,
+        ));
+
+        let fips_build = match std::env::var("KRYOPTIC_FIPS_BUILD") {
+            Ok(bd) => bd,
+            Err(_) => "test".to_string(),
+        };
+        defines.push_str(&format!(
+            " -DKRYOPTIC_FIPS_BUILD=\\\"{}\\\"",
+            fips_build,
         ));
 
         ar_name = "fips";
