@@ -25,6 +25,8 @@ pub struct Slot {
     token: RwLock<Token>,
     /// Map of active sessions associated with this slot, keyed by session handle.
     sessions: HashMap<CK_SESSION_HANDLE, RwLock<Session>>,
+    #[cfg(feature = "fips")]
+    fips_behavior: config::FipsBehavior,
 }
 
 impl Slot {
@@ -54,6 +56,8 @@ impl Slot {
             },
             token: RwLock::new(Token::new(dbtype, dbargs)?),
             sessions: HashMap::new(),
+            #[cfg(feature = "fips")]
+            fips_behavior: config.fips_behavior.clone(),
         };
 
         /* fill strings */
@@ -223,5 +227,15 @@ impl Slot {
     pub fn finalize(&mut self) -> Result<()> {
         self.drop_all_sessions();
         self.token.write().unwrap().save()
+    }
+
+    #[cfg(feature = "fips")]
+    pub fn get_fips_behavior(&self) -> &config::FipsBehavior {
+        &self.fips_behavior
+    }
+
+    #[cfg(feature = "fips")]
+    pub fn set_fips_behavior(&mut self, behavior: config::FipsBehavior) {
+        self.fips_behavior = behavior;
     }
 }

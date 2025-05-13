@@ -67,6 +67,9 @@ pub struct Slot {
     pub manufacturer: Option<String>,
     pub dbtype: Option<String>,
     pub dbargs: Option<String>,
+    #[cfg(feature = "fips")]
+    #[serde(default)]
+    pub fips_behavior: FipsBehavior,
 }
 
 impl Slot {
@@ -80,6 +83,8 @@ impl Slot {
             manufacturer: None,
             dbtype: None,
             dbargs: None,
+            #[cfg(feature = "fips")]
+            fips_behavior: FipsBehavior::default(),
         }
     }
 
@@ -94,6 +99,14 @@ impl Slot {
             manufacturer: None,
             dbtype: Some(dbtype.to_string()),
             dbargs: dbargs,
+            #[cfg(feature = "fips")]
+            fips_behavior: FipsBehavior {
+                keys_always_sensitive: if dbtype == "nssdb" {
+                    true
+                } else {
+                    false
+                },
+            },
         }
     }
 }
@@ -121,13 +134,10 @@ impl Default for EcPointEncoding {
 }
 
 /// Add tweaks for behavior in FIPS mode.
-/// NSS generally marks all keys as sensitive and forbids creation or
-/// extraction of secret keys in FIPS mode. So for NSS keys are
-/// always forced sensitive by default.
-
 #[cfg(feature = "fips")]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FipsBehavior {
+    /// Changes behavior of token in slot to always enforce keys to be private
     pub keys_always_sensitive: bool,
 }
 
@@ -135,10 +145,7 @@ pub struct FipsBehavior {
 impl Default for FipsBehavior {
     fn default() -> Self {
         FipsBehavior {
-            #[cfg(not(feature = "nssdb"))]
             keys_always_sensitive: false,
-            #[cfg(feature = "nssdb")]
-            keys_always_sensitive: true,
         }
     }
 }
@@ -153,9 +160,6 @@ pub struct Config {
     #[serde(default)]
     pub ec_point_encoding: EcPointEncoding,
     pub slots: Vec<Slot>,
-    #[cfg(feature = "fips")]
-    #[serde(default)]
-    pub fips_behavior: FipsBehavior,
 }
 
 /// Maps some config errors to CKR_TOKEN_NOT_RECOGNIZED
@@ -170,8 +174,6 @@ impl Config {
         Config {
             ec_point_encoding: EcPointEncoding::default(),
             slots: Vec::new(),
-            #[cfg(feature = "fips")]
-            fips_behavior: FipsBehavior::default(),
         }
     }
 
@@ -357,6 +359,15 @@ impl Config {
 
         slot.dbtype = Some(storage::nssdb::DBINFO.dbtype().to_string());
         slot.dbargs = Some(args.to_string());
+        #[cfg(feature = "fips")]
+        {
+            /* NSS generally marks all keys as sensitive and forbids
+             * creation or extraction of secret keys in FIPS mode.
+             * So for NSS, keys are sensitive by default. */
+            slot.fips_behavior = FipsBehavior {
+                keys_always_sensitive: true,
+            };
+        }
         conf.slots.push(slot);
         Ok(conf)
     }

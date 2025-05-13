@@ -221,9 +221,12 @@ impl TestToken<'_> {
         /* By default we force relaxed behavior so tests can access
          * data to check results */
         #[cfg(feature = "fips")]
-        set_fips_behavior(config::FipsBehavior {
-            keys_always_sensitive: false,
-        });
+        set_fips_behavior(
+            td.get_slot(),
+            config::FipsBehavior {
+                keys_always_sensitive: false,
+            },
+        );
 
         td
     }
