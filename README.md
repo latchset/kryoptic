@@ -38,10 +38,6 @@ Build the rust project:
 
     $ CONFDIR=/etc cargo build
 
-For the FIPS build, you need to generate the hmac checksum:
-
-    $ ./misc/hmacify.sh target/release/libkryoptic_pkcs11.so
-
 The default build specifies "standard" as the default feature for
 ease of use. "Standard" pulls in all the standard algorithms and the
 sqlitedb storage backend.
@@ -51,6 +47,32 @@ switch to disable default features (`--no-default-features`) and then
 specify the features you want to build with, eg:
 
     $ cargo build --no-default-features --features fips,sqlitedb,nssdb
+
+# FIPS Builds
+
+The `--feature fips` builds create a token linking just to OpenSSL libfips.a
+and enable FIPS behavior, restricting how algorithms behave and reporting
+FIPS indicators for (non)approved algorithms and operations. It forces the
+presence of the PKCS#11 3.2 interfaces as well as the PQC algorithms.
+
+The FIPS build allows to specify the name, version, and additional build
+information returned by the embedded OpenSSL FIPS provider by setting the
+following environment variables (requires custom patches to the OpenSSL
+code base to take effect):
+- KRYOPTIC_FIPS_VENDOR
+- KRYOPTIC_FIPS_VERSION
+- KRYOPTIC_FIPS_BUILD
+
+If these variables are not set build defaults respectively to:
+- CARGO_PKG_NAME
+- CARGO_PKG_VERSION
+- "test"
+
+For the FIPS build, you need to generate the hmac checksum:
+
+    $ ./misc/hmacify.sh target/release/libkryoptic_pkcs11.so
+
+Without this step the token will panic at initialization.
 
 # Tests
 
