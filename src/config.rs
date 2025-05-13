@@ -62,11 +62,17 @@ pub const DEFAULT_CONF_NAME: &str = "token.conf";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Slot {
+    /// Slot number
     pub slot: u32,
+    /// Slot's description
     pub description: Option<String>,
+    /// Slot's manufacturer
     pub manufacturer: Option<String>,
+    /// The token type (storage implementation)
     pub dbtype: Option<String>,
+    /// Storage specific configuration options
     pub dbargs: Option<String>,
+    /// The FIPS Behavior for the token
     #[cfg(feature = "fips")]
     #[serde(default)]
     pub fips_behavior: FipsBehavior,
@@ -157,8 +163,10 @@ impl Default for FipsBehavior {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
+    /// Type of encoding for EC Public Points
     #[serde(default)]
     pub ec_point_encoding: EcPointEncoding,
+    /// List of configured slots
     pub slots: Vec<Slot>,
 }
 
