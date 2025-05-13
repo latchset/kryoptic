@@ -163,6 +163,10 @@ jobs:
             FEATURES="$FEATURES,dynamic"
           fi
 
+          # create a bugus configuration file to make sure it is not used during tests
+          mkdir -p ~/.config/kryoptic/
+          cp testdata/test.conf ~/.config/kryoptic/token.conf
+
           cargo build -vv $OPTS --features "$FEATURES"
           cargo test -vv $OPTS --features "$FEATURES"
 
