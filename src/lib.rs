@@ -110,9 +110,9 @@ macro_rules! cast_or_ret {
     }};
 }
 
-/// Thread-local instance of the Cryptographically Secure Pseudo-Random Number
-/// Generator (CSPRNG). This is used to avoid contention and locking between
-/// different threads.
+/* Thread-local instance of the Cryptographically Secure Pseudo-Random Number
+ * Generator (CSPRNG). This is used to avoid contention and locking between
+ * different threads. */
 thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
 
 /// Fill a buffer with random data
