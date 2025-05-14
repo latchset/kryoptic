@@ -182,7 +182,7 @@ impl Token {
 
     /// Set the token info for uninitialized tokens
     fn uninitialized_token_info(&mut self) {
-        self.fill_token_info(&storage::StorageTokenInfo::default());
+        self.fill_token_info(&StorageTokenInfo::default());
         self.info.flags &= !CKF_TOKEN_INITIALIZED
     }
 
