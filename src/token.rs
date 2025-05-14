@@ -119,10 +119,10 @@ impl Token {
     pub fn new(dbtype: &str, dbargs: Option<String>) -> Result<Token> {
         let mut token: Token = Token {
             info: CK_TOKEN_INFO {
-                label: [0u8; 32],
-                manufacturerID: [0u8; 32],
-                model: [0u8; 16],
-                serialNumber: [0u8; 16],
+                label: [b' '; 32],
+                manufacturerID: [b' '; 32],
+                model: [b' '; 16],
+                serialNumber: [b' '; 16],
                 flags: CKF_RNG,
                 ulMaxSessionCount: CK_EFFECTIVELY_INFINITE,
                 ulSessionCount: 0,
@@ -158,7 +158,7 @@ impl Token {
             Ok(info) => token.fill_token_info(&info),
             Err(err) => match err.rv() {
                 CKR_CRYPTOKI_NOT_INITIALIZED => {
-                    token.info.flags &= !CKF_TOKEN_INITIALIZED
+                    token.uninitialized_token_info();
                 }
                 _ => return Err(err),
             },
@@ -178,6 +178,12 @@ impl Token {
         self.info.model = info.model;
         self.info.serialNumber = info.serial;
         self.info.flags = info.flags | CKF_RNG;
+    }
+
+    /// Set the token info for uninitialized tokens
+    fn uninitialized_token_info(&mut self) {
+        self.fill_token_info(&storage::StorageTokenInfo::default());
+        self.info.flags &= !CKF_TOKEN_INITIALIZED
     }
 
     /// Returns a reference to the token's information structure.
