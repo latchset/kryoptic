@@ -49,7 +49,7 @@ bitflags = "2.4.1"
 cfg-if = "1.0.0"
 clap = { version = "4.5.26", default-features = false, features = ["cargo", "derive", "help", "std", "usage"] }
 constant_time_eq = "0.3.0"
-cryptoki = "0.6.2"
+cryptoki = "0.9.0"
 data-encoding = "2.4.0"
 getrandom = "0.3"
 hex = "0.4.3"
