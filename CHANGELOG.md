@@ -6,6 +6,15 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+# [1.2.0]
+## 2025-06-09
+
+This release adds support for PQC algorithms, comprehensive doc string coverage
+and a few important compatibility fixes in the database format and key wrapping
+data formats.
+
+### What Changed
+
 * The jsondb storage backend has been removed
   - [Drop jsondb](https://github.com/latchset/kryoptic/pull/262)
 
@@ -134,3 +143,4 @@ that includes non public interfaces.
 
 [1.0.0]: https://github.com/latchset/kryoptic/releases/tag/v1.0.0
 [1.1.0]: https://github.com/latchset/kryoptic/releases/tag/v1.1.0
+[1.2.0]: https://github.com/latchset/kryoptic/releases/tag/v1.2.0
