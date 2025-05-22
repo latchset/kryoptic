@@ -1,6 +1,6 @@
 [package]
 name = "kryoptic"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "A PKCS #11 software token written in Rust"
 homepage = "https://github.com/latchset/kryoptic"
