@@ -56,6 +56,7 @@ impl EvpMd {
     }
 
     /// Returns a mutable pointer to the underlying `EVP_MD`.
+    #[allow(dead_code)]
     pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD {
         self.ptr
     }
@@ -89,6 +90,7 @@ impl EvpMdCtx {
     }
 
     /// Returns a const pointer to the underlying `EVP_MD_CTX`.
+    #[allow(dead_code)]
     pub unsafe fn as_ptr(&self) -> *const EVP_MD_CTX {
         self.ptr
     }
@@ -134,6 +136,7 @@ impl EvpCipher {
     }
 
     /// Returns a mutable pointer to the underlying `EVP_CIPHER`.
+    #[allow(dead_code)]
     pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER {
         self.ptr
     }
@@ -167,6 +170,7 @@ impl EvpCipherCtx {
     }
 
     /// Returns a const pointer to the underlying `EVP_CIPHER_CTX`.
+    #[allow(dead_code)]
     pub unsafe fn as_ptr(&self) -> *const EVP_CIPHER_CTX {
         self.ptr
     }
@@ -214,6 +218,7 @@ impl EvpKdfCtx {
     }
 
     /// Returns a const pointer to the underlying `EVP_KDF_CTX`.
+    #[allow(dead_code)]
     pub unsafe fn as_ptr(&self) -> *const EVP_KDF_CTX {
         self.ptr
     }
@@ -260,6 +265,7 @@ impl EvpMacCtx {
     }
 
     /// Returns a const pointer to the underlying `EVP_MAC_CTX`.
+    #[allow(dead_code)]
     pub unsafe fn as_ptr(&self) -> *const EVP_MAC_CTX {
         self.ptr
     }
