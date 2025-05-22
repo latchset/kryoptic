@@ -33,143 +33,253 @@ use crate::ossl::montgomery as ecm;
 #[cfg(feature = "rsa")]
 use crate::ossl::rsa;
 
-/// Macro to generate the basic struct definition for an OpenSSL pointer wrapper.
-macro_rules! ptr_wrapper_struct {
-    ($name:ident; $ctx:ident) => {
-        #[derive(Debug)]
-        pub struct $name {
-            ptr: *mut $ctx,
-        }
-    };
+/// Wrapper around OpenSSL's `EVP_MD`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpMd {
+    ptr: *mut EVP_MD,
 }
 
-/// Macro to generate `as_ptr` and `as_mut_ptr` methods for a pointer wrapper
-/// struct.
-macro_rules! ptr_wrapper_returns {
-    ($ossl:ident) => {
-        #[allow(dead_code)]
-        pub unsafe fn as_ptr(&self) -> *const $ossl {
-            self.ptr
+/// Methods for creating and accessing `EvpMd`.
+impl EvpMd {
+    pub fn new(name: *const c_char) -> Result<EvpMd> {
+        let ptr =
+            unsafe { EVP_MD_fetch(get_libctx(), name, std::ptr::null_mut()) };
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
         }
+        Ok(EvpMd { ptr })
+    }
 
-        #[allow(dead_code)]
-        pub unsafe fn as_mut_ptr(&mut self) -> *mut $ossl {
-            self.ptr
-        }
-    };
+    /// Returns a const pointer to the underlying `EVP_MD`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_MD {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_MD`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD {
+        self.ptr
+    }
 }
 
-/// Macro to generate the `Drop` implementation (calling the appropriate `_free`
-/// function) and the `unsafe impl Send/Sync` for a pointer wrapper struct.
-macro_rules! ptr_wrapper_tail {
-    ($name:ident; $free:ident) => {
-        impl Drop for $name {
-            fn drop(&mut self) {
-                unsafe {
-                    $free(self.ptr);
-                }
-            }
+impl Drop for EvpMd {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_MD_free(self.ptr);
         }
-
-        unsafe impl Send for $name {}
-        unsafe impl Sync for $name {}
-    };
+    }
 }
 
-/// Macro to generate complete Rust wrappers for common OpenSSL EVP types
-/// like `EVP_MD_CTX`, `EVP_MD`, `EVP_CIPHER_CTX`, `EVP_CIPHER`, etc.
-///
-/// It uses `ptr_wrapper_struct`, `ptr_wrapper_returns`, and `ptr_wrapper_tail`
-/// internally. Handles both `_CTX` types and the base types (e.g., `EVP_MD`).
-macro_rules! ptr_wrapper {
-    (ctx; $up:ident; $mix:ident) => {
-        paste::paste! {
-            /* EVP_XX_CTX */
-            ptr_wrapper_struct!([<Evp $mix Ctx>]; [<EVP_ $up _CTX>]);
+unsafe impl Send for EvpMd {}
+unsafe impl Sync for EvpMd {}
 
-            impl [<Evp $mix Ctx>] {
-                pub fn new() -> Result<[<Evp $mix Ctx>]> {
-                    let ptr = unsafe {
-                        [<EVP_ $up _CTX_new>]()
-                    };
-                    if ptr.is_null() {
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                    Ok([<Evp $mix Ctx>] { ptr: ptr })
-                }
-
-                ptr_wrapper_returns!([<EVP_ $up _CTX>]);
-            }
-
-            ptr_wrapper_tail!([<Evp $mix Ctx>]; [<EVP_ $up _CTX_free>]);
-
-            /* EVP_XX */
-            ptr_wrapper_struct!([<Evp $mix >]; [<EVP_ $up >]);
-
-            impl [<Evp $mix >] {
-                pub fn new(name: *const c_char) -> Result<[<Evp $mix >]> {
-                    let ptr = unsafe {
-                        [<EVP_ $up _fetch>](
-                            get_libctx(), name, std::ptr::null_mut()
-                        )
-                    };
-                    if ptr.is_null() {
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                    Ok([<Evp $mix >] { ptr: ptr })
-                }
-
-                ptr_wrapper_returns!([<EVP_ $up >]);
-            }
-
-            ptr_wrapper_tail!([<Evp $mix >]; [<EVP_ $up _free>]);
-        }
-    };
-
-    (ctx_from_name; $up:ident; $mix:ident) => {
-        paste::paste! {
-            ptr_wrapper_struct!([<Evp $mix Ctx>]; [<EVP_ $up _CTX>]);
-
-            impl [<Evp $mix Ctx>] {
-                pub fn new(
-                    name: *const c_char
-                ) -> Result<[<Evp $mix Ctx>]> {
-                    let arg = unsafe {
-                        [<EVP_ $up _fetch>](
-                            get_libctx(), name, std::ptr::null_mut()
-                        )
-                    };
-                    if arg.is_null() {
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                    let ptr = unsafe {
-                        /* This is safe and requires no lifetimes because
-                         * all _CTX_new() functions in OpenSSL take a
-                         * reference on the argument */
-                        [<EVP_ $up _CTX_new>](arg)
-                    };
-                    unsafe {
-                        [<EVP_ $up _free>](arg);
-                    }
-                    if ptr.is_null() {
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                    Ok([<Evp $mix Ctx>] { ptr: ptr })
-                }
-
-                ptr_wrapper_returns!([<EVP_ $up _CTX>]);
-            }
-
-            ptr_wrapper_tail!([<Evp $mix Ctx>]; [<EVP_ $up _CTX_free>]);
-        }
-    };
+/// Wrapper around OpenSSL's `EVP_MD_CTX`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpMdCtx {
+    ptr: *mut EVP_MD_CTX,
 }
 
-ptr_wrapper!(ctx; MD; Md);
-ptr_wrapper!(ctx; CIPHER; Cipher);
+/// Methods for creating and accessing `EvpMdCtx`.
+impl EvpMdCtx {
+    pub fn new() -> Result<EvpMdCtx> {
+        let ptr = unsafe { EVP_MD_CTX_new() };
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(EvpMdCtx { ptr })
+    }
 
-ptr_wrapper!(ctx_from_name; KDF; Kdf);
-ptr_wrapper!(ctx_from_name; MAC; Mac);
+    /// Returns a const pointer to the underlying `EVP_MD_CTX`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_MD_CTX {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_MD_CTX`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD_CTX {
+        self.ptr
+    }
+}
+
+impl Drop for EvpMdCtx {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_MD_CTX_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpMdCtx {}
+unsafe impl Sync for EvpMdCtx {}
+
+/// Wrapper around OpenSSL's `EVP_CIPHER`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpCipher {
+    ptr: *mut EVP_CIPHER,
+}
+
+/// Methods for creating and accessing `EvpCipher`.
+impl EvpCipher {
+    pub fn new(name: *const c_char) -> Result<EvpCipher> {
+        let ptr = unsafe {
+            EVP_CIPHER_fetch(get_libctx(), name, std::ptr::null_mut())
+        };
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(EvpCipher { ptr })
+    }
+
+    /// Returns a const pointer to the underlying `EVP_CIPHER`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_CIPHER {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_CIPHER`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER {
+        self.ptr
+    }
+}
+
+impl Drop for EvpCipher {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_CIPHER_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpCipher {}
+unsafe impl Sync for EvpCipher {}
+
+/// Wrapper around OpenSSL's `EVP_CIPHER_CTX`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpCipherCtx {
+    ptr: *mut EVP_CIPHER_CTX,
+}
+
+/// Methods for creating and accessing `EvpCipherCtx`.
+impl EvpCipherCtx {
+    pub fn new() -> Result<EvpCipherCtx> {
+        let ptr = unsafe { EVP_CIPHER_CTX_new() };
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(EvpCipherCtx { ptr })
+    }
+
+    /// Returns a const pointer to the underlying `EVP_CIPHER_CTX`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_CIPHER_CTX {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_CIPHER_CTX`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER_CTX {
+        self.ptr
+    }
+}
+
+impl Drop for EvpCipherCtx {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_CIPHER_CTX_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpCipherCtx {}
+unsafe impl Sync for EvpCipherCtx {}
+
+/// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpKdfCtx {
+    ptr: *mut EVP_KDF_CTX,
+}
+
+/// Methods for creating (from a named KDF) and accessing `EvpKdfCtx`.
+impl EvpKdfCtx {
+    pub fn new(name: *const c_char) -> Result<EvpKdfCtx> {
+        let arg = unsafe {
+            EVP_KDF_fetch(get_libctx(), name, std::ptr::null_mut()) // [cite: 31]
+        };
+        if arg.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        let ptr = unsafe { EVP_KDF_CTX_new(arg) };
+        unsafe {
+            EVP_KDF_free(arg);
+        }
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(EvpKdfCtx { ptr })
+    }
+
+    /// Returns a const pointer to the underlying `EVP_KDF_CTX`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_KDF_CTX {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_KDF_CTX`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_KDF_CTX {
+        self.ptr
+    }
+}
+
+impl Drop for EvpKdfCtx {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_KDF_CTX_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpKdfCtx {}
+unsafe impl Sync for EvpKdfCtx {}
+
+/// Wrapper around OpenSSL's `EVP_MAC_CTX`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpMacCtx {
+    ptr: *mut EVP_MAC_CTX,
+}
+
+/// Methods for creating (from a named MAC) and accessing `EvpMacCtx`.
+impl EvpMacCtx {
+    pub fn new(name: *const c_char) -> Result<EvpMacCtx> {
+        let arg =
+            unsafe { EVP_MAC_fetch(get_libctx(), name, std::ptr::null_mut()) };
+        if arg.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        let ptr = unsafe { EVP_MAC_CTX_new(arg) };
+        unsafe {
+            EVP_MAC_free(arg);
+        }
+        if ptr.is_null() {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(EvpMacCtx { ptr })
+    }
+
+    /// Returns a const pointer to the underlying `EVP_MAC_CTX`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_MAC_CTX {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_MAC_CTX`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MAC_CTX {
+        self.ptr
+    }
+}
+
+impl Drop for EvpMacCtx {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_MAC_CTX_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpMacCtx {}
+unsafe impl Sync for EvpMacCtx {}
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
 /// Used for various public key algorithm operations (key generation, signing,
