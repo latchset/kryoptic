@@ -17,11 +17,6 @@ name = "kryoptic_pkcs11"
 crate-type = ["cdylib"]
 
 [[bin]]
-name = "conformance"
-path = "src/conformance/main.rs"
-test = false
-
-[[bin]]
 name = "softhsm_migrate"
 path = "src/tools/softhsm/migrate.rs"
 test = false
