@@ -7,6 +7,11 @@ mod aes;
 #[cfg(feature = "ecc")]
 mod ec;
 
+#[cfg(feature = "ffdh")]
+mod ffdh;
+#[cfg(feature = "ffdh")]
+mod ffdh_groups;
+
 #[cfg(feature = "hash")]
 mod hash;
 
@@ -59,6 +64,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "eddsa")]
     ec::eddsa::register(mechs, ot);
+
+    #[cfg(feature = "ffdh")]
+    ffdh::register(mechs, ot);
 
     #[cfg(feature = "hash")]
     hash::register(mechs, ot);
