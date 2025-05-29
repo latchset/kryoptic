@@ -6,7 +6,7 @@
 //! the EVP (high-level) interface and parameter handling (`OSSL_PARAM`).
 
 use std::borrow::Cow;
-use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
+use std::ffi::{c_char, c_int, c_long, c_uint, c_void, CStr};
 
 use crate::error::{Error, Result};
 use crate::interface::*;
@@ -24,6 +24,8 @@ use crate::ec::get_oid_from_obj;
 use crate::ossl::ecdsa;
 #[cfg(feature = "eddsa")]
 use crate::ossl::eddsa;
+#[cfg(feature = "ffdh")]
+use crate::ossl::ffdh;
 #[cfg(feature = "mldsa")]
 use crate::ossl::mldsa;
 #[cfg(feature = "mlkem")]
@@ -399,6 +401,16 @@ impl EvpPkey {
         OsslParam::from_ptr(params)
     }
 
+    /// Allow to get parameters from a key.
+    /// The caller must preallocate the payloads with enough space to
+    /// receive the data, which is copied into the parameters.
+    pub fn get_params(&self, params: &mut OsslParam) -> Result<()> {
+        if unsafe { EVP_PKEY_get_params(self.ptr, params.as_mut_ptr()) } != 1 {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        Ok(())
+    }
+
     /// Generates a new key pair based on provided algorithm name and
     /// parameters.
     ///
@@ -476,6 +488,8 @@ impl EvpPkey {
             CKK_EC_EDWARDS => eddsa::eddsa_object_to_params(obj, class)?,
             #[cfg(feature = "ec_montgomery")]
             CKK_EC_MONTGOMERY => ecm::ecm_object_to_params(obj, class)?,
+            #[cfg(feature = "ffdh")]
+            CKK_DH => ffdh::ffdh_object_to_params(obj, class)?,
             #[cfg(feature = "rsa")]
             CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
             #[cfg(feature = "mlkem")]
@@ -802,7 +816,7 @@ impl<'a> OsslParam<'a> {
     pub fn add_owned_utf8_string(
         &mut self,
         key: *const c_char,
-        v: Vec<u8>,
+        mut v: Vec<u8>,
     ) -> Result<()> {
         if self.finalized {
             return Err(CKR_GENERAL_ERROR)?;
@@ -815,8 +829,36 @@ impl<'a> OsslParam<'a> {
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
                 key,
-                void_ptr!(v.as_ptr()) as *mut c_char,
+                void_ptr!(v.as_mut_ptr()) as *mut c_char,
                 0,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    /// Adds an empty sized string to receive values from queries like
+    /// get_params()
+    pub fn add_empty_utf8_string(
+        &mut self,
+        key: *const c_char,
+        len: usize,
+    ) -> Result<()> {
+        if self.finalized {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+
+        if key == std::ptr::null() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+
+        let mut v = vec![0u8; len];
+        let param = unsafe {
+            OSSL_PARAM_construct_utf8_string(
+                key,
+                void_ptr!(v.as_mut_ptr()) as *mut c_char,
+                len,
             )
         };
         self.v.push(v);
@@ -1091,6 +1133,26 @@ impl<'a> OsslParam<'a> {
         Ok(val)
     }
 
+    /// Gets the value of a long parameter by its key name.
+    #[allow(dead_code)]
+    pub fn get_long(&self, key: *const c_char) -> Result<c_long> {
+        if !self.finalized {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        let p = unsafe {
+            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
+        };
+        if p.is_null() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        let mut val: c_long = 0;
+        let res = unsafe { OSSL_PARAM_get_long(p, &mut val) };
+        if res != 1 {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        Ok(val)
+    }
+
     /// Gets the value of a BIGNUM parameter by its key name as a big-endian
     /// byte vector.
     pub fn get_bn(&self, key: *const c_char) -> Result<Vec<u8>> {
@@ -1133,6 +1195,32 @@ impl<'a> OsslParam<'a> {
         let octet =
             unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) };
         Ok(octet)
+    }
+
+    /// Gets a UTF8 String as vector, this includes the terminating NUL
+    #[allow(dead_code)]
+    pub fn get_utf8_string_as_vec(
+        &self,
+        key: *const c_char,
+    ) -> Result<Vec<u8>> {
+        if !self.finalized {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        let p = unsafe {
+            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
+        };
+        if p.is_null() {
+            let keyname =
+                unsafe { String::from(CStr::from_ptr(key).to_str().unwrap()) };
+            return Err(Error::not_found(keyname));
+        }
+        let mut ptr: *const c_char = std::ptr::null_mut();
+        let res = unsafe { OSSL_PARAM_get_utf8_string_ptr(p, &mut ptr) };
+        if res != 1 {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        let s = unsafe { CStr::from_ptr(ptr) };
+        Ok(s.to_bytes_with_nul().to_vec())
     }
 
     /// Checks if a parameter with the given key name exists in the array.
