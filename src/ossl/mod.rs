@@ -51,6 +51,9 @@ pub mod montgomery;
 #[cfg(feature = "eddsa")]
 pub mod eddsa;
 
+#[cfg(feature = "ffdh")]
+pub mod ffdh;
+
 #[cfg(feature = "fips")]
 pub mod fips;
 
