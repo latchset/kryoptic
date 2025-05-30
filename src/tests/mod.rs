@@ -314,6 +314,9 @@ mod ecdh_vectors;
 #[cfg(feature = "eddsa")]
 mod eddsa;
 
+#[cfg(feature = "ffdh")]
+mod ffdh;
+
 #[cfg(feature = "hash")]
 mod hashes;
 
