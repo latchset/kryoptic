@@ -38,7 +38,7 @@ bindgen = "0.71"
 pkg-config = "0.3"
 
 [dependencies]
-asn1 = "0.20.0"
+asn1 = "0.21"
 bimap = "0.6.3"
 bitflags = "2.4.1"
 cfg-if = "1.0.0"
