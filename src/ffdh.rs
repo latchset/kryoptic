@@ -111,15 +111,6 @@ impl FFDHPrivFactory {
             OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_ulong; val 0));
 
-        /* default to private */
-        let private = attr_element!(
-            CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
-            Attribute::from_bool; val true);
-        match attributes.iter().position(|x| x.get_type() == CKA_PRIVATE) {
-            Some(idx) => attributes[idx] = private,
-            None => attributes.push(private),
-        }
-
         factory.data.finalize();
 
         factory

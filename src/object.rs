@@ -475,7 +475,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     }
 
     /// Adds the storage object attributes defined in the spec
-    fn add_common_storage_attrs(&mut self) {
+    fn add_common_storage_attrs(&mut self, private: bool) {
         self.add_common_object_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
@@ -483,7 +483,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
             Attribute::from_bool; val false));
         attrs.push(attr_element!(
             CKA_PRIVATE; OAFlags::Defval | OAFlags::ChangeOnCopy;
-            Attribute::from_bool; val false));
+            Attribute::from_bool; val private));
         attrs.push(attr_element!(
             CKA_MODIFIABLE; OAFlags::Defval | OAFlags::ChangeOnCopy;
             Attribute::from_bool; val true));
@@ -917,7 +917,7 @@ impl DataFactory {
     fn new() -> DataFactory {
         let mut factory: DataFactory = Default::default();
 
-        factory.add_common_storage_attrs();
+        factory.add_common_storage_attrs(false);
 
         let attributes = factory.data.get_attributes_mut();
 
@@ -971,7 +971,7 @@ impl ObjectFactory for DataFactory {
 pub trait CertFactory: ObjectFactory {
     /// Adds the certificate object attributes defined in the spec
     fn add_common_certificate_attrs(&mut self) {
-        self.add_common_storage_attrs();
+        self.add_common_storage_attrs(false);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
             CKA_CERTIFICATE_TYPE; OAFlags::AlwaysRequired;
@@ -1162,8 +1162,8 @@ impl CertFactory for X509Factory {}
 
 pub trait CommonKeyFactory: ObjectFactory {
     /// Adds the key objects attributes defined for all keys in the spec
-    fn add_common_key_attrs(&mut self) {
-        self.add_common_storage_attrs();
+    fn add_common_key_attrs(&mut self, private: bool) {
+        self.add_common_storage_attrs(private);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
             CKA_KEY_TYPE; OAFlags::RequiredOnCreate; Attribute::from_ulong;
@@ -1207,7 +1207,7 @@ pub trait CommonKeyFactory: ObjectFactory {
 pub trait PubKeyFactory: CommonKeyFactory {
     /// Adds the public key attributes defined in the spec
     fn add_common_public_key_attrs(&mut self) {
-        self.add_common_key_attrs();
+        self.add_common_key_attrs(false);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
             CKA_SUBJECT; OAFlags::Defval; Attribute::from_bytes;
@@ -1248,7 +1248,7 @@ pub trait PubKeyFactory: CommonKeyFactory {
 pub trait PrivKeyFactory: CommonKeyFactory {
     /// Adds the private key attributes defined in the spec
     fn add_common_private_key_attrs(&mut self) {
-        self.add_common_key_attrs();
+        self.add_common_key_attrs(true);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
             CKA_SUBJECT; OAFlags::Defval; Attribute::from_bytes;
@@ -1334,7 +1334,7 @@ macro_rules! ok_or_clear {
 pub trait SecretKeyFactory: CommonKeyFactory {
     /// Adds the secret key attributes defined in the spec
     fn add_common_secret_key_attrs(&mut self) {
-        self.add_common_key_attrs();
+        self.add_common_key_attrs(true);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
             CKA_SENSITIVE; OAFlags::Defval | OAFlags::ChangeToTrue;
