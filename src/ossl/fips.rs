@@ -247,12 +247,27 @@ unsafe extern "C" fn fips_set_error_debug(
     _func: *const ::std::os::raw::c_char,
 ) {
 }
+#[allow(unused_variables)]
 unsafe extern "C" fn fips_vset_error(
     _prov: *const OSSL_CORE_HANDLE,
-    _reason: u32,
-    _fmt: *const ::std::os::raw::c_char,
-    _args: *mut c_void,
+    reason: u32,
+    fmt: *const ::std::os::raw::c_char,
+    args: *mut c_void,
 ) {
+    #[cfg(feature = "log")]
+    {
+        use log::{debug, error};
+        use vsprintf::vsprintf;
+
+        if !fmt.is_null() {
+            match vsprintf(fmt, args) {
+                Ok(s) => error!("Openssl Error({}): {:?}", reason, s),
+                Err(e) => error!("Openssl Reason: {} [{:?}]", reason, e),
+            }
+        } else {
+            debug!("Openssl Reason: {}", reason);
+        }
+    }
 }
 unsafe extern "C" fn fips_set_error_mark(
     _prov: *const OSSL_CORE_HANDLE,

@@ -123,6 +123,8 @@ fn ossl_bindings(args: &[&str], out_file: &Path) {
         .allowlist_item("evp_.*")
         .allowlist_item("BN_.*")
         .allowlist_item("LN_aes.*")
+        .allowlist_item("ERR.*")
+        .allowlist_item("BIO.*")
         .parse_callbacks(Box::new(OsslCallbacks))
         .generate()
         .expect("Unable to generate bindings")

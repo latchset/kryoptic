@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic, i686, minimal, pqc]
+        name: [ossl3, fips, release, dynamic, i686, minimal, pqc, log]
         db: [jsondb, sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
     container: fedora:latest
     steps:
@@ -87,6 +87,7 @@ jobs:
         run: |
           FEATURES="${{ matrix.db }}"
           OPTS="--no-default-features"
+          export CC=clang
 
           if [ "${{ matrix.name }}" = "fips" ]; then
             FEATURES="${FEATURES},fips"
@@ -105,6 +106,8 @@ jobs:
             FEATURES="${FEATURES},dynamic"
           elif [ "${{ matrix.name }}" = "pqc" ]; then
             FEATURES="${FEATURES},standard,pqc"
+          elif [ "${{ matrix.name }}" = "log" ]; then
+            FEATURES="${FEATURES},standard,log"
           fi
 
           # create a bugus configuration file to make sure it is not used during tests

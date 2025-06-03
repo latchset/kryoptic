@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::interface::*;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
-use crate::misc::{byte_ptr, void_ptr, BorrowedReference};
+use crate::misc::*;
 #[cfg(any(feature = "ecc", feature = "rsa"))]
 use crate::object::Object;
 use crate::ossl::bindings::*;
@@ -47,6 +47,7 @@ impl EvpMd {
         let ptr =
             unsafe { EVP_MD_fetch(get_libctx(), name, std::ptr::null_mut()) };
         if ptr.is_null() {
+            trace_ossl!("EVP_MD_fetch()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpMd { ptr })
@@ -86,6 +87,7 @@ impl EvpMdCtx {
     pub fn new() -> Result<EvpMdCtx> {
         let ptr = unsafe { EVP_MD_CTX_new() };
         if ptr.is_null() {
+            trace_ossl!("EVP_MD_ctx_new()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpMdCtx { ptr })
@@ -127,6 +129,7 @@ impl EvpCipher {
             EVP_CIPHER_fetch(get_libctx(), name, std::ptr::null_mut())
         };
         if ptr.is_null() {
+            trace_ossl!("EVP_CIPHER_fetch()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpCipher { ptr })
@@ -166,6 +169,7 @@ impl EvpCipherCtx {
     pub fn new() -> Result<EvpCipherCtx> {
         let ptr = unsafe { EVP_CIPHER_CTX_new() };
         if ptr.is_null() {
+            trace_ossl!("EVP_CIPHER_ctx_new()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpCipherCtx { ptr })
@@ -207,6 +211,7 @@ impl EvpKdfCtx {
             EVP_KDF_fetch(get_libctx(), name, std::ptr::null_mut()) // [cite: 31]
         };
         if arg.is_null() {
+            trace_ossl!("EVP_KDF_fetch()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let ptr = unsafe { EVP_KDF_CTX_new(arg) };
@@ -214,6 +219,7 @@ impl EvpKdfCtx {
             EVP_KDF_free(arg);
         }
         if ptr.is_null() {
+            trace_ossl!("EVP_KDF_CTX_new()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpKdfCtx { ptr })
@@ -254,6 +260,7 @@ impl EvpMacCtx {
         let arg =
             unsafe { EVP_MAC_fetch(get_libctx(), name, std::ptr::null_mut()) };
         if arg.is_null() {
+            trace_ossl!("EVP_MAC_fetch()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let ptr = unsafe { EVP_MAC_CTX_new(arg) };
@@ -261,6 +268,7 @@ impl EvpMacCtx {
             EVP_MAC_free(arg);
         }
         if ptr.is_null() {
+            trace_ossl!("EVP_MAC_CTX_new()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpMacCtx { ptr })
@@ -308,6 +316,7 @@ impl EvpPkeyCtx {
             EVP_PKEY_CTX_new_from_name(get_libctx(), name, std::ptr::null())
         };
         if ptr.is_null() {
+            trace_ossl!("EVP_PKEY_CTX_new_from_name()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkeyCtx { ptr: ptr })
@@ -369,6 +378,7 @@ impl EvpPkey {
         let mut ctx = EvpPkeyCtx::new(pkey_name)?;
         let res = unsafe { EVP_PKEY_fromdata_init(ctx.as_mut_ptr()) };
         if res != 1 {
+            trace_ossl!("EVP_PKEY_fromdata_init()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
@@ -381,6 +391,7 @@ impl EvpPkey {
             )
         };
         if res != 1 {
+            trace_ossl!("EVP_PKEY_fromdata()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkey { ptr: pkey })
@@ -396,6 +407,7 @@ impl EvpPkey {
             EVP_PKEY_todata(self.ptr, c_int::try_from(selection)?, &mut params)
         } != 1
         {
+            trace_ossl!("EVP_PKEY_todata()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         OsslParam::from_ptr(params)
@@ -423,17 +435,20 @@ impl EvpPkey {
         let mut ctx = EvpPkeyCtx::new(pkey_name)?;
         let res = unsafe { EVP_PKEY_keygen_init(ctx.as_mut_ptr()) };
         if res != 1 {
+            trace_ossl!("EVP_PKEY_keygen_init()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let res = unsafe {
             EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
         };
         if res != 1 {
+            trace_ossl!("EVP_PKEY_CTX_set_params()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
         let res = unsafe { EVP_PKEY_generate(ctx.as_mut_ptr(), &mut pkey) };
         if res != 1 {
+            trace_ossl!("EVP_PKEY_generate()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpPkey { ptr: pkey })
@@ -587,6 +602,7 @@ impl BigNum {
             )
         };
         if bn.is_null() {
+            trace_ossl!("BN_bin2bn()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(BigNum {
@@ -623,6 +639,7 @@ impl BigNum {
             BN_bn2nativepad(self.bn, v.as_mut_ptr(), c_int::try_from(v.len())?)
         } < 1
         {
+            trace_ossl!("BN_bn2nativepad()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(v)
@@ -1128,6 +1145,7 @@ impl<'a> OsslParam<'a> {
         let mut val: c_int = 0;
         let res = unsafe { OSSL_PARAM_get_int(p, &mut val) };
         if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_int()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(val)
@@ -1148,6 +1166,7 @@ impl<'a> OsslParam<'a> {
         let mut val: c_long = 0;
         let res = unsafe { OSSL_PARAM_get_long(p, &mut val) };
         if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_long()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(val)
@@ -1190,6 +1209,7 @@ impl<'a> OsslParam<'a> {
             OSSL_PARAM_get_octet_string_ptr(p, &mut buf, &mut buf_len)
         };
         if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_octet_string_ptr()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let octet =
@@ -1217,6 +1237,7 @@ impl<'a> OsslParam<'a> {
         let mut ptr: *const c_char = std::ptr::null_mut();
         let res = unsafe { OSSL_PARAM_get_utf8_string_ptr(p, &mut ptr) };
         if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_utf8_string_ptr()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         let s = unsafe { CStr::from_ptr(ptr) };
@@ -1372,6 +1393,7 @@ impl EvpSignature {
             EVP_SIGNATURE_fetch(get_libctx(), name, std::ptr::null_mut())
         };
         if ptr.is_null() {
+            trace_ossl!("EVP_SIGNATURE_fetch()");
             return Err(CKR_DEVICE_ERROR)?;
         }
         Ok(EvpSignature { ptr })
@@ -1397,3 +1419,57 @@ impl Drop for EvpSignature {
         }
     }
 }
+
+#[cfg(all(feature = "log", feature = "fips"))]
+fn ossl_err_stack() -> String {
+    /* there is no external error management with fips builds */
+    "".to_string()
+}
+
+#[cfg(all(feature = "log", not(feature = "fips")))]
+fn ossl_err_stack() -> String {
+    // Use a mem bio to "print out" the error stack
+    let mut bio = std::ptr::null_mut();
+    let bio_method = unsafe { BIO_s_mem() };
+    if !bio_method.is_null() {
+        bio = unsafe { BIO_new(bio_method) };
+    }
+    if bio.is_null() {
+        return "Failed to fetch OpenSSL Error Stack".to_string();
+    }
+    unsafe { ERR_print_errors(bio) };
+
+    /* retrieve the mem bio data as a long string, with embedded \n */
+    let mut raw_mem: *mut c_char = std::ptr::null_mut();
+    let raw_len = unsafe {
+        BIO_ctrl(bio, BIO_CTRL_INFO as c_int, 0, void_ptr!(&mut raw_mem))
+    };
+
+    /* copy this buffer to a vector so we can turn it into a Rust String */
+    let mut vec = bytes_to_vec!(raw_mem, raw_len);
+    // remove final newline if any
+    while vec[vec.len() - 1] == b'\n' {
+        let _ = vec.pop();
+    }
+    match String::from_utf8(vec) {
+        Ok(s) => s,
+        Err(e) => format!("Failed to parse OpenSSL Error Stack: [{:?}]", e),
+    }
+}
+
+macro_rules! trace_ossl {
+    ($name:expr) => {
+        #[cfg(feature = "log")]
+        {
+            use log::error;
+            error!(
+                "{}:{}: {} failed: [{}]",
+                file!(),
+                line!(),
+                $name,
+                ossl_err_stack()
+            );
+        }
+    };
+}
+pub(crate) use trace_ossl;
