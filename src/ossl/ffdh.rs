@@ -32,6 +32,10 @@ const MODP_8192_NAME: &[u8; 10] = b"modp_8192\0";
 
 static DH_NAME: &[u8; 3] = b"DH\0";
 
+/* This is the smallest AES key size, anything smaller then this
+ * is worthless as a shared secret */
+const MIN_KEYLEN: usize = 16;
+
 fn group_to_ossl_name(group: DHGroupName) -> *const c_char {
     match group {
         DHGroupName::FFDHE2048 => name_as_char(FFDHE2048_NAME),
@@ -274,6 +278,18 @@ impl Derive for FFDHOperation {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
+        let mut secret = vec![0u8; secret_len];
+        let res = unsafe {
+            EVP_PKEY_derive(
+                ctx.as_mut_ptr(),
+                secret.as_mut_ptr(),
+                &mut secret_len,
+            )
+        };
+        if res != 1 || secret_len < MIN_KEYLEN {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(attr) => {
                 let len = usize::try_from(attr.to_ulong()?)?;
@@ -285,20 +301,11 @@ impl Derive for FFDHOperation {
             None => secret_len,
         };
 
-        let mut secret = vec![0u8; secret_len];
-        let res = unsafe {
-            EVP_PKEY_derive(
-                ctx.as_mut_ptr(),
-                secret.as_mut_ptr(),
-                &mut secret_len,
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
         let mut tmpl = CkAttrs::from(template);
-        tmpl.add_owned_slice(CKA_VALUE, &secret[(secret_len - keylen)..])?;
+        tmpl.add_owned_slice(
+            CKA_VALUE,
+            &secret[(secret_len - keylen)..secret_len],
+        )?;
         tmpl.zeroize = true;
         let mut obj = factory.create(tmpl.as_slice())?;
 
