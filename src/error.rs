@@ -6,9 +6,10 @@
 use std::error;
 use std::fmt;
 
-use crate::interface;
+use crate::interface::*;
 
 use asn1;
+
 use serde_json;
 
 /// The Result type used within the project, wraps
@@ -28,7 +29,7 @@ pub struct Error {
     /// required buffer size if the function is called again
     reqsize: usize,
     /// The PKCS#11 CK_RV error code to be returned to the application
-    ckrv: interface::CK_RV,
+    ckrv: CK_RV,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -44,79 +45,91 @@ pub enum ErrorKind {
     Nested,
 }
 
+macro_rules! trace_err {
+    ($err:expr) => {{
+        let e = $err;
+        #[cfg(feature = "log")]
+        if e.ckrv != CKR_OK {
+            use log::error;
+            error!("{}", &e);
+        }
+        e
+    }};
+}
+
 impl Error {
     /// Creates an error that represents a PKCS#11 Error code
-    pub fn ck_rv(ckrv: interface::CK_RV) -> Error {
-        Error {
+    pub fn ck_rv(ckrv: CK_RV) -> Error {
+        trace_err!(Error {
             kind: ErrorKind::CkError,
             origin: None,
             errmsg: None,
             reqsize: 0,
             ckrv: ckrv,
-        }
+        })
     }
 
     /// Creates an error that represents a PKCS#11 Error code, and stores
     /// the originating error code that was mapped to this error code
-    pub fn ck_rv_from_error<E>(ckrv: interface::CK_RV, error: E) -> Error
+    pub fn ck_rv_from_error<E>(ckrv: CK_RV, error: E) -> Error
     where
-        E: Into<Box<dyn error::Error>>,
+        E: Into<Box<dyn error::Error>> + std::fmt::Display,
     {
-        Error {
+        trace_err!(Error {
             kind: ErrorKind::CkError,
             origin: Some(error.into()),
             errmsg: None,
             reqsize: 0,
             ckrv: ckrv,
-        }
+        })
     }
 
     /// Creates an error that represents a PKCS#11 Error code, and includes
     /// an error message
-    pub fn ck_rv_with_errmsg(ckrv: interface::CK_RV, errmsg: String) -> Error {
-        Error {
+    pub fn ck_rv_with_errmsg(ckrv: CK_RV, errmsg: String) -> Error {
+        trace_err!(Error {
             kind: ErrorKind::CkError,
             origin: None,
             errmsg: Some(errmsg),
             reqsize: 0,
             ckrv: ckrv,
-        }
+        })
     }
 
     /// Creates an AttributeNotFound error, and includes an error message
     pub fn not_found(errmsg: String) -> Error {
-        Error {
+        trace_err!(Error {
             kind: ErrorKind::AttributeNotFound,
             origin: None,
             errmsg: Some(errmsg),
             reqsize: 0,
-            ckrv: interface::CKR_GENERAL_ERROR,
-        }
+            ckrv: CKR_GENERAL_ERROR,
+        })
     }
 
     /// Creates an general (unspecified) error message from a previous error
     pub fn other_error<E>(error: E) -> Error
     where
-        E: Into<Box<dyn error::Error>>,
+        E: Into<Box<dyn error::Error>> + std::fmt::Display,
     {
-        Error {
+        trace_err!(Error {
             kind: ErrorKind::Nested,
             origin: Some(error.into()),
             errmsg: None,
             reqsize: 0,
-            ckrv: interface::CKR_GENERAL_ERROR,
-        }
+            ckrv: CKR_GENERAL_ERROR,
+        })
     }
 
     /// Creates a BufferTooSmall error and set the required buffer size
     pub fn buf_too_small(reqsize: usize) -> Error {
-        Error {
+        trace_err!(Error {
             kind: ErrorKind::BufferTooSmall,
             origin: None,
             errmsg: None,
             reqsize: reqsize,
-            ckrv: interface::CKR_BUFFER_TOO_SMALL,
-        }
+            ckrv: CKR_BUFFER_TOO_SMALL,
+        })
     }
 
     /// Returns the error kind
@@ -130,7 +143,7 @@ impl Error {
     }
 
     /// Returns the associated PKCS#11 Error code
-    pub fn rv(&self) -> interface::CK_RV {
+    pub fn rv(&self) -> CK_RV {
         self.ckrv
     }
 
@@ -142,32 +155,46 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.kind {
-            ErrorKind::CkError => {
-                if let Some(ref e) = self.errmsg {
-                    write!(f, "{}", e)
-                } else {
-                    match self.ckrv {
-                        interface::CKR_GENERAL_ERROR => {
-                            write!(f, std::stringify!(CKR_GENERAL_ERROR))
-                        }
-                        interface::CKR_ATTRIBUTE_TYPE_INVALID => {
-                            write!(f, "CKR_ATTRIBUTE_TYPE_INVALID")
-                        }
-                        _ => write!(f, "{}", self.ckrv),
-                    }
+        let ret = match self.kind {
+            ErrorKind::CkError => write!(f, "Generic CK error"),
+            ErrorKind::AttributeNotFound => write!(f, "Attribute not found"),
+            ErrorKind::BufferTooSmall => write!(f, "Buffer too small"),
+            ErrorKind::Nested => write!(f, "Nested error"),
+        };
+        if ret.is_err() {
+            return ret;
+        }
+
+        let ret = write!(f, ", {}", ckrv_to_string(self.ckrv));
+        if ret.is_err() {
+            return ret;
+        }
+
+        match &self.origin {
+            Some(e) => {
+                let ret = write!(f, " - Error from: {{ {} }}", e);
+                if ret.is_err() {
+                    return ret;
                 }
             }
-            ErrorKind::AttributeNotFound => write!(
-                f,
-                "attribute not found: {}",
-                self.errmsg.as_ref().unwrap()
-            ),
-            ErrorKind::BufferTooSmall => {
-                write!(f, "Buffer Too Small, required size: {}", self.reqsize)
-            }
-            ErrorKind::Nested => self.origin.as_ref().unwrap().fmt(f),
+            None => (),
         }
+        match &self.errmsg {
+            Some(e) => {
+                let ret = write!(f, " - With message: {}", e);
+                if ret.is_err() {
+                    return ret;
+                }
+            }
+            None => (),
+        }
+        if self.reqsize != 0 {
+            let ret = write!(f, " - With reqsize: {}", self.reqsize);
+            if ret.is_err() {
+                return ret;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -201,9 +228,9 @@ impl From<std::convert::Infallible> for Error {
     }
 }
 
-impl From<interface::CK_RV> for Error {
+impl From<CK_RV> for Error {
     /// Maps a naked PKCS#11 Error code to an Error
-    fn from(error: interface::CK_RV) -> Error {
+    fn from(error: CK_RV) -> Error {
         Error::ck_rv(error)
     }
 }
@@ -270,26 +297,26 @@ pub(crate) use some_or_err;
 #[allow(dead_code)]
 pub fn general_error<E>(error: E) -> Error
 where
-    E: Into<Box<dyn error::Error>>,
+    E: Into<Box<dyn error::Error>> + std::fmt::Display,
 {
-    Error::ck_rv_from_error(interface::CKR_GENERAL_ERROR, error)
+    Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
 }
 
 /// Helper to return a CKR_DEVICE_ERROR error
 #[allow(dead_code)]
 pub fn device_error<E>(error: E) -> Error
 where
-    E: Into<Box<dyn error::Error>>,
+    E: Into<Box<dyn error::Error>> + std::fmt::Display,
 {
-    Error::ck_rv_from_error(interface::CKR_DEVICE_ERROR, error)
+    Error::ck_rv_from_error(CKR_DEVICE_ERROR, error)
 }
 
 /// Helper to return a CKR_ARGUMENTS_BAD error
 pub fn arg_bad<E>(error: E) -> Error
 where
-    E: Into<Box<dyn error::Error>>,
+    E: Into<Box<dyn error::Error>> + std::fmt::Display,
 {
-    Error::ck_rv_from_error(interface::CKR_ARGUMENTS_BAD, error)
+    Error::ck_rv_from_error(CKR_ARGUMENTS_BAD, error)
 }
 
 /// Helper to map an Error to a PKCS#11 Error code error

@@ -56,7 +56,7 @@ jobs:
                 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
                 'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
                 'crate(serial_test/default)' 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' \
-                'crate(uuid/default)' 'crate(uuid/v4)' 'crate(cryptoki/default)'
+                'crate(uuid/default)' 'crate(uuid/v4)' 'crate(cryptoki/default)' 'crate(vsprintf/default)'
           fi
 
       - name: Checkout Repository

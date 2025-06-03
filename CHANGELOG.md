@@ -6,6 +6,10 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* Added initial support for tracing logs
+  - [Add some basic infrastructure to perform
+     tracing](https://github.com/latchset/kryoptic/pull/259)
+
 * Added support for FFDH key generation and derivation
   - [Add support fo FFDH key generation and
      derivation](https://github.com/latchset/kryoptic/pull/257)

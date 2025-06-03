@@ -6,6 +6,9 @@ use std::fs::{create_dir_all, remove_dir_all, OpenOptions};
 use std::io::Write;
 use std::sync::Once;
 
+#[cfg(feature = "log")]
+use crate::log;
+
 use crate::misc::*;
 use crate::storage::StorageDBInfo;
 use crate::*;
@@ -31,6 +34,9 @@ static SYNC: RwLock<u64> = RwLock::new(0);
 
 static INIT: Once = Once::new();
 fn test_initialize() -> Option<RwLockWriteGuard<'static, u64>> {
+    #[cfg(feature = "log")]
+    log::test_init();
+
     let mut winner: Option<RwLockWriteGuard<u64>> = None;
     INIT.call_once(|| {
         /* ignore failure to remove */

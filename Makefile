@@ -1,3 +1,5 @@
+TESTS:=
+
 all: build
 
 build:
@@ -10,13 +12,13 @@ static:
 	cargo build --no-default-features --features standard
 
 check:
-	cargo test --features nssdb
+	cargo test --features nssdb,log $(TESTS)
 
 check-fips:
-	cargo test --no-default-features --features fips,sqlitedb,nssdb
+	cargo test --no-default-features --features fips,sqlitedb,nssdb,log $(TESTS)
 
 check-static:
-	cargo test --no-default-features --features standard
+	cargo test --no-default-features --features standard,log $(TESTS)
 
 check-format:
 	@find ./src build.rs -name '*.rs' | xargs rustfmt --check --color auto
@@ -31,7 +33,7 @@ tests: build
 	src/tools/softhsm/test.sh
 
 docs:
-	cargo doc --no-default-features --features standard,pqc,nssdb,jsondb --document-private-items
+	cargo doc --no-default-features --features standard,pqc,nssdb,jsondb,log --document-private-items
 
 docs-fips:
 	cargo doc --no-default-features --features fips --document-private-items
