@@ -100,10 +100,14 @@ macro_rules! cast_or_ret {
     }};
 }
 
-/* Thread-local instance of the Cryptographically Secure Pseudo-Random Number
- * Generator (CSPRNG). This is used to avoid contention and locking between
- * different threads. */
-thread_local!(static CSPRNG: RefCell<RNG> = RefCell::new(RNG::new("HMAC DRBG SHA256").unwrap()));
+thread_local!(
+    /// Thread-local instance of the Cryptographically Secure Pseudo-Random Number
+    /// Generator (CSPRNG). This is used to avoid contention and locking between
+    /// different threads.
+    static CSPRNG: RefCell<RNG> = RefCell::new(
+        RNG::new("HMAC DRBG SHA256").unwrap()
+    )
+);
 
 /// Fill a buffer with random data
 ///
@@ -2922,6 +2926,7 @@ extern "C" fn fn_wait_for_slot_event(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
+/// FFI Compatible structure that holds the PKCS#11 v2.40 functions table
 static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     version: CK_VERSION {
         major: 2,
@@ -3075,6 +3080,7 @@ extern "C" fn fn_get_token_info(
     CKR_OK
 }
 
+/// Holds the version of the implemented interface to return by default
 #[cfg(feature = "pkcs11_3_2")]
 static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 2 };
 #[cfg(not(feature = "pkcs11_3_2"))]
@@ -3086,6 +3092,7 @@ static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic PKCS11 Module          ";
 static LIBRARY_VERSION: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
 
+/// The default module info data
 static MODULE_INFO: CK_INFO = CK_INFO {
     cryptokiVersion: IMPLEMENTED_VERSION,
     manufacturerID: MANUFACTURER_ID,
@@ -3821,6 +3828,7 @@ extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
+/// FFI Compatible structure that holds the PKCS#11 v3.0 functions table
 static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     version: CK_VERSION { major: 3, minor: 0 },
     C_Initialize: Some(fn_initialize),
@@ -4279,6 +4287,7 @@ extern "C" fn fn_unwrap_key_authenticated(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
+/// FFI Compatible structure that holds the PKCS#11 v3.2 functions table
 #[cfg(feature = "pkcs11_3_2")]
 static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
     version: CK_VERSION { major: 3, minor: 2 },
@@ -4388,26 +4397,34 @@ static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
     C_UnwrapKeyAuthenticated: Some(fn_unwrap_key_authenticated),
 };
 
+/// PKCS#11 reserved name for the standard official interfaces
 static INTERFACE_NAME_STD_NUL: &str = "PKCS 11\0";
 
+/// Holds pointers to v2.40 interface
 static INTERFACE_240: CK_INTERFACE = CK_INTERFACE {
     pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
     pFunctionList: &FNLIST_240 as *const _ as *const ::std::os::raw::c_void,
     flags: 0,
 };
 
+/// Holds pointers to v3.0 interface
 static INTERFACE_300: CK_INTERFACE = CK_INTERFACE {
     pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
     pFunctionList: &FNLIST_300 as *const _ as *const ::std::os::raw::c_void,
     flags: 0,
 };
 
+/// Holds pointers to v3.2 interface
 #[cfg(feature = "pkcs11_3_2")]
 static INTERFACE_320: CK_INTERFACE = CK_INTERFACE {
     pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
     pFunctionList: &FNLIST_320 as *const _ as *const ::std::os::raw::c_void,
     flags: 0,
 };
+
+/// Structure that holds a pointer to the interface structure.
+/// It is used when applications request a specific interface version,
+/// and we need to return the associated structure via FFI.
 
 #[derive(Debug, Copy, Clone)]
 struct InterfaceData {
@@ -4418,6 +4435,8 @@ unsafe impl Sync for CK_INTERFACE {}
 unsafe impl Send for CK_INTERFACE {}
 unsafe impl Sync for InterfaceData {}
 unsafe impl Send for InterfaceData {}
+
+/// The set of known interfaces we can return to applications
 
 static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
     let mut v = Vec::with_capacity(3);
