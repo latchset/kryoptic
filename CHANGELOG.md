@@ -6,6 +6,9 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* The jsondb storage backend has been removed
+  - [Drop jsondb](https://github.com/latchset/kryoptic/pull/262)
+
 * Added initial support for tracing logs
   - [Add some basic infrastructure to perform
      tracing](https://github.com/latchset/kryoptic/pull/259)
