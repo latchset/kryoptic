@@ -49,7 +49,7 @@ impl Default for StorageTokenInfo {
 /// Trait for discovering available storage database backend types.
 ///
 /// Each backend implementation provides a static instance of this trait
-/// (e.g., `json::DBINFO`, `sqlite::DBINFO`) which is registered in the
+/// (e.g., `sqlite::DBINFO`) which is registered in the
 /// `STORAGE_DBS` list.
 pub trait StorageDBInfo: Debug + Send + Sync {
     /// Creates a new instance of the storage backend.
@@ -138,9 +138,6 @@ pub trait Storage: Debug + Send + Sync {
 pub mod aci;
 pub mod format;
 
-#[cfg(feature = "jsondb")]
-pub mod json;
-
 #[cfg(feature = "memorydb")]
 pub mod memory;
 
@@ -157,9 +154,6 @@ pub mod nssdb;
 /// Populated at runtime based on features enabled at compile time.
 static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
     let mut v = Vec::<&'static dyn StorageDBInfo>::with_capacity(4);
-
-    #[cfg(feature = "jsondb")]
-    v.push(&json::DBINFO);
 
     #[cfg(feature = "memorydb")]
     v.push(&memory::DBINFO);

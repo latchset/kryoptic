@@ -9,14 +9,14 @@ use crate::tests::*;
 
 use serial_test::{parallel, serial};
 
-#[cfg(any(feature = "jsondb", feature = "sqlitedb"))]
+#[cfg(feature = "sqlitedb")]
 fn test_token_setup(name: &str) -> TestToken {
     let mut testtokn = TestToken::new(String::from(name));
     testtokn.setup_db(None);
     testtokn
 }
 
-#[cfg(any(feature = "jsondb", feature = "sqlitedb"))]
+#[cfg(feature = "sqlitedb")]
 fn test_token_env(suffix: &str) {
     let dbname = format!("test_token_env{}", suffix);
     let mut testtokn = test_token_setup(&dbname);
@@ -47,7 +47,7 @@ fn test_token_env(suffix: &str) {
     testtokn.finalize();
 }
 
-#[cfg(any(feature = "jsondb", feature = "sqlitedb"))]
+#[cfg(feature = "sqlitedb")]
 fn test_token_null_args(suffix: &str) {
     let dbname = format!("test_token_nullargs{}", suffix);
     let mut testtokn = test_token_setup(&dbname);
@@ -112,14 +112,6 @@ fn test_token_datadir() {
     }
 
     testtokn.finalize();
-}
-
-#[cfg(feature = "jsondb")]
-#[test]
-#[serial]
-fn test_token_json() {
-    test_token_env(".json");
-    test_token_null_args(".json");
 }
 
 #[cfg(feature = "sqlitedb")]
@@ -331,17 +323,19 @@ fn test_config_multiple_tokens() {
         (
             "memory",
             String::from("flags=encrypt"), // TODO fix and test unencrypted memory!
-            "TOKEN 1",
+            "TOKEN MEMORYDB",
         ),
-        #[cfg(feature = "jsondb")]
-        ("json", format!("{}/{}.json", TESTDIR, name), "TOKEN 2"),
         #[cfg(feature = "sqlitedb")]
-        ("sqlite", format!("{}/{}.sql", TESTDIR, name), "TOKEN 3"),
+        (
+            "sqlite",
+            format!("{}/{}.sql", TESTDIR, name),
+            "TOKEN SQLITEDB",
+        ),
         #[cfg(feature = "nssdb")]
         (
             "nssdb",
             format!("configDir={}/{}", TESTDIR, name),
-            "TOKEN 4",
+            "TOKEN NSSDB",
         ),
     ];
     let mut config = String::new();
