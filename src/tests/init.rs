@@ -290,14 +290,6 @@ fn test_re_init_token_common(dbtype: String, dbargs: String) {
     testtokn.finalize();
 }
 
-#[cfg(feature = "jsondb")]
-#[test]
-#[serial]
-fn test_re_init_token_json() {
-    let dbargs = format!("{}/{}", TESTDIR, "test_reinit_token.json");
-    test_re_init_token_common(String::from("json"), dbargs)
-}
-
 #[cfg(feature = "sqlitedb")]
 #[test]
 #[serial]

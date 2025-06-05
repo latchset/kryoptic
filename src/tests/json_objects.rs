@@ -1,12 +1,15 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-/// This file is included by `storage/json.rs` and `tests/ts.rs`.
-/// It defines the Serde structures (`JsonObjects`, `JsonObject`,
-/// `JsonTokenInfo`) used for serializing and deserializing the token state,
-/// objects, and user authentication information to/from a JSON file format.
-/// It also includes helper functions for converting between PKCS#11
-/// `Attribute`s and JSON values.
+//! This crate defines the Serde structures (`JsonObjects`, `JsonObject`,
+//! `JsonTokenInfo`) used for serializing and deserializing token state,
+//! objects, and user authentication information to/from a JSON file format.
+//! It also includes helper functions for converting between PKCS#11
+//! `Attribute`s and JSON values.
+
+use std::collections::HashMap;
+use std::fmt::Debug;
+
 use crate::attribute::string_to_ck_date;
 use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
@@ -14,12 +17,12 @@ use crate::interface::*;
 use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::storage::aci;
-use crate::storage::format;
+use crate::storage::format::StorageRaw;
 use crate::storage::StorageTokenInfo;
 
 use data_encoding::BASE64;
 use serde::{Deserialize, Serialize};
-use serde_json::{from_reader, to_string_pretty, Map, Number, Value};
+use serde_json::{from_reader, Map, Value};
 
 /// Helper function to convert IO errors, specifically mapping `NotFound` to
 /// `CKR_CRYPTOKI_NOT_INITIALIZED` for the storage loading case.
@@ -31,85 +34,12 @@ fn uninit(e: std::io::Error) -> Error {
     }
 }
 
-/// Converts a PKCS#11 `Attribute` into a `serde_json::Value`.
-///
-/// Handles different attribute types, encoding binary data (Bytes, unknown
-/// String) as Base64 strings.
-fn to_json_value(a: &Attribute) -> Value {
-    match a.get_attrtype() {
-        AttrType::BoolType => match a.to_bool() {
-            Ok(b) => Value::Bool(b),
-            Err(_) => Value::Null,
-        },
-        AttrType::NumType => match a.to_ulong() {
-            Ok(l) => Value::Number(Number::from(l)),
-            Err(_) => Value::Null,
-        },
-        AttrType::StringType => match a.to_string() {
-            Ok(s) => Value::String(s),
-            Err(_) => Value::String(BASE64.encode(a.get_value())),
-        },
-        AttrType::BytesType => Value::String(BASE64.encode(a.get_value())),
-        AttrType::UlongArrayType => match a.to_ulong_array() {
-            Ok(array) => {
-                let mut numvec = Vec::<Value>::with_capacity(array.len());
-                for elem in array.iter() {
-                    numvec.push(Value::Number(Number::from(*elem)));
-                }
-                Value::Array(numvec)
-            }
-            Err(_) => Value::Null,
-        },
-        AttrType::DateType => match a.to_date_string() {
-            Ok(d) => Value::String(d),
-            Err(_) => Value::String(String::new()),
-        },
-        AttrType::IgnoreType => Value::Null,
-        AttrType::DenyType => Value::Null,
-    }
-}
-
 /// Serializable representation of a single PKCS#11 object.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonObject {
     /// Map where keys are attribute names (e.g., "CKA_LABEL") and values
     /// are JSON representations of the attribute values.
     attributes: Map<String, Value>,
-}
-
-impl JsonObject {
-    /// Creates a `JsonObject` from a PKCS#11 `Object`.
-    pub fn from_object(o: &Object) -> JsonObject {
-        let mut jo = JsonObject {
-            attributes: Map::new(),
-        };
-        for a in o.get_attributes() {
-            jo.attributes.insert(a.name(), to_json_value(a));
-        }
-        jo
-    }
-
-    /// Creates a `JsonObject` representing user authentication info.
-    fn from_user(uid: &str, info: &aci::StorageAuthInfo) -> JsonObject {
-        let mut ju = JsonObject {
-            attributes: Map::new(),
-        };
-        ju.attributes
-            .insert("name".to_string(), Value::String(uid.to_string()));
-        ju.attributes
-            .insert("default_pin".to_string(), Value::Bool(info.default_pin));
-        ju.attributes.insert(
-            "attempts".to_string(),
-            Value::Number(Number::from(info.cur_attempts)),
-        );
-        if let Some(data) = &info.user_data {
-            ju.attributes.insert(
-                "data".to_string(),
-                Value::String(BASE64.encode(data.as_slice())),
-            );
-        }
-        ju
-    }
 }
 
 /// Serializable representation of the `StorageTokenInfo` structure.
@@ -150,10 +80,7 @@ impl JsonObjects {
     /// Populates a `StorageRaw` backend (typically an in-memory cache)
     /// with the data loaded from this `JsonObjects` instance (deserialized
     /// from a JSON file).
-    pub fn prime_store(
-        &self,
-        store: &mut Box<dyn format::StorageRaw>,
-    ) -> Result<()> {
+    pub fn prime_store(&self, store: &mut Box<dyn StorageRaw>) -> Result<()> {
         if let Some(t) = &self.token {
             let mut info = StorageTokenInfo {
                 label: [0; 32],
@@ -284,55 +211,34 @@ impl JsonObjects {
         }
         Ok(())
     }
+}
 
-    /// Creates a `JsonObjects` instance by reading all token objects, user
-    /// info, and token info from a `StorageRaw` backend (typically an in-memory
-    /// cache) and converting them into the serializable JSON format.
-    pub fn from_store(store: &mut Box<dyn format::StorageRaw>) -> JsonObjects {
-        let objs = store.search(&[]).unwrap();
-        let mut jobjs = Vec::with_capacity(objs.len());
-        for o in objs {
-            if !o.is_token() {
-                continue;
-            }
-            jobjs.push(JsonObject::from_object(&o));
-        }
+#[derive(Debug)]
+pub struct TransferStorage {
+    objects: HashMap<String, Object>,
+}
 
-        let info = store.fetch_token_info().unwrap();
-        let jtoken = JsonTokenInfo {
-            label: String::from_utf8(info.label.to_vec()).unwrap(),
-            manufacturer: String::from_utf8(info.manufacturer.to_vec())
-                .unwrap(),
-            model: String::from_utf8(info.model.to_vec()).unwrap(),
-            serial: String::from_utf8(info.serial.to_vec()).unwrap(),
-            flags: info.flags,
-        };
-
-        let mut jusers = Vec::new();
-        for id in [format::SO_ID, format::USER_ID] {
-            match store.fetch_user(id) {
-                Ok(u) => jusers.push(JsonObject::from_user(id, &u)),
-                Err(_) => (),
-            }
-        }
-
-        JsonObjects {
-            objects: jobjs,
-            users: Some(jusers),
-            token: Some(jtoken),
-        }
+impl TransferStorage {
+    pub fn new() -> Box<dyn StorageRaw> {
+        Box::new(TransferStorage {
+            objects: HashMap::new(),
+        })
     }
+}
 
-    /// Serializes this `JsonObjects` instance to a pretty-printed JSON string
-    /// and saves it to the specified `filename`.
-    pub fn save(&self, filename: &str) -> Result<()> {
-        let jstr = match to_string_pretty(&self) {
-            Ok(j) => j,
-            Err(e) => return Err(Error::other_error(e)),
-        };
-        match std::fs::write(filename, jstr) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::other_error(e)),
+impl StorageRaw for TransferStorage {
+    fn search(&self, template: &[CK_ATTRIBUTE]) -> Result<Vec<Object>> {
+        let mut ret = Vec::<Object>::new();
+        for (_, o) in self.objects.iter() {
+            if o.match_template(template) {
+                ret.push(o.clone());
+            }
         }
+        Ok(ret)
+    }
+    fn store_obj(&mut self, obj: Object) -> Result<()> {
+        let uid = obj.get_attr_as_string(CKA_UNIQUE_ID)?;
+        self.objects.insert(uid, obj);
+        Ok(())
     }
 }

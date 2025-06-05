@@ -19,8 +19,8 @@ use hex;
 mod util;
 use util::*;
 
+mod json_objects;
 mod token;
-mod ts;
 
 const TESTDIR: &str = "test/kryoptic";
 const SO_PIN: &str = "12345678";
@@ -113,8 +113,8 @@ impl TestToken<'_> {
 
         match import {
             Some(s) => {
-                let test_data = ts::json::JsonObjects::load(s).unwrap();
-                let mut tstore = ts::TransferStorage::new();
+                let test_data = json_objects::JsonObjects::load(s).unwrap();
+                let mut tstore = json_objects::TransferStorage::new();
                 test_data.prime_store(&mut tstore).unwrap();
 
                 let objects = tstore.search(&[]).unwrap();
@@ -198,11 +198,6 @@ impl TestToken<'_> {
         {
             let ret = format!("{}/{}.sql", TESTDIR, name);
             return (storage::sqlite::DBINFO.dbtype(), ret);
-        }
-        #[cfg(feature = "jsondb")]
-        {
-            let ret = format!("{}/{}.json", TESTDIR, name);
-            return (storage::json::DBINFO.dbtype(), ret);
         }
         #[cfg(feature = "memorydb")]
         {
