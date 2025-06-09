@@ -12,11 +12,12 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::{Error, Result};
 use crate::ffdh::FFDHMechanism;
 use crate::ffdh_groups::{get_group_name, DHGroupName, FFDHE2048};
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use pkcs11::*;
 
 /// Names as understood by OpenSSL
 const FFDHE2048_NAME: &[u8; 10] = b"ffdhe2048\0";

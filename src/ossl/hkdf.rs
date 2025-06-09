@@ -12,7 +12,6 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::*;
 use crate::object::{Object, ObjectFactories};
@@ -20,6 +19,8 @@ use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
+
+use pkcs11::*;
 
 /// Represents an active HKDF operation state.
 #[derive(Debug)]

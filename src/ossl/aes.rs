@@ -8,7 +8,7 @@ use std::ffi::{c_char, c_int, c_void};
 use crate::aes::*;
 use crate::error;
 use crate::error::{map_err, Result};
-use crate::interface::*;
+use crate::get_random_data;
 use crate::mechanism::*;
 use crate::misc::{
     bytes_to_slice, bytes_to_vec, cast_params, void_ptr, zeromem,
@@ -19,10 +19,9 @@ use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
 
-use crate::get_random_data;
-
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
+use pkcs11::*;
 
 /// Maximum buffer size for accumulating data in CCM mode (1 MiB).
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */

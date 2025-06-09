@@ -11,7 +11,6 @@ use std::sync::{RwLock, RwLockReadGuard};
 
 use crate::attribute::CkAttrs;
 use crate::error::Result;
-use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
 use crate::misc::{sizeof, void_ptr, zeromem};
@@ -19,6 +18,8 @@ use crate::object::Object;
 use crate::storage::aci::pbkdf2_derive;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
+
+use pkcs11::*;
 
 const SHA256_LEN: usize = 32;
 /// Maximum number of derived keys to keep in the cache.

@@ -4,7 +4,6 @@
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash;
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
@@ -12,6 +11,9 @@ use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::ossl::fips::*;
 use crate::{bytes_to_vec, cast_params};
+
+use pkcs11::vendor::KR_SSHKDF_PARAMS;
+use pkcs11::*;
 
 #[derive(Debug)]
 pub struct SSHKDFOperation {

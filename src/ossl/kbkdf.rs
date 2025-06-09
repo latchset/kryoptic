@@ -5,7 +5,6 @@ use std::ffi::c_int;
 
 use crate::attribute::Attribute;
 use crate::error::{map_err, Result};
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_slice, bytes_to_vec};
 use crate::object::{Object, ObjectFactories};
@@ -13,6 +12,8 @@ use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::ossl::fips::*;
 use crate::sp800_108::*;
+
+use pkcs11::*;
 
 const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
 const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";

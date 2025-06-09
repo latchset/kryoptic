@@ -10,7 +10,27 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
-include!("pkcs11/interface.rs");
+include!(concat!(env!("OUT_DIR"), "/pkcs11_bindings.rs"));
+
+// types that need different mutability than bindgen provides
+pub type CK_FUNCTION_LIST_PTR = *const CK_FUNCTION_LIST;
+pub type CK_FUNCTION_LIST_3_0_PTR = *const CK_FUNCTION_LIST_3_0;
+#[cfg(feature = "pkcs11_3_2")]
+pub type CK_FUNCTION_LIST_3_2_PTR = *const CK_FUNCTION_LIST_3_2;
+// this is wrongly converted on 32b architecture to too large value
+// which can not be represented in CK_ULONG.
+pub const CK_UNAVAILABLE_INFORMATION: CK_ULONG = CK_ULONG::MAX;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CK_INTERFACE {
+    pub pInterfaceName: *const CK_CHAR,
+    pub pFunctionList: *const ::std::os::raw::c_void,
+    pub flags: CK_FLAGS,
+}
+unsafe impl Sync for CK_INTERFACE {}
+unsafe impl Send for CK_INTERFACE {}
+
+pub mod vendor;
 
 macro_rules! err_to_elem {
     ($map:expr; $idx:expr; $name:ident) => {
@@ -159,4 +179,197 @@ pub fn ckrv_to_string(ckrv: CK_ULONG) -> String {
         }
     }
     return format!("Unknown Error {:x}", ckrv);
+}
+
+/// Convenience helper to copy a pointer+length obtained via FFI into a
+/// valid Vector of bytes.
+macro_rules! bytes_to_vec {
+    ($ptr:expr, $len:expr) => {{
+        let ptr = $ptr as *const u8;
+        let size = usize::try_from($len).unwrap();
+        if ptr == std::ptr::null_mut() || size == 0 {
+            Vec::new()
+        } else {
+            let mut v = Vec::<u8>::with_capacity(size);
+            unsafe {
+                std::ptr::copy_nonoverlapping(ptr, v.as_mut_ptr(), size);
+                v.set_len(size);
+            }
+            v
+        }
+    }};
+}
+
+#[derive(Debug)]
+pub struct Error {
+    /// The PKCS#11 CK_RV error code to be returned to the application
+    ckrv: CK_RV,
+}
+
+impl Error {
+    pub fn rv(&self) -> CK_RV {
+        self.ckrv
+    }
+}
+
+impl From<CK_RV> for Error {
+    /// Maps a naked PKCS#11 Error code to an Error
+    fn from(error: CK_RV) -> Error {
+        Error { ckrv: error }
+    }
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    /// Maps an integer conversion error to a generic error
+    fn from(_error: std::num::TryFromIntError) -> Error {
+        Error {
+            ckrv: CKR_FUNCTION_FAILED,
+        }
+    }
+}
+
+/// Date digits separator
+const ASCII_DASH: u8 = b'-';
+/// Smallest ASCII value for a date digit
+const MIN_ASCII_DIGIT: u8 = b'0';
+/// Largest ASCII value for a date digit
+const MAX_ASCII_DIGIT: u8 = b'9';
+
+/// Converts a vector of bytes into a CK_DATE structure with some validation
+///
+/// The data is checked to ensure only ASCII values of numbers are present,
+/// but there is no validation that the resulting date is in any way valid.
+pub fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE, Error> {
+    if val.len() != 8 {
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+    }
+    for n in val.iter() {
+        if *n < MIN_ASCII_DIGIT || *n > MAX_ASCII_DIGIT {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+    }
+    Ok(CK_DATE {
+        year: [val[0], val[1], val[2], val[3]],
+        month: [val[5], val[6]],
+        day: [val[8], val[9]],
+    })
+}
+
+/// Parses a string as a date
+///
+/// Returns a CK_DATE on success
+pub fn string_to_ck_date(date: &str) -> Result<CK_DATE, Error> {
+    let s = date.as_bytes().to_vec();
+    if s.len() != 10 {
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+    }
+    if s[4] != ASCII_DASH || s[7] != ASCII_DASH {
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+    }
+    let mut buf = Vec::with_capacity(8);
+    buf[0] = s[0];
+    buf[1] = s[1];
+    buf[2] = s[2];
+    buf[3] = s[3];
+    buf[4] = s[5];
+    buf[5] = s[6];
+    buf[6] = s[8];
+    buf[7] = s[9];
+    vec_to_date_validate(buf)
+}
+
+impl CK_ATTRIBUTE {
+    /// Returns the internal data memory buffer as a CK_ULONG
+    ///
+    /// Errors out if the data size does not match the size of a CK_ULONG
+    pub fn to_ulong(&self) -> Result<CK_ULONG, Error> {
+        if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
+    }
+
+    /// Returns the internal data memory buffer as a bool
+    ///
+    /// Errors out if the data size does not match the size of a CK_BBOOL
+    pub fn to_bool(self) -> Result<bool, Error> {
+        if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
+        if val == 0 {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
+    }
+
+    /// Returns the internal data memory buffer as a String
+    ///
+    /// Errors out if the data size does not match or the buffer is
+    /// not parseable as a UTF8 string.
+    pub fn to_string(&self) -> Result<String, Error> {
+        if self.ulValueLen == 0 {
+            return Ok(String::new());
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        let buf: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self.pValue as *const _,
+                usize::try_from(self.ulValueLen)?,
+            )
+        };
+        match std::str::from_utf8(buf) {
+            Ok(s) => Ok(s.to_string()),
+            Err(_) => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+        }
+    }
+
+    /// Returns the internal data memory buffer as a slice
+    ///
+    /// Errors out if the internal data pointer is null
+    pub fn to_slice(&self) -> Result<&[u8], Error> {
+        if self.ulValueLen == 0 {
+            return Ok(&[]);
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        Ok(unsafe {
+            std::slice::from_raw_parts(
+                self.pValue as *const u8,
+                usize::try_from(self.ulValueLen)?,
+            )
+        })
+    }
+
+    /// Returns a copy of the internal buffer as an vector
+    ///
+    /// Returns an empty vector if the internal buffer pointer is null
+    pub fn to_buf(&self) -> Result<Vec<u8>, Error> {
+        Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
+    }
+
+    /// Returns the internal buffer as a CK_DATE
+    ///
+    /// Errors out if parsing the buffer as a date fails
+    pub fn to_date(&self) -> Result<CK_DATE, Error> {
+        if self.ulValueLen == 0 {
+            /* set 0000-00-00 */
+            return Ok(CK_DATE {
+                year: [b'0', b'0', b'0', b'0'],
+                month: [b'0', b'0'],
+                day: [b'0', b'0'],
+            });
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        if self.ulValueLen != 8 {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
+    }
 }

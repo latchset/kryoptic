@@ -5,7 +5,6 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::hmac::*;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::zeromem;
 use crate::ossl::bindings::*;
@@ -13,6 +12,7 @@ use crate::ossl::common::*;
 use crate::ossl::fips::*;
 
 use constant_time_eq::constant_time_eq;
+use pkcs11::*;
 
 #[derive(Debug)]
 pub struct HMACOperation {

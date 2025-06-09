@@ -14,13 +14,13 @@ use std::fmt::Debug;
 
 use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
-use crate::interface::*;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::zeromem;
 use crate::CSPRNG;
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
+use pkcs11::*;
 use uuid::Uuid;
 
 /// Helper macro that generates methods to check specific boolean
@@ -648,7 +648,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
                         None => (),
                     }
                     if !attr.is(OAFlags::Ignored) {
-                        obj.attributes.push(ck_attr.to_attribute()?);
+                        obj.attributes.push(Attribute::from_ck_attr(ck_attr)?);
                     }
                 }
                 None => {
@@ -732,7 +732,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
 
         let mut obj = origin.blind_copy()?;
         for ck_attr in template {
-            let _ = obj.set_attr(ck_attr.to_attribute()?);
+            let _ = obj.set_attr(Attribute::from_ck_attr(ck_attr)?);
         }
 
         /* special attrs handling */
@@ -889,7 +889,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
 
         /* if checks clear out, apply changes */
         for ck_attr in template {
-            obj.set_attr(ck_attr.to_attribute()?)?;
+            obj.set_attr(Attribute::from_ck_attr(ck_attr)?)?;
         }
 
         Ok(())
