@@ -9,9 +9,10 @@ use std::ffi::c_uint;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::ossl::common::zeromem as ossl_zeromem;
+
+use pkcs11::*;
 
 /// Constant containing the size of a CK_ULONG on this architecture
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();

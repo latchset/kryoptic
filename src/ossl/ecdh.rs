@@ -10,12 +10,13 @@ use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::bytes_to_vec;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
 /// PKCS#11 hash mechanism type (`CK_MECHANISM_TYPE`).

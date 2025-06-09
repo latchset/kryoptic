@@ -3,11 +3,12 @@
 
 use crate::config::FipsBehavior;
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::Mechanisms;
 use crate::object::{ObjectFactories, ObjectType};
 use crate::ossl::fips;
 use crate::token::Token;
+
+use pkcs11::*;
 
 pub(crate) mod indicators;
 

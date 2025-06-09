@@ -12,13 +12,13 @@ use std::path::Path;
 use std::slice;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
 use getrandom;
 use libc;
 use once_cell::sync::Lazy;
+use pkcs11::*;
 
 /* Entropy Stuff */
 

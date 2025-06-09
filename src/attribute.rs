@@ -10,8 +10,10 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::error::{Error, Result};
-use crate::interface::*;
-use crate::misc::{bytes_to_vec, sizeof, void_ptr, zeromem, BorrowedReference};
+use crate::misc::{sizeof, void_ptr, zeromem, BorrowedReference};
+
+use pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
+use pkcs11::*;
 
 /// List of attribute types we understand
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -602,193 +604,36 @@ impl Attribute {
             value: v,
         }
     }
-}
 
-/// Converts a vector of bytes into a CK_DATE structure with *no* validation
-fn vec_to_date(val: Vec<u8>) -> CK_DATE {
-    CK_DATE {
-        year: [val[0], val[1], val[2], val[3]],
-        month: [val[5], val[6]],
-        day: [val[8], val[9]],
-    }
-}
-
-/// Date digits separator
-const ASCII_DASH: u8 = b'-';
-/// Smallest ASCII value for a date digit
-const MIN_ASCII_DIGIT: u8 = b'0';
-/// Largest ASCII value for a date digit
-const MAX_ASCII_DIGIT: u8 = b'9';
-
-/// Returns the "empty" date, all fields of CK_DATE are initialized to the
-/// ASCII value of the number 0
-fn empty_date() -> CK_DATE {
-    CK_DATE {
-        year: [b'0', b'0', b'0', b'0'],
-        month: [b'0', b'0'],
-        day: [b'0', b'0'],
-    }
-}
-
-/// Converts a vector of bytes into a CK_DATE structure with some validation
-///
-/// The data is checked to ensure only ASCII values of numbers are present,
-/// but there is no validation that the resulting date is in any way valid.
-fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE> {
-    if val.len() != 8 {
-        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-    }
-    for n in val.iter() {
-        if *n < MIN_ASCII_DIGIT || *n > MAX_ASCII_DIGIT {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-    }
-    Ok(vec_to_date(val))
-}
-
-/// Parses a string as a date
-///
-/// Returns a CK_DATE on success
-pub fn string_to_ck_date(date: &str) -> Result<CK_DATE> {
-    let s = date.as_bytes().to_vec();
-    if s.len() != 10 {
-        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-    }
-    if s[4] != ASCII_DASH || s[7] != ASCII_DASH {
-        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-    }
-    let mut buf = Vec::with_capacity(8);
-    buf[0] = s[0];
-    buf[1] = s[1];
-    buf[2] = s[2];
-    buf[3] = s[3];
-    buf[4] = s[5];
-    buf[5] = s[6];
-    buf[6] = s[8];
-    buf[7] = s[9];
-    vec_to_date_validate(buf)
-}
-
-impl CK_ATTRIBUTE {
-    /// Returns the internal data memory buffer as a CK_ULONG
-    ///
-    /// Errors out if the data size does not match the size of a CK_ULONG
-    pub fn to_ulong(&self) -> Result<CK_ULONG> {
-        if self.ulValueLen != sizeof!(CK_ULONG) {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
-    }
-
-    /// Returns the internal data memory buffer as a bool
-    ///
-    /// Errors out if the data size does not match the size of a CK_BBOOL
-    pub fn to_bool(self) -> Result<bool> {
-        if self.ulValueLen != sizeof!(CK_BBOOL) {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
-        if val == 0 {
-            Ok(false)
-        } else {
-            Ok(true)
-        }
-    }
-
-    /// Returns the internal data memory buffer as a String
-    ///
-    /// Errors out if the data size does not match or the buffer is
-    /// not parseable as a UTF8 string.
-    pub fn to_string(&self) -> Result<String> {
-        if self.ulValueLen == 0 {
-            return Ok(String::new());
-        }
-        if self.pValue.is_null() {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        let buf: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const _,
-                usize::try_from(self.ulValueLen)?,
-            )
-        };
-        match std::str::from_utf8(buf) {
-            Ok(s) => Ok(s.to_string()),
-            Err(_) => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-        }
-    }
-
-    /// Returns the internal data memory buffer as a slice
-    ///
-    /// Errors out if the internal data pointer is null
-    pub fn to_slice(&self) -> Result<&[u8]> {
-        if self.ulValueLen == 0 {
-            return Ok(&[]);
-        }
-        if self.pValue.is_null() {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        Ok(unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const u8,
-                usize::try_from(self.ulValueLen)?,
-            )
-        })
-    }
-
-    /// Returns a copy of the internal buffer as an vector
-    ///
-    /// Returns an empty vector if the internal buffer pointer is null
-    pub fn to_buf(&self) -> Result<Vec<u8>> {
-        Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
-    }
-
-    /// Returns the internal buffer as a CK_DATE
-    ///
-    /// Errors out if parsing the buffer as a date fails
-    pub fn to_date(&self) -> Result<CK_DATE> {
-        if self.ulValueLen == 0 {
-            /* set 0000-00-00 */
-            return Ok(empty_date());
-        }
-        if self.pValue.is_null() {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        if self.ulValueLen != 8 {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
-    }
-
-    /// Converts this CK_ATTRIBUTE to an Attribute object with a typed
+    /// Converts a CK_ATTRIBUTE to an Attribute object with a typed
     /// copy of the data
-    pub fn to_attribute(&self) -> Result<Attribute> {
-        let atype = match Attrmap::search_by_id(self.type_) {
+    pub fn from_ck_attr(attr: &CK_ATTRIBUTE) -> Result<Attribute> {
+        let atype = match Attrmap::search_by_id(attr.type_) {
             Some(a) => a.atype,
             None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
         };
         match atype {
             AttrType::BoolType => {
-                Ok(Attribute::from_bool(self.type_, self.to_bool()?))
+                Ok(Attribute::from_bool(attr.type_, attr.to_bool()?))
             }
             AttrType::NumType => {
-                Ok(Attribute::from_ulong(self.type_, self.to_ulong()?))
+                Ok(Attribute::from_ulong(attr.type_, attr.to_ulong()?))
             }
             AttrType::StringType => {
-                Ok(Attribute::from_string(self.type_, self.to_string()?))
+                Ok(Attribute::from_string(attr.type_, attr.to_string()?))
             }
             AttrType::BytesType => {
-                Ok(Attribute::from_bytes(self.type_, self.to_buf()?))
+                Ok(Attribute::from_bytes(attr.type_, attr.to_buf()?))
             }
             AttrType::UlongArrayType => {
-                Ok(Attribute::from_ulong_bytevec(self.type_, self.to_buf()?))
+                Ok(Attribute::from_ulong_bytevec(attr.type_, attr.to_buf()?))
             }
             AttrType::DateType => {
-                Ok(Attribute::from_date(self.type_, self.to_date()?))
+                Ok(Attribute::from_date(attr.type_, attr.to_date()?))
             }
             AttrType::DenyType => Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
             AttrType::IgnoreType => {
-                Ok(Attribute::from_ignore(self.type_, None))
+                Ok(Attribute::from_ignore(attr.type_, None))
             }
         }
     }

@@ -4,11 +4,12 @@
 use std::ffi::c_uint;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::Mechanisms;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use pkcs11::*;
 
 pub fn pbkdf2_derive(
     _: &Mechanisms,

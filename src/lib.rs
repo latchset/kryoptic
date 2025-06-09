@@ -13,12 +13,13 @@ use std::ffi::{c_char, CStr};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use once_cell::sync::Lazy;
+use pkcs11::vendor::KRY_UNSPEC;
+use pkcs11::*;
 
 mod attribute;
 mod config;
 mod defaults;
 mod error;
-pub mod interface;
 mod mechanism;
 mod object;
 mod rng;
@@ -29,7 +30,6 @@ mod token;
 
 use config::Config;
 use error::{arg_bad, Result};
-use interface::*;
 use mechanism::*;
 use rng::RNG;
 use session::Session;
@@ -4436,8 +4436,6 @@ struct InterfaceData {
     interface: *const CK_INTERFACE,
     version: CK_VERSION,
 }
-unsafe impl Sync for CK_INTERFACE {}
-unsafe impl Send for CK_INTERFACE {}
 unsafe impl Sync for InterfaceData {}
 unsafe impl Send for InterfaceData {}
 

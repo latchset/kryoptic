@@ -9,10 +9,11 @@ use std::ffi::c_char;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use pkcs11::*;
 
 /* Openssl Key types */
 static ML_KEM_512_TYPE: &[u8; 11] = b"ML-KEM-512\0";

@@ -15,7 +15,6 @@ use crate::defaults;
 use crate::error::Result;
 #[cfg(feature = "fips")]
 use crate::fips;
-use crate::interface::*;
 use crate::mechanism::Mechanisms;
 use crate::misc::copy_sized_string;
 use crate::object::{Object, ObjectFactories};
@@ -23,6 +22,8 @@ use crate::register_all;
 use crate::storage::*;
 
 use bimap;
+use pkcs11::vendor::KRY_UNSPEC;
+use pkcs11::*;
 
 /// Manages the mapping between persistent internal object UIDs (String) and
 /// temporary object handles (`CK_OBJECT_HANDLE`) assigned during runtime.

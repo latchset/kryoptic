@@ -4,14 +4,15 @@
 //! This module implements the PKCS#11 mechanisms to access the Secure
 //! Hash Algorithm Standards (SHA1, SHA2, SHA3) operations.
 
+use std::fmt::Debug;
+
 use crate::attribute::CkAttrs;
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::hash::HashOperation;
 
-use std::fmt::Debug;
+use pkcs11::*;
 
 pub const INVALID_HASH_SIZE: usize = CK_UNAVAILABLE_INFORMATION as usize;
 

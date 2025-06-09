@@ -11,7 +11,6 @@ use std::fmt::Debug;
 use crate::aes;
 use crate::attribute::CkAttrs;
 use crate::error::Result;
-use crate::interface::*;
 use crate::kasn1::*;
 use crate::misc::{byte_ptr, sizeof, void_ptr, zeromem};
 use crate::object::Object;
@@ -19,6 +18,7 @@ use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use asn1;
+use pkcs11::*;
 
 /// Derives a key using PBKDF2 (CKM_PKCS5_PBKD2) based on PKCS#5 v2.1.
 ///

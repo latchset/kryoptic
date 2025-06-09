@@ -11,7 +11,6 @@ use std::ffi::c_char;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash;
-use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
 use crate::object::Object;
@@ -21,6 +20,7 @@ use crate::{bytes_to_vec, cast_params};
 
 use asn1;
 use bitflags::bitflags;
+use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;

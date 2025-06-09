@@ -7,10 +7,10 @@
 use std::sync::MutexGuard;
 
 use crate::error::{Error, Result};
-use crate::interface::*;
-use rusqlite::{Error as rlError, ErrorCode};
 
+use pkcs11::*;
 use rusqlite;
+use rusqlite::{Error as rlError, ErrorCode};
 
 /// Converts `rusqlite::Error` into the crate's custom `Error` type, mapping
 /// specific SQLite error codes to appropriate PKCS#11 `CK_RV` return values.

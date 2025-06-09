@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 kryoptic = { version = "1.2.0", path = "..", default-features = false }
+pkcs11 = { version = "1.2.0", path = "../pkcs11" }
 
 [features]
 fips = []

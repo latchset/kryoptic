@@ -11,12 +11,12 @@
 //! cryptographic operations (e.g., `Encryption`, `Sign`, `Derive`).
 
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::{Object, ObjectFactories, ObjectFactory};
 
-use std::fmt::Debug;
+use pkcs11::*;
 
 pub trait Mechanism: Debug + Send + Sync {
     /// Returns a reference to the mechanism info

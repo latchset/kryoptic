@@ -9,11 +9,12 @@ use std::fmt::Debug;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
-use crate::interface::*;
 use crate::kasn1::{pkcs, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::rsa::*;
+
+use pkcs11::*;
 
 use asn1;
 use once_cell::sync::Lazy;
