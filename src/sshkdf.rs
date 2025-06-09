@@ -7,9 +7,11 @@
 use std::fmt::Debug;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::object::ObjectFactories;
+
+use pkcs11::vendor::*;
+use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::sshkdf::*;

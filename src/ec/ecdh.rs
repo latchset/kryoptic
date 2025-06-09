@@ -8,11 +8,12 @@ use std::fmt::Debug;
 
 use crate::ec::ecdsa::{MAX_EC_SIZE_BITS, MIN_EC_SIZE_BITS};
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::cast_params;
 use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
+
+use pkcs11::*;
 
 /// Public entry to register the ECDH Mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {

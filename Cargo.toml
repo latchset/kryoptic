@@ -1,6 +1,6 @@
 [workspace]
-members = ["tools/softhsm", "cdylib"]
-default-members = [".", "cdylib"]
+members = ["pkcs11", "cdylib", "tools/softhsm"]
+default-members = [".", "pkcs11", "cdylib"]
 
 [workspace.package]
 version = "1.2.0"
@@ -49,6 +49,7 @@ num-bigint = "0.4.4"
 num-integer = "0.1.45"
 num-traits = "0.2.17"
 once_cell = "1.18.0"
+pkcs11 = { version = "1.2.0", path = "pkcs11" }
 rusqlite = { version = "0.31.0", optional = true }
 serde = { version = "1.0.180", features = ["derive"] }
 serde_json = "1.0.104"
@@ -94,7 +95,7 @@ fips = ["sqlitedb", "rusqlite/bundled", "aes", "ecc_fips", "ffdh", "hash_all", "
 
 dynamic = [] # Builds against system libcrypto.so
 
-pkcs11_3_2 = [ ] # Exposes PKCS#11 3.2 Interfaces and new functions
+pkcs11_3_2 = ["pkcs11/pkcs11_3_2"] # Exposes PKCS#11 3.2 Interfaces and new functions
 
 log = ["dep:log", "dep:simplelog", "dep:vsprintf"] #Enables error/info tracing
 slow = [] # Enables slow tests

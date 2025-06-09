@@ -24,5 +24,10 @@ test = false
 [dependencies]
 clap = { version = "4.5.26", default-features = false, features = ["cargo", "derive", "help", "std", "usage"] }
 cryptoki = "0.9.0"
-kryoptic = { version = "1.2.0", path = "../..", default-features = false }
 libc = "0.2.151"
+pkcs11 = { version = "1.2.0", path = "../../pkcs11", default-features = false }
+
+[features]
+# We have to create pass-through features otherwise it is impossible to provide
+# feature selection in some cases
+pkcs11_3_2 = ["pkcs11/pkcs11_3_2"]

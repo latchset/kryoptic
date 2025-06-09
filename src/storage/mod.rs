@@ -10,12 +10,12 @@ use std::fmt::Debug;
 
 use crate::defaults;
 use crate::error::Result;
-use crate::interface::*;
 use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::token::TokenFacilities;
 
 use once_cell::sync::Lazy;
+use pkcs11::*;
 
 /// Structure holding basic token information stored persistently.
 #[derive(Clone, Debug)]

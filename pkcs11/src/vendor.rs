@@ -1,23 +1,9 @@
-// Copyright 2023 Simo Sorce
+// Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
 
-include!(concat!(env!("OUT_DIR"), "/pkcs11_bindings.rs"));
+//! PKCS#11 API Vendor extensions
 
-// types that need different mutability than bindgen provides
-pub type CK_FUNCTION_LIST_PTR = *const CK_FUNCTION_LIST;
-pub type CK_FUNCTION_LIST_3_0_PTR = *const CK_FUNCTION_LIST_3_0;
-#[cfg(feature = "pkcs11_3_2")]
-pub type CK_FUNCTION_LIST_3_2_PTR = *const CK_FUNCTION_LIST_3_2;
-// this is wrongly converted on 32b architecture to too large value
-// which can not be represented in CK_ULONG.
-pub const CK_UNAVAILABLE_INFORMATION: CK_ULONG = CK_ULONG::MAX;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CK_INTERFACE {
-    pub pInterfaceName: *const CK_CHAR,
-    pub pFunctionList: *const ::std::os::raw::c_void,
-    pub flags: CK_FLAGS,
-}
+use crate::*;
 
 pub const KRY_VENDOR_OFFSET: CK_ULONG = CKA_VENDOR_DEFINED + 485259;
 

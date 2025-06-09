@@ -9,7 +9,6 @@ use std::borrow::Cow;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_void, CStr};
 
 use crate::error::{Error, Result};
-use crate::interface::*;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
 use crate::misc::*;
@@ -17,6 +16,8 @@ use crate::misc::*;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::get_libctx;
+
+use pkcs11::*;
 
 #[cfg(feature = "ecc")]
 use crate::ec::get_oid_from_obj;

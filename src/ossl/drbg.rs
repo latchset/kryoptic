@@ -7,9 +7,10 @@
 use std::ffi::c_char;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::DRBG;
 use crate::ossl::bindings::*;
+
+use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::ossl::get_libctx;

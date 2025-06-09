@@ -5,9 +5,10 @@
 //! Generator
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism;
 use crate::ossl::drbg;
+
+use pkcs11::*;
 
 #[derive(Debug)]
 pub struct RNG {

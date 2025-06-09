@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::attribute::{AttrType, Attribute, CkAttrs};
 use crate::defaults;
 use crate::error::{Error, Result};
-use crate::interface::*;
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
 use crate::storage::sqlite_common::{check_table, set_secure_delete};
@@ -21,6 +20,7 @@ use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use itertools::Itertools;
+use pkcs11::*;
 use rusqlite::types::{FromSqlError, Value, ValueRef};
 use rusqlite::{params, Connection, OpenFlags, Rows, Transaction};
 
@@ -814,7 +814,7 @@ impl NSSStorage {
             Vec::<CK_ATTRIBUTE_TYPE>::with_capacity(1 + attrs.len());
         let mut params = Vec::<Value>::with_capacity(1 + attrs.len());
         for a in attrs.as_slice() {
-            let attr = a.to_attribute()?;
+            let attr = Attribute::from_ck_attr(a)?;
             let a_type = attr.get_type();
 
             if is_skippable_attribute(a_type) {

@@ -10,10 +10,10 @@
 use std::borrow::Cow;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::misc::zeromem;
 
 use asn1;
+use pkcs11::*;
 
 /* Helper routines to use with rust/asn1 */
 

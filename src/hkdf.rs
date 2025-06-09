@@ -8,10 +8,11 @@
 use std::fmt::Debug;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::object::{GenericSecretKeyMechanism, ObjectFactories};
 use crate::ossl::hkdf::HKDFOperation;
+
+use pkcs11::*;
 
 /// Registers all HKDF related mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {

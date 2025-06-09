@@ -10,10 +10,11 @@ use std::ffi::{c_char, c_int};
 use crate::attribute::Attribute;
 use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::Object;
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use pkcs11::*;
 
 /// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into
 /// OpenSSL parameters (`OsslParam`).

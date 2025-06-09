@@ -7,9 +7,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::attribute::{string_to_ck_date, AttrType, Attribute};
+use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
-use crate::interface::*;
 use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
@@ -18,6 +17,7 @@ use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
 use itertools::Itertools;
+use pkcs11::*;
 use rusqlite::types::{Value, ValueRef};
 use rusqlite::{
     params, params_from_iter, Connection, Rows, Statement, Transaction,
@@ -490,7 +490,7 @@ impl StorageRaw for SqliteStorage {
                     v
                 }),
                 AttrType::DateType => {
-                    Value::from(a.to_attribute()?.to_date_string()?)
+                    Value::from(Attribute::from_ck_attr(a)?.to_date_string()?)
                 }
                 AttrType::DenyType | AttrType::IgnoreType => {
                     return Err(CKR_ATTRIBUTE_TYPE_INVALID)?

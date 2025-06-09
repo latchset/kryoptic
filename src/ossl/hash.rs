@@ -7,10 +7,11 @@
 use std::os::raw::*;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::{Digest, MechOperation};
 use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use pkcs11::*;
 
 /// Represents an active hash (digest) operation.
 #[derive(Debug)]

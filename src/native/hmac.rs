@@ -9,11 +9,11 @@ use std::fmt::Debug;
 use crate::error::Result;
 use crate::hash;
 use crate::hmac::*;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::zeromem;
 
 use constant_time_eq::constant_time_eq;
+use pkcs11::*;
 
 /// Maximum size for internal buffers
 ///

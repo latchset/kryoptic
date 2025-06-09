@@ -9,13 +9,14 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::ffdh_groups;
-use crate::interface::*;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::bytes_to_vec;
 use crate::object::*;
 use crate::ossl::ffdh::FFDHOperation;
 
-use crate::Lazy;
+use once_cell::sync::Lazy;
+
+use pkcs11::*;
 
 /// Minimum FFDH key size
 pub const MIN_DH_SIZE_BITS: CK_ULONG = 2048;

@@ -7,8 +7,8 @@
 //!
 //! A cryptographic software token using the PKCS#11 standard API
 
-use kryoptic::interface::*;
 use kryoptic::{fn_get_function_list, fn_get_interface, fn_get_interface_list};
+use pkcs11::*;
 
 /// Public export symbol to access [kryoptic::fn_get_function_list]
 #[unsafe(no_mangle)]

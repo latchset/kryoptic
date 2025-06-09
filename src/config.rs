@@ -9,13 +9,16 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::interface;
 use crate::storage;
 use crate::storage::StorageDBInfo;
 
+use pkcs11::*;
 use serde::de;
 use serde::{Deserialize, Serialize};
 use toml;
+
+#[cfg(test)]
+use pkcs11::vendor::KRR_SLOT_CONFIG;
 
 /// The directory where to search the default configuration,
 /// can be changed with the CONFDIR environment variable at
@@ -172,7 +175,7 @@ pub struct Config {
 
 /// Maps some config errors to CKR_TOKEN_NOT_RECOGNIZED
 fn config_error<E: de::Error + 'static>(error: E) -> Error {
-    Error::ck_rv_from_error(interface::CKR_TOKEN_NOT_RECOGNIZED, error)
+    Error::ck_rv_from_error(CKR_TOKEN_NOT_RECOGNIZED, error)
 }
 
 impl Config {
@@ -192,7 +195,7 @@ impl Config {
     pub fn add_slot(&mut self, slot: Slot) -> Result<()> {
         for s in &self.slots {
             if slot.slot == u32::MAX || slot.slot == s.slot {
-                return Err(interface::KRR_SLOT_CONFIG)?;
+                return Err(KRR_SLOT_CONFIG)?;
             }
         }
         self.slots.push(slot);
@@ -245,7 +248,7 @@ impl Config {
         if Path::new(&datafile).is_file() {
             Ok(datafile)
         } else {
-            Err(interface::CKR_ARGUMENTS_BAD)?
+            Err(CKR_ARGUMENTS_BAD)?
         }
     }
 
@@ -422,14 +425,14 @@ impl Config {
                             && s.dbargs.as_deref() == slot.dbargs.as_deref()
                         {
                             /* already loaded in a different slot, fail! */
-                            return Err(interface::CKR_ARGUMENTS_BAD)?;
+                            return Err(CKR_ARGUMENTS_BAD)?;
                         }
                     } else {
                         if s.dbtype.as_deref() != slot.dbtype.as_deref() {
-                            return Err(interface::CKR_ARGUMENTS_BAD)?;
+                            return Err(CKR_ARGUMENTS_BAD)?;
                         }
                         if s.dbargs.as_deref() != slot.dbargs.as_deref() {
-                            return Err(interface::CKR_ARGUMENTS_BAD)?;
+                            return Err(CKR_ARGUMENTS_BAD)?;
                         }
                         /* already present skip adding */
                         found = true;
