@@ -47,8 +47,8 @@ jobs:
 
       - name: Build & test
         run: |
-          cargo build -vv
-          src/tools/softhsm/test.sh
+          cargo build -vv --all
+          tools/softhsm/test.sh
 
       - uses: actions/upload-artifact@v4
         if: failure()

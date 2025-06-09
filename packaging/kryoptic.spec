@@ -95,14 +95,19 @@ rm -f Cargo.lock
 
 %build
 export CONFDIR=%{_sysconfdir}
-%cargo_build -f nssdb,pqc
+%cargo_build -f nssdb,pqc -- --all
 %{cargo_license_summary -f nssdb,pqc}
 %{cargo_license -f nssdb,pqc} > LICENSE.dependencies
 
 %install
-%cargo_install -f nssdb,pqc
+# Have to cd because the macro already defines --path . and cargo install
+# in workspaces does not take a --all, requires to install each package
+# explicitly, and we care only for the tools, as install does not install
+# cdylib package outputs.
+pushd tools/softhsm
+%cargo_install -- --bin softhsm_migrate
+popd
 install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
-rm -f $RPM_BUILD_ROOT%{_bindir}/{kryoptic_init,test_signature}
 
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/
 echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryoptic.module

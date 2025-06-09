@@ -1,0 +1,17 @@
+[package]
+name = "kryoptic_pkcs11"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+kryoptic = { version = "1.2.0", path = "..", default-features = false }
+
+[features]
+fips = []
