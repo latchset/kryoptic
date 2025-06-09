@@ -90,17 +90,17 @@ rm -f Cargo.lock
 %cargo_prep
 
 %generate_buildrequires
-%cargo_generate_buildrequires -f dynamic,nssdb,standard
+%cargo_generate_buildrequires -f nssdb,pqc
 %endif
 
 %build
 export CONFDIR=%{_sysconfdir}
-%cargo_build -f dynamic,nssdb,standard
-%{cargo_license_summary -f dynamic,nssdb,standard}
-%{cargo_license -f dynamic,nssdb,standard} > LICENSE.dependencies
+%cargo_build -f nssdb,pqc
+%{cargo_license_summary -f nssdb,pqc}
+%{cargo_license -f nssdb,pqc} > LICENSE.dependencies
 
 %install
-%cargo_install -f dynamic,nssdb,standard
+%cargo_install -f nssdb,pqc
 install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 rm -f $RPM_BUILD_ROOT%{_bindir}/{kryoptic_init,test_signature}
 
@@ -110,9 +110,9 @@ echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryopti
 %if %{with check}
 %check
 %if 0%{?rhel}
-%cargo_test -f dynamic,nssdb,standard -- -- --exact --skip tests::signatures::test_rsa_signatures
+%cargo_test -f nssdb,pqc -- -- --exact --skip tests::signatures::test_rsa_signatures
 %else
-%cargo_test -f dynamic,nssdb,standard
+%cargo_test -f nssdb,pqc
 %endif
 %endif
 

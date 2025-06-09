@@ -1,10 +1,10 @@
 [package]
-source-url = "https://github.com/latchset/%{name}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz"
+source-url = "https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-%{version}.tar.gz"
 cargo-install-lib = true
 cargo-install-bin = true
 
 [features]
-enable = ["standard", "dynamic", "nssdb"]
+enable = ["nssdb", "pqc"]
 
 [requires]
 build = ["openssl-devel"]
