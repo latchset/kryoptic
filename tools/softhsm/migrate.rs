@@ -11,15 +11,7 @@ use std::process::ExitCode;
 use clap::Parser;
 use libc;
 
-mod interface {
-    #![allow(non_upper_case_globals)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
-    #![allow(dead_code)]
-    include!("../../pkcs11/interface.rs");
-}
-
-use interface::*;
+use kryoptic::interface::*;
 
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 pub const CK_BBOOL_SIZE: usize = std::mem::size_of::<CK_BBOOL>();

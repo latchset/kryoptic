@@ -1,7 +1,7 @@
 // Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
-#![warn(missing_docs)]
+//#![warn(missing_docs)]
 
 //! This is Kryoptic
 //!
@@ -18,7 +18,7 @@ mod attribute;
 mod config;
 mod defaults;
 mod error;
-mod interface;
+pub mod interface;
 mod mechanism;
 mod object;
 mod rng;
@@ -37,7 +37,7 @@ use slot::Slot;
 use token::Token;
 
 mod native;
-mod ossl;
+pub mod ossl;
 
 #[cfg(feature = "fips")]
 mod fips;
@@ -2939,7 +2939,7 @@ static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
     C_GetInfo: Some(fn_get_info),
-    C_GetFunctionList: Some(C_GetFunctionList),
+    C_GetFunctionList: Some(fn_get_function_list),
     C_GetSlotList: Some(fn_get_slot_list),
     C_GetSlotInfo: Some(fn_get_slot_info),
     C_GetTokenInfo: Some(fn_get_token_info),
@@ -3131,8 +3131,9 @@ extern "C" fn fn_get_info(info: CK_INFO_PTR) -> CK_RV {
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258)
 
-#[unsafe(no_mangle)]
-pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
+pub extern "C" fn fn_get_function_list(
+    fnlist: CK_FUNCTION_LIST_PTR_PTR,
+) -> CK_RV {
     unsafe {
         *fnlist = &FNLIST_240 as *const _ as *mut _;
     };
@@ -3838,7 +3839,7 @@ static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
     C_GetInfo: Some(fn_get_info),
-    C_GetFunctionList: Some(C_GetFunctionList),
+    C_GetFunctionList: Some(fn_get_function_list),
     C_GetSlotList: Some(fn_get_slot_list),
     C_GetSlotInfo: Some(fn_get_slot_info),
     C_GetTokenInfo: Some(fn_get_token_info),
@@ -3903,8 +3904,8 @@ static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     C_GetFunctionStatus: Some(fn_get_function_status),
     C_CancelFunction: Some(fn_cancel_function),
     C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
-    C_GetInterfaceList: Some(C_GetInterfaceList),
-    C_GetInterface: Some(C_GetInterface),
+    C_GetInterfaceList: Some(fn_get_interface_list),
+    C_GetInterface: Some(fn_get_interface),
     C_LoginUser: Some(fn_login_user),
     C_SessionCancel: Some(fn_session_cancel),
     C_MessageEncryptInit: Some(fn_message_encrypt_init),
@@ -4298,7 +4299,7 @@ static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
     C_GetInfo: Some(fn_get_info),
-    C_GetFunctionList: Some(C_GetFunctionList),
+    C_GetFunctionList: Some(fn_get_function_list),
     C_GetSlotList: Some(fn_get_slot_list),
     C_GetSlotInfo: Some(fn_get_slot_info),
     C_GetTokenInfo: Some(fn_get_token_info),
@@ -4363,8 +4364,8 @@ static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
     C_GetFunctionStatus: Some(fn_get_function_status),
     C_CancelFunction: Some(fn_cancel_function),
     C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
-    C_GetInterfaceList: Some(C_GetInterfaceList),
-    C_GetInterface: Some(C_GetInterface),
+    C_GetInterfaceList: Some(fn_get_interface_list),
+    C_GetInterface: Some(fn_get_interface),
     C_LoginUser: Some(fn_login_user),
     C_SessionCancel: Some(fn_session_cancel),
     C_MessageEncryptInit: Some(fn_message_encrypt_init),
@@ -4472,8 +4473,7 @@ static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259)
 
-#[unsafe(no_mangle)]
-pub extern "C" fn C_GetInterfaceList(
+pub extern "C" fn fn_get_interface_list(
     interfaces_list: CK_INTERFACE_PTR,
     count: CK_ULONG_PTR,
 ) -> CK_RV {
@@ -4515,8 +4515,7 @@ pub extern "C" fn C_GetInterfaceList(
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260)
 
-#[unsafe(no_mangle)]
-pub extern "C" fn C_GetInterface(
+pub extern "C" fn fn_get_interface(
     interface_name: CK_UTF8CHAR_PTR,
     version: CK_VERSION_PTR,
     interface: CK_INTERFACE_PTR_PTR,
@@ -4560,22 +4559,6 @@ pub extern "C" fn C_GetInterface(
     }
 
     CKR_ARGUMENTS_BAD
-}
-
-/// Implementation of the OpenSSL provider initialization function
-///
-/// This function allows OpenSSL to use this module as an OpenSSL FIPS
-/// provider
-
-#[cfg(feature = "fips")]
-#[no_mangle]
-pub extern "C" fn OSSL_provider_init(
-    handle: *const ossl::bindings::OSSL_CORE_HANDLE,
-    in_: *const ossl::bindings::OSSL_DISPATCH,
-    out: *mut *const ossl::bindings::OSSL_DISPATCH,
-    provctx: *mut *mut ::std::ffi::c_void,
-) -> ::std::ffi::c_int {
-    unsafe { ossl::bindings::OSSL_provider_init_int(handle, in_, out, provctx) }
 }
 
 #[cfg(feature = "log")]

@@ -1,5 +1,8 @@
-[package]
-name = "kryoptic"
+[workspace]
+members = ["tools/softhsm", "cdylib"]
+default-members = [".", "cdylib"]
+
+[workspace.package]
 version = "1.2.0"
 edition = "2021"
 description = "A PKCS #11 software token written in Rust"
@@ -7,29 +10,22 @@ homepage = "https://github.com/latchset/kryoptic"
 repository = "https://github.com/latchset/kryoptic"
 license = "GPL-3.0-or-later"
 
+[package]
+name = "kryoptic"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
 exclude = [
     ".github/*",
     "openssl/*",
 ]
 
 [lib]
-name = "kryoptic_pkcs11"
-crate-type = ["cdylib"]
-
-[[bin]]
-name = "softhsm_migrate"
-path = "src/tools/softhsm/migrate.rs"
-test = false
-
-[[bin]]
-name = "kryoptic_init"
-path = "src/tools/softhsm/test_init.rs"
-test = false
-
-[[bin]]
-name = "test_signature"
-path = "src/tools/softhsm/test_signature.rs"
-test = false
+test = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -42,9 +38,7 @@ asn1 = "0.21"
 bimap = "0.6.3"
 bitflags = "2.4.1"
 cfg-if = "1.0.0"
-clap = { version = "4.5.26", default-features = false, features = ["cargo", "derive", "help", "std", "usage"] }
 constant_time_eq = "0.3.0"
-cryptoki = "0.9.0"
 data-encoding = "2.4.0"
 getrandom = "0.3"
 hex = "0.4.3"
