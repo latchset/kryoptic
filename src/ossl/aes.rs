@@ -14,13 +14,14 @@ use crate::misc::{
     bytes_to_slice, bytes_to_vec, cast_params, void_ptr, zeromem,
 };
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
+use ossl::bindings::*;
+use ossl::{EvpCipher, EvpCipherCtx, EvpMacCtx, OsslParam};
 use pkcs11::*;
 
 /// Maximum buffer size for accumulating data in CCM mode (1 MiB).
@@ -56,7 +57,7 @@ impl AesCipher {
     /// Returns an OpenSSL EVP_CIPHER wrapper, or None if fetching fails.
     pub fn new(name: *const u8) -> AesCipher {
         AesCipher {
-            cipher: match EvpCipher::new(name as *const c_char) {
+            cipher: match EvpCipher::new(osslctx(), name as *const c_char) {
                 Ok(ec) => Some(ec),
                 Err(_) => None,
             },
@@ -745,7 +746,7 @@ impl AesOperation {
     /// Helper function to add CTS mode to the parameters
     /// array to be passed to OpenSSL functions.
     fn cts_params(&mut self, params: &mut OsslParam) -> Result<()> {
-        params.add_const_c_string(
+        Ok(params.add_const_c_string(
             name_as_char(OSSL_CIPHER_PARAM_CTS_MODE),
             match self.params.ctsmode {
                 1 => name_as_char(OSSL_CIPHER_CTS_MODE_CS1),
@@ -753,7 +754,7 @@ impl AesOperation {
                 3 => name_as_char(OSSL_CIPHER_CTS_MODE_CS3),
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             },
-        )
+        )?)
     }
 
     /// Helper function for setting up CCM tag lengths on the
@@ -2859,7 +2860,8 @@ impl AesCmacOperation {
         #[cfg(feature = "fips")]
         fips_approval_init_checks(&mut fips_approved);
 
-        let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_CMAC))?;
+        let mut ctx =
+            EvpMacCtx::new(osslctx(), name_as_char(OSSL_MAC_NAME_CMAC))?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
             name_as_char(OSSL_MAC_PARAM_CIPHER),

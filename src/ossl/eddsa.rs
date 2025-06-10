@@ -13,16 +13,14 @@ use crate::error::{some_or_err, Result};
 use crate::mechanism::*;
 use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpMdCtx, EvpPkey, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
-use crate::ossl::fips::*;
-
-#[cfg(not(feature = "fips"))]
-use crate::ossl::get_libctx;
+use ossl::fips::ProviderSignatureCtx;
 
 /// Expected signature length for Ed25519 in bytes.
 pub const OUTLEN_ED25519: usize = 64;
@@ -183,13 +181,13 @@ impl EddsaOperation {
         match flag {
             CKF_SIGN => {
                 public_key = None;
-                let privkey = EvpPkey::privkey_from_object(key)?;
+                let privkey = privkey_from_object(key)?;
                 output_len = 2 * ((privkey.get_bits()? + 7) / 8);
                 private_key = Some(privkey);
             }
             CKF_VERIFY => {
                 private_key = None;
-                let pubkey = EvpPkey::pubkey_from_object(key)?;
+                let pubkey = pubkey_from_object(key)?;
                 output_len = 2 * ((pubkey.get_bits()? + 7) / 8);
                 if let Some(s) = &signature {
                     if s.len() != output_len {
@@ -255,6 +253,7 @@ impl EddsaOperation {
         privkey: &mut Object,
     ) -> Result<()> {
         let evp_pkey = EvpPkey::generate(
+            osslctx(),
             get_ossl_name_from_obj(pubkey)?.as_ptr() as *const c_char,
             &OsslParam::empty(),
         )?;
@@ -367,7 +366,7 @@ impl Sign for EddsaOperation {
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
-                    get_libctx(),
+                    osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.private_key).as_mut_ptr(),
                     params.as_mut_ptr(),
@@ -474,7 +473,7 @@ impl EddsaOperation {
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
-                    get_libctx(),
+                    osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.public_key).as_mut_ptr(),
                     params.as_mut_ptr(),
@@ -535,7 +534,7 @@ impl EddsaOperation {
         self.sigctx
             .as_mut()
             .unwrap()
-            .digest_verify(sig.as_ptr(), &mut self.data.as_slice())?;
+            .digest_verify(sig, &mut self.data.as_slice())?;
 
         Ok(())
     }

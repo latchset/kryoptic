@@ -15,16 +15,14 @@ use crate::kasn1::DerEncBigUint;
 use crate::mechanism::*;
 use crate::misc::zeromem;
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpMdCtx, EvpPkey, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
-use crate::ossl::fips::*;
-
-#[cfg(not(feature = "fips"))]
-use crate::ossl::get_libctx;
+use ossl::fips::ProviderSignatureCtx;
 
 /// Converts a PKCS#11 EC key `Object` into OpenSSL parameters (`OsslParam`).
 ///
@@ -220,13 +218,13 @@ impl EcdsaOperation {
         match flag {
             CKF_SIGN => {
                 public_key = None;
-                let privkey = EvpPkey::privkey_from_object(key)?;
+                let privkey = privkey_from_object(key)?;
                 output_len = 2 * ((privkey.get_bits()? + 7) / 8);
                 private_key = Some(privkey);
             }
             CKF_VERIFY => {
                 private_key = None;
-                let pubkey = EvpPkey::pubkey_from_object(key)?;
+                let pubkey = pubkey_from_object(key)?;
                 output_len = 2 * ((pubkey.get_bits()? + 7) / 8);
                 if let Some(s) = &signature {
                     if s.len() != output_len {
@@ -302,7 +300,8 @@ impl EcdsaOperation {
         )?;
         params.finalize();
 
-        let evp_pkey = EvpPkey::generate(name_as_char(EC_NAME), &params)?;
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), name_as_char(EC_NAME), &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key */
@@ -346,7 +345,8 @@ impl Sign for EcdsaOperation {
             if signature.len() != self.output_len {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
-            let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
+            let mut ctx =
+                some_or_err!(mut self.private_key).new_ctx(osslctx())?;
             let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return Err(CKR_DEVICE_ERROR)?;
@@ -406,7 +406,7 @@ impl Sign for EcdsaOperation {
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     mech_type_to_digest_name(self.mech),
-                    get_libctx(),
+                    osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.private_key).as_mut_ptr(),
                     std::ptr::null(),
@@ -438,7 +438,7 @@ impl Sign for EcdsaOperation {
             Ok(())
         }
         #[cfg(feature = "fips")]
-        self.sigctx.as_mut().unwrap().digest_sign_update(data)
+        Ok(self.sigctx.as_mut().unwrap().digest_sign_update(data)?)
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
@@ -509,7 +509,8 @@ impl EcdsaOperation {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_ECDSA {
-            let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
+            let mut ctx =
+                some_or_err!(mut self.public_key).new_ctx(osslctx())?;
             let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
             if res != 1 {
                 return Err(CKR_DEVICE_ERROR)?;
@@ -567,7 +568,7 @@ impl EcdsaOperation {
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     mech_type_to_digest_name(self.mech),
-                    get_libctx(),
+                    osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.public_key).as_mut_ptr(),
                     std::ptr::null(),
@@ -600,7 +601,7 @@ impl EcdsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        self.sigctx.as_mut().unwrap().digest_verify_update(data)
+        Ok(self.sigctx.as_mut().unwrap().digest_verify_update(data)?)
     }
 
     /// Internal helper for the final step of multi-part verification.

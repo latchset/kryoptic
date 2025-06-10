@@ -13,9 +13,10 @@ use crate::error::Result;
 use crate::mechanism::*;
 use crate::misc::bytes_to_vec;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
@@ -61,7 +62,12 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
     params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
     params.finalize();
 
-    EvpPkey::fromdata(name_as_char(name), EVP_PKEY_PUBLIC_KEY, &params)
+    Ok(EvpPkey::fromdata(
+        osslctx(),
+        name_as_char(name),
+        EVP_PKEY_PUBLIC_KEY,
+        &params,
+    )?)
 }
 
 /// Represents an active ECDH key derivation operation.
@@ -148,7 +154,7 @@ impl Derive for ECDHOperation {
         };
         let outlen: c_uint;
 
-        let mut pkey = EvpPkey::privkey_from_object(key)?;
+        let mut pkey = privkey_from_object(key)?;
 
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;
@@ -215,7 +221,7 @@ impl Derive for ECDHOperation {
 
         params.finalize();
 
-        let mut ctx = pkey.new_ctx()?;
+        let mut ctx = pkey.new_ctx(osslctx())?;
         let res = unsafe {
             EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
         };
