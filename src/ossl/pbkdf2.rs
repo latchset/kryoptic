@@ -6,9 +6,10 @@ use std::ffi::c_uint;
 use crate::error::Result;
 use crate::mechanism::Mechanisms;
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpKdfCtx, OsslParam};
 use pkcs11::*;
 
 pub fn pbkdf2_derive(
@@ -36,7 +37,8 @@ pub fn pbkdf2_derive(
     )?;
     params.finalize();
 
-    let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_PBKDF2))?;
+    let mut kctx =
+        EvpKdfCtx::new(osslctx(), name_as_char(OSSL_KDF_NAME_PBKDF2))?;
     let mut dkm = vec![0u8; len];
     let res = unsafe {
         EVP_KDF_derive(

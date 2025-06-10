@@ -21,10 +21,18 @@ check-static:
 	cargo test --no-default-features --features standard,log $(TESTS)
 
 check-format:
-	@find ./src build.rs -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./cdylib -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./ossl -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
+	@find ./pkcs11 -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./src -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./tools -name '*.rs' | xargs rustfmt --check --color auto
 
 fix-format:
-	@find ./src build.rs -name '*.rs' | xargs rustfmt
+	@find ./cdylib -name '*.rs' | xargs rustfmt
+	@find ./ossl -name '*.rs' | xargs rustfmt --edition 2021
+	@find ./pkcs11 -name '*.rs' | xargs rustfmt
+	@find ./src -name '*.rs' | xargs rustfmt
+	@find ./tools -name '*.rs' | xargs rustfmt
 
 check-spell:
 	@.github/codespell.sh
@@ -50,7 +58,7 @@ scope:
 		if [[ -n "$$OSSLFILES" ]]; then
 			read OSSLFILE < <(ls -t $$OSSLFILES)
 		fi
-		scope -- src cdylib tools $$PKCSFILE $$OSSLFILE
+		scope -- cdylib ossl pkcs11 src tools $$PKCSFILE $$OSSLFILE
 	fi
 
 tags: scope

@@ -10,8 +10,9 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::error::{Error, Result};
-use crate::misc::{sizeof, void_ptr, zeromem, BorrowedReference};
+use crate::misc::{sizeof, void_ptr, zeromem};
 
+use ossl::BorrowedReference;
 use pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
 use pkcs11::*;
 
@@ -823,7 +824,7 @@ impl<'a> CkAttrs<'a> {
             pValue: val as *const CK_BBOOL as *mut std::ffi::c_void,
             ulValueLen: sizeof!(CK_BBOOL),
         });
-        self.br.push(BorrowedReference::CkBool(val));
+        self.br.push(BorrowedReference::CharBool(val));
     }
 
     /// Adds a new attribute but only if it does not already exist on

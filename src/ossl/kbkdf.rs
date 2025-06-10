@@ -8,11 +8,12 @@ use crate::error::{map_err, Result};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_slice, bytes_to_vec};
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::ossl::fips::*;
 use crate::sp800_108::*;
 
+use ossl::bindings::*;
+use ossl::{EvpKdfCtx, OsslParam};
 use pkcs11::*;
 
 const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
@@ -531,7 +532,8 @@ impl Derive for Sp800Operation {
         #[cfg(feature = "fips")]
         fips_approval_prep_check();
 
-        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_KBKDF))?;
+        let mut kctx =
+            EvpKdfCtx::new(osslctx(), name_as_char(OSSL_KDF_NAME_KBKDF))?;
         let mut dkm = vec![0u8; slen];
         let res = unsafe {
             EVP_KDF_derive(

@@ -14,16 +14,14 @@ use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::mechanism::*;
 use crate::misc::{bytes_to_vec, cast_params, zeromem};
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpMdCtx, EvpPkey, OsslParam};
 use pkcs11::*;
 
-#[cfg(not(feature = "fips"))]
-use crate::ossl::get_libctx;
-
 #[cfg(feature = "fips")]
-use crate::ossl::fips::*;
+use ossl::fips::ProviderSignatureCtx;
 
 #[cfg(not(feature = "fips"))]
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
@@ -339,7 +337,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let keysize = Self::get_key_size(key, info)?;
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let pubkey = pubkey_from_object(key)?;
         Self::encdec_new(mech, Some(pubkey), None, keysize)
     }
 
@@ -350,8 +348,8 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let keysize = Self::get_key_size(key, info)?;
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
-        let privkey = EvpPkey::privkey_from_object(key)?;
+        let pubkey = pubkey_from_object(key)?;
+        let privkey = privkey_from_object(key)?;
         Self::encdec_new(mech, Some(pubkey), Some(privkey), keysize)
     }
 
@@ -404,8 +402,8 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let keysize = Self::get_key_size(key, info)?;
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
-        let privkey = EvpPkey::privkey_from_object(key)?;
+        let pubkey = pubkey_from_object(key)?;
+        let privkey = privkey_from_object(key)?;
         Self::sigver_new(mech, Some(pubkey), Some(privkey), keysize, None)
     }
 
@@ -416,7 +414,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
         let keysize = Self::get_key_size(key, info)?;
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let pubkey = pubkey_from_object(key)?;
         Self::sigver_new(mech, Some(pubkey), None, keysize, None)
     }
 
@@ -433,7 +431,7 @@ impl RsaPKCSOperation {
         if signature.len() != keysize {
             return Err(CKR_SIGNATURE_LEN_RANGE)?;
         }
-        let pubkey = EvpPkey::pubkey_from_object(key)?;
+        let pubkey = pubkey_from_object(key)?;
         Self::sigver_new(mech, Some(pubkey), None, keysize, Some(signature))
     }
 
@@ -458,7 +456,8 @@ impl RsaPKCSOperation {
         params.add_uint(name_as_char(OSSL_PKEY_PARAM_RSA_BITS), &c_bits)?;
         params.finalize();
 
-        let evp_pkey = EvpPkey::generate(name_as_char(RSA_NAME), &params)?;
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), name_as_char(RSA_NAME), &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key (has E already set) */
@@ -728,7 +727,7 @@ impl Encryption for RsaPKCSOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
+        let mut ctx = some_or_err!(mut self.public_key).new_ctx(osslctx())?;
         if unsafe { EVP_PKEY_encrypt_init(ctx.as_mut_ptr()) } != 1 {
             return Err(CKR_DEVICE_ERROR)?;
         }
@@ -808,7 +807,7 @@ impl Decryption for RsaPKCSOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
+        let mut ctx = some_or_err!(mut self.private_key).new_ctx(osslctx())?;
         let ret = unsafe { EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) };
         if ret != 1 {
             return Err(CKR_DEVICE_ERROR)?;
@@ -924,7 +923,8 @@ impl Sign for RsaPKCSOperation {
                 if signature.len() != self.output_len {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
-                let mut ctx = some_or_err!(mut self.private_key).new_ctx()?;
+                let mut ctx =
+                    some_or_err!(mut self.private_key).new_ctx(osslctx())?;
                 let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
                 if res != 1 {
                     return Err(CKR_DEVICE_ERROR)?;
@@ -1006,7 +1006,7 @@ impl Sign for RsaPKCSOperation {
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     mech_type_to_digest_name(self.mech),
-                    get_libctx(),
+                    osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.private_key).as_mut_ptr(),
                     params.as_ptr(),
@@ -1019,7 +1019,7 @@ impl Sign for RsaPKCSOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.sigctx.as_mut().unwrap().digest_sign_update(data)
+            Ok(self.sigctx.as_mut().unwrap().digest_sign_update(data)?)
         }
         #[cfg(not(feature = "fips"))]
         unsafe {
@@ -1112,7 +1112,8 @@ impl RsaPKCSOperation {
                 if sig.len() != self.output_len {
                     return Err(CKR_SIGNATURE_LEN_RANGE)?;
                 }
-                let mut ctx = some_or_err!(mut self.public_key).new_ctx()?;
+                let mut ctx =
+                    some_or_err!(mut self.public_key).new_ctx(osslctx())?;
                 let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
                 if res != 1 {
                     return Err(CKR_DEVICE_ERROR)?;
@@ -1174,7 +1175,7 @@ impl RsaPKCSOperation {
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
                     mech_type_to_digest_name(self.mech),
-                    get_libctx(),
+                    osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.public_key).as_mut_ptr(),
                     params.as_ptr(),
@@ -1187,7 +1188,7 @@ impl RsaPKCSOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.sigctx.as_mut().unwrap().digest_verify_update(data)
+            Ok(self.sigctx.as_mut().unwrap().digest_verify_update(data)?)
         }
         #[cfg(not(feature = "fips"))]
         unsafe {
@@ -1224,7 +1225,7 @@ impl RsaPKCSOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.sigctx.as_mut().unwrap().digest_verify_final(sig)
+            Ok(self.sigctx.as_mut().unwrap().digest_verify_final(sig)?)
         }
         #[cfg(not(feature = "fips"))]
         unsafe {

@@ -36,10 +36,6 @@ pub extern "C" fn C_GetInterfaceList(
     fn_get_interface_list(interfaces_list, count)
 }
 
-
-#[cfg(feature = "fips")]
-use kryoptic::ossl;
-
 /// Implementation of the OpenSSL provider initialization function
 ///
 /// This function allows OpenSSL to use this module as an OpenSSL FIPS
@@ -48,11 +44,12 @@ use kryoptic::ossl;
 #[cfg(feature = "fips")]
 #[no_mangle]
 pub extern "C" fn OSSL_provider_init(
-    handle: *const ossl::bindings::OSSL_CORE_HANDLE,
-    in_: *const ossl::bindings::OSSL_DISPATCH,
-    out: *mut *const ossl::bindings::OSSL_DISPATCH,
+    handle: *const ::ossl::bindings::OSSL_CORE_HANDLE,
+    in_: *const ::ossl::bindings::OSSL_DISPATCH,
+    out: *mut *const ::ossl::bindings::OSSL_DISPATCH,
     provctx: *mut *mut ::std::ffi::c_void,
 ) -> ::std::ffi::c_int {
-    unsafe { ossl::bindings::OSSL_provider_init_int(handle, in_, out, provctx) }
+    unsafe {
+        ::ossl::bindings::OSSL_provider_init_int(handle, in_, out, provctx)
+    }
 }
-

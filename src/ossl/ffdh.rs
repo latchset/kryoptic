@@ -14,9 +14,10 @@ use crate::ffdh::FFDHMechanism;
 use crate::ffdh_groups::{get_group_name, DHGroupName, FFDHE2048};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Names as understood by OpenSSL
@@ -61,7 +62,8 @@ pub fn get_group_name_from_key(key: &EvpPkey) -> Result<Vec<u8>> {
     )?;
     params.finalize();
     key.get_params(&mut params)?;
-    params.get_utf8_string_as_vec(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME))
+    Ok(params
+        .get_utf8_string_as_vec(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME))?)
 }
 
 /// Converts a PKCS#11 DH key `Object` into OpenSSL parameters (`OsslParam`).
@@ -154,7 +156,12 @@ impl FFDHOperation {
         params.add_bn(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), &self.public)?;
         params.finalize();
 
-        EvpPkey::fromdata(name_as_char(DH_NAME), EVP_PKEY_PUBLIC_KEY, &params)
+        Ok(EvpPkey::fromdata(
+            osslctx(),
+            name_as_char(DH_NAME),
+            EVP_PKEY_PUBLIC_KEY,
+            &params,
+        )?)
     }
 
     /// Generates an FFDH key pair using OpenSSL.
@@ -174,7 +181,8 @@ impl FFDHOperation {
         )?;
         params.finalize();
 
-        let evp_pkey = EvpPkey::generate(name_as_char(DH_NAME), &params)?;
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), name_as_char(DH_NAME), &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key */
@@ -243,13 +251,13 @@ impl Derive for FFDHOperation {
         }
         self.finalized = true;
 
-        let mut pkey = EvpPkey::privkey_from_object(key)?;
+        let mut pkey = privkey_from_object(key)?;
         let params = OsslParam::empty();
 
         let factory =
             objectfactories.get_obj_factory_from_key_template(template)?;
 
-        let mut ctx = pkey.new_ctx()?;
+        let mut ctx = pkey.new_ctx(osslctx())?;
         let res = unsafe {
             EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
         };
