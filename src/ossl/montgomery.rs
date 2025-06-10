@@ -11,9 +11,10 @@ use crate::attribute::Attribute;
 use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into
@@ -74,6 +75,7 @@ impl ECMontgomeryOperation {
         privkey: &mut Object,
     ) -> Result<()> {
         let evp_pkey = EvpPkey::generate(
+            osslctx(),
             get_ossl_name_from_obj(pubkey)?.as_ptr() as *const c_char,
             &OsslParam::empty(),
         )?;

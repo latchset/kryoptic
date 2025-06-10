@@ -7,11 +7,12 @@ use crate::hash;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::ossl::fips::*;
 use crate::{bytes_to_vec, cast_params};
 
+use ossl::bindings::*;
+use ossl::{EvpKdfCtx, OsslParam};
 use pkcs11::vendor::KR_SSHKDF_PARAMS;
 use pkcs11::*;
 
@@ -129,7 +130,8 @@ impl Derive for SSHKDFOperation {
         #[cfg(feature = "fips")]
         fips_approval_prep_check();
 
-        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_SSHKDF))?;
+        let mut kctx =
+            EvpKdfCtx::new(osslctx(), name_as_char(OSSL_KDF_NAME_SSHKDF))?;
         let mut dkm = vec![0u8; value_len];
         let res = unsafe {
             EVP_KDF_derive(

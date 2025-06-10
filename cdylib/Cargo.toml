@@ -11,8 +11,9 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-kryoptic = { version = "1.2.0", path = "..", default-features = false }
-pkcs11 = { version = "1.2.0", path = "../pkcs11" }
+kryoptic.workspace = true
+ossl.workspace = true
+pkcs11.workspace = true
 
 [features]
 fips = []

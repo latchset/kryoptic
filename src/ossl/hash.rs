@@ -8,9 +8,10 @@ use std::os::raw::*;
 
 use crate::error::Result;
 use crate::mechanism::{Digest, MechOperation};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{EvpMd, EvpMdCtx};
 use pkcs11::*;
 
 /// Represents an active hash (digest) operation.
@@ -40,7 +41,7 @@ impl HashState {
     /// wrapper containing a EVP_MD and EVP_MD_CTX pointers
     pub fn new(alg: *const c_char) -> Result<HashState> {
         Ok(HashState {
-            md: EvpMd::new(alg)?,
+            md: EvpMd::new(osslctx(), alg)?,
             ctx: EvpMdCtx::new()?,
         })
     }

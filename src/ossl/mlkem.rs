@@ -10,9 +10,10 @@ use std::ffi::c_char;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 
+use ossl::bindings::*;
+use ossl::{ErrorKind, EvpPkey, OsslParam};
 use pkcs11::*;
 
 /* Openssl Key types */
@@ -92,8 +93,8 @@ pub fn encapsulate(
     key: &Object,
     ciphertext: &mut [u8],
 ) -> Result<(Vec<u8>, usize)> {
-    let mut pubkey = EvpPkey::pubkey_from_object(key)?;
-    let mut ctx = pubkey.new_ctx()?;
+    let mut pubkey = pubkey_from_object(key)?;
+    let mut ctx = pubkey.new_ctx(osslctx())?;
     if unsafe {
         EVP_PKEY_encapsulate_init(ctx.as_mut_ptr(), std::ptr::null_mut())
     } != 1
@@ -145,8 +146,8 @@ pub fn encapsulate(
 ///
 /// Returns the derived shared secret (`Vec<u8>`).
 pub fn decapsulate(key: &Object, ciphertext: &[u8]) -> Result<Vec<u8>> {
-    let mut privkey = EvpPkey::privkey_from_object(key)?;
-    let mut ctx = privkey.new_ctx()?;
+    let mut privkey = privkey_from_object(key)?;
+    let mut ctx = privkey.new_ctx(osslctx())?;
     if unsafe {
         EVP_PKEY_decapsulate_init(ctx.as_mut_ptr(), std::ptr::null_mut())
     } != 1
@@ -196,6 +197,7 @@ pub fn generate_keypair(
     privkey: &mut Object,
 ) -> Result<()> {
     let evp_pkey = EvpPkey::generate(
+        osslctx(),
         mlkem_param_set_to_name(param_set)?,
         &OsslParam::empty(),
     )?;
@@ -214,8 +216,8 @@ pub fn generate_keypair(
             privkey.set_attr(Attribute::from_bytes(CKA_SEED, val.to_vec()))?
         }
         Err(e) => {
-            if !e.attr_not_found() {
-                return Err(e);
+            if e.kind() != ErrorKind::NullPtr {
+                return Err(CKR_GENERAL_ERROR)?;
             }
         }
     }

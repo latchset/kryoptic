@@ -7,11 +7,12 @@ use crate::error::Result;
 use crate::hmac::*;
 use crate::mechanism::*;
 use crate::misc::zeromem;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::ossl::fips::*;
 
 use constant_time_eq::constant_time_eq;
+use ossl::bindings::*;
+use ossl::{EvpMacCtx, OsslParam};
 use pkcs11::*;
 
 #[derive(Debug)]
@@ -40,7 +41,8 @@ impl HMACOperation {
         #[cfg(feature = "fips")]
         fips_approval_init_checks(&mut fips_approved);
 
-        let mut ctx = EvpMacCtx::new(name_as_char(OSSL_MAC_NAME_HMAC))?;
+        let mut ctx =
+            EvpMacCtx::new(osslctx(), name_as_char(OSSL_MAC_NAME_HMAC))?;
         let hash = hmac_mech_to_hash_mech(mech)?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(

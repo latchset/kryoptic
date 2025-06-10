@@ -14,12 +14,13 @@ use crate::hash;
 use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 use crate::{bytes_to_vec, cast_params};
 
 use asn1;
 use bitflags::bitflags;
+use ossl::bindings::*;
+use ossl::{ErrorKind, EvpPkey, EvpPkeyCtx, EvpSignature, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -320,12 +321,12 @@ impl MlDsaOperation {
             )?,
             sigctx: match flag {
                 CKF_SIGN => {
-                    let mut privkey = EvpPkey::privkey_from_object(key)?;
-                    privkey.new_ctx()?
+                    let mut privkey = privkey_from_object(key)?;
+                    privkey.new_ctx(osslctx())?
                 }
                 CKF_VERIFY => {
-                    let mut pubkey = EvpPkey::pubkey_from_object(key)?;
-                    pubkey.new_ctx()?
+                    let mut pubkey = pubkey_from_object(key)?;
+                    pubkey.new_ctx(osslctx())?
                 }
                 _ => return Err(CKR_GENERAL_ERROR)?,
             },
@@ -353,9 +354,10 @@ impl MlDsaOperation {
                 let res = unsafe {
                     EVP_PKEY_sign_message_init(
                         op.sigctx.as_mut_ptr(),
-                        EvpSignature::new(mldsa_param_set_to_name(
-                            op.params.param_set,
-                        )?)?
+                        EvpSignature::new(
+                            osslctx(),
+                            mldsa_param_set_to_name(op.params.param_set)?,
+                        )?
                         .as_mut_ptr(),
                         op.params.ossl_params(pflags)?.as_ptr(),
                     )
@@ -370,9 +372,10 @@ impl MlDsaOperation {
                 let res = unsafe {
                     EVP_PKEY_verify_message_init(
                         op.sigctx.as_mut_ptr(),
-                        EvpSignature::new(mldsa_param_set_to_name(
-                            op.params.param_set,
-                        )?)?
+                        EvpSignature::new(
+                            osslctx(),
+                            mldsa_param_set_to_name(op.params.param_set)?,
+                        )?
                         .as_mut_ptr(),
                         op.params.ossl_params(pflags)?.as_ptr(),
                     )
@@ -979,6 +982,7 @@ pub fn generate_keypair(
     privkey: &mut Object,
 ) -> Result<()> {
     let evp_pkey = EvpPkey::generate(
+        osslctx(),
         mldsa_param_set_to_name(param_set)?,
         &OsslParam::empty(),
     )?;
@@ -993,8 +997,8 @@ pub fn generate_keypair(
             privkey.set_attr(Attribute::from_bytes(CKA_SEED, val.to_vec()))?
         }
         Err(e) => {
-            if !e.attr_not_found() {
-                return Err(e);
+            if e.kind() != ErrorKind::NullPtr {
+                return Err(CKR_GENERAL_ERROR)?;
             }
         }
     }

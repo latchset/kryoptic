@@ -7,6 +7,7 @@ use std::error;
 use std::fmt;
 
 use asn1;
+use ossl;
 use pkcs11;
 use pkcs11::*;
 use serde_json;
@@ -275,6 +276,17 @@ impl From<pkcs11::Error> for Error {
     /// Maps an error from the pkcs11 module to a CK_RV error
     fn from(error: pkcs11::Error) -> Error {
         Error::ck_rv(error.rv())
+    }
+}
+
+impl From<ossl::Error> for Error {
+    /// Maps an openssl error
+    fn from(error: ossl::Error) -> Error {
+        match error.kind() {
+            ossl::ErrorKind::KeyError => Error::ck_rv(CKR_KEY_INDIGESTIBLE),
+            ossl::ErrorKind::WrapperError => Error::ck_rv(CKR_GENERAL_ERROR),
+            _ => Error::ck_rv(CKR_DEVICE_ERROR),
+        }
     }
 }
 
