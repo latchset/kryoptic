@@ -97,6 +97,28 @@ impl TLSPRFMechanism {
                 },
             }),
         );
+        #[cfg(feature = "pkcs11_3_2")]
+        mechs.add_mechanism(
+            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
+                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
+                    flags: CKF_DERIVE,
+                },
+            }),
+        );
+        #[cfg(feature = "pkcs11_3_2")]
+        mechs.add_mechanism(
+            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
+            Box::new(TLSPRFMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
+                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
+                    flags: CKF_DERIVE,
+                },
+            }),
+        );
     }
 }
 
@@ -116,6 +138,11 @@ impl Mechanism for TLSPRFMechanism {
         }
 
         match mech.mechanism {
+            #[cfg(feature = "pkcs11_3_2")]
+            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
+            | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
+                Ok(Box::new(TLSKDFOperation::new(mech)?))
+            }
             CKM_TLS12_MASTER_KEY_DERIVE
             | CKM_TLS12_KEY_AND_MAC_DERIVE
             | CKM_TLS12_KEY_SAFE_DERIVE

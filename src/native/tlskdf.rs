@@ -67,6 +67,8 @@ const TLS_MASTER_SECRET_LABEL: &[u8; 13] = b"master secret";
 const TLS_KEY_EXPANSION_LABEL: &[u8; 13] = b"key expansion";
 const TLS_SERVER_FINISHED: &[u8; 15] = b"server finished";
 const TLS_CLIENT_FINISHED: &[u8; 15] = b"client finished";
+#[cfg(feature = "pkcs11_3_2")]
+const TLS_EXTENDED_MASTER_SECRET_LABEL: &[u8; 22] = b"extended master secret";
 
 /// Represents the TLS Pseudo-Random Function (PRF) based on HMAC
 /// (RFC 5246 Section 5)
@@ -250,6 +252,9 @@ pub struct TLSKDFOperation {
     client_random: Vec<u8>,
     /// Server random bytes.
     server_random: Vec<u8>,
+    /// Full session hash for EMS.
+    #[cfg(feature = "pkcs11_3_2")]
+    session_hash: Vec<u8>,
     /// Optional pointer to store the negotiated TLS version (used by
     /// CKM_TLS12_MASTER_KEY_DERIVE)
     version: Option<*mut CK_VERSION>,
@@ -293,15 +298,65 @@ impl TLSKDFOperation {
         }
 
         match mech.mechanism {
-            CKM_TLS12_MASTER_KEY_DERIVE => Self::new_tls12_mk_derive(mech),
+            CKM_TLS12_MASTER_KEY_DERIVE | CKM_TLS12_MASTER_KEY_DERIVE_DH => {
+                Self::new_tls12_mk_derive(mech)
+            }
             CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
                 Self::new_tls12_keymac_derive(mech)
             }
             CKM_TLS12_KDF | CKM_TLS_KDF => {
                 Self::new_tls_generic_key_derive(mech)
             }
+            #[cfg(feature = "pkcs11_3_2")]
+            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
+            | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
+                Self::new_tls12_ems_derive(mech)
+            }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         }
+    }
+
+    /// Constructor for the `CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE` and
+    /// `CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH` mechanisms
+    ///
+    /// Parses `CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS`, validates inputs and sets up the
+    /// operation context for deriving the extended master secret
+    #[cfg(feature = "pkcs11_3_2")]
+    fn new_tls12_ems_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
+        let params =
+            cast_params!(mech, CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+
+        let prf = match hash_to_hmac_mech(params.prfHashMechanism) {
+            Ok(h) => h,
+            Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+        };
+
+        let session_hash =
+            bytes_to_vec!(params.pSessionHash, params.ulSessionHashLen);
+
+        let version = if params.pVersion.is_null() {
+            None
+        } else {
+            Some(params.pVersion)
+        };
+
+        Ok(TLSKDFOperation {
+            finalized: false,
+            mech: mech.mechanism,
+            client_random: Vec::new(),
+            server_random: Vec::new(),
+            session_hash: session_hash,
+            version: version,
+            prf: prf,
+            label: TLS_EXTENDED_MASTER_SECRET_LABEL,
+            context: &[],
+            maclen: 0,
+            keylen: 0,
+            ivlen: 0,
+            mat_out: None,
+            #[cfg(feature = "fips")]
+            fips_approved: is_hmac_fips_approved(prf),
+        })
     }
 
     /// Constructor for the `CKM_TLS12_MASTER_KEY_DERIVE` mechanism
@@ -342,6 +397,8 @@ impl TLSKDFOperation {
             mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
+            #[cfg(feature = "pkcs11_3_2")]
+            session_hash: Vec::new(),
             version: version,
             prf: prf,
             label: TLS_MASTER_SECRET_LABEL,
@@ -406,6 +463,8 @@ impl TLSKDFOperation {
             mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
+            #[cfg(feature = "pkcs11_3_2")]
+            session_hash: Vec::new(),
             version: None,
             prf: prf,
             label: TLS_KEY_EXPANSION_LABEL,
@@ -461,6 +520,8 @@ impl TLSKDFOperation {
             mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
+            #[cfg(feature = "pkcs11_3_2")]
+            session_hash: Vec::new(),
             version: None,
             prf: prf,
             label: bytes_to_slice!(params.pLabel, params.ulLabelLength, u8),
@@ -583,16 +644,31 @@ impl TLSKDFOperation {
         seed
     }
 
-    /// Performs the derivation for `CKM_TLS12_MASTER_KEY_DERIVE`
+    /// Constructs the seed input for the TLS PRF calculation of EMS
+    ///
+    /// Concatenates label + session hash.
+    #[cfg(feature = "pkcs11_3_2")]
+    fn tls_prf_seed_ems(&self) -> Vec<u8> {
+        let mut seed = Vec::<u8>::with_capacity(
+            self.label.len() + self.session_hash.len(),
+        );
+        seed.extend_from_slice(self.label);
+        seed.extend_from_slice(self.session_hash.as_slice());
+        seed
+    }
+
+    /// Performs the derivation for `CKM_TLS12_MASTER_KEY_DERIVE` or
+    /// `CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE`
     ///
     /// Verifies the base key and template.
     ///
-    /// Calls the TLS PRF with the "master secret" label and combined randoms.
+    /// Calls the TLS PRF with the "master secret" label and combined randoms
+    /// or with the "extended master secret" and session hash.
     ///
     /// Sets the derived key value in the new object.
     ///
     /// Optionally fills the TLS version structure provided in the mechanism
-    /// parameters.
+    /// parameters. This is not needed for the *_DH variants.
     fn derive_master_key(
         &mut self,
         key: &Object,
@@ -607,7 +683,17 @@ impl TLSKDFOperation {
         let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
 
         let mech = mechanisms.get(self.prf)?;
-        let seed = self.tls_prf_seed(true);
+        let seed = match self.mech {
+            #[cfg(feature = "pkcs11_3_2")]
+            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
+            | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
+                self.tls_prf_seed_ems()
+            }
+            CKM_TLS12_MASTER_KEY_DERIVE | CKM_TLS12_MASTER_KEY_DERIVE_DH => {
+                self.tls_prf_seed(true)
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
         let dkmlen = TLS_MASTER_SECRET_SIZE as usize;
         let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
         let dkm = tlsprf.finish(&seed, dkmlen)?;
@@ -867,7 +953,12 @@ impl Derive for TLSKDFOperation {
         self.finalized = true;
 
         match self.mech {
-            CKM_TLS12_MASTER_KEY_DERIVE => {
+            #[cfg(feature = "pkcs11_3_2")]
+            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
+            | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
+                self.derive_master_key(key, template, mechanisms, objfactories)
+            }
+            CKM_TLS12_MASTER_KEY_DERIVE | CKM_TLS12_MASTER_KEY_DERIVE_DH => {
                 self.derive_master_key(key, template, mechanisms, objfactories)
             }
             CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
