@@ -334,6 +334,14 @@ impl TLSKDFOperation {
         let session_hash =
             bytes_to_vec!(params.pSessionHash, params.ulSessionHashLen);
 
+        // The pVersion field of the structure must be set to NULL_PTR since the version
+        // number is not embedded in the "pre_master" key as it is for RSA-like cipher suites.
+        if mech.mechanism == CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH
+            && !params.pVersion.is_null()
+        {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+
         let version = if params.pVersion.is_null() {
             None
         } else {
@@ -385,6 +393,14 @@ impl TLSKDFOperation {
             Ok(h) => h,
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
+
+        // The pVersion field of the structure must be set to NULL_PTR since the version
+        // number is not embedded in the "pre_master" key as it is for RSA-like cipher suites.
+        if mech.mechanism == CKM_TLS12_MASTER_KEY_DERIVE_DH
+            && !params.pVersion.is_null()
+        {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
 
         let version = if params.pVersion.is_null() {
             None
