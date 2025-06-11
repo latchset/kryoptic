@@ -2811,8 +2811,10 @@ extern "C" fn fn_derive_key(
                 }
             }
 
-            unsafe {
-                core::ptr::write(key_handle, kh);
+            if !key_handle.is_null() {
+                unsafe {
+                    core::ptr::write(key_handle, kh);
+                }
             }
             CKR_OK
         }
@@ -2855,8 +2857,10 @@ extern "C" fn fn_derive_key(
             }
             let kh =
                 res_or_ret!(token.insert_object(s_handle, result.remove(0)));
-            unsafe {
-                core::ptr::write(key_handle, kh);
+            if !key_handle.is_null() {
+                unsafe {
+                    core::ptr::write(key_handle, kh);
+                }
             }
             CKR_OK
         }
