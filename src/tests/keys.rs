@@ -371,6 +371,7 @@ fn test_ec_keys() {
         op_flags: (CK_ATTRIBUTE_TYPE, CK_ATTRIBUTE_TYPE),
         op_alg: CK_MECHANISM_TYPE,
         out_size: usize,
+        fips_indicator: CK_FLAGS,
     }
 
     let mut testdata = Vec::<TestData>::new();
@@ -385,6 +386,7 @@ fn test_ec_keys() {
         op_flags: (CKA_VERIFY, CKA_SIGN),
         op_alg: CKM_ECDSA_SHA256,
         out_size: 96,
+        fips_indicator: 1,
     });
     #[cfg(feature = "eddsa")]
     testdata.push(TestData {
@@ -397,6 +399,7 @@ fn test_ec_keys() {
         op_flags: (CKA_VERIFY, CKA_SIGN),
         op_alg: CKM_EDDSA,
         out_size: 64,
+        fips_indicator: 1,
     });
     #[cfg(feature = "ec_montgomery")]
     testdata.push(TestData {
@@ -407,6 +410,7 @@ fn test_ec_keys() {
         op_flags: (CKA_DERIVE, CKA_DERIVE),
         op_alg: CK_UNAVAILABLE_INFORMATION,
         out_size: 0,
+        fips_indicator: 0,
     });
     let data = "plaintext";
 
@@ -521,7 +525,7 @@ fn test_ec_keys() {
         );
         assert_eq!(ret, CKR_OK);
 
-        assert_eq!(check_validation(session, 1), true);
+        assert_eq!(check_validation(session, t.fips_indicator), true);
 
         if t.op_flags.1 == CKA_SIGN {
             /* Test the unwrapped key can be used */
