@@ -24,14 +24,14 @@ check-format:
 	@find ./cdylib -name '*.rs' | xargs rustfmt --check --color auto
 	@find ./ossl -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
 	@find ./pkcs11 -name '*.rs' | xargs rustfmt --check --color auto
-	@find ./src -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./src -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
 	@find ./tools -name '*.rs' | xargs rustfmt --check --color auto
 
 fix-format:
 	@find ./cdylib -name '*.rs' | xargs rustfmt
 	@find ./ossl -name '*.rs' | xargs rustfmt --edition 2021
 	@find ./pkcs11 -name '*.rs' | xargs rustfmt
-	@find ./src -name '*.rs' | xargs rustfmt
+	@find ./src -name '*.rs' | xargs rustfmt --edition 2021
 	@find ./tools -name '*.rs' | xargs rustfmt
 
 check-spell:
