@@ -106,32 +106,29 @@ impl Derive for SSHKDFOperation {
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;
         params.add_const_c_string(
-            name_as_char(OSSL_ALG_PARAM_DIGEST),
-            mech_type_to_digest_name(self.prf),
+            cstr!(OSSL_ALG_PARAM_DIGEST),
+            mech_type_to_digest_name(self.prf)?,
         )?;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_KEY),
+            cstr!(OSSL_KDF_PARAM_KEY),
             key.get_attr_as_bytes(CKA_VALUE)?,
         )?;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
+            cstr!(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
             &self.exchange_hash,
         )?;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
+            cstr!(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
             &self.session_id,
         )?;
-        params.add_utf8_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_TYPE),
-            &sshkdf_type,
-        )?;
+        params
+            .add_utf8_string(cstr!(OSSL_KDF_PARAM_SSHKDF_TYPE), &sshkdf_type)?;
         params.finalize();
 
         #[cfg(feature = "fips")]
         fips_approval_prep_check();
 
-        let mut kctx =
-            EvpKdfCtx::new(osslctx(), name_as_char(OSSL_KDF_NAME_SSHKDF))?;
+        let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_SSHKDF))?;
         let mut dkm = vec![0u8; value_len];
         let res = unsafe {
             EVP_KDF_derive(

@@ -4,6 +4,7 @@
 //! This module implements PKCS#11 digest (hashing) mechanisms using the
 //! OpenSSL EVP_Digest interface.
 
+use std::ffi::CStr;
 use std::os::raw::*;
 
 use crate::error::Result;
@@ -39,7 +40,7 @@ pub struct HashState {
 impl HashState {
     /// Fetches a `EVP_MD` with the digest `alg` and crates a `HashState`
     /// wrapper containing a EVP_MD and EVP_MD_CTX pointers
-    pub fn new(alg: *const c_char) -> Result<HashState> {
+    pub fn new(alg: &CStr) -> Result<HashState> {
         Ok(HashState {
             md: EvpMd::new(osslctx(), alg)?,
             ctx: EvpMdCtx::new()?,
@@ -54,13 +55,9 @@ impl HashOperation {
     /// Creates a new `HashOperation` for the specified mechanism type.
     /// Determines the OpenSSL algorithm name from the mechanism type.
     pub fn new(mech: CK_MECHANISM_TYPE) -> Result<HashOperation> {
-        let alg: *const c_char = mech_type_to_digest_name(mech);
-        if alg.is_null() {
-            return Err(CKR_MECHANISM_INVALID)?;
-        }
         Ok(HashOperation {
             mech: mech,
-            state: HashState::new(alg)?,
+            state: HashState::new(mech_type_to_digest_name(mech)?)?,
             finalized: false,
             in_use: false,
         })

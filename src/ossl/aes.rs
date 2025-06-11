@@ -3,7 +3,7 @@
 
 //! This module implements access to the OpenSSL implementation of AES
 
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{c_int, c_void, CStr};
 
 use crate::aes::*;
 use crate::error;
@@ -29,15 +29,15 @@ const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 /// Minimum number of bits required for random IV generation.
 const MIN_RANDOM_IV_BITS: usize = 64;
 
-const AES_128_CBC_CTS: &[u8; 16] = b"AES-128-CBC-CTS\0";
-const AES_192_CBC_CTS: &[u8; 16] = b"AES-192-CBC-CTS\0";
-const AES_256_CBC_CTS: &[u8; 16] = b"AES-256-CBC-CTS\0";
-const AES_128_WRAP_NAME: &[u8; 13] = b"AES-128-WRAP\0";
-const AES_192_WRAP_NAME: &[u8; 13] = b"AES-192-WRAP\0";
-const AES_256_WRAP_NAME: &[u8; 13] = b"AES-256-WRAP\0";
-const AES_128_WRAP_PAD_NAME: &[u8; 17] = b"AES-128-WRAP-PAD\0";
-const AES_192_WRAP_PAD_NAME: &[u8; 17] = b"AES-192-WRAP-PAD\0";
-const AES_256_WRAP_PAD_NAME: &[u8; 17] = b"AES-256-WRAP-PAD\0";
+const AES_128_CBC_CTS: &CStr = c"AES-128-CBC-CTS";
+const AES_192_CBC_CTS: &CStr = c"AES-192-CBC-CTS";
+const AES_256_CBC_CTS: &CStr = c"AES-256-CBC-CTS";
+const AES_128_WRAP_NAME: &CStr = c"AES-128-WRAP";
+const AES_192_WRAP_NAME: &CStr = c"AES-192-WRAP";
+const AES_256_WRAP_NAME: &CStr = c"AES-256-WRAP";
+const AES_128_WRAP_PAD_NAME: &CStr = c"AES-128-WRAP-PAD";
+const AES_192_WRAP_PAD_NAME: &CStr = c"AES-192-WRAP-PAD";
+const AES_256_WRAP_PAD_NAME: &CStr = c"AES-256-WRAP-PAD";
 
 const AES_KWP_BLOCK: usize = AES_BLOCK_SIZE / 2;
 
@@ -55,9 +55,9 @@ struct AesCipher {
 
 impl AesCipher {
     /// Returns an OpenSSL EVP_CIPHER wrapper, or None if fetching fails.
-    pub fn new(name: *const u8) -> AesCipher {
+    pub fn new(name: &CStr) -> AesCipher {
         AesCipher {
-            cipher: match EvpCipher::new(osslctx(), name as *const c_char) {
+            cipher: match EvpCipher::new(osslctx(), name) {
                 Ok(ec) => Some(ec),
                 Err(_) => None,
             },
@@ -81,53 +81,52 @@ unsafe impl Sync for AesCipher {}
 /// Macro to define static `Lazy<AesCipher>` instances for various AES modes.
 macro_rules! aes_cipher {
     ($mode:ident; $name:expr) => {
-        static $mode: Lazy<AesCipher> =
-            Lazy::new(|| AesCipher::new($name.as_ptr()));
+        static $mode: Lazy<AesCipher> = Lazy::new(|| AesCipher::new($name));
     };
 }
 
-aes_cipher!(AES_128_CCM; LN_aes_128_ccm);
-aes_cipher!(AES_192_CCM; LN_aes_192_ccm);
-aes_cipher!(AES_256_CCM; LN_aes_256_ccm);
-aes_cipher!(AES_128_GCM; LN_aes_128_gcm);
-aes_cipher!(AES_192_GCM; LN_aes_192_gcm);
-aes_cipher!(AES_256_GCM; LN_aes_256_gcm);
+aes_cipher!(AES_128_CCM; CStr::from_bytes_with_nul(LN_aes_128_ccm).unwrap());
+aes_cipher!(AES_192_CCM; CStr::from_bytes_with_nul(LN_aes_192_ccm).unwrap());
+aes_cipher!(AES_256_CCM; CStr::from_bytes_with_nul(LN_aes_256_ccm).unwrap());
+aes_cipher!(AES_128_GCM; CStr::from_bytes_with_nul(LN_aes_128_gcm).unwrap());
+aes_cipher!(AES_192_GCM; CStr::from_bytes_with_nul(LN_aes_192_gcm).unwrap());
+aes_cipher!(AES_256_GCM; CStr::from_bytes_with_nul(LN_aes_256_gcm).unwrap());
 aes_cipher!(AES_128_CTS; AES_128_CBC_CTS);
 aes_cipher!(AES_192_CTS; AES_192_CBC_CTS);
 aes_cipher!(AES_256_CTS; AES_256_CBC_CTS);
-aes_cipher!(AES_128_CTR; LN_aes_128_ctr);
-aes_cipher!(AES_192_CTR; LN_aes_192_ctr);
-aes_cipher!(AES_256_CTR; LN_aes_256_ctr);
-aes_cipher!(AES_128_CBC; LN_aes_128_cbc);
-aes_cipher!(AES_192_CBC; LN_aes_192_cbc);
-aes_cipher!(AES_256_CBC; LN_aes_256_cbc);
-aes_cipher!(AES_128_ECB; LN_aes_128_ecb);
-aes_cipher!(AES_192_ECB; LN_aes_192_ecb);
-aes_cipher!(AES_256_ECB; LN_aes_256_ecb);
+aes_cipher!(AES_128_CTR; CStr::from_bytes_with_nul(LN_aes_128_ctr).unwrap());
+aes_cipher!(AES_192_CTR; CStr::from_bytes_with_nul(LN_aes_192_ctr).unwrap());
+aes_cipher!(AES_256_CTR; CStr::from_bytes_with_nul(LN_aes_256_ctr).unwrap());
+aes_cipher!(AES_128_CBC; CStr::from_bytes_with_nul(LN_aes_128_cbc).unwrap());
+aes_cipher!(AES_192_CBC; CStr::from_bytes_with_nul(LN_aes_192_cbc).unwrap());
+aes_cipher!(AES_256_CBC; CStr::from_bytes_with_nul(LN_aes_256_cbc).unwrap());
+aes_cipher!(AES_128_ECB; CStr::from_bytes_with_nul(LN_aes_128_ecb).unwrap());
+aes_cipher!(AES_192_ECB; CStr::from_bytes_with_nul(LN_aes_192_ecb).unwrap());
+aes_cipher!(AES_256_ECB; CStr::from_bytes_with_nul(LN_aes_256_ecb).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_128_CFB8; LN_aes_128_cfb8);
+aes_cipher!(AES_128_CFB8; CStr::from_bytes_with_nul(LN_aes_128_cfb8).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_192_CFB8; LN_aes_192_cfb8);
+aes_cipher!(AES_192_CFB8; CStr::from_bytes_with_nul(LN_aes_192_cfb8).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_256_CFB8; LN_aes_256_cfb8);
+aes_cipher!(AES_256_CFB8; CStr::from_bytes_with_nul(LN_aes_256_cfb8).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_128_CFB1; LN_aes_128_cfb1);
+aes_cipher!(AES_128_CFB1; CStr::from_bytes_with_nul(LN_aes_128_cfb1).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_192_CFB1; LN_aes_192_cfb1);
+aes_cipher!(AES_192_CFB1; CStr::from_bytes_with_nul(LN_aes_192_cfb1).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_256_CFB1; LN_aes_256_cfb1);
+aes_cipher!(AES_256_CFB1; CStr::from_bytes_with_nul(LN_aes_256_cfb1).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_128_CFB128; LN_aes_128_cfb128);
+aes_cipher!(AES_128_CFB128; CStr::from_bytes_with_nul(LN_aes_128_cfb128).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_192_CFB128; LN_aes_192_cfb128);
+aes_cipher!(AES_192_CFB128; CStr::from_bytes_with_nul(LN_aes_192_cfb128).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_256_CFB128; LN_aes_256_cfb128);
+aes_cipher!(AES_256_CFB128; CStr::from_bytes_with_nul(LN_aes_256_cfb128).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_128_OFB; LN_aes_128_ofb128);
+aes_cipher!(AES_128_OFB; CStr::from_bytes_with_nul(LN_aes_128_ofb128).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_192_OFB; LN_aes_192_ofb128);
+aes_cipher!(AES_192_OFB; CStr::from_bytes_with_nul(LN_aes_192_ofb128).unwrap());
 #[cfg(not(feature = "fips"))]
-aes_cipher!(AES_256_OFB; LN_aes_256_ofb128);
+aes_cipher!(AES_256_OFB; CStr::from_bytes_with_nul(LN_aes_256_ofb128).unwrap());
 aes_cipher!(AES_128_WRAP; AES_128_WRAP_NAME);
 aes_cipher!(AES_192_WRAP; AES_192_WRAP_NAME);
 aes_cipher!(AES_256_WRAP; AES_256_WRAP_NAME);
@@ -747,11 +746,11 @@ impl AesOperation {
     /// array to be passed to OpenSSL functions.
     fn cts_params(&mut self, params: &mut OsslParam) -> Result<()> {
         Ok(params.add_const_c_string(
-            name_as_char(OSSL_CIPHER_PARAM_CTS_MODE),
+            cstr!(OSSL_CIPHER_PARAM_CTS_MODE),
             match self.params.ctsmode {
-                1 => name_as_char(OSSL_CIPHER_CTS_MODE_CS1),
-                2 => name_as_char(OSSL_CIPHER_CTS_MODE_CS2),
-                3 => name_as_char(OSSL_CIPHER_CTS_MODE_CS3),
+                1 => cstr!(OSSL_CIPHER_CTS_MODE_CS1),
+                2 => cstr!(OSSL_CIPHER_CTS_MODE_CS2),
+                3 => cstr!(OSSL_CIPHER_CTS_MODE_CS3),
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             },
         )?)
@@ -2860,15 +2859,14 @@ impl AesCmacOperation {
         #[cfg(feature = "fips")]
         fips_approval_init_checks(&mut fips_approved);
 
-        let mut ctx =
-            EvpMacCtx::new(osslctx(), name_as_char(OSSL_MAC_NAME_CMAC))?;
+        let mut ctx = EvpMacCtx::new(osslctx(), cstr!(OSSL_MAC_NAME_CMAC))?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
-            name_as_char(OSSL_MAC_PARAM_CIPHER),
+            cstr!(OSSL_MAC_PARAM_CIPHER),
             match mackey.raw.len() {
-                16 => name_as_char(CIPHER_NAME_AES128),
-                24 => name_as_char(CIPHER_NAME_AES192),
-                32 => name_as_char(CIPHER_NAME_AES256),
+                16 => cstr!(CIPHER_NAME_AES128),
+                24 => cstr!(CIPHER_NAME_AES192),
+                32 => cstr!(CIPHER_NAME_AES256),
                 _ => return Err(CKR_KEY_INDIGESTIBLE)?,
             },
         )?;

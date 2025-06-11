@@ -41,13 +41,12 @@ impl HMACOperation {
         #[cfg(feature = "fips")]
         fips_approval_init_checks(&mut fips_approved);
 
-        let mut ctx =
-            EvpMacCtx::new(osslctx(), name_as_char(OSSL_MAC_NAME_HMAC))?;
+        let mut ctx = EvpMacCtx::new(osslctx(), cstr!(OSSL_MAC_NAME_HMAC))?;
         let hash = hmac_mech_to_hash_mech(mech)?;
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
-            name_as_char(OSSL_MAC_PARAM_DIGEST),
-            mech_type_to_digest_name(hash),
+            cstr!(OSSL_MAC_PARAM_DIGEST),
+            mech_type_to_digest_name(hash)?,
         )?;
         params.finalize();
 
