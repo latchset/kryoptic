@@ -649,3 +649,125 @@ fn test_tls_mechanisms() {
     /* The End */
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+#[cfg(feature = "pkcs11_3_2")]
+fn test_tls_ems_mechanisms() {
+    let mut testtokn = TestToken::initialized("tls_ems_mechanisms", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 48),],
+        &[],
+        &[
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, false),
+            (CKA_DERIVE, true),
+        ],
+    ));
+
+    /* test CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE */
+    let hash = hex::decode("9bbe436ba940f017b17652849a71db35").unwrap();
+    let mut version: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
+    let params = CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS {
+        prfHashMechanism: CKM_SHA256,
+        pSessionHash: hash.as_ptr() as *mut _,
+        ulSessionHashLen: hash.len() as CK_ULONG,
+        pVersion: &mut version,
+    };
+    let paramslen = sizeof!(CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 48),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* Try again with non-FIPS-approved hash */
+    let params = CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS {
+        prfHashMechanism: CKM_SHA3_256,
+        pSessionHash: hash.as_ptr() as *mut _,
+        ulSessionHashLen: hash.len() as CK_ULONG,
+        pVersion: &mut version,
+    };
+    let paramslen = sizeof!(CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
+    /* ensure Version fields were filled */
+    //assert_not_eq!(version.major.as_slice(), 0);
+    //assert_not_eq!(version.minor.as_slice(), 0);
+
+    /* _DH kdf needs NULL Version */
+    let params = CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS {
+        prfHashMechanism: CKM_SHA256,
+        pSessionHash: hash.as_ptr() as *mut _,
+        ulSessionHashLen: hash.len() as CK_ULONG,
+        pVersion: std::ptr::null_mut(),
+    };
+    let paramslen = sizeof!(CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        std::ptr::null_mut(),
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* ensure Version fields were filled */
+    //assert_not_eq!(version.major.as_slice(), 0);
+    //assert_not_eq!(version.minor.as_slice(), 0);
+
+    /* The End */
+    testtokn.finalize();
+}
