@@ -5,7 +5,7 @@
 //! with the OpenSSL library (`libcrypto`) via its C API, primarily focusing on
 //! the EVP (high-level) interface and parameter handling (`OSSL_PARAM`).
 
-use std::ffi::c_char;
+use std::ffi::CStr;
 
 use crate::error::Result;
 #[cfg(feature = "ecc")]
@@ -97,105 +97,113 @@ pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
 pub const CIPHER_NAME_AES192: &[u8; 7] = b"AES192\0";
 pub const CIPHER_NAME_AES256: &[u8; 7] = b"AES256\0";
 
-/// Utility function to cast a Rust byte slice (`&[u8]`) to a C-style
-/// null-terminated string pointer (`*const c_char`).
-pub fn name_as_char(name: &[u8]) -> *const c_char {
-    name.as_ptr() as *const c_char
+/// Helper to turn 0 terminated slices, as constructed by bindgen for OpenSSL
+/// macro defined string into a CStr. Converts an error into a general error.
+macro_rules! cstr {
+    ($str:expr) => {
+        match ::std::ffi::CStr::from_bytes_with_nul($str) {
+            Ok(s) => s,
+            Err(e) => return Err(crate::error::Error::other_error(e)),
+        }
+    };
 }
+pub(crate) use cstr;
 
 /// Maps a PKCS#11 mechanism type involving a hash to the corresponding
 /// OpenSSL digest name string (e.g., `CKM_SHA256_RSA_PKCS` -> `"SHA256"`).
-pub fn mech_type_to_digest_name(mech: CK_MECHANISM_TYPE) -> *const c_char {
-    (match mech {
+pub fn mech_type_to_digest_name(
+    mech: CK_MECHANISM_TYPE,
+) -> Result<&'static CStr> {
+    Ok(match mech {
         CKM_SHA1_RSA_PKCS
         | CKM_ECDSA_SHA1
         | CKM_SHA1_RSA_PKCS_PSS
         | CKM_SHA_1_HMAC
         | CKM_SHA_1_HMAC_GENERAL
-        | CKM_SHA_1 => OSSL_DIGEST_NAME_SHA1.as_ptr(),
+        | CKM_SHA_1 => cstr!(OSSL_DIGEST_NAME_SHA1),
         CKM_SHA224_RSA_PKCS
         | CKM_ECDSA_SHA224
         | CKM_SHA224_RSA_PKCS_PSS
         | CKM_SHA224_HMAC
         | CKM_SHA224_HMAC_GENERAL
-        | CKM_SHA224 => OSSL_DIGEST_NAME_SHA2_224.as_ptr(),
+        | CKM_SHA224 => cstr!(OSSL_DIGEST_NAME_SHA2_224),
         CKM_SHA256_RSA_PKCS
         | CKM_ECDSA_SHA256
         | CKM_SHA256_RSA_PKCS_PSS
         | CKM_SHA256_HMAC
         | CKM_SHA256_HMAC_GENERAL
-        | CKM_SHA256 => OSSL_DIGEST_NAME_SHA2_256.as_ptr(),
+        | CKM_SHA256 => cstr!(OSSL_DIGEST_NAME_SHA2_256),
         CKM_SHA384_RSA_PKCS
         | CKM_ECDSA_SHA384
         | CKM_SHA384_RSA_PKCS_PSS
         | CKM_SHA384_HMAC
         | CKM_SHA384_HMAC_GENERAL
-        | CKM_SHA384 => OSSL_DIGEST_NAME_SHA2_384.as_ptr(),
+        | CKM_SHA384 => cstr!(OSSL_DIGEST_NAME_SHA2_384),
         CKM_SHA512_RSA_PKCS
         | CKM_ECDSA_SHA512
         | CKM_SHA512_RSA_PKCS_PSS
         | CKM_SHA512_HMAC
         | CKM_SHA512_HMAC_GENERAL
-        | CKM_SHA512 => OSSL_DIGEST_NAME_SHA2_512.as_ptr(),
+        | CKM_SHA512 => cstr!(OSSL_DIGEST_NAME_SHA2_512),
         CKM_SHA3_224_RSA_PKCS
         | CKM_ECDSA_SHA3_224
         | CKM_SHA3_224_RSA_PKCS_PSS
         | CKM_SHA3_224_HMAC
         | CKM_SHA3_224_HMAC_GENERAL
-        | CKM_SHA3_224 => OSSL_DIGEST_NAME_SHA3_224.as_ptr(),
+        | CKM_SHA3_224 => cstr!(OSSL_DIGEST_NAME_SHA3_224),
         CKM_SHA3_256_RSA_PKCS
         | CKM_ECDSA_SHA3_256
         | CKM_SHA3_256_RSA_PKCS_PSS
         | CKM_SHA3_256_HMAC
         | CKM_SHA3_256_HMAC_GENERAL
-        | CKM_SHA3_256 => OSSL_DIGEST_NAME_SHA3_256.as_ptr(),
+        | CKM_SHA3_256 => cstr!(OSSL_DIGEST_NAME_SHA3_256),
         CKM_SHA3_384_RSA_PKCS
         | CKM_ECDSA_SHA3_384
         | CKM_SHA3_384_RSA_PKCS_PSS
         | CKM_SHA3_384_HMAC
         | CKM_SHA3_384_HMAC_GENERAL
-        | CKM_SHA3_384 => OSSL_DIGEST_NAME_SHA3_384.as_ptr(),
+        | CKM_SHA3_384 => cstr!(OSSL_DIGEST_NAME_SHA3_384),
         CKM_SHA3_512_RSA_PKCS
         | CKM_ECDSA_SHA3_512
         | CKM_SHA3_512_RSA_PKCS_PSS
         | CKM_SHA3_512_HMAC
         | CKM_SHA3_512_HMAC_GENERAL
-        | CKM_SHA3_512 => OSSL_DIGEST_NAME_SHA3_512.as_ptr(),
+        | CKM_SHA3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
         CKM_SHA512_224_HMAC | CKM_SHA512_224_HMAC_GENERAL | CKM_SHA512_224 => {
-            OSSL_DIGEST_NAME_SHA2_512_224.as_ptr()
+            cstr!(OSSL_DIGEST_NAME_SHA2_512_224)
         }
         CKM_SHA512_256_HMAC | CKM_SHA512_256_HMAC_GENERAL | CKM_SHA512_256 => {
-            OSSL_DIGEST_NAME_SHA2_512_256.as_ptr()
+            cstr!(OSSL_DIGEST_NAME_SHA2_512_256)
         }
-        _ => std::ptr::null(),
-    }) as *const c_char
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    })
 }
 
 #[cfg(feature = "ecc")]
-pub static EC_NAME: &[u8; 3] = b"EC\0";
+pub static EC_NAME: &CStr = c"EC";
 #[cfg(all(feature = "ecc", feature = "fips"))]
-pub static ECDSA_NAME: &[u8; 6] = b"ECDSA\0";
+pub static ECDSA_NAME: &CStr = c"ECDSA";
 
 /* Curve names as used in OpenSSL */
 #[cfg(feature = "ecc")]
-const NAME_SECP256R1: &[u8] = b"prime256v1\0";
+const NAME_SECP256R1: &CStr = c"prime256v1";
 #[cfg(feature = "ecc")]
-const NAME_SECP384R1: &[u8] = b"secp384r1\0";
+const NAME_SECP384R1: &CStr = c"secp384r1";
 #[cfg(feature = "ecc")]
-const NAME_SECP521R1: &[u8] = b"secp521r1\0";
+const NAME_SECP521R1: &CStr = c"secp521r1";
 #[cfg(feature = "ecc")]
-const NAME_ED25519: &[u8] = b"ED25519\0";
+const NAME_ED25519: &CStr = c"ED25519";
 #[cfg(feature = "ecc")]
-const NAME_ED448: &[u8] = b"ED448\0";
+const NAME_ED448: &CStr = c"ED448";
 #[cfg(feature = "ecc")]
-const NAME_X25519: &[u8] = b"X25519\0";
+const NAME_X25519: &CStr = c"X25519";
 #[cfg(feature = "ecc")]
-const NAME_X448: &[u8] = b"X448\0";
+const NAME_X448: &CStr = c"X448";
 
 /// Maps an ASN.1 Object Identifier for an EC curve to the OpenSSL curve name
 /// string.
 #[cfg(feature = "ecc")]
-fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static [u8]> {
+fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static CStr> {
     match oid {
         &oid::EC_SECP256R1 => Ok(NAME_SECP256R1),
         &oid::EC_SECP384R1 => Ok(NAME_SECP384R1),
@@ -210,7 +218,7 @@ fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static [u8]> {
 
 /// Gets the OpenSSL curve name string associated with a PKCS#11 EC key `Object`.
 #[cfg(feature = "ecc")]
-pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static [u8]> {
+pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static CStr> {
     oid_to_ossl_name(&get_oid_from_obj(key)?)
 }
 

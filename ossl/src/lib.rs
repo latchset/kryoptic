@@ -384,16 +384,8 @@ impl<'a> OsslParam<'a> {
     ///
     /// Handles the necessary conversions for OpenSSL's native-endian BIGNUM
     /// representation within `OSSL_PARAM`.
-    pub fn add_bn(
-        &mut self,
-        key: *const c_char,
-        v: &Vec<u8>,
-    ) -> Result<(), Error> {
+    pub fn add_bn(&mut self, key: &CStr, v: &Vec<u8>) -> Result<(), Error> {
         if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
-        if key == std::ptr::null() {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
@@ -407,7 +399,7 @@ impl<'a> OsslParam<'a> {
         let container = bn.to_native_vec()?;
         let param = unsafe {
             OSSL_PARAM_construct_BN(
-                key,
+                key.as_ptr(),
                 void_ptr!(container.as_ptr()) as *mut u8,
                 container.len(),
             )
@@ -421,7 +413,7 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_utf8_string(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         v: &'a Vec<u8>,
     ) -> Result<(), Error> {
         if self.finalized {
@@ -430,7 +422,7 @@ impl<'a> OsslParam<'a> {
 
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
-                key,
+                key.as_ptr(),
                 void_ptr!(v.as_ptr()) as *mut c_char,
                 0,
             )
@@ -444,20 +436,16 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_owned_utf8_string(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         mut v: Vec<u8>,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
-                key,
+                key.as_ptr(),
                 void_ptr!(v.as_mut_ptr()) as *mut c_char,
                 0,
             )
@@ -471,21 +459,17 @@ impl<'a> OsslParam<'a> {
     /// get_params()
     pub fn add_empty_utf8_string(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         len: usize,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let mut v = vec![0u8; len];
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
-                key,
+                key.as_ptr(),
                 void_ptr!(v.as_mut_ptr()) as *mut c_char,
                 len,
             )
@@ -504,19 +488,19 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_const_c_string(
         &mut self,
-        key: *const c_char,
-        val: *const c_char,
+        key: &CStr,
+        val: &CStr,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() || val == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
-            OSSL_PARAM_construct_utf8_string(key, val as *mut c_char, 0)
+            OSSL_PARAM_construct_utf8_string(
+                key.as_ptr(),
+                val.as_ptr() as *mut c_char,
+                0,
+            )
         };
         self.p.to_mut().push(param);
         Ok(())
@@ -529,20 +513,16 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_octet_string(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         v: &'a Vec<u8>,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_octet_string(
-                key,
+                key.as_ptr(),
                 void_ptr!(v.as_ptr()),
                 v.len(),
             )
@@ -556,20 +536,16 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_owned_octet_string(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         v: Vec<u8>,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_octet_string(
-                key,
+                key.as_ptr(),
                 void_ptr!(v.as_ptr()),
                 v.len(),
             )
@@ -586,19 +562,18 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_size_t(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         val: &'a usize,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
-            OSSL_PARAM_construct_size_t(key, val as *const _ as *mut usize)
+            OSSL_PARAM_construct_size_t(
+                key.as_ptr(),
+                val as *const _ as *mut usize,
+            )
         };
         self.p.to_mut().push(param);
         self.br.push(BorrowedReference::Usize(val));
@@ -612,19 +587,18 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_uint(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         val: &'a c_uint,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
-            OSSL_PARAM_construct_uint(key, val as *const _ as *mut c_uint)
+            OSSL_PARAM_construct_uint(
+                key.as_ptr(),
+                val as *const _ as *mut c_uint,
+            )
         };
         self.p.to_mut().push(param);
         self.br.push(BorrowedReference::Uint(val));
@@ -636,21 +610,16 @@ impl<'a> OsslParam<'a> {
     /// The caller must ensure the lifetime of `val` exceeds the `OsslParam`'s
     /// usage.
     #[allow(dead_code)]
-    pub fn add_int(
-        &mut self,
-        key: *const c_char,
-        val: &'a c_int,
-    ) -> Result<(), Error> {
+    pub fn add_int(&mut self, key: &CStr, val: &'a c_int) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
-            OSSL_PARAM_construct_int(key, val as *const _ as *mut c_int)
+            OSSL_PARAM_construct_int(
+                key.as_ptr(),
+                val as *const _ as *mut c_int,
+            )
         };
         self.p.to_mut().push(param);
         self.br.push(BorrowedReference::Int(val));
@@ -661,14 +630,10 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_owned_uint(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         val: c_uint,
     ) -> Result<(), Error> {
         if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
-        if key == std::ptr::null() {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
@@ -676,7 +641,7 @@ impl<'a> OsslParam<'a> {
 
         let param = unsafe {
             OSSL_PARAM_construct_uint(
-                key,
+                key.as_ptr(),
                 v.as_ptr() as *const _ as *mut c_uint,
             )
         };
@@ -689,21 +654,20 @@ impl<'a> OsslParam<'a> {
     #[allow(dead_code)]
     pub fn add_owned_int(
         &mut self,
-        key: *const c_char,
+        key: &CStr,
         val: c_int,
     ) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
 
-        if key == std::ptr::null() {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let v = val.to_ne_bytes().to_vec();
 
         let param = unsafe {
-            OSSL_PARAM_construct_int(key, v.as_ptr() as *const _ as *mut c_int)
+            OSSL_PARAM_construct_int(
+                key.as_ptr(),
+                v.as_ptr() as *const _ as *mut c_int,
+            )
         };
         self.v.push(v);
         self.p.to_mut().push(param);
@@ -742,15 +706,24 @@ impl<'a> OsslParam<'a> {
         self.p.to_mut().as_mut_ptr()
     }
 
+    /// Internal functions to convert an immutable reference to a mutable
+    /// pointer. This is only used for interfaces that bindgen automatically
+    /// mark as mutable but we know the interface contract means the pointer
+    /// is effectively a const.
+    unsafe fn int_mut_ptr(&self) -> *mut OSSL_PARAM {
+        if !self.finalized {
+            panic!("Unfinalized OsslParam");
+        }
+        self.p.as_ref().as_ptr() as *mut OSSL_PARAM
+    }
+
     /// Gets the value of an integer parameter by its key name.
     #[allow(dead_code)]
-    pub fn get_int(&self, key: *const c_char) -> Result<c_int, Error> {
+    pub fn get_int(&self, key: &CStr) -> Result<c_int, Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
-        let p = unsafe {
-            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
-        };
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
         }
@@ -765,13 +738,11 @@ impl<'a> OsslParam<'a> {
 
     /// Gets the value of a long parameter by its key name.
     #[allow(dead_code)]
-    pub fn get_long(&self, key: *const c_char) -> Result<c_long, Error> {
+    pub fn get_long(&self, key: &CStr) -> Result<c_long, Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
-        let p = unsafe {
-            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
-        };
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
         }
@@ -786,13 +757,11 @@ impl<'a> OsslParam<'a> {
 
     /// Gets the value of a BIGNUM parameter by its key name as a big-endian
     /// byte vector.
-    pub fn get_bn(&self, key: *const c_char) -> Result<Vec<u8>, Error> {
+    pub fn get_bn(&self, key: &CStr) -> Result<Vec<u8>, Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
-        let p = unsafe {
-            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
-        };
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
         }
@@ -803,16 +772,11 @@ impl<'a> OsslParam<'a> {
     /// Gets the value of an octet string parameter by its key name as a byte
     /// slice.
     #[allow(dead_code)]
-    pub fn get_octet_string(
-        &self,
-        key: *const c_char,
-    ) -> Result<&'a [u8], Error> {
+    pub fn get_octet_string(&self, key: &CStr) -> Result<&'a [u8], Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
-        let p = unsafe {
-            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
-        };
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
         }
@@ -832,16 +796,11 @@ impl<'a> OsslParam<'a> {
 
     /// Gets a UTF8 String as vector, this includes the terminating NUL
     #[allow(dead_code)]
-    pub fn get_utf8_string_as_vec(
-        &self,
-        key: *const c_char,
-    ) -> Result<Vec<u8>, Error> {
+    pub fn get_utf8_string_as_vec(&self, key: &CStr) -> Result<Vec<u8>, Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
-        let p = unsafe {
-            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
-        };
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
         }
@@ -857,13 +816,11 @@ impl<'a> OsslParam<'a> {
 
     /// Checks if a parameter with the given key name exists in the array.
     #[allow(dead_code)]
-    pub fn has_param(&self, key: *const c_char) -> Result<bool, Error> {
+    pub fn has_param(&self, key: &CStr) -> Result<bool, Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
-        let p = unsafe {
-            OSSL_PARAM_locate(self.p.as_ref().as_ptr() as *mut OSSL_PARAM, key)
-        };
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             Ok(false)
         } else {
@@ -880,9 +837,10 @@ pub struct EvpMd {
 
 /// Methods for creating and accessing `EvpMd`.
 impl EvpMd {
-    pub fn new(ctx: &OsslContext, name: *const c_char) -> Result<EvpMd, Error> {
-        let ptr =
-            unsafe { EVP_MD_fetch(ctx.ptr(), name, std::ptr::null_mut()) };
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMd, Error> {
+        let ptr = unsafe {
+            EVP_MD_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+        };
         if ptr.is_null() {
             trace_ossl!("EVP_MD_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));
@@ -959,12 +917,10 @@ pub struct EvpCipher {
 
 /// Methods for creating and accessing `EvpCipher`.
 impl EvpCipher {
-    pub fn new(
-        ctx: &OsslContext,
-        name: *const c_char,
-    ) -> Result<EvpCipher, Error> {
-        let ptr =
-            unsafe { EVP_CIPHER_fetch(ctx.ptr(), name, std::ptr::null_mut()) };
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpCipher, Error> {
+        let ptr = unsafe {
+            EVP_CIPHER_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+        };
         if ptr.is_null() {
             trace_ossl!("EVP_CIPHER_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));
@@ -1041,12 +997,10 @@ pub struct EvpKdfCtx {
 
 /// Methods for creating (from a named KDF) and accessing `EvpKdfCtx`.
 impl EvpKdfCtx {
-    pub fn new(
-        ctx: &OsslContext,
-        name: *const c_char,
-    ) -> Result<EvpKdfCtx, Error> {
-        let arg =
-            unsafe { EVP_KDF_fetch(ctx.ptr(), name, std::ptr::null_mut()) };
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpKdfCtx, Error> {
+        let arg = unsafe {
+            EVP_KDF_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+        };
         if arg.is_null() {
             trace_ossl!("EVP_KDF_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));
@@ -1092,12 +1046,10 @@ pub struct EvpMacCtx {
 
 /// Methods for creating (from a named MAC) and accessing `EvpMacCtx`.
 impl EvpMacCtx {
-    pub fn new(
-        ctx: &OsslContext,
-        name: *const c_char,
-    ) -> Result<EvpMacCtx, Error> {
-        let arg =
-            unsafe { EVP_MAC_fetch(ctx.ptr(), name, std::ptr::null_mut()) };
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMacCtx, Error> {
+        let arg = unsafe {
+            EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+        };
         if arg.is_null() {
             trace_ossl!("EVP_MAC_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));
@@ -1146,12 +1098,13 @@ pub struct EvpPkeyCtx {
 /// Methods for creating and accessing `EvpPkeyCtx`.
 impl EvpPkeyCtx {
     /// Fecthes an algorithm by name and returns a wrapper `EvpPkeyCtx`
-    pub fn new(
-        ctx: &OsslContext,
-        name: *const c_char,
-    ) -> Result<EvpPkeyCtx, Error> {
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpPkeyCtx, Error> {
         let ptr = unsafe {
-            EVP_PKEY_CTX_new_from_name(ctx.ptr(), name, std::ptr::null())
+            EVP_PKEY_CTX_new_from_name(
+                ctx.ptr(),
+                name.as_ptr(),
+                std::ptr::null(),
+            )
         };
         if ptr.is_null() {
             trace_ossl!("EVP_PKEY_CTX_new_from_name()");
@@ -1207,7 +1160,7 @@ impl EvpPkey {
     /// (e.g., modulus/exponent for RSA, curve/point for EC).
     pub fn fromdata(
         ctx: &OsslContext,
-        pkey_name: *const c_char,
+        pkey_name: &CStr,
         pkey_type: u32,
         params: &OsslParam,
     ) -> Result<EvpPkey, Error> {
@@ -1266,7 +1219,7 @@ impl EvpPkey {
     /// name.
     pub fn generate(
         ctx: &OsslContext,
-        pkey_name: *const c_char,
+        pkey_name: &CStr,
         params: &OsslParam,
     ) -> Result<EvpPkey, Error> {
         let mut pctx = EvpPkeyCtx::new(ctx, pkey_name)?;
@@ -1369,12 +1322,9 @@ pub struct EvpSignature {
 
 impl EvpSignature {
     /// Creates a new `EvpSignature` instance by fetching it by name.
-    pub fn new(
-        ctx: &OsslContext,
-        name: *const c_char,
-    ) -> Result<EvpSignature, Error> {
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpSignature, Error> {
         let ptr: *mut EVP_SIGNATURE = unsafe {
-            EVP_SIGNATURE_fetch(ctx.ptr(), name, std::ptr::null_mut())
+            EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
         };
         if ptr.is_null() {
             trace_ossl!("EVP_SIGNATURE_fetch()");

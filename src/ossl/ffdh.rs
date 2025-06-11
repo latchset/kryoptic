@@ -5,7 +5,7 @@
 //! and derivation functionality according to PKCS#11 standards using the
 //! OpenSSL APIs.
 
-use std::ffi::c_char;
+use std::ffi::CStr;
 use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
@@ -21,49 +21,48 @@ use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Names as understood by OpenSSL
-const FFDHE2048_NAME: &[u8; 10] = b"ffdhe2048\0";
-const FFDHE3072_NAME: &[u8; 10] = b"ffdhe3072\0";
-const FFDHE4096_NAME: &[u8; 10] = b"ffdhe4096\0";
-const FFDHE6144_NAME: &[u8; 10] = b"ffdhe6144\0";
-const FFDHE8192_NAME: &[u8; 10] = b"ffdhe8192\0";
-const MODP_2048_NAME: &[u8; 10] = b"modp_2048\0";
-const MODP_3072_NAME: &[u8; 10] = b"modp_3072\0";
-const MODP_4096_NAME: &[u8; 10] = b"modp_4096\0";
-const MODP_6144_NAME: &[u8; 10] = b"modp_6144\0";
-const MODP_8192_NAME: &[u8; 10] = b"modp_8192\0";
+const FFDHE2048_NAME: &CStr = c"ffdhe2048";
+const FFDHE3072_NAME: &CStr = c"ffdhe3072";
+const FFDHE4096_NAME: &CStr = c"ffdhe4096";
+const FFDHE6144_NAME: &CStr = c"ffdhe6144";
+const FFDHE8192_NAME: &CStr = c"ffdhe8192";
+const MODP_2048_NAME: &CStr = c"modp_2048";
+const MODP_3072_NAME: &CStr = c"modp_3072";
+const MODP_4096_NAME: &CStr = c"modp_4096";
+const MODP_6144_NAME: &CStr = c"modp_6144";
+const MODP_8192_NAME: &CStr = c"modp_8192";
 
-static DH_NAME: &[u8; 3] = b"DH\0";
+static DH_NAME: &CStr = c"DH";
 
 /* This is the smallest AES key size, anything smaller then this
  * is worthless as a shared secret */
 const MIN_KEYLEN: usize = 16;
 
-fn group_to_ossl_name(group: DHGroupName) -> *const c_char {
-    match group {
-        DHGroupName::FFDHE2048 => name_as_char(FFDHE2048_NAME),
-        DHGroupName::FFDHE3072 => name_as_char(FFDHE3072_NAME),
-        DHGroupName::FFDHE4096 => name_as_char(FFDHE4096_NAME),
-        DHGroupName::FFDHE6144 => name_as_char(FFDHE6144_NAME),
-        DHGroupName::FFDHE8192 => name_as_char(FFDHE8192_NAME),
-        DHGroupName::MODP2048 => name_as_char(MODP_2048_NAME),
-        DHGroupName::MODP3072 => name_as_char(MODP_3072_NAME),
-        DHGroupName::MODP4096 => name_as_char(MODP_4096_NAME),
-        DHGroupName::MODP6144 => name_as_char(MODP_6144_NAME),
-        DHGroupName::MODP8192 => name_as_char(MODP_8192_NAME),
-    }
+fn group_to_ossl_name(group: DHGroupName) -> Result<&'static CStr> {
+    Ok(match group {
+        DHGroupName::FFDHE2048 => FFDHE2048_NAME,
+        DHGroupName::FFDHE3072 => FFDHE3072_NAME,
+        DHGroupName::FFDHE4096 => FFDHE4096_NAME,
+        DHGroupName::FFDHE6144 => FFDHE6144_NAME,
+        DHGroupName::FFDHE8192 => FFDHE8192_NAME,
+        DHGroupName::MODP2048 => MODP_2048_NAME,
+        DHGroupName::MODP3072 => MODP_3072_NAME,
+        DHGroupName::MODP4096 => MODP_4096_NAME,
+        DHGroupName::MODP6144 => MODP_6144_NAME,
+        DHGroupName::MODP8192 => MODP_8192_NAME,
+    })
 }
 
 pub fn get_group_name_from_key(key: &EvpPkey) -> Result<Vec<u8>> {
     let mut params = OsslParam::with_capacity(1);
     /* All group names have the same string length */
     params.add_empty_utf8_string(
-        name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+        cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
         FFDHE2048.len(),
     )?;
     params.finalize();
     key.get_params(&mut params)?;
-    Ok(params
-        .get_utf8_string_as_vec(name_as_char(OSSL_PKEY_PARAM_GROUP_NAME))?)
+    Ok(params.get_utf8_string_as_vec(cstr!(OSSL_PKEY_PARAM_GROUP_NAME))?)
 }
 
 /// Converts a PKCS#11 DH key `Object` into OpenSSL parameters (`OsslParam`).
@@ -74,7 +73,7 @@ pub fn get_group_name_from_key(key: &EvpPkey) -> Result<Vec<u8>> {
 pub fn ffdh_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(*const c_char, OsslParam)> {
+) -> Result<(&'static CStr, OsslParam)> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
@@ -84,9 +83,9 @@ pub fn ffdh_object_to_params(
     params.zeroize = true;
 
     params.add_const_c_string(
-        name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
+        cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
         match get_group_name(key) {
-            Ok(g) => group_to_ossl_name(g),
+            Ok(g) => group_to_ossl_name(g)?,
             Err(e) => {
                 return Err(Error::ck_rv_from_error(CKR_KEY_INDIGESTIBLE, e))
             }
@@ -96,13 +95,13 @@ pub fn ffdh_object_to_params(
     match kclass {
         CKO_PUBLIC_KEY => {
             params.add_bn(
-                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?,
             )?;
         }
         CKO_PRIVATE_KEY => {
             params.add_bn(
-                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?,
             )?;
         }
@@ -111,7 +110,7 @@ pub fn ffdh_object_to_params(
 
     params.finalize();
 
-    Ok((name_as_char(DH_NAME), params))
+    Ok((DH_NAME, params))
 }
 
 /// Represents an active FFDH key derivation operation.
@@ -150,15 +149,15 @@ impl FFDHOperation {
         let group_name = get_group_name_from_key(key)?;
         let mut params = OsslParam::with_capacity(2);
         params.add_const_c_string(
-            name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-            name_as_char(group_name.as_slice()),
+            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+            cstr!(group_name.as_slice()),
         )?;
-        params.add_bn(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), &self.public)?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY), &self.public)?;
         params.finalize();
 
         Ok(EvpPkey::fromdata(
             osslctx(),
-            name_as_char(DH_NAME),
+            DH_NAME,
             EVP_PKEY_PUBLIC_KEY,
             &params,
         )?)
@@ -176,41 +175,39 @@ impl FFDHOperation {
     ) -> Result<()> {
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
-            name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-            group_to_ossl_name(group),
+            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+            group_to_ossl_name(group)?,
         )?;
         params.finalize();
 
-        let evp_pkey =
-            EvpPkey::generate(osslctx(), name_as_char(DH_NAME), &params)?;
+        let evp_pkey = EvpPkey::generate(osslctx(), DH_NAME, &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key */
         pubkey.check_or_set_attr(Attribute::from_bytes(
             CKA_PRIME,
-            params.get_bn(name_as_char(OSSL_PKEY_PARAM_FFC_P))?,
+            params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P))?,
         ))?;
         pubkey.set_attr(Attribute::from_bytes(
             CKA_VALUE,
-            params.get_bn(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
+            params.get_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?,
         ))?;
 
         /* Private Key */
         privkey.check_or_set_attr(Attribute::from_bytes(
             CKA_PRIME,
-            params.get_bn(name_as_char(OSSL_PKEY_PARAM_FFC_P))?,
+            params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P))?,
         ))?;
         privkey.set_attr(Attribute::from_bytes(
             CKA_VALUE,
-            params.get_bn(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?,
+            params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?,
         ))?;
 
-        if params.has_param(name_as_char(OSSL_PKEY_PARAM_DH_PRIV_LEN))? {
+        if params.has_param(cstr!(OSSL_PKEY_PARAM_DH_PRIV_LEN))? {
             privkey.set_attr(Attribute::from_ulong(
                 CKA_VALUE_BITS,
                 CK_ULONG::try_from(
-                    params
-                        .get_long(name_as_char(OSSL_PKEY_PARAM_DH_PRIV_LEN))?,
+                    params.get_long(cstr!(OSSL_PKEY_PARAM_DH_PRIV_LEN))?,
                 )? * 8,
             ))?;
         }

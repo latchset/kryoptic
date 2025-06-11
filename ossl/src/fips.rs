@@ -802,9 +802,13 @@ pub struct ProviderSignatureCtx {
 }
 
 impl ProviderSignatureCtx {
-    pub fn new(alg: *const c_char) -> Result<ProviderSignatureCtx, Error> {
+    pub fn new(alg: &CStr) -> Result<ProviderSignatureCtx, Error> {
         let sigtable = unsafe {
-            EVP_SIGNATURE_fetch(get_libctx().ptr(), alg, std::ptr::null())
+            EVP_SIGNATURE_fetch(
+                get_libctx().ptr(),
+                alg.as_ptr(),
+                std::ptr::null(),
+            )
         };
         if sigtable.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));

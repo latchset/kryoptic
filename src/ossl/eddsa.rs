@@ -5,7 +5,7 @@
 //! functionalities (Ed25519, Ed448) using the OpenSSL EVP interface,
 //! handling key generation, signing, verification, and parameter parsing.
 
-use std::ffi::{c_char, c_int};
+use std::ffi::{c_int, CStr};
 
 use crate::attribute::Attribute;
 use crate::ec::get_ec_point_from_obj;
@@ -69,7 +69,7 @@ fn parse_params(mech: &CK_MECHANISM, outlen: usize) -> Result<EddsaParams> {
 pub fn eddsa_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(*const c_char, OsslParam)> {
+) -> Result<(&'static CStr, OsslParam)> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
@@ -82,13 +82,13 @@ pub fn eddsa_object_to_params(
     match kclass {
         CKO_PUBLIC_KEY => {
             params.add_owned_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                 get_ec_point_from_obj(key)?,
             )?;
         }
         CKO_PRIVATE_KEY => {
             params.add_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?,
             )?;
         }
@@ -98,7 +98,7 @@ pub fn eddsa_object_to_params(
 
     params.finalize();
 
-    Ok((name_as_char(name), params))
+    Ok((name, params))
 }
 
 /// Helper function to create default (empty) `EddsaParams`.
@@ -117,7 +117,7 @@ macro_rules! get_sig_ctx {
          * expressions */
         match $key {
             #[cfg(feature = "fips")]
-            _ => Some(ProviderSignatureCtx::new(get_ossl_name_from_obj($key)?.as_ptr() as *const i8)?),
+            _ => Some(ProviderSignatureCtx::new(get_ossl_name_from_obj($key)?)?),
             #[cfg(not(feature = "fips"))]
             _ => Some(EvpMdCtx::new()?),
         }
@@ -254,7 +254,7 @@ impl EddsaOperation {
     ) -> Result<()> {
         let evp_pkey = EvpPkey::generate(
             osslctx(),
-            get_ossl_name_from_obj(pubkey)?.as_ptr() as *const c_char,
+            get_ossl_name_from_obj(pubkey)?,
             &OsslParam::empty(),
         )?;
 
@@ -272,13 +272,13 @@ impl EddsaOperation {
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
         let point = params
-            .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?
+            .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?
             .to_vec();
         pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point))?;
 
         /* Private Key */
         let value = params
-            .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?
+            .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?
             .to_vec();
         privkey.set_attr(Attribute::from_bytes(CKA_VALUE, value))?;
         Ok(())
@@ -298,7 +298,7 @@ fn sig_params<'a>(
     match &eddsa_params.context_data {
         Some(v) => {
             params.add_octet_string(
-                name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+                cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
                 &v,
             )?;
         }
@@ -322,7 +322,7 @@ fn sig_params<'a>(
         },
     };
     params.add_owned_utf8_string(
-        name_as_char(OSSL_SIGNATURE_PARAM_INSTANCE),
+        cstr!(OSSL_SIGNATURE_PARAM_INSTANCE),
         instance,
     )?;
     params.finalize();

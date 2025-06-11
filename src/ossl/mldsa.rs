@@ -6,7 +6,7 @@
 //! signing, verification, and parameter/context handling for different ML-DSA
 //! variants.
 
-use std::ffi::c_char;
+use std::ffi::CStr;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
@@ -31,9 +31,9 @@ use crate::ossl::fips::*;
 const MAX_BUFFER_LEN: usize = 1024 * 1024;
 
 /* Openssl Key types */
-static ML_DSA_44_TYPE: &[u8; 10] = b"ML-DSA-44\0";
-static ML_DSA_65_TYPE: &[u8; 10] = b"ML-DSA-65\0";
-static ML_DSA_87_TYPE: &[u8; 10] = b"ML-DSA-87\0";
+static ML_DSA_44_TYPE: &CStr = c"ML-DSA-44";
+static ML_DSA_65_TYPE: &CStr = c"ML-DSA-65";
+static ML_DSA_87_TYPE: &CStr = c"ML-DSA-87";
 
 const ML_DSA_44_SIG_SIZE: usize = 2420;
 const ML_DSA_65_SIG_SIZE: usize = 3309;
@@ -52,11 +52,11 @@ const MAX_HASH_LEN: usize = 64;
 /// to the corresponding OpenSSL algorithm name string.
 pub fn mldsa_param_set_to_name(
     pset: CK_ML_DSA_PARAMETER_SET_TYPE,
-) -> Result<*const c_char> {
+) -> Result<&'static CStr> {
     match pset {
-        CKP_ML_DSA_44 => Ok(name_as_char(ML_DSA_44_TYPE)),
-        CKP_ML_DSA_65 => Ok(name_as_char(ML_DSA_65_TYPE)),
-        CKP_ML_DSA_87 => Ok(name_as_char(ML_DSA_87_TYPE)),
+        CKP_ML_DSA_44 => Ok(ML_DSA_44_TYPE),
+        CKP_ML_DSA_65 => Ok(ML_DSA_65_TYPE),
+        CKP_ML_DSA_87 => Ok(ML_DSA_87_TYPE),
         _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
     }
 }
@@ -71,7 +71,7 @@ pub fn mldsa_param_set_to_name(
 pub fn mldsa_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(*const c_char, OsslParam)> {
+) -> Result<(&'static CStr, OsslParam)> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
@@ -82,18 +82,18 @@ pub fn mldsa_object_to_params(
     match kclass {
         CKO_PUBLIC_KEY => {
             params.add_owned_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?.to_vec(),
             )?;
         }
         CKO_PRIVATE_KEY => {
             params.add_owned_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?.to_vec(),
             )?;
             match key.get_attr_as_bytes(CKA_SEED) {
                 Ok(s) => params.add_owned_octet_string(
-                    name_as_char(OSSL_PKEY_PARAM_ML_DSA_SEED),
+                    cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED),
                     s.to_vec(),
                 )?,
                 Err(_) => (),
@@ -218,13 +218,13 @@ impl MlDsaParams {
         let mut params = OsslParam::with_capacity(3);
         if flags.contains(ParmFlags::RawEncoding) {
             params.add_owned_int(
-                name_as_char(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING),
+                cstr!(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING),
                 0,
             )?;
         } else {
             if let Some(ctx) = &self.context {
                 params.add_octet_string(
-                    name_as_char(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+                    cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
                     ctx,
                 )?;
             }
@@ -234,7 +234,7 @@ impl MlDsaParams {
         if flags.contains(ParmFlags::Sign) {
             if self.hedge == CKH_DETERMINISTIC_REQUIRED {
                 params.add_owned_int(
-                    name_as_char(OSSL_SIGNATURE_PARAM_DETERMINISTIC),
+                    cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC),
                     1,
                 )?;
             }
@@ -988,11 +988,10 @@ pub fn generate_keypair(
     )?;
 
     let mut params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
-    let val =
-        params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?;
+    let val = params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?;
     privkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;
 
-    match params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_ML_DSA_SEED)) {
+    match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED)) {
         Ok(val) => {
             privkey.set_attr(Attribute::from_bytes(CKA_SEED, val.to_vec()))?
         }
@@ -1006,13 +1005,11 @@ pub fn generate_keypair(
     // OpenSSL helpfully does not provide public key when we ask for key pair
     // here so if it is not available, retry exporting just public key part
     // https://github.com/openssl/openssl/issues/27542
-    let val = match params
-        .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))
-    {
+    let val = match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
         Ok(v) => v,
         Err(_) => {
             params = evp_pkey.todata(EVP_PKEY_PUBLIC_KEY)?;
-            params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?
+            params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?
         }
     };
     pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;

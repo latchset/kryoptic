@@ -5,7 +5,7 @@
 //! functionalities using the OpenSSL EVP interface, including key generation,
 //! signing, verification, and signature format conversions.
 
-use core::ffi::c_char;
+use std::ffi::CStr;
 
 use crate::attribute::Attribute;
 use crate::ec::ecdsa::*;
@@ -32,7 +32,7 @@ use ossl::fips::ProviderSignatureCtx;
 pub fn ecc_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(*const c_char, OsslParam)> {
+) -> Result<(&'static CStr, OsslParam)> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
@@ -41,20 +41,20 @@ pub fn ecc_object_to_params(
     params.zeroize = true;
 
     params.add_const_c_string(
-        name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-        name_as_char(get_ossl_name_from_obj(key)?),
+        cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+        get_ossl_name_from_obj(key)?,
     )?;
 
     match kclass {
         CKO_PUBLIC_KEY => {
             params.add_owned_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                 get_ec_point_from_obj(key)?,
             )?;
         }
         CKO_PRIVATE_KEY => {
             params.add_bn(
-                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?,
             )?;
         }
@@ -63,7 +63,7 @@ pub fn ecc_object_to_params(
 
     params.finalize();
 
-    Ok((name_as_char(EC_NAME), params))
+    Ok((EC_NAME, params))
 }
 
 /// ASN.1 structure for an ECDSA signature value (SEQUENCE of two INTEGERs).
@@ -245,7 +245,7 @@ impl EcdsaOperation {
             sigctx: match mech.mechanism {
                 CKM_ECDSA => None,
                 #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(name_as_char(ECDSA_NAME))?),
+                _ => Some(ProviderSignatureCtx::new(ECDSA_NAME)?),
                 #[cfg(not(feature = "fips"))]
                 _ => Some(EvpMdCtx::new()?),
             },
@@ -295,18 +295,17 @@ impl EcdsaOperation {
     ) -> Result<()> {
         let mut params = OsslParam::with_capacity(1);
         params.add_const_c_string(
-            name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-            name_as_char(get_ossl_name_from_obj(pubkey)?),
+            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+            get_ossl_name_from_obj(pubkey)?,
         )?;
         params.finalize();
 
-        let evp_pkey =
-            EvpPkey::generate(osslctx(), name_as_char(EC_NAME), &params)?;
+        let evp_pkey = EvpPkey::generate(osslctx(), EC_NAME, &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key */
         let point_encoded = match asn1::write_single(
-            &params.get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?,
+            &params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?,
         ) {
             Ok(b) => b,
             Err(_) => return Err(CKR_GENERAL_ERROR)?,
@@ -316,7 +315,7 @@ impl EcdsaOperation {
         /* Private Key */
         privkey.set_attr(Attribute::from_bytes(
             CKA_VALUE,
-            params.get_bn(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?,
+            params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?,
         ))?;
         Ok(())
     }
@@ -405,7 +404,7 @@ impl Sign for EcdsaOperation {
                 EVP_DigestSignInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
-                    mech_type_to_digest_name(self.mech),
+                    mech_type_to_digest_name(self.mech)?.as_ptr(),
                     osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.private_key).as_mut_ptr(),
@@ -417,7 +416,7 @@ impl Sign for EcdsaOperation {
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_sign_init(
-                mech_type_to_digest_name(self.mech),
+                mech_type_to_digest_name(self.mech)?.as_ptr(),
                 some_or_err!(self.private_key),
                 std::ptr::null(),
             )?;
@@ -567,7 +566,7 @@ impl EcdsaOperation {
                 EVP_DigestVerifyInit_ex(
                     self.sigctx.as_mut().unwrap().as_mut_ptr(),
                     std::ptr::null_mut(),
-                    mech_type_to_digest_name(self.mech),
+                    mech_type_to_digest_name(self.mech)?.as_ptr(),
                     osslctx().ptr(),
                     std::ptr::null(),
                     some_or_err!(mut self.public_key).as_mut_ptr(),
@@ -579,7 +578,7 @@ impl EcdsaOperation {
             }
             #[cfg(feature = "fips")]
             self.sigctx.as_mut().unwrap().digest_verify_init(
-                mech_type_to_digest_name(self.mech),
+                mech_type_to_digest_name(self.mech)?.as_ptr(),
                 some_or_err!(self.public_key),
                 std::ptr::null(),
             )?;
