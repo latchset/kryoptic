@@ -17,7 +17,9 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{EvpPkey, OsslParam, OsslSignature, SigAlg};
+use ossl::{
+    rsa_sig_params, EvpPkey, OsslParam, OsslSignature, RsaPssParams, SigAlg,
+};
 use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
@@ -103,10 +105,8 @@ pub fn rsa_object_to_params(
 }
 
 /// Maps a PKCS#11 MGF type (`CK_RSA_PKCS_MGF_TYPE`) to the corresponding
-/// OpenSSL digest name byte slice used within MGF1.
-fn mgf1_to_digest_name_as_slice(
-    mech: CK_MECHANISM_TYPE,
-) -> Result<&'static CStr> {
+/// OpenSSL digest name used within MGF1.
+fn mgf1_to_digest_name(mech: CK_MECHANISM_TYPE) -> Result<&'static CStr> {
     Ok(match mech {
         CKG_MGF1_SHA1 => cstr!(OSSL_DIGEST_NAME_SHA1),
         CKG_MGF1_SHA224 => cstr!(OSSL_DIGEST_NAME_SHA2_224),
@@ -121,31 +121,12 @@ fn mgf1_to_digest_name_as_slice(
     })
 }
 
-/// Holds parameters specific to an RSA-PSS operation.
-#[derive(Debug)]
-struct RsaPssParams {
-    /// Hash algorithm mechanism identifier (e.g., `CKM_SHA256`).
-    hash: CK_ULONG,
-    /// Mask Generation Function identifier (e.g., `CKG_MGF1_SHA256`).
-    mgf: CK_ULONG,
-    /// Salt length in bytes.
-    saltlen: c_int,
-}
-
-/// Helper function to create default (empty) `RsaPssParams`.
-fn no_pss_params() -> RsaPssParams {
-    RsaPssParams {
-        hash: 0,
-        mgf: 0,
-        saltlen: 0,
-    }
-}
-
-/// Helper function to parse PSS parameters from `CK_MECHANISM`.
+/// Helper function to parse signature parameters from `CK_MECHANISM`.
 ///
-/// Returns a `RsaPssParams` structure with the fields or an empty structure
-/// via `no_pss_params`.
-fn parse_pss_params(mech: &CK_MECHANISM) -> Result<RsaPssParams> {
+/// Returns a `RsaPssParams` structure for the PSS mechanisms.
+fn parse_pss_params(
+    mech: &CK_MECHANISM,
+) -> Result<(Option<RsaPssParams>, usize)> {
     match mech.mechanism {
         CKM_RSA_PKCS_PSS
         | CKM_SHA1_RSA_PKCS_PSS
@@ -158,19 +139,26 @@ fn parse_pss_params(mech: &CK_MECHANISM) -> Result<RsaPssParams> {
         | CKM_SHA3_384_RSA_PKCS_PSS
         | CKM_SHA3_512_RSA_PKCS_PSS => {
             let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
+            let mdname = mech_type_to_digest_name(params.hashAlg)?;
+            let hash_len = hash_size(params.hashAlg);
+            if hash_len == INVALID_HASH_SIZE {
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+            }
             if mech.mechanism != CKM_RSA_PKCS_PSS {
-                let mdname = mech_type_to_digest_name(params.hashAlg)?;
                 if mech_type_to_digest_name(mech.mechanism)? != mdname {
-                    return Err(CKR_ARGUMENTS_BAD)?;
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
             }
-            Ok(RsaPssParams {
-                hash: params.hashAlg,
-                mgf: params.mgf,
-                saltlen: c_int::try_from(params.sLen)?,
-            })
+            Ok((
+                Some(RsaPssParams {
+                    digest: mdname,
+                    mgf1: mgf1_to_digest_name(params.mgf)?,
+                    saltlen: c_int::try_from(params.sLen)?,
+                }),
+                hash_len,
+            ))
         }
-        _ => Ok(no_pss_params()),
+        _ => Ok((None, 0)),
     }
 }
 
@@ -229,9 +217,9 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> Result<RsaOaepParams> {
 /// understood by the ossl package.
 pub fn rsa_type_to_ossl_alg(mech: CK_MECHANISM_TYPE) -> Result<SigAlg> {
     Ok(match mech {
-        CKM_RSA_X_509 => SigAlg::Rsa,
+        CKM_RSA_X_509 => SigAlg::RsaNoPad,
         CKM_RSA_PKCS => SigAlg::Rsa,
-        CKM_RSA_PKCS_PSS => SigAlg::Rsa,
+        CKM_RSA_PKCS_PSS => SigAlg::RsaPss,
         CKM_SHA1_RSA_PKCS => SigAlg::RsaSha1,
         CKM_SHA224_RSA_PKCS => SigAlg::RsaSha2_224,
         CKM_SHA256_RSA_PKCS => SigAlg::RsaSha2_256,
@@ -380,20 +368,22 @@ impl RsaPKCSOperation {
         keysize: usize,
         signature: Option<&[u8]>,
     ) -> Result<RsaPKCSOperation> {
-        let pss_params = parse_pss_params(mech)?;
+        let sigalg = rsa_type_to_ossl_alg(mech.mechanism)?;
+        let (pss_params, hash_len) = parse_pss_params(mech)?;
+        let params = rsa_sig_params(sigalg, &pss_params)?;
         let mut sigctx = if let Some(pkey) = &mut privkey {
             OsslSignature::message_sign_new(
                 osslctx(),
-                rsa_type_to_ossl_alg(mech.mechanism)?,
+                sigalg,
                 pkey,
-                Some(&Self::rsa_sig_params(mech.mechanism, &pss_params)?),
+                params.as_ref(),
             )?
         } else if let Some(pkey) = &mut pubkey {
             OsslSignature::message_verify_new(
                 osslctx(),
-                rsa_type_to_ossl_alg(mech.mechanism)?,
+                sigalg,
                 pkey,
-                Some(&Self::rsa_sig_params(mech.mechanism, &pss_params)?),
+                params.as_ref(),
             )?
         } else {
             return Err(CKR_GENERAL_ERROR)?;
@@ -406,7 +396,7 @@ impl RsaPKCSOperation {
             max_input: match mech.mechanism {
                 CKM_RSA_X_509 => keysize,
                 CKM_RSA_PKCS => keysize - 11,
-                CKM_RSA_PKCS_PSS => Self::hash_len(pss_params.hash)?,
+                CKM_RSA_PKCS_PSS => hash_len,
                 _ => 0,
             },
             output_len: keysize,
@@ -581,69 +571,6 @@ impl RsaPKCSOperation {
     }
 
     /// Creates an `OSSL_PARAM` array containing RSA padding and digest
-    /// parameters suitable for OpenSSL's EVP signature functions (PKCS#1 v1.5
-    /// or PSS).
-    fn rsa_sig_params(
-        mech: CK_MECHANISM_TYPE,
-        pss: &RsaPssParams,
-    ) -> Result<OsslParam> {
-        let mut params = OsslParam::new();
-        match mech {
-            CKM_RSA_X_509 => {
-                params.add_const_c_string(
-                    cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
-                    cstr!(OSSL_PKEY_RSA_PAD_MODE_NONE),
-                )?;
-            }
-            CKM_RSA_PKCS
-            | CKM_SHA1_RSA_PKCS
-            | CKM_SHA224_RSA_PKCS
-            | CKM_SHA256_RSA_PKCS
-            | CKM_SHA384_RSA_PKCS
-            | CKM_SHA512_RSA_PKCS
-            | CKM_SHA3_224_RSA_PKCS
-            | CKM_SHA3_256_RSA_PKCS
-            | CKM_SHA3_384_RSA_PKCS
-            | CKM_SHA3_512_RSA_PKCS => {
-                params.add_const_c_string(
-                    cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
-                    cstr!(OSSL_PKEY_RSA_PAD_MODE_PKCSV15),
-                )?;
-            }
-            CKM_RSA_PKCS_PSS
-            | CKM_SHA1_RSA_PKCS_PSS
-            | CKM_SHA224_RSA_PKCS_PSS
-            | CKM_SHA256_RSA_PKCS_PSS
-            | CKM_SHA384_RSA_PKCS_PSS
-            | CKM_SHA512_RSA_PKCS_PSS
-            | CKM_SHA3_224_RSA_PKCS_PSS
-            | CKM_SHA3_256_RSA_PKCS_PSS
-            | CKM_SHA3_384_RSA_PKCS_PSS
-            | CKM_SHA3_512_RSA_PKCS_PSS => {
-                params.add_const_c_string(
-                    cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
-                    cstr!(OSSL_PKEY_RSA_PAD_MODE_PSS),
-                )?;
-                params.add_const_c_string(
-                    cstr!(OSSL_SIGNATURE_PARAM_DIGEST),
-                    mech_type_to_digest_name(pss.hash)?,
-                )?;
-                params.add_const_c_string(
-                    cstr!(OSSL_SIGNATURE_PARAM_MGF1_DIGEST),
-                    mgf1_to_digest_name_as_slice(pss.mgf)?,
-                )?;
-                params.add_int(
-                    cstr!(OSSL_SIGNATURE_PARAM_PSS_SALTLEN),
-                    &pss.saltlen,
-                )?;
-            }
-            _ => (),
-        }
-        params.finalize();
-        Ok(params)
-    }
-
-    /// Creates an `OSSL_PARAM` array containing RSA padding and digest
     /// parameters suitable for OpenSSL's EVP encryption/decryption functions
     /// (PKCS#1 v1.5 or OAEP). Includes OAEP hash, MGF, and label parameters
     /// if applicable.
@@ -673,7 +600,7 @@ impl RsaPKCSOperation {
                 )?;
                 params.add_const_c_string(
                     cstr!(OSSL_PKEY_PARAM_MGF1_DIGEST),
-                    mgf1_to_digest_name_as_slice(self.oaep.mgf)?,
+                    mgf1_to_digest_name(self.oaep.mgf)?,
                 )?;
                 match &self.oaep.source {
                     None => (),
