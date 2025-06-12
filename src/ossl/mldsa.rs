@@ -20,7 +20,7 @@ use crate::{bytes_to_vec, cast_params};
 use asn1;
 use bitflags::bitflags;
 use ossl::bindings::*;
-use ossl::{ErrorKind, EvpPkey, OsslParam, OsslSignature};
+use ossl::{ErrorKind, EvpPkey, OsslParam, OsslSignature, SigAlg};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -46,13 +46,26 @@ const MAX_HASH_LEN: usize = 64;
 
 /// Maps a PKCS#11 ML-DSA parameter set type (`CK_ML_DSA_PARAMETER_SET_TYPE`)
 /// to the corresponding OpenSSL algorithm name string.
-pub fn mldsa_param_set_to_name(
+fn mldsa_param_set_to_name(
     pset: CK_ML_DSA_PARAMETER_SET_TYPE,
 ) -> Result<&'static CStr> {
     match pset {
         CKP_ML_DSA_44 => Ok(ML_DSA_44_TYPE),
         CKP_ML_DSA_65 => Ok(ML_DSA_65_TYPE),
         CKP_ML_DSA_87 => Ok(ML_DSA_87_TYPE),
+        _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+    }
+}
+
+/// Maps a PKCS#11 ML-DSA parameter set type (`CK_ML_DSA_PARAMETER_SET_TYPE`)
+/// to the corresponding SigAlg
+fn mldsa_param_set_to_sigalg(
+    pset: CK_ML_DSA_PARAMETER_SET_TYPE,
+) -> Result<SigAlg> {
+    match pset {
+        CKP_ML_DSA_44 => Ok(SigAlg::Mldsa44),
+        CKP_ML_DSA_65 => Ok(SigAlg::Mldsa65),
+        CKP_ML_DSA_87 => Ok(SigAlg::Mldsa87),
         _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
     }
 }
@@ -319,18 +332,18 @@ impl MlDsaOperation {
                 pflags = pflags | ParmFlags::Sign;
                 OsslSignature::message_sign_new(
                     osslctx(),
-                    mldsa_param_set_to_name(params.param_set)?,
+                    mldsa_param_set_to_sigalg(params.param_set)?,
                     &mut privkey_from_object(key)?,
-                    params.ossl_params(pflags)?,
+                    Some(&params.ossl_params(pflags)?),
                 )?
             }
             CKF_VERIFY => {
                 pflags = pflags | ParmFlags::Verify;
                 OsslSignature::message_verify_new(
                     osslctx(),
-                    mldsa_param_set_to_name(params.param_set)?,
+                    mldsa_param_set_to_sigalg(params.param_set)?,
                     &mut pubkey_from_object(key)?,
-                    params.ossl_params(pflags)?,
+                    Some(&params.ossl_params(pflags)?),
                 )?
             }
             _ => return Err(CKR_GENERAL_ERROR)?,
@@ -511,7 +524,7 @@ impl MlDsaOperation {
                 None => return Err(CKR_SIGNATURE_LEN_RANGE)?,
             },
         };
-        Ok(self.sigctx.message_verify(mprime.as_slice(), sig)?)
+        Ok(self.sigctx.message_verify(mprime.as_slice(), Some(sig))?)
     }
 
     fn sign_hash(
@@ -520,7 +533,9 @@ impl MlDsaOperation {
         signature: &mut [u8],
     ) -> Result<usize> {
         let mprime = self.hash_mldsa_m_prime(hash)?;
-        Ok(self.sigctx.message_sign(mprime.as_slice(), signature)?)
+        Ok(self
+            .sigctx
+            .message_sign(mprime.as_slice(), Some(signature))?)
     }
 
     /// Internal helper for performing one-shot or final verification step.
