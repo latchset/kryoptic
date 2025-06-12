@@ -32,7 +32,18 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
                     value
                 );
             }
+            /* Emit versions we found, versions stack, so code
+             * just need to build conditionalized just to the older version
+             * that introduced the desired feature */
+            println!("cargo::rustc-cfg=ossl_v307");
+            if value >= OPENSSL_3_2_0 {
+                println!("cargo::rustc-cfg=ossl_v320");
+            }
+            if value >= OPENSSL_3_5_0 {
+                println!("cargo::rustc-cfg=ossl_v350");
+            }
         }
+
         None
     }
 }
@@ -234,6 +245,9 @@ fn main() {
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let ossl_bindings = out_path.join("ossl_bindings.rs");
+
+    /* Always emit know detectable versions */
+    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350)");
 
     /* OpenSSL Cryptography */
     if cfg!(feature = "dynamic") {
