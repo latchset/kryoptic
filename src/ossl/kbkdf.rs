@@ -9,12 +9,13 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_slice, bytes_to_vec};
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::*;
-use crate::ossl::fips::*;
 use crate::sp800_108::*;
 
 use ossl::bindings::*;
 use ossl::{EvpKdfCtx, OsslParam};
 use pkcs11::*;
+
+use ossl::fips::FipsApproval;
 
 const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
 const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";
@@ -278,7 +279,7 @@ pub struct Sp800Operation {
     iv: Vec<u8>,
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
 }
 
 unsafe impl Send for Sp800Operation {}
@@ -306,7 +307,7 @@ impl Sp800Operation {
             iv: Vec::new(),
             addl_drv_keys: addl_drv_keys.to_vec(),
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: FipsApproval::init(),
         })
     }
 
@@ -338,7 +339,7 @@ impl Sp800Operation {
             iv: iv,
             addl_drv_keys: addl_drv_keys.to_vec(),
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: FipsApproval::init(),
         })
     }
 }
@@ -509,7 +510,7 @@ impl Derive for Sp800Operation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_KBKDF))?;
         let mut dkm = vec![0u8; slen];
@@ -526,7 +527,7 @@ impl Derive for Sp800Operation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut self.fips_approved);
+        self.fips_approval.update();
 
         let mut cursor = 0;
         for key in &mut keys {
