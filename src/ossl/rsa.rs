@@ -17,11 +17,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{EvpMdCtx, EvpPkey, OsslParam};
+use ossl::{EvpPkey, OsslParam, OsslSignature, SigAlg};
 use pkcs11::*;
-
-#[cfg(feature = "fips")]
-use ossl::fips::ProviderSignatureCtx;
 
 #[cfg(not(feature = "fips"))]
 pub const MIN_RSA_SIZE_BITS: usize = 1024;
@@ -228,6 +225,35 @@ fn parse_oaep_params(mech: &CK_MECHANISM) -> Result<RsaOaepParams> {
     })
 }
 
+/// Helper function to convert PKCS#11 mechanism type to name
+/// understood by the ossl package.
+pub fn rsa_type_to_ossl_alg(mech: CK_MECHANISM_TYPE) -> Result<SigAlg> {
+    Ok(match mech {
+        CKM_RSA_X_509 => SigAlg::Rsa,
+        CKM_RSA_PKCS => SigAlg::Rsa,
+        CKM_RSA_PKCS_PSS => SigAlg::Rsa,
+        CKM_SHA1_RSA_PKCS => SigAlg::RsaSha1,
+        CKM_SHA224_RSA_PKCS => SigAlg::RsaSha2_224,
+        CKM_SHA256_RSA_PKCS => SigAlg::RsaSha2_256,
+        CKM_SHA384_RSA_PKCS => SigAlg::RsaSha2_384,
+        CKM_SHA512_RSA_PKCS => SigAlg::RsaSha2_512,
+        CKM_SHA3_224_RSA_PKCS => SigAlg::RsaSha3_224,
+        CKM_SHA3_256_RSA_PKCS => SigAlg::RsaSha3_256,
+        CKM_SHA3_384_RSA_PKCS => SigAlg::RsaSha3_384,
+        CKM_SHA3_512_RSA_PKCS => SigAlg::RsaSha3_512,
+        CKM_SHA1_RSA_PKCS_PSS => SigAlg::RsaPssSha1,
+        CKM_SHA224_RSA_PKCS_PSS => SigAlg::RsaPssSha2_224,
+        CKM_SHA256_RSA_PKCS_PSS => SigAlg::RsaPssSha2_256,
+        CKM_SHA384_RSA_PKCS_PSS => SigAlg::RsaPssSha2_384,
+        CKM_SHA512_RSA_PKCS_PSS => SigAlg::RsaPssSha2_512,
+        CKM_SHA3_224_RSA_PKCS_PSS => SigAlg::RsaPssSha3_224,
+        CKM_SHA3_256_RSA_PKCS_PSS => SigAlg::RsaPssSha3_256,
+        CKM_SHA3_384_RSA_PKCS_PSS => SigAlg::RsaPssSha3_384,
+        CKM_SHA3_512_RSA_PKCS_PSS => SigAlg::RsaPssSha3_512,
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    })
+}
+
 /// Represents an active RSA cryptographic operation.
 #[derive(Debug)]
 pub struct RsaPKCSOperation {
@@ -245,22 +271,13 @@ pub struct RsaPKCSOperation {
     finalized: bool,
     /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
-    /// OpenSSL Provider Signature Context (for FIPS digest/sign operations).
-    #[cfg(feature = "fips")]
-    sigctx: Option<ProviderSignatureCtx>,
-    /// OpenSSL EVP Message Digest Context (for non-FIPS operations).
-    #[cfg(not(feature = "fips"))]
-    sigctx: Option<EvpMdCtx>,
-    /// Parsed PSS parameters, if applicable.
-    pss: RsaPssParams,
+    /// The OpenSSL Wrapper Signature Context
+    sigctx: Option<OsslSignature>,
     /// Parsed OAEP parameters, if applicable.
     oaep: RsaOaepParams,
     /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
-    /// Optional storage for signatures, used when the signature to verify
-    /// is provided at initialization
-    signature: Option<Vec<u8>>,
 }
 
 impl RsaPKCSOperation {
@@ -324,11 +341,9 @@ impl RsaPKCSOperation {
             finalized: false,
             in_use: false,
             sigctx: None,
-            pss: no_pss_params(),
             oaep: oaep_params,
             #[cfg(feature = "fips")]
             fips_approved: None,
-            signature: None,
         })
     }
 
@@ -357,15 +372,35 @@ impl RsaPKCSOperation {
 
     /// Internal constructor for signing/verification operations.
     /// Parses PSS parameters if applicable and initializes the appropriate
-    /// signature context (`EvpMdCtx` or `ProviderSignatureCtx`).
+    /// signature context
     fn sigver_new(
         mech: &CK_MECHANISM,
-        pubkey: Option<EvpPkey>,
-        privkey: Option<EvpPkey>,
+        mut pubkey: Option<EvpPkey>,
+        mut privkey: Option<EvpPkey>,
         keysize: usize,
         signature: Option<&[u8]>,
     ) -> Result<RsaPKCSOperation> {
         let pss_params = parse_pss_params(mech)?;
+        let mut sigctx = if let Some(pkey) = &mut privkey {
+            OsslSignature::message_sign_new(
+                osslctx(),
+                rsa_type_to_ossl_alg(mech.mechanism)?,
+                pkey,
+                Some(&Self::rsa_sig_params(mech.mechanism, &pss_params)?),
+            )?
+        } else if let Some(pkey) = &mut pubkey {
+            OsslSignature::message_verify_new(
+                osslctx(),
+                rsa_type_to_ossl_alg(mech.mechanism)?,
+                pkey,
+                Some(&Self::rsa_sig_params(mech.mechanism, &pss_params)?),
+            )?
+        } else {
+            return Err(CKR_GENERAL_ERROR)?;
+        };
+        if let Some(sig) = &signature {
+            sigctx.set_signature(sig)?;
+        }
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: match mech.mechanism {
@@ -379,21 +414,10 @@ impl RsaPKCSOperation {
             private_key: privkey,
             finalized: false,
             in_use: false,
-            sigctx: match mech.mechanism {
-                CKM_RSA_X_509 | CKM_RSA_PKCS => None,
-                #[cfg(feature = "fips")]
-                _ => Some(ProviderSignatureCtx::new(RSA_NAME)?),
-                #[cfg(not(feature = "fips"))]
-                _ => Some(EvpMdCtx::new()?),
-            },
-            pss: pss_params,
+            sigctx: Some(sigctx),
             oaep: no_oaep_params(),
             #[cfg(feature = "fips")]
             fips_approved: None,
-            signature: match signature {
-                Some(s) => Some(s.to_vec()),
-                None => None,
-            },
         })
     }
 
@@ -889,53 +913,17 @@ impl Sign for RsaPKCSOperation {
                 if signature.len() != self.output_len {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
-                let mut ctx =
-                    some_or_err!(mut self.private_key).new_ctx(osslctx())?;
-                let res = unsafe { EVP_PKEY_sign_init(ctx.as_mut_ptr()) };
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-                let params = Self::rsa_sig_params(self.mech, &self.pss)?;
-                let res = unsafe {
-                    EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-                };
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
 
                 self.finalized = true;
 
-                let mut siglen = 0usize;
-                let siglen_ptr: *mut usize = &mut siglen;
-                let res = unsafe {
-                    EVP_PKEY_sign(
-                        ctx.as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        siglen_ptr,
-                        data.as_ptr(),
-                        data.len(),
-                    )
-                };
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-                if signature.len() != siglen {
+                if let Some(ctx) = &mut self.sigctx {
+                    if ctx.message_sign(data, None)? != signature.len() {
+                        return Err(CKR_GENERAL_ERROR)?;
+                    }
+                    let _ = ctx.message_sign(data, Some(signature))?;
+                } else {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
-
-                let res = unsafe {
-                    EVP_PKEY_sign(
-                        ctx.as_mut_ptr(),
-                        signature.as_mut_ptr(),
-                        siglen_ptr,
-                        data.as_ptr(),
-                        data.len(),
-                    )
-                };
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-
                 Ok(())
             }
             _ => {
@@ -957,48 +945,12 @@ impl Sign for RsaPKCSOperation {
                 _ => (),
             }
             self.in_use = true;
-
-            let params = Self::rsa_sig_params(self.mech, &self.pss)?;
-
-            #[cfg(feature = "fips")]
-            self.sigctx.as_mut().unwrap().digest_sign_init(
-                mech_type_to_digest_name(self.mech)?.as_ptr(),
-                some_or_err!(self.private_key),
-                params.as_ptr(),
-            )?;
-            #[cfg(not(feature = "fips"))]
-            unsafe {
-                let res = EVP_DigestSignInit_ex(
-                    self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    mech_type_to_digest_name(self.mech)?.as_ptr(),
-                    osslctx().ptr(),
-                    std::ptr::null(),
-                    some_or_err!(mut self.private_key).as_mut_ptr(),
-                    params.as_ptr(),
-                );
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-            }
         }
 
-        #[cfg(feature = "fips")]
-        {
-            Ok(self.sigctx.as_mut().unwrap().digest_sign_update(data)?)
-        }
-        #[cfg(not(feature = "fips"))]
-        unsafe {
-            let res = EVP_DigestSignUpdate(
-                self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                data.as_ptr() as *const std::os::raw::c_void,
-                data.len(),
-            );
-            if res != 1 {
-                Err(CKR_DEVICE_ERROR)?
-            } else {
-                Ok(())
-            }
+        if let Some(ctx) = &mut self.sigctx {
+            Ok(ctx.message_sign_update(data)?)
+        } else {
+            Err(CKR_GENERAL_ERROR)?
         }
     }
 
@@ -1011,34 +963,14 @@ impl Sign for RsaPKCSOperation {
         }
         self.finalized = true;
 
-        #[cfg(feature = "fips")]
-        {
-            match self.sigctx.as_mut().unwrap().digest_sign_final(signature) {
-                Ok(siglen) => {
-                    if siglen != signature.len() {
-                        Err(CKR_DEVICE_ERROR)?
-                    } else {
-                        Ok(())
-                    }
-                }
-                Err(_) => return Err(CKR_DEVICE_ERROR)?,
+        if let Some(ctx) = &mut self.sigctx {
+            let len = ctx.message_sign_final(signature)?;
+            if len != signature.len() {
+                return Err(CKR_DEVICE_ERROR)?;
             }
-        }
-        #[cfg(not(feature = "fips"))]
-        unsafe {
-            let mut siglen = signature.len();
-            let siglen_ptr = &mut siglen;
-
-            let res = EVP_DigestSignFinal(
-                self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                signature.as_mut_ptr(),
-                siglen_ptr,
-            );
-            if res != 1 {
-                Err(CKR_DEVICE_ERROR)?
-            } else {
-                Ok(())
-            }
+            Ok(())
+        } else {
+            Err(CKR_GENERAL_ERROR)?
         }
     }
 
@@ -1061,50 +993,22 @@ impl RsaPKCSOperation {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
-        let sig = match signature {
-            Some(s) => s,
-            None => match &self.signature {
-                Some(s) => s.as_slice(),
-                None => return Err(CKR_GENERAL_ERROR)?,
-            },
-        };
-
         match self.mech {
             CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
                 self.finalized = true;
                 if data.len() > self.max_input {
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
-                if sig.len() != self.output_len {
-                    return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                if let Some(sig) = &signature {
+                    if sig.len() != self.output_len {
+                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
+                    }
                 }
-                let mut ctx =
-                    some_or_err!(mut self.public_key).new_ctx(osslctx())?;
-                let res = unsafe { EVP_PKEY_verify_init(ctx.as_mut_ptr()) };
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
+                if let Some(ctx) = &mut self.sigctx {
+                    Ok(ctx.message_verify(data, signature)?)
+                } else {
+                    Err(CKR_GENERAL_ERROR)?
                 }
-                let params = Self::rsa_sig_params(self.mech, &self.pss)?;
-                let res = unsafe {
-                    EVP_PKEY_CTX_set_params(ctx.as_mut_ptr(), params.as_ptr())
-                };
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-
-                let res = unsafe {
-                    EVP_PKEY_verify(
-                        ctx.as_mut_ptr(),
-                        sig.as_ptr(),
-                        sig.len(),
-                        data.as_ptr(),
-                        data.len(),
-                    )
-                };
-                if res != 1 {
-                    return Err(CKR_SIGNATURE_INVALID)?;
-                }
-                Ok(())
             }
             _ => {
                 self.verify_int_update(data)?;
@@ -1126,48 +1030,12 @@ impl RsaPKCSOperation {
                 _ => (),
             }
             self.in_use = true;
-
-            let params = Self::rsa_sig_params(self.mech, &self.pss)?;
-
-            #[cfg(feature = "fips")]
-            self.sigctx.as_mut().unwrap().digest_verify_init(
-                mech_type_to_digest_name(self.mech)?.as_ptr(),
-                some_or_err!(self.public_key),
-                params.as_ptr(),
-            )?;
-            #[cfg(not(feature = "fips"))]
-            unsafe {
-                let res = EVP_DigestVerifyInit_ex(
-                    self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                    std::ptr::null_mut(),
-                    mech_type_to_digest_name(self.mech)?.as_ptr(),
-                    osslctx().ptr(),
-                    std::ptr::null(),
-                    some_or_err!(mut self.public_key).as_mut_ptr(),
-                    params.as_ptr(),
-                );
-                if res != 1 {
-                    return Err(CKR_DEVICE_ERROR)?;
-                }
-            }
         }
 
-        #[cfg(feature = "fips")]
-        {
-            Ok(self.sigctx.as_mut().unwrap().digest_verify_update(data)?)
-        }
-        #[cfg(not(feature = "fips"))]
-        unsafe {
-            let res = EVP_DigestVerifyUpdate(
-                self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                data.as_ptr() as *const std::os::raw::c_void,
-                data.len(),
-            );
-            if res != 1 {
-                Err(CKR_DEVICE_ERROR)?
-            } else {
-                Ok(())
-            }
+        if let Some(ctx) = &mut self.sigctx {
+            Ok(ctx.message_verify_update(data)?)
+        } else {
+            Err(CKR_GENERAL_ERROR)?
         }
     }
 
@@ -1181,30 +1049,10 @@ impl RsaPKCSOperation {
         }
         self.finalized = true;
 
-        let sig = match signature {
-            Some(s) => s,
-            None => match &self.signature {
-                Some(s) => s.as_slice(),
-                None => return Err(CKR_GENERAL_ERROR)?,
-            },
-        };
-
-        #[cfg(feature = "fips")]
-        {
-            Ok(self.sigctx.as_mut().unwrap().digest_verify_final(sig)?)
-        }
-        #[cfg(not(feature = "fips"))]
-        unsafe {
-            let res = EVP_DigestVerifyFinal(
-                self.sigctx.as_mut().unwrap().as_mut_ptr(),
-                sig.as_ptr(),
-                sig.len(),
-            );
-            if res != 1 {
-                Err(CKR_SIGNATURE_INVALID)?
-            } else {
-                Ok(())
-            }
+        if let Some(ctx) = &mut self.sigctx {
+            Ok(ctx.message_verify_final(signature)?)
+        } else {
+            Err(CKR_GENERAL_ERROR)?
         }
     }
 }

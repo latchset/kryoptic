@@ -1355,8 +1355,161 @@ impl Drop for EvpSignature {
     }
 }
 
+macro_rules! cstr {
+    ($str:expr) => {
+        unsafe { CStr::from_ptr($str.as_ptr() as *const c_char) }
+    };
+}
+
+/// Known algorithms selectable for OsslSignature
+#[derive(Clone, Copy, Debug)]
+pub enum SigAlg {
+    Ecdsa,
+    EcdsaSha1,
+    EcdsaSha2_224,
+    EcdsaSha2_256,
+    EcdsaSha2_384,
+    EcdsaSha2_512,
+    EcdsaSha3_224,
+    EcdsaSha3_256,
+    EcdsaSha3_384,
+    EcdsaSha3_512,
+    Mldsa44,
+    Mldsa65,
+    Mldsa87,
+    Rsa,
+    RsaSha1,
+    RsaSha2_224,
+    RsaSha2_256,
+    RsaSha2_384,
+    RsaSha2_512,
+    RsaSha3_224,
+    RsaSha3_256,
+    RsaSha3_384,
+    RsaSha3_512,
+    RsaPssSha1,
+    RsaPssSha2_224,
+    RsaPssSha2_256,
+    RsaPssSha2_384,
+    RsaPssSha2_512,
+    RsaPssSha3_224,
+    RsaPssSha3_256,
+    RsaPssSha3_384,
+    RsaPssSha3_512,
+}
+
+/// Helper that indicates if a signature algorithm should use oneshot apis
+fn sigalg_is_oneshot(alg: SigAlg) -> bool {
+    match alg {
+        SigAlg::Ecdsa | SigAlg::Rsa => true,
+        _ => false,
+    }
+}
+
+/// Helper that indicates if a signature algorithm should use legacy apis
+fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
+    #[cfg(not(feature = "ossl350"))]
+    match alg {
+        SigAlg::Ecdsa | SigAlg::Rsa => false,
+        SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => false,
+        _ => true,
+    }
+    #[cfg(feature = "ossl350")]
+    match alg {
+        SigAlg::RsaPssSha1
+        | SigAlg::RsaPssSha2_224
+        | SigAlg::RsaPssSha2_256
+        | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha3_224
+        | SigAlg::RsaPssSha3_256
+        | SigAlg::RsaPssSha3_384
+        | SigAlg::RsaPssSha3_512 => true,
+        _ => false,
+    }
+}
+
+/// Helper to return OpenSSL sigalg name
+fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
+    match alg {
+        SigAlg::Ecdsa => c"ECDSA",
+        SigAlg::EcdsaSha1 => c"ECDSA-SHA1",
+        SigAlg::EcdsaSha2_224 => c"ECDSA-SHA2-224",
+        SigAlg::EcdsaSha2_256 => c"ECDSA-SHA2-256",
+        SigAlg::EcdsaSha2_384 => c"ECDSA-SHA2-384",
+        SigAlg::EcdsaSha2_512 => c"ECDSA-SHA2-512",
+        SigAlg::EcdsaSha3_224 => c"ECDSA-SHA3-224",
+        SigAlg::EcdsaSha3_256 => c"ECDSA-SHA3-256",
+        SigAlg::EcdsaSha3_384 => c"ECDSA-SHA3-384",
+        SigAlg::EcdsaSha3_512 => c"ECDSA-SHA3-512",
+        SigAlg::Mldsa44 => c"ML-DSA-44",
+        SigAlg::Mldsa65 => c"ML-DSA-65",
+        SigAlg::Mldsa87 => c"ML-DSA-87",
+        SigAlg::Rsa => c"RSA",
+        SigAlg::RsaSha1 => c"RSA-SHA1",
+        SigAlg::RsaSha2_224 => c"RSA-SHA2-224",
+        SigAlg::RsaSha2_256 => c"RSA-SHA2-256",
+        SigAlg::RsaSha2_384 => c"RSA-SHA2-384",
+        SigAlg::RsaSha2_512 => c"RSA-SHA2-512",
+        SigAlg::RsaSha3_224 => c"RSA-SHA3-224",
+        SigAlg::RsaSha3_256 => c"RSA-SHA3-256",
+        SigAlg::RsaSha3_384 => c"RSA-SHA3-384",
+        SigAlg::RsaSha3_512 => c"RSA-SHA3-512",
+        /* The following names are not actually recognized by
+         * OpenSSL and will cause a fetch error if used, they
+         * have been made up for completeness, and debugging */
+        SigAlg::RsaPssSha1 => c"RSA-PSS-SHA1",
+        SigAlg::RsaPssSha2_224 => c"RSA-PSS-SHA2-224",
+        SigAlg::RsaPssSha2_256 => c"RSA-PSS-SHA2-256",
+        SigAlg::RsaPssSha2_384 => c"RSA-PSS-SHA2-384",
+        SigAlg::RsaPssSha2_512 => c"RSA-PSS-SHA2-512",
+        SigAlg::RsaPssSha3_224 => c"RSA-PSS-SHA3-224",
+        SigAlg::RsaPssSha3_256 => c"RSA-PSS-SHA3-256",
+        SigAlg::RsaPssSha3_384 => c"RSA-PSS-SHA3-384",
+        SigAlg::RsaPssSha3_512 => c"RSA-PSS-SHA3-512",
+    }
+}
+
+/// Helper that returns the OpenSSL digest name associated to a sigalg
+fn sigalg_to_digest_name(alg: SigAlg) -> &'static CStr {
+    match alg {
+        SigAlg::EcdsaSha1 | SigAlg::RsaSha1 | SigAlg::RsaPssSha1 => {
+            cstr!(OSSL_DIGEST_NAME_SHA1)
+        }
+        SigAlg::EcdsaSha2_224
+        | SigAlg::RsaSha2_224
+        | SigAlg::RsaPssSha2_224 => cstr!(OSSL_DIGEST_NAME_SHA2_224),
+        SigAlg::EcdsaSha2_256
+        | SigAlg::RsaSha2_256
+        | SigAlg::RsaPssSha2_256 => cstr!(OSSL_DIGEST_NAME_SHA2_256),
+        SigAlg::EcdsaSha2_384
+        | SigAlg::RsaSha2_384
+        | SigAlg::RsaPssSha2_384 => cstr!(OSSL_DIGEST_NAME_SHA2_384),
+        SigAlg::EcdsaSha2_512
+        | SigAlg::RsaSha2_512
+        | SigAlg::RsaPssSha2_512 => cstr!(OSSL_DIGEST_NAME_SHA2_512),
+        SigAlg::EcdsaSha3_224
+        | SigAlg::RsaSha3_224
+        | SigAlg::RsaPssSha3_224 => cstr!(OSSL_DIGEST_NAME_SHA3_224),
+        SigAlg::EcdsaSha3_256
+        | SigAlg::RsaSha3_256
+        | SigAlg::RsaPssSha3_256 => cstr!(OSSL_DIGEST_NAME_SHA3_256),
+        SigAlg::EcdsaSha3_384
+        | SigAlg::RsaSha3_384
+        | SigAlg::RsaPssSha3_384 => cstr!(OSSL_DIGEST_NAME_SHA3_384),
+        SigAlg::EcdsaSha3_512
+        | SigAlg::RsaSha3_512
+        | SigAlg::RsaPssSha3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
+        SigAlg::Mldsa44
+        | SigAlg::Mldsa65
+        | SigAlg::Mldsa87
+        | SigAlg::Ecdsa
+        | SigAlg::Rsa => c"",
+    }
+}
+
 /// Maximum buffer size for accumulating data when emulating multi-part
 /// operations for OpenSSL versions that only support one-shot operations.
+#[cfg(feature = "ossl350")]
 const MAX_BUFFER_LEN: usize = 1024 * 1024;
 
 /// Higher level wrapper for signature operations with OpenSSL
@@ -1364,10 +1517,17 @@ const MAX_BUFFER_LEN: usize = 1024 * 1024;
 pub struct OsslSignature {
     /// The underlying OpenSSL EVP PKEY context.
     pkey_ctx: EvpPkeyCtx,
+    /// The MD Ctx for cases when the old EVP_Digest interfaces need to be used
+    #[cfg(not(feature = "fips"))]
+    legacy_ctx: Option<EvpMdCtx>,
+    #[cfg(feature = "fips")]
+    legacy_ctx: Option<fips::ProviderSignatureCtx>,
     /// Flag indicating if the current OpenSSL version supports multi-part
     /// updates.
+    #[cfg(feature = "ossl350")]
     supports_updates: bool,
     /// Buffer to accumulate data for multi-part emulation if needed.
+    #[cfg(feature = "ossl350")]
     data: Option<Vec<u8>>,
     /// Stored signature for VerifySignature operations if updates aren't
     /// supported by the OpenSSL provider.
@@ -1382,13 +1542,17 @@ impl OsslSignature {
     ) -> Result<OsslSignature, Error> {
         Ok(OsslSignature {
             pkey_ctx: key.new_ctx(ctx)?,
+            legacy_ctx: None,
+            #[cfg(feature = "ossl350")]
             supports_updates: false,
+            #[cfg(feature = "ossl350")]
             data: None,
             signature: None,
         })
     }
 
     /// Accumulates data when native update is not available
+    #[cfg(feature = "ossl350")]
     fn store_data(&mut self, data: &[u8]) -> Result<(), Error> {
         match &mut self.data {
             Some(buffer) => {
@@ -1410,41 +1574,112 @@ impl OsslSignature {
 
     /// Creates a new message sign context for a specific
     /// algorithm name, requires a private key and parameters.
-    #[cfg(feature = "ossl350")]
     pub fn message_sign_new(
         libctx: &OsslContext,
-        alg_name: &CStr,
+        alg: SigAlg,
         key: &mut EvpPkey,
-        params: OsslParam,
+        params: Option<&OsslParam>,
     ) -> Result<OsslSignature, Error> {
         let mut ctx = Self::init(libctx, key)?;
-        let ret = unsafe {
-            EVP_PKEY_sign_message_init(
-                ctx.pkey_ctx.as_mut_ptr(),
-                EvpSignature::new(libctx, alg_name)?.as_mut_ptr(),
-                params.as_ptr(),
-            )
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
+
+        if sigalg_is_oneshot(alg) {
+            /* Single shot algorithms must always use EVP_PKEY_sign_init */
+            if unsafe { EVP_PKEY_sign_init(ctx.pkey_ctx.as_mut_ptr()) } != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            if let Some(p) = params {
+                let ret = unsafe {
+                    EVP_PKEY_CTX_set_params(
+                        ctx.pkey_ctx.as_mut_ptr(),
+                        p.as_ptr(),
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+            }
+            return Ok(ctx);
         }
-        /* OpenSSL 3.5 implements only one shot ML-DSA,
-         * while later implementations can deal with
-         * update()/final() operations. Probe here, and
-         * set up a backup buffer if update()s are not
-         * supported.
-         */
-        let ret = unsafe {
-            EVP_PKEY_sign_message_update(
-                ctx.pkey_ctx.as_mut_ptr(),
-                std::ptr::null(),
-                0,
-            )
-        };
-        if ret == 1 {
-            ctx.supports_updates = true;
+
+        if sigalg_uses_legacy_api(alg) {
+            #[cfg(not(feature = "fips"))]
+            {
+                let mut lctx = EvpMdCtx::new()?;
+                let ret = unsafe {
+                    EVP_DigestSignInit_ex(
+                        lctx.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                        sigalg_to_digest_name(alg).as_ptr(),
+                        libctx.ptr(),
+                        std::ptr::null(),
+                        key.as_mut_ptr(),
+                        match params {
+                            Some(p) => p.as_ptr(),
+                            None => std::ptr::null(),
+                        },
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                ctx.legacy_ctx = Some(lctx);
+            }
+            #[cfg(feature = "fips")]
+            {
+                let mut lctx = fips::ProviderSignatureCtx::new(
+                    fips::sigalg_to_legacy_name(alg),
+                )?;
+                lctx.digest_sign_init(
+                    sigalg_to_digest_name(alg).as_ptr(),
+                    key,
+                    match params {
+                        Some(p) => p.as_ptr(),
+                        None => std::ptr::null(),
+                    },
+                )?;
+                ctx.legacy_ctx = Some(lctx);
+            }
+            return Ok(ctx);
         }
-        Ok(ctx)
+
+        #[cfg(feature = "ossl350")]
+        {
+            let ret = unsafe {
+                EVP_PKEY_sign_message_init(
+                    ctx.pkey_ctx.as_mut_ptr(),
+                    EvpSignature::new(libctx, sigalg_to_ossl_name(alg))?
+                        .as_mut_ptr(),
+                    match params {
+                        Some(p) => p.as_ptr(),
+                        None => std::ptr::null(),
+                    },
+                )
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            /* OpenSSL 3.5 implements only one shot ML-DSA,
+             * while later implementations can deal with
+             * update()/final() operations. Probe here, and
+             * set up a backup buffer if update()s are not
+             * supported.
+             */
+            let ret = unsafe {
+                EVP_PKEY_sign_message_update(
+                    ctx.pkey_ctx.as_mut_ptr(),
+                    std::ptr::null(),
+                    0,
+                )
+            };
+            if ret == 1 {
+                ctx.supports_updates = true;
+            }
+
+            return Ok(ctx);
+        }
+
+        #[cfg(not(feature = "ossl350"))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// One shot signature, takes data and a buffer where to store
@@ -1454,9 +1689,12 @@ impl OsslSignature {
     pub fn message_sign(
         &mut self,
         data: &[u8],
-        signature: &mut [u8],
+        signature: Option<&mut [u8]>,
     ) -> Result<usize, Error> {
-        let mut siglen = signature.len();
+        let mut siglen = match &signature {
+            Some(sig) => sig.len(),
+            None => 0,
+        };
         let siglen_ptr: *mut usize = &mut siglen;
 
         /* check siglen buffer is enough */
@@ -1473,128 +1711,261 @@ impl OsslSignature {
             return Err(Error::new(ErrorKind::OsslError));
         }
 
-        if siglen > signature.len() {
-            return Err(Error::new(ErrorKind::BufferSize));
-        }
+        if let Some(sig) = signature {
+            if siglen > sig.len() {
+                return Err(Error::new(ErrorKind::BufferSize));
+            }
 
-        let ret = unsafe {
-            EVP_PKEY_sign(
-                self.pkey_ctx.as_mut_ptr(),
-                signature.as_mut_ptr(),
-                siglen_ptr,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
+            let ret = unsafe {
+                EVP_PKEY_sign(
+                    self.pkey_ctx.as_mut_ptr(),
+                    sig.as_mut_ptr(),
+                    siglen_ptr,
+                    data.as_ptr(),
+                    data.len(),
+                )
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
         }
 
         Ok(siglen)
     }
 
     /// Feeds data to the message sign provider
-    #[cfg(feature = "ossl350")]
     pub fn message_sign_update(&mut self, data: &[u8]) -> Result<(), Error> {
-        if !self.supports_updates {
-            return self.store_data(data);
+        if let Some(ctx) = &mut self.legacy_ctx {
+            #[cfg(not(feature = "fips"))]
+            {
+                let ret = unsafe {
+                    EVP_DigestSignUpdate(
+                        ctx.as_mut_ptr(),
+                        data.as_ptr() as *const c_void,
+                        data.len(),
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+            }
+            #[cfg(feature = "fips")]
+            ctx.digest_sign_update(data)?;
+
+            return Ok(());
         }
 
-        let ret = unsafe {
-            EVP_PKEY_sign_message_update(
-                self.pkey_ctx.as_mut_ptr(),
-                data.as_ptr(),
-                data.len(),
-            )
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
+        #[cfg(feature = "ossl350")]
+        {
+            if !self.supports_updates {
+                return self.store_data(data);
+            }
+
+            let ret = unsafe {
+                EVP_PKEY_sign_message_update(
+                    self.pkey_ctx.as_mut_ptr(),
+                    data.as_ptr(),
+                    data.len(),
+                )
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+
+            return Ok(());
         }
 
-        Ok(())
+        #[cfg(not(feature = "ossl350"))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// Finalizes data and generates signature
-    #[cfg(feature = "ossl350")]
     pub fn message_sign_final(
         &mut self,
         signature: &mut [u8],
     ) -> Result<usize, Error> {
-        if !self.supports_updates {
-            if let Some(buffer) = self.data.take() {
-                return self.message_sign(buffer.as_slice(), signature);
+        if let Some(ctx) = &mut self.legacy_ctx {
+            #[cfg(not(feature = "fips"))]
+            {
+                let mut siglen = signature.len();
+                let siglen_ptr: *mut usize = &mut siglen;
+
+                let ret = unsafe {
+                    EVP_DigestSignFinal(
+                        ctx.as_mut_ptr(),
+                        signature.as_mut_ptr(),
+                        siglen_ptr,
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                return Ok(siglen);
+            }
+            #[cfg(feature = "fips")]
+            return ctx.digest_sign_final(signature);
+        }
+
+        #[cfg(feature = "ossl350")]
+        {
+            if !self.supports_updates {
+                if let Some(buffer) = self.data.take() {
+                    return self
+                        .message_sign(buffer.as_slice(), Some(signature));
+                }
+
+                return Err(Error::new(ErrorKind::WrapperError));
             }
 
-            return Err(Error::new(ErrorKind::WrapperError));
+            let mut siglen = signature.len();
+            let siglen_ptr: *mut usize = &mut siglen;
+
+            let ret = unsafe {
+                EVP_PKEY_sign_message_final(
+                    self.pkey_ctx.as_mut_ptr(),
+                    signature.as_mut_ptr(),
+                    siglen_ptr,
+                )
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+
+            return Ok(siglen);
         }
 
-        let mut siglen = signature.len();
-        let siglen_ptr: *mut usize = &mut siglen;
-
-        let ret = unsafe {
-            EVP_PKEY_sign_message_final(
-                self.pkey_ctx.as_mut_ptr(),
-                signature.as_mut_ptr(),
-                siglen_ptr,
-            )
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
-        }
-
-        Ok(siglen)
+        #[cfg(not(feature = "ossl350"))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// Creates a new message verify context for a specific
     /// algorithm name, requires a public key and parameters.
-    #[cfg(feature = "ossl350")]
     pub fn message_verify_new(
         libctx: &OsslContext,
-        alg_name: &CStr,
+        alg: SigAlg,
         key: &mut EvpPkey,
-        params: OsslParam,
+        params: Option<&OsslParam>,
     ) -> Result<OsslSignature, Error> {
         let mut ctx = Self::init(libctx, key)?;
-        let ret = unsafe {
-            EVP_PKEY_verify_message_init(
-                ctx.pkey_ctx.as_mut_ptr(),
-                EvpSignature::new(libctx, alg_name)?.as_mut_ptr(),
-                params.as_ptr(),
-            )
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
+
+        if sigalg_is_oneshot(alg) {
+            /* Single shot algorithms must always use EVP_PKEY_verify_init */
+            if unsafe { EVP_PKEY_verify_init(ctx.pkey_ctx.as_mut_ptr()) } != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            if let Some(p) = params {
+                let ret = unsafe {
+                    EVP_PKEY_CTX_set_params(
+                        ctx.pkey_ctx.as_mut_ptr(),
+                        p.as_ptr(),
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+            }
+            return Ok(ctx);
         }
-        /* OpenSSL 3.5 implements only one shot ML-DSA,
-         * while later implementations can deal with
-         * update()/final() operations. Probe here, and
-         * set up a backup buffer if update()s are not
-         * supported.
-         */
-        let ret = unsafe {
-            EVP_PKEY_verify_message_update(
-                ctx.pkey_ctx.as_mut_ptr(),
-                std::ptr::null(),
-                0,
-            )
-        };
-        if ret == 1 {
-            ctx.supports_updates = true;
+
+        if sigalg_uses_legacy_api(alg) {
+            #[cfg(not(feature = "fips"))]
+            {
+                let mut lctx = EvpMdCtx::new()?;
+                let ret = unsafe {
+                    EVP_DigestVerifyInit_ex(
+                        lctx.as_mut_ptr(),
+                        std::ptr::null_mut(),
+                        sigalg_to_digest_name(alg).as_ptr(),
+                        libctx.ptr(),
+                        std::ptr::null(),
+                        key.as_mut_ptr(),
+                        match params {
+                            Some(p) => p.as_ptr(),
+                            None => std::ptr::null(),
+                        },
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                ctx.legacy_ctx = Some(lctx);
+            }
+            #[cfg(feature = "fips")]
+            {
+                let mut lctx = fips::ProviderSignatureCtx::new(
+                    fips::sigalg_to_legacy_name(alg),
+                )?;
+                lctx.digest_verify_init(
+                    sigalg_to_digest_name(alg).as_ptr(),
+                    key,
+                    match params {
+                        Some(p) => p.as_ptr(),
+                        None => std::ptr::null(),
+                    },
+                )?;
+                ctx.legacy_ctx = Some(lctx);
+            }
+            return Ok(ctx);
         }
-        Ok(ctx)
+
+        #[cfg(feature = "ossl350")]
+        {
+            let ret = unsafe {
+                EVP_PKEY_verify_message_init(
+                    ctx.pkey_ctx.as_mut_ptr(),
+                    EvpSignature::new(libctx, sigalg_to_ossl_name(alg))?
+                        .as_mut_ptr(),
+                    match params {
+                        Some(p) => p.as_ptr(),
+                        None => std::ptr::null(),
+                    },
+                )
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            /* OpenSSL 3.5 implements only one shot ML-DSA,
+             * while later implementations can deal with
+             * update()/final() operations. Probe here, and
+             * set up a backup buffer if update()s are not
+             * supported.
+             */
+            let ret = unsafe {
+                EVP_PKEY_verify_message_update(
+                    ctx.pkey_ctx.as_mut_ptr(),
+                    std::ptr::null(),
+                    0,
+                )
+            };
+            if ret == 1 {
+                ctx.supports_updates = true;
+            }
+
+            return Ok(ctx);
+        }
+
+        #[cfg(not(feature = "ossl350"))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// One shot verification function
     pub fn message_verify(
         &mut self,
         data: &[u8],
-        signature: &[u8],
+        signature: Option<&[u8]>,
     ) -> Result<(), Error> {
+        let sig = match &signature {
+            Some(s) => s,
+            None => match &self.signature {
+                Some(v) => v.as_slice(),
+                None => return Err(Error::new(ErrorKind::WrapperError)),
+            },
+        };
         let ret = unsafe {
             EVP_PKEY_verify(
                 self.pkey_ctx.as_mut_ptr(),
-                signature.as_ptr(),
-                signature.len(),
+                sig.as_ptr(),
+                sig.len(),
                 data.as_ptr(),
                 data.len(),
             )
@@ -1602,8 +1973,13 @@ impl OsslSignature {
         if ret != 1 {
             return Err(Error::new(ErrorKind::OsslError));
         }
-
         Ok(())
+    }
+
+    /// Unsupported in versions of OpenSSL prior to 3.5.0
+    #[cfg(not(feature = "ossl350"))]
+    pub fn set_signature(&mut self, _signature: &[u8]) -> Result<(), Error> {
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// Sets the signature for a VerifySignature operation.
@@ -1612,7 +1988,7 @@ impl OsslSignature {
     /// signature internally for later use.
     #[cfg(feature = "ossl350")]
     pub fn set_signature(&mut self, signature: &[u8]) -> Result<(), Error> {
-        if !self.supports_updates {
+        if self.legacy_ctx.is_some() || !self.supports_updates {
             self.signature = Some(signature.to_vec());
             return Ok(());
         }
@@ -1632,68 +2008,111 @@ impl OsslSignature {
     }
 
     /// Feeds data to the message verify provider
-    #[cfg(feature = "ossl350")]
     pub fn message_verify_update(&mut self, data: &[u8]) -> Result<(), Error> {
-        if !self.supports_updates {
-            return self.store_data(data);
+        if let Some(ctx) = &mut self.legacy_ctx {
+            #[cfg(not(feature = "fips"))]
+            {
+                let ret = unsafe {
+                    EVP_DigestVerifyUpdate(
+                        ctx.as_mut_ptr(),
+                        data.as_ptr() as *const c_void,
+                        data.len(),
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+            }
+            #[cfg(feature = "fips")]
+            ctx.digest_sign_update(data)?;
+
+            return Ok(());
         }
 
-        let ret = unsafe {
-            EVP_PKEY_verify_message_update(
-                self.pkey_ctx.as_mut_ptr(),
-                data.as_ptr(),
-                data.len(),
-            )
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
+        #[cfg(feature = "ossl350")]
+        {
+            if !self.supports_updates {
+                return self.store_data(data);
+            }
+
+            let ret = unsafe {
+                EVP_PKEY_verify_message_update(
+                    self.pkey_ctx.as_mut_ptr(),
+                    data.as_ptr(),
+                    data.len(),
+                )
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+
+            return Ok(());
         }
 
-        Ok(())
+        #[cfg(not(feature = "ossl350"))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// Finalizes data and generates signature
-    #[cfg(feature = "ossl350")]
     pub fn message_verify_final(
         &mut self,
         signature: Option<&[u8]>,
     ) -> Result<(), Error> {
-        if !self.supports_updates {
-            if let Some(buffer) = self.data.take() {
-                match signature {
-                    Some(s) => {
-                        return self.message_verify(buffer.as_slice(), s)
-                    }
-                    None => {
-                        if let Some(s) = self.signature.take() {
-                            return self.message_verify(
-                                buffer.as_slice(),
-                                s.as_slice(),
-                            );
-                        } else {
-                            return Err(Error::new(ErrorKind::BufferSize));
-                        }
-                    }
+        if let Some(ctx) = &mut self.legacy_ctx {
+            let sig = match &signature {
+                Some(s) => s,
+                None => match &self.signature {
+                    Some(v) => v.as_slice(),
+                    None => return Err(Error::new(ErrorKind::NullPtr)),
+                },
+            };
+            #[cfg(not(feature = "fips"))]
+            {
+                let ret = unsafe {
+                    EVP_DigestVerifyFinal(
+                        ctx.as_mut_ptr(),
+                        sig.as_ptr(),
+                        sig.len(),
+                    )
+                };
+                if ret != 1 {
+                    return Err(Error::new(ErrorKind::OsslError));
+                } else {
+                    return Ok(());
                 }
             }
-
-            return Err(Error::new(ErrorKind::WrapperError));
+            #[cfg(feature = "fips")]
+            return ctx.digest_verify_final(sig);
         }
 
-        match signature {
-            Some(sig) => {
-                self.set_signature(sig)?;
+        #[cfg(feature = "ossl350")]
+        {
+            if !self.supports_updates {
+                if let Some(buffer) = self.data.take() {
+                    return self.message_verify(buffer.as_slice(), signature);
+                }
+
+                return Err(Error::new(ErrorKind::WrapperError));
             }
-            None => (),
+
+            match signature {
+                Some(sig) => {
+                    self.set_signature(sig)?;
+                }
+                None => (),
+            }
+
+            let ret = unsafe {
+                EVP_PKEY_verify_message_final(self.pkey_ctx.as_mut_ptr())
+            };
+            if ret != 1 {
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+
+            return Ok(());
         }
 
-        let ret = unsafe {
-            EVP_PKEY_verify_message_final(self.pkey_ctx.as_mut_ptr())
-        };
-        if ret != 1 {
-            return Err(Error::new(ErrorKind::OsslError));
-        }
-
-        Ok(())
+        #[cfg(not(feature = "ossl350"))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 }
