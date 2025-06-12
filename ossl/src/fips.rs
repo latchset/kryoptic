@@ -807,6 +807,7 @@ pub(crate) fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
         | SigAlg::EcdsaSha3_384
         | SigAlg::EcdsaSha3_512 => c"ECDSA",
         SigAlg::Rsa
+        | SigAlg::RsaNoPad
         | SigAlg::RsaSha1
         | SigAlg::RsaSha2_224
         | SigAlg::RsaSha2_256
@@ -816,6 +817,7 @@ pub(crate) fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
         | SigAlg::RsaSha3_256
         | SigAlg::RsaSha3_384
         | SigAlg::RsaSha3_512
+        | SigAlg::RsaPss
         | SigAlg::RsaPssSha1
         | SigAlg::RsaPssSha2_224
         | SigAlg::RsaPssSha2_256

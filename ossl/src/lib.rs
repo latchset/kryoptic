@@ -1362,7 +1362,7 @@ macro_rules! cstr {
 }
 
 /// Known algorithms selectable for OsslSignature
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SigAlg {
     Ecdsa,
     EcdsaSha1,
@@ -1378,6 +1378,7 @@ pub enum SigAlg {
     Mldsa65,
     Mldsa87,
     Rsa,
+    RsaNoPad,
     RsaSha1,
     RsaSha2_224,
     RsaSha2_256,
@@ -1387,6 +1388,7 @@ pub enum SigAlg {
     RsaSha3_256,
     RsaSha3_384,
     RsaSha3_512,
+    RsaPss,
     RsaPssSha1,
     RsaPssSha2_224,
     RsaPssSha2_256,
@@ -1401,7 +1403,7 @@ pub enum SigAlg {
 /// Helper that indicates if a signature algorithm should use oneshot apis
 fn sigalg_is_oneshot(alg: SigAlg) -> bool {
     match alg {
-        SigAlg::Ecdsa | SigAlg::Rsa => true,
+        SigAlg::Ecdsa | SigAlg::Rsa | SigAlg::RsaPss | SigAlg::RsaNoPad => true,
         _ => false,
     }
 }
@@ -1410,7 +1412,9 @@ fn sigalg_is_oneshot(alg: SigAlg) -> bool {
 fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
     #[cfg(not(feature = "ossl350"))]
     match alg {
-        SigAlg::Ecdsa | SigAlg::Rsa => false,
+        SigAlg::Ecdsa | SigAlg::Rsa | SigAlg::RsaPss | SigAlg::RsaNoPad => {
+            false
+        }
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => false,
         _ => true,
     }
@@ -1429,6 +1433,7 @@ fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
 }
 
 /// Helper to return OpenSSL sigalg name
+#[cfg(feature = "ossl350")]
 fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
     match alg {
         SigAlg::Ecdsa => c"ECDSA",
@@ -1457,6 +1462,7 @@ fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
         /* The following names are not actually recognized by
          * OpenSSL and will cause a fetch error if used, they
          * have been made up for completeness, and debugging */
+        SigAlg::RsaPss => c"RSA-PSS",
         SigAlg::RsaPssSha1 => c"RSA-PSS-SHA1",
         SigAlg::RsaPssSha2_224 => c"RSA-PSS-SHA2-224",
         SigAlg::RsaPssSha2_256 => c"RSA-PSS-SHA2-256",
@@ -1466,6 +1472,7 @@ fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
         SigAlg::RsaPssSha3_256 => c"RSA-PSS-SHA3-256",
         SigAlg::RsaPssSha3_384 => c"RSA-PSS-SHA3-384",
         SigAlg::RsaPssSha3_512 => c"RSA-PSS-SHA3-512",
+        SigAlg::RsaNoPad => c"RSA-NO-PAD",
     }
 }
 
@@ -1503,7 +1510,95 @@ fn sigalg_to_digest_name(alg: SigAlg) -> &'static CStr {
         | SigAlg::Mldsa65
         | SigAlg::Mldsa87
         | SigAlg::Ecdsa
-        | SigAlg::Rsa => c"",
+        | SigAlg::Rsa
+        | SigAlg::RsaPss
+        | SigAlg::RsaNoPad => c"",
+    }
+}
+
+pub struct RsaPssParams {
+    pub digest: &'static CStr,
+    pub mgf1: &'static CStr,
+    pub saltlen: c_int,
+}
+
+/// Helper to generate OsslParam arrays for initialization
+pub fn rsa_sig_params(
+    alg: SigAlg,
+    pss_params: &Option<RsaPssParams>,
+) -> Result<Option<OsslParam>, Error> {
+    match alg {
+        SigAlg::RsaNoPad => {
+            let mut params = OsslParam::new();
+            params.add_const_c_string(
+                cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
+                cstr!(OSSL_PKEY_RSA_PAD_MODE_NONE),
+            )?;
+            params.finalize();
+            return Ok(Some(params));
+        }
+        SigAlg::Rsa
+        | SigAlg::RsaSha1
+        | SigAlg::RsaSha2_224
+        | SigAlg::RsaSha2_256
+        | SigAlg::RsaSha2_384
+        | SigAlg::RsaSha3_224
+        | SigAlg::RsaSha3_256
+        | SigAlg::RsaSha3_384
+        | SigAlg::RsaSha3_512 => {
+            /* In 3.5.0 there is direct sigalg support for
+             * PCKCS1 padding for digest algorithms so no
+             * paramters are needed or processed */
+            #[cfg(feature = "ossl350")]
+            if alg != SigAlg::Rsa {
+                return Ok(None);
+            }
+
+            let mut params = OsslParam::new();
+            params.add_const_c_string(
+                cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
+                cstr!(OSSL_PKEY_RSA_PAD_MODE_PKCSV15),
+            )?;
+            params.finalize();
+            return Ok(Some(params));
+        }
+        SigAlg::RsaPss
+        | SigAlg::RsaPssSha1
+        | SigAlg::RsaPssSha2_224
+        | SigAlg::RsaPssSha2_256
+        | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha3_224
+        | SigAlg::RsaPssSha3_256
+        | SigAlg::RsaPssSha3_384
+        | SigAlg::RsaPssSha3_512 => {
+            /* Pss always uses legacy interfaces, so we need
+             * all params set up */
+            if let Some(pss) = pss_params {
+                let mut params = OsslParam::new();
+
+                params.add_const_c_string(
+                    cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
+                    cstr!(OSSL_PKEY_RSA_PAD_MODE_PSS),
+                )?;
+                params.add_const_c_string(
+                    cstr!(OSSL_SIGNATURE_PARAM_DIGEST),
+                    pss.digest,
+                )?;
+                params.add_const_c_string(
+                    cstr!(OSSL_SIGNATURE_PARAM_MGF1_DIGEST),
+                    pss.mgf1,
+                )?;
+                params.add_owned_int(
+                    cstr!(OSSL_SIGNATURE_PARAM_PSS_SALTLEN),
+                    pss.saltlen,
+                )?;
+                params.finalize();
+                return Ok(Some(params));
+            } else {
+                return Err(Error::new(ErrorKind::NullPtr));
+            }
+        }
+        _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
 
