@@ -282,7 +282,7 @@ struct FipsMechanism {
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 17],
-    mechs: [FipsMechanism; 86],
+    mechs: [FipsMechanism; 87],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -917,7 +917,20 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
                 | CKF_DERIVE,
         },
         FipsMechanism {
-            mechanism: CKM_TLS12_MASTER_KEY_DERIVE,
+            mechanism: CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(CKK_GENERIC_SECRET, step!(48 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
             operations: CKF_DERIVE,
             restrictions: [
                 restrict!(CKK_GENERIC_SECRET, step!(48 * 8)),
