@@ -771,3 +771,72 @@ fn test_tls_ems_mechanisms() {
     /* The End */
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+#[cfg(feature = "pkcs11_3_2")]
+fn test_tls_ems_vector() {
+    /* The first test from
+     * https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/TLS-v1.2-KDF-RFC7627
+     */
+    let mut testtokn = TestToken::initialized("tls_ems_vector", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    let pms = hex::decode("75BF0F2B5C2058813C4BF66EAE416C57CC05B7F7D631BC2400FE4372B2271C8D94947B0E380387D3B4DAC40F269DEB9D").unwrap();
+    let key_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, pms.as_slice()),],
+        &[(CKA_DERIVE, true)],
+    ));
+
+    let hash = hex::decode(
+        "15D4A2221A31EBD09626E539A1E136811BBD039353019DEC59948B3C1865BCD8",
+    )
+    .unwrap();
+    let mut version: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
+    let params = CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS {
+        prfHashMechanism: CKM_SHA256,
+        pSessionHash: hash.as_ptr() as *mut _,
+        ulSessionHashLen: hash.len() as CK_ULONG,
+        pVersion: &mut version,
+    };
+    let paramslen = sizeof!(CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let value_len: usize = 48;
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, value_len as CK_ULONG),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let exp_value = hex::decode("4EC38663D2CEFE30EDA0F30957649953A5437D37CDBC409408DA44F30BD8D9F280E07EE55233AFA69E1C90D8A24239E3").unwrap();
+    let value = ret_or_panic!(extract_key_value(session, dk_handle, value_len));
+    if value != exp_value {
+        panic!("The derived extended master secret value does not match");
+    }
+}
