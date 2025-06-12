@@ -13,7 +13,6 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::slice;
-use std::thread::LocalKey;
 
 use crate::*;
 
@@ -732,10 +731,6 @@ thread_local! {
     static FIPS_INDICATOR: Cell<u32> = Cell::new(0);
 }
 
-pub fn fips_indicator() -> &'static LocalKey<Cell<u32>> {
-    &FIPS_INDICATOR
-}
-
 unsafe extern "C" fn fips_indicator_callback(
     _type_: *const ::std::os::raw::c_char,
     _desc: *const ::std::os::raw::c_char,
@@ -1071,3 +1066,94 @@ impl ProviderSignatureCtx {
 
 unsafe impl Send for ProviderSignatureCtx {}
 unsafe impl Sync for ProviderSignatureCtx {}
+
+/// This structure represent whether a service execetuion is approved.
+/// It has access to the internal OpenSSL fips indicator callbacks
+/// and can query the fips indicators to establish if a non-approved
+/// operation occurred.
+#[derive(Debug)]
+pub struct FipsApproval {
+    approved: Option<bool>,
+}
+
+impl FipsApproval {
+    /// clear the thread local fips indicator so that any
+    /// new indicator trigger can be detected
+    fn clear_indicator() {
+        FIPS_INDICATOR.set(0);
+    }
+
+    /// Checks thread local fips indicator to see if it has
+    /// been triggered
+    fn check_indicator() -> bool {
+        FIPS_INDICATOR.get() != 0
+    }
+
+    /// Clears indicators and creates a new FipsApproval object
+    pub fn init() -> FipsApproval {
+        Self::clear_indicator();
+        FipsApproval { approved: None }
+    }
+
+    /// Resets FipsApproval status
+    pub fn reset(&mut self) {
+        self.approved = None;
+    }
+
+    /// Clears indicators
+    pub fn clear(&self) {
+        Self::clear_indicator();
+    }
+
+    /// Check if any indicator has triggered and updates
+    /// internal status if that happened.
+    pub fn update(&mut self) {
+        if Self::check_indicator() {
+            /* The indicator was set, therefore there was an unapproved use */
+            self.approved = Some(false);
+        }
+    }
+
+    /// Resutrns current approval status
+    pub fn approval(&self) -> Option<bool> {
+        self.approved
+    }
+
+    /// Check if operation is approved, returns true only
+    /// if the operation has been positively marked as
+    /// approved.
+    pub fn is_approved(&self) -> bool {
+        if self.approved.is_some_and(|b| b == true) {
+            return true;
+        }
+        return false;
+    }
+
+    /// Check if operation is not approved, returns true only
+    /// if the operation has been positively marked as not
+    /// approved.
+    pub fn is_not_approved(&self) -> bool {
+        if self.approved.is_some_and(|b| b == false) {
+            return true;
+        }
+        return false;
+    }
+
+    /// Sets approval status.
+    /// Note: approval can only go from true -> false
+    /// A non-approved operation cannot be marked approved later.
+    pub fn set(&mut self, b: bool) {
+        if self.approved.is_some_and(|b| b == false) {
+            return;
+        }
+        self.approved = Some(b);
+    }
+
+    /// Finalizes approval status, generaly used after the last operation
+    /// for the service.
+    pub fn finalize(&mut self) {
+        self.update();
+        /* this is the last check, mark approval as true if not set so far */
+        self.set(true);
+    }
+}

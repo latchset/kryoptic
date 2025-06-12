@@ -24,7 +24,7 @@ use ossl::{ErrorKind, EvpPkey, OsslParam, OsslSignature, SigAlg};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
-use crate::ossl::fips::*;
+use ossl::fips::FipsApproval;
 
 /* Openssl Key types */
 static ML_DSA_44_TYPE: &CStr = c"ML-DSA-44";
@@ -275,7 +275,7 @@ pub struct MlDsaOperation {
     signature: Option<Vec<u8>>,
     /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
 }
 
 impl MechOperation for MlDsaOperation {
@@ -289,7 +289,7 @@ impl MechOperation for MlDsaOperation {
 
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        self.fips_approval.approval()
     }
 }
 
@@ -309,11 +309,7 @@ impl MlDsaOperation {
         signature: Option<&[u8]>,
     ) -> Result<MlDsaOperation> {
         #[cfg(feature = "fips")]
-        let fips_approved: Option<bool> = {
-            let mut fa: Option<bool> = None;
-            fips_approval_init_checks(&mut fa);
-            fa
-        };
+        let fips_approval = FipsApproval::init();
 
         /* OpenSSL 3.5.0 does not offer HashML-DSA, so we'll
          * have to compute the context on our own via raw
@@ -359,7 +355,7 @@ impl MlDsaOperation {
             hasher: None,
             signature: None,
             #[cfg(feature = "fips")]
-            fips_approved: fips_approved,
+            fips_approval: fips_approval,
         };
 
         match mech.mechanism {
@@ -397,7 +393,7 @@ impl MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut op.fips_approved);
+        op.fips_approval.update();
 
         Ok(op)
     }
@@ -577,7 +573,7 @@ impl MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         match self.mech {
             CKM_ML_DSA => match self.sigctx.message_verify_update(data) {
@@ -604,7 +600,7 @@ impl MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_finalize(&mut self.fips_approved);
+        self.fips_approval.finalize();
 
         Ok(())
     }
@@ -623,7 +619,7 @@ impl MlDsaOperation {
         self.finalized = true;
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         match self.mech {
             CKM_ML_DSA => self.sigctx.message_verify_final(signature)?,
@@ -643,7 +639,7 @@ impl MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut self.fips_approved);
+        self.fips_approval.update();
 
         Ok(())
     }
@@ -687,7 +683,7 @@ impl Sign for MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         match self.mech {
             CKM_ML_DSA => match self.sigctx.message_sign_update(data) {
@@ -714,7 +710,7 @@ impl Sign for MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut self.fips_approved);
+        self.fips_approval.update();
 
         Ok(())
     }
@@ -729,7 +725,7 @@ impl Sign for MlDsaOperation {
         self.finalized = true;
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         let siglen = match self.mech {
             CKM_ML_DSA => self.sigctx.message_sign_final(signature)?,
@@ -753,7 +749,7 @@ impl Sign for MlDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut self.fips_approved);
+        self.fips_approval.update();
 
         Ok(())
     }

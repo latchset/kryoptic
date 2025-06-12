@@ -8,12 +8,13 @@ use crate::hmac::*;
 use crate::mechanism::*;
 use crate::misc::zeromem;
 use crate::ossl::common::*;
-use crate::ossl::fips::*;
 
 use constant_time_eq::constant_time_eq;
 use ossl::bindings::*;
 use ossl::{EvpMacCtx, OsslParam};
 use pkcs11::*;
+
+use ossl::fips::FipsApproval;
 
 #[derive(Debug)]
 pub struct HMACOperation {
@@ -25,7 +26,7 @@ pub struct HMACOperation {
     key: HmacKey,
     ctx: EvpMacCtx,
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
     signature: Option<Vec<u8>>,
 }
 
@@ -37,9 +38,7 @@ impl HMACOperation {
         signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
         #[cfg(feature = "fips")]
-        let mut fips_approved: Option<bool> = None;
-        #[cfg(feature = "fips")]
-        fips_approval_init_checks(&mut fips_approved);
+        let mut fips_approval = FipsApproval::init();
 
         let mut ctx = EvpMacCtx::new(osslctx(), cstr!(OSSL_MAC_NAME_HMAC))?;
         let hash = hmac_mech_to_hash_mech(mech)?;
@@ -63,7 +62,7 @@ impl HMACOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut fips_approved);
+        fips_approval.update();
 
         Ok(HMACOperation {
             mech: mech,
@@ -74,7 +73,7 @@ impl HMACOperation {
             key: key,
             ctx: ctx,
             #[cfg(feature = "fips")]
-            fips_approved: fips_approved,
+            fips_approval: fips_approval,
             signature: match signature {
                 Some(s) => {
                     if s.len() != outputlen {
@@ -101,7 +100,7 @@ impl HMACOperation {
         self.in_use = true;
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         if unsafe {
             EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
@@ -111,7 +110,7 @@ impl HMACOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut self.fips_approved);
+        self.fips_approval.update();
 
         Ok(())
     }
@@ -129,7 +128,7 @@ impl HMACOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         let mut buf = vec![0u8; self.maclen];
         let mut outlen: usize = 0;
@@ -157,14 +156,14 @@ impl HMACOperation {
          * according to the FIPS 140-3 IG, C.D Use of a Truncated HMAC
          */
         #[cfg(feature = "fips")]
-        fips_approval_finalize(&mut self.fips_approved);
+        self.fips_approval.finalize();
 
         Ok(())
     }
 
     fn reinit(&mut self) -> Result<()> {
         #[cfg(feature = "fips")]
-        fips_approval_init_checks(&mut self.fips_approved);
+        self.fips_approval.reset();
 
         if unsafe {
             EVP_MAC_init(
@@ -179,7 +178,7 @@ impl HMACOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_check(&mut self.fips_approved);
+        self.fips_approval.update();
 
         self.finalized = false;
         self.in_use = false;
@@ -199,7 +198,7 @@ impl MechOperation for HMACOperation {
         self.reinit()
     }
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        self.fips_approval.approval()
     }
 }
 
