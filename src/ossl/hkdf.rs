@@ -16,12 +16,13 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::*;
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::*;
-#[cfg(feature = "fips")]
-use crate::ossl::fips::*;
 
 use ossl::bindings::*;
 use ossl::{EvpKdfCtx, OsslParam};
 use pkcs11::*;
+
+#[cfg(feature = "fips")]
+use ossl::fips::FipsApproval;
 
 /// Represents an active HKDF operation state.
 #[derive(Debug)]
@@ -50,7 +51,7 @@ pub struct HKDFOperation {
     emit_data_obj: bool,
     /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
 }
 
 impl HKDFOperation {
@@ -183,7 +184,7 @@ impl HKDFOperation {
             info: bytes_to_slice!(params.pInfo, params.ulInfoLen, u8).to_vec(),
             emit_data_obj: mech.mechanism == CKM_HKDF_DATA,
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: FipsApproval::init(),
         })
     }
 }
@@ -198,7 +199,7 @@ impl MechOperation for HKDFOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        self.fips_approval.approval()
     }
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
         if self.salt_type == CKF_HKDF_SALT_KEY {
@@ -294,7 +295,7 @@ impl Derive for HKDFOperation {
         params.finalize();
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
         let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];
@@ -311,7 +312,7 @@ impl Derive for HKDFOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_finalize(&mut self.fips_approved);
+        self.fips_approval.finalize();
 
         obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
 

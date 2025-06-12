@@ -26,9 +26,6 @@ pub mod eddsa;
 #[cfg(feature = "ffdh")]
 pub mod ffdh;
 
-#[cfg(feature = "fips")]
-pub mod fips;
-
 #[cfg(feature = "hash")]
 pub mod hash;
 #[cfg(feature = "hkdf")]
