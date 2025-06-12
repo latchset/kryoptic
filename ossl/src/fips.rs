@@ -793,6 +793,42 @@ pub fn check_state_ok() -> bool {
     return true;
 }
 
+/// Helper function to convert legacy name to ossl name for fetching
+pub(crate) fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
+    match alg {
+        SigAlg::Ecdsa
+        | SigAlg::EcdsaSha1
+        | SigAlg::EcdsaSha2_224
+        | SigAlg::EcdsaSha2_256
+        | SigAlg::EcdsaSha2_384
+        | SigAlg::EcdsaSha2_512
+        | SigAlg::EcdsaSha3_224
+        | SigAlg::EcdsaSha3_256
+        | SigAlg::EcdsaSha3_384
+        | SigAlg::EcdsaSha3_512 => c"ECDSA",
+        SigAlg::Rsa
+        | SigAlg::RsaSha1
+        | SigAlg::RsaSha2_224
+        | SigAlg::RsaSha2_256
+        | SigAlg::RsaSha2_384
+        | SigAlg::RsaSha2_512
+        | SigAlg::RsaSha3_224
+        | SigAlg::RsaSha3_256
+        | SigAlg::RsaSha3_384
+        | SigAlg::RsaSha3_512
+        | SigAlg::RsaPssSha1
+        | SigAlg::RsaPssSha2_224
+        | SigAlg::RsaPssSha2_256
+        | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha2_512
+        | SigAlg::RsaPssSha3_224
+        | SigAlg::RsaPssSha3_256
+        | SigAlg::RsaPssSha3_384
+        | SigAlg::RsaPssSha3_512 => c"RSA",
+        SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => c"",
+    }
+}
+
 /* The OpenSSL FIPS Provider do not export helper functions to set up
  * digest-sign operations. So we'll just have to brute force it */
 #[derive(Debug)]
