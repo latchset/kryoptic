@@ -16,9 +16,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{
-    eddsa_params, ErrorKind, EvpPkey, OsslParam, OsslSignature, SigAlg,
-};
+use ossl::signature::{eddsa_params, OsslSignature, SigAlg};
+use ossl::{ErrorKind, EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Expected signature length for Ed25519 in bytes.

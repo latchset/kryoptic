@@ -14,6 +14,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::slice;
 
+use crate::signature::SigAlg;
 use crate::*;
 
 use getrandom;
