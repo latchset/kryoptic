@@ -794,7 +794,7 @@ pub fn check_state_ok() -> bool {
 }
 
 /// Helper function to convert legacy name to ossl name for fetching
-pub(crate) fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
+fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
     match alg {
         SigAlg::Ecdsa
         | SigAlg::EcdsaSha1
@@ -806,6 +806,11 @@ pub(crate) fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
         | SigAlg::EcdsaSha3_256
         | SigAlg::EcdsaSha3_384
         | SigAlg::EcdsaSha3_512 => c"ECDSA",
+        SigAlg::Ed25519
+        | SigAlg::Ed25519ctx
+        | SigAlg::Ed25519ph
+        | SigAlg::Ed448
+        | SigAlg::Ed448ph => c"EDDSA",
         SigAlg::Rsa
         | SigAlg::RsaNoPad
         | SigAlg::RsaSha1
@@ -840,11 +845,11 @@ pub struct ProviderSignatureCtx {
 }
 
 impl ProviderSignatureCtx {
-    pub fn new(alg: &CStr) -> Result<ProviderSignatureCtx, Error> {
+    pub fn new(alg: SigAlg) -> Result<ProviderSignatureCtx, Error> {
         let sigtable = unsafe {
             EVP_SIGNATURE_fetch(
                 get_libctx().ptr(),
-                alg.as_ptr(),
+                sigalg_to_legacy_name(alg).as_ptr(),
                 std::ptr::null(),
             )
         };
@@ -938,19 +943,30 @@ impl ProviderSignatureCtx {
 
     pub fn digest_sign(
         &mut self,
-        signature: &mut [u8],
+        mut signature: Option<&mut [u8]>,
         tbs: &[u8],
     ) -> Result<usize, Error> {
         unsafe {
             match (*self.vtable).digest_sign {
                 Some(f) => {
-                    let mut siglen = 0usize;
+                    let mut siglen: usize;
+                    let sigptr: *mut c_uchar;
+                    match &mut signature {
+                        Some(s) => {
+                            sigptr = s.as_mut_ptr();
+                            siglen = s.len();
+                        }
+                        None => {
+                            sigptr = std::ptr::null_mut() as *mut c_uchar;
+                            siglen = 0usize;
+                        }
+                    }
                     let siglen_ptr: *mut usize = &mut siglen;
                     let res = f(
                         self.ctx,
-                        signature.as_mut_ptr() as *mut c_uchar,
+                        sigptr,
                         siglen_ptr,
-                        signature.len(),
+                        siglen,
                         tbs.as_ptr() as *mut c_uchar,
                         tbs.len(),
                     );
@@ -1027,7 +1043,6 @@ impl ProviderSignatureCtx {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn digest_verify(
         &mut self,
         signature: &[u8],
