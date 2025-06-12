@@ -1415,7 +1415,7 @@ fn sigalg_is_oneshot(alg: SigAlg) -> bool {
 
 /// Helper that indicates if a signature algorithm should use legacy apis
 fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
-    #[cfg(not(feature = "ossl350"))]
+    #[cfg(not(ossl_v350))]
     match alg {
         SigAlg::Ecdsa | SigAlg::Rsa | SigAlg::RsaPss | SigAlg::RsaNoPad => {
             false
@@ -1423,7 +1423,7 @@ fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => false,
         _ => true,
     }
-    #[cfg(feature = "ossl350")]
+    #[cfg(ossl_v350)]
     match alg {
         SigAlg::RsaPssSha1
         | SigAlg::RsaPssSha2_224
@@ -1621,7 +1621,7 @@ pub fn rsa_sig_params(
             /* In 3.5.0 there is direct sigalg support for
              * PCKCS1 padding for digest algorithms so no
              * paramters are needed or processed */
-            #[cfg(feature = "ossl350")]
+            #[cfg(ossl_v350)]
             if alg != SigAlg::Rsa {
                 return Ok(None);
             }
@@ -1675,7 +1675,7 @@ pub fn rsa_sig_params(
 }
 
 /// Helper to generate OsslParam arrays for Eddsa initialization
-#[cfg(any(feature = "ossl320", feature = "ossl350"))]
+#[cfg(ossl_v320)]
 pub fn eddsa_params(
     alg: SigAlg,
     context: Option<Vec<u8>>,
@@ -1691,14 +1691,14 @@ pub fn eddsa_params(
 
     /* With 3.5.0 we use the sigalg interface so no need
      * for params */
-    #[cfg(feature = "ossl350")]
+    #[cfg(ossl_v350)]
     if context.is_none() {
         return Ok(None);
     }
 
     let mut params = OsslParam::new();
 
-    #[cfg(not(feature = "ossl350"))]
+    #[cfg(not(ossl_v350))]
     params.add_const_c_string(
         cstr!(OSSL_SIGNATURE_PARAM_INSTANCE),
         sigalg_to_ossl_name(alg),
@@ -1847,7 +1847,7 @@ impl OsslSignature {
             return Ok(ctx);
         }
 
-        #[cfg(feature = "ossl350")]
+        #[cfg(ossl_v350)]
         {
             let ret = unsafe {
                 EVP_PKEY_sign_message_init(
@@ -1886,7 +1886,7 @@ impl OsslSignature {
             return Ok(ctx);
         }
 
-        #[cfg(not(feature = "ossl350"))]
+        #[cfg(not(ossl_v350))]
         Err(Error::new(ErrorKind::WrapperError))
     }
 
@@ -2011,7 +2011,7 @@ impl OsslSignature {
             return Ok(());
         }
 
-        #[cfg(feature = "ossl350")]
+        #[cfg(ossl_v350)]
         {
             let ret = unsafe {
                 EVP_PKEY_sign_message_update(
@@ -2027,7 +2027,7 @@ impl OsslSignature {
             return Ok(());
         }
 
-        #[cfg(not(feature = "ossl350"))]
+        #[cfg(not(ossl_v350))]
         Err(Error::new(ErrorKind::WrapperError))
     }
 
@@ -2066,7 +2066,7 @@ impl OsslSignature {
             return ctx.digest_sign_final(signature);
         }
 
-        #[cfg(feature = "ossl350")]
+        #[cfg(ossl_v350)]
         {
             let mut siglen = signature.len();
             let siglen_ptr: *mut usize = &mut siglen;
@@ -2085,7 +2085,7 @@ impl OsslSignature {
             return Ok(siglen);
         }
 
-        #[cfg(not(feature = "ossl350"))]
+        #[cfg(not(ossl_v350))]
         Err(Error::new(ErrorKind::WrapperError))
     }
 
@@ -2162,7 +2162,7 @@ impl OsslSignature {
             return Ok(ctx);
         }
 
-        #[cfg(feature = "ossl350")]
+        #[cfg(ossl_v350)]
         {
             let ret = unsafe {
                 EVP_PKEY_verify_message_init(
@@ -2201,7 +2201,7 @@ impl OsslSignature {
             return Ok(ctx);
         }
 
-        #[cfg(not(feature = "ossl350"))]
+        #[cfg(not(ossl_v350))]
         Err(Error::new(ErrorKind::WrapperError))
     }
 
@@ -2256,7 +2256,7 @@ impl OsslSignature {
     }
 
     /// Unsupported in versions of OpenSSL prior to 3.5.0
-    #[cfg(not(feature = "ossl350"))]
+    #[cfg(not(ossl_v350))]
     pub fn set_signature(&mut self, _signature: &[u8]) -> Result<(), Error> {
         Err(Error::new(ErrorKind::WrapperError))
     }
@@ -2265,7 +2265,7 @@ impl OsslSignature {
     /// If the OpenSSL backend supports setting it early (via
     /// `EVP_PKEY_CTX_set_signature`), it does so; otherwise, it stores the
     /// signature internally for later use.
-    #[cfg(feature = "ossl350")]
+    #[cfg(ossl_v350)]
     pub fn set_signature(&mut self, signature: &[u8]) -> Result<(), Error> {
         if self.legacy_ctx.is_some() || !self.supports_updates {
             self.signature = Some(signature.to_vec());
@@ -2312,7 +2312,7 @@ impl OsslSignature {
             return Ok(());
         }
 
-        #[cfg(feature = "ossl350")]
+        #[cfg(ossl_v350)]
         {
             let ret = unsafe {
                 EVP_PKEY_verify_message_update(
@@ -2328,7 +2328,7 @@ impl OsslSignature {
             return Ok(());
         }
 
-        #[cfg(not(feature = "ossl350"))]
+        #[cfg(not(ossl_v350))]
         Err(Error::new(ErrorKind::WrapperError))
     }
 
@@ -2372,7 +2372,7 @@ impl OsslSignature {
             return ctx.digest_verify_final(sig);
         }
 
-        #[cfg(feature = "ossl350")]
+        #[cfg(ossl_v350)]
         {
             match signature {
                 Some(sig) => {
@@ -2391,7 +2391,7 @@ impl OsslSignature {
             return Ok(());
         }
 
-        #[cfg(not(feature = "ossl350"))]
+        #[cfg(not(ossl_v350))]
         Err(Error::new(ErrorKind::WrapperError))
     }
 }
