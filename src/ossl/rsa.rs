@@ -17,9 +17,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{
-    rsa_sig_params, EvpPkey, OsslParam, OsslSignature, RsaPssParams, SigAlg,
-};
+use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
+use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
