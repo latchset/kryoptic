@@ -18,7 +18,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{EvpPkey, OsslParam, OsslSignature, SigAlg};
+use ossl::signature::{OsslSignature, SigAlg};
+use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Converts a PKCS#11 EC key `Object` into OpenSSL parameters (`OsslParam`).
