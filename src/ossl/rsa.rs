@@ -123,41 +123,51 @@ fn mgf1_to_digest_name(mech: CK_MECHANISM_TYPE) -> Result<&'static CStr> {
 /// Helper function to parse signature parameters from `CK_MECHANISM`.
 ///
 /// Returns a `RsaPssParams` structure for the PSS mechanisms.
-fn parse_pss_params(
+fn parse_sig_params(
     mech: &CK_MECHANISM,
-) -> Result<(Option<RsaPssParams>, usize)> {
-    match mech.mechanism {
-        CKM_RSA_PKCS_PSS
-        | CKM_SHA1_RSA_PKCS_PSS
-        | CKM_SHA224_RSA_PKCS_PSS
-        | CKM_SHA256_RSA_PKCS_PSS
-        | CKM_SHA384_RSA_PKCS_PSS
-        | CKM_SHA512_RSA_PKCS_PSS
-        | CKM_SHA3_224_RSA_PKCS_PSS
-        | CKM_SHA3_256_RSA_PKCS_PSS
-        | CKM_SHA3_384_RSA_PKCS_PSS
-        | CKM_SHA3_512_RSA_PKCS_PSS => {
-            let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
-            let mdname = mech_type_to_digest_name(params.hashAlg)?;
-            let hash_len = hash_size(params.hashAlg);
-            if hash_len == INVALID_HASH_SIZE {
+) -> Result<(SigAlg, Option<RsaPssParams>)> {
+    let (alg, pss) = match mech.mechanism {
+        CKM_RSA_X_509 => (SigAlg::RsaNoPad, false),
+        CKM_RSA_PKCS => (SigAlg::Rsa, false),
+        CKM_RSA_PKCS_PSS => (SigAlg::RsaPss, true),
+        CKM_SHA1_RSA_PKCS => (SigAlg::RsaSha1, false),
+        CKM_SHA224_RSA_PKCS => (SigAlg::RsaSha2_224, false),
+        CKM_SHA256_RSA_PKCS => (SigAlg::RsaSha2_256, false),
+        CKM_SHA384_RSA_PKCS => (SigAlg::RsaSha2_384, false),
+        CKM_SHA512_RSA_PKCS => (SigAlg::RsaSha2_512, false),
+        CKM_SHA3_224_RSA_PKCS => (SigAlg::RsaSha3_224, false),
+        CKM_SHA3_256_RSA_PKCS => (SigAlg::RsaSha3_256, false),
+        CKM_SHA3_384_RSA_PKCS => (SigAlg::RsaSha3_384, false),
+        CKM_SHA3_512_RSA_PKCS => (SigAlg::RsaSha3_512, false),
+        CKM_SHA1_RSA_PKCS_PSS => (SigAlg::RsaPssSha1, true),
+        CKM_SHA224_RSA_PKCS_PSS => (SigAlg::RsaPssSha2_224, true),
+        CKM_SHA256_RSA_PKCS_PSS => (SigAlg::RsaPssSha2_256, true),
+        CKM_SHA384_RSA_PKCS_PSS => (SigAlg::RsaPssSha2_384, true),
+        CKM_SHA512_RSA_PKCS_PSS => (SigAlg::RsaPssSha2_512, true),
+        CKM_SHA3_224_RSA_PKCS_PSS => (SigAlg::RsaPssSha3_224, true),
+        CKM_SHA3_256_RSA_PKCS_PSS => (SigAlg::RsaPssSha3_256, true),
+        CKM_SHA3_384_RSA_PKCS_PSS => (SigAlg::RsaPssSha3_384, true),
+        CKM_SHA3_512_RSA_PKCS_PSS => (SigAlg::RsaPssSha3_512, true),
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    };
+    if pss {
+        let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
+        let mdname = mech_type_to_digest_name(params.hashAlg)?;
+        if mech.mechanism != CKM_RSA_PKCS_PSS {
+            if mech_type_to_digest_name(mech.mechanism)? != mdname {
                 return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
-            if mech.mechanism != CKM_RSA_PKCS_PSS {
-                if mech_type_to_digest_name(mech.mechanism)? != mdname {
-                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
-                }
-            }
-            Ok((
-                Some(RsaPssParams {
-                    digest: mdname,
-                    mgf1: mgf1_to_digest_name(params.mgf)?,
-                    saltlen: c_int::try_from(params.sLen)?,
-                }),
-                hash_len,
-            ))
         }
-        _ => Ok((None, 0)),
+        Ok((
+            alg,
+            Some(RsaPssParams {
+                digest: mdname,
+                mgf1: mgf1_to_digest_name(params.mgf)?,
+                saltlen: c_int::try_from(params.sLen)?,
+            }),
+        ))
+    } else {
+        Ok((alg, None))
     }
 }
 
@@ -198,35 +208,6 @@ fn parse_enc_params(
         }
         _ => Err(CKR_MECHANISM_INVALID)?,
     }
-}
-
-/// Helper function to convert PKCS#11 mechanism type to name
-/// understood by the ossl package.
-pub fn rsa_type_to_ossl_alg(mech: CK_MECHANISM_TYPE) -> Result<SigAlg> {
-    Ok(match mech {
-        CKM_RSA_X_509 => SigAlg::RsaNoPad,
-        CKM_RSA_PKCS => SigAlg::Rsa,
-        CKM_RSA_PKCS_PSS => SigAlg::RsaPss,
-        CKM_SHA1_RSA_PKCS => SigAlg::RsaSha1,
-        CKM_SHA224_RSA_PKCS => SigAlg::RsaSha2_224,
-        CKM_SHA256_RSA_PKCS => SigAlg::RsaSha2_256,
-        CKM_SHA384_RSA_PKCS => SigAlg::RsaSha2_384,
-        CKM_SHA512_RSA_PKCS => SigAlg::RsaSha2_512,
-        CKM_SHA3_224_RSA_PKCS => SigAlg::RsaSha3_224,
-        CKM_SHA3_256_RSA_PKCS => SigAlg::RsaSha3_256,
-        CKM_SHA3_384_RSA_PKCS => SigAlg::RsaSha3_384,
-        CKM_SHA3_512_RSA_PKCS => SigAlg::RsaSha3_512,
-        CKM_SHA1_RSA_PKCS_PSS => SigAlg::RsaPssSha1,
-        CKM_SHA224_RSA_PKCS_PSS => SigAlg::RsaPssSha2_224,
-        CKM_SHA256_RSA_PKCS_PSS => SigAlg::RsaPssSha2_256,
-        CKM_SHA384_RSA_PKCS_PSS => SigAlg::RsaPssSha2_384,
-        CKM_SHA512_RSA_PKCS_PSS => SigAlg::RsaPssSha2_512,
-        CKM_SHA3_224_RSA_PKCS_PSS => SigAlg::RsaPssSha3_224,
-        CKM_SHA3_256_RSA_PKCS_PSS => SigAlg::RsaPssSha3_256,
-        CKM_SHA3_384_RSA_PKCS_PSS => SigAlg::RsaPssSha3_384,
-        CKM_SHA3_512_RSA_PKCS_PSS => SigAlg::RsaPssSha3_512,
-        _ => return Err(CKR_MECHANISM_INVALID)?,
-    })
 }
 
 /// Represents an active RSA cryptographic operation.
@@ -278,12 +259,16 @@ impl RsaPKCSOperation {
         match mech.mechanism {
             CKM_RSA_X_509 => Ok(modulus),
             CKM_RSA_PKCS => Ok(modulus - 11),
+            CKM_RSA_PKCS_PSS => {
+                let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
+                Ok(Self::hash_len(params.hashAlg)?)
+            }
             CKM_RSA_PKCS_OAEP => {
                 let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
                 let hs = Self::hash_len(params.hashAlg)?;
                 Ok(modulus - 2 * hs - 2)
             }
-            _ => Err(CKR_MECHANISM_INVALID)?,
+            _ => Ok(0),
         }
     }
 
@@ -348,42 +333,39 @@ impl RsaPKCSOperation {
     /// signature context
     fn sigver_new(
         mech: &CK_MECHANISM,
-        mut pubkey: Option<EvpPkey>,
-        mut privkey: Option<EvpPkey>,
-        keysize: usize,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+        flag: CK_FLAGS,
         signature: Option<&[u8]>,
     ) -> Result<RsaPKCSOperation> {
-        let sigalg = rsa_type_to_ossl_alg(mech.mechanism)?;
-        let (pss_params, hash_len) = parse_pss_params(mech)?;
-        let params = rsa_sig_params(sigalg, &pss_params)?;
-        let mut sigctx = if let Some(pkey) = &mut privkey {
-            OsslSignature::message_sign_new(
+        let (alg, params) = parse_sig_params(mech)?;
+        let mut sigctx = match flag {
+            CKF_SIGN => OsslSignature::message_sign_new(
                 osslctx(),
-                sigalg,
-                pkey,
-                params.as_ref(),
-            )?
-        } else if let Some(pkey) = &mut pubkey {
-            OsslSignature::message_verify_new(
+                alg,
+                &mut privkey_from_object(key)?,
+                rsa_sig_params(alg, &params)?.as_ref(),
+            )?,
+            CKF_VERIFY => OsslSignature::message_verify_new(
                 osslctx(),
-                sigalg,
-                pkey,
-                params.as_ref(),
-            )?
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
+                alg,
+                &mut pubkey_from_object(key)?,
+                rsa_sig_params(alg, &params)?.as_ref(),
+            )?,
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
+        let keysize = Self::get_key_size(key, info)?;
+        let maxinput = Self::max_message_len(keysize, mech)?;
         if let Some(sig) = &signature {
+            if sig.len() != keysize {
+                return Err(CKR_SIGNATURE_LEN_RANGE)?;
+            }
             sigctx.set_signature(sig)?;
         }
+
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
-            max_input: match mech.mechanism {
-                CKM_RSA_X_509 => keysize,
-                CKM_RSA_PKCS => keysize - 11,
-                CKM_RSA_PKCS_PSS => hash_len,
-                _ => 0,
-            },
+            max_input: maxinput,
             output_len: keysize,
             finalized: false,
             in_use: false,
@@ -400,10 +382,7 @@ impl RsaPKCSOperation {
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let keysize = Self::get_key_size(key, info)?;
-        let pubkey = pubkey_from_object(key)?;
-        let privkey = privkey_from_object(key)?;
-        Self::sigver_new(mech, Some(pubkey), Some(privkey), keysize, None)
+        Self::sigver_new(mech, key, info, CKF_SIGN, None)
     }
 
     /// Creates a new `RsaPKCSOperation` for verification.
@@ -412,9 +391,7 @@ impl RsaPKCSOperation {
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let keysize = Self::get_key_size(key, info)?;
-        let pubkey = pubkey_from_object(key)?;
-        Self::sigver_new(mech, Some(pubkey), None, keysize, None)
+        Self::sigver_new(mech, key, info, CKF_VERIFY, None)
     }
 
     /// Creates a new `RsaPKCSOperation` for verification with a pre-supplied
@@ -426,12 +403,7 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
         signature: &[u8],
     ) -> Result<RsaPKCSOperation> {
-        let keysize = Self::get_key_size(key, info)?;
-        if signature.len() != keysize {
-            return Err(CKR_SIGNATURE_LEN_RANGE)?;
-        }
-        let pubkey = pubkey_from_object(key)?;
-        Self::sigver_new(mech, Some(pubkey), None, keysize, Some(signature))
+        Self::sigver_new(mech, key, info, CKF_VERIFY, Some(signature))
     }
 
     /// Generates an RSA key pair using OpenSSL.
