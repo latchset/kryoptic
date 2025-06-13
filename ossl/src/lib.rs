@@ -21,6 +21,7 @@ use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
 
 use crate::bindings::*;
 
+pub mod asymcipher;
 pub mod digest;
 pub mod signature;
 
@@ -41,6 +42,17 @@ macro_rules! void_ptr {
     };
 }
 pub(crate) use void_ptr;
+
+macro_rules! cstr {
+    ($str:expr) => {
+        unsafe {
+            ::std::ffi::CStr::from_ptr(
+                $str.as_ptr() as *const ::std::ffi::c_char
+            )
+        }
+    };
+}
+pub(crate) use cstr;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[non_exhaustive]
