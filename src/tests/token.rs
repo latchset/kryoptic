@@ -25,7 +25,7 @@ fn test_token_env(suffix: &str) {
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
-    let result = C_GetFunctionList(&mut *pplist);
+    let result = fn_get_function_list(&mut *pplist);
     assert_eq!(result, 0);
     unsafe {
         let list: CK_FUNCTION_LIST = *plist;
@@ -56,7 +56,7 @@ fn test_token_null_args(suffix: &str) {
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
-    let result = C_GetFunctionList(&mut *pplist);
+    let result = fn_get_function_list(&mut *pplist);
     assert_eq!(result, 0);
     unsafe {
         let list: CK_FUNCTION_LIST = *plist;
@@ -91,7 +91,7 @@ fn test_token_datadir() {
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
-    let result = C_GetFunctionList(&mut *pplist);
+    let result = fn_get_function_list(&mut *pplist);
     assert_eq!(result, 0);
     unsafe {
         let list: CK_FUNCTION_LIST = *plist;
@@ -132,7 +132,7 @@ fn test_interface_null() {
     /* NULL interface name and NULL version -- the module should return default one */
     let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
     let ppiface = &mut piface;
-    let result = C_GetInterface(
+    let result = fn_get_interface(
         std::ptr::null_mut(),
         std::ptr::null_mut(),
         &mut *ppiface,
@@ -169,7 +169,7 @@ fn test_interface_pkcs11() {
     /* NULL version -- the module should return default one */
     let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
     let ppiface = &mut piface;
-    let result = C_GetInterface(
+    let result = fn_get_interface(
         "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
         std::ptr::null_mut(),
         &mut *ppiface,
@@ -207,7 +207,7 @@ fn test_interface_pkcs11_version3() {
     let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
     let ppiface = &mut piface;
     let mut version = { CK_VERSION { major: 3, minor: 0 } };
-    let result = C_GetInterface(
+    let result = fn_get_interface(
         "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
         &mut version,
         &mut *ppiface,
@@ -250,7 +250,7 @@ fn test_interface_pkcs11_version240() {
             minor: 40,
         }
     };
-    let result = C_GetInterface(
+    let result = fn_get_interface(
         "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
         &mut version,
         &mut *ppiface,
@@ -283,7 +283,7 @@ fn test_interface_invalid_name() {
     /* Try to get in valid name */
     let mut piface: *mut CK_INTERFACE = std::ptr::null_mut();
     let ppiface = &mut piface;
-    let result = C_GetInterface(
+    let result = fn_get_interface(
         "MyPKCS 12\0".as_ptr() as CK_UTF8CHAR_PTR,
         std::ptr::null_mut(),
         &mut *ppiface,
@@ -304,7 +304,7 @@ fn test_interface_invalid_version() {
             minor: 99,
         }
     };
-    let result = C_GetInterface(
+    let result = fn_get_interface(
         "PKCS 11\0".as_ptr() as CK_UTF8CHAR_PTR,
         &mut version,
         &mut *ppiface,

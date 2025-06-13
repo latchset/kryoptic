@@ -7,15 +7,11 @@
 use std::ffi::c_char;
 
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::DRBG;
-use crate::ossl::bindings::*;
+use crate::ossl::common::*;
 
-#[cfg(not(feature = "fips"))]
-use crate::ossl::get_libctx;
-
-#[cfg(feature = "fips")]
-use crate::ossl::fips::*;
+use ossl::bindings::*;
+use pkcs11::*;
 
 /// Implements HMAC-DRBG using SHA-256 as the underlying hash function.
 #[derive(Debug)]
@@ -41,7 +37,7 @@ impl HmacSha256Drbg {
         unsafe {
             let rng_spec: &[u8; 10] = b"HMAC-DRBG\0";
             let rand = EVP_RAND_fetch(
-                get_libctx(),
+                osslctx().ptr(),
                 rng_spec.as_ptr() as *const c_char,
                 std::ptr::null(),
             );
@@ -179,7 +175,7 @@ impl HmacSha512Drbg {
         unsafe {
             let rng_spec = b"HMAC-DRBG\0";
             let rand = EVP_RAND_fetch(
-                get_libctx(),
+                osslctx().ptr(),
                 rng_spec.as_ptr() as *const c_char,
                 std::ptr::null(),
             );

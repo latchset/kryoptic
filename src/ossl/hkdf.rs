@@ -12,14 +12,16 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::*;
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
 #[cfg(feature = "fips")]
 use crate::ossl::fips::*;
+
+use ossl::bindings::*;
+use ossl::{EvpKdfCtx, OsslParam};
+use pkcs11::*;
 
 /// Represents an active HKDF operation state.
 #[derive(Debug)]
@@ -300,7 +302,8 @@ impl Derive for HKDFOperation {
         #[cfg(feature = "fips")]
         fips_approval_prep_check();
 
-        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_HKDF))?;
+        let mut kctx =
+            EvpKdfCtx::new(osslctx(), name_as_char(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];
         let res = unsafe {
             EVP_KDF_derive(

@@ -11,7 +11,6 @@ use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::Object;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::{Storage, StorageTokenInfo};
@@ -19,6 +18,7 @@ use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use hex;
+use pkcs11::*;
 
 /// Calculates and sets PIN status flags based on authentication info.
 ///
@@ -394,7 +394,7 @@ impl Storage for StdStorageFormat {
         }
 
         for ck_attr in attrs.as_slice() {
-            obj.set_attr(ck_attr.to_attribute()?)?;
+            obj.set_attr(Attribute::from_ck_attr(ck_attr)?)?;
         }
 
         /* remove any ephemeral attributes before storage */

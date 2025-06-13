@@ -4,14 +4,12 @@
 //! This module implements miscellaneous utilities that do not really
 //! belong in any specific module
 
-use std::ffi::c_int;
-use std::ffi::c_uint;
-
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::ossl::common::zeromem as ossl_zeromem;
+
+use pkcs11::*;
 
 /// Constant containing the size of a CK_ULONG on this architecture
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
@@ -249,19 +247,4 @@ pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
 /// This future-proofs the ability to use an alternative crypto backend
 pub fn zeromem(mem: &mut [u8]) {
     ossl_zeromem(mem);
-}
-
-/// Helper container to keep references around in structure that deal with
-/// FFI structures that reference pointers, like arrays of CK_ATTRIBUTEs and
-/// OSSL_PARAMs
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum BorrowedReference<'a> {
-    CkBool(&'a CK_BBOOL),
-    Int(&'a c_int),
-    Slice(&'a [u8]),
-    Vector(&'a Vec<u8>),
-    Uint(&'a c_uint),
-    Ulong(&'a CK_ULONG),
-    Usize(&'a usize),
 }
