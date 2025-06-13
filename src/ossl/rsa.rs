@@ -21,10 +21,11 @@ use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
 use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
-#[cfg(not(feature = "fips"))]
-pub const MIN_RSA_SIZE_BITS: usize = 1024;
 #[cfg(feature = "fips")]
-pub const MIN_RSA_SIZE_BITS: usize = 2048;
+use ossl::fips::FipsApproval;
+
+pub const MIN_RSA_SIZE_BITS: usize =
+    if cfg!(feature = "fips") { 2048 } else { 1024 };
 
 pub const MAX_RSA_SIZE_BITS: usize = 16384;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
@@ -229,7 +230,7 @@ pub struct RsaPKCSOperation {
     encctx: Option<OsslAsymcipher>,
     /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
 }
 
 impl RsaPKCSOperation {
@@ -280,6 +281,9 @@ impl RsaPKCSOperation {
         info: &CK_MECHANISM_INFO,
         flag: CK_FLAGS,
     ) -> Result<RsaPKCSOperation> {
+        #[cfg(feature = "fips")]
+        let mut fips_approval = FipsApproval::init();
+
         let (alg, params) = parse_enc_params(mech)?;
         let encctx = match flag {
             CKF_ENCRYPT => OsslAsymcipher::message_encrypt_new(
@@ -297,6 +301,9 @@ impl RsaPKCSOperation {
         let keysize = Self::get_key_size(key, info)?;
         let maxinput = Self::max_message_len(keysize, mech)?;
 
+        #[cfg(feature = "fips")]
+        fips_approval.update();
+
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: maxinput,
@@ -306,7 +313,7 @@ impl RsaPKCSOperation {
             sigctx: None,
             encctx: Some(encctx),
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: fips_approval,
         })
     }
 
@@ -338,6 +345,9 @@ impl RsaPKCSOperation {
         flag: CK_FLAGS,
         signature: Option<&[u8]>,
     ) -> Result<RsaPKCSOperation> {
+        #[cfg(feature = "fips")]
+        let mut fips_approval = FipsApproval::init();
+
         let (alg, params) = parse_sig_params(mech)?;
         let mut sigctx = match flag {
             CKF_SIGN => OsslSignature::message_sign_new(
@@ -363,6 +373,9 @@ impl RsaPKCSOperation {
             sigctx.set_signature(sig)?;
         }
 
+        #[cfg(feature = "fips")]
+        fips_approval.update();
+
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: maxinput,
@@ -372,7 +385,7 @@ impl RsaPKCSOperation {
             sigctx: Some(sigctx),
             encctx: None,
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: fips_approval,
         })
     }
 
@@ -536,7 +549,7 @@ impl MechOperation for RsaPKCSOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        self.fips_approval.approval()
     }
 }
 
@@ -549,7 +562,10 @@ impl Encryption for RsaPKCSOperation {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
-        if let Some(ctx) = &mut self.encctx {
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
+        let len = if let Some(ctx) = &mut self.encctx {
             let outlen = ctx.message_encrypt(plain, None)?;
             if cipher.len() == 0 {
                 return Ok(outlen);
@@ -561,11 +577,16 @@ impl Encryption for RsaPKCSOperation {
 
             self.finalized = true;
 
-            Ok(ctx.message_encrypt(plain, Some(cipher))?)
+            ctx.message_encrypt(plain, Some(cipher))?
         } else {
             self.finalized = true;
-            Err(CKR_GENERAL_ERROR)?
-        }
+            return Err(CKR_GENERAL_ERROR)?;
+        };
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
+        Ok(len)
     }
 
     fn encrypt_update(
@@ -598,7 +619,11 @@ impl Decryption for RsaPKCSOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if let Some(ctx) = &mut self.encctx {
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
+        let len = if let Some(ctx) = &mut self.encctx {
             let mut outlen = ctx.message_decrypt(cipher, None)?;
             if plain.len() == 0 {
                 return Ok(outlen);
@@ -629,11 +654,16 @@ impl Decryption for RsaPKCSOperation {
             if outlen > plain.len() {
                 return Err(CKR_GENERAL_ERROR)?;
             }
-            Ok(outlen)
+            outlen
         } else {
             self.finalized = true;
-            Err(CKR_GENERAL_ERROR)?
-        }
+            return Err(CKR_GENERAL_ERROR)?;
+        };
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
+        Ok(len)
     }
 
     fn decrypt_update(
@@ -668,6 +698,9 @@ impl Sign for RsaPKCSOperation {
         }
         match self.mech {
             CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                #[cfg(feature = "fips")]
+                self.fips_approval.clear();
+
                 self.finalized = true;
                 if match self.mech {
                     CKM_RSA_X_509 | CKM_RSA_PKCS => data.len() > self.max_input,
@@ -680,8 +713,6 @@ impl Sign for RsaPKCSOperation {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
 
-                self.finalized = true;
-
                 if let Some(ctx) = &mut self.sigctx {
                     if ctx.message_sign(data, None)? != signature.len() {
                         return Err(CKR_GENERAL_ERROR)?;
@@ -690,6 +721,10 @@ impl Sign for RsaPKCSOperation {
                 } else {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.finalize();
+
                 Ok(())
             }
             _ => {
@@ -713,11 +748,19 @@ impl Sign for RsaPKCSOperation {
             self.in_use = true;
         }
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         if let Some(ctx) = &mut self.sigctx {
-            Ok(ctx.message_sign_update(data)?)
+            ctx.message_sign_update(data)?;
         } else {
-            Err(CKR_GENERAL_ERROR)?
+            return Err(CKR_GENERAL_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.update();
+
+        Ok(())
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
@@ -729,15 +772,22 @@ impl Sign for RsaPKCSOperation {
         }
         self.finalized = true;
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         if let Some(ctx) = &mut self.sigctx {
             let len = ctx.message_sign_final(signature)?;
             if len != signature.len() {
                 return Err(CKR_DEVICE_ERROR)?;
             }
-            Ok(())
         } else {
-            Err(CKR_GENERAL_ERROR)?
+            return Err(CKR_GENERAL_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
+        Ok(())
     }
 
     fn signature_len(&self) -> Result<usize> {
@@ -761,6 +811,9 @@ impl RsaPKCSOperation {
 
         match self.mech {
             CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                #[cfg(feature = "fips")]
+                self.fips_approval.clear();
+
                 self.finalized = true;
                 if data.len() > self.max_input {
                     return Err(CKR_DATA_LEN_RANGE)?;
@@ -771,10 +824,15 @@ impl RsaPKCSOperation {
                     }
                 }
                 if let Some(ctx) = &mut self.sigctx {
-                    Ok(ctx.message_verify(data, signature)?)
+                    ctx.message_verify(data, signature)?;
                 } else {
-                    Err(CKR_GENERAL_ERROR)?
+                    return Err(CKR_GENERAL_ERROR)?;
                 }
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.finalize();
+
+                Ok(())
             }
             _ => {
                 self.verify_int_update(data)?;
@@ -798,11 +856,19 @@ impl RsaPKCSOperation {
             self.in_use = true;
         }
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         if let Some(ctx) = &mut self.sigctx {
-            Ok(ctx.message_verify_update(data)?)
+            ctx.message_verify_update(data)?;
         } else {
-            Err(CKR_GENERAL_ERROR)?
+            return Err(CKR_GENERAL_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.update();
+
+        Ok(())
     }
 
     /// Internal helper for the final step of multi-part verification.
@@ -815,11 +881,19 @@ impl RsaPKCSOperation {
         }
         self.finalized = true;
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         if let Some(ctx) = &mut self.sigctx {
-            Ok(ctx.message_verify_final(signature)?)
+            ctx.message_verify_final(signature)?;
         } else {
-            Err(CKR_GENERAL_ERROR)?
+            return Err(CKR_GENERAL_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
+        Ok(())
     }
 }
 
