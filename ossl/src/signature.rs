@@ -491,6 +491,7 @@ impl OsslSignature {
         if sigalg_is_oneshot(alg) {
             /* Single shot algorithms must always use EVP_PKEY_sign_init */
             if unsafe { EVP_PKEY_sign_init(ctx.pkey_ctx.as_mut_ptr()) } != 1 {
+                trace_ossl!("EVP_PKEY_sign_init()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
             if let Some(p) = params {
@@ -501,6 +502,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_CTX_set_param()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -526,6 +528,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestSignInit_ex()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
                 ctx.legacy_ctx = Some(lctx);
@@ -623,6 +626,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestSign()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -641,6 +645,7 @@ impl OsslSignature {
                 )
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_sign()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
         }
@@ -663,6 +668,7 @@ impl OsslSignature {
                         )
                     };
                     if ret != 1 {
+                        trace_ossl!("EVP_DigestSign()");
                         return Err(Error::new(ErrorKind::OsslError));
                     }
                 }
@@ -681,6 +687,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_PKEY_sign()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -706,6 +713,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestSignUpdate()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -725,6 +733,7 @@ impl OsslSignature {
                 )
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_sign_mesage_update()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
 
@@ -762,6 +771,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestSignFinal()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
                 return Ok(siglen);
@@ -783,6 +793,7 @@ impl OsslSignature {
                 )
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_sign_mesage_final()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
 
@@ -806,6 +817,7 @@ impl OsslSignature {
         if sigalg_is_oneshot(alg) {
             /* Single shot algorithms must always use EVP_PKEY_verify_init */
             if unsafe { EVP_PKEY_verify_init(ctx.pkey_ctx.as_mut_ptr()) } != 1 {
+                trace_ossl!("EVP_PKEY_verify_init()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
             if let Some(p) = params {
@@ -816,6 +828,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_PKEY_CTX_set_params()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -841,6 +854,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestVerifyInit_ex()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
                 ctx.legacy_ctx = Some(lctx);
@@ -880,6 +894,7 @@ impl OsslSignature {
                 )
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_verify_message_init()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
             ctx.supports_updates = match sigalg_supports_updates(alg) {
@@ -935,6 +950,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestVerify()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -953,6 +969,7 @@ impl OsslSignature {
                 )
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_verify()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
         }
@@ -984,6 +1001,7 @@ impl OsslSignature {
             )
         };
         if ret != 1 {
+            trace_ossl!("EVP_PKEY_CTX_set_signature()");
             return Err(Error::new(ErrorKind::OsslError));
         }
 
@@ -1007,6 +1025,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestVerifyUpdate()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
@@ -1026,6 +1045,7 @@ impl OsslSignature {
                 )
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_verify_message_update()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
 
@@ -1067,6 +1087,7 @@ impl OsslSignature {
                     )
                 };
                 if ret != 1 {
+                    trace_ossl!("EVP_DigestVerifyFinal()");
                     return Err(Error::new(ErrorKind::OsslError));
                 } else {
                     return Ok(());
@@ -1089,6 +1110,7 @@ impl OsslSignature {
                 EVP_PKEY_verify_message_final(self.pkey_ctx.as_mut_ptr())
             };
             if ret != 1 {
+                trace_ossl!("EVP_PKEY_verify_message_final()");
                 return Err(Error::new(ErrorKind::OsslError));
             }
 
