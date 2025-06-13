@@ -9,7 +9,8 @@ use std::ffi::{c_char, c_int, CStr};
 use crate::bindings::*;
 
 use crate::{
-    trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext, OsslParam,
+    cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
+    OsslParam,
 };
 
 #[cfg(not(feature = "fips"))]
@@ -57,12 +58,6 @@ impl Drop for EvpSignature {
             EVP_SIGNATURE_free(self.ptr);
         }
     }
-}
-
-macro_rules! cstr {
-    ($str:expr) => {
-        unsafe { CStr::from_ptr($str.as_ptr() as *const c_char) }
-    };
 }
 
 /// Known algorithms selectable for OsslSignature
@@ -292,6 +287,7 @@ fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
     }
 }
 
+/// Pss Parameters container
 pub struct RsaPssParams {
     pub digest: &'static CStr,
     pub mgf1: &'static CStr,
