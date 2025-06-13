@@ -8,7 +8,6 @@
 use core::ffi::{c_int, c_uint, CStr};
 
 use crate::attribute::Attribute;
-use crate::error::some_or_err;
 use crate::error::{Error, Result};
 use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::mechanism::*;
@@ -16,6 +15,7 @@ use crate::misc::{bytes_to_vec, cast_params, zeromem};
 use crate::object::Object;
 use crate::ossl::common::*;
 
+use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
 use ossl::bindings::*;
 use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
 use ossl::{EvpPkey, OsslParam};
@@ -161,55 +161,43 @@ fn parse_pss_params(
     }
 }
 
-/// Holds parameters specific to an RSA-OAEP operation.
-#[derive(Debug)]
-struct RsaOaepParams {
-    /// Hash algorithm mechanism identifier (e.g., `CKM_SHA256`).
-    hash: CK_ULONG,
-    /// Mask Generation Function identifier (e.g., `CKG_MGF1_SHA256`).
-    mgf: CK_ULONG,
-    /// Optional source/label data.
-    source: Option<Vec<u8>>,
-}
-
-/// Helper function to create default (empty) `RsaOaepParams`.
-fn no_oaep_params() -> RsaOaepParams {
-    RsaOaepParams {
-        hash: 0,
-        mgf: 0,
-        source: None,
-    }
-}
-
-/// Helper function to parse OAEP parameters from `CK_MECHANISM`.
+/// Helper function to parse encryption parameters from `CK_MECHANISM`.
 ///
-/// Returns a `RsaOaepParams` structure with the fields.
-fn parse_oaep_params(mech: &CK_MECHANISM) -> Result<RsaOaepParams> {
-    if mech.mechanism != CKM_RSA_PKCS_OAEP {
-        return Ok(no_oaep_params());
-    }
-    let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
-    let source = match params.source {
-        0 => {
-            if params.ulSourceDataLen != 0 {
-                return Err(CKR_MECHANISM_PARAM_INVALID)?;
-            }
-            None
+/// Returns a `RsaOaepParams` structure for the CKM_RSA_PKCS_OAEP
+/// mechanism.
+fn parse_enc_params(
+    mech: &CK_MECHANISM,
+) -> Result<(EncAlg, Option<RsaOaepParams>)> {
+    match mech.mechanism {
+        CKM_RSA_X_509 => Ok((EncAlg::RsaNoPad, None)),
+        CKM_RSA_PKCS => Ok((EncAlg::RsaPkcs1_5, None)),
+        CKM_RSA_PKCS_OAEP => {
+            let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
+            let label = match params.source {
+                0 => {
+                    if params.ulSourceDataLen != 0 {
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                    }
+                    None
+                }
+                CKZ_DATA_SPECIFIED => match params.ulSourceDataLen {
+                    0 => None,
+                    _ => Some(bytes_to_vec!(
+                        params.pSourceData,
+                        params.ulSourceDataLen
+                    )),
+                },
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+            };
+            let oaep = RsaOaepParams {
+                digest: mech_type_to_digest_name(params.hashAlg)?,
+                mgf1: mgf1_to_digest_name(params.mgf)?,
+                label: label,
+            };
+            Ok((EncAlg::RsaOaep, Some(oaep)))
         }
-        CKZ_DATA_SPECIFIED => match params.ulSourceDataLen {
-            0 => None,
-            _ => {
-                Some(bytes_to_vec!(params.pSourceData, params.ulSourceDataLen))
-            }
-        },
-        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-    };
-
-    Ok(RsaOaepParams {
-        hash: params.hashAlg,
-        mgf: params.mgf,
-        source: source,
-    })
+        _ => Err(CKR_MECHANISM_INVALID)?,
+    }
 }
 
 /// Helper function to convert PKCS#11 mechanism type to name
@@ -250,18 +238,14 @@ pub struct RsaPKCSOperation {
     max_input: usize,
     /// Expected output length (typically key size in bytes).
     output_len: usize,
-    /// The public key (`EvpPkey`) if needed for the operation.
-    public_key: Option<EvpPkey>,
-    /// The private key (`EvpPkey`) if needed for the operation.
-    private_key: Option<EvpPkey>,
     /// Flag indicating if the operation has been finalized.
     finalized: bool,
     /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: Option<OsslSignature>,
-    /// Parsed OAEP parameters, if applicable.
-    oaep: RsaOaepParams,
+    /// The OpenSSL Wrapper Encryption Context
+    encctx: Option<OsslAsymcipher>,
     /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
@@ -290,16 +274,13 @@ impl RsaPKCSOperation {
 
     /// Calculates the maximum message length for encryption/decryption based
     /// on modulus size, padding mode (PKCS#1 v1.5, OAEP), and hash algorithm.
-    fn max_message_len(
-        modulus: usize,
-        mech: CK_MECHANISM_TYPE,
-        hash: CK_MECHANISM_TYPE,
-    ) -> Result<usize> {
-        match mech {
+    fn max_message_len(modulus: usize, mech: &CK_MECHANISM) -> Result<usize> {
+        match mech.mechanism {
             CKM_RSA_X_509 => Ok(modulus),
             CKM_RSA_PKCS => Ok(modulus - 11),
             CKM_RSA_PKCS_OAEP => {
-                let hs = Self::hash_len(hash)?;
+                let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
+                let hs = Self::hash_len(params.hashAlg)?;
                 Ok(modulus - 2 * hs - 2)
             }
             _ => Err(CKR_MECHANISM_INVALID)?,
@@ -310,25 +291,35 @@ impl RsaPKCSOperation {
     /// Parses OAEP parameters if applicable.
     fn encdec_new(
         mech: &CK_MECHANISM,
-        pubkey: Option<EvpPkey>,
-        privkey: Option<EvpPkey>,
-        keysize: usize,
+        key: &Object,
+        info: &CK_MECHANISM_INFO,
+        flag: CK_FLAGS,
     ) -> Result<RsaPKCSOperation> {
-        let oaep_params = parse_oaep_params(mech)?;
+        let (alg, params) = parse_enc_params(mech)?;
+        let encctx = match flag {
+            CKF_ENCRYPT => OsslAsymcipher::message_encrypt_new(
+                osslctx(),
+                &mut pubkey_from_object(key)?,
+                &rsa_enc_params(alg, params.as_ref())?,
+            )?,
+            CKF_DECRYPT => OsslAsymcipher::message_decrypt_new(
+                osslctx(),
+                &mut privkey_from_object(key)?,
+                &rsa_enc_params(alg, params.as_ref())?,
+            )?,
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
+        let keysize = Self::get_key_size(key, info)?;
+        let maxinput = Self::max_message_len(keysize, mech)?;
+
         Ok(RsaPKCSOperation {
             mech: mech.mechanism,
-            max_input: Self::max_message_len(
-                keysize,
-                mech.mechanism,
-                oaep_params.hash,
-            )?,
+            max_input: maxinput,
             output_len: keysize,
-            public_key: pubkey,
-            private_key: privkey,
             finalized: false,
             in_use: false,
             sigctx: None,
-            oaep: oaep_params,
+            encctx: Some(encctx),
             #[cfg(feature = "fips")]
             fips_approved: None,
         })
@@ -340,9 +331,7 @@ impl RsaPKCSOperation {
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let keysize = Self::get_key_size(key, info)?;
-        let pubkey = pubkey_from_object(key)?;
-        Self::encdec_new(mech, Some(pubkey), None, keysize)
+        Self::encdec_new(mech, key, info, CKF_ENCRYPT)
     }
 
     /// Creates a new `RsaPKCSOperation` for decryption.
@@ -351,10 +340,7 @@ impl RsaPKCSOperation {
         key: &Object,
         info: &CK_MECHANISM_INFO,
     ) -> Result<RsaPKCSOperation> {
-        let keysize = Self::get_key_size(key, info)?;
-        let pubkey = pubkey_from_object(key)?;
-        let privkey = privkey_from_object(key)?;
-        Self::encdec_new(mech, Some(pubkey), Some(privkey), keysize)
+        Self::encdec_new(mech, key, info, CKF_DECRYPT)
     }
 
     /// Internal constructor for signing/verification operations.
@@ -399,12 +385,10 @@ impl RsaPKCSOperation {
                 _ => 0,
             },
             output_len: keysize,
-            public_key: pubkey,
-            private_key: privkey,
             finalized: false,
             in_use: false,
             sigctx: Some(sigctx),
-            oaep: no_oaep_params(),
+            encctx: None,
             #[cfg(feature = "fips")]
             fips_approved: None,
         })
@@ -568,52 +552,6 @@ impl RsaPKCSOperation {
         result.resize(outlen, 0);
         Ok(result)
     }
-
-    /// Creates an `OSSL_PARAM` array containing RSA padding and digest
-    /// parameters suitable for OpenSSL's EVP encryption/decryption functions
-    /// (PKCS#1 v1.5 or OAEP). Includes OAEP hash, MGF, and label parameters
-    /// if applicable.
-    fn rsa_enc_params(&self) -> Result<OsslParam> {
-        let mut params = OsslParam::new();
-        match self.mech {
-            CKM_RSA_X_509 => {
-                params.add_const_c_string(
-                    cstr!(OSSL_PKEY_PARAM_PAD_MODE),
-                    cstr!(OSSL_PKEY_RSA_PAD_MODE_NONE),
-                )?;
-            }
-            CKM_RSA_PKCS => {
-                params.add_const_c_string(
-                    cstr!(OSSL_PKEY_PARAM_PAD_MODE),
-                    cstr!(OSSL_PKEY_RSA_PAD_MODE_PKCSV15),
-                )?;
-            }
-            CKM_RSA_PKCS_OAEP => {
-                params.add_const_c_string(
-                    cstr!(OSSL_PKEY_PARAM_PAD_MODE),
-                    cstr!(OSSL_PKEY_RSA_PAD_MODE_OAEP),
-                )?;
-                params.add_const_c_string(
-                    cstr!(OSSL_ASYM_CIPHER_PARAM_OAEP_DIGEST),
-                    mech_type_to_digest_name(self.oaep.hash)?,
-                )?;
-                params.add_const_c_string(
-                    cstr!(OSSL_PKEY_PARAM_MGF1_DIGEST),
-                    mgf1_to_digest_name(self.oaep.mgf)?,
-                )?;
-                match &self.oaep.source {
-                    None => (),
-                    Some(source) => params.add_octet_string(
-                        cstr!(OSSL_ASYM_CIPHER_PARAM_OAEP_LABEL),
-                        source,
-                    )?,
-                }
-            }
-            _ => (),
-        }
-        params.finalize();
-        Ok(params)
-    }
 }
 
 impl MechOperation for RsaPKCSOperation {
@@ -638,57 +576,24 @@ impl Encryption for RsaPKCSOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        let mut ctx = some_or_err!(mut self.public_key).new_ctx(osslctx())?;
-        if unsafe { EVP_PKEY_encrypt_init(ctx.as_mut_ptr()) } != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        let ret = unsafe {
-            EVP_PKEY_CTX_set_params(
-                ctx.as_mut_ptr(),
-                self.rsa_enc_params()?.as_ptr(),
-            )
-        };
-        if ret != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
 
-        let mut outlen = 0;
-        let outlen_ptr: *mut usize = &mut outlen;
-        if unsafe {
-            EVP_PKEY_encrypt(
-                ctx.as_mut_ptr(),
-                std::ptr::null_mut(),
-                outlen_ptr,
-                plain.as_ptr(),
-                plain.len(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        if cipher.len() == 0 {
-            return Ok(outlen);
-        } else {
-            if cipher.len() < outlen {
-                return Err(Error::buf_too_small(outlen));
+        if let Some(ctx) = &mut self.encctx {
+            let outlen = ctx.message_encrypt(plain, None)?;
+            if cipher.len() == 0 {
+                return Ok(outlen);
+            } else {
+                if cipher.len() < outlen {
+                    return Err(Error::buf_too_small(outlen));
+                }
             }
-        }
 
-        self.finalized = true;
+            self.finalized = true;
 
-        if unsafe {
-            EVP_PKEY_encrypt(
-                ctx.as_mut_ptr(),
-                cipher.as_mut_ptr(),
-                outlen_ptr,
-                plain.as_ptr(),
-                plain.len(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
+            Ok(ctx.message_encrypt(plain, Some(cipher))?)
+        } else {
+            self.finalized = true;
+            Err(CKR_GENERAL_ERROR)?
         }
-        Ok(outlen)
     }
 
     fn encrypt_update(
@@ -721,79 +626,42 @@ impl Decryption for RsaPKCSOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        let mut ctx = some_or_err!(mut self.private_key).new_ctx(osslctx())?;
-        let ret = unsafe { EVP_PKEY_decrypt_init(ctx.as_mut_ptr()) };
-        if ret != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        let ret = unsafe {
-            EVP_PKEY_CTX_set_params(
-                ctx.as_mut_ptr(),
-                self.rsa_enc_params()?.as_ptr(),
-            )
-        };
-        if ret != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        if let Some(ctx) = &mut self.encctx {
+            let mut outlen = ctx.message_decrypt(cipher, None)?;
+            if plain.len() == 0 {
+                return Ok(outlen);
+            }
 
-        let mut outlen = 0usize;
-        let outlen_ptr: *mut usize = &mut outlen;
-        let ret = unsafe {
-            EVP_PKEY_decrypt(
-                ctx.as_mut_ptr(),
-                std::ptr::null_mut(),
-                outlen_ptr,
-                cipher.as_ptr(),
-                cipher.len(),
-            )
-        };
-        if ret != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        if plain.len() == 0 {
-            return Ok(outlen);
-        }
-        let mut tmp_plain: Option<Vec<u8>> = None;
-        let plain_ptr = if plain.len() < outlen {
-            if plain.len() < self.output_len {
+            if plain.len() < outlen && plain.len() < self.output_len {
                 return Err(CKR_BUFFER_TOO_SMALL)?;
             }
-            /* the PKCS#11 documentation allows modules to pass
-             * in a buffer that is shorter than modulus by the
-             * amount taken by padding, while openssl requires
-             * a full modulus long buffer, so we need to use a
-             * temporary buffer here to bridge this mismatch */
-            tmp_plain = Some(vec![0u8; outlen]);
-            if let Some(ref mut p) = tmp_plain.as_mut() {
-                p.as_mut_ptr()
+            self.finalized = true;
+
+            if outlen > plain.len() {
+                /* the PKCS#11 documentation allows modules to pass
+                 * in a buffer that is shorter than modulus by the
+                 * amount taken by padding, while openssl requires
+                 * a full modulus long buffer, so we need to use a
+                 * temporary buffer here to bridge this mismatch */
+                let mut tmp = vec![0u8; outlen];
+                let len =
+                    ctx.message_decrypt(cipher, Some(tmp.as_mut_slice()))?;
+                if len <= plain.len() {
+                    plain[..len].copy_from_slice(&tmp[..len]);
+                }
+                zeromem(tmp.as_mut_slice());
+                outlen = len;
             } else {
+                outlen = ctx.message_decrypt(cipher, Some(plain))?;
+            }
+            if outlen > plain.len() {
                 return Err(CKR_GENERAL_ERROR)?;
             }
+            Ok(outlen)
         } else {
-            plain.as_mut_ptr()
-        };
-
-        self.finalized = true;
-
-        let ret = unsafe {
-            EVP_PKEY_decrypt(
-                ctx.as_mut_ptr(),
-                plain_ptr,
-                outlen_ptr,
-                cipher.as_ptr(),
-                cipher.len(),
-            )
-        };
-        if ret != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
+            self.finalized = true;
+            Err(CKR_GENERAL_ERROR)?
         }
-        match tmp_plain {
-            Some(p) => {
-                plain[..outlen].copy_from_slice(&p[..outlen]);
-            }
-            None => (),
-        }
-        Ok(outlen)
     }
 
     fn decrypt_update(
