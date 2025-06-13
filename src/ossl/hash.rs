@@ -4,15 +4,11 @@
 //! This module implements PKCS#11 digest (hashing) mechanisms using the
 //! OpenSSL EVP_Digest interface.
 
-use std::ffi::CStr;
-use std::os::raw::*;
-
 use crate::error::Result;
 use crate::mechanism::{Digest, MechOperation};
-use crate::ossl::common::*;
+use crate::ossl::common::{mech_type_to_digest_name, osslctx};
 
-use ossl::bindings::*;
-use ossl::{EvpMd, EvpMdCtx};
+use ossl::digest::OsslDigest;
 use pkcs11::*;
 
 /// Represents an active hash (digest) operation.
@@ -20,36 +16,13 @@ use pkcs11::*;
 pub struct HashOperation {
     /// The specific hash mechanism being used (e.g., CKM_SHA256).
     mech: CK_MECHANISM_TYPE,
-    /// The underlying OpenSSL state (algorithm and context).
-    state: HashState,
+    /// The underlying OpenSSL digest (algorithm and context).
+    hasher: OsslDigest,
     /// Flag indicating if the operation has been finalized.
     finalized: bool,
     /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
 }
-
-/// Holds the state for an OpenSSL EVP digest operation.
-#[derive(Debug)]
-pub struct HashState {
-    /// The OpenSSL message digest algorithm (`EVP_MD`).
-    md: EvpMd,
-    /// The OpenSSL message digest context (`EVP_MD_CTX`).
-    ctx: EvpMdCtx,
-}
-
-impl HashState {
-    /// Fetches a `EVP_MD` with the digest `alg` and crates a `HashState`
-    /// wrapper containing a EVP_MD and EVP_MD_CTX pointers
-    pub fn new(alg: &CStr) -> Result<HashState> {
-        Ok(HashState {
-            md: EvpMd::new(osslctx(), alg)?,
-            ctx: EvpMdCtx::new()?,
-        })
-    }
-}
-
-unsafe impl Send for HashState {}
-unsafe impl Sync for HashState {}
 
 impl HashOperation {
     /// Creates a new `HashOperation` for the specified mechanism type.
@@ -57,23 +30,14 @@ impl HashOperation {
     pub fn new(mech: CK_MECHANISM_TYPE) -> Result<HashOperation> {
         Ok(HashOperation {
             mech: mech,
-            state: HashState::new(mech_type_to_digest_name(mech)?)?,
+            hasher: OsslDigest::new(
+                osslctx(),
+                mech_type_to_digest_name(mech)?,
+                None,
+            )?,
             finalized: false,
             in_use: false,
         })
-    }
-
-    /// Initializes the underlying OpenSSL digest context (`EVP_DigestInit`).
-    fn digest_init(&mut self) -> Result<()> {
-        unsafe {
-            match EVP_DigestInit(
-                self.state.ctx.as_mut_ptr(),
-                self.state.md.as_ptr(),
-            ) {
-                1 => Ok(()),
-                _ => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
     }
 }
 
@@ -86,6 +50,7 @@ impl MechOperation for HashOperation {
         self.finalized
     }
     fn reset(&mut self) -> Result<()> {
+        self.hasher.reset(None)?;
         self.finalized = false;
         self.in_use = false;
         Ok(())
@@ -97,23 +62,13 @@ impl Digest for HashOperation {
         if self.in_use || self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if digest.len() != self.digest_len()? {
+        if digest.len() != self.hasher.size() {
             return Err(CKR_GENERAL_ERROR)?;
         }
         self.finalized = true;
-        /* NOTE: It is ok if data and digest point to the same buffer*/
-        let mut digest_len = c_uint::try_from(self.digest_len()?)?;
-        let r = unsafe {
-            EVP_Digest(
-                data.as_ptr() as *const c_void,
-                data.len(),
-                digest.as_mut_ptr(),
-                &mut digest_len,
-                self.state.md.as_ptr(),
-                std::ptr::null_mut(),
-            )
-        };
-        if r != 1 || usize::try_from(digest_len)? != digest.len() {
+        self.hasher.update(data)?;
+        let len = self.hasher.finalize(digest)?;
+        if len != digest.len() {
             return Err(CKR_GENERAL_ERROR)?;
         }
         Ok(())
@@ -123,20 +78,10 @@ impl Digest for HashOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if !self.in_use {
-            self.digest_init()?;
-            self.in_use = true;
-        }
-        let r = unsafe {
-            EVP_DigestUpdate(
-                self.state.ctx.as_mut_ptr(),
-                data.as_ptr() as *const c_void,
-                data.len(),
-            )
-        };
-        match r {
-            1 => Ok(()),
-            _ => {
+        self.in_use = true;
+        match self.hasher.update(data) {
+            Ok(()) => Ok(()),
+            Err(_) => {
                 self.finalized = true;
                 Err(CKR_DEVICE_ERROR)?
             }
@@ -150,26 +95,18 @@ impl Digest for HashOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if digest.len() != self.digest_len()? {
+        if digest.len() != self.hasher.size() {
             return Err(CKR_GENERAL_ERROR)?;
         }
         self.finalized = true;
-        let mut digest_len = c_uint::try_from(self.digest_len()?)?;
-        let r = unsafe {
-            EVP_DigestFinal_ex(
-                self.state.ctx.as_mut_ptr(),
-                digest.as_mut_ptr(),
-                &mut digest_len,
-            )
-        };
-        if r != 1 || usize::try_from(digest_len)? != digest.len() {
+        let len = self.hasher.finalize(digest)?;
+        if len != digest.len() {
             return Err(CKR_GENERAL_ERROR)?;
         }
         Ok(())
     }
 
     fn digest_len(&self) -> Result<usize> {
-        let len = unsafe { EVP_MD_get_size(self.state.md.as_ptr()) };
-        Ok(usize::try_from(len)?)
+        Ok(self.hasher.size())
     }
 }
