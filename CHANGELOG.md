@@ -6,6 +6,11 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* The project was reorganized in a workspace with several crates
+ - [Switch cargo setup to a workspace with several
+    packages](https://github.com/latchset/kryoptic/pull/263)
+
+
 # [1.2.0]
 ## 2025-06-09
 
