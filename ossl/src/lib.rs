@@ -21,6 +21,7 @@ use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
 
 use crate::bindings::*;
 
+pub mod digest;
 pub mod signature;
 
 #[cfg(feature = "fips")]
