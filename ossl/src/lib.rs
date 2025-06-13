@@ -839,11 +839,7 @@ impl<'a> OsslParam<'a> {
             return Err(Error::new(ErrorKind::WrapperError));
         }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
-        if p.is_null() {
-            Ok(false)
-        } else {
-            Ok(true)
-        }
+        Ok(!p.is_null())
     }
 }
 

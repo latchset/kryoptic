@@ -14,8 +14,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::slice;
 
+use crate::bindings::*;
 use crate::signature::SigAlg;
-use crate::*;
+use crate::{cstr, void_ptr, Error, ErrorKind, EvpPkey, OsslContext};
 
 use getrandom;
 use libc;
@@ -132,27 +133,26 @@ static FIPS_MODULE_FILE_NAME: Lazy<&CStr> = Lazy::new(|| {
 });
 
 #[cfg(feature = "dummy-integrity")]
-static FIPS_MODULE_MAC: &str = "C5:91:22:79:AF:0D:28:F7:DD:6B:BF:03:6B:01:D0:E5:50:81:C5:93:18:8C:7C:77:A3:97:98:CE:56:1B:67:80\0";
+static FIPS_MODULE_MAC: &CStr = c"C5:91:22:79:AF:0D:28:F7:DD:6B:BF:03:6B:01:D0:E5:50:81:C5:93:18:8C:7C:77:A3:97:98:CE:56:1B:67:80";
 
 /* Lets always run KATS for now:
  * static FIPS_INSTALL_MAC: &str = "41:9C:38:C2:8F:59:09:43:2C:AA:2F:58:36:2D:D9:04:F9:6C:56:8B:09:E0:18:3A:2E:D6:CC:69:05:04:E1:11\0";
  * static FIPS_INSTALL_STATUS: &str = "INSTALL_SELF_TEST_KATS_RUN\0"; */
 
-static FIPS_INSTALL_VERSION: &str = "1\0";
-static FIPS_CONDITIONAL_ERRORS: &str = "1\0";
-static FIPS_SECURITY_CHECKS: &str = "0\0";
-static FIPS_PARAM_TLS1_PRF_EMS_CHECK: &str = "1\0";
-static FIPS_PARAM_DRBG_TRUNC_DIGEST: &str = "1\0";
+static FIPS_INSTALL_VERSION: &CStr = c"1";
+static FIPS_CONDITIONAL_ERRORS: &CStr = c"1";
+static FIPS_SECURITY_CHECKS: &CStr = c"0";
+static FIPS_PARAM_TLS1_PRF_EMS_CHECK: &CStr = c"1";
+static FIPS_PARAM_DRBG_TRUNC_DIGEST: &CStr = c"1";
+static FIPS_PARAM_RSA_PKCS15_PAD_DISABLED: &CStr = c"0";
 
 macro_rules! set_config_string {
     ($params:expr, $key:expr, $val:expr) => {
-        let p = unsafe {
-            OSSL_PARAM_locate($params, $key.as_ptr() as *const c_char)
-        };
-        if p != std::ptr::null_mut() {
-            unsafe {
-                let _ =
-                    OSSL_PARAM_set_utf8_ptr(p, $val.as_ptr() as *const c_char);
+        let key = $key.as_ptr();
+        let p = unsafe { OSSL_PARAM_locate($params, key) };
+        if !p.is_null() {
+            if unsafe { OSSL_PARAM_set_utf8_ptr(p, $val.as_ptr()) } != 1 {
+                return 0;
             }
         }
     };
@@ -166,14 +166,14 @@ unsafe extern "C" fn fips_get_params(
     /* config options */
     set_config_string!(
         params,
-        OSSL_PROV_PARAM_CORE_MODULE_FILENAME,
+        cstr!(OSSL_PROV_PARAM_CORE_MODULE_FILENAME),
         FIPS_MODULE_FILE_NAME
     );
 
     #[cfg(feature = "dummy-integrity")]
     set_config_string!(
         params,
-        OSSL_PROV_FIPS_PARAM_MODULE_MAC,
+        cstr!(OSSL_PROV_FIPS_PARAM_MODULE_MAC),
         FIPS_MODULE_MAC
     );
     /* Lets always run KATS for now:
@@ -190,30 +190,35 @@ unsafe extern "C" fn fips_get_params(
      */
     set_config_string!(
         params,
-        OSSL_PROV_FIPS_PARAM_INSTALL_VERSION,
+        cstr!(OSSL_PROV_FIPS_PARAM_INSTALL_VERSION),
         FIPS_INSTALL_VERSION
     );
     set_config_string!(
         params,
-        OSSL_PROV_FIPS_PARAM_CONDITIONAL_ERRORS,
+        cstr!(OSSL_PROV_FIPS_PARAM_CONDITIONAL_ERRORS),
         FIPS_CONDITIONAL_ERRORS
     );
 
     /* features */
     set_config_string!(
         params,
-        OSSL_PROV_FIPS_PARAM_SECURITY_CHECKS,
+        cstr!(OSSL_PROV_FIPS_PARAM_SECURITY_CHECKS),
         FIPS_SECURITY_CHECKS
     );
     set_config_string!(
         params,
-        OSSL_PROV_FIPS_PARAM_TLS1_PRF_EMS_CHECK,
+        cstr!(OSSL_PROV_FIPS_PARAM_TLS1_PRF_EMS_CHECK),
         FIPS_PARAM_TLS1_PRF_EMS_CHECK
     );
     set_config_string!(
         params,
-        OSSL_PROV_FIPS_PARAM_DRBG_TRUNC_DIGEST,
+        cstr!(OSSL_PROV_FIPS_PARAM_DRBG_TRUNC_DIGEST),
         FIPS_PARAM_DRBG_TRUNC_DIGEST
+    );
+    set_config_string!(
+        params,
+        cstr!(OSSL_PROV_PARAM_RSA_PKCS15_PAD_DISABLED),
+        FIPS_PARAM_RSA_PKCS15_PAD_DISABLED
     );
 
     return 1;
