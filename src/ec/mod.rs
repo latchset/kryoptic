@@ -6,7 +6,6 @@
 
 use crate::attribute::Attribute;
 use crate::error::{device_error, general_error, Error, Result};
-use crate::interface::*;
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
 use crate::kasn1::PrivateKeyInfo;
@@ -14,6 +13,7 @@ use crate::misc::zeromem;
 use crate::object::Object;
 
 use asn1;
+use pkcs11::*;
 
 #[cfg(feature = "ecdh")]
 pub mod ecdh;

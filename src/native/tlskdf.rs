@@ -13,13 +13,13 @@ use crate::attribute::Attribute;
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::{bytes_to_slice, bytes_to_vec, cast_params, CK_ULONG_SIZE};
 use crate::object::{Object, ObjectFactories};
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
+use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use crate::fips::set_fips_error_state;

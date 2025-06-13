@@ -14,13 +14,13 @@ use std::fmt::Debug;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::{cast_params, zeromem};
 use crate::object::*;
 use crate::ossl::aes::*;
 
 use once_cell::sync::Lazy;
+use pkcs11::*;
 
 /// Smallest AES Key Size (128 bits)
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */

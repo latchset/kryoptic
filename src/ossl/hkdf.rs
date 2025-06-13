@@ -12,14 +12,17 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::*;
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use ossl::bindings::*;
+use ossl::{EvpKdfCtx, OsslParam};
+use pkcs11::*;
+
 #[cfg(feature = "fips")]
-use crate::ossl::fips::*;
+use ossl::fips::FipsApproval;
 
 /// Represents an active HKDF operation state.
 #[derive(Debug)]
@@ -48,7 +51,7 @@ pub struct HKDFOperation {
     emit_data_obj: bool,
     /// FIPS approval status for the operation.
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
 }
 
 impl HKDFOperation {
@@ -181,7 +184,7 @@ impl HKDFOperation {
             info: bytes_to_slice!(params.pInfo, params.ulInfoLen, u8).to_vec(),
             emit_data_obj: mech.mechanism == CKM_HKDF_DATA,
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: FipsApproval::init(),
         })
     }
 }
@@ -196,7 +199,7 @@ impl MechOperation for HKDFOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        self.fips_approval.approval()
     }
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
         if self.salt_type == CKF_HKDF_SALT_KEY {
@@ -273,34 +276,28 @@ impl Derive for HKDFOperation {
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_KEY),
+            cstr!(OSSL_KDF_PARAM_KEY),
             key.get_attr_as_bytes(CKA_VALUE)?,
         )?;
         params.add_const_c_string(
-            name_as_char(OSSL_KDF_PARAM_DIGEST),
-            mech_type_to_digest_name(self.prf),
+            cstr!(OSSL_KDF_PARAM_DIGEST),
+            mech_type_to_digest_name(self.prf)?,
         )?;
-        params.add_int(name_as_char(OSSL_KDF_PARAM_MODE), &mode)?;
+        params.add_int(cstr!(OSSL_KDF_PARAM_MODE), &mode)?;
 
         if self.extract && self.salt.len() > 0 {
-            params.add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_SALT),
-                &self.salt,
-            )?;
+            params.add_octet_string(cstr!(OSSL_KDF_PARAM_SALT), &self.salt)?;
         }
 
         if self.info.len() > 0 {
-            params.add_octet_string(
-                name_as_char(OSSL_KDF_PARAM_INFO),
-                &self.info,
-            )?;
+            params.add_octet_string(cstr!(OSSL_KDF_PARAM_INFO), &self.info)?;
         }
         params.finalize();
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
-        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_HKDF))?;
+        let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];
         let res = unsafe {
             EVP_KDF_derive(
@@ -315,7 +312,7 @@ impl Derive for HKDFOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_finalize(&mut self.fips_approved);
+        self.fips_approval.finalize();
 
         obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
 

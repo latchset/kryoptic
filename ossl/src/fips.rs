@@ -1,27 +1,27 @@
-// Copyright 2023 Simo Sorce
+// Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
+
+//! This module implements support for using just the fips provider as
+//! the "openssl crypto" provider, by wrapping the fips provider with
+//! enough scaffolding to be able to use it directly instead of using
+//! it through libcrypto.
 
 use std::cell::Cell;
 use std::ffi::CStr;
 use std::ffi::{c_char, c_int, c_uchar, c_void};
 use std::fs::File;
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::slice;
 
-use crate::error::Result;
-use crate::interface::*;
-use crate::ossl::bindings::*;
-use crate::ossl::common::*;
+use crate::signature::SigAlg;
+use crate::*;
 
 use getrandom;
 use libc;
 use once_cell::sync::Lazy;
 
 /* Entropy Stuff */
-
 unsafe extern "C" fn fips_get_entropy(
     _handle: *const OSSL_CORE_HANDLE,
     pout: *mut *mut ::std::os::raw::c_uchar,
@@ -106,29 +106,32 @@ unsafe extern "C" fn fips_get_nonce(
     return out;
 }
 
-cfg_if::cfg_if! {
-    if #[cfg(test)] {
-        static FIPS_MODULE_FILE_NAME: &str = "./dummy.txt\0";
+static FIPS_MODULE_FILE_NAME: Lazy<&CStr> = Lazy::new(|| {
+    if cfg!(feature = "dummy-integrity") {
+        c"./dummy.txt"
     } else {
-        static FIPS_MODULE_FILE_NAME: Lazy<&CStr> = Lazy::new(|| unsafe {
+        unsafe {
             let mut dlinfo = libc::Dl_info {
                 dli_fname: std::ptr::null(),
                 dli_fbase: std::ptr::null_mut(),
                 dli_sname: std::ptr::null(),
                 dli_saddr: std::ptr::null_mut(),
             };
-            let res = libc::dladdr(OSSL_provider_init_int as *const c_void, &mut dlinfo);
+            let res = libc::dladdr(
+                OSSL_provider_init_int as *const c_void,
+                &mut dlinfo,
+            );
             if res == 0 {
                 /* uh oh! */
                 CStr::from_bytes_with_nul(&[0u8; 1]).unwrap()
             } else {
                 CStr::from_ptr(dlinfo.dli_fname)
             }
-        });
+        }
     }
-}
+});
 
-#[cfg(test)]
+#[cfg(feature = "dummy-integrity")]
 static FIPS_MODULE_MAC: &str = "C5:91:22:79:AF:0D:28:F7:DD:6B:BF:03:6B:01:D0:E5:50:81:C5:93:18:8C:7C:77:A3:97:98:CE:56:1B:67:80\0";
 
 /* Lets always run KATS for now:
@@ -167,7 +170,7 @@ unsafe extern "C" fn fips_get_params(
         FIPS_MODULE_FILE_NAME
     );
 
-    #[cfg(test)]
+    #[cfg(feature = "dummy-integrity")]
     set_config_string!(
         params,
         OSSL_PROV_FIPS_PARAM_MODULE_MAC,
@@ -224,7 +227,7 @@ unsafe extern "C" fn fips_get_libctx(
     if prov.is_null() {
         return std::ptr::null_mut();
     }
-    get_libctx() as *mut OPENSSL_CORE_CTX
+    get_libctx().ptr() as *mut OPENSSL_CORE_CTX
 }
 
 unsafe extern "C" fn fips_thread_start(
@@ -292,7 +295,7 @@ struct FileBio {
 }
 
 impl FileBio {
-    fn new(filename: &str) -> Result<FileBio> {
+    fn new(filename: &str) -> Result<FileBio, Error> {
         Ok(FileBio {
             file: File::open(Path::new(filename))?,
         })
@@ -456,7 +459,7 @@ unsafe fn fips_cleanse(
     let slice: &mut [u8] =
         slice::from_raw_parts_mut(addr as *mut u8, pos + len);
     let (_, clear) = slice.split_at_mut(pos);
-    zeromem(clear);
+    OPENSSL_cleanse(void_ptr!(clear.as_ptr()), clear.len());
 }
 
 unsafe extern "C" fn fips_malloc(
@@ -575,6 +578,7 @@ struct FipsProvider {
     provider: *mut PROV_CTX,
     #[allow(dead_code)]
     dispatch: *const OSSL_DISPATCH,
+    context: OsslContext,
 }
 
 unsafe impl Send for FipsProvider {}
@@ -700,9 +704,13 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
         &FIPS_CANARY as *const _ as *const ossl_core_handle_st,
     );
 
+    /* we assume libctx is crated once for the provider and
+     * never changed afterwards */
+    let osslctx = ossl_prov_ctx_get0_libctx(provider);
     FipsProvider {
         provider: provider,
         dispatch: fips_dispatch,
+        context: OsslContext::from_ctx(osslctx),
     }
 });
 
@@ -710,206 +718,9 @@ pub fn init() {
     assert!(FIPS_PROVIDER.provider != std::ptr::null_mut());
 }
 
-pub fn get_libctx() -> *mut OSSL_LIB_CTX {
-    unsafe { ossl_prov_ctx_get0_libctx(FIPS_PROVIDER.provider) }
+pub fn get_libctx() -> &'static OsslContext {
+    &FIPS_PROVIDER.context
 }
-
-/* The OpenSSL FIPS Provider do not export helper functions to set up
- * digest-sign operations. So we'll just have to brute force it */
-
-macro_rules! res_to_err {
-    ($res:expr) => {
-        if $res == 1 {
-            Ok(())
-        } else {
-            Err(CKR_DEVICE_ERROR)?
-        }
-    };
-}
-
-#[derive(Debug)]
-pub struct ProviderSignatureCtx {
-    vtable: *mut EVP_SIGNATURE,
-    ctx: *mut c_void,
-}
-
-impl ProviderSignatureCtx {
-    pub fn new(alg: *const c_char) -> Result<ProviderSignatureCtx> {
-        let sigtable =
-            unsafe { EVP_SIGNATURE_fetch(get_libctx(), alg, std::ptr::null()) };
-        if sigtable.is_null() {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
-        let ctx = unsafe {
-            match (*sigtable).newctx {
-                Some(f) => {
-                    f(FIPS_PROVIDER.provider as *mut c_void, std::ptr::null())
-                }
-                None => return Err(CKR_DEVICE_ERROR)?,
-            }
-        };
-        if ctx.is_null() {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
-        Ok(ProviderSignatureCtx {
-            vtable: sigtable,
-            ctx: ctx,
-        })
-    }
-
-    pub fn digest_sign_init(
-        &mut self,
-        mdname: *const c_char,
-        pkey: &EvpPkey,
-        params: *const OSSL_PARAM,
-    ) -> Result<()> {
-        unsafe {
-            match (*self.vtable).digest_sign_init {
-                Some(f) => res_to_err!(f(
-                    self.ctx,
-                    mdname,
-                    (*pkey.as_ptr()).keydata as *mut c_void,
-                    params
-                )),
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    pub fn digest_sign_update(&mut self, data: &[u8]) -> Result<()> {
-        unsafe {
-            match (*self.vtable).digest_sign_update {
-                Some(f) => res_to_err!(f(
-                    self.ctx,
-                    data.as_ptr() as *const c_uchar,
-                    data.len()
-                )),
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    pub fn digest_sign_final(&mut self, signature: &mut [u8]) -> Result<usize> {
-        unsafe {
-            match (*self.vtable).digest_sign_final {
-                Some(f) => {
-                    let mut siglen = 0usize;
-                    let siglen_ptr: *mut usize = &mut siglen;
-                    let res = f(
-                        self.ctx,
-                        signature.as_mut_ptr() as *mut c_uchar,
-                        siglen_ptr,
-                        signature.len(),
-                    );
-                    if res != 1 {
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                    Ok(siglen)
-                }
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn digest_sign(
-        &mut self,
-        signature: &mut [u8],
-        tbs: &[u8],
-    ) -> Result<usize> {
-        unsafe {
-            match (*self.vtable).digest_sign {
-                Some(f) => {
-                    let mut siglen = 0usize;
-                    let siglen_ptr: *mut usize = &mut siglen;
-                    let res = f(
-                        self.ctx,
-                        signature.as_mut_ptr() as *mut c_uchar,
-                        siglen_ptr,
-                        signature.len(),
-                        tbs.as_ptr() as *mut c_uchar,
-                        tbs.len(),
-                    );
-                    if res != 1 {
-                        return Err(CKR_DEVICE_ERROR)?;
-                    }
-                    Ok(siglen)
-                }
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    pub fn digest_verify_init(
-        &mut self,
-        mdname: *const c_char,
-        pkey: &EvpPkey,
-        params: *const OSSL_PARAM,
-    ) -> Result<()> {
-        unsafe {
-            match (*self.vtable).digest_verify_init {
-                Some(f) => res_to_err!(f(
-                    self.ctx,
-                    mdname,
-                    (*pkey.as_ptr()).keydata as *mut c_void,
-                    params
-                )),
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    pub fn digest_verify_update(&mut self, data: &[u8]) -> Result<()> {
-        unsafe {
-            match (*self.vtable).digest_verify_update {
-                Some(f) => res_to_err!(f(
-                    self.ctx,
-                    data.as_ptr() as *const c_uchar,
-                    data.len()
-                )),
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    pub fn digest_verify_final(&mut self, signature: &[u8]) -> Result<()> {
-        unsafe {
-            match (*self.vtable).digest_verify_final {
-                Some(f) => res_to_err!(f(
-                    self.ctx,
-                    signature.as_ptr() as *const c_uchar,
-                    signature.len()
-                )),
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn digest_verify(
-        &mut self,
-        signature: &[u8],
-        tbs: &[u8],
-    ) -> Result<()> {
-        unsafe {
-            match (*self.vtable).digest_verify {
-                Some(f) => res_to_err!(f(
-                    self.ctx,
-                    signature.as_ptr() as *const c_uchar,
-                    signature.len(),
-                    tbs.as_ptr() as *const c_uchar,
-                    tbs.len()
-                )),
-                None => Err(CKR_DEVICE_ERROR)?,
-            }
-        }
-    }
-}
-
-unsafe impl Send for ProviderSignatureCtx {}
-unsafe impl Sync for ProviderSignatureCtx {}
 
 /* The Openssl FIPS indicator callback is inadequate for easily
  * accessing individual indicators in the context of a single
@@ -965,49 +776,10 @@ unsafe extern "C" fn fips_indicator_callback(
     return 1;
 }
 
-fn clear_ossl_fips_indicator() {
-    FIPS_INDICATOR.set(0);
-}
-
-fn ossl_fips_indicator_is_set() -> bool {
-    if FIPS_INDICATOR.get() == 0 {
-        return false;
-    }
-    return true;
-}
-
-fn fips_approval(fips_approved: &mut Option<bool>, finalize: bool) {
-    if ossl_fips_indicator_is_set() {
-        /* The indicator was set, therefore there was an unapproved use */
-        *fips_approved = Some(false);
-    }
-    if finalize {
-        /* this is the last check, mark approval as true if not set so far */
-        if fips_approved.is_none() {
-            *fips_approved = Some(true);
-        }
-    }
-}
-
-pub fn fips_approval_init_checks(fips_approved: &mut Option<bool>) {
-    *fips_approved = None;
-    clear_ossl_fips_indicator();
-}
-
-pub fn fips_approval_prep_check() {
-    clear_ossl_fips_indicator();
-}
-
-pub fn fips_approval_check(fips_approved: &mut Option<bool>) {
-    fips_approval(fips_approved, false);
-}
-
-pub fn fips_approval_finalize(fips_approved: &mut Option<bool>) {
-    fips_approval(fips_approved, true);
-}
-
 pub fn set_error_state() {
-    unsafe { ossl_set_error_state(name_as_char(OSSL_SELF_TEST_TYPE_PCT)) };
+    unsafe {
+        ossl_set_error_state(OSSL_SELF_TEST_TYPE_PCT.as_ptr() as *const c_char)
+    };
 }
 
 pub fn check_state_ok() -> bool {
@@ -1015,4 +787,355 @@ pub fn check_state_ok() -> bool {
         return false;
     }
     return true;
+}
+
+/// Helper function to convert legacy name to ossl name for fetching
+fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
+    match alg {
+        SigAlg::Ecdsa
+        | SigAlg::EcdsaSha1
+        | SigAlg::EcdsaSha2_224
+        | SigAlg::EcdsaSha2_256
+        | SigAlg::EcdsaSha2_384
+        | SigAlg::EcdsaSha2_512
+        | SigAlg::EcdsaSha3_224
+        | SigAlg::EcdsaSha3_256
+        | SigAlg::EcdsaSha3_384
+        | SigAlg::EcdsaSha3_512 => c"ECDSA",
+        SigAlg::Ed25519
+        | SigAlg::Ed25519ctx
+        | SigAlg::Ed25519ph
+        | SigAlg::Ed448
+        | SigAlg::Ed448ph => c"EDDSA",
+        SigAlg::Rsa
+        | SigAlg::RsaNoPad
+        | SigAlg::RsaSha1
+        | SigAlg::RsaSha2_224
+        | SigAlg::RsaSha2_256
+        | SigAlg::RsaSha2_384
+        | SigAlg::RsaSha2_512
+        | SigAlg::RsaSha3_224
+        | SigAlg::RsaSha3_256
+        | SigAlg::RsaSha3_384
+        | SigAlg::RsaSha3_512
+        | SigAlg::RsaPss
+        | SigAlg::RsaPssSha1
+        | SigAlg::RsaPssSha2_224
+        | SigAlg::RsaPssSha2_256
+        | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha2_512
+        | SigAlg::RsaPssSha3_224
+        | SigAlg::RsaPssSha3_256
+        | SigAlg::RsaPssSha3_384
+        | SigAlg::RsaPssSha3_512 => c"RSA",
+        SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => c"",
+    }
+}
+
+/* The OpenSSL FIPS Provider do not export helper functions to set up
+ * digest-sign operations. So we'll just have to brute force it */
+#[derive(Debug)]
+pub struct ProviderSignatureCtx {
+    vtable: *mut EVP_SIGNATURE,
+    ctx: *mut c_void,
+}
+
+impl ProviderSignatureCtx {
+    pub fn new(alg: SigAlg) -> Result<ProviderSignatureCtx, Error> {
+        let sigtable = unsafe {
+            EVP_SIGNATURE_fetch(
+                get_libctx().ptr(),
+                sigalg_to_legacy_name(alg).as_ptr(),
+                std::ptr::null(),
+            )
+        };
+        if sigtable.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+
+        let ctx = unsafe {
+            match (*sigtable).newctx {
+                Some(f) => {
+                    f(FIPS_PROVIDER.provider as *mut c_void, std::ptr::null())
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        };
+        if ctx.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+
+        Ok(ProviderSignatureCtx {
+            vtable: sigtable,
+            ctx: ctx,
+        })
+    }
+
+    pub fn digest_sign_init(
+        &mut self,
+        mdname: *const c_char,
+        pkey: &EvpPkey,
+        params: *const OSSL_PARAM,
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.vtable).digest_sign_init {
+                Some(f) => {
+                    if f(
+                        self.ctx,
+                        mdname,
+                        (*pkey.as_ptr()).keydata as *mut c_void,
+                        params,
+                    ) != 1
+                    {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn digest_sign_update(&mut self, data: &[u8]) -> Result<(), Error> {
+        unsafe {
+            match (*self.vtable).digest_sign_update {
+                Some(f) => {
+                    if f(self.ctx, data.as_ptr() as *const c_uchar, data.len())
+                        != 1
+                    {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn digest_sign_final(
+        &mut self,
+        signature: &mut [u8],
+    ) -> Result<usize, Error> {
+        unsafe {
+            match (*self.vtable).digest_sign_final {
+                Some(f) => {
+                    let mut siglen = 0usize;
+                    let siglen_ptr: *mut usize = &mut siglen;
+                    let res = f(
+                        self.ctx,
+                        signature.as_mut_ptr() as *mut c_uchar,
+                        siglen_ptr,
+                        signature.len(),
+                    );
+                    if res != 1 {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                    Ok(siglen)
+                }
+                None => Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+    }
+
+    pub fn digest_sign(
+        &mut self,
+        mut signature: Option<&mut [u8]>,
+        tbs: &[u8],
+    ) -> Result<usize, Error> {
+        unsafe {
+            match (*self.vtable).digest_sign {
+                Some(f) => {
+                    let mut siglen: usize;
+                    let sigptr: *mut c_uchar;
+                    match &mut signature {
+                        Some(s) => {
+                            sigptr = s.as_mut_ptr();
+                            siglen = s.len();
+                        }
+                        None => {
+                            sigptr = std::ptr::null_mut() as *mut c_uchar;
+                            siglen = 0usize;
+                        }
+                    }
+                    let siglen_ptr: *mut usize = &mut siglen;
+                    let res = f(
+                        self.ctx,
+                        sigptr,
+                        siglen_ptr,
+                        siglen,
+                        tbs.as_ptr() as *mut c_uchar,
+                        tbs.len(),
+                    );
+                    if res != 1 {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                    Ok(siglen)
+                }
+                None => Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+    }
+
+    pub fn digest_verify_init(
+        &mut self,
+        mdname: *const c_char,
+        pkey: &EvpPkey,
+        params: *const OSSL_PARAM,
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.vtable).digest_verify_init {
+                Some(f) => {
+                    if f(
+                        self.ctx,
+                        mdname,
+                        (*pkey.as_ptr()).keydata as *mut c_void,
+                        params,
+                    ) != 1
+                    {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn digest_verify_update(&mut self, data: &[u8]) -> Result<(), Error> {
+        unsafe {
+            match (*self.vtable).digest_verify_update {
+                Some(f) => {
+                    if f(self.ctx, data.as_ptr() as *const c_uchar, data.len())
+                        != 1
+                    {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn digest_verify_final(
+        &mut self,
+        signature: &[u8],
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.vtable).digest_verify_final {
+                Some(f) => {
+                    if f(
+                        self.ctx,
+                        signature.as_ptr() as *const c_uchar,
+                        signature.len(),
+                    ) != 1
+                    {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn digest_verify(
+        &mut self,
+        signature: &[u8],
+        tbs: &[u8],
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.vtable).digest_verify {
+                Some(f) => {
+                    if f(
+                        self.ctx,
+                        signature.as_ptr() as *const c_uchar,
+                        signature.len(),
+                        tbs.as_ptr() as *const c_uchar,
+                        tbs.len(),
+                    ) != 1
+                    {
+                        return Err(Error::new(ErrorKind::OsslError));
+                    }
+                }
+                None => return Err(Error::new(ErrorKind::NullPtr)),
+            }
+        }
+        Ok(())
+    }
+}
+
+unsafe impl Send for ProviderSignatureCtx {}
+unsafe impl Sync for ProviderSignatureCtx {}
+
+/// This structure represent whether a service execetuin is approved.
+/// IT has access to the internal OpenSSL fips indicator callbacks
+/// and can query the fips indicators to establish if a non-approved
+/// operation occurred.
+#[derive(Debug)]
+pub struct FipsApproval {
+    approved: Option<bool>,
+}
+
+impl FipsApproval {
+    fn clear_indicator() {
+        FIPS_INDICATOR.set(0);
+    }
+
+    fn check_indicator() -> bool {
+        FIPS_INDICATOR.get() != 0
+    }
+
+    pub fn init() -> FipsApproval {
+        Self::clear_indicator();
+        FipsApproval { approved: None }
+    }
+
+    pub fn reset(&mut self) {
+        self.approved = None;
+    }
+
+    pub fn clear(&self) {
+        Self::clear_indicator();
+    }
+
+    pub fn update(&mut self) {
+        if Self::check_indicator() {
+            /* The indicator was set, therefore there was an unapproved use */
+            self.approved = Some(false);
+        }
+    }
+
+    pub fn approval(&self) -> Option<bool> {
+        self.approved
+    }
+
+    pub fn is_approved(&self) -> bool {
+        if self.approved.is_some_and(|b| b == true) {
+            return true;
+        }
+        return false;
+    }
+
+    pub fn is_not_approved(&self) -> bool {
+        if self.approved.is_some_and(|b| b == false) {
+            return true;
+        }
+        return false;
+    }
+
+    pub fn set(&mut self, b: bool) {
+        /* can only go from true -> false */
+        /* if already false it cannot be changed */
+        if self.approved.is_some_and(|b| b == false) {
+            return;
+        }
+        self.approved = Some(b);
+    }
+
+    pub fn finalize(&mut self) {
+        self.update();
+        /* this is the last check, mark approval as true if not set so far */
+        self.set(true);
+    }
 }

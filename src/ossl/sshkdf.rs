@@ -4,14 +4,18 @@
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash;
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
-use crate::ossl::fips::*;
 use crate::{bytes_to_vec, cast_params};
+
+use ossl::bindings::*;
+use ossl::{EvpKdfCtx, OsslParam};
+use pkcs11::vendor::KR_SSHKDF_PARAMS;
+use pkcs11::*;
+
+use ossl::fips::FipsApproval;
 
 #[derive(Debug)]
 pub struct SSHKDFOperation {
@@ -22,7 +26,7 @@ pub struct SSHKDFOperation {
     exchange_hash: Vec<u8>,
     session_id: Vec<u8>,
     #[cfg(feature = "fips")]
-    fips_approved: Option<bool>,
+    fips_approval: FipsApproval,
     is_data: bool,
 }
 
@@ -55,7 +59,7 @@ impl SSHKDFOperation {
             ),
             session_id: bytes_to_vec!(params.pSessionId, params.ulSessionIdLen),
             #[cfg(feature = "fips")]
-            fips_approved: None,
+            fips_approval: FipsApproval::init(),
             is_data: is_data,
         })
     }
@@ -71,7 +75,7 @@ impl MechOperation for SSHKDFOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        self.fips_approval.approval()
     }
 }
 
@@ -103,31 +107,29 @@ impl Derive for SSHKDFOperation {
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;
         params.add_const_c_string(
-            name_as_char(OSSL_ALG_PARAM_DIGEST),
-            mech_type_to_digest_name(self.prf),
+            cstr!(OSSL_ALG_PARAM_DIGEST),
+            mech_type_to_digest_name(self.prf)?,
         )?;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_KEY),
+            cstr!(OSSL_KDF_PARAM_KEY),
             key.get_attr_as_bytes(CKA_VALUE)?,
         )?;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
+            cstr!(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
             &self.exchange_hash,
         )?;
         params.add_octet_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
+            cstr!(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
             &self.session_id,
         )?;
-        params.add_utf8_string(
-            name_as_char(OSSL_KDF_PARAM_SSHKDF_TYPE),
-            &sshkdf_type,
-        )?;
+        params
+            .add_utf8_string(cstr!(OSSL_KDF_PARAM_SSHKDF_TYPE), &sshkdf_type)?;
         params.finalize();
 
         #[cfg(feature = "fips")]
-        fips_approval_prep_check();
+        self.fips_approval.clear();
 
-        let mut kctx = EvpKdfCtx::new(name_as_char(OSSL_KDF_NAME_SSHKDF))?;
+        let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_SSHKDF))?;
         let mut dkm = vec![0u8; value_len];
         let res = unsafe {
             EVP_KDF_derive(
@@ -142,7 +144,7 @@ impl Derive for SSHKDFOperation {
         }
 
         #[cfg(feature = "fips")]
-        fips_approval_finalize(&mut self.fips_approved);
+        self.fips_approval.finalize();
 
         dobj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
         Ok(vec![dobj])

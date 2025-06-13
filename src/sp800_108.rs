@@ -9,10 +9,11 @@
 use std::fmt::Debug;
 
 use crate::error::{map_err, Result};
-use crate::interface::*;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, cast_params, sizeof};
 use crate::object::{Object, ObjectFactories};
+
+use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::sp800_108::*;

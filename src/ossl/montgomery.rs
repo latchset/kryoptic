@@ -5,15 +5,17 @@
 //! (Curve25519/X25519, Curve448/X448) using the OpenSSL EVP interface,
 //! primarily key generation and parameter conversion.
 
-use std::ffi::{c_char, c_int};
+use std::ffi::{c_int, CStr};
 
 use crate::attribute::Attribute;
 use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
-use crate::interface::*;
 use crate::object::Object;
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use ossl::bindings::*;
+use ossl::{EvpPkey, OsslParam};
+use pkcs11::*;
 
 /// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into
 /// OpenSSL parameters (`OsslParam`).
@@ -24,7 +26,7 @@ use crate::ossl::common::*;
 pub fn ecm_object_to_params(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(*const c_char, OsslParam)> {
+) -> Result<(&'static CStr, OsslParam)> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
@@ -37,13 +39,13 @@ pub fn ecm_object_to_params(
     match kclass {
         CKO_PUBLIC_KEY => {
             params.add_owned_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PUB_KEY),
+                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                 get_ec_point_from_obj(key)?,
             )?;
         }
         CKO_PRIVATE_KEY => {
             params.add_octet_string(
-                name_as_char(OSSL_PKEY_PARAM_PRIV_KEY),
+                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                 key.get_attr_as_bytes(CKA_VALUE)?,
             )?;
         }
@@ -53,7 +55,7 @@ pub fn ecm_object_to_params(
 
     params.finalize();
 
-    Ok((name_as_char(name), params))
+    Ok((name, params))
 }
 
 /// Represents state for Montgomery curve operations (currently mainly keygen).
@@ -73,7 +75,8 @@ impl ECMontgomeryOperation {
         privkey: &mut Object,
     ) -> Result<()> {
         let evp_pkey = EvpPkey::generate(
-            get_ossl_name_from_obj(pubkey)?.as_ptr() as *const c_char,
+            osslctx(),
+            get_ossl_name_from_obj(pubkey)?,
             &OsslParam::empty(),
         )?;
 
@@ -91,13 +94,13 @@ impl ECMontgomeryOperation {
         let params = OsslParam::from_ptr(params)?;
         /* Public Key */
         let point = params
-            .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY))?
+            .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?
             .to_vec();
         pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point))?;
 
         /* Private Key */
         let value = params
-            .get_octet_string(name_as_char(OSSL_PKEY_PARAM_PRIV_KEY))?
+            .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?
             .to_vec();
         privkey.set_attr(Attribute::from_bytes(CKA_VALUE, value))?;
         Ok(())

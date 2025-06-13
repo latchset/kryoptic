@@ -5,17 +5,19 @@
 //! functionalities according to PKCS#11 standards (CKM_ECDH1_DERIVE,
 //! CKM_ECDH1_COFACTOR_DERIVE) using the OpenSSL EVP_PKEY_derive API.
 
-use core::ffi::{c_char, c_int, c_uint};
+use core::ffi::{c_int, c_uint};
 use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
 use crate::error::Result;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::bytes_to_vec;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-use crate::ossl::bindings::*;
 use crate::ossl::common::*;
+
+use ossl::bindings::*;
+use ossl::{EvpPkey, OsslParam};
+use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
 /// PKCS#11 hash mechanism type (`CK_MECHANISM_TYPE`).
@@ -47,8 +49,8 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
         #[cfg(feature = "ecdsa")]
         CKK_EC => {
             params.add_const_c_string(
-                name_as_char(OSSL_PKEY_PARAM_GROUP_NAME),
-                name_as_char(get_ossl_name_from_obj(key)?),
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                get_ossl_name_from_obj(key)?,
             )?;
             EC_NAME
         }
@@ -57,10 +59,15 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     };
 
-    params.add_octet_string(name_as_char(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
+    params.add_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
     params.finalize();
 
-    EvpPkey::fromdata(name_as_char(name), EVP_PKEY_PUBLIC_KEY, &params)
+    Ok(EvpPkey::fromdata(
+        osslctx(),
+        name,
+        EVP_PKEY_PUBLIC_KEY,
+        &params,
+    )?)
 }
 
 /// Represents an active ECDH key derivation operation.
@@ -147,14 +154,12 @@ impl Derive for ECDHOperation {
         };
         let outlen: c_uint;
 
-        let mut pkey = EvpPkey::privkey_from_object(key)?;
+        let mut pkey = privkey_from_object(key)?;
 
         let mut params = OsslParam::with_capacity(5);
         params.zeroize = true;
-        params.add_int(
-            name_as_char(OSSL_EXCHANGE_PARAM_EC_ECDH_COFACTOR_MODE),
-            &mode,
-        )?;
+        params
+            .add_int(cstr!(OSSL_EXCHANGE_PARAM_EC_ECDH_COFACTOR_MODE), &mode)?;
 
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
@@ -189,24 +194,22 @@ impl Derive for ECDHOperation {
             | CKD_SHA512_KDF | CKD_SHA3_224_KDF | CKD_SHA3_256_KDF
             | CKD_SHA3_384_KDF | CKD_SHA3_512_KDF => {
                 params.add_const_c_string(
-                    name_as_char(OSSL_EXCHANGE_PARAM_KDF_TYPE),
-                    OSSL_KDF_NAME_X963KDF.as_ptr() as *const c_char,
+                    cstr!(OSSL_EXCHANGE_PARAM_KDF_TYPE),
+                    cstr!(OSSL_KDF_NAME_X963KDF),
                 )?;
                 params.add_const_c_string(
-                    name_as_char(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
-                    mech_type_to_digest_name(kdf_type_to_hash_mech(self.kdf)?),
+                    cstr!(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
+                    mech_type_to_digest_name(kdf_type_to_hash_mech(self.kdf)?)?,
                 )?;
                 if self.shared.len() > 0 {
                     params.add_octet_string(
-                        name_as_char(OSSL_EXCHANGE_PARAM_KDF_UKM),
+                        cstr!(OSSL_EXCHANGE_PARAM_KDF_UKM),
                         &self.shared,
                     )?;
                 }
                 outlen = c_uint::try_from(keylen)?;
-                params.add_uint(
-                    name_as_char(OSSL_EXCHANGE_PARAM_KDF_OUTLEN),
-                    &outlen,
-                )?;
+                params
+                    .add_uint(cstr!(OSSL_EXCHANGE_PARAM_KDF_OUTLEN), &outlen)?;
             }
             CKD_NULL => (),
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
@@ -214,7 +217,7 @@ impl Derive for ECDHOperation {
 
         params.finalize();
 
-        let mut ctx = pkey.new_ctx()?;
+        let mut ctx = pkey.new_ctx(osslctx())?;
         let res = unsafe {
             EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
         };

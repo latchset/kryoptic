@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+use pkcs11::vendor::*;
 
 use itertools::Itertools;
 use serial_test::parallel;

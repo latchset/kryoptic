@@ -9,10 +9,12 @@ use std::fmt::Debug;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::hash;
-use crate::interface::*;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc;
 use crate::object::{Object, ObjectFactories};
+
+use pkcs11::vendor::KR_SSHKDF_PARAMS;
+use pkcs11::*;
 
 /// Represents an SSH Key Derivation Function (KDF) operation
 /// ([RFC 4253](https://www.rfc-editor.org/rfc/rfc4253) Section 7.2)

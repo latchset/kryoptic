@@ -9,12 +9,12 @@ use std::fmt::Debug;
 
 use crate::error::{Error, Result};
 use crate::hash;
-use crate::interface::*;
 use crate::mechanism::*;
 use crate::misc::{sizeof, zeromem};
 use crate::object::*;
 
 use once_cell::sync::Lazy;
+use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::hmac::HMACOperation;
