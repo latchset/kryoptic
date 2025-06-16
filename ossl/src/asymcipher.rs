@@ -4,10 +4,8 @@
 //! This module provides a coherent abstraction over the several OpenSSL
 //! asymmetric encryption apis
 
-use std::ffi::CStr;
-
 use crate::bindings::*;
-
+use crate::digest::{digest_to_string, DigestAlg};
 use crate::{
     cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
     OsslParam,
@@ -23,8 +21,8 @@ pub enum EncAlg {
 
 /// Oaep Parameters container
 pub struct RsaOaepParams {
-    pub digest: &'static CStr,
-    pub mgf1: &'static CStr,
+    pub digest: DigestAlg,
+    pub mgf1: DigestAlg,
     pub label: Option<Vec<u8>>,
 }
 
@@ -48,11 +46,11 @@ pub fn rsa_enc_params(
                 )?;
                 params.add_const_c_string(
                     cstr!(OSSL_ASYM_CIPHER_PARAM_OAEP_DIGEST),
-                    oaep.digest,
+                    digest_to_string(oaep.digest),
                 )?;
                 params.add_const_c_string(
                     cstr!(OSSL_PKEY_PARAM_MGF1_DIGEST),
-                    oaep.mgf1,
+                    digest_to_string(oaep.mgf1),
                 )?;
                 match &oaep.label {
                     None => (),

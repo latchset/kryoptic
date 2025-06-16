@@ -17,6 +17,7 @@ use crate::ossl::common::*;
 
 use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
 use ossl::bindings::*;
+use ossl::digest::DigestAlg;
 use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
 use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
@@ -106,17 +107,17 @@ pub fn rsa_object_to_params(
 
 /// Maps a PKCS#11 MGF type (`CK_RSA_PKCS_MGF_TYPE`) to the corresponding
 /// OpenSSL digest name used within MGF1.
-fn mgf1_to_digest_name(mech: CK_MECHANISM_TYPE) -> Result<&'static CStr> {
+fn mgf1_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
     Ok(match mech {
-        CKG_MGF1_SHA1 => cstr!(OSSL_DIGEST_NAME_SHA1),
-        CKG_MGF1_SHA224 => cstr!(OSSL_DIGEST_NAME_SHA2_224),
-        CKG_MGF1_SHA256 => cstr!(OSSL_DIGEST_NAME_SHA2_256),
-        CKG_MGF1_SHA384 => cstr!(OSSL_DIGEST_NAME_SHA2_384),
-        CKG_MGF1_SHA512 => cstr!(OSSL_DIGEST_NAME_SHA2_512),
-        CKG_MGF1_SHA3_224 => cstr!(OSSL_DIGEST_NAME_SHA3_224),
-        CKG_MGF1_SHA3_256 => cstr!(OSSL_DIGEST_NAME_SHA3_256),
-        CKG_MGF1_SHA3_384 => cstr!(OSSL_DIGEST_NAME_SHA3_384),
-        CKG_MGF1_SHA3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
+        CKG_MGF1_SHA1 => DigestAlg::Sha1,
+        CKG_MGF1_SHA224 => DigestAlg::Sha2_224,
+        CKG_MGF1_SHA256 => DigestAlg::Sha2_256,
+        CKG_MGF1_SHA384 => DigestAlg::Sha2_384,
+        CKG_MGF1_SHA512 => DigestAlg::Sha2_512,
+        CKG_MGF1_SHA3_224 => DigestAlg::Sha3_224,
+        CKG_MGF1_SHA3_256 => DigestAlg::Sha3_256,
+        CKG_MGF1_SHA3_384 => DigestAlg::Sha3_384,
+        CKG_MGF1_SHA3_512 => DigestAlg::Sha3_512,
         _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     })
 }
@@ -153,9 +154,9 @@ fn parse_sig_params(
     };
     if pss {
         let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
-        let mdname = mech_type_to_digest_name(params.hashAlg)?;
+        let mdname = mech_type_to_digest_alg(params.hashAlg)?;
         if mech.mechanism != CKM_RSA_PKCS_PSS {
-            if mech_type_to_digest_name(mech.mechanism)? != mdname {
+            if mech_type_to_digest_alg(mech.mechanism)? != mdname {
                 return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
         }
@@ -163,7 +164,7 @@ fn parse_sig_params(
             alg,
             Some(RsaPssParams {
                 digest: mdname,
-                mgf1: mgf1_to_digest_name(params.mgf)?,
+                mgf1: mgf1_to_digest_alg(params.mgf)?,
                 saltlen: c_int::try_from(params.sLen)?,
             }),
         ))
@@ -201,8 +202,8 @@ fn parse_enc_params(
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             };
             let oaep = RsaOaepParams {
-                digest: mech_type_to_digest_name(params.hashAlg)?,
-                mgf1: mgf1_to_digest_name(params.mgf)?,
+                digest: mech_type_to_digest_alg(params.hashAlg)?,
+                mgf1: mgf1_to_digest_alg(params.mgf)?,
                 label: label,
             };
             Ok((EncAlg::RsaOaep, Some(oaep)))

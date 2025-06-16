@@ -8,8 +8,39 @@ use std::ffi::{c_uint, c_void, CStr};
 use crate::bindings::*;
 
 use crate::{
-    trace_ossl, Error, ErrorKind, EvpMd, EvpMdCtx, OsslContext, OsslParam,
+    cstr, trace_ossl, Error, ErrorKind, EvpMd, EvpMdCtx, OsslContext, OsslParam,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DigestAlg {
+    Sha1,
+    Sha2_224,
+    Sha2_256,
+    Sha2_384,
+    Sha2_512,
+    Sha2_512_224,
+    Sha2_512_256,
+    Sha3_224,
+    Sha3_256,
+    Sha3_384,
+    Sha3_512,
+}
+
+pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
+    match digest {
+        DigestAlg::Sha1 => cstr!(OSSL_DIGEST_NAME_SHA1),
+        DigestAlg::Sha2_224 => cstr!(OSSL_DIGEST_NAME_SHA2_224),
+        DigestAlg::Sha2_256 => cstr!(OSSL_DIGEST_NAME_SHA2_256),
+        DigestAlg::Sha2_384 => cstr!(OSSL_DIGEST_NAME_SHA2_384),
+        DigestAlg::Sha2_512 => cstr!(OSSL_DIGEST_NAME_SHA2_512),
+        DigestAlg::Sha2_512_224 => cstr!(OSSL_DIGEST_NAME_SHA2_512_224),
+        DigestAlg::Sha2_512_256 => cstr!(OSSL_DIGEST_NAME_SHA2_512_256),
+        DigestAlg::Sha3_224 => cstr!(OSSL_DIGEST_NAME_SHA3_224),
+        DigestAlg::Sha3_256 => cstr!(OSSL_DIGEST_NAME_SHA3_256),
+        DigestAlg::Sha3_384 => cstr!(OSSL_DIGEST_NAME_SHA3_384),
+        DigestAlg::Sha3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
+    }
+}
 
 /// Higher level wrapper for Digest operations
 #[derive(Debug)]
@@ -26,10 +57,10 @@ impl OsslDigest {
     /// Fully initializes a new digest context that is ready to ingest data
     pub fn new(
         ctx: &OsslContext,
-        digest: &CStr,
+        digest: DigestAlg,
         params: Option<&OsslParam>,
     ) -> Result<OsslDigest, Error> {
-        let md = EvpMd::new(ctx, digest)?;
+        let md = EvpMd::new(ctx, digest_to_string(digest))?;
         let size = usize::try_from(unsafe { EVP_MD_get_size(md.as_ptr()) })?;
         let mut dctx = OsslDigest {
             ctx: EvpMdCtx::new()?,
