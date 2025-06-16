@@ -1,30 +1,22 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::ffi::c_int;
-
 use crate::attribute::Attribute;
 use crate::error::{map_err, Result};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::{bytes_to_slice, bytes_to_vec};
+use crate::misc::bytes_to_slice;
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::common::*;
-use crate::sp800_108::*;
+use crate::ossl::common::osslctx;
+use crate::sp800_108::{verify_prf_key, Sp800Params};
 
-use ossl::bindings::*;
-use ossl::{EvpKdfCtx, OsslParam};
+use ossl::derive::{KbkdfCounterLen, KbkdfDerive, KbkdfMac, KbkdfMode};
 use pkcs11::*;
 
 use ossl::fips::FipsApproval;
 
-const SP800_MODE_COUNTER: &[u8; 8] = b"counter\0";
-const SP800_MODE_FEEDBACK: &[u8; 9] = b"feedback\0";
-const MAC_NAME_CMAC: &[u8; 5] = b"CMAC\0";
-const MAC_NAME_HMAC: &[u8; 5] = b"HMAC\0";
-
 fn prep_counter_kdf<'a>(
     sparams: &'a Vec<Sp800Params>,
-    params: &mut OsslParam<'a>,
+    kbkdf: &mut KbkdfDerive<'a>,
 ) -> Result<()> {
     if sparams.len() < 1 {
         return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -40,10 +32,13 @@ fn prep_counter_kdf<'a>(
                 /* OpenSSL limitations */
                 return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
-            params.add_owned_int(
-                cstr!(OSSL_KDF_PARAM_KBKDF_R),
-                c_int::try_from(i.bits)?,
-            )?;
+            kbkdf.set_counter_len(match i.bits {
+                8 => KbkdfCounterLen::Len8b,
+                16 => KbkdfCounterLen::Len16b,
+                24 => KbkdfCounterLen::Len24b,
+                32 => KbkdfCounterLen::Len32b,
+                _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+            })?;
         }
         _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     }
@@ -62,29 +57,19 @@ fn prep_counter_kdf<'a>(
                 }
                 if separator {
                     /* separator set, this is a Context */
-                    params.add_octet_string(cstr!(OSSL_KDF_PARAM_INFO), &v)?;
+                    kbkdf.set_info(v.as_slice());
                     context = true;
                 } else {
                     /* check if separator */
                     if v.len() == 1 && v[0] == 0 {
-                        params.add_owned_int(
-                            cstr!(OSSL_KDF_PARAM_KBKDF_USE_SEPARATOR),
-                            1,
-                        )?;
                         separator = true;
                     } else {
                         if label {
                             /* label set and no separator, this is a Context */
-                            params.add_octet_string(
-                                cstr!(OSSL_KDF_PARAM_INFO),
-                                &v,
-                            )?;
+                            kbkdf.set_info(v.as_slice());
                             context = true;
                         } else {
-                            params.add_octet_string(
-                                cstr!(OSSL_KDF_PARAM_SALT),
-                                &v,
-                            )?;
+                            kbkdf.set_salt(v.as_slice());
                             label = true;
                         }
                     }
@@ -102,7 +87,6 @@ fn prep_counter_kdf<'a>(
                     /* OpenSSL limitations */
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                params.add_owned_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_L), 1)?;
                 dkmlen = true;
 
                 /* DKM Length is always last in OpenSSL, so also mark
@@ -113,19 +97,14 @@ fn prep_counter_kdf<'a>(
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
     }
-    if !separator {
-        params.add_owned_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_SEPARATOR), 0)?
-    }
-    if !dkmlen {
-        params.add_owned_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_L), 0)?
-    }
-    params.finalize();
+    kbkdf.use_separator(separator);
+    kbkdf.use_fixed_len(dkmlen);
     Ok(())
 }
 
 fn prep_feedback_kdf<'a>(
     sparams: &'a Vec<Sp800Params>,
-    params: &mut OsslParam<'a>,
+    kbkdf: &mut KbkdfDerive<'a>,
 ) -> Result<()> {
     if sparams.len() < 1 {
         return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -159,10 +138,13 @@ fn prep_feedback_kdf<'a>(
                     /* OpenSSL limitations */
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                params.add_owned_int(
-                    cstr!(OSSL_KDF_PARAM_KBKDF_R),
-                    c_int::try_from(c.bits)?,
-                )?;
+                kbkdf.set_counter_len(match c.bits {
+                    8 => KbkdfCounterLen::Len8b,
+                    16 => KbkdfCounterLen::Len16b,
+                    24 => KbkdfCounterLen::Len24b,
+                    32 => KbkdfCounterLen::Len32b,
+                    _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+                })?;
             }
             Sp800Params::ByteArray(v) => {
                 /* unconditionally set counter to true as once we get
@@ -175,29 +157,19 @@ fn prep_feedback_kdf<'a>(
                 }
                 if separator {
                     /* separator set, this is a Context */
-                    params.add_octet_string(cstr!(OSSL_KDF_PARAM_INFO), &v)?;
+                    kbkdf.set_info(v.as_slice());
                     context = true;
                 } else {
                     /* check if separator */
                     if v.len() == 1 && v[0] == 0 {
-                        params.add_owned_int(
-                            cstr!(OSSL_KDF_PARAM_KBKDF_USE_L),
-                            1,
-                        )?;
                         separator = true;
                     } else {
                         if label {
                             /* label set and no separator, this is a Context */
-                            params.add_octet_string(
-                                cstr!(OSSL_KDF_PARAM_INFO),
-                                &v,
-                            )?;
+                            kbkdf.set_info(v.as_slice());
                             context = true;
                         } else {
-                            params.add_octet_string(
-                                cstr!(OSSL_KDF_PARAM_SALT),
-                                &v,
-                            )?;
+                            kbkdf.set_salt(v.as_slice());
                             label = true;
                         }
                     }
@@ -215,7 +187,6 @@ fn prep_feedback_kdf<'a>(
                     /* OpenSSL limitations */
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                params.add_owned_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_L), 1)?;
                 dkmlen = true;
 
                 /* DKM Length is always last in OpenSSL, so also mark
@@ -227,13 +198,8 @@ fn prep_feedback_kdf<'a>(
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         }
     }
-    if !separator {
-        params.add_owned_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_SEPARATOR), 0)?
-    }
-    if !dkmlen {
-        params.add_owned_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_L), 0)?
-    }
-    params.finalize();
+    kbkdf.use_separator(separator);
+    kbkdf.use_fixed_len(dkmlen);
     Ok(())
 }
 
@@ -276,7 +242,7 @@ pub struct Sp800Operation {
     prf: CK_MECHANISM_TYPE,
     finalized: bool,
     params: Vec<Sp800Params>,
-    iv: Vec<u8>,
+    iv: Option<&'static [u8]>, /* TODO: 'static -> 'a */
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
     #[cfg(feature = "fips")]
     fips_approval: FipsApproval,
@@ -304,7 +270,7 @@ impl Sp800Operation {
             prf: params.prfType,
             finalized: false,
             params: Sp800Params::parse_data_params(&data_params)?,
-            iv: Vec::new(),
+            iv: None,
             addl_drv_keys: addl_drv_keys.to_vec(),
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
@@ -325,9 +291,9 @@ impl Sp800Operation {
             CK_DERIVED_KEY
         );
         let iv = if params.pIV != std::ptr::null_mut() && params.ulIVLen != 0 {
-            bytes_to_vec!(params.pIV, params.ulIVLen)
+            Some(bytes_to_slice!(params.pIV, params.ulIVLen, u8))
         } else if params.pIV == std::ptr::null_mut() && params.ulIVLen == 0 {
-            Vec::new()
+            None
         } else {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         };
@@ -387,65 +353,41 @@ impl Derive for Sp800Operation {
          * and other lengths as bigendian, has a fixed size for the L
          * variable of 32 bit (or none at all), and supports only
          * counters of size 8, 16, 24, 32 ...
-         * If any of these restrictions breaks a user we'll have to
-         * reimplement the KBKDF code using raw HAMC/CMAC PRFs */
+         */
 
-        let mac_type_name = if self.prf == CKM_AES_CMAC {
-            cstr!(MAC_NAME_CMAC)
-        } else {
-            cstr!(MAC_NAME_HMAC)
+        let mode = match self.mech {
+            CKM_SP800_108_COUNTER_KDF => KbkdfMode::Counter,
+            CKM_SP800_108_FEEDBACK_KDF => KbkdfMode::Feedback,
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
-        let (prf_alg_param, prf_alg_value) = match self.prf {
-            CKM_SHA_1_HMAC | CKM_SHA224_HMAC | CKM_SHA256_HMAC
-            | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_224_HMAC
-            | CKM_SHA512_224_HMAC | CKM_SHA512_256_HMAC | CKM_SHA3_256_HMAC
-            | CKM_SHA3_384_HMAC | CKM_SHA3_512_HMAC => (
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                mech_type_to_digest_name(self.prf)?,
-            ),
-            CKM_AES_CMAC => (
-                cstr!(OSSL_KDF_PARAM_CIPHER),
-                match key.get_attr_as_ulong(CKA_VALUE_LEN)? {
-                    16 => cstr!(CIPHER_NAME_AES128),
-                    24 => cstr!(CIPHER_NAME_AES192),
-                    32 => cstr!(CIPHER_NAME_AES256),
-                    _ => return Err(CKR_KEY_INDIGESTIBLE)?,
-                },
-            ),
+        let mac = match self.prf {
+            CKM_SHA_1_HMAC => KbkdfMac::HmacSha1,
+            CKM_SHA224_HMAC => KbkdfMac::HmacSha2_224,
+            CKM_SHA256_HMAC => KbkdfMac::HmacSha2_256,
+            CKM_SHA384_HMAC => KbkdfMac::HmacSha2_384,
+            CKM_SHA512_HMAC => KbkdfMac::HmacSha2_512,
+            CKM_SHA512_224_HMAC => KbkdfMac::HmacSha2_512_224,
+            CKM_SHA512_256_HMAC => KbkdfMac::HmacSha2_512_256,
+            CKM_SHA3_224_HMAC => KbkdfMac::HmacSha3_224,
+            CKM_SHA3_256_HMAC => KbkdfMac::HmacSha3_256,
+            CKM_SHA3_384_HMAC => KbkdfMac::HmacSha3_384,
+            CKM_SHA3_512_HMAC => KbkdfMac::HmacSha3_512,
+            CKM_AES_CMAC => match key.get_attr_as_ulong(CKA_VALUE_LEN)? {
+                16 => KbkdfMac::CmacAes128,
+                24 => KbkdfMac::CmacAes192,
+                32 => KbkdfMac::CmacAes256,
+                _ => return Err(CKR_KEY_INDIGESTIBLE)?,
+            },
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
-
-        let mut params = OsslParam::with_capacity(10);
-        params.zeroize = true;
-        params.add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac_type_name)?;
-        params.add_const_c_string(prf_alg_param, prf_alg_value)?;
-        params.add_octet_string(
-            cstr!(OSSL_KDF_PARAM_KEY),
-            key.get_attr_as_bytes(CKA_VALUE)?,
-        )?;
-
-        match self.mech {
-            CKM_SP800_108_COUNTER_KDF => {
-                params.add_const_c_string(
-                    cstr!(OSSL_KDF_PARAM_MODE),
-                    cstr!(SP800_MODE_COUNTER),
-                )?;
-                prep_counter_kdf(&self.params, &mut params)?;
-            }
-            CKM_SP800_108_FEEDBACK_KDF => {
-                params.add_const_c_string(
-                    cstr!(OSSL_KDF_PARAM_MODE),
-                    cstr!(SP800_MODE_FEEDBACK),
-                )?;
-                if self.iv.len() > 0 {
-                    params.add_octet_string(
-                        cstr!(OSSL_KDF_PARAM_SEED),
-                        &self.iv,
-                    )?;
-                }
-                prep_feedback_kdf(&self.params, &mut params)?;
-            }
-            _ => return Err(CKR_GENERAL_ERROR)?,
+        let mut kdf = KbkdfDerive::new(osslctx(), mac, mode)?;
+        kdf.set_key(key.get_attr_as_bytes(CKA_VALUE)?.as_slice());
+        match mode {
+            KbkdfMode::Counter => prep_counter_kdf(&self.params, &mut kdf)?,
+            KbkdfMode::Feedback => prep_feedback_kdf(&self.params, &mut kdf)?,
+        }
+        if let Some(iv) = self.iv {
+            kdf.set_seed(iv);
         }
 
         let mut segment = 1;
@@ -512,19 +454,8 @@ impl Derive for Sp800Operation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_KBKDF))?;
         let mut dkm = vec![0u8; slen];
-        let res = unsafe {
-            EVP_KDF_derive(
-                kctx.as_mut_ptr(),
-                dkm.as_mut_ptr(),
-                dkm.len(),
-                params.as_ptr(),
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        kdf.derive(&mut dkm)?;
 
         #[cfg(feature = "fips")]
         self.fips_approval.update();

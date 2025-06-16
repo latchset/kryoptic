@@ -3,15 +3,16 @@
 
 use crate::attribute::Attribute;
 use crate::error::Result;
-use crate::hash;
+use crate::hash::is_valid_hash;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc;
+use crate::misc::{
+    bytes_to_slice, cast_params, common_derive_data_object,
+    common_derive_key_object,
+};
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::common::*;
-use crate::{bytes_to_vec, cast_params};
+use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 
-use ossl::bindings::*;
-use ossl::{EvpKdfCtx, OsslParam};
+use ossl::derive::{SshKdfPurpose, SshkdfDerive};
 use pkcs11::vendor::KR_SSHKDF_PARAMS;
 use pkcs11::*;
 
@@ -22,29 +23,28 @@ pub struct SSHKDFOperation {
     mech: CK_MECHANISM_TYPE,
     finalized: bool,
     prf: CK_MECHANISM_TYPE,
-    key_type: u8,
-    exchange_hash: Vec<u8>,
-    session_id: Vec<u8>,
+    purpose: SshKdfPurpose,
+    exchange_hash: &'static [u8], /* TODO: static -> a */
+    session_id: &'static [u8],    /* TODO: static -> a */
     #[cfg(feature = "fips")]
     fips_approval: FipsApproval,
-    is_data: bool,
 }
 
 impl SSHKDFOperation {
     pub fn new(mech: &CK_MECHANISM) -> Result<SSHKDFOperation> {
         let params = cast_params!(mech, KR_SSHKDF_PARAMS);
 
-        if !hash::is_valid_hash(params.prfHashMechanism) {
+        if !is_valid_hash(params.prfHashMechanism) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let is_data = match params.derivedKeyType {
-            0x41 => true,  /* A */
-            0x42 => true,  /* B */
-            0x43 => false, /* C */
-            0x44 => false, /* D */
-            0x45 => false, /* E */
-            0x46 => false, /* F */
+        let purpose = match params.derivedKeyType {
+            b'A' => SshKdfPurpose::InitialIVClientToServer,
+            b'B' => SshKdfPurpose::InitialIVServerToClient,
+            b'C' => SshKdfPurpose::EncryptioKeyClientToServer,
+            b'D' => SshKdfPurpose::EncryptioKeyServerToClient,
+            b'E' => SshKdfPurpose::IntegrityKeyClientToServer,
+            b'F' => SshKdfPurpose::IntegrityKeyServerToClient,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
@@ -52,15 +52,19 @@ impl SSHKDFOperation {
             mech: mech.mechanism,
             finalized: false,
             prf: params.prfHashMechanism,
-            key_type: params.derivedKeyType,
-            exchange_hash: bytes_to_vec!(
+            purpose: purpose,
+            exchange_hash: bytes_to_slice!(
                 params.pExchangeHash,
-                params.ulExchangeHashLen
+                params.ulExchangeHashLen,
+                u8
             ),
-            session_id: bytes_to_vec!(params.pSessionId, params.ulSessionIdLen),
+            session_id: bytes_to_slice!(
+                params.pSessionId,
+                params.ulSessionIdLen,
+                u8
+            ),
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
-            is_data: is_data,
         })
     }
 }
@@ -94,54 +98,29 @@ impl Derive for SSHKDFOperation {
 
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
 
-        let (mut dobj, value_len) = if self.is_data {
-            misc::common_derive_data_object(template, objfactories, 0)
-        } else {
-            misc::common_derive_key_object(key, template, objfactories, 0)
-        }?;
+        let (mut dobj, value_len) = match self.purpose {
+            SshKdfPurpose::InitialIVClientToServer
+            | SshKdfPurpose::InitialIVServerToClient => {
+                common_derive_data_object(template, objfactories, 0)?
+            }
+            _ => common_derive_key_object(key, template, objfactories, 0)?,
+        };
         if value_len == 0 || value_len > usize::try_from(u32::MAX)? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
-        let sshkdf_type = vec![self.key_type, 0u8];
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params.add_const_c_string(
-            cstr!(OSSL_ALG_PARAM_DIGEST),
-            mech_type_to_digest_name(self.prf)?,
-        )?;
-        params.add_octet_string(
-            cstr!(OSSL_KDF_PARAM_KEY),
-            key.get_attr_as_bytes(CKA_VALUE)?,
-        )?;
-        params.add_octet_string(
-            cstr!(OSSL_KDF_PARAM_SSHKDF_XCGHASH),
-            &self.exchange_hash,
-        )?;
-        params.add_octet_string(
-            cstr!(OSSL_KDF_PARAM_SSHKDF_SESSION_ID),
-            &self.session_id,
-        )?;
-        params
-            .add_utf8_string(cstr!(OSSL_KDF_PARAM_SSHKDF_TYPE), &sshkdf_type)?;
-        params.finalize();
+        let mut kdf =
+            SshkdfDerive::new(osslctx(), mech_type_to_digest_alg(self.prf)?)?;
+        kdf.set_purpose(self.purpose);
+        kdf.set_key(key.get_attr_as_bytes(CKA_VALUE)?.as_slice());
+        kdf.set_hash(self.exchange_hash);
+        kdf.set_session(self.session_id);
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_SSHKDF))?;
         let mut dkm = vec![0u8; value_len];
-        let res = unsafe {
-            EVP_KDF_derive(
-                kctx.as_mut_ptr(),
-                dkm.as_mut_ptr(),
-                dkm.len(),
-                params.as_ptr(),
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        kdf.derive(&mut dkm)?;
 
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();

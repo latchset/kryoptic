@@ -5,7 +5,6 @@
 //! mechanism (CKM_HKDF) as specified in RFC 5869 and PKCS#11 v3.0+,
 //! using the OpenSSL EVP_KDF interface.
 
-use core::ffi::c_int;
 use std::fmt::Debug;
 
 use crate::attribute::Attribute;
@@ -13,12 +12,14 @@ use crate::error::Result;
 use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::*;
+use crate::misc::{
+    bytes_to_slice, bytes_to_vec, cast_params, common_derive_data_object,
+    common_derive_key_object,
+};
 use crate::object::{Object, ObjectFactories};
-use crate::ossl::common::*;
+use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 
-use ossl::bindings::*;
-use ossl::{EvpKdfCtx, OsslParam};
+use ossl::derive::{HkdfDerive, HkdfMode};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -31,10 +32,8 @@ pub struct HKDFOperation {
     mech: CK_MECHANISM_TYPE,
     /// Flag indicating if the derive operation has been completed.
     finalized: bool,
-    /// Flag indicating if the extract phase should be performed.
-    extract: bool,
-    /// Flag indicating if the expand phase should be performed.
-    expand: bool,
+    /// Selected HKDF mode
+    mode: HkdfMode,
     /// The underlying PRF hash mechanism (e.g., CKM_SHA256).
     prf: CK_MECHANISM_TYPE,
     /// The output length of the PRF hash in bytes.
@@ -44,9 +43,9 @@ pub struct HKDFOperation {
     /// Key handle if salt type is CKF_HKDF_SALT_KEY.
     salt_key: [CK_OBJECT_HANDLE; 1],
     /// Salt data (either provided directly or loaded from salt_key).
-    salt: Vec<u8>,
+    salt: Option<Vec<u8>>,
     /// Optional info/context data for the expand phase.
-    info: Vec<u8>,
+    info: Option<&'static [u8]>, /* FIXME: static -> a */
     /// Flag indicating if the output should be a CKO_DATA object.
     emit_data_obj: bool,
     /// FIPS approval status for the operation.
@@ -83,9 +82,9 @@ impl HKDFOperation {
                     }
                     CKO_DATA => {
                         /* HKDF also allow a DATA object as input key ... */
-                        if !self.extract
+                        if self.mode == HkdfMode::ExpandOnly
                             || self.salt_type == CKF_HKDF_SALT_NULL
-                            || self.salt.len() == 0
+                            || self.salt.is_none()
                         {
                             return Err(CKR_MECHANISM_PARAM_INVALID)?;
                         }
@@ -145,7 +144,7 @@ impl HKDFOperation {
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 } else {
-                    vec![0u8; hmaclen]
+                    Some(vec![0u8; hmaclen])
                 }
             }
             CKF_HKDF_SALT_DATA => {
@@ -153,20 +152,19 @@ impl HKDFOperation {
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 } else {
-                    bytes_to_slice!(params.pSalt, params.ulSaltLen, u8).to_vec()
+                    Some(bytes_to_vec!(params.pSalt, params.ulSaltLen))
                 }
             }
             CKF_HKDF_SALT_KEY => {
-                /* a len of 0 indicates a key object is needed.
-                 * the salt must be set via [requires/receives]_objects()
-                 * if not derive() will error */
-                Vec::new()
+                /* will have to be provided later via calls to
+                 * `MechOperation::receives_objects` */
+                None
             }
             _ => {
                 if params.bExtract != CK_FALSE {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 } else {
-                    Vec::new()
+                    None
                 }
             }
         };
@@ -174,14 +172,25 @@ impl HKDFOperation {
         Ok(HKDFOperation {
             mech: mech.mechanism,
             finalized: false,
-            extract: params.bExtract != CK_FALSE,
-            expand: params.bExpand != CK_FALSE,
+            mode: if params.bExtract == CK_TRUE {
+                if params.bExpand == CK_TRUE {
+                    HkdfMode::ExtractAndExpand
+                } else {
+                    HkdfMode::ExtractOnly
+                }
+            } else {
+                HkdfMode::ExpandOnly
+            },
             prf: params.prfHashMechanism,
             prflen: hmaclen,
             salt_type: params.ulSaltType,
             salt_key: [params.hSaltKey],
             salt: salt,
-            info: bytes_to_slice!(params.pInfo, params.ulInfoLen, u8).to_vec(),
+            info: if params.ulInfoLen > 0 {
+                Some(bytes_to_slice!(params.pInfo, params.ulInfoLen, u8))
+            } else {
+                None
+            },
             emit_data_obj: mech.mechanism == CKM_HKDF_DATA,
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
@@ -216,13 +225,14 @@ impl MechOperation for HKDFOperation {
         self.verify_key(objs[0], 0)?;
         match objs[0].get_attr_as_bytes(CKA_VALUE) {
             Ok(salt) => {
-                self.salt.clone_from(salt);
+                self.salt = Some(salt.clone());
                 Ok(())
             }
             _ => Err(CKR_KEY_HANDLE_INVALID)?,
         }
     }
 }
+
 impl Derive for HKDFOperation {
     /// Performs the HKDF key derivation (Extract and/or Expand phases).
     ///
@@ -243,7 +253,7 @@ impl Derive for HKDFOperation {
 
         self.verify_key(key, self.prflen)?;
 
-        if self.salt.len() == 0 && self.extract {
+        if self.salt.is_none() && self.mode != HkdfMode::ExpandOnly {
             match self.salt_type {
                 CKF_HKDF_SALT_KEY => return Err(CKR_GENERAL_ERROR)?,
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
@@ -256,60 +266,29 @@ impl Derive for HKDFOperation {
             common_derive_key_object(key, template, objfactories, self.prflen)
         }?;
 
-        if !self.expand && keysize != self.prflen {
+        if self.mode == HkdfMode::ExtractOnly && keysize != self.prflen {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
         if keysize == 0 || keysize > usize::try_from(u32::MAX)? {
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
 
-        let mode = if self.extract {
-            if self.expand {
-                c_int::try_from(EVP_KDF_HKDF_MODE_EXTRACT_AND_EXPAND)?
-            } else {
-                c_int::try_from(EVP_KDF_HKDF_MODE_EXTRACT_ONLY)?
-            }
-        } else {
-            c_int::try_from(EVP_KDF_HKDF_MODE_EXPAND_ONLY)?
-        };
-
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params.add_octet_string(
-            cstr!(OSSL_KDF_PARAM_KEY),
-            key.get_attr_as_bytes(CKA_VALUE)?,
-        )?;
-        params.add_const_c_string(
-            cstr!(OSSL_KDF_PARAM_DIGEST),
-            mech_type_to_digest_name(self.prf)?,
-        )?;
-        params.add_int(cstr!(OSSL_KDF_PARAM_MODE), &mode)?;
-
-        if self.extract && self.salt.len() > 0 {
-            params.add_octet_string(cstr!(OSSL_KDF_PARAM_SALT), &self.salt)?;
+        let mut kdf =
+            HkdfDerive::new(osslctx(), mech_type_to_digest_alg(self.prf)?)?;
+        kdf.set_mode(self.mode);
+        kdf.set_key(key.get_attr_as_bytes(CKA_VALUE)?.as_slice());
+        if let Some(s) = &self.salt {
+            kdf.set_salt(s);
         }
-
-        if self.info.len() > 0 {
-            params.add_octet_string(cstr!(OSSL_KDF_PARAM_INFO), &self.info)?;
+        if let Some(i) = &self.info {
+            kdf.set_info(i);
         }
-        params.finalize();
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_HKDF))?;
         let mut dkm = vec![0u8; keysize];
-        let res = unsafe {
-            EVP_KDF_derive(
-                kctx.as_mut_ptr(),
-                dkm.as_mut_ptr(),
-                dkm.len(),
-                params.as_ptr(),
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        kdf.derive(&mut dkm)?;
 
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
