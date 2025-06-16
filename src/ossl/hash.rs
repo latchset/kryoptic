@@ -6,7 +6,7 @@
 
 use crate::error::Result;
 use crate::mechanism::{Digest, MechOperation};
-use crate::ossl::common::{mech_type_to_digest_name, osslctx};
+use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 
 use ossl::digest::OsslDigest;
 use pkcs11::*;
@@ -32,7 +32,7 @@ impl HashOperation {
             mech: mech,
             hasher: OsslDigest::new(
                 osslctx(),
-                mech_type_to_digest_name(mech)?,
+                mech_type_to_digest_alg(mech)?,
                 None,
             )?,
             finalized: false,

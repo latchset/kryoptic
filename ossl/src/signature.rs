@@ -7,7 +7,7 @@
 use std::ffi::{c_char, c_int, CStr};
 
 use crate::bindings::*;
-
+use crate::digest::{digest_to_string, DigestAlg};
 use crate::{
     cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
     OsslParam,
@@ -289,8 +289,8 @@ fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
 
 /// Pss Parameters container
 pub struct RsaPssParams {
-    pub digest: &'static CStr,
-    pub mgf1: &'static CStr,
+    pub digest: DigestAlg,
+    pub mgf1: DigestAlg,
     pub saltlen: c_int,
 }
 
@@ -354,11 +354,11 @@ pub fn rsa_sig_params(
                 )?;
                 params.add_const_c_string(
                     cstr!(OSSL_SIGNATURE_PARAM_DIGEST),
-                    pss.digest,
+                    digest_to_string(pss.digest),
                 )?;
                 params.add_const_c_string(
                     cstr!(OSSL_SIGNATURE_PARAM_MGF1_DIGEST),
-                    pss.mgf1,
+                    digest_to_string(pss.mgf1),
                 )?;
                 params.add_owned_int(
                     cstr!(OSSL_SIGNATURE_PARAM_PSS_SALTLEN),

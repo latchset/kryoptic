@@ -14,6 +14,7 @@ use crate::misc::*;
 use crate::object::Object;
 
 use ossl::bindings::*;
+use ossl::digest::DigestAlg;
 use ossl::*;
 use pkcs11::*;
 
@@ -108,6 +109,74 @@ macro_rules! cstr {
     };
 }
 pub(crate) use cstr;
+
+/// Maps a PKCS#11 mechanism type involving a hash to the corresponding
+/// ossl DigestAlg
+pub fn mech_type_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
+    Ok(match mech {
+        CKM_SHA1_RSA_PKCS
+        | CKM_ECDSA_SHA1
+        | CKM_SHA1_RSA_PKCS_PSS
+        | CKM_SHA_1_HMAC
+        | CKM_SHA_1_HMAC_GENERAL
+        | CKM_SHA_1 => DigestAlg::Sha1,
+        CKM_SHA224_RSA_PKCS
+        | CKM_ECDSA_SHA224
+        | CKM_SHA224_RSA_PKCS_PSS
+        | CKM_SHA224_HMAC
+        | CKM_SHA224_HMAC_GENERAL
+        | CKM_SHA224 => DigestAlg::Sha2_224,
+        CKM_SHA256_RSA_PKCS
+        | CKM_ECDSA_SHA256
+        | CKM_SHA256_RSA_PKCS_PSS
+        | CKM_SHA256_HMAC
+        | CKM_SHA256_HMAC_GENERAL
+        | CKM_SHA256 => DigestAlg::Sha2_256,
+        CKM_SHA384_RSA_PKCS
+        | CKM_ECDSA_SHA384
+        | CKM_SHA384_RSA_PKCS_PSS
+        | CKM_SHA384_HMAC
+        | CKM_SHA384_HMAC_GENERAL
+        | CKM_SHA384 => DigestAlg::Sha2_384,
+        CKM_SHA512_RSA_PKCS
+        | CKM_ECDSA_SHA512
+        | CKM_SHA512_RSA_PKCS_PSS
+        | CKM_SHA512_HMAC
+        | CKM_SHA512_HMAC_GENERAL
+        | CKM_SHA512 => DigestAlg::Sha2_512,
+        CKM_SHA3_224_RSA_PKCS
+        | CKM_ECDSA_SHA3_224
+        | CKM_SHA3_224_RSA_PKCS_PSS
+        | CKM_SHA3_224_HMAC
+        | CKM_SHA3_224_HMAC_GENERAL
+        | CKM_SHA3_224 => DigestAlg::Sha3_224,
+        CKM_SHA3_256_RSA_PKCS
+        | CKM_ECDSA_SHA3_256
+        | CKM_SHA3_256_RSA_PKCS_PSS
+        | CKM_SHA3_256_HMAC
+        | CKM_SHA3_256_HMAC_GENERAL
+        | CKM_SHA3_256 => DigestAlg::Sha3_256,
+        CKM_SHA3_384_RSA_PKCS
+        | CKM_ECDSA_SHA3_384
+        | CKM_SHA3_384_RSA_PKCS_PSS
+        | CKM_SHA3_384_HMAC
+        | CKM_SHA3_384_HMAC_GENERAL
+        | CKM_SHA3_384 => DigestAlg::Sha3_384,
+        CKM_SHA3_512_RSA_PKCS
+        | CKM_ECDSA_SHA3_512
+        | CKM_SHA3_512_RSA_PKCS_PSS
+        | CKM_SHA3_512_HMAC
+        | CKM_SHA3_512_HMAC_GENERAL
+        | CKM_SHA3_512 => DigestAlg::Sha3_512,
+        CKM_SHA512_224_HMAC | CKM_SHA512_224_HMAC_GENERAL | CKM_SHA512_224 => {
+            DigestAlg::Sha2_512_224
+        }
+        CKM_SHA512_256_HMAC | CKM_SHA512_256_HMAC_GENERAL | CKM_SHA512_256 => {
+            DigestAlg::Sha2_512_256
+        }
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    })
+}
 
 /// Maps a PKCS#11 mechanism type involving a hash to the corresponding
 /// OpenSSL digest name string (e.g., `CKM_SHA256_RSA_PKCS` -> `"SHA256"`).
