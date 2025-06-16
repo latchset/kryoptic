@@ -22,6 +22,7 @@ use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
 use crate::bindings::*;
 
 pub mod asymcipher;
+pub mod derive;
 pub mod digest;
 pub mod signature;
 
@@ -550,6 +551,27 @@ impl<'a> OsslParam<'a> {
         Ok(())
     }
 
+    pub fn add_octet_slice(
+        &mut self,
+        key: &CStr,
+        s: &'a [u8],
+    ) -> Result<(), Error> {
+        if self.finalized {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+
+        let param = unsafe {
+            OSSL_PARAM_construct_octet_string(
+                key.as_ptr(),
+                void_ptr!(s.as_ptr()),
+                s.len(),
+            )
+        };
+        self.p.to_mut().push(param);
+        self.br.push(BorrowedReference::Slice(s));
+        Ok(())
+    }
+
     /// Adds an octet string (byte array) parameter using an owned byte vector.
     #[allow(dead_code)]
     pub fn add_owned_octet_string(
@@ -1002,55 +1024,6 @@ impl Drop for EvpCipherCtx {
 
 unsafe impl Send for EvpCipherCtx {}
 unsafe impl Sync for EvpCipherCtx {}
-
-/// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
-#[derive(Debug)]
-pub struct EvpKdfCtx {
-    ptr: *mut EVP_KDF_CTX,
-}
-
-/// Methods for creating (from a named KDF) and accessing `EvpKdfCtx`.
-impl EvpKdfCtx {
-    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpKdfCtx, Error> {
-        let arg = unsafe {
-            EVP_KDF_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
-        };
-        if arg.is_null() {
-            trace_ossl!("EVP_KDF_fetch()");
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        let ptr = unsafe { EVP_KDF_CTX_new(arg) };
-        unsafe {
-            EVP_KDF_free(arg);
-        }
-        if ptr.is_null() {
-            trace_ossl!("EVP_KDF_CTX_new()");
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        Ok(EvpKdfCtx { ptr })
-    }
-
-    /// Returns a const pointer to the underlying `EVP_KDF_CTX`.
-    pub unsafe fn as_ptr(&self) -> *const EVP_KDF_CTX {
-        self.ptr
-    }
-
-    /// Returns a mutable pointer to the underlying `EVP_KDF_CTX`.
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_KDF_CTX {
-        self.ptr
-    }
-}
-
-impl Drop for EvpKdfCtx {
-    fn drop(&mut self) {
-        unsafe {
-            EVP_KDF_CTX_free(self.ptr);
-        }
-    }
-}
-
-unsafe impl Send for EvpKdfCtx {}
-unsafe impl Sync for EvpKdfCtx {}
 
 /// Wrapper around OpenSSL's `EVP_MAC_CTX`, managing its lifecycle.
 #[derive(Debug)]

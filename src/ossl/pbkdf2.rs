@@ -1,15 +1,12 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
-use std::ffi::c_uint;
-
 use crate::error::Result;
 use crate::mechanism::Mechanisms;
 use crate::object::Object;
-use crate::ossl::common::*;
+use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 
-use ossl::bindings::*;
-use ossl::{EvpKdfCtx, OsslParam};
+use ossl::derive::Pbkdf2Derive;
 use pkcs11::*;
 
 pub fn pbkdf2_derive(
@@ -20,34 +17,13 @@ pub fn pbkdf2_derive(
     iter: usize,
     len: usize,
 ) -> Result<Vec<u8>> {
-    let mut params = OsslParam::with_capacity(4);
-    params.zeroize = true;
-    params.add_octet_string(
-        cstr!(OSSL_KDF_PARAM_PASSWORD),
-        pass.get_attr_as_bytes(CKA_VALUE)?,
-    )?;
-    params.add_octet_string(cstr!(OSSL_KDF_PARAM_SALT), salt)?;
-    params
-        .add_owned_uint(cstr!(OSSL_KDF_PARAM_ITER), c_uint::try_from(iter)?)?;
-    params.add_const_c_string(
-        cstr!(OSSL_KDF_PARAM_DIGEST),
-        mech_type_to_digest_name(prf)?,
-    )?;
-    params.finalize();
+    let mut kdf = Pbkdf2Derive::new(osslctx(), mech_type_to_digest_alg(prf)?)?;
+    kdf.set_password(pass.get_attr_as_bytes(CKA_VALUE)?.as_slice());
+    kdf.set_iterations(iter);
+    kdf.set_salt(salt.as_slice());
 
-    let mut kctx = EvpKdfCtx::new(osslctx(), cstr!(OSSL_KDF_NAME_PBKDF2))?;
     let mut dkm = vec![0u8; len];
-    let res = unsafe {
-        EVP_KDF_derive(
-            kctx.as_mut_ptr(),
-            dkm.as_mut_ptr(),
-            dkm.len(),
-            params.as_ptr(),
-        )
-    };
-    if res != 1 {
-        return Err(CKR_DEVICE_ERROR)?;
-    }
+    kdf.derive(&mut dkm)?;
 
     Ok(dkm)
 }
