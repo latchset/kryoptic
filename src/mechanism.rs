@@ -734,16 +734,6 @@ pub trait MsgDecryption: MessageOperation {
 }
 
 pub trait DRBG: Debug + Send + Sync {
-    /// Initializes an internal DRBG
-    fn init(
-        &mut self,
-        _entropy: &[u8],
-        _nonce: &[u8],
-        _pers: &[u8],
-    ) -> Result<()> {
-        Err(CKR_GENERAL_ERROR)?
-    }
-
     /// Request re-seeding of the internal DRBG
     fn reseed(&mut self, _entropy: &[u8], _addtl: &[u8]) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?

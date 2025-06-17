@@ -24,6 +24,7 @@ use crate::bindings::*;
 pub mod asymcipher;
 pub mod derive;
 pub mod digest;
+pub mod rand;
 pub mod signature;
 
 #[cfg(feature = "fips")]
