@@ -35,6 +35,14 @@ impl Drop for HmacKey {
     }
 }
 
+impl HmacKey {
+    pub fn take(&mut self) -> Vec<u8> {
+        let mut vec = Vec::<u8>::new();
+        std::mem::swap(&mut vec, &mut self.raw);
+        vec
+    }
+}
+
 /// Helper function that returns the underlying hash output size
 ///
 /// Uses the hash module's `HASH_MECH_SET` map to retrieve the data.
@@ -46,26 +54,6 @@ pub fn hmac_size(mech: CK_MECHANISM_TYPE) -> usize {
         }
     }
     hash::INVALID_HASH_SIZE
-}
-
-/// Returns the underlying hash mechanism type from the HMAC mechanism type
-pub fn hmac_mech_to_hash_mech(
-    mech: CK_MECHANISM_TYPE,
-) -> Result<CK_MECHANISM_TYPE> {
-    Ok(match mech {
-        CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => CKM_SHA_1,
-        CKM_SHA224_HMAC | CKM_SHA224_HMAC_GENERAL => CKM_SHA224,
-        CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => CKM_SHA256,
-        CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => CKM_SHA384,
-        CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => CKM_SHA512,
-        CKM_SHA3_224_HMAC | CKM_SHA3_224_HMAC_GENERAL => CKM_SHA3_224,
-        CKM_SHA3_256_HMAC | CKM_SHA3_256_HMAC_GENERAL => CKM_SHA3_256,
-        CKM_SHA3_384_HMAC | CKM_SHA3_384_HMAC_GENERAL => CKM_SHA3_384,
-        CKM_SHA3_512_HMAC | CKM_SHA3_512_HMAC_GENERAL => CKM_SHA3_512,
-        CKM_SHA512_224_HMAC | CKM_SHA512_224_HMAC_GENERAL => CKM_SHA512_224,
-        CKM_SHA512_256_HMAC | CKM_SHA512_256_HMAC_GENERAL => CKM_SHA512_256,
-        _ => return Err(CKR_MECHANISM_INVALID)?,
-    })
 }
 
 /// Returns the standard HMAC mechanism associated to the provided hash

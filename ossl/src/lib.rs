@@ -24,6 +24,7 @@ use crate::bindings::*;
 pub mod asymcipher;
 pub mod derive;
 pub mod digest;
+pub mod mac;
 pub mod rand;
 pub mod signature;
 
@@ -40,7 +41,7 @@ pub mod fips;
 /// This macro is UNSAFE, use carefully.
 macro_rules! void_ptr {
     ($ptr:expr) => {
-        $ptr as *const _ as *mut c_void
+        $ptr as *const _ as *mut ::std::ffi::c_void
     };
 }
 pub(crate) use void_ptr;
@@ -1025,55 +1026,6 @@ impl Drop for EvpCipherCtx {
 
 unsafe impl Send for EvpCipherCtx {}
 unsafe impl Sync for EvpCipherCtx {}
-
-/// Wrapper around OpenSSL's `EVP_MAC_CTX`, managing its lifecycle.
-#[derive(Debug)]
-pub struct EvpMacCtx {
-    ptr: *mut EVP_MAC_CTX,
-}
-
-/// Methods for creating (from a named MAC) and accessing `EvpMacCtx`.
-impl EvpMacCtx {
-    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMacCtx, Error> {
-        let arg = unsafe {
-            EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
-        };
-        if arg.is_null() {
-            trace_ossl!("EVP_MAC_fetch()");
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        let ptr = unsafe { EVP_MAC_CTX_new(arg) };
-        unsafe {
-            EVP_MAC_free(arg);
-        }
-        if ptr.is_null() {
-            trace_ossl!("EVP_MAC_CTX_new()");
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        Ok(EvpMacCtx { ptr })
-    }
-
-    /// Returns a const pointer to the underlying `EVP_MAC_CTX`.
-    pub unsafe fn as_ptr(&self) -> *const EVP_MAC_CTX {
-        self.ptr
-    }
-
-    /// Returns a mutable pointer to the underlying `EVP_MAC_CTX`.
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MAC_CTX {
-        self.ptr
-    }
-}
-
-impl Drop for EvpMacCtx {
-    fn drop(&mut self) {
-        unsafe {
-            EVP_MAC_CTX_free(self.ptr);
-        }
-    }
-}
-
-unsafe impl Send for EvpMacCtx {}
-unsafe impl Sync for EvpMacCtx {}
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
 /// Used for various public key algorithm operations (key generation, signing,

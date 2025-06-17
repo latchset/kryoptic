@@ -26,13 +26,33 @@ const IPAD_INIT: [u8; MAX_BSZ] = [0x36; MAX_BSZ];
 /// Initial value for the opad buffer
 const OPAD_INIT: [u8; MAX_BSZ] = [0x5c; MAX_BSZ];
 
+/// Returns the underlying hash mechanism type from the HMAC mechanism type
+fn hmac_mech_to_hash_mech(
+    mech: CK_MECHANISM_TYPE,
+) -> Result<CK_MECHANISM_TYPE> {
+    Ok(match mech {
+        CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => CKM_SHA_1,
+        CKM_SHA224_HMAC | CKM_SHA224_HMAC_GENERAL => CKM_SHA224,
+        CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => CKM_SHA256,
+        CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => CKM_SHA384,
+        CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => CKM_SHA512,
+        CKM_SHA3_224_HMAC | CKM_SHA3_224_HMAC_GENERAL => CKM_SHA3_224,
+        CKM_SHA3_256_HMAC | CKM_SHA3_256_HMAC_GENERAL => CKM_SHA3_256,
+        CKM_SHA3_384_HMAC | CKM_SHA3_384_HMAC_GENERAL => CKM_SHA3_384,
+        CKM_SHA3_512_HMAC | CKM_SHA3_512_HMAC_GENERAL => CKM_SHA3_512,
+        CKM_SHA512_224_HMAC | CKM_SHA512_224_HMAC_GENERAL => CKM_SHA512_224,
+        CKM_SHA512_256_HMAC | CKM_SHA512_256_HMAC_GENERAL => CKM_SHA512_256,
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    })
+}
+
 /// Object that represents the HMAC operation
 #[derive(Debug)]
 pub struct HMACOperation {
     /// The Specific HMAC mechanism
     mech: CK_MECHANISM_TYPE,
     /// The raw key to be used in the HMAC operation
-    key: HmacKey,
+    key: Vec<u8>,
     /// The associated Hash output size
     hashlen: usize,
     /// The associated Hash internal block size
@@ -60,6 +80,7 @@ pub struct HMACOperation {
 
 impl Drop for HMACOperation {
     fn drop(&mut self) {
+        zeromem(self.key.as_mut_slice());
         zeromem(&mut self.state);
         zeromem(&mut self.ipad);
         zeromem(&mut self.opad);
@@ -70,7 +91,7 @@ impl HMACOperation {
     /// Instantiates a new HMAC operation
     pub fn new(
         mech: CK_MECHANISM_TYPE,
-        key: HmacKey,
+        mut key: HmacKey,
         outputlen: usize,
         signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
@@ -80,7 +101,7 @@ impl HMACOperation {
         let op = hash::internal_hash_op(hash)?;
         let mut hmac = HMACOperation {
             mech: mech,
-            key: key,
+            key: key.take(),
             hashlen: hashlen,
             blocklen: blocklen,
             outputlen: outputlen,
@@ -111,14 +132,11 @@ impl HMACOperation {
     /// Called by [Self::new()] and [Self::reinit()]
     fn init(&mut self) -> Result<()> {
         /* K0 */
-        if self.key.raw.len() <= self.blocklen {
-            self.state[0..self.key.raw.len()]
-                .copy_from_slice(self.key.raw.as_slice());
+        if self.key.len() <= self.blocklen {
+            self.state[0..self.key.len()].copy_from_slice(self.key.as_slice());
         } else {
-            self.inner.digest(
-                self.key.raw.as_slice(),
-                &mut self.state[..self.hashlen],
-            )?;
+            self.inner
+                .digest(self.key.as_slice(), &mut self.state[..self.hashlen])?;
         }
         let ipad = &mut self.ipad[..self.blocklen];
         let opad = &mut self.opad[..self.blocklen];
