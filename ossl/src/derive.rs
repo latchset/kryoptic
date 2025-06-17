@@ -8,6 +8,7 @@ use std::ffi::{c_int, c_uint, CStr};
 
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
+use crate::mac::{add_mac_alg_to_params, MacAlg};
 use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
 
 /// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
@@ -245,25 +246,6 @@ pub enum KbkdfMode {
     Feedback,
 }
 
-/// KBKDF Mac Type (Hmac or Cmac)
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum KbkdfMac {
-    HmacSha1,
-    HmacSha2_224,
-    HmacSha2_256,
-    HmacSha2_384,
-    HmacSha2_512,
-    HmacSha2_512_224,
-    HmacSha2_512_256,
-    HmacSha3_224,
-    HmacSha3_256,
-    HmacSha3_384,
-    HmacSha3_512,
-    CmacAes128,
-    CmacAes192,
-    CmacAes256,
-}
-
 /// Allowed Counter length values
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KbkdfCounterLen {
@@ -279,7 +261,7 @@ pub struct KbkdfDerive<'a> {
     /// The OpenSSL KDF context (`EVP_KDF_CTX`).
     ctx: EvpKdfCtx,
     /// The kind of Mac
-    mac: KbkdfMac,
+    mac: MacAlg,
     /// The desired mode
     mode: KbkdfMode,
     /// The counter len (only 8, 16, 24, 32 supported)
@@ -302,7 +284,7 @@ impl<'a> KbkdfDerive<'a> {
     /// Instantiates a new HKDF context
     pub fn new(
         ctx: &OsslContext,
-        mac: KbkdfMac,
+        mac: MacAlg,
         mode: KbkdfMode,
     ) -> Result<KbkdfDerive<'a>, Error> {
         Ok(KbkdfDerive {
@@ -378,68 +360,13 @@ impl<'a> KbkdfDerive<'a> {
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
         let mut params = OsslParam::with_capacity(10);
         params.zeroize = true;
-        params.add_const_c_string(
-            cstr!(OSSL_KDF_PARAM_MAC),
-            match self.mac {
-                KbkdfMac::CmacAes128
-                | KbkdfMac::CmacAes192
-                | KbkdfMac::CmacAes256 => c"CMAC",
-                _ => c"HMAC",
-            },
+        let mac_type = add_mac_alg_to_params(
+            &mut params,
+            self.mac,
+            cstr!(OSSL_KDF_PARAM_DIGEST),
+            cstr!(OSSL_KDF_PARAM_CIPHER),
         )?;
-        match self.mac {
-            KbkdfMac::HmacSha1 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA1),
-            )?,
-            KbkdfMac::HmacSha2_224 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA2_224),
-            )?,
-            KbkdfMac::HmacSha2_256 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA2_256),
-            )?,
-            KbkdfMac::HmacSha2_384 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA2_384),
-            )?,
-            KbkdfMac::HmacSha2_512 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA2_512),
-            )?,
-            KbkdfMac::HmacSha2_512_224 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA2_512_224),
-            )?,
-            KbkdfMac::HmacSha2_512_256 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA2_512_256),
-            )?,
-            KbkdfMac::HmacSha3_224 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA3_224),
-            )?,
-            KbkdfMac::HmacSha3_256 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA3_256),
-            )?,
-            KbkdfMac::HmacSha3_384 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA3_384),
-            )?,
-            KbkdfMac::HmacSha3_512 => params.add_const_c_string(
-                cstr!(OSSL_KDF_PARAM_DIGEST),
-                cstr!(OSSL_DIGEST_NAME_SHA3_512),
-            )?,
-            KbkdfMac::CmacAes128 => params
-                .add_const_c_string(cstr!(OSSL_KDF_PARAM_CIPHER), c"AES128")?,
-            KbkdfMac::CmacAes192 => params
-                .add_const_c_string(cstr!(OSSL_KDF_PARAM_CIPHER), c"AES192")?,
-            KbkdfMac::CmacAes256 => params
-                .add_const_c_string(cstr!(OSSL_KDF_PARAM_CIPHER), c"AES256")?,
-        }
-
+        params.add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac_type)?;
         params.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_MODE),
             match self.mode {

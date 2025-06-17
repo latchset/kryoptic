@@ -14,12 +14,13 @@ use crate::misc::{
     bytes_to_slice, bytes_to_vec, cast_params, void_ptr, zeromem,
 };
 use crate::object::Object;
-use crate::ossl::common::*;
+use crate::ossl::common::{cstr, osslctx};
 
 use constant_time_eq::constant_time_eq;
 use once_cell::sync::Lazy;
 use ossl::bindings::*;
-use ossl::{EvpCipher, EvpCipherCtx, EvpMacCtx, OsslParam};
+use ossl::mac::{MacAlg, OsslMac};
+use ossl::{EvpCipher, EvpCipherCtx, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -2806,10 +2807,8 @@ pub struct AesCmacOperation {
     finalized: bool,
     /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
-    /// The AES key used for CMAC.
-    _key: AesKey,
-    /// The underlying OpenSSL EVP MAC context.
-    ctx: EvpMacCtx,
+    /// The OsslMac context
+    ctx: OsslMac,
     /// The MAC length
     maclen: usize,
     /// Option that holds the FIPS indicator
@@ -2851,35 +2850,19 @@ impl AesCmacOperation {
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
-        let mackey = object_to_raw_key(key)?;
+
+        let key = key.get_attr_as_bytes(CKA_VALUE)?.clone();
+        let mac = match key.len() {
+            16 => MacAlg::CmacAes128,
+            24 => MacAlg::CmacAes192,
+            32 => MacAlg::CmacAes256,
+            _ => return Err(CKR_KEY_INDIGESTIBLE)?,
+        };
 
         #[cfg(feature = "fips")]
         let mut fips_approval = FipsApproval::init();
 
-        let mut ctx = EvpMacCtx::new(osslctx(), cstr!(OSSL_MAC_NAME_CMAC))?;
-        let mut params = OsslParam::with_capacity(1);
-        params.add_const_c_string(
-            cstr!(OSSL_MAC_PARAM_CIPHER),
-            match mackey.raw.len() {
-                16 => cstr!(CIPHER_NAME_AES128),
-                24 => cstr!(CIPHER_NAME_AES192),
-                32 => cstr!(CIPHER_NAME_AES256),
-                _ => return Err(CKR_KEY_INDIGESTIBLE)?,
-            },
-        )?;
-        params.finalize();
-
-        if unsafe {
-            EVP_MAC_init(
-                ctx.as_mut_ptr(),
-                mackey.raw.as_ptr(),
-                mackey.raw.len(),
-                params.as_ptr(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let ctx = OsslMac::new(osslctx(), mac, key)?;
 
         #[cfg(feature = "fips")]
         fips_approval.update();
@@ -2888,7 +2871,6 @@ impl AesCmacOperation {
             mech: mech.mechanism,
             finalized: false,
             in_use: false,
-            _key: mackey,
             ctx: ctx,
             maclen: maclen,
             #[cfg(feature = "fips")]
@@ -2923,17 +2905,12 @@ impl AesCmacOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        if unsafe {
-            EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let ret = self.ctx.update(data);
 
         #[cfg(feature = "fips")]
         self.fips_approval.update();
 
-        Ok(())
+        Ok(ret?)
     }
 
     /// Finalizes the CMAC computation and returns the output in the
@@ -2950,18 +2927,7 @@ impl AesCmacOperation {
         self.fips_approval.clear();
 
         let mut buf = [0u8; AES_BLOCK_SIZE];
-        let mut outlen: usize = 0;
-        if unsafe {
-            EVP_MAC_final(
-                self.ctx.as_mut_ptr(),
-                buf.as_mut_ptr(),
-                &mut outlen,
-                buf.len(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let outlen = self.ctx.finalize(&mut buf)?;
         if outlen != AES_BLOCK_SIZE {
             return Err(CKR_GENERAL_ERROR)?;
         }

@@ -5,16 +5,36 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::hmac::*;
-use crate::mechanism::*;
+use crate::mechanism::{Mac, MechOperation, Sign, Verify, VerifySignature};
 use crate::misc::zeromem;
-use crate::ossl::common::*;
+use crate::ossl::common::osslctx;
 
 use constant_time_eq::constant_time_eq;
-use ossl::bindings::*;
-use ossl::{EvpMacCtx, OsslParam};
+use ossl::mac::{MacAlg, OsslMac};
 use pkcs11::*;
 
 use ossl::fips::FipsApproval;
+
+fn hmac_mech_to_mac_alg(mech: CK_MECHANISM_TYPE) -> Result<MacAlg> {
+    Ok(match mech {
+        CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => MacAlg::HmacSha1,
+        CKM_SHA224_HMAC | CKM_SHA224_HMAC_GENERAL => MacAlg::HmacSha2_224,
+        CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => MacAlg::HmacSha2_256,
+        CKM_SHA384_HMAC | CKM_SHA384_HMAC_GENERAL => MacAlg::HmacSha2_384,
+        CKM_SHA512_HMAC | CKM_SHA512_HMAC_GENERAL => MacAlg::HmacSha2_512,
+        CKM_SHA3_224_HMAC | CKM_SHA3_224_HMAC_GENERAL => MacAlg::HmacSha3_224,
+        CKM_SHA3_256_HMAC | CKM_SHA3_256_HMAC_GENERAL => MacAlg::HmacSha3_256,
+        CKM_SHA3_384_HMAC | CKM_SHA3_384_HMAC_GENERAL => MacAlg::HmacSha3_384,
+        CKM_SHA3_512_HMAC | CKM_SHA3_512_HMAC_GENERAL => MacAlg::HmacSha3_512,
+        CKM_SHA512_224_HMAC | CKM_SHA512_224_HMAC_GENERAL => {
+            MacAlg::HmacSha2_512_224
+        }
+        CKM_SHA512_256_HMAC | CKM_SHA512_256_HMAC_GENERAL => {
+            MacAlg::HmacSha2_512_256
+        }
+        _ => return Err(CKR_MECHANISM_INVALID)?,
+    })
+}
 
 #[derive(Debug)]
 pub struct HMACOperation {
@@ -22,9 +42,7 @@ pub struct HMACOperation {
     finalized: bool,
     in_use: bool,
     outputlen: usize,
-    maclen: usize,
-    key: HmacKey,
-    ctx: EvpMacCtx,
+    ctx: OsslMac,
     #[cfg(feature = "fips")]
     fips_approval: FipsApproval,
     signature: Option<Vec<u8>>,
@@ -33,33 +51,15 @@ pub struct HMACOperation {
 impl HMACOperation {
     pub fn new(
         mech: CK_MECHANISM_TYPE,
-        key: HmacKey,
+        mut key: HmacKey,
         outputlen: usize,
         signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
         #[cfg(feature = "fips")]
         let mut fips_approval = FipsApproval::init();
 
-        let mut ctx = EvpMacCtx::new(osslctx(), cstr!(OSSL_MAC_NAME_HMAC))?;
-        let hash = hmac_mech_to_hash_mech(mech)?;
-        let mut params = OsslParam::with_capacity(1);
-        params.add_const_c_string(
-            cstr!(OSSL_MAC_PARAM_DIGEST),
-            mech_type_to_digest_name(hash)?,
-        )?;
-        params.finalize();
-
-        if unsafe {
-            EVP_MAC_init(
-                ctx.as_mut_ptr(),
-                key.raw.as_ptr(),
-                key.raw.len(),
-                params.as_ptr(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let ctx =
+            OsslMac::new(osslctx(), hmac_mech_to_mac_alg(mech)?, key.take())?;
 
         #[cfg(feature = "fips")]
         fips_approval.update();
@@ -69,8 +69,6 @@ impl HMACOperation {
             finalized: false,
             in_use: false,
             outputlen: outputlen,
-            maclen: unsafe { EVP_MAC_CTX_get_mac_size(ctx.as_mut_ptr()) },
-            key: key,
             ctx: ctx,
             #[cfg(feature = "fips")]
             fips_approval: fips_approval,
@@ -102,17 +100,12 @@ impl HMACOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        if unsafe {
-            EVP_MAC_update(self.ctx.as_mut_ptr(), data.as_ptr(), data.len())
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let ret = self.ctx.update(data);
 
         #[cfg(feature = "fips")]
         self.fips_approval.update();
 
-        Ok(())
+        Ok(ret?)
     }
 
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
@@ -130,20 +123,10 @@ impl HMACOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut buf = vec![0u8; self.maclen];
-        let mut outlen: usize = 0;
-        if unsafe {
-            EVP_MAC_final(
-                self.ctx.as_mut_ptr(),
-                buf.as_mut_ptr(),
-                &mut outlen,
-                buf.len(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        if outlen != self.maclen {
+        let mut buf = vec![0u8; self.ctx.size()];
+        let outlen = self.ctx.finalize(&mut buf)?;
+
+        if outlen != self.ctx.size() {
             zeromem(buf.as_mut_slice());
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -165,17 +148,7 @@ impl HMACOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.reset();
 
-        if unsafe {
-            EVP_MAC_init(
-                self.ctx.as_mut_ptr(),
-                self.key.raw.as_ptr(),
-                self.key.raw.len(),
-                std::ptr::null_mut(),
-            )
-        } != 1
-        {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        self.ctx.reinit()?;
 
         #[cfg(feature = "fips")]
         self.fips_approval.update();

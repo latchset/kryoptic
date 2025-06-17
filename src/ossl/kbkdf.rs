@@ -9,7 +9,8 @@ use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::osslctx;
 use crate::sp800_108::{verify_prf_key, Sp800Params};
 
-use ossl::derive::{KbkdfCounterLen, KbkdfDerive, KbkdfMac, KbkdfMode};
+use ossl::derive::{KbkdfCounterLen, KbkdfDerive, KbkdfMode};
+use ossl::mac::MacAlg;
 use pkcs11::*;
 
 use ossl::fips::FipsApproval;
@@ -361,21 +362,21 @@ impl Derive for Sp800Operation {
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let mac = match self.prf {
-            CKM_SHA_1_HMAC => KbkdfMac::HmacSha1,
-            CKM_SHA224_HMAC => KbkdfMac::HmacSha2_224,
-            CKM_SHA256_HMAC => KbkdfMac::HmacSha2_256,
-            CKM_SHA384_HMAC => KbkdfMac::HmacSha2_384,
-            CKM_SHA512_HMAC => KbkdfMac::HmacSha2_512,
-            CKM_SHA512_224_HMAC => KbkdfMac::HmacSha2_512_224,
-            CKM_SHA512_256_HMAC => KbkdfMac::HmacSha2_512_256,
-            CKM_SHA3_224_HMAC => KbkdfMac::HmacSha3_224,
-            CKM_SHA3_256_HMAC => KbkdfMac::HmacSha3_256,
-            CKM_SHA3_384_HMAC => KbkdfMac::HmacSha3_384,
-            CKM_SHA3_512_HMAC => KbkdfMac::HmacSha3_512,
+            CKM_SHA_1_HMAC => MacAlg::HmacSha1,
+            CKM_SHA224_HMAC => MacAlg::HmacSha2_224,
+            CKM_SHA256_HMAC => MacAlg::HmacSha2_256,
+            CKM_SHA384_HMAC => MacAlg::HmacSha2_384,
+            CKM_SHA512_HMAC => MacAlg::HmacSha2_512,
+            CKM_SHA512_224_HMAC => MacAlg::HmacSha2_512_224,
+            CKM_SHA512_256_HMAC => MacAlg::HmacSha2_512_256,
+            CKM_SHA3_224_HMAC => MacAlg::HmacSha3_224,
+            CKM_SHA3_256_HMAC => MacAlg::HmacSha3_256,
+            CKM_SHA3_384_HMAC => MacAlg::HmacSha3_384,
+            CKM_SHA3_512_HMAC => MacAlg::HmacSha3_512,
             CKM_AES_CMAC => match key.get_attr_as_ulong(CKA_VALUE_LEN)? {
-                16 => KbkdfMac::CmacAes128,
-                24 => KbkdfMac::CmacAes192,
-                32 => KbkdfMac::CmacAes256,
+                16 => MacAlg::CmacAes128,
+                24 => MacAlg::CmacAes192,
+                32 => MacAlg::CmacAes256,
                 _ => return Err(CKR_KEY_INDIGESTIBLE)?,
             },
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
