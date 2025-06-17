@@ -13,7 +13,7 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{ErrorKind, EvpPkey, OsslParam};
+use ossl::{ErrorKind, EvpPkey, EvpPkeyType, OsslParam};
 use pkcs11::*;
 
 /* Openssl Key types */
@@ -30,6 +30,19 @@ pub fn mlkem_param_set_to_name(
         CKP_ML_KEM_512 => Ok(ML_KEM_512_TYPE),
         CKP_ML_KEM_768 => Ok(ML_KEM_768_TYPE),
         CKP_ML_KEM_1024 => Ok(ML_KEM_1024_TYPE),
+        _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+    }
+}
+
+/// Maps a PKCS#11 ML-KEM parameter set type (`CK_ML_KEM_PARAMETER_SET_TYPE`)
+/// to the corresponding EvpPkeyType
+pub fn mlkem_param_set_to_pkey_type(
+    pset: CK_ML_KEM_PARAMETER_SET_TYPE,
+) -> Result<EvpPkeyType> {
+    match pset {
+        CKP_ML_KEM_512 => Ok(EvpPkeyType::MlKem512),
+        CKP_ML_KEM_768 => Ok(EvpPkeyType::MlKem768),
+        CKP_ML_KEM_1024 => Ok(EvpPkeyType::MlKem1024),
         _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
     }
 }
@@ -196,11 +209,8 @@ pub fn generate_keypair(
     pubkey: &mut Object,
     privkey: &mut Object,
 ) -> Result<()> {
-    let evp_pkey = EvpPkey::generate(
-        osslctx(),
-        mlkem_param_set_to_name(param_set)?,
-        &OsslParam::empty(),
-    )?;
+    let evp_pkey =
+        EvpPkey::generate(osslctx(), mlkem_param_set_to_pkey_type(param_set)?)?;
 
     let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 

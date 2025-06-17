@@ -5,7 +5,7 @@
 //! PSS, and OAEP padding schemes, using the OpenSSL EVP interface. It handles
 //! key generation, encryption, decryption, signing, verification, and wrapping.
 
-use core::ffi::{c_int, c_uint, CStr};
+use core::ffi::{c_int, CStr};
 
 use crate::attribute::Attribute;
 use crate::error::{Error, Result};
@@ -19,7 +19,7 @@ use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
 use ossl::bindings::*;
 use ossl::digest::DigestAlg;
 use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
-use ossl::{EvpPkey, OsslParam};
+use ossl::{EvpPkey, EvpPkeyType, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -435,13 +435,10 @@ impl RsaPKCSOperation {
         if bits < MIN_RSA_SIZE_BITS || bits > MAX_RSA_SIZE_BITS {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
-        let c_bits = bits as c_uint;
-        let mut params = OsslParam::with_capacity(2);
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_E), &exponent)?;
-        params.add_uint(cstr!(OSSL_PKEY_PARAM_RSA_BITS), &c_bits)?;
-        params.finalize();
 
-        let evp_pkey = EvpPkey::generate(osslctx(), RSA_NAME, &params)?;
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), EvpPkeyType::Rsa(bits, exponent))?;
+
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key (has E already set) */

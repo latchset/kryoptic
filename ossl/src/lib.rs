@@ -1098,6 +1098,157 @@ impl Drop for EvpPkeyCtx {
 unsafe impl Send for EvpPkeyCtx {}
 unsafe impl Sync for EvpPkeyCtx {}
 
+#[derive(Debug)]
+pub enum EvpPkeyType {
+    /* DH */
+    Ffdhe2048,
+    Ffdhe3072,
+    Ffdhe4096,
+    Ffdhe6144,
+    Ffdhe8192,
+    Modp2048,
+    Modp3072,
+    Modp4096,
+    Modp6144,
+    Modp8192,
+    /* Ecc */
+    P256,
+    P384,
+    P521,
+    Ed25519,
+    Ed448,
+    X25519,
+    X448,
+    /* ML */
+    Mldsa44,
+    Mldsa65,
+    Mldsa87,
+    MlKem512,
+    MlKem768,
+    MlKem1024,
+    /* RSA */
+    Rsa(usize, Vec<u8>),
+}
+
+fn pkey_type_to_params(
+    pt: EvpPkeyType,
+) -> Result<(&'static CStr, OsslParam<'static>), Error> {
+    let mut params = OsslParam::new();
+    let name = match pt {
+        EvpPkeyType::Ffdhe2048 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"ffdhe2048",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Ffdhe3072 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"ffdhe3072",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Ffdhe4096 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"ffdhe4096",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Ffdhe6144 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"ffdhe6144",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Ffdhe8192 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"ffdhe8192",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Modp2048 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"modp_2048",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Modp3072 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"modp_3072",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Modp4096 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"modp_4096",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Modp6144 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"modp_6144",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::Modp8192 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"modp_8192",
+            )?;
+            c"DH"
+        }
+        EvpPkeyType::P256 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"prime256v1",
+            )?;
+            c"EC"
+        }
+        EvpPkeyType::P384 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"secp384r1",
+            )?;
+            c"EC"
+        }
+        EvpPkeyType::P521 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"secp521r1",
+            )?;
+            c"EC"
+        }
+        EvpPkeyType::Ed25519 => c"ED25519",
+        EvpPkeyType::Ed448 => c"ED448",
+        EvpPkeyType::X25519 => c"X25519",
+        EvpPkeyType::X448 => c"X448",
+        EvpPkeyType::Mldsa44 => c"ML-DSA-44",
+        EvpPkeyType::Mldsa65 => c"ML-DSA-65",
+        EvpPkeyType::Mldsa87 => c"ML-DSA-87",
+        EvpPkeyType::MlKem512 => c"ML-KEM-512",
+        EvpPkeyType::MlKem768 => c"ML-KEM-768",
+        EvpPkeyType::MlKem1024 => c"ML-KEM-1024",
+        EvpPkeyType::Rsa(size, exp) => {
+            params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_E), &exp)?;
+            params.add_owned_uint(
+                cstr!(OSSL_PKEY_PARAM_RSA_BITS),
+                c_uint::try_from(size)?,
+            )?;
+            c"RSA"
+        }
+    };
+    params.finalize();
+    Ok((name, params))
+}
+
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
 /// private key. Manages the key's lifecycle.
 #[derive(Debug)]
@@ -1171,10 +1322,10 @@ impl EvpPkey {
     /// name.
     pub fn generate(
         ctx: &OsslContext,
-        pkey_name: &CStr,
-        params: &OsslParam,
+        pkey_type: EvpPkeyType,
     ) -> Result<EvpPkey, Error> {
-        let mut pctx = EvpPkeyCtx::new(ctx, pkey_name)?;
+        let (name, params) = pkey_type_to_params(pkey_type)?;
+        let mut pctx = EvpPkeyCtx::new(ctx, name)?;
         let res = unsafe { EVP_PKEY_keygen_init(pctx.as_mut_ptr()) };
         if res != 1 {
             trace_ossl!("EVP_PKEY_keygen_init()");

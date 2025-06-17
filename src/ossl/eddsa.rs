@@ -217,11 +217,8 @@ impl EddsaOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let evp_pkey = EvpPkey::generate(
-            osslctx(),
-            get_ossl_name_from_obj(pubkey)?,
-            &OsslParam::empty(),
-        )?;
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
 
         let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
         let res = unsafe {
