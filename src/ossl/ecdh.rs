@@ -5,33 +5,38 @@
 //! functionalities according to PKCS#11 standards (CKM_ECDH1_DERIVE,
 //! CKM_ECDH1_COFACTOR_DERIVE) using the OpenSSL EVP_PKEY_derive API.
 
-use core::ffi::{c_int, c_uint};
 use std::borrow::Cow;
 
 use crate::attribute::CkAttrs;
 use crate::error::Result;
-use crate::mechanism::*;
+use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::bytes_to_vec;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-use crate::ossl::common::*;
+use crate::ossl::common::{
+    cstr, get_ossl_name_from_obj, osslctx, privkey_from_object, EC_NAME,
+};
 
-use ossl::bindings::*;
+use ossl::bindings::{
+    EVP_PKEY_PUBLIC_KEY, OSSL_PKEY_PARAM_GROUP_NAME, OSSL_PKEY_PARAM_PUB_KEY,
+};
+use ossl::derive::EcdhDerive;
+use ossl::digest::DigestAlg;
 use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
-/// PKCS#11 hash mechanism type (`CK_MECHANISM_TYPE`).
-fn kdf_type_to_hash_mech(mech: CK_EC_KDF_TYPE) -> Result<CK_MECHANISM_TYPE> {
+/// ossl DigestAlg
+fn kdf_type_to_digest_alg(mech: CK_EC_KDF_TYPE) -> Result<DigestAlg> {
     match mech {
-        CKD_SHA1_KDF => Ok(CKM_SHA_1),
-        CKD_SHA224_KDF => Ok(CKM_SHA224),
-        CKD_SHA256_KDF => Ok(CKM_SHA256),
-        CKD_SHA384_KDF => Ok(CKM_SHA384),
-        CKD_SHA512_KDF => Ok(CKM_SHA512),
-        CKD_SHA3_224_KDF => Ok(CKM_SHA3_224),
-        CKD_SHA3_256_KDF => Ok(CKM_SHA3_256),
-        CKD_SHA3_384_KDF => Ok(CKM_SHA3_384),
-        CKD_SHA3_512_KDF => Ok(CKM_SHA3_512),
+        CKD_SHA1_KDF => Ok(DigestAlg::Sha1),
+        CKD_SHA224_KDF => Ok(DigestAlg::Sha2_224),
+        CKD_SHA256_KDF => Ok(DigestAlg::Sha2_256),
+        CKD_SHA384_KDF => Ok(DigestAlg::Sha2_384),
+        CKD_SHA512_KDF => Ok(DigestAlg::Sha2_512),
+        CKD_SHA3_224_KDF => Ok(DigestAlg::Sha3_224),
+        CKD_SHA3_256_KDF => Ok(DigestAlg::Sha3_256),
+        CKD_SHA3_384_KDF => Ok(DigestAlg::Sha3_384),
+        CKD_SHA3_512_KDF => Ok(DigestAlg::Sha3_512),
         _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     }
 }
@@ -80,7 +85,7 @@ pub struct ECDHOperation {
     /// Peer's public key point data.
     public: Vec<u8>,
     /// Optional shared data for the KDF.
-    shared: Vec<u8>,
+    shared: Option<Vec<u8>>,
     /// Flag indicating if the derivation has been finalized.
     finalized: bool,
 }
@@ -106,12 +111,18 @@ impl ECDHOperation {
         {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
+        let shared =
+            if !params.pSharedData.is_null() || params.ulSharedDataLen > 0 {
+                Some(bytes_to_vec!(params.pSharedData, params.ulSharedDataLen))
+            } else {
+                None
+            };
 
         Ok(ECDHOperation {
             finalized: false,
             mech: mechanism,
             kdf: params.kdf,
-            shared: bytes_to_vec!(params.pSharedData, params.ulSharedDataLen),
+            shared: shared,
             public: bytes_to_vec!(params.pPublicData, params.ulPublicDataLen),
         })
     }
@@ -147,19 +158,12 @@ impl Derive for ECDHOperation {
         }
         self.finalized = true;
 
-        let mode: c_int = if self.mech == CKM_ECDH1_COFACTOR_DERIVE {
-            1
-        } else {
-            -1
-        };
-        let outlen: c_uint;
-
         let mut pkey = privkey_from_object(key)?;
+        let mut ecdh = EcdhDerive::new(osslctx(), &mut pkey)?;
 
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params
-            .add_int(cstr!(OSSL_EXCHANGE_PARAM_EC_ECDH_COFACTOR_MODE), &mode)?;
+        if self.mech == CKM_ECDH1_COFACTOR_DERIVE {
+            ecdh.set_cofactor_mode(Some(true));
+        }
 
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
@@ -188,41 +192,21 @@ impl Derive for ECDHOperation {
                 }
             }
         };
+
         /* these do not apply to the raw ECDH */
         match self.kdf {
             CKD_SHA1_KDF | CKD_SHA224_KDF | CKD_SHA256_KDF | CKD_SHA384_KDF
             | CKD_SHA512_KDF | CKD_SHA3_224_KDF | CKD_SHA3_256_KDF
             | CKD_SHA3_384_KDF | CKD_SHA3_512_KDF => {
-                params.add_const_c_string(
-                    cstr!(OSSL_EXCHANGE_PARAM_KDF_TYPE),
-                    cstr!(OSSL_KDF_NAME_X963KDF),
-                )?;
-                params.add_const_c_string(
-                    cstr!(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
-                    mech_type_to_digest_name(kdf_type_to_hash_mech(self.kdf)?)?,
-                )?;
-                if self.shared.len() > 0 {
-                    params.add_octet_string(
-                        cstr!(OSSL_EXCHANGE_PARAM_KDF_UKM),
-                        &self.shared,
-                    )?;
+                ecdh.set_x963_kdf_type(true);
+                ecdh.set_digest(kdf_type_to_digest_alg(self.kdf)?);
+                if let Some(ukm) = &self.shared {
+                    ecdh.set_ukm(ukm.as_slice());
                 }
-                outlen = c_uint::try_from(keylen)?;
-                params
-                    .add_uint(cstr!(OSSL_EXCHANGE_PARAM_KDF_OUTLEN), &outlen)?;
+                ecdh.set_outlen(keylen)?;
             }
             CKD_NULL => (),
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-        }
-
-        params.finalize();
-
-        let mut ctx = pkey.new_ctx(osslctx())?;
-        let res = unsafe {
-            EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let ec_point = {
@@ -237,44 +221,18 @@ impl Derive for ECDHOperation {
             }
         };
 
-        /* Import peer key */
-        let mut peer = make_peer_key(key, &ec_point)?;
+        let mut secret = vec![0u8; keylen];
+        let outlen = ecdh.derive(
+            &mut make_peer_key(key, &ec_point)?,
+            secret.as_mut_slice(),
+        )?;
 
-        let res = unsafe {
-            EVP_PKEY_derive_set_peer(ctx.as_mut_ptr(), peer.as_mut_ptr())
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
-        let mut secret_len = 0usize;
-        let res = unsafe {
-            EVP_PKEY_derive(
-                ctx.as_mut_ptr(),
-                std::ptr::null_mut(),
-                &mut secret_len,
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-        if secret_len < keylen {
+        if outlen < keylen {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        let mut secret = vec![0u8; secret_len];
-        let res = unsafe {
-            EVP_PKEY_derive(
-                ctx.as_mut_ptr(),
-                secret.as_mut_ptr(),
-                &mut secret_len,
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
         }
 
         let mut tmpl = CkAttrs::from(template);
-        tmpl.add_owned_slice(CKA_VALUE, &secret[(secret_len - keylen)..])?;
+        tmpl.add_vec(CKA_VALUE, secret)?;
         tmpl.zeroize = true;
         let mut obj = factory.create(tmpl.as_slice())?;
 

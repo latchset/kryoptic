@@ -9,7 +9,10 @@ use std::ffi::{c_int, c_uint, CStr};
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
 use crate::mac::{add_mac_alg_to_params, MacAlg};
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
+    OsslParam,
+};
 
 /// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
 #[derive(Debug)]
@@ -509,5 +512,164 @@ impl<'a> SshkdfDerive<'a> {
         params.finalize();
 
         self.ctx.derive(&params, output)
+    }
+}
+
+/// Higher level wrapper for ECDH Derive operation
+#[derive(Debug)]
+pub struct EcdhDerive<'a> {
+    /// The OpenSSL PKEY context (`EVP_PKEY_CTX`).
+    ctx: EvpPkeyCtx,
+    /// Cofactor mode (on, off, or default)
+    mode: Option<c_int>,
+    /// The Kdf Type, either None or "X963KDF"
+    kdf_type: Option<&'static CStr>,
+    /// Desired digest
+    digest: Option<DigestAlg>,
+    /// User Key Material
+    ukm: Option<&'a [u8]>,
+    /// Requested output size
+    outlen: c_uint,
+}
+
+impl<'a> EcdhDerive<'a> {
+    pub fn new(
+        ctx: &OsslContext,
+        privkey: &mut EvpPkey,
+    ) -> Result<EcdhDerive<'a>, Error> {
+        let mut pctx = EcdhDerive {
+            ctx: privkey.new_ctx(ctx)?,
+            mode: None,
+            kdf_type: None,
+            digest: None,
+            ukm: None,
+            outlen: 0,
+        };
+        let ret = unsafe { EVP_PKEY_derive_init(pctx.ctx.as_mut_ptr()) };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive_init()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(pctx)
+    }
+
+    pub fn set_cofactor_mode(&mut self, mode: Option<bool>) {
+        self.mode = match mode {
+            Some(true) => Some(1),
+            Some(false) => Some(0),
+            None => Some(-1),
+        }
+    }
+
+    pub fn set_x963_kdf_type(&mut self, b: bool) {
+        self.kdf_type = if b { Some(c"X963KDF") } else { None }
+    }
+
+    pub fn set_digest(&mut self, digest: DigestAlg) {
+        self.digest = Some(digest);
+    }
+
+    pub fn set_ukm(&mut self, ukm: &'a [u8]) {
+        self.ukm = Some(ukm);
+    }
+
+    pub fn set_outlen(&mut self, outlen: usize) -> Result<(), Error> {
+        self.outlen = c_uint::try_from(outlen)?;
+        Ok(())
+    }
+
+    pub fn derive(
+        &mut self,
+        peer: &mut EvpPkey,
+        output: &mut [u8],
+    ) -> Result<usize, Error> {
+        let mut params = OsslParam::with_capacity(5);
+        params.zeroize = true;
+        if let Some(mode) = &self.mode {
+            params.add_int(
+                cstr!(OSSL_EXCHANGE_PARAM_EC_ECDH_COFACTOR_MODE),
+                mode,
+            )?;
+        }
+        if let Some(kdf_type) = self.kdf_type {
+            params.add_const_c_string(
+                cstr!(OSSL_EXCHANGE_PARAM_KDF_TYPE),
+                kdf_type,
+            )?;
+        }
+        if let Some(alg) = self.digest {
+            params.add_const_c_string(
+                cstr!(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
+                digest_to_string(alg),
+            )?;
+        }
+        if let Some(ukm) = self.ukm {
+            params.add_octet_slice(cstr!(OSSL_EXCHANGE_PARAM_KDF_UKM), ukm)?;
+        }
+        if self.outlen != 0 {
+            params.add_uint(
+                cstr!(OSSL_EXCHANGE_PARAM_KDF_OUTLEN),
+                &self.outlen,
+            )?;
+        }
+        params.finalize();
+
+        if params.len() > 0 {
+            let ret = unsafe {
+                EVP_PKEY_CTX_set_params(self.ctx.as_mut_ptr(), params.as_ptr())
+            };
+            if ret != 1 {
+                trace_ossl!("EVP_PKEY_CTX_set_params()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+        }
+
+        let ret = unsafe {
+            EVP_PKEY_derive_set_peer(self.ctx.as_mut_ptr(), peer.as_mut_ptr())
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive_set_peer()");
+            return Err(Error::new(ErrorKind::KeyError));
+        }
+
+        let mut outlen = 0usize;
+        let ret = unsafe {
+            EVP_PKEY_derive(
+                self.ctx.as_mut_ptr(),
+                std::ptr::null_mut(),
+                &mut outlen,
+            )
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
+        let mut outvec = Vec::new();
+        let outbuf_ptr = if output.len() >= outlen {
+            output.as_mut_ptr()
+        } else {
+            outvec.resize(outlen, 0);
+            outvec.as_mut_ptr()
+        };
+
+        let ret = unsafe {
+            EVP_PKEY_derive(self.ctx.as_mut_ptr(), outbuf_ptr, &mut outlen)
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
+        let len = if outlen < output.len() {
+            outlen
+        } else {
+            output.len()
+        };
+        if outvec.len() > 0 {
+            output[0..len].copy_from_slice(&outvec[(outvec.len() - len)..]);
+        }
+
+        Ok(len)
     }
 }
