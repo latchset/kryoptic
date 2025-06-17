@@ -865,6 +865,18 @@ impl<'a> OsslParam<'a> {
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         Ok(!p.is_null())
     }
+
+    /// Returns the number of elements in the array, excluding the terminating
+    /// null element
+    ///
+    /// Panics if the array has not been finalized.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        if !self.finalized {
+            panic!("Unfinalized OsslParam");
+        }
+        self.p.as_ref().len() - 1
+    }
 }
 
 /// Wrapper around OpenSSL's `EVP_MD`, managing its lifecycle.
