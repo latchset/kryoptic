@@ -8,8 +8,6 @@ use crate::error::Result;
 use crate::mechanism;
 use crate::ossl::drbg;
 
-use pkcs11::*;
-
 #[derive(Debug)]
 pub struct RNG {
     drbg: Box<dyn mechanism::DRBG>,
@@ -17,15 +15,9 @@ pub struct RNG {
 
 impl RNG {
     pub fn new(alg: &str) -> Result<RNG> {
-        match alg {
-            "HMAC DRBG SHA256" => Ok(RNG {
-                drbg: Box::new(drbg::HmacSha256Drbg::new()?),
-            }),
-            "HMAC DRBG SHA512" => Ok(RNG {
-                drbg: Box::new(drbg::HmacSha512Drbg::new()?),
-            }),
-            _ => Err(CKR_RANDOM_NO_RNG)?,
-        }
+        Ok(RNG {
+            drbg: Box::new(drbg::HmacDrbg::new(alg)?),
+        })
     }
 
     pub fn generate_random(&mut self, buffer: &mut [u8]) -> Result<()> {
