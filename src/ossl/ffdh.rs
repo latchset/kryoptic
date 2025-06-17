@@ -17,7 +17,7 @@ use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{EvpPkey, OsslParam};
+use ossl::{EvpPkey, EvpPkeyType, OsslParam};
 use pkcs11::*;
 
 /// Names as understood by OpenSSL
@@ -50,6 +50,21 @@ fn group_to_ossl_name(group: DHGroupName) -> Result<&'static CStr> {
         DHGroupName::MODP4096 => MODP_4096_NAME,
         DHGroupName::MODP6144 => MODP_6144_NAME,
         DHGroupName::MODP8192 => MODP_8192_NAME,
+    })
+}
+
+fn group_to_pkey_type(group: DHGroupName) -> Result<EvpPkeyType> {
+    Ok(match group {
+        DHGroupName::FFDHE2048 => EvpPkeyType::Ffdhe2048,
+        DHGroupName::FFDHE3072 => EvpPkeyType::Ffdhe3072,
+        DHGroupName::FFDHE4096 => EvpPkeyType::Ffdhe4096,
+        DHGroupName::FFDHE6144 => EvpPkeyType::Ffdhe6144,
+        DHGroupName::FFDHE8192 => EvpPkeyType::Ffdhe8192,
+        DHGroupName::MODP2048 => EvpPkeyType::Modp2048,
+        DHGroupName::MODP3072 => EvpPkeyType::Modp3072,
+        DHGroupName::MODP4096 => EvpPkeyType::Modp4096,
+        DHGroupName::MODP6144 => EvpPkeyType::Modp6144,
+        DHGroupName::MODP8192 => EvpPkeyType::Modp8192,
     })
 }
 
@@ -173,14 +188,9 @@ impl FFDHOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let mut params = OsslParam::with_capacity(1);
-        params.add_const_c_string(
-            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-            group_to_ossl_name(group)?,
-        )?;
-        params.finalize();
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), group_to_pkey_type(group)?)?;
 
-        let evp_pkey = EvpPkey::generate(osslctx(), DH_NAME, &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key */

@@ -303,14 +303,9 @@ impl EcdsaOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let mut params = OsslParam::with_capacity(1);
-        params.add_const_c_string(
-            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-            get_ossl_name_from_obj(pubkey)?,
-        )?;
-        params.finalize();
+        let evp_pkey =
+            EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
 
-        let evp_pkey = EvpPkey::generate(osslctx(), EC_NAME, &params)?;
         let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
 
         /* Public Key */

@@ -21,7 +21,7 @@ use asn1;
 use bitflags::bitflags;
 use ossl::bindings::*;
 use ossl::signature::{OsslSignature, SigAlg};
-use ossl::{ErrorKind, EvpPkey, OsslParam};
+use ossl::{ErrorKind, EvpPkey, EvpPkeyType, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -54,6 +54,19 @@ fn mldsa_param_set_to_name(
         CKP_ML_DSA_44 => Ok(ML_DSA_44_TYPE),
         CKP_ML_DSA_65 => Ok(ML_DSA_65_TYPE),
         CKP_ML_DSA_87 => Ok(ML_DSA_87_TYPE),
+        _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+    }
+}
+
+/// Maps a PKCS#11 ML-DSA parameter set type (`CK_ML_DSA_PARAMETER_SET_TYPE`)
+/// to the corresponding EvpPkeyType
+fn mldsa_param_set_to_pkey_type(
+    pset: CK_ML_DSA_PARAMETER_SET_TYPE,
+) -> Result<EvpPkeyType> {
+    match pset {
+        CKP_ML_DSA_44 => Ok(EvpPkeyType::Mldsa44),
+        CKP_ML_DSA_65 => Ok(EvpPkeyType::Mldsa65),
+        CKP_ML_DSA_87 => Ok(EvpPkeyType::Mldsa87),
         _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
     }
 }
@@ -800,11 +813,8 @@ pub fn generate_keypair(
     pubkey: &mut Object,
     privkey: &mut Object,
 ) -> Result<()> {
-    let evp_pkey = EvpPkey::generate(
-        osslctx(),
-        mldsa_param_set_to_name(param_set)?,
-        &OsslParam::empty(),
-    )?;
+    let evp_pkey =
+        EvpPkey::generate(osslctx(), mldsa_param_set_to_pkey_type(param_set)?)?;
 
     let mut params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
     let val = params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?;

@@ -285,10 +285,31 @@ fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static CStr> {
     }
 }
 
+/// Maps an ASN.1 Object Identifier for an EC curve to EvpPkeyType
+#[cfg(feature = "ecc")]
+fn oid_to_evp_key_type(oid: &asn1::ObjectIdentifier) -> Result<EvpPkeyType> {
+    match oid {
+        &oid::EC_SECP256R1 => Ok(EvpPkeyType::P256),
+        &oid::EC_SECP384R1 => Ok(EvpPkeyType::P384),
+        &oid::EC_SECP521R1 => Ok(EvpPkeyType::P521),
+        &oid::ED25519_OID => Ok(EvpPkeyType::Ed25519),
+        &oid::ED448_OID => Ok(EvpPkeyType::Ed448),
+        &oid::X25519_OID => Ok(EvpPkeyType::X25519),
+        &oid::X448_OID => Ok(EvpPkeyType::X448),
+        _ => Err(CKR_GENERAL_ERROR)?,
+    }
+}
+
 /// Gets the OpenSSL curve name string associated with a PKCS#11 EC key `Object`.
 #[cfg(feature = "ecc")]
 pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static CStr> {
     oid_to_ossl_name(&get_oid_from_obj(key)?)
+}
+
+/// Gets the EvpPkeyType associated with a PKCS#11 EC key `Object`.
+#[cfg(feature = "ecc")]
+pub fn get_evp_pkey_type_from_obj(key: &Object) -> Result<EvpPkeyType> {
+    oid_to_evp_key_type(&get_oid_from_obj(key)?)
 }
 
 /// Securely zeroizes a memory slice using `OPENSSL_cleanse`.
