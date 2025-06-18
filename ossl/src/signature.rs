@@ -440,7 +440,7 @@ pub struct OsslSignature {
 }
 
 impl OsslSignature {
-    /// Internal function to init the structure from a key
+    /// Internal function to init the signature structure from a key
     fn init(
         ctx: &OsslContext,
         key: &mut EvpPkey,
@@ -543,8 +543,7 @@ impl OsslSignature {
                 ctx.legacy_ctx = Some(lctx);
             }
             ctx.supports_updates = match sigalg_supports_updates(alg) {
-                Some(true) => true,
-                Some(false) => false,
+                Some(b) => b,
                 None => false,
             };
             return Ok(ctx);
@@ -608,7 +607,7 @@ impl OsslSignature {
         };
         let siglen_ptr: *mut usize = &mut siglen;
 
-        /* check siglen buffer is enough */
+        /* check siglen buffer is large enough */
         if let Some(ctx) = &mut self.legacy_ctx {
             #[cfg(not(feature = "fips"))]
             {
@@ -1052,7 +1051,7 @@ impl OsslSignature {
         Err(Error::new(ErrorKind::WrapperError))
     }
 
-    /// Finalizes data and generates signature
+    /// Finalizes data and verifies signature
     pub fn message_verify_final(
         &mut self,
         signature: Option<&[u8]>,
