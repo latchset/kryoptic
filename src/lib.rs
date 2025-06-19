@@ -368,7 +368,7 @@ impl State {
     }
 
     /// Sets the FIPS behavior configuration for a specific slot.
-    #[cfg(feature = "fips")]
+    #[cfg(all(test, feature = "fips"))]
     pub fn set_fips_behavior(
         &mut self,
         slot_id: CK_SLOT_ID,
