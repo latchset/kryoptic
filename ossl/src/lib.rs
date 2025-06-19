@@ -22,6 +22,7 @@ use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
 use crate::bindings::*;
 
 pub mod asymcipher;
+pub mod cipher;
 pub mod derive;
 pub mod digest;
 pub mod mac;
@@ -70,6 +71,8 @@ pub enum ErrorKind {
     WrapperError,
     /// A buffer is not of the correct size
     BufferSize,
+    /// An optional argument is required or has a bad value
+    BadArg,
 }
 
 #[derive(Debug)]
@@ -958,86 +961,6 @@ impl Drop for EvpMdCtx {
 
 unsafe impl Send for EvpMdCtx {}
 unsafe impl Sync for EvpMdCtx {}
-
-/// Wrapper around OpenSSL's `EVP_CIPHER`, managing its lifecycle.
-#[derive(Debug)]
-pub struct EvpCipher {
-    ptr: *mut EVP_CIPHER,
-}
-
-/// Methods for creating and accessing `EvpCipher`.
-impl EvpCipher {
-    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpCipher, Error> {
-        let ptr = unsafe {
-            EVP_CIPHER_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
-        };
-        if ptr.is_null() {
-            trace_ossl!("EVP_CIPHER_fetch()");
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        Ok(EvpCipher { ptr })
-    }
-
-    /// Returns a const pointer to the underlying `EVP_CIPHER`.
-    pub unsafe fn as_ptr(&self) -> *const EVP_CIPHER {
-        self.ptr
-    }
-
-    /// Returns a mutable pointer to the underlying `EVP_CIPHER`.
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER {
-        self.ptr
-    }
-}
-
-impl Drop for EvpCipher {
-    fn drop(&mut self) {
-        unsafe {
-            EVP_CIPHER_free(self.ptr);
-        }
-    }
-}
-
-unsafe impl Send for EvpCipher {}
-unsafe impl Sync for EvpCipher {}
-
-/// Wrapper around OpenSSL's `EVP_CIPHER_CTX`, managing its lifecycle.
-#[derive(Debug)]
-pub struct EvpCipherCtx {
-    ptr: *mut EVP_CIPHER_CTX,
-}
-
-/// Methods for creating and accessing `EvpCipherCtx`.
-impl EvpCipherCtx {
-    pub fn new() -> Result<EvpCipherCtx, Error> {
-        let ptr = unsafe { EVP_CIPHER_CTX_new() };
-        if ptr.is_null() {
-            trace_ossl!("EVP_CIPHER_ctx_new()");
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        Ok(EvpCipherCtx { ptr })
-    }
-
-    /// Returns a const pointer to the underlying `EVP_CIPHER_CTX`.
-    pub unsafe fn as_ptr(&self) -> *const EVP_CIPHER_CTX {
-        self.ptr
-    }
-
-    /// Returns a mutable pointer to the underlying `EVP_CIPHER_CTX`.
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER_CTX {
-        self.ptr
-    }
-}
-
-impl Drop for EvpCipherCtx {
-    fn drop(&mut self) {
-        unsafe {
-            EVP_CIPHER_CTX_free(self.ptr);
-        }
-    }
-}
-
-unsafe impl Send for EvpCipherCtx {}
-unsafe impl Sync for EvpCipherCtx {}
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
 /// Used for various public key algorithm operations (key generation, signing,
