@@ -1,0 +1,248 @@
+---
+name: OpenJDK Integration Tests
+
+env:
+  # List of OpenJDK tests to run, under openjdk/test/jdk/sun/security/pkcs11/.
+  openjdk_tests: |
+    Cipher/EncryptionPadding.java
+  jtreg_version: 7.5.2+1
+
+on:
+  # Create "Run workflow" button.
+  workflow_dispatch:
+  # Make workflow "reusable" so that it can be its own file callable
+  # from build.yml.
+  workflow_call:
+
+jobs:
+  test-openjdk-integration:
+    name: Run a subset of OpenJDK PKCS11 tests against Kryoptic
+    runs-on: ubuntu-22.04
+    container: eclipse-temurin:21
+    steps:
+      - name: Get container OpenJDK version
+        id: release
+        run: |
+          . /opt/java/openjdk/release
+          echo version=$SEMANTIC_VERSION >> $GITHUB_OUTPUT
+          echo repository=$SOURCE_REPO | sed -e 's/adoptium/openjdk/' -e 's/.git$//' >> $GITHUB_OUTPUT
+
+      # OpenJDK archive.
+      - name: Restore OpenJDK test cases from cache
+        uses: actions/cache/restore@v4
+        id: restore-openjdk-test-cases
+        with:
+          path: jdk-${{ steps.release.outputs.version }}.tar.gz
+          key: ${{ runner.os }}-openjdk-${{ steps.release.outputs.version }}
+
+      - if: ${{ steps.restore-openjdk-test-cases.outputs.cache-hit != 'true' }}
+        name: Download OpenJDK test cases
+        id: download-openjdk-test-cases
+        run: wget --no-verbose ${{ steps.release.outputs.repository }}/archive/refs/tags/jdk-${{ steps.release.outputs.version }}.tar.gz
+
+      - if: ${{ steps.restore-openjdk-test-cases.outputs.cache-hit != 'true' }}
+        name: Cache OpenJDK test cases
+        uses: actions/cache/save@v4
+        with:
+          path: jdk-${{ steps.release.outputs.version }}.tar.gz
+          key: ${{ runner.os }}-openjdk-${{ steps.release.outputs.version }}
+
+      # JTReg archive.
+      - name: Restore JTReg binary from cache
+        uses: actions/cache/restore@v4
+        id: restore-jtreg-binary
+        with:
+          path: jtreg-${{ env.jtreg_version }}.zip
+          key: ${{ runner.os }}-jtreg-${{ env.jtreg_version }}
+
+      - if: ${{ steps.restore-jtreg-binary.outputs.cache-hit != 'true' }}
+        name: Download JTReg binary
+        id: download-jtreg-binary
+        run: wget --no-verbose https://builds.shipilev.net/jtreg/jtreg-${{ env.jtreg_version }}.zip
+
+      - if: ${{ steps.restore-jtreg-binary.outputs.cache-hit != 'true' }}
+        name: Cache JTReg binary
+        uses: actions/cache/save@v4
+        with:
+          path: jtreg-${{ env.jtreg_version }}.zip
+          key: ${{ runner.os }}-jtreg-${{ env.jtreg_version }}
+
+      # Extract OpenJDK.
+      - name: Extract OpenJDK test cases
+        id: extract
+        run: |
+          echo directory=$(tar tf jdk-*.tar.gz | head --lines 1) >> $GITHUB_OUTPUT
+          tar xf jdk-*.tar.gz
+
+      - name: Install required programs with APT
+        id: install-required-programs-with-apt
+        run: apt update && apt-get -y install sqlite3 patch unzip
+
+      # Extract JTReg.
+      - name: Extract JTReg binary
+        id: extract-jtreg-binary
+        run: unzip jtreg-*.zip
+
+      # Download libkryoptic_pkcs11.so (sqlite, fips variant) from
+      # successful Build workflow run.
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-libraries-sqlitedb-fips
+          path: kryoptic/target/debug
+
+      - name: Find Kryoptic library containing directory
+        id: find-kryoptic-library-containing-directory
+        run: echo "path=$(find $(pwd) -name libkryoptic_pkcs11.so -exec dirname '{}' ';' | sort | head --lines 1)" >> $GITHUB_OUTPUT
+
+      - name: Patch OpenJDK JTReg test harness for Kryoptic
+        id: patch-openjdk-jtreg-test-harness-for-kryoptic
+        run: |
+          cd ${{ steps.extract.outputs.directory }}
+          sqlite3 test/jdk/sun/security/pkcs11/nss/kryoptic.sql <<EOF
+          PRAGMA foreign_keys=OFF;
+          BEGIN TRANSACTION;
+          CREATE TABLE meta (name TEXT NOT NULL, id INTEGER, value TEXT, data BLOB, UNIQUE(name, value));
+          INSERT INTO meta VALUES('version',NULL,'v1',NULL);
+          INSERT INTO meta VALUES('USER COUNTER',NULL,'SO',X'00000000');
+          INSERT INTO meta VALUES('USER DATA',NULL,'SO',X'3081a2307e060a2b0601040192081402013070020101304406092a864886f70d01050c303704205aa28d17ebde5545c17d8b762ae708bb38ac395e5d194a5514824e861c7f797a020203e8020120300c06082a864886f70d020905003025060960864801650304012e3018040c0019784e4a1f0d2d6e379e620408488b6ea2505271be04204441cc811661d61d1dc7911e36e14931dc7702e313e4c32a257447c1b4b4548a');
+          INSERT INTO meta VALUES('TOKEN INFO',NULL,'label',X'494e5445524e414c205445535420544f4b454e20202020202020202020202020');
+          INSERT INTO meta VALUES('TOKEN INFO',NULL,'manufacturer',X'4b72796f707469632050726f6a65637420202020202020202020202020202020');
+          INSERT INTO meta VALUES('TOKEN INFO',NULL,'model',X'464950532d3134302d33207631202020');
+          INSERT INTO meta VALUES('TOKEN INFO',NULL,'serial',X'00000000000000000000000000000000');
+          INSERT INTO meta VALUES('TOKEN INFO',NULL,'flags',X'04040000');
+          INSERT INTO meta VALUES('USER COUNTER',NULL,'USER',X'00000000');
+          INSERT INTO meta VALUES('USER DATA',NULL,'USER',X'3081a2307e060a2b0601040192081402013070020101304406092a864886f70d01050c30370420b3606b9562f08db7708ee9b6be267cabdfe6f9412f30a10bafaed7521f2226fd020203e8020120300c06082a864886f70d020905003025060960864801650304012e3018040c00b4f5237e1cd8338115c96704087ce29b02f29c9a8704206d6c3a8b05514d7133709d616a560e08dd349d0466ceb49ac2647abe9e15714b');
+          CREATE TABLE objects (id int NOT NULL, attr int NOT NULL, val blob, UNIQUE (id, attr));
+          COMMIT;
+          EOF
+          sqlite3 test/jdk/sun/security/pkcs11/nss/kryoptic.sql .dump
+          cat > test/jdk/sun/security/pkcs11/nss/kryoptic.conf <<EOF
+          [[slots]]
+          slot = 3
+          dbtype = "sqlite"
+          dbargs = "./nss/kryoptic-token.sql"
+          EOF
+          cat test/jdk/sun/security/pkcs11/nss/kryoptic.conf
+          cat > test/jdk/sun/security/pkcs11/nss/p11-kryoptic.txt <<EOF
+          name = Kryoptic
+          slot = 3
+          showInfo = true
+          library = \${pkcs11test.nss.libdir}/libkryoptic_pkcs11.so
+          # Not yet available on 21: cipherTextStealingVariant = CS1
+          nssArgs = "kryoptic_conf=\${pkcs11test.nss.db}/../kryoptic.conf"
+          disabledMechanisms = {
+            CKM_DSA_SHA224
+            CKM_DSA_SHA256
+            CKM_DSA_SHA384
+            CKM_DSA_SHA512
+            CKM_DSA_SHA3_224
+            CKM_DSA_SHA3_256
+            CKM_DSA_SHA3_384
+            CKM_DSA_SHA3_512
+            CKM_ECDSA_SHA224
+            CKM_ECDSA_SHA256
+            CKM_ECDSA_SHA384
+            CKM_ECDSA_SHA512
+            CKM_ECDSA_SHA3_224
+            CKM_ECDSA_SHA3_256
+            CKM_ECDSA_SHA3_384
+            CKM_ECDSA_SHA3_512
+          }
+          attributes = compatibility
+          attributes(*,CKO_SECRET_KEY,*) = {
+            CKA_EXTRACTABLE = true
+            CKA_SENSITIVE = false
+            CKA_ENCRYPT = true
+          }
+          attributes(*,CKO_PRIVATE_KEY,*) = {
+            CKA_EXTRACTABLE = true
+            CKA_SENSITIVE = false
+            CKA_SIGN = true
+          }
+          EOF
+          cat test/jdk/sun/security/pkcs11/nss/p11-kryoptic.txt
+          cat > pkcs11test.patch <<EOF
+          diff --git a/test/jdk/sun/security/pkcs11/PKCS11Test.java b/test/jdk/sun/security/pkcs11/PKCS11Test.java
+          index efae619314d..b8821ab57c1 100644
+          --- a/test/jdk/sun/security/pkcs11/PKCS11Test.java
+          +++ b/test/jdk/sun/security/pkcs11/PKCS11Test.java
+          @@ -455,17 +455,10 @@ public static void testNSS(PKCS11Test test) throws Exception {
+               }
+
+               public static String getNssConfig() throws Exception {
+          -        String libdir = getNSSLibDir();
+          -        if (libdir == null) {
+          -            return null;
+          -        }
+          -
+          -        if (!loadNSPR(libdir)) {
+          -            return null;
+          -        }
+          -
+          +        String customConfigLibrary = System.getProperty("CUSTOM_P11_CONFIG_LIBRARY", "nss");
+          +        String customConfig = System.getProperty("CUSTOM_P11_CONFIG");
+          +        String customConfigName = System.getProperty("CUSTOM_P11_CONFIG_NAME", "p11-nss.txt");
+                   String nssConfigDir = copyNssFiles();
+          -        String libfile = libdir + System.mapLibraryName(nss_library);
+
+                   String customDBdir = System.getProperty("CUSTOM_DB_DIR");
+                   String dbdir = (customDBdir != null) ?
+          @@ -474,9 +467,26 @@ public static String getNssConfig() throws Exception {
+                   // NSS always wants forward slashes for the config path
+                   dbdir = dbdir.replace('\\', '/');
+
+          -        String customConfig = System.getProperty("CUSTOM_P11_CONFIG");
+          -        String customConfigName = System.getProperty("CUSTOM_P11_CONFIG_NAME", "p11-nss.txt");
+          -        System.setProperty("pkcs11test.nss.lib", libfile);
+          +        if (customConfigLibrary.equals("nss")) {
+          +            String libdir = getNSSLibDir();
+          +            if (libdir == null) {
+          +                return null;
+          +            }
+          +
+          +            if (!loadNSPR(libdir)) {
+          +                return null;
+          +            }
+          +
+          +            String libfile = libdir + System.mapLibraryName(nss_library);
+          +
+          +            System.setProperty("pkcs11test.nss.lib", libfile);
+          +        } else {
+          +            if (customConfigName.equals("p11-nss-sensitive.txt")) {
+          +                customConfigName = "p11-" + customConfigLibrary + "-sensitive.txt";
+          +            } else {
+          +                customConfigName =  "p11-" + customConfigLibrary + ".txt";
+          +            }
+          +        }
+                   System.setProperty("pkcs11test.nss.db", dbdir);
+                   return (customConfig != null) ?
+                           customConfig :
+          @@ -739,7 +749,7 @@ private static Path fetchNssLib(Class<?> clazz, Path libraryName) throws IOExcep
+               }
+
+               private static Path findNSSLibrary(Path path, Path libraryName) throws IOException {
+          -        try(Stream<Path> files = Files.find(path, 10,
+          +        try(Stream<Path> files = Files.find(path, 1,
+                           (tp, attr) -> tp.getFileName().equals(libraryName))) {
+
+                       return files.findAny()
+          EOF
+          patch -p1 < pkcs11test.patch
+          cd ..
+
+      # Run test suite.
+      - name: Run OpenJDK JTReg test cases
+        id: run-openjdk-jtreg-test-cases
+        run: |
+          set -- $openjdk_tests
+          for test do
+          set -- "$@" "${{ steps.extract.outputs.directory }}test/jdk/sun/security/pkcs11/$test"
+          shift
+          done
+          jtreg/bin/jtreg -verbose:fail,error \
+          -javaoption:-Dpkcs11test.nss.libdir=${{ steps.find-kryoptic-library-containing-directory.outputs.path }} \
+          -javaoption:-Djdk.test.lib.artifacts.nsslib-linux_x64=${{ steps.find-kryoptic-library-containing-directory.outputs.path }} \
+          -javaoption:-DCUSTOM_P11_CONFIG_LIBRARY=kryoptic \
+          -testjdk:/opt/java/openjdk \
+          -javacoption:-g \
+          $@

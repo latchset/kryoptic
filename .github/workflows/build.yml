@@ -124,6 +124,12 @@ jobs:
           path: |
             target/debug/build/*/output
 
+      - if: ${{ matrix.db == 'sqlitedb' && matrix.name == 'fips' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-libraries-${{ matrix.db }}-${{ matrix.name }}
+          path: target/debug/libkryoptic_pkcs11.so
+
       - if: ${{ matrix.name == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
         name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
         uses: actions/cache/save@v4
@@ -138,3 +144,8 @@ jobs:
           path: |
             /var/cache/libdnf5
           key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+  run-openjdk-integration-tests:
+    name: Test OpenJDK integration
+    needs: build
+    uses: ./.github/workflows/openjdk-integration.yml
+    secrets: inherit
