@@ -236,7 +236,7 @@ impl Slot {
         &self.fips_behavior
     }
 
-    #[cfg(feature = "fips")]
+    #[cfg(all(test, feature = "fips"))]
     pub fn set_fips_behavior(&mut self, behavior: config::FipsBehavior) {
         self.fips_behavior = behavior;
     }
