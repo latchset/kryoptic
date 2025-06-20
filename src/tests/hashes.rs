@@ -122,34 +122,36 @@ fn test_hashes_digest() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
 
-    /* ==== SHA 1 ==== */
+    #[cfg(not(feature = "no_sha1"))]
+    {
+        /* ==== SHA 1 ==== */
+        /* test data */
+        let hash = hex::decode("31d2378fd917639c7120f58bdff96da84dc5b19f")
+            .expect("failed to decode hash");
+        let mut value = hex::decode("48656c6c6f20534841310a")
+            .expect("failed to decode value");
 
-    /* test data */
-    let hash = hex::decode("31d2378fd917639c7120f58bdff96da84dc5b19f")
-        .expect("failed to decode hash");
-    let mut value =
-        hex::decode("48656c6c6f20534841310a").expect("failed to decode value");
+        /* one shot digest */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_SHA_1,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        ret = fn_digest_init(session, &mut mechanism);
+        assert_eq!(ret, CKR_OK);
 
-    /* one shot digest */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_SHA_1,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    ret = fn_digest_init(session, &mut mechanism);
-    assert_eq!(ret, CKR_OK);
-
-    let mut digest: [u8; 20] = [0; 20];
-    let mut digest_len: CK_ULONG = digest.len() as CK_ULONG;
-    ret = fn_digest(
-        session,
-        value.as_mut_ptr(),
-        value.len() as CK_ULONG,
-        digest.as_mut_ptr(),
-        &mut digest_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(hash, digest);
+        let mut digest: [u8; 20] = [0; 20];
+        let mut digest_len: CK_ULONG = digest.len() as CK_ULONG;
+        ret = fn_digest(
+            session,
+            value.as_mut_ptr(),
+            value.len() as CK_ULONG,
+            digest.as_mut_ptr(),
+            &mut digest_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(hash, digest);
+    }
 
     testtokn.finalize();
 }

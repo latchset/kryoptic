@@ -53,6 +53,7 @@ fn get_test_case_data(name: &str) -> TestCase {
                 .expect("failed to decode result"),
             }
         },
+        #[cfg(not(feature = "no_sha1"))]
         "CKM_SHA_1_HMAC" => {
             TestCase {
                 value: hex::decode("48656c6c6f205348412d3120484d4143")
@@ -277,33 +278,39 @@ fn test_hmac_signatures() {
             Err(e) => panic!("{}", e),
         };
 
-    /* ### SHA-1 HMAC */
+    #[cfg(not(feature = "no_sha1"))]
+    {
+        /* ### SHA-1 HMAC */
 
-    /* get test data */
-    let mut testcase = get_test_case_data("CKM_SHA_1_HMAC");
+        /* get test data */
+        let mut testcase = get_test_case_data("CKM_SHA_1_HMAC");
 
-    /* verify test vector */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_SHA_1_HMAC,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    let ret = sig_verify(
-        session,
-        key_handle,
-        &mut testcase.value,
-        &mut testcase.result,
-        &mut mechanism,
-    );
-    assert_eq!(ret, CKR_OK);
+        /* verify test vector */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_SHA_1_HMAC,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let ret = sig_verify(
+            session,
+            key_handle,
+            &mut testcase.value,
+            &mut testcase.result,
+            &mut mechanism,
+        );
+        assert_eq!(ret, CKR_OK);
 
-    let result =
-        match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
-        {
+        let result = match sig_gen(
+            session,
+            key_handle,
+            &mut testcase.value,
+            &mut mechanism,
+        ) {
             Ok(r) => r,
             Err(e) => panic!("f{e}"),
         };
-    assert_eq!(testcase.result, result);
+        assert_eq!(testcase.result, result);
+    }
 
     /* ### SHA256 HMAC */
 
