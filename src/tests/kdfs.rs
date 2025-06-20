@@ -326,6 +326,9 @@ fn test_hash_kdf() {
             (CKM_SHA3_384_KEY_DERIVATION, 48),
             (CKM_SHA3_512_KEY_DERIVATION, 64),
         ] {
+            if cfg!(feature = "no_sha1") && hopt.0 == CKM_SHA1_KEY_DERIVATION {
+                continue;
+            }
             /* No length or type */
             let derive_template = make_attr_template(
                 &[(CKA_CLASS, CKO_SECRET_KEY)],
@@ -790,6 +793,7 @@ fn test_hkdf() {
 }
 
 #[cfg(feature = "pbkdf2")]
+#[cfg(not(feature = "no_sha1"))]
 #[test]
 #[parallel]
 fn test_pbkdf2() {
@@ -916,7 +920,7 @@ fn test_sshkdf() {
     testtokn.login();
 
     for test in [
-        #[cfg(not(feature = "fips"))]
+        #[cfg(not(any(feature = "fips", feature = "no_sha1")))]
         (
             CKM_SHA_1,
             hex::decode(

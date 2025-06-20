@@ -28,7 +28,13 @@ use pkcs11::*;
 /// ossl DigestAlg
 fn kdf_type_to_digest_alg(mech: CK_EC_KDF_TYPE) -> Result<DigestAlg> {
     match mech {
-        CKD_SHA1_KDF => Ok(DigestAlg::Sha1),
+        CKD_SHA1_KDF => {
+            if cfg!(feature = "no_sha1") {
+                return Err(CKR_MECHANISM_INVALID)?;
+            } else {
+                return Ok(DigestAlg::Sha1);
+            }
+        }
         CKD_SHA224_KDF => Ok(DigestAlg::Sha2_224),
         CKD_SHA256_KDF => Ok(DigestAlg::Sha2_256),
         CKD_SHA384_KDF => Ok(DigestAlg::Sha2_384),

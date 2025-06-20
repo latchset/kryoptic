@@ -381,6 +381,9 @@ impl Derive for Sp800Operation {
             },
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
+        if cfg!(feature = "no_sha1") && self.prf == CKM_SHA_1_HMAC {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
         let mut kdf = KbkdfDerive::new(osslctx(), mac, mode)?;
         kdf.set_key(key.get_attr_as_bytes(CKA_VALUE)?.as_slice());
         match mode {

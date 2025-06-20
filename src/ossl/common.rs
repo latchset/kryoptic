@@ -119,7 +119,13 @@ pub fn mech_type_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
         | CKM_SHA1_RSA_PKCS_PSS
         | CKM_SHA_1_HMAC
         | CKM_SHA_1_HMAC_GENERAL
-        | CKM_SHA_1 => DigestAlg::Sha1,
+        | CKM_SHA_1 => {
+            if cfg!(feature = "no_sha1") {
+                return Err(CKR_MECHANISM_INVALID)?;
+            } else {
+                return Ok(DigestAlg::Sha1);
+            }
+        }
         CKM_SHA224_RSA_PKCS
         | CKM_ECDSA_SHA224
         | CKM_SHA224_RSA_PKCS_PSS
@@ -189,7 +195,13 @@ pub fn mech_type_to_digest_name(
         | CKM_SHA1_RSA_PKCS_PSS
         | CKM_SHA_1_HMAC
         | CKM_SHA_1_HMAC_GENERAL
-        | CKM_SHA_1 => cstr!(OSSL_DIGEST_NAME_SHA1),
+        | CKM_SHA_1 => {
+            if cfg!(feature = "no_sha1") {
+                return Err(CKR_MECHANISM_INVALID)?;
+            } else {
+                return Ok(cstr!(OSSL_DIGEST_NAME_SHA1));
+            }
+        }
         CKM_SHA224_RSA_PKCS
         | CKM_ECDSA_SHA224
         | CKM_SHA224_RSA_PKCS_PSS

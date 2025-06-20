@@ -109,7 +109,13 @@ pub fn rsa_object_to_params(
 /// OpenSSL digest name used within MGF1.
 fn mgf1_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
     Ok(match mech {
-        CKG_MGF1_SHA1 => DigestAlg::Sha1,
+        CKG_MGF1_SHA1 => {
+            if cfg!(feature = "no_sha1") {
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+            } else {
+                return Ok(DigestAlg::Sha1);
+            }
+        }
         CKG_MGF1_SHA224 => DigestAlg::Sha2_224,
         CKG_MGF1_SHA256 => DigestAlg::Sha2_256,
         CKG_MGF1_SHA384 => DigestAlg::Sha2_384,
@@ -152,6 +158,12 @@ fn parse_sig_params(
         CKM_SHA3_512_RSA_PKCS_PSS => (SigAlg::RsaPssSha3_512, true),
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
+    if cfg!(feature = "no_sha1")
+        && (mech.mechanism == CKM_SHA1_RSA_PKCS
+            || mech.mechanism == CKM_SHA1_RSA_PKCS_PSS)
+    {
+        return Err(CKR_MECHANISM_INVALID)?;
+    }
     if pss {
         let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
         let mdname = mech_type_to_digest_alg(params.hashAlg)?;
