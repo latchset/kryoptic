@@ -396,7 +396,7 @@ fn test_ecc_derive_x963() {
 #[test]
 #[parallel]
 fn test_ecc_derive_nist() {
-    /* derive with shared data and NIST KDF not supported now */
+    /* derive with shared data and NIST KDF */
     let mut testtokn = TestToken::initialized(
         "test_ecc_derive_nist",
         Some("testdata/test_ecc_operations.json"),
@@ -413,7 +413,11 @@ fn test_ecc_derive_nist() {
         &[(CKA_ID, "\x02".as_bytes())],
         &[],
     );
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let ret = fn_find_objects_init(
+        session,
+        template.as_ptr() as *mut _,
+        template.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
@@ -469,7 +473,7 @@ fn test_ecc_derive_nist() {
         derive_template.len() as CK_ULONG,
         &mut s_handle,
     );
-    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
 }
