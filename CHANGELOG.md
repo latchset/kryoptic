@@ -10,6 +10,10 @@ All notable changes to this project should be documented in this file.
  - [Switch cargo setup to a workspace with several
     packages](https://github.com/latchset/kryoptic/pull/263)
 
+* Added support for SP800 ECDH KDF variant
+ - [Support Sp800 ECDH KDF
+    flavor](https://github.com/latchset/kryoptic/pull/273)
+
 
 # [1.2.0]
 ## 2025-06-09
