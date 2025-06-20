@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::bytes_to_vec;
+use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{
     cstr, get_ossl_name_from_obj, osslctx, privkey_from_object, EC_NAME,
@@ -19,7 +19,7 @@ use crate::ossl::common::{
 use ossl::bindings::{
     EVP_PKEY_PUBLIC_KEY, OSSL_PKEY_PARAM_GROUP_NAME, OSSL_PKEY_PARAM_PUB_KEY,
 };
-use ossl::derive::EcdhDerive;
+use ossl::derive::{EcdhDerive, OneStepKdfDerive, X963KdfDerive};
 use ossl::digest::DigestAlg;
 use ossl::{EvpPkey, OsslParam};
 use pkcs11::*;
@@ -27,18 +27,36 @@ use pkcs11::*;
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
 /// ossl DigestAlg
 fn kdf_type_to_digest_alg(mech: CK_EC_KDF_TYPE) -> Result<DigestAlg> {
-    match mech {
-        CKD_SHA1_KDF => Ok(DigestAlg::Sha1),
-        CKD_SHA224_KDF => Ok(DigestAlg::Sha2_224),
-        CKD_SHA256_KDF => Ok(DigestAlg::Sha2_256),
-        CKD_SHA384_KDF => Ok(DigestAlg::Sha2_384),
-        CKD_SHA512_KDF => Ok(DigestAlg::Sha2_512),
-        CKD_SHA3_224_KDF => Ok(DigestAlg::Sha3_224),
-        CKD_SHA3_256_KDF => Ok(DigestAlg::Sha3_256),
-        CKD_SHA3_384_KDF => Ok(DigestAlg::Sha3_384),
-        CKD_SHA3_512_KDF => Ok(DigestAlg::Sha3_512),
+    Ok(match mech {
+        CKD_SHA1_KDF | CKD_SHA1_KDF_SP800 => DigestAlg::Sha1,
+        CKD_SHA224_KDF | CKD_SHA224_KDF_SP800 => DigestAlg::Sha2_224,
+        CKD_SHA256_KDF | CKD_SHA256_KDF_SP800 => DigestAlg::Sha2_256,
+        CKD_SHA384_KDF | CKD_SHA384_KDF_SP800 => DigestAlg::Sha2_384,
+        CKD_SHA512_KDF | CKD_SHA512_KDF_SP800 => DigestAlg::Sha2_512,
+        CKD_SHA3_224_KDF | CKD_SHA3_224_KDF_SP800 => DigestAlg::Sha3_224,
+        CKD_SHA3_256_KDF | CKD_SHA3_256_KDF_SP800 => DigestAlg::Sha3_256,
+        CKD_SHA3_384_KDF | CKD_SHA3_384_KDF_SP800 => DigestAlg::Sha3_384,
+        CKD_SHA3_512_KDF | CKD_SHA3_512_KDF_SP800 => DigestAlg::Sha3_512,
         _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-    }
+    })
+}
+
+fn kdf_type_is_x963(mech: CK_EC_KDF_TYPE) -> Result<bool> {
+    Ok(match mech {
+        CKD_SHA1_KDF | CKD_SHA224_KDF | CKD_SHA256_KDF | CKD_SHA384_KDF
+        | CKD_SHA512_KDF | CKD_SHA3_224_KDF | CKD_SHA3_256_KDF
+        | CKD_SHA3_384_KDF | CKD_SHA3_512_KDF => true,
+        CKD_SHA1_KDF_SP800
+        | CKD_SHA224_KDF_SP800
+        | CKD_SHA256_KDF_SP800
+        | CKD_SHA384_KDF_SP800
+        | CKD_SHA512_KDF_SP800
+        | CKD_SHA3_224_KDF_SP800
+        | CKD_SHA3_256_KDF_SP800
+        | CKD_SHA3_384_KDF_SP800
+        | CKD_SHA3_512_KDF_SP800 => false,
+        _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+    })
 }
 
 /// Creates an OpenSSL `EvpPkey` representing the peer's public key.
@@ -168,8 +186,9 @@ impl Derive for ECDHOperation {
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
 
-        let raw_max = (pkey.get_bits()? + 7) / 8;
         /* the raw ECDH results have length of bit field length */
+        let raw_max = (pkey.get_bits()? + 7) / 8;
+
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(a) => {
                 let value_len = usize::try_from(a.to_ulong()?)?;
@@ -193,22 +212,6 @@ impl Derive for ECDHOperation {
             }
         };
 
-        /* these do not apply to the raw ECDH */
-        match self.kdf {
-            CKD_SHA1_KDF | CKD_SHA224_KDF | CKD_SHA256_KDF | CKD_SHA384_KDF
-            | CKD_SHA512_KDF | CKD_SHA3_224_KDF | CKD_SHA3_256_KDF
-            | CKD_SHA3_384_KDF | CKD_SHA3_512_KDF => {
-                ecdh.set_x963_kdf_type(true);
-                ecdh.set_digest(kdf_type_to_digest_alg(self.kdf)?);
-                if let Some(ukm) = &self.shared {
-                    ecdh.set_ukm(ukm.as_slice());
-                }
-                ecdh.set_outlen(keylen)?;
-            }
-            CKD_NULL => (),
-            _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-        }
-
         let ec_point = {
             if self.public.len() > (2 * raw_max) + 1 {
                 /* try to see if it is a DER encoded point */
@@ -221,14 +224,43 @@ impl Derive for ECDHOperation {
             }
         };
 
-        let mut secret = vec![0u8; keylen];
+        let mut secret = vec![0u8; raw_max];
         let outlen = ecdh.derive(
             &mut make_peer_key(key, &ec_point)?,
             secret.as_mut_slice(),
         )?;
+        secret.resize(outlen, 0);
 
-        if outlen < keylen {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        if self.kdf == CKD_NULL {
+            if outlen < keylen {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+            /* We need to take the tail of the raw output */
+            secret.drain(..(outlen - keylen));
+        } else {
+            /* Handle KDFs in token as OpenSSL does not support all cases */
+            let digest = kdf_type_to_digest_alg(self.kdf)?;
+            let mut output = vec![0u8; keylen];
+
+            if kdf_type_is_x963(self.kdf)? {
+                let mut kdf = X963KdfDerive::new(osslctx(), digest)?;
+                kdf.set_key(secret.as_slice());
+                if let Some(ukm) = &self.shared {
+                    kdf.set_info(ukm.as_slice());
+                }
+                kdf.derive(output.as_mut_slice())?;
+            } else {
+                let mut kdf =
+                    OneStepKdfDerive::new(osslctx(), None, Some(digest))?;
+                kdf.set_key(secret.as_slice());
+                if let Some(ukm) = &self.shared {
+                    kdf.set_info(ukm.as_slice());
+                }
+                kdf.derive(output.as_mut_slice())?;
+            }
+
+            zeromem(secret.as_mut_slice());
+            secret = output;
         }
 
         let mut tmpl = CkAttrs::from(template);
