@@ -413,7 +413,11 @@ fn test_ecc_derive_nist() {
         &[(CKA_ID, "\x02".as_bytes())],
         &[],
     );
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 1);
+    let ret = fn_find_objects_init(
+        session,
+        template.as_ptr() as *mut _,
+        template.len() as CK_ULONG,
+    );
     assert_eq!(ret, CKR_OK);
     let mut count: CK_ULONG = 0;
     let ret = fn_find_objects(session, &mut handle, 1, &mut count);
