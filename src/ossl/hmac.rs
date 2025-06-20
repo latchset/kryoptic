@@ -17,6 +17,7 @@ use ossl::fips::FipsApproval;
 
 fn hmac_mech_to_mac_alg(mech: CK_MECHANISM_TYPE) -> Result<MacAlg> {
     Ok(match mech {
+        #[cfg(not(feature = "no_sha1"))]
         CKM_SHA_1_HMAC | CKM_SHA_1_HMAC_GENERAL => MacAlg::HmacSha1,
         CKM_SHA224_HMAC | CKM_SHA224_HMAC_GENERAL => MacAlg::HmacSha2_224,
         CKM_SHA256_HMAC | CKM_SHA256_HMAC_GENERAL => MacAlg::HmacSha2_256,

@@ -95,6 +95,7 @@ pub const CIPHER_NAME_AES256: &[u8; 7] = b"AES256\0";
 /// ossl DigestAlg
 pub fn mech_type_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
     Ok(match mech {
+        #[cfg(not(feature = "no_sha1"))]
         CKM_SHA1_RSA_PKCS
         | CKM_ECDSA_SHA1
         | CKM_SHA1_RSA_PKCS_PSS

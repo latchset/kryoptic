@@ -178,6 +178,10 @@ fn parse_kdf_vector(filename: &str) -> Vec<TlsKdfTestSection> {
                 prf: prf,
                 units: Vec::with_capacity(100),
             };
+            #[cfg(feature = "no_sha1")]
+            if prf == CKM_SHA_1 {
+                continue;
+            }
             data.push(section);
             continue;
         }

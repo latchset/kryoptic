@@ -474,6 +474,7 @@ impl RsaPKCSMechanism {
             );
         }
         for ckm in &[
+            #[cfg(not(feature = "no_sha1"))]
             CKM_SHA1_RSA_PKCS,
             CKM_SHA224_RSA_PKCS,
             CKM_SHA256_RSA_PKCS,
@@ -484,6 +485,7 @@ impl RsaPKCSMechanism {
             CKM_SHA3_384_RSA_PKCS,
             CKM_SHA3_512_RSA_PKCS,
             CKM_RSA_PKCS_PSS,
+            #[cfg(not(feature = "no_sha1"))]
             CKM_SHA1_RSA_PKCS_PSS,
             CKM_SHA224_RSA_PKCS_PSS,
             CKM_SHA256_RSA_PKCS_PSS,

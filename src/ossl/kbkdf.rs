@@ -362,6 +362,7 @@ impl Derive for Sp800Operation {
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let mac = match self.prf {
+            #[cfg(not(feature = "no_sha1"))]
             CKM_SHA_1_HMAC => MacAlg::HmacSha1,
             CKM_SHA224_HMAC => MacAlg::HmacSha2_224,
             CKM_SHA256_HMAC => MacAlg::HmacSha2_256,

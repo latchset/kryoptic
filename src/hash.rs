@@ -45,7 +45,12 @@ pub struct HashBasedOp {
 
 /// A table referencing all of the supported hash mechanisms used for
 /// mapping purposes
-pub static HASH_MECH_SET: [HashBasedOp; 11] = [
+#[cfg(feature = "no_sha1")]
+const HASH_MECH_SET_LEN: usize = 10;
+#[cfg(not(feature = "no_sha1"))]
+const HASH_MECH_SET_LEN: usize = 11;
+pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
+    #[cfg(not(feature = "no_sha1"))]
     HashBasedOp {
         hash: CKM_SHA_1,
         key_type: CKK_SHA_1_HMAC,

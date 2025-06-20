@@ -316,6 +316,7 @@ fn test_hash_kdf() {
 
         /* Test Hash based derivation iwith multiple hashes */
         for hopt in [
+            #[cfg(not(feature = "no_sha1"))]
             (CKM_SHA1_KEY_DERIVATION, 20),
             (CKM_SHA224_KEY_DERIVATION, 28),
             (CKM_SHA256_KEY_DERIVATION, 32),
@@ -790,6 +791,7 @@ fn test_hkdf() {
 }
 
 #[cfg(feature = "pbkdf2")]
+#[cfg(not(feature = "no_sha1"))]
 #[test]
 #[parallel]
 fn test_pbkdf2() {
@@ -916,7 +918,7 @@ fn test_sshkdf() {
     testtokn.login();
 
     for test in [
-        #[cfg(not(feature = "fips"))]
+        #[cfg(not(any(feature = "fips", feature = "no_sha1")))]
         (
             CKM_SHA_1,
             hex::decode(

@@ -97,6 +97,7 @@ pub fn rsa_object_to_pkey(
 /// OpenSSL digest name used within MGF1.
 fn mgf1_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
     Ok(match mech {
+        #[cfg(not(feature = "no_sha1"))]
         CKG_MGF1_SHA1 => DigestAlg::Sha1,
         CKG_MGF1_SHA224 => DigestAlg::Sha2_224,
         CKG_MGF1_SHA256 => DigestAlg::Sha2_256,
@@ -120,6 +121,7 @@ fn parse_sig_params(
         CKM_RSA_X_509 => (SigAlg::RsaNoPad, false),
         CKM_RSA_PKCS => (SigAlg::Rsa, false),
         CKM_RSA_PKCS_PSS => (SigAlg::RsaPss, true),
+        #[cfg(not(feature = "no_sha1"))]
         CKM_SHA1_RSA_PKCS => (SigAlg::RsaSha1, false),
         CKM_SHA224_RSA_PKCS => (SigAlg::RsaSha2_224, false),
         CKM_SHA256_RSA_PKCS => (SigAlg::RsaSha2_256, false),
@@ -129,6 +131,7 @@ fn parse_sig_params(
         CKM_SHA3_256_RSA_PKCS => (SigAlg::RsaSha3_256, false),
         CKM_SHA3_384_RSA_PKCS => (SigAlg::RsaSha3_384, false),
         CKM_SHA3_512_RSA_PKCS => (SigAlg::RsaSha3_512, false),
+        #[cfg(not(feature = "no_sha1"))]
         CKM_SHA1_RSA_PKCS_PSS => (SigAlg::RsaPssSha1, true),
         CKM_SHA224_RSA_PKCS_PSS => (SigAlg::RsaPssSha2_224, true),
         CKM_SHA256_RSA_PKCS_PSS => (SigAlg::RsaPssSha2_256, true),

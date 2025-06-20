@@ -130,6 +130,7 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
 pub fn ecdsa_type_to_ossl_alg(mech: CK_MECHANISM_TYPE) -> Result<SigAlg> {
     Ok(match mech {
         CKM_ECDSA => SigAlg::Ecdsa,
+        #[cfg(not(feature = "no_sha1"))]
         CKM_ECDSA_SHA1 => SigAlg::EcdsaSha1,
         CKM_ECDSA_SHA224 => SigAlg::EcdsaSha2_224,
         CKM_ECDSA_SHA256 => SigAlg::EcdsaSha2_256,
@@ -172,6 +173,7 @@ impl EcdsaOperation {
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[
             CKM_ECDSA,
+            #[cfg(not(feature = "no_sha1"))]
             CKM_ECDSA_SHA1,
             CKM_ECDSA_SHA224,
             CKM_ECDSA_SHA256,

@@ -22,6 +22,7 @@ use pkcs11::*;
 /// ossl DigestAlg
 fn kdf_type_to_digest_alg(mech: CK_EC_KDF_TYPE) -> Result<DigestAlg> {
     Ok(match mech {
+        #[cfg(not(feature = "no_sha1"))]
         CKD_SHA1_KDF | CKD_SHA1_KDF_SP800 => DigestAlg::Sha1,
         CKD_SHA224_KDF | CKD_SHA224_KDF_SP800 => DigestAlg::Sha2_224,
         CKD_SHA256_KDF | CKD_SHA256_KDF_SP800 => DigestAlg::Sha2_256,
