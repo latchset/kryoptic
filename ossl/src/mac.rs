@@ -6,7 +6,7 @@
 use std::ffi::CStr;
 
 use crate::bindings::*;
-
+use crate::digest::DigestAlg;
 use crate::{
     cstr, trace_ossl, void_ptr, Error, ErrorKind, OsslContext, OsslParam,
 };
@@ -77,6 +77,45 @@ pub enum MacAlg {
     CmacAes128,
     CmacAes192,
     CmacAes256,
+}
+
+pub(crate) fn mac_to_digest_and_type(
+    mac: MacAlg,
+) -> Result<(DigestAlg, &'static CStr), Error> {
+    Ok(match mac {
+        MacAlg::HmacSha1 => (DigestAlg::Sha1, cstr!(OSSL_MAC_NAME_HMAC)),
+        MacAlg::HmacSha2_224 => {
+            (DigestAlg::Sha2_224, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha2_256 => {
+            (DigestAlg::Sha2_256, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha2_384 => {
+            (DigestAlg::Sha2_384, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha2_512 => {
+            (DigestAlg::Sha2_512, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha2_512_224 => {
+            (DigestAlg::Sha2_512_224, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha2_512_256 => {
+            (DigestAlg::Sha2_512_256, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha3_224 => {
+            (DigestAlg::Sha3_224, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha3_256 => {
+            (DigestAlg::Sha3_256, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha3_384 => {
+            (DigestAlg::Sha3_384, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        MacAlg::HmacSha3_512 => {
+            (DigestAlg::Sha3_512, cstr!(OSSL_MAC_NAME_HMAC))
+        }
+        _ => return Err(Error::new(ErrorKind::WrapperError)),
+    })
 }
 
 pub(crate) fn add_mac_alg_to_params(

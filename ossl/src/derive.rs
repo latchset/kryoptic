@@ -8,7 +8,7 @@ use std::ffi::{c_int, c_uint, CStr};
 
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
-use crate::mac::{add_mac_alg_to_params, MacAlg};
+use crate::mac::{add_mac_alg_to_params, mac_to_digest_and_type, MacAlg};
 use crate::{
     cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
     OsslParam,
@@ -509,6 +509,176 @@ impl<'a> SshkdfDerive<'a> {
                 .add_octet_slice(cstr!(OSSL_KDF_PARAM_SSHKDF_SESSION_ID), s)?,
             None => (),
         }
+        params.finalize();
+
+        self.ctx.derive(&params, output)
+    }
+}
+
+/// Higher level wrapper for One Step KDF Derive operation as
+/// defined in SP-800 56C
+///
+/// The OpenSSL implementation is called "SSKDF"
+#[derive(Debug)]
+pub struct OneStepKdfDerive<'a> {
+    /// The OpenSSL KDF context (`EVP_KDF_CTX`).
+    ctx: EvpKdfCtx,
+    /// The digest function
+    digest: DigestAlg,
+    /// The (Optional) Mac type
+    mac: Option<&'static CStr>,
+    /// The key to derive from
+    key: Option<&'a [u8]>,
+    /// optional salt value (a non-secret random value)
+    salt: Option<&'a [u8]>,
+    /// Optional Context Info
+    info: Option<&'a [u8]>,
+}
+
+impl<'a> OneStepKdfDerive<'a> {
+    /// Instantiates a new OneStepKeyDerive context
+    /// Note that digest and mac are mutually exclusive, but
+    /// one or the other must be provided.
+    pub fn new(
+        ctx: &OsslContext,
+        mac: Option<MacAlg>,
+        digest: Option<DigestAlg>,
+    ) -> Result<OneStepKdfDerive<'a>, Error> {
+        let mut mac_type: Option<&'static CStr> = None;
+        let alg = if let Some(m) = mac {
+            if digest.is_some() {
+                return Err(Error::new(ErrorKind::WrapperError));
+            }
+            let (a, t) = mac_to_digest_and_type(m)?;
+            mac_type = Some(t);
+            a
+        } else if let Some(a) = digest {
+            if mac.is_some() {
+                return Err(Error::new(ErrorKind::WrapperError));
+            }
+            a
+        } else {
+            return Err(Error::new(ErrorKind::NullPtr));
+        };
+
+        Ok(OneStepKdfDerive {
+            ctx: EvpKdfCtx::new(ctx, cstr!(OSSL_KDF_NAME_SSKDF))?,
+            digest: alg,
+            mac: mac_type,
+            key: None,
+            salt: None,
+            info: None,
+        })
+    }
+
+    /// Set the derivation key
+    pub fn set_key(&mut self, key: &'a [u8]) {
+        self.key = Some(key);
+    }
+
+    /// Set the salt (optional)
+    /// Note: salt is ignored when a Mac option is not present
+    pub fn set_salt(&mut self, salt: &'a [u8]) {
+        self.salt = Some(salt);
+    }
+
+    /// Set info (context)
+    pub fn set_info(&mut self, info: &'a [u8]) {
+        self.info = Some(info);
+    }
+
+    /// Perform the derive operation based on the parameters set on the context
+    /// The key parameter must have been set
+    /// Returns the output in the provided output buffer
+    pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
+        let mut params = OsslParam::with_capacity(5);
+        params.zeroize = true;
+        params.add_const_c_string(
+            cstr!(OSSL_KDF_PARAM_DIGEST),
+            digest_to_string(self.digest),
+        )?;
+        match &self.key {
+            Some(key) => {
+                params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), key)?
+            }
+            None => return Err(Error::new(ErrorKind::KeyError)),
+        }
+        if let Some(mac) = self.mac {
+            params.add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac)?;
+        }
+        if let Some(salt) = self.salt {
+            params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), salt)?;
+        }
+        if let Some(info) = &self.info {
+            params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
+        }
+
+        params.finalize();
+
+        self.ctx.derive(&params, output)
+    }
+}
+
+/// Higher level wrapper for The X9.63 Key Derive operation as
+/// defined in ANSI-X9.63
+///
+/// The OpenSSL implementation is called "X963KDF"
+#[derive(Debug)]
+pub struct X963KdfDerive<'a> {
+    /// The OpenSSL KDF context (`EVP_KDF_CTX`).
+    ctx: EvpKdfCtx,
+    /// The digest function
+    digest: DigestAlg,
+    /// The key to derive from
+    key: Option<&'a [u8]>,
+    /// Optional Context Info
+    info: Option<&'a [u8]>,
+}
+
+impl<'a> X963KdfDerive<'a> {
+    /// Instantiates a new X9.63 Key Derive context
+    pub fn new(
+        ctx: &OsslContext,
+        digest: DigestAlg,
+    ) -> Result<X963KdfDerive<'a>, Error> {
+        Ok(X963KdfDerive {
+            ctx: EvpKdfCtx::new(ctx, cstr!(OSSL_KDF_NAME_X963KDF))?,
+            digest: digest,
+            key: None,
+            info: None,
+        })
+    }
+
+    /// Set the derivation key
+    pub fn set_key(&mut self, key: &'a [u8]) {
+        self.key = Some(key);
+    }
+
+    /// Set info (context)
+    pub fn set_info(&mut self, info: &'a [u8]) {
+        self.info = Some(info);
+    }
+
+    /// Perform the derive operation based on the parameters set on the context
+    /// The key parameter must have been set
+    /// Returns the output in the provided output buffer
+    pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
+        let mut params = OsslParam::with_capacity(3);
+        params.zeroize = true;
+        params.add_const_c_string(
+            cstr!(OSSL_KDF_PARAM_DIGEST),
+            digest_to_string(self.digest),
+        )?;
+        match &self.key {
+            Some(key) => {
+                params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), key)?
+            }
+            None => return Err(Error::new(ErrorKind::KeyError)),
+        }
+        if let Some(info) = &self.info {
+            params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
+        }
+
         params.finalize();
 
         self.ctx.derive(&params, output)
