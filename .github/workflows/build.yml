@@ -17,8 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic, i686, minimal, pqc, log]
+        name: [ossl3, fips, release, dynamic, i686, minimal, pqc, log, no_sha1]
         db: [sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
+        exclude:
+          - name: no_sha1
+            db: nssdb
     container: fedora:latest
     steps:
       - name: Get Date for DNF cache entry
@@ -108,6 +111,9 @@ jobs:
             FEATURES="${FEATURES},standard,pqc"
           elif [ "${{ matrix.name }}" = "log" ]; then
             FEATURES="${FEATURES},standard,log"
+          elif [ "${{ matrix.name }}" = "no_sha1" ]; then
+            #nssdb doesn't work with no_sha1
+            FEATURES="${FEATURES},standard,no_sha1"
           fi
 
           # create a bugus configuration file to make sure it is not used during tests

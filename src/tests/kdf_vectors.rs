@@ -77,7 +77,13 @@ fn parse_kdf_vector(filename: &str) -> Vec<KdfTestSection> {
                     "CMAC_AES128]" => CKM_AES_CMAC,
                     "CMAC_AES192]" => CKM_AES_CMAC,
                     "CMAC_AES256]" => CKM_AES_CMAC,
-                    "HMAC_SHA1]" => CKM_SHA_1_HMAC,
+                    "HMAC_SHA1]" => {
+                        if cfg!(feature = "no_sha1") {
+                            CK_UNAVAILABLE_INFORMATION
+                        } else {
+                            CKM_SHA_1_HMAC
+                        }
+                    }
                     "HMAC_SHA224]" => CKM_SHA224_HMAC,
                     "HMAC_SHA256]" => CKM_SHA256_HMAC,
                     "HMAC_SHA384]" => CKM_SHA384_HMAC,

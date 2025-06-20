@@ -141,7 +141,13 @@ fn pkcs11_to_ossl_signature(signature: &[u8]) -> Result<Vec<u8>> {
 pub fn ecdsa_type_to_ossl_alg(mech: CK_MECHANISM_TYPE) -> Result<SigAlg> {
     Ok(match mech {
         CKM_ECDSA => SigAlg::Ecdsa,
-        CKM_ECDSA_SHA1 => SigAlg::EcdsaSha1,
+        CKM_ECDSA_SHA1 => {
+            if cfg!(feature = "no_sha1") {
+                return Err(CKR_MECHANISM_INVALID)?;
+            } else {
+                return Ok(SigAlg::EcdsaSha1);
+            }
+        }
         CKM_ECDSA_SHA224 => SigAlg::EcdsaSha2_224,
         CKM_ECDSA_SHA256 => SigAlg::EcdsaSha2_256,
         CKM_ECDSA_SHA384 => SigAlg::EcdsaSha2_384,
@@ -193,6 +199,9 @@ impl EcdsaOperation {
             CKM_ECDSA_SHA3_384,
             CKM_ECDSA_SHA3_512,
         ] {
+            if cfg!(feature = "no_sha1") && ckm == &CKM_ECDSA_SHA1 {
+                continue;
+            }
             mechs.add_mechanism(*ckm, Self::new_mechanism());
         }
 

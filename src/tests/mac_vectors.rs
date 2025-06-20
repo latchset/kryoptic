@@ -182,6 +182,9 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
             CKK_GENERIC_SECRET
         };
 
+        if cfg!(feature = "no_sha1") && unit.mech == CKM_SHA_1_HMAC_GENERAL {
+            continue;
+        }
         /* create key */
         let key_handle = ret_or_panic!(import_object(
             session,

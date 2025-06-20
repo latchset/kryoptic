@@ -156,7 +156,7 @@ jobs:
           elif [ "${{ matrix.version }}" = "3.2" ]; then
             FEATURES="minimal,eddsa"
           elif [ "${{ matrix.version }}" = "3.5" ]; then
-            FEATURES="minimal,eddsa,mldsa"
+            FEATURES="minimal,eddsa,mldsa,no_sha1"
           fi
 
           if [ "${{ matrix.build }}" = "false" ]; then
