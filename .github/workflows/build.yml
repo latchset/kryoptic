@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic, i686, minimal, pqc, log]
+        name: [ossl3, fips, release, dynamic, i686, minimal, pqc]
         db: [sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
     container: fedora:latest
     steps:
@@ -106,8 +106,6 @@ jobs:
             FEATURES="${FEATURES},dynamic"
           elif [ "${{ matrix.name }}" = "pqc" ]; then
             FEATURES="${FEATURES},standard,pqc"
-          elif [ "${{ matrix.name }}" = "log" ]; then
-            FEATURES="${FEATURES},standard,log"
           fi
 
           # create a bugus configuration file to make sure it is not used during tests
@@ -115,7 +113,7 @@ jobs:
           cp testdata/test.conf ~/.config/kryoptic/token.conf
 
           cargo build -vv $OPTS --features "$FEATURES"
-          cargo test -vv $OPTS --features "$FEATURES"
+          KRYOPTIC_TRACE=trace.log cargo test -vv $OPTS --features "$FEATURES,log"
 
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -123,6 +121,7 @@ jobs:
           name: Build logs ${{ matrix.db }} ${{ matrix.name }}
           path: |
             target/debug/build/*/output
+            trace.log
 
       - if: ${{ matrix.name == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
         name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
