@@ -204,12 +204,12 @@ struct BigNum {
 }
 
 impl BigNum {
-    /// Allocates a new BIGNUM from a vector of bytes with the binary
+    /// Allocates a new BIGNUM from a slice of bytes with the binary
     /// representation of the number in big endian byte order (most
     /// significant byte first).
     ///
     /// Returns a wrapped `BigNum` or an error if the import fails.
-    pub fn from_bigendian_vec(v: &Vec<u8>) -> Result<BigNum, Error> {
+    pub fn from_bigendian_slice(v: &[u8]) -> Result<BigNum, Error> {
         let bn = unsafe {
             BN_bin2bn(
                 v.as_ptr() as *mut u8,
@@ -405,11 +405,11 @@ impl<'a> OsslParam<'a> {
         p
     }
 
-    /// Adds a BIGNUM parameter from a big-endian byte vector.
+    /// Adds a BIGNUM parameter from a big-endian byte slice.
     ///
     /// Handles the necessary conversions for OpenSSL's native-endian BIGNUM
     /// representation within `OSSL_PARAM`.
-    pub fn add_bn(&mut self, key: &CStr, v: &Vec<u8>) -> Result<(), Error> {
+    pub fn add_bn(&mut self, key: &CStr, v: &[u8]) -> Result<(), Error> {
         if self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
@@ -420,7 +420,7 @@ impl<'a> OsslParam<'a> {
          * native endianness, ensuring the buffer we pass in
          * is in the correct order for openssl ...
          */
-        let bn = BigNum::from_bigendian_vec(v)?;
+        let bn = BigNum::from_bigendian_slice(v)?;
         let container = bn.to_native_vec()?;
         let param = unsafe {
             OSSL_PARAM_construct_BN(

@@ -56,17 +56,17 @@ pub fn rsa_object_to_params(
     params.zeroize = true;
     params.add_bn(
         cstr!(OSSL_PKEY_PARAM_RSA_N),
-        key.get_attr_as_bytes(CKA_MODULUS)?,
+        key.get_attr_as_bytes(CKA_MODULUS)?.as_slice(),
     )?;
     params.add_bn(
         cstr!(OSSL_PKEY_PARAM_RSA_E),
-        key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
+        key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?.as_slice(),
     )?;
 
     if class == CKO_PRIVATE_KEY {
         params.add_bn(
             cstr!(OSSL_PKEY_PARAM_RSA_D),
-            key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
+            key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?.as_slice(),
         )?;
 
         /* OpenSSL can compute a,b,c with just p,q */
@@ -75,11 +75,11 @@ pub fn rsa_object_to_params(
         {
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1),
-                key.get_attr_as_bytes(CKA_PRIME_1)?,
+                key.get_attr_as_bytes(CKA_PRIME_1)?.as_slice(),
             )?;
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2),
-                key.get_attr_as_bytes(CKA_PRIME_2)?,
+                key.get_attr_as_bytes(CKA_PRIME_2)?.as_slice(),
             )?;
         }
 
@@ -89,15 +89,15 @@ pub fn rsa_object_to_params(
         {
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1),
-                key.get_attr_as_bytes(CKA_EXPONENT_1)?,
+                key.get_attr_as_bytes(CKA_EXPONENT_1)?.as_slice(),
             )?;
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2),
-                key.get_attr_as_bytes(CKA_EXPONENT_2)?,
+                key.get_attr_as_bytes(CKA_EXPONENT_2)?.as_slice(),
             )?;
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
-                key.get_attr_as_bytes(CKA_COEFFICIENT)?,
+                key.get_attr_as_bytes(CKA_COEFFICIENT)?.as_slice(),
             )?;
         }
     }
