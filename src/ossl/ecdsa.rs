@@ -5,8 +5,6 @@
 //! functionalities using the OpenSSL EVP interface, including key generation,
 //! signing, verification, and signature format conversions.
 
-use std::ffi::CStr;
-
 use crate::attribute::Attribute;
 use crate::ec::ecdsa::*;
 use crate::ec::get_ec_point_from_obj;
@@ -17,52 +15,42 @@ use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::common::*;
 
-use ossl::bindings::*;
-use ossl::pkey::EvpPkey;
+use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{OsslSignature, SigAlg};
-use ossl::OsslParam;
 use pkcs11::*;
 
-/// Converts a PKCS#11 EC key `Object` into OpenSSL parameters (`OsslParam`).
+/// Converts a PKCS#11 EC key `Object` into an `EvpPkey`.
 ///
-/// Extracts the curve name and relevant key components (public point or private
-/// value) based on the object `class` and populates an `OsslParam` structure
-/// suitable for creating an OpenSSL `EvpPkey`.
-pub fn ecc_object_to_params(
+/// Extracts the curve type and relevant key components (public point or private
+/// value) based on the object `class` and populates an `EccData` structure
+/// suitable for creating an `EvpPkey`.
+pub fn ecc_object_to_pkey(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(&'static CStr, OsslParam)> {
+) -> Result<EvpPkey> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
     }
-    let mut params = OsslParam::with_capacity(2);
-    params.zeroize = true;
-
-    params.add_const_c_string(
-        cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-        get_ossl_name_from_obj(key)?,
-    )?;
-
     match kclass {
-        CKO_PUBLIC_KEY => {
-            params.add_owned_octet_string(
-                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                get_ec_point_from_obj(key)?,
-            )?;
-        }
-        CKO_PRIVATE_KEY => {
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
-            )?;
-        }
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+        CKO_PUBLIC_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            get_evp_pkey_type_from_obj(key)?,
+            PkeyData::Ecc(EccData {
+                pubkey: Some(get_ec_point_from_obj(key)?),
+                prikey: None,
+            }),
+        )?),
+        CKO_PRIVATE_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            get_evp_pkey_type_from_obj(key)?,
+            PkeyData::Ecc(EccData {
+                pubkey: None,
+                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+            }),
+        )?),
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
-
-    params.finalize();
-
-    Ok((EC_NAME, params))
 }
 
 /// ASN.1 structure for an ECDSA signature value (SEQUENCE of two INTEGERs).
@@ -303,25 +291,31 @@ impl EcdsaOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let evp_pkey =
+        let pkey =
             EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
-
-        let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
-
-        /* Public Key */
-        let point_encoded = match asn1::write_single(
-            &params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?,
-        ) {
-            Ok(b) => b,
-            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        let ecc = match pkey.export()? {
+            PkeyData::Ecc(e) => e,
         };
-        pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
 
-        /* Private Key */
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_VALUE,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?,
-        ))?;
+        /* Set Public Key */
+        if let Some(key) = ecc.pubkey {
+            let point_encoded = match asn1::write_single(&key.as_slice()) {
+                Ok(b) => b,
+                Err(_) => return Err(CKR_GENERAL_ERROR)?,
+            };
+            pubkey
+                .set_attr(Attribute::from_bytes(CKA_EC_POINT, point_encoded))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
+        /* Set Private Key */
+        if let Some(key) = ecc.prikey {
+            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
         Ok(())
     }
 }

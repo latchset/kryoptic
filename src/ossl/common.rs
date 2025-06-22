@@ -65,7 +65,7 @@ pub fn evp_pkey_from_object(
     let key_type = obj.get_attr_as_ulong(CKA_KEY_TYPE)?;
     let (name, params) = match key_type {
         #[cfg(feature = "ecdsa")]
-        CKK_EC => ecdsa::ecc_object_to_params(obj, class)?,
+        CKK_EC => return ecdsa::ecc_object_to_pkey(obj, class),
         #[cfg(feature = "eddsa")]
         CKK_EC_EDWARDS => eddsa::eddsa_object_to_params(obj, class)?,
         #[cfg(feature = "ec_montgomery")]
