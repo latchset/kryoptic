@@ -4,7 +4,7 @@
 //! This module provides a coherent abstraction for OpenSSL asymmetric Key
 //! management. It handles import/export and key generation
 
-use std::ffi::{c_char, c_int, c_uint, CStr};
+use std::ffi::{c_int, c_uint, CStr};
 
 use crate::bindings::*;
 use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
@@ -101,9 +101,9 @@ pub enum EvpPkeyType {
 }
 
 fn pkey_type_to_params(
-    pt: EvpPkeyType,
-) -> Result<(&'static CStr, OsslParam<'static>), Error> {
-    let mut params = OsslParam::new();
+    pt: &EvpPkeyType,
+    params: &mut OsslParam,
+) -> Result<&'static CStr, Error> {
     let name = match pt {
         EvpPkeyType::Ffdhe2048 => {
             params.add_const_c_string(
@@ -210,13 +210,25 @@ fn pkey_type_to_params(
             params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_E), &exp)?;
             params.add_owned_uint(
                 cstr!(OSSL_PKEY_PARAM_RSA_BITS),
-                c_uint::try_from(size)?,
+                c_uint::try_from(*size)?,
             )?;
             c"RSA"
         }
     };
-    params.finalize();
-    Ok((name, params))
+    Ok(name)
+}
+
+/// Structure that holds Ecc key data
+#[derive(Debug)]
+pub struct EccData {
+    pub pubkey: Option<Vec<u8>>,
+    pub prikey: Option<Vec<u8>>,
+}
+
+/// Wrapper to handle import/export data based on the type
+#[derive(Debug)]
+pub enum PkeyData {
+    Ecc(EccData),
 }
 
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
@@ -294,7 +306,9 @@ impl EvpPkey {
         ctx: &OsslContext,
         pkey_type: EvpPkeyType,
     ) -> Result<EvpPkey, Error> {
-        let (name, params) = pkey_type_to_params(pkey_type)?;
+        let mut params = OsslParam::new();
+        let name = pkey_type_to_params(&pkey_type, &mut params)?;
+        params.finalize();
         let mut pctx = EvpPkeyCtx::new(ctx, name)?;
         let res = unsafe { EVP_PKEY_keygen_init(pctx.as_mut_ptr()) };
         if res != 1 {
@@ -336,6 +350,70 @@ impl EvpPkey {
         }
     }
 
+    /// Helper to import a public/private pkey */
+    pub fn import(
+        ctx: &OsslContext,
+        pkey_type: EvpPkeyType,
+        data: PkeyData,
+    ) -> Result<EvpPkey, Error> {
+        let mut pkey_class: u32 = 0;
+        let mut params = OsslParam::with_capacity(2);
+        params.zeroize = true;
+
+        let name = pkey_type_to_params(&pkey_type, &mut params)?;
+
+        match pkey_type {
+            EvpPkeyType::P256 | EvpPkeyType::P384 | EvpPkeyType::P521 => {
+                match data {
+                    PkeyData::Ecc(ecc) => {
+                        if let Some(p) = ecc.pubkey {
+                            pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                            params.add_owned_octet_string(
+                                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                                p,
+                            )?
+                        }
+                        if let Some(p) = ecc.prikey {
+                            pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                            params.add_bn(
+                                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
+                                p.as_slice(),
+                            )?
+                        }
+                    }
+                }
+            }
+            _ => return Err(Error::new(ErrorKind::WrapperError)),
+        }
+
+        params.finalize();
+
+        EvpPkey::fromdata(ctx, name, pkey_class, &params)
+    }
+
+    /// Export public point in encoded form and/or private key
+    pub fn export(&self) -> Result<PkeyData, Error> {
+        let params = self.todata(EVP_PKEY_KEYPAIR)?;
+        Ok(PkeyData::Ecc(EccData {
+            pubkey: match params
+                .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
+            {
+                Ok(p) => Some(p.to_vec()),
+                Err(e) => match e.kind() {
+                    ErrorKind::NullPtr => None,
+                    _ => return Err(e),
+                },
+            },
+            prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
+                Ok(p) => Some(p),
+                Err(e) => match e.kind() {
+                    ErrorKind::NullPtr => None,
+                    _ => return Err(e),
+                },
+            },
+        }))
+    }
+
     /// Returns a const pointer to the underlying `EVP_PKEY`.
     pub fn as_ptr(&self) -> *const EVP_PKEY {
         self.ptr
@@ -361,13 +439,8 @@ impl EvpPkey {
     pub fn get_bits(&self) -> Result<usize, Error> {
         /* EVP_PKEY_get_bits() not available in libfips.a */
         let mut bits: c_int = 0;
-        let ret = unsafe {
-            EVP_PKEY_get_int_param(
-                self.ptr,
-                OSSL_PKEY_PARAM_BITS.as_ptr() as *const c_char,
-                &mut bits,
-            )
-        };
+        let name = cstr!(OSSL_PKEY_PARAM_BITS).as_ptr();
+        let ret = unsafe { EVP_PKEY_get_int_param(self.ptr, name, &mut bits) };
         if ret == 0 {
             /* TODO: may want to return a special error
              * for unsupported keys */

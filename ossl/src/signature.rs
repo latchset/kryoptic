@@ -12,7 +12,7 @@ use crate::pkey::{EvpPkey, EvpPkeyCtx};
 use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
 
 #[cfg(not(feature = "fips"))]
-use crate::EvpMdCtx;
+use crate::digest::EvpMdCtx;
 
 #[cfg(feature = "fips")]
 use crate::fips::ProviderSignatureCtx;
