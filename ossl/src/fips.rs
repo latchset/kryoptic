@@ -15,8 +15,9 @@ use std::path::Path;
 use std::slice;
 
 use crate::bindings::*;
+use crate::pkey::EvpPkey;
 use crate::signature::SigAlg;
-use crate::{cstr, void_ptr, Error, ErrorKind, EvpPkey, OsslContext};
+use crate::{cstr, void_ptr, Error, ErrorKind, OsslContext};
 
 use getrandom;
 use libc;

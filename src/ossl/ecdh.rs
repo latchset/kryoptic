@@ -21,7 +21,8 @@ use ossl::bindings::{
 };
 use ossl::derive::{EcdhDerive, OneStepKdfDerive, X963KdfDerive};
 use ossl::digest::DigestAlg;
-use ossl::{EvpPkey, OsslParam};
+use ossl::pkey::EvpPkey;
+use ossl::OsslParam;
 use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding

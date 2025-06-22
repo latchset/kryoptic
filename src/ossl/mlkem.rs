@@ -13,7 +13,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{ErrorKind, EvpPkey, EvpPkeyType, OsslParam};
+use ossl::pkey::{EvpPkey, EvpPkeyType};
+use ossl::{ErrorKind, OsslParam};
 use pkcs11::*;
 
 /* Openssl Key types */

@@ -9,10 +9,8 @@ use std::ffi::{c_int, c_uint, CStr};
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
 use crate::mac::{add_mac_alg_to_params, mac_to_digest_and_type, MacAlg};
-use crate::{
-    cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
-    OsslParam,
-};
+use crate::pkey::{EvpPkey, EvpPkeyCtx};
+use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
 
 /// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
 #[derive(Debug)]
