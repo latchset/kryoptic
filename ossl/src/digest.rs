@@ -7,9 +7,87 @@ use std::ffi::{c_uint, c_void, CStr};
 
 use crate::bindings::*;
 
-use crate::{
-    cstr, trace_ossl, Error, ErrorKind, EvpMd, EvpMdCtx, OsslContext, OsslParam,
-};
+use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+
+/// Wrapper around OpenSSL's `EVP_MD`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpMd {
+    ptr: *mut EVP_MD,
+}
+
+/// Methods for creating and accessing `EvpMd`.
+impl EvpMd {
+    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMd, Error> {
+        let ptr = unsafe {
+            EVP_MD_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+        };
+        if ptr.is_null() {
+            trace_ossl!("EVP_MD_fetch()");
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        Ok(EvpMd { ptr })
+    }
+
+    /// Returns a const pointer to the underlying `EVP_MD`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_MD {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_MD`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD {
+        self.ptr
+    }
+}
+
+impl Drop for EvpMd {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_MD_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpMd {}
+unsafe impl Sync for EvpMd {}
+
+/// Wrapper around OpenSSL's `EVP_MD_CTX`, managing its lifecycle.
+#[derive(Debug)]
+pub struct EvpMdCtx {
+    ptr: *mut EVP_MD_CTX,
+}
+
+/// Methods for creating and accessing `EvpMdCtx`.
+impl EvpMdCtx {
+    pub fn new() -> Result<EvpMdCtx, Error> {
+        let ptr = unsafe { EVP_MD_CTX_new() };
+        if ptr.is_null() {
+            trace_ossl!("EVP_MD_ctx_new()");
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        Ok(EvpMdCtx { ptr })
+    }
+
+    /// Returns a const pointer to the underlying `EVP_MD_CTX`.
+    pub unsafe fn as_ptr(&self) -> *const EVP_MD_CTX {
+        self.ptr
+    }
+
+    /// Returns a mutable pointer to the underlying `EVP_MD_CTX`.
+    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD_CTX {
+        self.ptr
+    }
+}
+
+impl Drop for EvpMdCtx {
+    fn drop(&mut self) {
+        unsafe {
+            EVP_MD_CTX_free(self.ptr);
+        }
+    }
+}
+
+unsafe impl Send for EvpMdCtx {}
+unsafe impl Sync for EvpMdCtx {}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DigestAlg {

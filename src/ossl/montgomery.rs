@@ -14,7 +14,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{EvpPkey, OsslParam};
+use ossl::pkey::EvpPkey;
+use ossl::OsslParam;
 use pkcs11::*;
 
 /// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into

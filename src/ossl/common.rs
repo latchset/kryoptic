@@ -15,7 +15,8 @@ use crate::object::Object;
 
 use ossl::bindings::*;
 use ossl::digest::DigestAlg;
-use ossl::*;
+use ossl::pkey::{EvpPkey, EvpPkeyType};
+use ossl::OsslContext;
 use pkcs11::*;
 
 #[cfg(feature = "ecc")]

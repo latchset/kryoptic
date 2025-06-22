@@ -17,7 +17,8 @@ use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::{EvpPkey, EvpPkeyType, OsslParam};
+use ossl::pkey::{EvpPkey, EvpPkeyType};
+use ossl::OsslParam;
 use pkcs11::*;
 
 /// Names as understood by OpenSSL

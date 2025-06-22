@@ -6,10 +6,8 @@
 
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
-use crate::{
-    cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
-    OsslParam,
-};
+use crate::pkey::{EvpPkey, EvpPkeyCtx};
+use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
 
 /// Known algorithms selectable for OsslAsymcipher
 #[derive(Clone, Copy, Debug, PartialEq)]

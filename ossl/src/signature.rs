@@ -8,10 +8,8 @@ use std::ffi::{c_char, c_int, CStr};
 
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
-use crate::{
-    cstr, trace_ossl, Error, ErrorKind, EvpPkey, EvpPkeyCtx, OsslContext,
-    OsslParam,
-};
+use crate::pkey::{EvpPkey, EvpPkeyCtx};
+use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
 
 #[cfg(not(feature = "fips"))]
 use crate::EvpMdCtx;

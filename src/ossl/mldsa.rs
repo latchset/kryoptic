@@ -20,8 +20,9 @@ use crate::{bytes_to_vec, cast_params};
 use asn1;
 use bitflags::bitflags;
 use ossl::bindings::*;
+use ossl::pkey::{EvpPkey, EvpPkeyType};
 use ossl::signature::{OsslSignature, SigAlg};
-use ossl::{ErrorKind, EvpPkey, EvpPkeyType, OsslParam};
+use ossl::{ErrorKind, OsslParam};
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
