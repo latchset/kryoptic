@@ -112,13 +112,13 @@ pub fn ffdh_object_to_params(
         CKO_PUBLIC_KEY => {
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?,
+                key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
             )?;
         }
         CKO_PRIVATE_KEY => {
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?,
+                key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
             )?;
         }
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
@@ -168,7 +168,8 @@ impl FFDHOperation {
             cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
             cstr!(group_name.as_slice()),
         )?;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY), &self.public)?;
+        params
+            .add_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY), self.public.as_slice())?;
         params.finalize();
 
         Ok(EvpPkey::fromdata(

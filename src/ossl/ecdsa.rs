@@ -54,7 +54,7 @@ pub fn ecc_object_to_params(
         CKO_PRIVATE_KEY => {
             params.add_bn(
                 cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?,
+                key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
             )?;
         }
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
