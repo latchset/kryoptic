@@ -12,14 +12,10 @@ use crate::error::Result;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-use crate::ossl::common::{
-    get_evp_pkey_type_from_obj, osslctx, privkey_from_object,
-};
+use crate::ossl::common::{osslctx, privkey_from_object};
 
 use ossl::derive::{EcdhDerive, OneStepKdfDerive, X963KdfDerive};
 use ossl::digest::DigestAlg;
-use ossl::pkey::{EccData, EvpPkey, PkeyData};
-use ossl::OsslParam;
 use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
@@ -55,38 +51,6 @@ fn kdf_type_is_x963(mech: CK_EC_KDF_TYPE) -> Result<bool> {
         | CKD_SHA3_512_KDF_SP800 => false,
         _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
     })
-}
-
-/// Creates an OpenSSL `EvpPkey` representing the peer's public key.
-///
-/// Uses the provided local `key` object to determine the curve group and
-/// constructs the peer key using the supplied public point (`ec_point`) bytes
-/// via `OSSL_PARAM`s.
-fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
-    let mut params = OsslParam::with_capacity(2);
-    params.zeroize = true;
-
-    match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
-        #[cfg(feature = "ecdsa")]
-        CKK_EC => Ok(EvpPkey::import(
-            osslctx(),
-            get_evp_pkey_type_from_obj(key)?,
-            PkeyData::Ecc(EccData {
-                pubkey: Some(ec_point.clone()),
-                prikey: None,
-            }),
-        )?),
-        #[cfg(feature = "ec_montgomery")]
-        CKK_EC_MONTGOMERY => Ok(EvpPkey::import(
-            osslctx(),
-            get_evp_pkey_type_from_obj(key)?,
-            PkeyData::Ecc(EccData {
-                pubkey: Some(ec_point.clone()),
-                prikey: None,
-            }),
-        )?),
-        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    }
 }
 
 /// Represents an active ECDH key derivation operation.
@@ -222,7 +186,7 @@ impl Derive for ECDHOperation {
 
         let mut secret = vec![0u8; raw_max];
         let outlen = ecdh.derive(
-            &mut make_peer_key(key, &ec_point)?,
+            &mut pkey.make_peer(osslctx(), &ec_point)?,
             secret.as_mut_slice(),
         )?;
         secret.resize(outlen, 0);

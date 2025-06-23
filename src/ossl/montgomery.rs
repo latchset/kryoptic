@@ -69,6 +69,7 @@ impl ECMontgomeryOperation {
             EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
         let ecc = match pkey.export()? {
             PkeyData::Ecc(e) => e,
+            _ => return Err(CKR_GENERAL_ERROR)?,
         };
 
         /* Set Public Key */

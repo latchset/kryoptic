@@ -71,7 +71,7 @@ pub fn evp_pkey_from_object(
         #[cfg(feature = "ec_montgomery")]
         CKK_EC_MONTGOMERY => return ecm::ecm_object_to_pkey(obj, class),
         #[cfg(feature = "ffdh")]
-        CKK_DH => ffdh::ffdh_object_to_params(obj, class)?,
+        CKK_DH => return ffdh::ffdh_object_to_pkey(obj, class),
         #[cfg(feature = "rsa")]
         CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
         #[cfg(feature = "mlkem")]

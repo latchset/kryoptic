@@ -5,54 +5,24 @@
 //! and derivation functionality according to PKCS#11 standards using the
 //! OpenSSL APIs.
 
-use std::ffi::CStr;
 use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::{Error, Result};
 use crate::ffdh::FFDHMechanism;
-use crate::ffdh_groups::{get_group_name, DHGroupName, FFDHE2048};
+use crate::ffdh_groups::{get_group_name, group_prime, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::*;
 
 use ossl::bindings::*;
-use ossl::pkey::{EvpPkey, EvpPkeyType};
+use ossl::pkey::{EvpPkey, EvpPkeyType, FfdhData, PkeyData};
 use ossl::OsslParam;
 use pkcs11::*;
-
-/// Names as understood by OpenSSL
-const FFDHE2048_NAME: &CStr = c"ffdhe2048";
-const FFDHE3072_NAME: &CStr = c"ffdhe3072";
-const FFDHE4096_NAME: &CStr = c"ffdhe4096";
-const FFDHE6144_NAME: &CStr = c"ffdhe6144";
-const FFDHE8192_NAME: &CStr = c"ffdhe8192";
-const MODP_2048_NAME: &CStr = c"modp_2048";
-const MODP_3072_NAME: &CStr = c"modp_3072";
-const MODP_4096_NAME: &CStr = c"modp_4096";
-const MODP_6144_NAME: &CStr = c"modp_6144";
-const MODP_8192_NAME: &CStr = c"modp_8192";
-
-static DH_NAME: &CStr = c"DH";
 
 /* This is the smallest AES key size, anything smaller then this
  * is worthless as a shared secret */
 const MIN_KEYLEN: usize = 16;
-
-fn group_to_ossl_name(group: DHGroupName) -> Result<&'static CStr> {
-    Ok(match group {
-        DHGroupName::FFDHE2048 => FFDHE2048_NAME,
-        DHGroupName::FFDHE3072 => FFDHE3072_NAME,
-        DHGroupName::FFDHE4096 => FFDHE4096_NAME,
-        DHGroupName::FFDHE6144 => FFDHE6144_NAME,
-        DHGroupName::FFDHE8192 => FFDHE8192_NAME,
-        DHGroupName::MODP2048 => MODP_2048_NAME,
-        DHGroupName::MODP3072 => MODP_3072_NAME,
-        DHGroupName::MODP4096 => MODP_4096_NAME,
-        DHGroupName::MODP6144 => MODP_6144_NAME,
-        DHGroupName::MODP8192 => MODP_8192_NAME,
-    })
-}
 
 fn group_to_pkey_type(group: DHGroupName) -> Result<EvpPkeyType> {
     Ok(match group {
@@ -69,67 +39,44 @@ fn group_to_pkey_type(group: DHGroupName) -> Result<EvpPkeyType> {
     })
 }
 
-pub fn get_group_name_from_key(key: &EvpPkey) -> Result<Vec<u8>> {
-    let mut params = OsslParam::with_capacity(1);
-    /* All group names have the same string length */
-    params.add_empty_utf8_string(
-        cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-        FFDHE2048.len(),
-    )?;
-    params.finalize();
-    key.get_params(&mut params)?;
-    Ok(params
-        .get_utf8_string(cstr!(OSSL_PKEY_PARAM_GROUP_NAME))?
-        .to_bytes_with_nul()
-        .to_vec())
-}
-
-/// Converts a PKCS#11 DH key `Object` into OpenSSL parameters (`OsslParam`).
+/// Converts a PKCS#11 DH key `Object` into an `EvpPkey`.
 ///
-/// Extracts the relevant key components (prime, base, public or private value)
-/// based on the object `class` and populates an `OsslParam` structure suitable
-/// for creating an OpenSSL `EvpPkey`.
-pub fn ffdh_object_to_params(
+/// Extracts the relevant key components (group name, public or private value)
+/// based on the object `class` and populates a `FfdhData` structure suitable
+/// for creating an `EvpPkey`.
+pub fn ffdh_object_to_pkey(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(&'static CStr, OsslParam)> {
+) -> Result<EvpPkey> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
     }
 
-    let mut params = OsslParam::with_capacity(2);
-    params.zeroize = true;
-
-    params.add_const_c_string(
-        cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-        match get_group_name(key) {
-            Ok(g) => group_to_ossl_name(g)?,
-            Err(e) => {
-                return Err(Error::ck_rv_from_error(CKR_KEY_INDIGESTIBLE, e))
-            }
-        },
-    )?;
+    let pkey_type = match get_group_name(key) {
+        Ok(g) => group_to_pkey_type(g)?,
+        Err(e) => return Err(Error::ck_rv_from_error(CKR_KEY_INDIGESTIBLE, e)),
+    };
 
     match kclass {
-        CKO_PUBLIC_KEY => {
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
-            )?;
-        }
-        CKO_PRIVATE_KEY => {
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
-            )?;
-        }
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+        CKO_PUBLIC_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            pkey_type,
+            PkeyData::Ffdh(FfdhData {
+                pubkey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                prikey: None,
+            }),
+        )?),
+        CKO_PRIVATE_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            pkey_type,
+            PkeyData::Ffdh(FfdhData {
+                pubkey: None,
+                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+            }),
+        )?),
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
-
-    params.finalize();
-
-    Ok((DH_NAME, params))
 }
 
 /// Represents an active FFDH key derivation operation.
@@ -160,29 +107,6 @@ impl FFDHOperation {
         })
     }
 
-    /// Creates an OpenSSL `EvpPkey` representing the peer's public key.
-    ///
-    /// Uses the provided local `key` object to determine the curve group
-    /// and constructs the peer key using the supplied public key bytes.
-    fn make_peer_key(&self, key: &EvpPkey) -> Result<EvpPkey> {
-        let group_name = get_group_name_from_key(key)?;
-        let mut params = OsslParam::with_capacity(2);
-        params.add_const_c_string(
-            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-            cstr!(group_name.as_slice()),
-        )?;
-        params
-            .add_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY), self.public.as_slice())?;
-        params.finalize();
-
-        Ok(EvpPkey::fromdata(
-            osslctx(),
-            DH_NAME,
-            EVP_PKEY_PUBLIC_KEY,
-            &params,
-        )?)
-    }
-
     /// Generates an FFDH key pair using OpenSSL.
     ///
     /// Takes mutable references to pre-created public and private key
@@ -193,38 +117,38 @@ impl FFDHOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let evp_pkey =
-            EvpPkey::generate(osslctx(), group_to_pkey_type(group)?)?;
+        let pkey = EvpPkey::generate(osslctx(), group_to_pkey_type(group)?)?;
 
-        let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
+        let ffdh = match pkey.export()? {
+            PkeyData::Ffdh(f) => f,
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
 
-        /* Public Key */
-        pubkey.check_or_set_attr(Attribute::from_bytes(
-            CKA_PRIME,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P))?,
-        ))?;
-        pubkey.set_attr(Attribute::from_bytes(
-            CKA_VALUE,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?,
-        ))?;
+        /* Set Public Key */
+        if let Some(key) = ffdh.pubkey {
+            pubkey.check_or_set_attr(Attribute::from_bytes(
+                CKA_PRIME,
+                group_prime(group)?,
+            ))?;
 
-        /* Private Key */
-        privkey.check_or_set_attr(Attribute::from_bytes(
-            CKA_PRIME,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P))?,
-        ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_VALUE,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?,
-        ))?;
+            pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
 
-        if params.has_param(cstr!(OSSL_PKEY_PARAM_DH_PRIV_LEN))? {
+        /* Set Private Key */
+        if let Some(key) = ffdh.prikey {
+            privkey.check_or_set_attr(Attribute::from_bytes(
+                CKA_PRIME,
+                group_prime(group)?,
+            ))?;
             privkey.set_attr(Attribute::from_ulong(
                 CKA_VALUE_BITS,
-                CK_ULONG::try_from(
-                    params.get_long(cstr!(OSSL_PKEY_PARAM_DH_PRIV_LEN))?,
-                )? * 8,
+                CK_ULONG::try_from(key.len() * 8)?,
             ))?;
+            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
         }
 
         Ok(())
@@ -278,7 +202,7 @@ impl Derive for FFDHOperation {
         }
 
         /* Import peer key */
-        let mut peer = self.make_peer_key(&pkey)?;
+        let mut peer = pkey.make_peer(osslctx(), self.public.as_slice())?;
 
         let res = unsafe {
             EVP_PKEY_derive_set_peer(ctx.as_mut_ptr(), peer.as_mut_ptr())
