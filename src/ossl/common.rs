@@ -10,10 +10,8 @@ use std::ffi::CStr;
 use crate::error::Result;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
-use crate::misc::*;
 use crate::object::Object;
 
-use ossl::bindings::OPENSSL_cleanse;
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType};
 use ossl::OsslContext;
@@ -223,11 +221,4 @@ pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static CStr> {
 #[cfg(feature = "ecc")]
 pub fn get_evp_pkey_type_from_obj(key: &Object) -> Result<EvpPkeyType> {
     oid_to_evp_key_type(&get_oid_from_obj(key)?)
-}
-
-/// Securely zeroizes a memory slice using `OPENSSL_cleanse`.
-pub fn zeromem(mem: &mut [u8]) {
-    unsafe {
-        OPENSSL_cleanse(void_ptr!(mem.as_mut_ptr()), mem.len());
-    }
 }
