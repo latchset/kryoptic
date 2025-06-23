@@ -77,7 +77,7 @@ pub fn evp_pkey_from_object(
         #[cfg(feature = "mlkem")]
         CKK_ML_KEM => mlkem::mlkem_object_to_params(obj, class)?,
         #[cfg(feature = "mldsa")]
-        CKK_ML_DSA => mldsa::mldsa_object_to_params(obj, class)?,
+        CKK_ML_DSA => return mldsa::mldsa_object_to_pkey(obj, class),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     };
     Ok(EvpPkey::fromdata(osslctx(), name, key_class, &params)?)
