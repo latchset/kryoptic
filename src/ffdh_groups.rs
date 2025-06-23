@@ -557,7 +557,7 @@ static MODP8192: [u8; 1024] = [
 /// The generator is set to 2 for all named groups
 pub static GENERATOR2: [u8; 1] = [2];
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum DHGroupName {
     FFDHE2048,
     FFDHE3072,
@@ -574,6 +574,7 @@ pub enum DHGroupName {
 pub struct FFDHNamedGroup {
     id: DHGroupName,
     prime: &'static [u8],
+    #[allow(dead_code)]
     keylen: usize,
     base: &'static [u8],
 }
@@ -652,24 +653,21 @@ pub fn get_group_name(obj: &Object) -> Result<DHGroupName> {
         Err(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
     };
 
-    let keylen = match obj.get_attr_as_ulong(CKA_VALUE_BITS) {
-        Ok(l) => Some(l),
-        Err(_) => None,
-    };
-
     for grp in &FFDHE_NAMED_GROUPS {
         if grp.prime == prime.as_slice() && grp.base == base.as_slice() {
-            match keylen {
-                None => (),
-                Some(l) => {
-                    if grp.keylen != usize::try_from(l)? {
-                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-                    }
-                }
-            }
             return Ok(grp.id);
         }
     }
 
     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+}
+
+pub fn group_prime(group: DHGroupName) -> Result<Vec<u8>> {
+    for grp in &FFDHE_NAMED_GROUPS {
+        if grp.id == group {
+            return Ok(grp.prime.to_vec());
+        }
+    }
+
+    return Err(CKR_GENERAL_ERROR)?;
 }

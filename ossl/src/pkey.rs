@@ -219,6 +219,8 @@ fn pkey_type_to_params(
     Ok(name)
 }
 
+const MAX_GROUP_NAME_LEN: usize = 10;
+
 /// Helper function to get pkey_type
 fn pkey_to_type(
     pkey: &EvpPkey,
@@ -247,6 +249,23 @@ fn pkey_to_type(
         b"ED448" => Ok(EvpPkeyType::Ed448),
         b"X25519" => Ok(EvpPkeyType::X25519),
         b"X448" => Ok(EvpPkeyType::X448),
+        b"DH" => {
+            let group_name =
+                params.get_utf8_string(cstr!(OSSL_PKEY_PARAM_GROUP_NAME))?;
+            match group_name.to_bytes() {
+                b"ffdhe2048" => Ok(EvpPkeyType::Ffdhe2048),
+                b"ffdhe3072" => Ok(EvpPkeyType::Ffdhe3072),
+                b"ffdhe4096" => Ok(EvpPkeyType::Ffdhe4096),
+                b"ffdhe6144" => Ok(EvpPkeyType::Ffdhe6144),
+                b"ffdhe8192" => Ok(EvpPkeyType::Ffdhe8192),
+                b"modp_2048" => Ok(EvpPkeyType::Modp2048),
+                b"modp_3072" => Ok(EvpPkeyType::Modp3072),
+                b"modp_4096" => Ok(EvpPkeyType::Modp4096),
+                b"modp_6144" => Ok(EvpPkeyType::Modp6144),
+                b"modp_8192" => Ok(EvpPkeyType::Modp8192),
+                _ => Err(Error::new(ErrorKind::WrapperError)),
+            }
+        }
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
@@ -258,10 +277,18 @@ pub struct EccData {
     pub prikey: Option<Vec<u8>>,
 }
 
+/// Structure that holds Ffdh key data
+#[derive(Debug)]
+pub struct FfdhData {
+    pub pubkey: Option<Vec<u8>>,
+    pub prikey: Option<Vec<u8>>,
+}
+
 /// Wrapper to handle import/export data based on the type
 #[derive(Debug)]
 pub enum PkeyData {
     Ecc(EccData),
+    Ffdh(FfdhData),
 }
 
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
@@ -414,6 +441,7 @@ impl EvpPkey {
                             )?
                         }
                     }
+                    _ => return Err(Error::new(ErrorKind::WrapperError)),
                 }
             }
             EvpPkeyType::Ed25519
@@ -436,6 +464,35 @@ impl EvpPkey {
                         )?
                     }
                 }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
+            EvpPkeyType::Ffdhe2048
+            | EvpPkeyType::Ffdhe3072
+            | EvpPkeyType::Ffdhe4096
+            | EvpPkeyType::Ffdhe6144
+            | EvpPkeyType::Ffdhe8192
+            | EvpPkeyType::Modp2048
+            | EvpPkeyType::Modp3072
+            | EvpPkeyType::Modp4096
+            | EvpPkeyType::Modp6144
+            | EvpPkeyType::Modp8192 => match data {
+                PkeyData::Ffdh(ffdh) => {
+                    if let Some(p) = ffdh.pubkey {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        params.add_bn(
+                            cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                            p.as_slice(),
+                        )?
+                    }
+                    if let Some(p) = ffdh.prikey {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_bn(
+                            cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
+                            p.as_slice(),
+                        )?
+                    }
+                }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         }
@@ -493,8 +550,77 @@ impl EvpPkey {
                     },
                 },
             }),
+            EvpPkeyType::Ffdhe2048
+            | EvpPkeyType::Ffdhe3072
+            | EvpPkeyType::Ffdhe4096
+            | EvpPkeyType::Ffdhe6144
+            | EvpPkeyType::Ffdhe8192
+            | EvpPkeyType::Modp2048
+            | EvpPkeyType::Modp3072
+            | EvpPkeyType::Modp4096
+            | EvpPkeyType::Modp6144
+            | EvpPkeyType::Modp8192 => PkeyData::Ffdh(FfdhData {
+                pubkey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+                    Ok(p) => Some(p),
+                    Err(e) => match e.kind() {
+                        ErrorKind::NullPtr => None,
+                        _ => return Err(e),
+                    },
+                },
+                prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
+                    Ok(p) => Some(p),
+                    Err(e) => match e.kind() {
+                        ErrorKind::NullPtr => None,
+                        _ => return Err(e),
+                    },
+                },
+            }),
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         })
+    }
+
+    /// Creates a new public EvpPkey with this key as template and the provided
+    /// slice as as public key value
+    pub fn make_peer(
+        &self,
+        ctx: &OsslContext,
+        public: &[u8],
+    ) -> Result<EvpPkey, Error> {
+        let mut params = OsslParam::with_capacity(1);
+        params.add_empty_utf8_string(
+            cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+            MAX_GROUP_NAME_LEN + 1,
+        )?;
+        params.finalize();
+        self.get_params(&mut params)?;
+        let pkey_type = pkey_to_type(&self, &params)?;
+        let data = match pkey_type {
+            EvpPkeyType::P256
+            | EvpPkeyType::P384
+            | EvpPkeyType::P521
+            | EvpPkeyType::Ed25519
+            | EvpPkeyType::Ed448
+            | EvpPkeyType::X25519
+            | EvpPkeyType::X448 => PkeyData::Ecc(EccData {
+                pubkey: Some(public.to_vec()),
+                prikey: None,
+            }),
+            EvpPkeyType::Ffdhe2048
+            | EvpPkeyType::Ffdhe3072
+            | EvpPkeyType::Ffdhe4096
+            | EvpPkeyType::Ffdhe6144
+            | EvpPkeyType::Ffdhe8192
+            | EvpPkeyType::Modp2048
+            | EvpPkeyType::Modp3072
+            | EvpPkeyType::Modp4096
+            | EvpPkeyType::Modp6144
+            | EvpPkeyType::Modp8192 => PkeyData::Ffdh(FfdhData {
+                pubkey: Some(public.to_vec()),
+                prikey: None,
+            }),
+            _ => return Err(Error::new(ErrorKind::WrapperError)),
+        };
+        Self::import(ctx, pkey_type, data)
     }
 
     /// Returns a const pointer to the underlying `EVP_PKEY`.
