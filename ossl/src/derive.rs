@@ -841,3 +841,94 @@ impl<'a> EcdhDerive<'a> {
         Ok(len)
     }
 }
+
+/// Higher level wrapper for FFDH Derive operation
+#[derive(Debug)]
+pub struct FfdhDerive {
+    /// The OpenSSL PKEY context (`EVP_PKEY_CTX`).
+    ctx: EvpPkeyCtx,
+    /// Requested output size
+    outlen: c_uint,
+}
+
+impl FfdhDerive {
+    /// Initializes a new FFDH derive operation
+    pub fn new(
+        ctx: &OsslContext,
+        privkey: &mut EvpPkey,
+    ) -> Result<FfdhDerive, Error> {
+        let mut pctx = FfdhDerive {
+            ctx: privkey.new_ctx(ctx)?,
+            outlen: 0,
+        };
+        let ret = unsafe { EVP_PKEY_derive_init(pctx.ctx.as_mut_ptr()) };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive_init()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(pctx)
+    }
+
+    /// Set the requested shared secret output length
+    pub fn set_outlen(&mut self, outlen: usize) -> Result<(), Error> {
+        self.outlen = c_uint::try_from(outlen)?;
+        Ok(())
+    }
+
+    /// Perform derivation, takes the peer public key and an output buffer as
+    /// a mutable slice which will be filled with the shared secret.
+    /// Returns the length of the part of the buffer that was used.
+    pub fn derive(
+        &mut self,
+        peer: &mut EvpPkey,
+        output: &mut [u8],
+    ) -> Result<usize, Error> {
+        let ret = unsafe {
+            EVP_PKEY_derive_set_peer(self.ctx.as_mut_ptr(), peer.as_mut_ptr())
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive_set_peer()");
+            return Err(Error::new(ErrorKind::KeyError));
+        }
+
+        let mut outlen = 0usize;
+        let ret = unsafe {
+            EVP_PKEY_derive(
+                self.ctx.as_mut_ptr(),
+                std::ptr::null_mut(),
+                &mut outlen,
+            )
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
+        let mut outvec = Vec::new();
+        let outbuf_ptr = if output.len() >= outlen {
+            output.as_mut_ptr()
+        } else {
+            outvec.resize(outlen, 0);
+            outvec.as_mut_ptr()
+        };
+
+        let ret = unsafe {
+            EVP_PKEY_derive(self.ctx.as_mut_ptr(), outbuf_ptr, &mut outlen)
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_PKEY_derive()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
+        let len = if outlen < output.len() {
+            outlen
+        } else {
+            output.len()
+        };
+        if outvec.len() > 0 {
+            output[0..len].copy_from_slice(&outvec[(outvec.len() - len)..]);
+        }
+
+        Ok(len)
+    }
+}

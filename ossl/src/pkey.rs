@@ -657,6 +657,13 @@ impl EvpPkey {
         }
         Ok(usize::try_from(bits)?)
     }
+
+    /// Gets the actual key size by querying the underlying `EVP_PKEY`
+    pub fn get_size(&self) -> Result<usize, Error> {
+        Ok(usize::try_from(unsafe {
+            EVP_PKEY_get_size(self.as_ptr())
+        })?)
+    }
 }
 
 impl Drop for EvpPkey {
