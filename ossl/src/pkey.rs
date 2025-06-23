@@ -266,6 +266,9 @@ fn pkey_to_type(
                 _ => Err(Error::new(ErrorKind::WrapperError)),
             }
         }
+        b"ML-DSA-44" => Ok(EvpPkeyType::Mldsa44),
+        b"ML-DSA-65" => Ok(EvpPkeyType::Mldsa65),
+        b"ML-DSA-87" => Ok(EvpPkeyType::Mldsa87),
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
@@ -284,11 +287,64 @@ pub struct FfdhData {
     pub prikey: Option<Vec<u8>>,
 }
 
+/// Structure that holds ML Keys data (MlDsa and MlKem)
+#[derive(Debug)]
+pub struct MlkeyData {
+    pub pubkey: Option<Vec<u8>>,
+    pub prikey: Option<Vec<u8>>,
+    pub seed: Option<Vec<u8>>,
+}
+
 /// Wrapper to handle import/export data based on the type
 #[derive(Debug)]
 pub enum PkeyData {
     Ecc(EccData),
     Ffdh(FfdhData),
+    Mlkey(MlkeyData),
+}
+
+#[cfg(ossl_mldsa)]
+fn params_to_mldsa_data(
+    pkey: &EvpPkey,
+    params: &OsslParam,
+) -> Result<PkeyData, Error> {
+    Ok(PkeyData::Mlkey(MlkeyData {
+        pubkey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => {
+                    // OpenSSL does not always provide public key when
+                    // asked for key pair here so if it not available,
+                    // retry exporting just public key part
+                    // https://github.com/openssl/openssl/issues/27542
+                    let p2 = pkey.todata(EVP_PKEY_PUBLIC_KEY)?;
+                    match p2.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+                        Ok(p) => Some(p.to_vec()),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NullPtr => None,
+                            _ => return Err(e),
+                        },
+                    }
+                }
+                _ => return Err(e),
+            },
+        },
+        prikey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        seed: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED))
+        {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+    }))
 }
 
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
@@ -494,6 +550,35 @@ impl EvpPkey {
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
+            EvpPkeyType::Mldsa44
+            | EvpPkeyType::Mldsa65
+            | EvpPkeyType::Mldsa87 => match data {
+                #[cfg(ossl_mldsa)]
+                PkeyData::Mlkey(mlk) => {
+                    if let Some(p) = mlk.pubkey {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                            p,
+                        )?
+                    }
+                    if let Some(p) = mlk.prikey {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
+                            p,
+                        )?
+                    }
+                    if let Some(p) = mlk.seed {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED),
+                            p,
+                        )?
+                    }
+                }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         }
         params.finalize();
@@ -575,6 +660,14 @@ impl EvpPkey {
                     },
                 },
             }),
+            EvpPkeyType::Mldsa44
+            | EvpPkeyType::Mldsa65
+            | EvpPkeyType::Mldsa87 => {
+                #[cfg(ossl_mldsa)]
+                return params_to_mldsa_data(&self, &params);
+                #[cfg(not(ossl_mldsa))]
+                return Err(Error::new(ErrorKind::WrapperError));
+            }
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         })
     }
