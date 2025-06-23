@@ -12,17 +12,13 @@ use crate::error::{Error, Result};
 use crate::ffdh::FFDHMechanism;
 use crate::ffdh_groups::{get_group_name, group_prime, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
+use crate::misc::zeromem;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-use crate::ossl::common::*;
+use crate::ossl::common::{osslctx, privkey_from_object};
 
-use ossl::bindings::*;
+use ossl::derive::FfdhDerive;
 use ossl::pkey::{EvpPkey, EvpPkeyType, FfdhData, PkeyData};
-use ossl::OsslParam;
 use pkcs11::*;
-
-/* This is the smallest AES key size, anything smaller then this
- * is worthless as a shared secret */
-const MIN_KEYLEN: usize = 16;
 
 fn group_to_pkey_type(group: DHGroupName) -> Result<EvpPkeyType> {
     Ok(match group {
@@ -187,70 +183,34 @@ impl Derive for FFDHOperation {
         }
         self.finalized = true;
 
-        let mut pkey = privkey_from_object(key)?;
-        let params = OsslParam::empty();
-
         let factory =
             objectfactories.get_obj_factory_from_key_template(template)?;
 
-        let mut ctx = pkey.new_ctx(osslctx())?;
-        let res = unsafe {
-            EVP_PKEY_derive_init_ex(ctx.as_mut_ptr(), params.as_ptr())
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
-        /* Import peer key */
+        let mut pkey = privkey_from_object(key)?;
         let mut peer = pkey.make_peer(osslctx(), self.public.as_slice())?;
-
-        let res = unsafe {
-            EVP_PKEY_derive_set_peer(ctx.as_mut_ptr(), peer.as_mut_ptr())
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
-        let mut secret_len = 0usize;
-        let res = unsafe {
-            EVP_PKEY_derive(
-                ctx.as_mut_ptr(),
-                std::ptr::null_mut(),
-                &mut secret_len,
-            )
-        };
-        if res != 1 {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
-
-        let mut secret = vec![0u8; secret_len];
-        let res = unsafe {
-            EVP_PKEY_derive(
-                ctx.as_mut_ptr(),
-                secret.as_mut_ptr(),
-                &mut secret_len,
-            )
-        };
-        if res != 1 || secret_len < MIN_KEYLEN {
-            return Err(CKR_DEVICE_ERROR)?;
-        }
+        let mut ffdh = FfdhDerive::new(osslctx(), &mut pkey)?;
 
         let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(attr) => {
                 let len = usize::try_from(attr.to_ulong()?)?;
-                if len > secret_len {
+                if len > pkey.get_size()? {
                     return Err(CKR_TEMPLATE_INCONSISTENT)?;
                 }
                 len
             }
-            None => secret_len,
+            None => pkey.get_size()?,
         };
+        ffdh.set_outlen(keylen)?;
+
+        let mut secret = vec![0u8; keylen];
+        let secret_len = ffdh.derive(&mut peer, &mut secret)?;
+        if secret_len != keylen {
+            zeromem(secret.as_mut_slice());
+            return Err(CKR_GENERAL_ERROR)?;
+        }
 
         let mut tmpl = CkAttrs::from(template);
-        tmpl.add_owned_slice(
-            CKA_VALUE,
-            &secret[(secret_len - keylen)..secret_len],
-        )?;
+        tmpl.add_vec(CKA_VALUE, secret)?;
         tmpl.zeroize = true;
         let mut obj = factory.create(tmpl.as_slice())?;
 
