@@ -413,6 +413,31 @@ pub fn eddsa_params(
     return Ok(Some(params));
 }
 
+/// Helper to generate OsslParam arrays for Mldsa initialization
+#[cfg(ossl_v350)]
+pub fn mldsa_params<'a>(
+    raw: bool,
+    context: Option<&'a Vec<u8>>,
+    deterministic: bool,
+) -> Result<Option<OsslParam<'a>>, Error> {
+    let mut params = OsslParam::with_capacity(3);
+    if raw {
+        params
+            .add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING), 0)?;
+    }
+    if let Some(ctx) = context {
+        params.add_octet_string(
+            cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+            ctx,
+        )?;
+    }
+    if deterministic {
+        params.add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC), 1)?;
+    }
+    params.finalize();
+    return Ok(Some(params));
+}
+
 /// Maximum buffer size for accumulating data when emulating multi-part
 /// operations for OpenSSL versions that only support one-shot operations.
 const MAX_BUFFER_LEN: usize = 1024 * 1024;

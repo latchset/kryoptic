@@ -12,17 +12,13 @@ use crate::hash;
 use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
 use crate::object::Object;
-use crate::ossl::common::*;
+use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 use crate::{bytes_to_vec, cast_params};
 
 use asn1;
 use bitflags::bitflags;
-use ossl::bindings::{
-    OSSL_SIGNATURE_PARAM_CONTEXT_STRING, OSSL_SIGNATURE_PARAM_DETERMINISTIC,
-    OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING,
-};
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
-use ossl::signature::{OsslSignature, SigAlg};
+use ossl::signature::{mldsa_params, OsslSignature, SigAlg};
 use ossl::OsslParam;
 use pkcs11::*;
 
@@ -217,34 +213,18 @@ impl MlDsaParams {
     /// `EVP_PKEY_sign/verify_message_init` based on the stored parameters
     /// and operation flags (sign/verify, raw encoding). Handles context string
     /// and deterministic/hedging parameters.
-    fn ossl_params(&self, flags: ParmFlags) -> Result<OsslParam> {
-        let mut params = OsslParam::with_capacity(3);
-        if flags.contains(ParmFlags::RawEncoding) {
-            params.add_owned_int(
-                cstr!(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING),
-                0,
-            )?;
-        } else {
-            if let Some(ctx) = &self.context {
-                params.add_octet_string(
-                    cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
-                    ctx,
-                )?;
-            }
-        }
-        /* from the spec:
-         * On verification the hedgeVariant parameter is ignored. */
-        if flags.contains(ParmFlags::Sign) {
-            if self.hedge == CKH_DETERMINISTIC_REQUIRED {
-                params.add_owned_int(
-                    cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC),
-                    1,
-                )?;
-            }
-        }
-        params.finalize();
-
-        Ok(params)
+    fn ossl_params<'a>(
+        &'a self,
+        flags: ParmFlags,
+    ) -> Result<Option<OsslParam<'a>>> {
+        Ok(mldsa_params(
+            flags.contains(ParmFlags::RawEncoding),
+            self.context.as_ref(),
+            /* from the spec:
+             * On verification the hedgeVariant parameter is ignored. */
+            flags.contains(ParmFlags::Sign)
+                && self.hedge == CKH_DETERMINISTIC_REQUIRED,
+        )?)
     }
 }
 
@@ -324,7 +304,7 @@ impl MlDsaOperation {
                     osslctx(),
                     mldsa_param_set_to_sigalg(params.param_set)?,
                     &mut privkey_from_object(key)?,
-                    Some(&params.ossl_params(pflags)?),
+                    params.ossl_params(pflags)?.as_ref(),
                 )?
             }
             CKF_VERIFY => {
@@ -333,7 +313,7 @@ impl MlDsaOperation {
                     osslctx(),
                     mldsa_param_set_to_sigalg(params.param_set)?,
                     &mut pubkey_from_object(key)?,
-                    Some(&params.ossl_params(pflags)?),
+                    params.ossl_params(pflags)?.as_ref(),
                 )?
             }
             _ => return Err(CKR_GENERAL_ERROR)?,
