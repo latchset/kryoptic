@@ -100,6 +100,7 @@ pub enum EvpPkeyType {
     Rsa(usize, Vec<u8>),
 }
 
+/// Adds group name to params if needed, and returns the ossl key type name
 fn pkey_type_to_params(
     pt: &EvpPkeyType,
     params: &mut OsslParam,
@@ -216,6 +217,36 @@ fn pkey_type_to_params(
         }
     };
     Ok(name)
+}
+
+/// Helper function to get pkey_type
+fn pkey_to_type(
+    pkey: &EvpPkey,
+    params: &OsslParam,
+) -> Result<EvpPkeyType, Error> {
+    #[cfg(not(feature = "fips"))]
+    let name = unsafe { EVP_PKEY_get0_type_name(pkey.as_ptr()) };
+    #[cfg(feature = "fips")]
+    let name = crate::fips::pkey_type_name(pkey.as_ptr());
+    if name.is_null() {
+        return Err(Error::new(ErrorKind::OsslError));
+    }
+    let type_name = unsafe { CStr::from_ptr(name) };
+    match type_name.to_bytes() {
+        b"EC" => {
+            let group_name =
+                params.get_utf8_string(cstr!(OSSL_PKEY_PARAM_GROUP_NAME))?;
+            match group_name.to_bytes() {
+                b"prime256v1" => Ok(EvpPkeyType::P256),
+                b"secp384r1" => Ok(EvpPkeyType::P384),
+                b"secp521r1" => Ok(EvpPkeyType::P521),
+                _ => Err(Error::new(ErrorKind::WrapperError)),
+            }
+        }
+        b"ED25519" => Ok(EvpPkeyType::Ed25519),
+        b"ED448" => Ok(EvpPkeyType::Ed448),
+        _ => Err(Error::new(ErrorKind::WrapperError)),
+    }
 }
 
 /// Structure that holds Ecc key data
@@ -383,9 +414,26 @@ impl EvpPkey {
                     }
                 }
             }
+            EvpPkeyType::Ed25519 | EvpPkeyType::Ed448 => match data {
+                PkeyData::Ecc(ecc) => {
+                    if let Some(p) = ecc.pubkey {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                            p,
+                        )?
+                    }
+                    if let Some(p) = ecc.prikey {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
+                            p,
+                        )?
+                    }
+                }
+            },
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         }
-
         params.finalize();
 
         EvpPkey::fromdata(ctx, name, pkey_class, &params)
@@ -394,24 +442,53 @@ impl EvpPkey {
     /// Export public point in encoded form and/or private key
     pub fn export(&self) -> Result<PkeyData, Error> {
         let params = self.todata(EVP_PKEY_KEYPAIR)?;
-        Ok(PkeyData::Ecc(EccData {
-            pubkey: match params
-                .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
-            {
-                Ok(p) => Some(p.to_vec()),
-                Err(e) => match e.kind() {
-                    ErrorKind::NullPtr => None,
-                    _ => return Err(e),
-                },
-            },
-            prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
-                Ok(p) => Some(p),
-                Err(e) => match e.kind() {
-                    ErrorKind::NullPtr => None,
-                    _ => return Err(e),
-                },
-            },
-        }))
+        let pkey_type = pkey_to_type(&self, &params)?;
+        Ok(match pkey_type {
+            EvpPkeyType::P256 | EvpPkeyType::P384 | EvpPkeyType::P521 => {
+                PkeyData::Ecc(EccData {
+                    pubkey: match params
+                        .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
+                    {
+                        Ok(p) => Some(p.to_vec()),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NullPtr => None,
+                            _ => return Err(e),
+                        },
+                    },
+                    prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
+                    {
+                        Ok(p) => Some(p),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NullPtr => None,
+                            _ => return Err(e),
+                        },
+                    },
+                })
+            }
+            EvpPkeyType::Ed25519 | EvpPkeyType::Ed448 => {
+                PkeyData::Ecc(EccData {
+                    pubkey: match params
+                        .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
+                    {
+                        Ok(p) => Some(p.to_vec()),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NullPtr => None,
+                            _ => return Err(e),
+                        },
+                    },
+                    prikey: match params
+                        .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
+                    {
+                        Ok(p) => Some(p.to_vec()),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NullPtr => None,
+                            _ => return Err(e),
+                        },
+                    },
+                })
+            }
+            _ => return Err(Error::new(ErrorKind::WrapperError)),
+        })
     }
 
     /// Returns a const pointer to the underlying `EVP_PKEY`.

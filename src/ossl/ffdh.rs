@@ -78,7 +78,10 @@ pub fn get_group_name_from_key(key: &EvpPkey) -> Result<Vec<u8>> {
     )?;
     params.finalize();
     key.get_params(&mut params)?;
-    Ok(params.get_utf8_string_as_vec(cstr!(OSSL_PKEY_PARAM_GROUP_NAME))?)
+    Ok(params
+        .get_utf8_string(cstr!(OSSL_PKEY_PARAM_GROUP_NAME))?
+        .to_bytes_with_nul()
+        .to_vec())
 }
 
 /// Converts a PKCS#11 DH key `Object` into OpenSSL parameters (`OsslParam`).

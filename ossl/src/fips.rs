@@ -1164,3 +1164,14 @@ impl FipsApproval {
         self.set(true);
     }
 }
+
+pub(crate) fn pkey_type_name(pkey: *const EVP_PKEY) -> *const c_char {
+    if pkey.is_null() {
+        return std::ptr::null();
+    }
+    let keymgmt = unsafe { (*pkey).keymgmt };
+    if keymgmt.is_null() {
+        return std::ptr::null();
+    }
+    return unsafe { (*keymgmt).type_name };
+}
