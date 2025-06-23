@@ -8,13 +8,11 @@
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::object::Object;
-use crate::ossl::common::*;
+use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 
-use ossl::bindings::{
-    EVP_PKEY_decapsulate, EVP_PKEY_decapsulate_init, EVP_PKEY_encapsulate,
-    EVP_PKEY_encapsulate_init,
-};
+use ossl::asymcipher::OsslEncapsulation;
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
+use ossl::ErrorKind;
 use pkcs11::*;
 
 /// Maps a PKCS#11 ML-KEM parameter set type (`CK_ML_KEM_PARAMETER_SET_TYPE`)
@@ -76,7 +74,7 @@ pub fn mlkem_object_to_pkey(
 /// Performs the ML-KEM key encapsulation operation using the recipient's
 /// public key.
 ///
-/// Uses the OpenSSL `EVP_PKEY_encapsulate` API.
+/// Uses the `OsslEncapsulation` API.
 ///
 /// Returns a tuple containing the derived shared secret (`Vec<u8>`) and
 /// the actual length of the generated ciphertext written to the `ciphertext`
@@ -86,96 +84,26 @@ pub fn encapsulate(
     ciphertext: &mut [u8],
 ) -> Result<(Vec<u8>, usize)> {
     let mut pubkey = pubkey_from_object(key)?;
-    let mut ctx = pubkey.new_ctx(osslctx())?;
-    if unsafe {
-        EVP_PKEY_encapsulate_init(ctx.as_mut_ptr(), std::ptr::null_mut())
-    } != 1
-    {
-        return Err(CKR_DEVICE_ERROR)?;
+    let mut ctx = OsslEncapsulation::new_encapsulation(osslctx(), &mut pubkey)?;
+    match ctx.encapsulate(ciphertext) {
+        Ok(ret) => Ok(ret),
+        Err(e) => match e.kind() {
+            ErrorKind::BufferSize => Err(CKR_BUFFER_TOO_SMALL)?,
+            _ => Err(CKR_DEVICE_ERROR)?,
+        },
     }
-
-    let mut outlen = 0;
-    let mut keylen = 0;
-
-    if unsafe {
-        EVP_PKEY_encapsulate(
-            ctx.as_mut_ptr(),
-            std::ptr::null_mut(),
-            &mut outlen,
-            std::ptr::null_mut(),
-            &mut keylen,
-        )
-    } != 1
-    {
-        return Err(CKR_DEVICE_ERROR)?;
-    }
-
-    if ciphertext.len() < outlen {
-        return Err(CKR_BUFFER_TOO_SMALL)?;
-    }
-
-    let mut keydata = vec![0u8; keylen];
-    if unsafe {
-        EVP_PKEY_encapsulate(
-            ctx.as_mut_ptr(),
-            ciphertext.as_mut_ptr(),
-            &mut outlen,
-            keydata.as_mut_ptr(),
-            &mut keylen,
-        )
-    } != 1
-    {
-        return Err(CKR_DEVICE_ERROR)?;
-    }
-
-    Ok((keydata, outlen))
 }
 
 /// Performs the ML-KEM key decapsulation operation using the recipient's
 /// private key and the received ciphertext.
 ///
-/// Uses the OpenSSL `EVP_PKEY_decapsulate` API.
+/// Uses the `OsslEncapsulation` API.
 ///
 /// Returns the derived shared secret (`Vec<u8>`).
 pub fn decapsulate(key: &Object, ciphertext: &[u8]) -> Result<Vec<u8>> {
-    let mut privkey = privkey_from_object(key)?;
-    let mut ctx = privkey.new_ctx(osslctx())?;
-    if unsafe {
-        EVP_PKEY_decapsulate_init(ctx.as_mut_ptr(), std::ptr::null_mut())
-    } != 1
-    {
-        return Err(CKR_DEVICE_ERROR)?;
-    }
-
-    let mut keylen = 0;
-    if unsafe {
-        EVP_PKEY_decapsulate(
-            ctx.as_mut_ptr(),
-            std::ptr::null_mut(),
-            &mut keylen,
-            ciphertext.as_ptr(),
-            ciphertext.len(),
-        )
-    } != 1
-    {
-        return Err(CKR_DEVICE_ERROR)?;
-    }
-
-    let mut keydata = vec![0u8; keylen];
-    if unsafe {
-        EVP_PKEY_decapsulate(
-            ctx.as_mut_ptr(),
-            keydata.as_mut_ptr(),
-            &mut keylen,
-            ciphertext.as_ptr(),
-            ciphertext.len(),
-        )
-    } != 1
-    {
-        return Err(CKR_DEVICE_ERROR)?;
-    }
-
-    Ok(keydata)
+    let mut prikey = privkey_from_object(key)?;
+    let mut ctx = OsslEncapsulation::new_decapsulation(osslctx(), &mut prikey)?;
+    Ok(ctx.decapsulate(ciphertext)?)
 }
 
 /// Generates an ML-KEM key pair for the specified parameter set.
