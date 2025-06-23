@@ -272,6 +272,12 @@ fn pkey_to_type(
         b"ML-KEM-512" => Ok(EvpPkeyType::MlKem512),
         b"ML-KEM-768" => Ok(EvpPkeyType::MlKem768),
         b"ML-KEM-1024" => Ok(EvpPkeyType::MlKem1024),
+        b"RSA" => {
+            let e = params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_E))?;
+            let n = params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?;
+            let size = n.len() * 8;
+            Ok(EvpPkeyType::Rsa(size, e))
+        }
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
@@ -298,12 +304,25 @@ pub struct MlkeyData {
     pub seed: Option<Vec<u8>>,
 }
 
+/// Structure that holds RSA key data
+#[derive(Debug)]
+pub struct RsaData {
+    pub n: Vec<u8>,
+    pub d: Option<Vec<u8>>,
+    pub p: Option<Vec<u8>>,
+    pub q: Option<Vec<u8>>,
+    pub a: Option<Vec<u8>>,
+    pub b: Option<Vec<u8>>,
+    pub c: Option<Vec<u8>>,
+}
+
 /// Wrapper to handle import/export data based on the type
 #[derive(Debug)]
 pub enum PkeyData {
     Ecc(EccData),
     Ffdh(FfdhData),
     Mlkey(MlkeyData),
+    Rsa(RsaData),
 }
 
 #[cfg(ossl_mldsa)]
@@ -376,6 +395,87 @@ fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
             },
         },
     }))
+}
+
+fn params_to_rsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
+    Ok(PkeyData::Rsa(RsaData {
+        n: params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?,
+        d: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_D)) {
+            Ok(p) => Some(p),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        p: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1)) {
+            Ok(p) => Some(p),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        q: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2)) {
+            Ok(p) => Some(p),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        a: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1)) {
+            Ok(p) => Some(p),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        b: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2)) {
+            Ok(p) => Some(p),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        c: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1)) {
+            Ok(p) => Some(p),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+    }))
+}
+
+fn rsa_data_to_params(
+    rsa: &RsaData,
+    params: &mut OsslParam,
+) -> Result<bool, Error> {
+    let mut is_priv = false;
+    params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_N), rsa.n.as_slice())?;
+    if let Some(p) = &rsa.d {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_D), p.as_slice())?;
+    }
+    if let Some(p) = &rsa.p {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1), p.as_slice())?;
+    }
+    if let Some(p) = &rsa.q {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2), p.as_slice())?;
+    }
+    if let Some(p) = &rsa.a {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1), p.as_slice())?;
+    }
+    if let Some(p) = &rsa.b {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2), p.as_slice())?;
+    }
+    if let Some(p) = &rsa.c {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1), p.as_slice())?;
+    }
+    Ok(is_priv)
 }
 
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
@@ -639,7 +739,16 @@ impl EvpPkey {
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
-            _ => return Err(Error::new(ErrorKind::WrapperError)),
+            EvpPkeyType::Rsa(_, _) => match data {
+                PkeyData::Rsa(rsa) => {
+                    if rsa_data_to_params(&rsa, &mut params)? {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                    } else {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                    }
+                }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
         }
         params.finalize();
 
@@ -736,7 +845,7 @@ impl EvpPkey {
                 #[cfg(not(ossl_mlkem))]
                 return Err(Error::new(ErrorKind::WrapperError));
             }
-            _ => return Err(Error::new(ErrorKind::WrapperError)),
+            EvpPkeyType::Rsa(_, _) => return params_to_rsa_data(&params),
         })
     }
 
