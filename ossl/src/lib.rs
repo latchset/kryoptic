@@ -782,6 +782,24 @@ impl<'a> OsslParam<'a> {
         Ok(val)
     }
 
+    /// Gets the value of an unsigend integer parameter by its key name.
+    pub fn get_uint(&self, key: &CStr) -> Result<c_uint, Error> {
+        if !self.finalized {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
+        if p.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let mut val: c_uint = 0;
+        let res = unsafe { OSSL_PARAM_get_uint(p, &mut val) };
+        if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_uint()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(val)
+    }
+
     /// Gets the value of a long parameter by its key name.
     #[allow(dead_code)]
     pub fn get_long(&self, key: &CStr) -> Result<c_long, Error> {

@@ -57,13 +57,8 @@ pub fn evp_pkey_from_object(
     obj: &Object,
     class: CK_OBJECT_CLASS,
 ) -> Result<EvpPkey> {
-    let key_class = match class {
-        CKO_PUBLIC_KEY => EVP_PKEY_PUBLIC_KEY,
-        CKO_PRIVATE_KEY => EVP_PKEY_PRIVATE_KEY,
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    };
     let key_type = obj.get_attr_as_ulong(CKA_KEY_TYPE)?;
-    let (name, params) = match key_type {
+    match key_type {
         #[cfg(feature = "ecdsa")]
         CKK_EC => return ecdsa::ecc_object_to_pkey(obj, class),
         #[cfg(feature = "eddsa")]
@@ -73,14 +68,13 @@ pub fn evp_pkey_from_object(
         #[cfg(feature = "ffdh")]
         CKK_DH => return ffdh::ffdh_object_to_pkey(obj, class),
         #[cfg(feature = "rsa")]
-        CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
+        CKK_RSA => return rsa::rsa_object_to_pkey(obj, class),
         #[cfg(feature = "mlkem")]
         CKK_ML_KEM => return mlkem::mlkem_object_to_pkey(obj, class),
         #[cfg(feature = "mldsa")]
         CKK_ML_DSA => return mldsa::mldsa_object_to_pkey(obj, class),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    };
-    Ok(EvpPkey::fromdata(osslctx(), name, key_class, &params)?)
+    }
 }
 
 /// Creates a public `EvpPkey` from a PKCS#11 `Object`.

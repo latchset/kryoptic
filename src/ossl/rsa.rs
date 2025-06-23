@@ -5,7 +5,7 @@
 //! PSS, and OAEP padding schemes, using the OpenSSL EVP interface. It handles
 //! key generation, encryption, decryption, signing, verification, and wrapping.
 
-use core::ffi::{c_int, CStr};
+use core::ffi::c_int;
 
 use crate::attribute::Attribute;
 use crate::error::{Error, Result};
@@ -16,11 +16,9 @@ use crate::object::Object;
 use crate::ossl::common::*;
 
 use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
-use ossl::bindings::*;
 use ossl::digest::DigestAlg;
-use ossl::pkey::{EvpPkey, EvpPkeyType};
+use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData, RsaData};
 use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
-use ossl::OsslParam;
 use pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -32,78 +30,65 @@ pub const MIN_RSA_SIZE_BITS: usize =
 pub const MAX_RSA_SIZE_BITS: usize = 16384;
 pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
 
-static RSA_NAME: &CStr = c"RSA";
-
-/// Converts a PKCS#11 RSA key `Object` into OpenSSL parameters (`OsslParam`).
+/// Converts a PKCS#11 RSA key `Object` into an `EvpPkey`.
 ///
 /// Extracts RSA key components (N, E, D, P, Q, DP, DQ, QInv) based on the
-/// object `class` (public/private) and populates an `OsslParam` structure.
-pub fn rsa_object_to_params(
+/// object `class` (public/private) and populates a `RsaData` structure.
+pub fn rsa_object_to_pkey(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(&'static CStr, OsslParam)> {
+) -> Result<EvpPkey> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
-    let mut params = match class {
-        CKO_PUBLIC_KEY => OsslParam::with_capacity(2),
-        CKO_PRIVATE_KEY => {
-            if kclass == CKO_PUBLIC_KEY {
-                return Err(CKR_KEY_TYPE_INCONSISTENT)?;
-            }
-            OsslParam::with_capacity(9)
-        }
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    };
-    params.zeroize = true;
-    params.add_bn(
-        cstr!(OSSL_PKEY_PARAM_RSA_N),
-        key.get_attr_as_bytes(CKA_MODULUS)?.as_slice(),
-    )?;
-    params.add_bn(
-        cstr!(OSSL_PKEY_PARAM_RSA_E),
-        key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?.as_slice(),
-    )?;
-
-    if class == CKO_PRIVATE_KEY {
-        params.add_bn(
-            cstr!(OSSL_PKEY_PARAM_RSA_D),
-            key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?.as_slice(),
-        )?;
-
-        /* OpenSSL can compute a,b,c with just p,q */
-        if key.get_attr(CKA_PRIME_1).is_some()
-            && key.get_attr(CKA_PRIME_2).is_some()
-        {
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1),
-                key.get_attr_as_bytes(CKA_PRIME_1)?.as_slice(),
-            )?;
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2),
-                key.get_attr_as_bytes(CKA_PRIME_2)?.as_slice(),
-            )?;
-        }
-
-        if key.get_attr(CKA_EXPONENT_1).is_some()
-            && key.get_attr(CKA_EXPONENT_2).is_some()
-            && key.get_attr(CKA_COEFFICIENT).is_some()
-        {
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1),
-                key.get_attr_as_bytes(CKA_EXPONENT_1)?.as_slice(),
-            )?;
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2),
-                key.get_attr_as_bytes(CKA_EXPONENT_2)?.as_slice(),
-            )?;
-            params.add_bn(
-                cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1),
-                key.get_attr_as_bytes(CKA_COEFFICIENT)?.as_slice(),
-            )?;
-        }
+    if kclass != class {
+        return Err(CKR_KEY_TYPE_INCONSISTENT)?;
     }
-    params.finalize();
 
-    Ok((RSA_NAME, params))
+    let n = key.get_attr_as_bytes(CKA_MODULUS)?.clone();
+    let e = key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?.clone();
+    let (d, p, q, a, b, c) = match kclass {
+        CKO_PUBLIC_KEY => (None, None, None, None, None, None),
+        CKO_PRIVATE_KEY => {
+            let d = Some(key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?.clone());
+            let pa = key.get_attr(CKA_PRIME_1);
+            let qa = key.get_attr(CKA_PRIME_1);
+            /* OpenSSL can compute a,b,c with just p,q */
+            let (p, q) = if pa.is_some() && qa.is_some() {
+                (
+                    Some(pa.unwrap().get_value().clone()),
+                    Some(qa.unwrap().get_value().clone()),
+                )
+            } else {
+                (None, None)
+            };
+            let aa = key.get_attr(CKA_EXPONENT_1);
+            let ba = key.get_attr(CKA_EXPONENT_2);
+            let ca = key.get_attr(CKA_COEFFICIENT);
+            let (a, b, c) = if aa.is_some() && ba.is_some() && ca.is_some() {
+                (
+                    Some(aa.unwrap().get_value().clone()),
+                    Some(ba.unwrap().get_value().clone()),
+                    Some(ca.unwrap().get_value().clone()),
+                )
+            } else {
+                (None, None, None)
+            };
+            (d, p, q, a, b, c)
+        }
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    };
+    Ok(EvpPkey::import(
+        osslctx(),
+        EvpPkeyType::Rsa(n.len() * 8, e),
+        PkeyData::Rsa(RsaData {
+            n: n,
+            d: d,
+            p: p,
+            q: q,
+            a: a,
+            b: b,
+            c: c,
+        }),
+    )?)
 }
 
 /// Maps a PKCS#11 MGF type (`CK_RSA_PKCS_MGF_TYPE`) to the corresponding
@@ -436,50 +421,55 @@ impl RsaPKCSOperation {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
 
-        let evp_pkey =
-            EvpPkey::generate(osslctx(), EvpPkeyType::Rsa(bits, exponent))?;
-
-        let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
+        let pkey = EvpPkey::generate(
+            osslctx(),
+            EvpPkeyType::Rsa(bits, exponent.clone()),
+        )?;
+        let rsa = match pkey.export()? {
+            PkeyData::Rsa(r) => r,
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
 
         /* Public Key (has E already set) */
-        pubkey.set_attr(Attribute::from_bytes(
-            CKA_MODULUS,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?,
-        ))?;
+        pubkey.set_attr(Attribute::from_bytes(CKA_MODULUS, rsa.n.clone()))?;
 
         /* Private Key */
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_MODULUS,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?,
-        ))?;
+        privkey.set_attr(Attribute::from_bytes(CKA_MODULUS, rsa.n))?;
         privkey.set_attr(Attribute::from_bytes(
             CKA_PUBLIC_EXPONENT,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_E))?,
+            exponent.clone(),
         ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_PRIVATE_EXPONENT,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_D))?,
-        ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_PRIME_1,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1))?,
-        ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_PRIME_2,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2))?,
-        ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_EXPONENT_1,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1))?,
-        ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_EXPONENT_2,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2))?,
-        ))?;
-        privkey.set_attr(Attribute::from_bytes(
-            CKA_COEFFICIENT,
-            params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1))?,
-        ))?;
+        if let Some(d) = rsa.d {
+            privkey.set_attr(Attribute::from_bytes(CKA_PRIVATE_EXPONENT, d))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        if let Some(p) = rsa.p {
+            privkey.set_attr(Attribute::from_bytes(CKA_PRIME_1, p))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        if let Some(q) = rsa.q {
+            privkey.set_attr(Attribute::from_bytes(CKA_PRIME_2, q))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        if let Some(a) = rsa.a {
+            privkey.set_attr(Attribute::from_bytes(CKA_EXPONENT_1, a))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        if let Some(b) = rsa.b {
+            privkey.set_attr(Attribute::from_bytes(CKA_EXPONENT_2, b))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+        if let Some(c) = rsa.c {
+            privkey.set_attr(Attribute::from_bytes(CKA_COEFFICIENT, c))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
         Ok(())
     }
 
