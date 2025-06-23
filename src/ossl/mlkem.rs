@@ -5,35 +5,17 @@
 //! in FIPS 203, using the OpenSSL (3.5+) EVP_PKEY interface. It handles key
 //! generation, encapsulation, and decapsulation.
 
-use std::ffi::CStr;
-
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::object::Object;
 use crate::ossl::common::*;
 
-use ossl::bindings::*;
-use ossl::pkey::{EvpPkey, EvpPkeyType};
-use ossl::{ErrorKind, OsslParam};
+use ossl::bindings::{
+    EVP_PKEY_decapsulate, EVP_PKEY_decapsulate_init, EVP_PKEY_encapsulate,
+    EVP_PKEY_encapsulate_init,
+};
+use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use pkcs11::*;
-
-/* Openssl Key types */
-static ML_KEM_512_TYPE: &CStr = c"ML-KEM-512";
-static ML_KEM_768_TYPE: &CStr = c"ML-KEM-768";
-static ML_KEM_1024_TYPE: &CStr = c"ML-KEM-1024";
-
-/// Maps a PKCS#11 ML-KEM parameter set type (`CK_ML_KEM_PARAMETER_SET_TYPE`)
-/// to the corresponding OpenSSL algorithm name string (e.g., "ML-KEM-768").
-pub fn mlkem_param_set_to_name(
-    pset: CK_ML_KEM_PARAMETER_SET_TYPE,
-) -> Result<&'static CStr> {
-    match pset {
-        CKP_ML_KEM_512 => Ok(ML_KEM_512_TYPE),
-        CKP_ML_KEM_768 => Ok(ML_KEM_768_TYPE),
-        CKP_ML_KEM_1024 => Ok(ML_KEM_1024_TYPE),
-        _ => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-    }
-}
 
 /// Maps a PKCS#11 ML-KEM parameter set type (`CK_ML_KEM_PARAMETER_SET_TYPE`)
 /// to the corresponding EvpPkeyType
@@ -48,51 +30,47 @@ pub fn mlkem_param_set_to_pkey_type(
     }
 }
 
-/// Converts a PKCS#11 ML-KEM key `Object` into OpenSSL parameters
 /// (`OsslParam`).
 ///
 /// Extracts the parameter set (`CKA_PARAMETER_SET`) to determine the algorithm
 /// name. Extracts key components (`CKA_VALUE` for public/private key,
-/// `CKA_SEED`) based on the object `class` and populates an `OsslParam`
+/// `CKA_SEED`) based on the object `class` and populates a `MlkeyData`
 /// structure.
-pub fn mlkem_object_to_params(
+pub fn mlkem_object_to_pkey(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(&'static CStr, OsslParam)> {
+) -> Result<EvpPkey> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
     }
-    let mut params = OsslParam::with_capacity(3);
-    params.zeroize = true;
-
-    match kclass {
-        CKO_PUBLIC_KEY => {
-            params.add_owned_octet_string(
-                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?.to_vec(),
-            )?;
-        }
-        CKO_PRIVATE_KEY => {
-            params.add_owned_octet_string(
-                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?.to_vec(),
-            )?;
-            match key.get_attr_as_bytes(CKA_SEED) {
-                Ok(s) => params.add_owned_octet_string(
-                    cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED),
-                    s.to_vec(),
-                )?,
-                Err(_) => (),
-            }
-        }
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    }
-
-    params.finalize();
 
     let param_set = key.get_attr_as_ulong(CKA_PARAMETER_SET)?;
-    Ok((mlkem_param_set_to_name(param_set)?, params))
+
+    match kclass {
+        CKO_PUBLIC_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            mlkem_param_set_to_pkey_type(param_set)?,
+            PkeyData::Mlkey(MlkeyData {
+                pubkey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                prikey: None,
+                seed: None,
+            }),
+        )?),
+        CKO_PRIVATE_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            mlkem_param_set_to_pkey_type(param_set)?,
+            PkeyData::Mlkey(MlkeyData {
+                pubkey: None,
+                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                seed: match key.get_attr_as_bytes(CKA_SEED) {
+                    Ok(s) => Some(s.clone()),
+                    Err(_) => None,
+                },
+            }),
+        )?),
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    }
 }
 
 /// Performs the ML-KEM key encapsulation operation using the recipient's
@@ -210,26 +188,31 @@ pub fn generate_keypair(
     pubkey: &mut Object,
     privkey: &mut Object,
 ) -> Result<()> {
-    let evp_pkey =
+    let pkey =
         EvpPkey::generate(osslctx(), mlkem_param_set_to_pkey_type(param_set)?)?;
 
-    let params = evp_pkey.todata(EVP_PKEY_KEYPAIR)?;
+    let mlk = match pkey.export()? {
+        PkeyData::Mlkey(m) => m,
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
 
-    let val = params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?;
-    pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;
-
-    let val = params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?;
-    privkey.set_attr(Attribute::from_bytes(CKA_VALUE, val.to_vec()))?;
-
-    match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED)) {
-        Ok(val) => {
-            privkey.set_attr(Attribute::from_bytes(CKA_SEED, val.to_vec()))?
-        }
-        Err(e) => {
-            if e.kind() != ErrorKind::NullPtr {
-                return Err(CKR_GENERAL_ERROR)?;
-            }
-        }
+    /* Set Public Key */
+    if let Some(key) = mlk.pubkey {
+        pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+    } else {
+        return Err(CKR_DEVICE_ERROR)?;
     }
+
+    /* Set private key and/or seed */
+    if mlk.prikey.is_none() && mlk.seed.is_none() {
+        return Err(CKR_DEVICE_ERROR)?;
+    }
+    if let Some(key) = mlk.prikey {
+        privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+    }
+    if let Some(seed) = mlk.seed {
+        privkey.set_attr(Attribute::from_bytes(CKA_SEED, seed))?;
+    }
+
     Ok(())
 }

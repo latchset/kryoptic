@@ -75,7 +75,7 @@ pub fn evp_pkey_from_object(
         #[cfg(feature = "rsa")]
         CKK_RSA => rsa::rsa_object_to_params(obj, class)?,
         #[cfg(feature = "mlkem")]
-        CKK_ML_KEM => mlkem::mlkem_object_to_params(obj, class)?,
+        CKK_ML_KEM => return mlkem::mlkem_object_to_pkey(obj, class),
         #[cfg(feature = "mldsa")]
         CKK_ML_DSA => return mldsa::mldsa_object_to_pkey(obj, class),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
