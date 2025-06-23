@@ -470,28 +470,29 @@ impl EvpPkey {
                     },
                 })
             }
-            EvpPkeyType::Ed25519 | EvpPkeyType::Ed448 => {
-                PkeyData::Ecc(EccData {
-                    pubkey: match params
-                        .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
-                    {
-                        Ok(p) => Some(p.to_vec()),
-                        Err(e) => match e.kind() {
-                            ErrorKind::NullPtr => None,
-                            _ => return Err(e),
-                        },
+            EvpPkeyType::Ed25519
+            | EvpPkeyType::Ed448
+            | EvpPkeyType::X25519
+            | EvpPkeyType::X448 => PkeyData::Ecc(EccData {
+                pubkey: match params
+                    .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
+                {
+                    Ok(p) => Some(p.to_vec()),
+                    Err(e) => match e.kind() {
+                        ErrorKind::NullPtr => None,
+                        _ => return Err(e),
                     },
-                    prikey: match params
-                        .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
-                    {
-                        Ok(p) => Some(p.to_vec()),
-                        Err(e) => match e.kind() {
-                            ErrorKind::NullPtr => None,
-                            _ => return Err(e),
-                        },
+                },
+                prikey: match params
+                    .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
+                {
+                    Ok(p) => Some(p.to_vec()),
+                    Err(e) => match e.kind() {
+                        ErrorKind::NullPtr => None,
+                        _ => return Err(e),
                     },
-                })
-            }
+                },
+            }),
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         })
     }
