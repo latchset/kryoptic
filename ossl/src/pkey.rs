@@ -245,6 +245,8 @@ fn pkey_to_type(
         }
         b"ED25519" => Ok(EvpPkeyType::Ed25519),
         b"ED448" => Ok(EvpPkeyType::Ed448),
+        b"X25519" => Ok(EvpPkeyType::X25519),
+        b"X448" => Ok(EvpPkeyType::X448),
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
@@ -414,7 +416,10 @@ impl EvpPkey {
                     }
                 }
             }
-            EvpPkeyType::Ed25519 | EvpPkeyType::Ed448 => match data {
+            EvpPkeyType::Ed25519
+            | EvpPkeyType::Ed448
+            | EvpPkeyType::X25519
+            | EvpPkeyType::X448 => match data {
                 PkeyData::Ecc(ecc) => {
                     if let Some(p) = ecc.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;

@@ -13,15 +13,12 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{
-    cstr, get_ossl_name_from_obj, osslctx, privkey_from_object, EC_NAME,
+    get_evp_pkey_type_from_obj, osslctx, privkey_from_object,
 };
 
-use ossl::bindings::{
-    EVP_PKEY_PUBLIC_KEY, OSSL_PKEY_PARAM_GROUP_NAME, OSSL_PKEY_PARAM_PUB_KEY,
-};
 use ossl::derive::{EcdhDerive, OneStepKdfDerive, X963KdfDerive};
 use ossl::digest::DigestAlg;
-use ossl::pkey::EvpPkey;
+use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::OsslParam;
 use pkcs11::*;
 
@@ -69,29 +66,27 @@ fn make_peer_key(key: &Object, ec_point: &Vec<u8>) -> Result<EvpPkey> {
     let mut params = OsslParam::with_capacity(2);
     params.zeroize = true;
 
-    let name = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
+    match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
         #[cfg(feature = "ecdsa")]
-        CKK_EC => {
-            params.add_const_c_string(
-                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
-                get_ossl_name_from_obj(key)?,
-            )?;
-            EC_NAME
-        }
+        CKK_EC => Ok(EvpPkey::import(
+            osslctx(),
+            get_evp_pkey_type_from_obj(key)?,
+            PkeyData::Ecc(EccData {
+                pubkey: Some(ec_point.clone()),
+                prikey: None,
+            }),
+        )?),
         #[cfg(feature = "ec_montgomery")]
-        CKK_EC_MONTGOMERY => get_ossl_name_from_obj(key)?,
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
-    };
-
-    params.add_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY), ec_point)?;
-    params.finalize();
-
-    Ok(EvpPkey::fromdata(
-        osslctx(),
-        name,
-        EVP_PKEY_PUBLIC_KEY,
-        &params,
-    )?)
+        CKK_EC_MONTGOMERY => Ok(EvpPkey::import(
+            osslctx(),
+            get_evp_pkey_type_from_obj(key)?,
+            PkeyData::Ecc(EccData {
+                pubkey: Some(ec_point.clone()),
+                prikey: None,
+            }),
+        )?),
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
+    }
 }
 
 /// Represents an active ECDH key derivation operation.
