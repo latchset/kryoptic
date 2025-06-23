@@ -7,7 +7,6 @@
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::object::{Object, ObjectFactories, ObjectType};
-use crate::ossl::common::zeromem as ossl_zeromem;
 
 use pkcs11::*;
 
@@ -246,5 +245,5 @@ pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
 ///
 /// This future-proofs the ability to use an alternative crypto backend
 pub fn zeromem(mem: &mut [u8]) {
-    ossl_zeromem(mem);
+    ossl::zeromem(mem);
 }

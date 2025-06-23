@@ -33,6 +33,13 @@ pub mod signature;
 #[cfg(feature = "fips")]
 pub mod fips;
 
+/// Securely zeroizes a memory slice using `OPENSSL_cleanse`.
+pub fn zeromem(mem: &mut [u8]) {
+    unsafe {
+        OPENSSL_cleanse(void_ptr!(mem.as_mut_ptr()), mem.len());
+    }
+}
+
 /// Convenience macro to type cast any pointer into a mutable void
 /// NOTE(1): bindgen always turns void pointers to mutable ones, but in most
 /// cases the pointed data nor the pointer itself are mutated, so this casts
