@@ -51,6 +51,9 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
         if name == "OSSL_PKEY_PARAM_ML_DSA_SEED" {
             println!("cargo::rustc-cfg=ossl_mldsa")
         }
+        if name == "OSSL_PKEY_PARAM_ML_KEM_SEED" {
+            println!("cargo::rustc-cfg=ossl_mlkem")
+        }
     }
 }
 
@@ -253,7 +256,7 @@ fn main() {
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* Always emit known configs */
-    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa)");
+    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa,ossl_mlkem)");
 
     /* OpenSSL Cryptography */
     if cfg!(feature = "dynamic") {

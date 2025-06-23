@@ -269,6 +269,9 @@ fn pkey_to_type(
         b"ML-DSA-44" => Ok(EvpPkeyType::Mldsa44),
         b"ML-DSA-65" => Ok(EvpPkeyType::Mldsa65),
         b"ML-DSA-87" => Ok(EvpPkeyType::Mldsa87),
+        b"ML-KEM-512" => Ok(EvpPkeyType::MlKem512),
+        b"ML-KEM-768" => Ok(EvpPkeyType::MlKem768),
+        b"ML-KEM-1024" => Ok(EvpPkeyType::MlKem1024),
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
@@ -337,6 +340,34 @@ fn params_to_mldsa_data(
             },
         },
         seed: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED))
+        {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+    }))
+}
+
+#[cfg(ossl_mldsa)]
+fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
+    Ok(PkeyData::Mlkey(MlkeyData {
+        pubkey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        prikey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        seed: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED))
         {
             Ok(p) => Some(p.to_vec()),
             Err(e) => match e.kind() {
@@ -579,6 +610,35 @@ impl EvpPkey {
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
+            EvpPkeyType::MlKem512
+            | EvpPkeyType::MlKem768
+            | EvpPkeyType::MlKem1024 => match data {
+                #[cfg(ossl_mlkem)]
+                PkeyData::Mlkey(mlk) => {
+                    if let Some(p) = mlk.pubkey {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                            p,
+                        )?
+                    }
+                    if let Some(p) = mlk.prikey {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
+                            p,
+                        )?
+                    }
+                    if let Some(p) = mlk.seed {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_owned_octet_string(
+                            cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED),
+                            p,
+                        )?
+                    }
+                }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         }
         params.finalize();
@@ -666,6 +726,14 @@ impl EvpPkey {
                 #[cfg(ossl_mldsa)]
                 return params_to_mldsa_data(&self, &params);
                 #[cfg(not(ossl_mldsa))]
+                return Err(Error::new(ErrorKind::WrapperError));
+            }
+            EvpPkeyType::MlKem512
+            | EvpPkeyType::MlKem768
+            | EvpPkeyType::MlKem1024 => {
+                #[cfg(ossl_mlkem)]
+                return params_to_mlkem_data(&params);
+                #[cfg(not(ossl_mlkem))]
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             _ => return Err(Error::new(ErrorKind::WrapperError)),
