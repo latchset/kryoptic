@@ -840,9 +840,9 @@ impl<'a> OsslParam<'a> {
         Ok(octet)
     }
 
-    /// Gets a UTF8 String as vector, this includes the terminating NUL
+    /// Gets a UTF8 String as a &CStr
     #[allow(dead_code)]
-    pub fn get_utf8_string_as_vec(&self, key: &CStr) -> Result<Vec<u8>, Error> {
+    pub fn get_utf8_string(&self, key: &CStr) -> Result<&'a CStr, Error> {
         if !self.finalized {
             return Err(Error::new(ErrorKind::WrapperError));
         }
@@ -856,8 +856,7 @@ impl<'a> OsslParam<'a> {
             trace_ossl!("OSSL_PARAM_get_utf8_string_ptr()");
             return Err(Error::new(ErrorKind::OsslError));
         }
-        let s = unsafe { CStr::from_ptr(ptr) };
-        Ok(s.to_bytes_with_nul().to_vec())
+        Ok(unsafe { CStr::from_ptr(ptr) })
     }
 
     /// Checks if a parameter with the given key name exists in the array.

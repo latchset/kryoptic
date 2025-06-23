@@ -67,7 +67,7 @@ pub fn evp_pkey_from_object(
         #[cfg(feature = "ecdsa")]
         CKK_EC => return ecdsa::ecc_object_to_pkey(obj, class),
         #[cfg(feature = "eddsa")]
-        CKK_EC_EDWARDS => eddsa::eddsa_object_to_params(obj, class)?,
+        CKK_EC_EDWARDS => return eddsa::eddsa_object_to_pkey(obj, class),
         #[cfg(feature = "ec_montgomery")]
         CKK_EC_MONTGOMERY => ecm::ecm_object_to_params(obj, class)?,
         #[cfg(feature = "ffdh")]

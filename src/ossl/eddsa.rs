@@ -5,8 +5,6 @@
 //! functionalities (Ed25519, Ed448) using the OpenSSL EVP interface,
 //! handling key generation, signing, verification, and parameter parsing.
 
-use std::ffi::{c_int, CStr};
-
 use crate::attribute::Attribute;
 use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
@@ -15,10 +13,9 @@ use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::Object;
 use crate::ossl::common::*;
 
-use ossl::bindings::*;
-use ossl::pkey::EvpPkey;
+use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{eddsa_params, OsslSignature, SigAlg};
-use ossl::{ErrorKind, OsslParam};
+use ossl::ErrorKind;
 use pkcs11::*;
 
 /// Expected signature length for Ed25519 in bytes.
@@ -66,44 +63,38 @@ fn parse_params(
     return Err(CKR_MECHANISM_PARAM_INVALID)?;
 }
 
-/// Converts a PKCS#11 EdDSA key `Object` into OpenSSL parameters (`OsslParam`).
+/// Converts a PKCS#11 EdDSA key `Object` into an `EvpPkey`.
 ///
-/// Extracts the curve name (Ed25519/Ed448) and relevant key components
-/// (public point or private value) based on the object `class` and populates
-/// an `OsslParam` structure suitable for creating an OpenSSL `EvpPkey`.
-pub fn eddsa_object_to_params(
+/// Extracts the curve type and relevant key components (public point or
+/// private value) based on the object `class` and populates an `EccData`
+/// structure suitable for creating an `EvpPkey`.
+pub fn eddsa_object_to_pkey(
     key: &Object,
     class: CK_OBJECT_CLASS,
-) -> Result<(&'static CStr, OsslParam)> {
+) -> Result<EvpPkey> {
     let kclass = key.get_attr_as_ulong(CKA_CLASS)?;
     if kclass != class {
         return Err(CKR_KEY_TYPE_INCONSISTENT)?;
     }
-    let mut params = OsslParam::with_capacity(1);
-    params.zeroize = true;
-
-    let name = get_ossl_name_from_obj(key)?;
-
     match kclass {
-        CKO_PUBLIC_KEY => {
-            params.add_owned_octet_string(
-                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                get_ec_point_from_obj(key)?,
-            )?;
-        }
-        CKO_PRIVATE_KEY => {
-            params.add_octet_string(
-                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                key.get_attr_as_bytes(CKA_VALUE)?,
-            )?;
-        }
-
-        _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
+        CKO_PUBLIC_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            get_evp_pkey_type_from_obj(key)?,
+            PkeyData::Ecc(EccData {
+                pubkey: Some(get_ec_point_from_obj(key)?),
+                prikey: None,
+            }),
+        )?),
+        CKO_PRIVATE_KEY => Ok(EvpPkey::import(
+            osslctx(),
+            get_evp_pkey_type_from_obj(key)?,
+            PkeyData::Ecc(EccData {
+                pubkey: None,
+                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+            }),
+        )?),
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
-
-    params.finalize();
-
-    Ok((name, params))
 }
 
 /// Represents an active EdDSA signing or verification operation.
@@ -217,32 +208,26 @@ impl EddsaOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let evp_pkey =
+        let pkey =
             EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
-
-        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
-        let res = unsafe {
-            EVP_PKEY_todata(
-                evp_pkey.as_ptr(),
-                c_int::try_from(EVP_PKEY_KEYPAIR)?,
-                &mut params,
-            )
+        let ecc = match pkey.export()? {
+            PkeyData::Ecc(e) => e,
         };
-        if res != 1 {
+
+        /* Set Public Key */
+        if let Some(key) = ecc.pubkey {
+            pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, key))?;
+        } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
-        let params = OsslParam::from_ptr(params)?;
-        /* Public Key */
-        let point = params
-            .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))?
-            .to_vec();
-        pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, point))?;
 
-        /* Private Key */
-        let value = params
-            .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))?
-            .to_vec();
-        privkey.set_attr(Attribute::from_bytes(CKA_VALUE, value))?;
+        /* Set Private Key */
+        if let Some(key) = ecc.prikey {
+            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        } else {
+            return Err(CKR_DEVICE_ERROR)?;
+        }
+
         Ok(())
     }
 }
