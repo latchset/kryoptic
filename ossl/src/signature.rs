@@ -289,7 +289,7 @@ fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
 pub struct RsaPssParams {
     pub digest: DigestAlg,
     pub mgf1: DigestAlg,
-    pub saltlen: c_int,
+    pub saltlen: usize,
 }
 
 /// Helper to generate OsslParam arrays for initialization
@@ -360,7 +360,7 @@ pub fn rsa_sig_params(
                 )?;
                 params.add_owned_int(
                     cstr!(OSSL_SIGNATURE_PARAM_PSS_SALTLEN),
-                    pss.saltlen,
+                    c_int::try_from(pss.saltlen)?,
                 )?;
                 params.finalize();
                 return Ok(Some(params));

@@ -5,15 +5,17 @@
 //! PSS, and OAEP padding schemes, using the OpenSSL EVP interface. It handles
 //! key generation, encryption, decryption, signing, verification, and wrapping.
 
-use core::ffi::c_int;
-
 use crate::attribute::Attribute;
 use crate::error::{Error, Result};
 use crate::hash::{hash_size, INVALID_HASH_SIZE};
-use crate::mechanism::*;
+use crate::mechanism::{
+    Decryption, Encryption, MechOperation, Sign, Verify, VerifySignature,
+};
 use crate::misc::{bytes_to_vec, cast_params, zeromem};
 use crate::object::Object;
-use crate::ossl::common::*;
+use crate::ossl::common::{
+    mech_type_to_digest_alg, osslctx, privkey_from_object, pubkey_from_object,
+};
 
 use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
 use ossl::digest::DigestAlg;
@@ -151,7 +153,7 @@ fn parse_sig_params(
             Some(RsaPssParams {
                 digest: mdname,
                 mgf1: mgf1_to_digest_alg(params.mgf)?,
-                saltlen: c_int::try_from(params.sLen)?,
+                saltlen: usize::try_from(params.sLen)?,
             }),
         ))
     } else {
