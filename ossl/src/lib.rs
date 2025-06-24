@@ -75,7 +75,7 @@ pub enum ErrorKind {
     OsslError,
     /// A falure resulting from wrong key usage
     KeyError,
-    /// A warpper error
+    /// A wrapper error
     WrapperError,
     /// A buffer is not of the correct size
     BufferSize,
