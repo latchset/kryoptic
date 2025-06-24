@@ -39,12 +39,8 @@ fn main() {
     let pkcs11_bindings = out_path.join("pkcs11_bindings.rs");
 
     /* PKCS11 Headers */
+    let pkcs11_header = "headers/3.2/pkcs11.h";
 
-    let pkcs11_header = if cfg!(feature = "pkcs11_3_2") {
-        "headers/3.2-prerelease/pkcs11.h"
-    } else {
-        "headers/3.1/pkcs11.h"
-    };
     println!("cargo:rerun-if-changed={}", pkcs11_header);
 
     bindgen::Builder::default()
