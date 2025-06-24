@@ -63,9 +63,6 @@ const CKA_TRUST_STEP_UP_APPROVED: CK_ATTRIBUTE_TYPE = NSS_VENDOR_TRUST + 16;
 const CKA_CERT_SHA1_HASH: CK_ATTRIBUTE_TYPE = NSS_VENDOR_TRUST + 100;
 const CKA_CERT_MD5_HASH: CK_ATTRIBUTE_TYPE = NSS_VENDOR_TRUST + 101;
 
-#[cfg(not(feature = "pkcs11_3_2"))]
-const NSS_KA_LEN: usize = 119;
-#[cfg(feature = "pkcs11_3_2")]
 const NSS_KA_LEN: usize = 121;
 
 /// Static array listing all standard and NSS vendor-specific attributes
@@ -190,9 +187,7 @@ pub static NSS_KNOWN_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; NSS_KA_LEN] = [
     CKA_CERT_SHA1_HASH,
     CKA_CERT_MD5_HASH,
     CKA_NSS_DB,
-    #[cfg(feature = "pkcs11_3_2")]
     CKA_ENCAPSULATE,
-    #[cfg(feature = "pkcs11_3_2")]
     CKA_DECAPSULATE,
 ];
 

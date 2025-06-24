@@ -243,7 +243,6 @@ impl Mechanism for HMACMechanism {
     }
 
     /// Initializes an HMAC operation for the VerifySignature operation
-    #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
         mech: &CK_MECHANISM,

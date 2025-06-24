@@ -197,7 +197,6 @@ impl EddsaOperation {
 
     /// Creates a new `EddsaOperation` for verification with a pre-supplied
     /// signature.
-    #[cfg(feature = "pkcs11_3_2")]
     pub fn verify_signature_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -384,7 +383,6 @@ impl Verify for EddsaOperation {
     }
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 impl VerifySignature for EddsaOperation {
     fn verify(&mut self, data: &[u8]) -> Result<()> {
         self.verify_internal(data, None)

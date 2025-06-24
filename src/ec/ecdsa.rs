@@ -297,7 +297,6 @@ impl Mechanism for EcdsaMechanism {
 
     /// Initializes a PKCS#11 3.2 signature verification operation using
     /// CKK_EC keys
-    #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
         mech: &CK_MECHANISM,

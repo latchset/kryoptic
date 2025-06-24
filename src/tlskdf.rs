@@ -98,7 +98,6 @@ impl TLSPRFMechanism {
                 },
             }),
         );
-        #[cfg(feature = "pkcs11_3_2")]
         mechs.add_mechanism(
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
             Box::new(TLSPRFMechanism {
@@ -109,7 +108,6 @@ impl TLSPRFMechanism {
                 },
             }),
         );
-        #[cfg(feature = "pkcs11_3_2")]
         mechs.add_mechanism(
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
             Box::new(TLSPRFMechanism {
@@ -139,7 +137,6 @@ impl Mechanism for TLSPRFMechanism {
         }
 
         match mech.mechanism {
-            #[cfg(feature = "pkcs11_3_2")]
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
             | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
                 Ok(Box::new(TLSKDFOperation::new(mech)?))

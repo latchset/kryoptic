@@ -971,36 +971,37 @@ impl OsslSignature {
         Ok(())
     }
 
-    /// Unsupported in versions of OpenSSL prior to 3.5.0
-    #[cfg(not(ossl_v350))]
-    pub fn set_signature(&mut self, _signature: &[u8]) -> Result<(), Error> {
-        Err(Error::new(ErrorKind::WrapperError))
-    }
-
     /// Sets the signature for a VerifySignature operation.
     /// If the OpenSSL backend supports setting it early (via
     /// `EVP_PKEY_CTX_set_signature`), it does so; otherwise, it stores the
     /// signature internally for later use.
-    #[cfg(ossl_v350)]
     pub fn set_signature(&mut self, signature: &[u8]) -> Result<(), Error> {
         if self.legacy_ctx.is_some() || !self.supports_updates {
             self.signature = Some(signature.to_vec());
             return Ok(());
         }
 
-        let ret = unsafe {
-            EVP_PKEY_CTX_set_signature(
-                self.pkey_ctx.as_mut_ptr(),
-                signature.as_ptr(),
-                signature.len(),
-            )
-        };
-        if ret != 1 {
-            trace_ossl!("EVP_PKEY_CTX_set_signature()");
-            return Err(Error::new(ErrorKind::OsslError));
-        }
+        #[cfg(ossl_v350)]
+        {
+            let ret = unsafe {
+                EVP_PKEY_CTX_set_signature(
+                    self.pkey_ctx.as_mut_ptr(),
+                    signature.as_ptr(),
+                    signature.len(),
+                )
+            };
+            if ret != 1 {
+                trace_ossl!("EVP_PKEY_CTX_set_signature()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
 
-        Ok(())
+            Ok(())
+        }
+        #[cfg(not(ossl_v350))]
+        {
+            trace_ossl!("unsupported");
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
     }
 
     /// Feeds data to the message verify provider

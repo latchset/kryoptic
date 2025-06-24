@@ -652,7 +652,6 @@ fn test_tls_mechanisms() {
 
 #[test]
 #[parallel]
-#[cfg(feature = "pkcs11_3_2")]
 fn test_tls_ems_mechanisms() {
     let mut testtokn = TestToken::initialized("tls_ems_mechanisms", None);
     let session = testtokn.get_session(false);
@@ -774,7 +773,6 @@ fn test_tls_ems_mechanisms() {
 
 #[test]
 #[parallel]
-#[cfg(feature = "pkcs11_3_2")]
 fn test_tls_ems_vector() {
     /* The first test from
      * https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/TLS-v1.2-KDF-RFC7627

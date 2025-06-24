@@ -14,6 +14,9 @@ All notable changes to this project should be documented in this file.
  - [Support Sp800 ECDH KDF
     flavor](https://github.com/latchset/kryoptic/pull/273)
 
+* PKCS#11 3.2 is now the default interface
+ - [Make PKCS#11 3.2 the default
+    interface](https://github.com/latchset/kryoptic/pull/276)
 
 # [1.2.0]
 ## 2025-06-09

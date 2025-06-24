@@ -606,7 +606,6 @@ impl Mechanism for RsaPKCSMechanism {
     ///
     /// Checks mechanism flags and key suitability, then delegates to
     /// [RsaPKCSOperation::verify_signature_new].
-    #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
         mech: &CK_MECHANISM,

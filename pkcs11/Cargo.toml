@@ -13,3 +13,4 @@ bindgen = "0.71"
 
 [features]
 pkcs11_3_2 = []
+default = ["pkcs11_3_2"]

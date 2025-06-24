@@ -99,210 +99,177 @@ impl Attrmap<'_> {
 
 /// Helper macro to populate the static attributes map
 macro_rules! attrmap_element {
-    () => {
+    ($id:expr; as $attrtype:ident) => {
         Attrmap {
-            id: 0,
-            name: "",
-            atype: AttrType::IgnoreType,
-        }
-    };
-    ($map:expr; $idx:expr; $id:expr; as $attrtype:ident) => {
-        $map[$idx] = Attrmap {
             id: $id,
             name: stringify!($id),
             atype: AttrType::$attrtype,
-        };
-        $idx += 1;
+        }
     };
 }
 
-/// Size of the attribute map, separately defined as the size can vary
-/// based on enabled features
-const ATTRMAP_SIZE: usize = if cfg!(feature = "pkcs11_3_2") {
-    158
-} else {
-    131
-};
-
 /// The main attributes map, list all known attributes
-static ATTRMAP: [Attrmap<'_>; ATTRMAP_SIZE] = {
-    /* PKCS11 3.0 defined attributes */
-    let mut m: [Attrmap<'_>; ATTRMAP_SIZE] = [attrmap_element!(); ATTRMAP_SIZE];
-    let mut i = 0;
-    attrmap_element!(m; i; CKA_CLASS; as NumType);
-    attrmap_element!(m; i; CKA_TOKEN; as BoolType);
-    attrmap_element!(m; i; CKA_PRIVATE; as BoolType);
-    attrmap_element!(m; i; CKA_LABEL; as StringType);
-    attrmap_element!(m; i; CKA_UNIQUE_ID; as StringType);
-    attrmap_element!(m; i; CKA_APPLICATION; as StringType);
-    attrmap_element!(m; i; CKA_VALUE; as BytesType);
-    attrmap_element!(m; i; CKA_OBJECT_ID; as BytesType);
-    attrmap_element!(m; i; CKA_CERTIFICATE_TYPE; as NumType);
-    attrmap_element!(m; i; CKA_ISSUER; as BytesType);
-    attrmap_element!(m; i; CKA_SERIAL_NUMBER; as BytesType);
-    attrmap_element!(m; i; CKA_AC_ISSUER; as BytesType);
-    attrmap_element!(m; i; CKA_OWNER; as BytesType);
-    attrmap_element!(m; i; CKA_ATTR_TYPES; as BytesType);
-    attrmap_element!(m; i; CKA_TRUSTED; as BoolType);
-    attrmap_element!(m; i; CKA_CERTIFICATE_CATEGORY; as NumType);
-    attrmap_element!(m; i; CKA_JAVA_MIDP_SECURITY_DOMAIN; as NumType);
-    attrmap_element!(m; i; CKA_URL; as StringType);
-    attrmap_element!(m; i; CKA_HASH_OF_SUBJECT_PUBLIC_KEY; as BytesType);
-    attrmap_element!(m; i; CKA_HASH_OF_ISSUER_PUBLIC_KEY; as BytesType);
-    attrmap_element!(m; i; CKA_NAME_HASH_ALGORITHM; as NumType);
-    attrmap_element!(m; i; CKA_CHECK_VALUE; as IgnoreType);
-    attrmap_element!(m; i; CKA_KEY_TYPE; as NumType);
-    attrmap_element!(m; i; CKA_SUBJECT; as BytesType);
-    attrmap_element!(m; i; CKA_ID; as BytesType);
-    attrmap_element!(m; i; CKA_SENSITIVE; as BoolType);
-    attrmap_element!(m; i; CKA_ENCRYPT; as BoolType);
-    attrmap_element!(m; i; CKA_DECRYPT; as BoolType);
-    attrmap_element!(m; i; CKA_WRAP; as BoolType);
-    attrmap_element!(m; i; CKA_UNWRAP; as BoolType);
-    attrmap_element!(m; i; CKA_SIGN; as BoolType);
-    attrmap_element!(m; i; CKA_SIGN_RECOVER; as BoolType);
-    attrmap_element!(m; i; CKA_VERIFY; as BoolType);
-    attrmap_element!(m; i; CKA_VERIFY_RECOVER; as BoolType);
-    attrmap_element!(m; i; CKA_DERIVE; as BoolType);
-    attrmap_element!(m; i; CKA_START_DATE; as DateType);
-    attrmap_element!(m; i; CKA_END_DATE; as DateType);
-    attrmap_element!(m; i; CKA_MODULUS; as BytesType);
-    attrmap_element!(m; i; CKA_MODULUS_BITS; as NumType);
-    attrmap_element!(m; i; CKA_PUBLIC_EXPONENT; as BytesType);
-    attrmap_element!(m; i; CKA_PRIVATE_EXPONENT; as BytesType);
-    attrmap_element!(m; i; CKA_PRIME_1; as BytesType);
-    attrmap_element!(m; i; CKA_PRIME_2; as BytesType);
-    attrmap_element!(m; i; CKA_EXPONENT_1; as BytesType);
-    attrmap_element!(m; i; CKA_EXPONENT_2; as BytesType);
-    attrmap_element!(m; i; CKA_COEFFICIENT; as BytesType);
-    attrmap_element!(m; i; CKA_PUBLIC_KEY_INFO; as BytesType);
-    attrmap_element!(m; i; CKA_PRIME; as BytesType);
-    attrmap_element!(m; i; CKA_SUBPRIME; as BytesType);
-    attrmap_element!(m; i; CKA_BASE; as BytesType);
-    attrmap_element!(m; i; CKA_PRIME_BITS; as BytesType);
-    attrmap_element!(m; i; CKA_SUBPRIME_BITS; as NumType);
-    attrmap_element!(m; i; CKA_VALUE_BITS; as NumType);
-    attrmap_element!(m; i; CKA_VALUE_LEN; as NumType);
-    attrmap_element!(m; i; CKA_EXTRACTABLE; as BoolType);
-    attrmap_element!(m; i; CKA_LOCAL; as BoolType);
-    attrmap_element!(m; i; CKA_NEVER_EXTRACTABLE; as BoolType);
-    attrmap_element!(m; i; CKA_ALWAYS_SENSITIVE; as BoolType);
-    attrmap_element!(m; i; CKA_KEY_GEN_MECHANISM; as NumType);
-    attrmap_element!(m; i; CKA_MODIFIABLE; as BoolType);
-    attrmap_element!(m; i; CKA_COPYABLE; as BoolType);
-    attrmap_element!(m; i; CKA_DESTROYABLE; as BoolType);
-    attrmap_element!(m; i; CKA_EC_PARAMS; as BytesType);
-    attrmap_element!(m; i; CKA_EC_POINT; as BytesType);
-    attrmap_element!(m; i; CKA_ALWAYS_AUTHENTICATE; as BoolType);
-    attrmap_element!(m; i; CKA_WRAP_WITH_TRUSTED; as BoolType);
-    attrmap_element!(m; i; CKA_OTP_FORMAT; as NumType);
-    attrmap_element!(m; i; CKA_OTP_LENGTH; as NumType);
-    attrmap_element!(m; i; CKA_OTP_TIME_INTERVAL; as NumType);
-    attrmap_element!(m; i; CKA_OTP_USER_FRIENDLY_MODE; as BoolType);
-    attrmap_element!(m; i; CKA_OTP_CHALLENGE_REQUIREMENT; as NumType);
-    attrmap_element!(m; i; CKA_OTP_TIME_REQUIREMENT; as NumType);
-    attrmap_element!(m; i; CKA_OTP_COUNTER_REQUIREMENT; as NumType);
-    attrmap_element!(m; i; CKA_OTP_PIN_REQUIREMENT; as NumType);
-    attrmap_element!(m; i; CKA_OTP_USER_IDENTIFIER; as StringType);
-    attrmap_element!(m; i; CKA_OTP_SERVICE_IDENTIFIER; as StringType);
-    attrmap_element!(m; i; CKA_OTP_SERVICE_LOGO; as BytesType);
-    attrmap_element!(m; i; CKA_OTP_SERVICE_LOGO_TYPE; as StringType);
-    attrmap_element!(m; i; CKA_OTP_COUNTER; as BytesType);
-    attrmap_element!(m; i; CKA_OTP_TIME; as StringType);
-    attrmap_element!(m; i; CKA_GOSTR3410_PARAMS; as BytesType);
-    attrmap_element!(m; i; CKA_GOSTR3411_PARAMS; as BytesType);
-    attrmap_element!(m; i; CKA_GOST28147_PARAMS; as BytesType);
-    attrmap_element!(m; i; CKA_HW_FEATURE_TYPE; as NumType);
-    attrmap_element!(m; i; CKA_RESET_ON_INIT; as BoolType);
-    attrmap_element!(m; i; CKA_HAS_RESET; as BoolType);
-    attrmap_element!(m; i; CKA_PIXEL_X; as NumType);
-    attrmap_element!(m; i; CKA_PIXEL_Y; as NumType);
-    attrmap_element!(m; i; CKA_RESOLUTION; as NumType);
-    attrmap_element!(m; i; CKA_CHAR_ROWS; as NumType);
-    attrmap_element!(m; i; CKA_CHAR_COLUMNS; as NumType);
-    attrmap_element!(m; i; CKA_COLOR; as BoolType);
-    attrmap_element!(m; i; CKA_BITS_PER_PIXEL; as NumType);
-    attrmap_element!(m; i; CKA_CHAR_SETS; as StringType);
-    attrmap_element!(m; i; CKA_ENCODING_METHODS; as StringType);
-    attrmap_element!(m; i; CKA_MIME_TYPES; as StringType);
-    attrmap_element!(m; i; CKA_MECHANISM_TYPE; as NumType);
-    attrmap_element!(m; i; CKA_REQUIRED_CMS_ATTRIBUTES; as BytesType);
-    attrmap_element!(m; i; CKA_DEFAULT_CMS_ATTRIBUTES; as BytesType);
-    attrmap_element!(m; i; CKA_SUPPORTED_CMS_ATTRIBUTES; as BytesType);
-    attrmap_element!(m; i; CKA_PROFILE_ID; as NumType);
-    attrmap_element!(m; i; CKA_X2RATCHET_BAG; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_BAGSIZE; as NumType);
-    attrmap_element!(m; i; CKA_X2RATCHET_BOBS1STMSG; as BoolType);
-    attrmap_element!(m; i; CKA_X2RATCHET_CKR; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_CKS; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_DHP; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_DHR; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_DHS; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_HKR; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_HKS; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_ISALICE; as BoolType);
-    attrmap_element!(m; i; CKA_X2RATCHET_NHKR; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_NHKS; as BytesType);
-    attrmap_element!(m; i; CKA_X2RATCHET_NR; as NumType);
-    attrmap_element!(m; i; CKA_X2RATCHET_NS; as NumType);
-    attrmap_element!(m; i; CKA_X2RATCHET_PNS; as NumType);
-    attrmap_element!(m; i; CKA_X2RATCHET_RK; as BytesType);
-    attrmap_element!(m; i; CKA_HSS_LEVELS; as NumType);
-    attrmap_element!(m; i; CKA_HSS_LMS_TYPE; as NumType);
-    attrmap_element!(m; i; CKA_HSS_LMOTS_TYPE; as NumType);
-    attrmap_element!(m; i; CKA_HSS_LMS_TYPES; as BytesType);
-    attrmap_element!(m; i; CKA_HSS_LMOTS_TYPES; as BytesType);
-    attrmap_element!(m; i; CKA_HSS_KEYS_REMAINING; as NumType);
-
-    /* PKCS11 3.2 defined additional attributes */
-    #[cfg(feature = "pkcs11_3_2")]
-    {
-        attrmap_element!(m; i; CKA_PARAMETER_SET; as NumType);
-        attrmap_element!(m; i; CKA_OBJECT_VALIDATION_FLAGS; as NumType);
-        attrmap_element!(m; i; CKA_VALIDATION_TYPE; as NumType);
-        attrmap_element!(m; i; CKA_VALIDATION_VERSION; as BytesType);
-        attrmap_element!(m; i; CKA_VALIDATION_LEVEL; as NumType);
-        attrmap_element!(m; i; CKA_VALIDATION_MODULE_ID; as StringType);
-        attrmap_element!(m; i; CKA_VALIDATION_FLAG; as NumType);
-        attrmap_element!(m; i; CKA_VALIDATION_AUTHORITY_TYPE; as NumType);
-        attrmap_element!(m; i; CKA_VALIDATION_COUNTRY; as StringType);
-        attrmap_element!(m; i; CKA_VALIDATION_CERTIFICATE_IDENTIFIER; as StringType);
-        attrmap_element!(m; i; CKA_VALIDATION_CERTIFICATE_URI; as StringType);
-        attrmap_element!(m; i; CKA_VALIDATION_VENDOR_URI; as StringType);
-        attrmap_element!(m; i; CKA_VALIDATION_PROFILE; as StringType);
-        attrmap_element!(m; i; CKA_ENCAPSULATE_TEMPLATE; as DenyType);
-        attrmap_element!(m; i; CKA_DECAPSULATE_TEMPLATE; as DenyType);
-        attrmap_element!(m; i; CKA_TRUST_SERVER_AUTH; as NumType);
-        attrmap_element!(m; i; CKA_TRUST_CLIENT_AUTH; as NumType);
-        attrmap_element!(m; i; CKA_TRUST_CODE_SIGNING; as NumType);
-        attrmap_element!(m; i; CKA_TRUST_EMAIL_PROTECTION; as NumType);
-        attrmap_element!(m; i; CKA_TRUST_IPSEC_IKE; as NumType);
-        attrmap_element!(m; i; CKA_TRUST_TIME_STAMPING; as NumType);
-        attrmap_element!(m; i; CKA_TRUST_OCSP_SIGNING; as NumType);
-        attrmap_element!(m; i; CKA_ENCAPSULATE; as BoolType);
-        attrmap_element!(m; i; CKA_DECAPSULATE; as BoolType);
-        attrmap_element!(m; i; CKA_HASH_OF_CERTIFICATE; as BytesType);
-        attrmap_element!(m; i; CKA_PUBLIC_CRC64_VALUE; as BytesType);
-        attrmap_element!(m; i; CKA_SEED; as BytesType);
-    }
-
-    attrmap_element!(m; i; CKA_WRAP_TEMPLATE; as DenyType);
-    attrmap_element!(m; i; CKA_UNWRAP_TEMPLATE; as DenyType);
-    attrmap_element!(m; i; CKA_DERIVE_TEMPLATE; as DenyType);
-    attrmap_element!(m; i; CKA_ALLOWED_MECHANISMS; as UlongArrayType);
-    attrmap_element!(m; i; CKA_VENDOR_DEFINED; as DenyType);
-
+static ATTRMAP: [Attrmap<'_>; 158] = [
+    attrmap_element!(CKA_CLASS; as NumType),
+    attrmap_element!(CKA_TOKEN; as BoolType),
+    attrmap_element!(CKA_PRIVATE; as BoolType),
+    attrmap_element!(CKA_LABEL; as StringType),
+    attrmap_element!(CKA_UNIQUE_ID; as StringType),
+    attrmap_element!(CKA_APPLICATION; as StringType),
+    attrmap_element!(CKA_VALUE; as BytesType),
+    attrmap_element!(CKA_OBJECT_ID; as BytesType),
+    attrmap_element!(CKA_CERTIFICATE_TYPE; as NumType),
+    attrmap_element!(CKA_ISSUER; as BytesType),
+    attrmap_element!(CKA_SERIAL_NUMBER; as BytesType),
+    attrmap_element!(CKA_AC_ISSUER; as BytesType),
+    attrmap_element!(CKA_OWNER; as BytesType),
+    attrmap_element!(CKA_ATTR_TYPES; as BytesType),
+    attrmap_element!(CKA_TRUSTED; as BoolType),
+    attrmap_element!(CKA_CERTIFICATE_CATEGORY; as NumType),
+    attrmap_element!(CKA_JAVA_MIDP_SECURITY_DOMAIN; as NumType),
+    attrmap_element!(CKA_URL; as StringType),
+    attrmap_element!(CKA_HASH_OF_SUBJECT_PUBLIC_KEY; as BytesType),
+    attrmap_element!(CKA_HASH_OF_ISSUER_PUBLIC_KEY; as BytesType),
+    attrmap_element!(CKA_NAME_HASH_ALGORITHM; as NumType),
+    attrmap_element!(CKA_CHECK_VALUE; as IgnoreType),
+    attrmap_element!(CKA_KEY_TYPE; as NumType),
+    attrmap_element!(CKA_SUBJECT; as BytesType),
+    attrmap_element!(CKA_ID; as BytesType),
+    attrmap_element!(CKA_SENSITIVE; as BoolType),
+    attrmap_element!(CKA_ENCRYPT; as BoolType),
+    attrmap_element!(CKA_DECRYPT; as BoolType),
+    attrmap_element!(CKA_WRAP; as BoolType),
+    attrmap_element!(CKA_UNWRAP; as BoolType),
+    attrmap_element!(CKA_SIGN; as BoolType),
+    attrmap_element!(CKA_SIGN_RECOVER; as BoolType),
+    attrmap_element!(CKA_VERIFY; as BoolType),
+    attrmap_element!(CKA_VERIFY_RECOVER; as BoolType),
+    attrmap_element!(CKA_DERIVE; as BoolType),
+    attrmap_element!(CKA_START_DATE; as DateType),
+    attrmap_element!(CKA_END_DATE; as DateType),
+    attrmap_element!(CKA_MODULUS; as BytesType),
+    attrmap_element!(CKA_MODULUS_BITS; as NumType),
+    attrmap_element!(CKA_PUBLIC_EXPONENT; as BytesType),
+    attrmap_element!(CKA_PRIVATE_EXPONENT; as BytesType),
+    attrmap_element!(CKA_PRIME_1; as BytesType),
+    attrmap_element!(CKA_PRIME_2; as BytesType),
+    attrmap_element!(CKA_EXPONENT_1; as BytesType),
+    attrmap_element!(CKA_EXPONENT_2; as BytesType),
+    attrmap_element!(CKA_COEFFICIENT; as BytesType),
+    attrmap_element!(CKA_PUBLIC_KEY_INFO; as BytesType),
+    attrmap_element!(CKA_PRIME; as BytesType),
+    attrmap_element!(CKA_SUBPRIME; as BytesType),
+    attrmap_element!(CKA_BASE; as BytesType),
+    attrmap_element!(CKA_PRIME_BITS; as BytesType),
+    attrmap_element!(CKA_SUBPRIME_BITS; as NumType),
+    attrmap_element!(CKA_VALUE_BITS; as NumType),
+    attrmap_element!(CKA_VALUE_LEN; as NumType),
+    attrmap_element!(CKA_EXTRACTABLE; as BoolType),
+    attrmap_element!(CKA_LOCAL; as BoolType),
+    attrmap_element!(CKA_NEVER_EXTRACTABLE; as BoolType),
+    attrmap_element!(CKA_ALWAYS_SENSITIVE; as BoolType),
+    attrmap_element!(CKA_KEY_GEN_MECHANISM; as NumType),
+    attrmap_element!(CKA_MODIFIABLE; as BoolType),
+    attrmap_element!(CKA_COPYABLE; as BoolType),
+    attrmap_element!(CKA_DESTROYABLE; as BoolType),
+    attrmap_element!(CKA_EC_PARAMS; as BytesType),
+    attrmap_element!(CKA_EC_POINT; as BytesType),
+    attrmap_element!(CKA_ALWAYS_AUTHENTICATE; as BoolType),
+    attrmap_element!(CKA_WRAP_WITH_TRUSTED; as BoolType),
+    attrmap_element!(CKA_OTP_FORMAT; as NumType),
+    attrmap_element!(CKA_OTP_LENGTH; as NumType),
+    attrmap_element!(CKA_OTP_TIME_INTERVAL; as NumType),
+    attrmap_element!(CKA_OTP_USER_FRIENDLY_MODE; as BoolType),
+    attrmap_element!(CKA_OTP_CHALLENGE_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_TIME_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_COUNTER_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_PIN_REQUIREMENT; as NumType),
+    attrmap_element!(CKA_OTP_USER_IDENTIFIER; as StringType),
+    attrmap_element!(CKA_OTP_SERVICE_IDENTIFIER; as StringType),
+    attrmap_element!(CKA_OTP_SERVICE_LOGO; as BytesType),
+    attrmap_element!(CKA_OTP_SERVICE_LOGO_TYPE; as StringType),
+    attrmap_element!(CKA_OTP_COUNTER; as BytesType),
+    attrmap_element!(CKA_OTP_TIME; as StringType),
+    attrmap_element!(CKA_GOSTR3410_PARAMS; as BytesType),
+    attrmap_element!(CKA_GOSTR3411_PARAMS; as BytesType),
+    attrmap_element!(CKA_GOST28147_PARAMS; as BytesType),
+    attrmap_element!(CKA_HW_FEATURE_TYPE; as NumType),
+    attrmap_element!(CKA_RESET_ON_INIT; as BoolType),
+    attrmap_element!(CKA_HAS_RESET; as BoolType),
+    attrmap_element!(CKA_PIXEL_X; as NumType),
+    attrmap_element!(CKA_PIXEL_Y; as NumType),
+    attrmap_element!(CKA_RESOLUTION; as NumType),
+    attrmap_element!(CKA_CHAR_ROWS; as NumType),
+    attrmap_element!(CKA_CHAR_COLUMNS; as NumType),
+    attrmap_element!(CKA_COLOR; as BoolType),
+    attrmap_element!(CKA_BITS_PER_PIXEL; as NumType),
+    attrmap_element!(CKA_CHAR_SETS; as StringType),
+    attrmap_element!(CKA_ENCODING_METHODS; as StringType),
+    attrmap_element!(CKA_MIME_TYPES; as StringType),
+    attrmap_element!(CKA_MECHANISM_TYPE; as NumType),
+    attrmap_element!(CKA_REQUIRED_CMS_ATTRIBUTES; as BytesType),
+    attrmap_element!(CKA_DEFAULT_CMS_ATTRIBUTES; as BytesType),
+    attrmap_element!(CKA_SUPPORTED_CMS_ATTRIBUTES; as BytesType),
+    attrmap_element!(CKA_PROFILE_ID; as NumType),
+    attrmap_element!(CKA_X2RATCHET_BAG; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_BAGSIZE; as NumType),
+    attrmap_element!(CKA_X2RATCHET_BOBS1STMSG; as BoolType),
+    attrmap_element!(CKA_X2RATCHET_CKR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_CKS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_DHP; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_DHR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_DHS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_HKR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_HKS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_ISALICE; as BoolType),
+    attrmap_element!(CKA_X2RATCHET_NHKR; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_NHKS; as BytesType),
+    attrmap_element!(CKA_X2RATCHET_NR; as NumType),
+    attrmap_element!(CKA_X2RATCHET_NS; as NumType),
+    attrmap_element!(CKA_X2RATCHET_PNS; as NumType),
+    attrmap_element!(CKA_X2RATCHET_RK; as BytesType),
+    attrmap_element!(CKA_HSS_LEVELS; as NumType),
+    attrmap_element!(CKA_HSS_LMS_TYPE; as NumType),
+    attrmap_element!(CKA_HSS_LMOTS_TYPE; as NumType),
+    attrmap_element!(CKA_HSS_LMS_TYPES; as BytesType),
+    attrmap_element!(CKA_HSS_LMOTS_TYPES; as BytesType),
+    attrmap_element!(CKA_HSS_KEYS_REMAINING; as NumType),
+    attrmap_element!(CKA_PARAMETER_SET; as NumType),
+    attrmap_element!(CKA_OBJECT_VALIDATION_FLAGS; as NumType),
+    attrmap_element!(CKA_VALIDATION_TYPE; as NumType),
+    attrmap_element!(CKA_VALIDATION_VERSION; as BytesType),
+    attrmap_element!(CKA_VALIDATION_LEVEL; as NumType),
+    attrmap_element!(CKA_VALIDATION_MODULE_ID; as StringType),
+    attrmap_element!(CKA_VALIDATION_FLAG; as NumType),
+    attrmap_element!(CKA_VALIDATION_AUTHORITY_TYPE; as NumType),
+    attrmap_element!(CKA_VALIDATION_COUNTRY; as StringType),
+    attrmap_element!(CKA_VALIDATION_CERTIFICATE_IDENTIFIER; as StringType),
+    attrmap_element!(CKA_VALIDATION_CERTIFICATE_URI; as StringType),
+    attrmap_element!(CKA_VALIDATION_VENDOR_URI; as StringType),
+    attrmap_element!(CKA_VALIDATION_PROFILE; as StringType),
+    attrmap_element!(CKA_ENCAPSULATE_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_DECAPSULATE_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_TRUST_SERVER_AUTH; as NumType),
+    attrmap_element!(CKA_TRUST_CLIENT_AUTH; as NumType),
+    attrmap_element!(CKA_TRUST_CODE_SIGNING; as NumType),
+    attrmap_element!(CKA_TRUST_EMAIL_PROTECTION; as NumType),
+    attrmap_element!(CKA_TRUST_IPSEC_IKE; as NumType),
+    attrmap_element!(CKA_TRUST_TIME_STAMPING; as NumType),
+    attrmap_element!(CKA_TRUST_OCSP_SIGNING; as NumType),
+    attrmap_element!(CKA_ENCAPSULATE; as BoolType),
+    attrmap_element!(CKA_DECAPSULATE; as BoolType),
+    attrmap_element!(CKA_HASH_OF_CERTIFICATE; as BytesType),
+    attrmap_element!(CKA_PUBLIC_CRC64_VALUE; as BytesType),
+    attrmap_element!(CKA_SEED; as BytesType),
+    attrmap_element!(CKA_WRAP_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_UNWRAP_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_DERIVE_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_ALLOWED_MECHANISMS; as UlongArrayType),
+    attrmap_element!(CKA_VENDOR_DEFINED; as DenyType),
     /* Additional Vendor defined Attributes */
-    attrmap_element!(m; i; KRA_MAX_LOGIN_ATTEMPTS; as NumType);
-    attrmap_element!(m; i; KRA_LOGIN_ATTEMPTS; as NumType);
-
-    /* Quiet linter by reading the last assignment to i */
-    if i != ATTRMAP_SIZE {
-        panic!();
-    }
-
-    m
-};
+    attrmap_element!(KRA_MAX_LOGIN_ATTEMPTS; as NumType),
+    attrmap_element!(KRA_LOGIN_ATTEMPTS; as NumType),
+];
 
 #[cfg(test)]
 mod tests {

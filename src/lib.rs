@@ -3085,10 +3085,7 @@ extern "C" fn fn_get_token_info(
 }
 
 /// Holds the version of the implemented interface to return by default
-#[cfg(feature = "pkcs11_3_2")]
 static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 2 };
-#[cfg(not(feature = "pkcs11_3_2"))]
-static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 0 };
 
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic                        ";
@@ -3934,7 +3931,6 @@ static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
 ///
 /// Version 3.2 Specification: [link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_encapsulate_key(
     s_handle: CK_SESSION_HANDLE,
     mechptr: *mut CK_MECHANISM,
@@ -4028,7 +4024,6 @@ extern "C" fn fn_encapsulate_key(
 ///
 /// Version 3.2 Specification: [link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_decapsulate_key(
     s_handle: CK_SESSION_HANDLE,
     mechptr: *mut CK_MECHANISM,
@@ -4107,7 +4102,6 @@ extern "C" fn fn_decapsulate_key(
 ///
 /// Version 3.2 Specification: [Link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: *mut CK_MECHANISM,
@@ -4145,7 +4139,6 @@ extern "C" fn fn_verify_signature_init(
 ///
 /// Version 3.2 Specification: [Link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature(
     s_handle: CK_SESSION_HANDLE,
     pdata: *mut CK_BYTE,
@@ -4174,7 +4167,6 @@ extern "C" fn fn_verify_signature(
 ///
 /// Version 3.2 Specification: [Link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_update(
     s_handle: CK_SESSION_HANDLE,
     part: *mut CK_BYTE,
@@ -4195,7 +4187,6 @@ extern "C" fn fn_verify_signature_update(
 ///
 /// Version 3.2 Specification: [Link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_verify_signature_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
     let rstate = global_rlock!(STATE);
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
@@ -4215,7 +4206,6 @@ extern "C" fn fn_verify_signature_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
 ///
 /// Version 3.2 Specification: [Link TBD]
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_get_session_validation_flags(
     s_handle: CK_SESSION_HANDLE,
     flags_type: CK_SESSION_VALIDATION_FLAGS_TYPE,
@@ -4233,7 +4223,6 @@ extern "C" fn fn_get_session_validation_flags(
     CKR_OK
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_async_complete(
     _s_handle: CK_SESSION_HANDLE,
     _function_name: *mut CK_UTF8CHAR,
@@ -4242,7 +4231,6 @@ extern "C" fn fn_async_complete(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_async_get_id(
     _s_handle: CK_SESSION_HANDLE,
     _function_name: *mut CK_UTF8CHAR,
@@ -4251,7 +4239,6 @@ extern "C" fn fn_async_get_id(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_async_join(
     _s_handle: CK_SESSION_HANDLE,
     _function_name: *mut CK_UTF8CHAR,
@@ -4262,7 +4249,6 @@ extern "C" fn fn_async_join(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_wrap_key_authenticated(
     _s_handle: CK_SESSION_HANDLE,
     _mechptr: CK_MECHANISM_PTR,
@@ -4276,7 +4262,6 @@ extern "C" fn fn_wrap_key_authenticated(
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 extern "C" fn fn_unwrap_key_authenticated(
     _s_handle: CK_SESSION_HANDLE,
     _mechptr: CK_MECHANISM_PTR,
@@ -4293,7 +4278,6 @@ extern "C" fn fn_unwrap_key_authenticated(
 }
 
 /// FFI Compatible structure that holds the PKCS#11 v3.2 functions table
-#[cfg(feature = "pkcs11_3_2")]
 static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
     version: CK_VERSION { major: 3, minor: 2 },
     C_Initialize: Some(fn_initialize),
@@ -4420,7 +4404,6 @@ static INTERFACE_300: CK_INTERFACE = CK_INTERFACE {
 };
 
 /// Holds pointers to v3.2 interface
-#[cfg(feature = "pkcs11_3_2")]
 static INTERFACE_320: CK_INTERFACE = CK_INTERFACE {
     pInterfaceName: INTERFACE_NAME_STD_NUL.as_ptr() as *mut u8,
     pFunctionList: &FNLIST_320 as *const _ as *const ::std::os::raw::c_void,
@@ -4443,7 +4426,6 @@ unsafe impl Send for InterfaceData {}
 
 static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
     let mut v = Vec::with_capacity(3);
-    #[cfg(feature = "pkcs11_3_2")]
     v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_320),
         version: FNLIST_320.version,

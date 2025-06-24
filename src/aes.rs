@@ -442,7 +442,6 @@ impl Mechanism for AesMechanism {
         }
     }
 
-    #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
         mech: &CK_MECHANISM,
