@@ -193,7 +193,6 @@ pub fn sig_verify(
     )
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 pub fn sig_verifysig(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,

@@ -67,7 +67,6 @@ const TLS_MASTER_SECRET_LABEL: &[u8; 13] = b"master secret";
 const TLS_KEY_EXPANSION_LABEL: &[u8; 13] = b"key expansion";
 const TLS_SERVER_FINISHED: &[u8; 15] = b"server finished";
 const TLS_CLIENT_FINISHED: &[u8; 15] = b"client finished";
-#[cfg(feature = "pkcs11_3_2")]
 const TLS_EXTENDED_MASTER_SECRET_LABEL: &[u8; 22] = b"extended master secret";
 
 /// Represents the TLS Pseudo-Random Function (PRF) based on HMAC
@@ -253,7 +252,6 @@ pub struct TLSKDFOperation {
     /// Server random bytes.
     server_random: Vec<u8>,
     /// Full session hash for EMS.
-    #[cfg(feature = "pkcs11_3_2")]
     session_hash: Vec<u8>,
     /// Optional pointer to store the negotiated TLS version (used by
     /// CKM_TLS12_MASTER_KEY_DERIVE)
@@ -307,7 +305,6 @@ impl TLSKDFOperation {
             CKM_TLS12_KDF | CKM_TLS_KDF => {
                 Self::new_tls_generic_key_derive(mech)
             }
-            #[cfg(feature = "pkcs11_3_2")]
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
             | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
                 Self::new_tls12_ems_derive(mech)
@@ -321,7 +318,6 @@ impl TLSKDFOperation {
     ///
     /// Parses `CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS`, validates inputs and sets up the
     /// operation context for deriving the extended master secret
-    #[cfg(feature = "pkcs11_3_2")]
     fn new_tls12_ems_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         let params =
             cast_params!(mech, CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
@@ -413,7 +409,6 @@ impl TLSKDFOperation {
             mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
-            #[cfg(feature = "pkcs11_3_2")]
             session_hash: Vec::new(),
             version: version,
             prf: prf,
@@ -479,7 +474,6 @@ impl TLSKDFOperation {
             mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
-            #[cfg(feature = "pkcs11_3_2")]
             session_hash: Vec::new(),
             version: None,
             prf: prf,
@@ -536,7 +530,6 @@ impl TLSKDFOperation {
             mech: mech.mechanism,
             client_random: clirand,
             server_random: srvrand,
-            #[cfg(feature = "pkcs11_3_2")]
             session_hash: Vec::new(),
             version: None,
             prf: prf,
@@ -663,7 +656,6 @@ impl TLSKDFOperation {
     /// Constructs the seed input for the TLS PRF calculation of EMS
     ///
     /// Concatenates label + session hash.
-    #[cfg(feature = "pkcs11_3_2")]
     fn tls_prf_seed_ems(&self) -> Vec<u8> {
         let mut seed = Vec::<u8>::with_capacity(
             self.label.len() + self.session_hash.len(),
@@ -700,7 +692,6 @@ impl TLSKDFOperation {
 
         let mech = mechanisms.get(self.prf)?;
         let seed = match self.mech {
-            #[cfg(feature = "pkcs11_3_2")]
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
             | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
                 self.tls_prf_seed_ems()
@@ -969,7 +960,6 @@ impl Derive for TLSKDFOperation {
         self.finalized = true;
 
         match self.mech {
-            #[cfg(feature = "pkcs11_3_2")]
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
             | CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH => {
                 self.derive_master_key(key, template, mechanisms, objfactories)

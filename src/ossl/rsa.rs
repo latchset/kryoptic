@@ -410,7 +410,6 @@ impl RsaPKCSOperation {
 
     /// Creates a new `RsaPKCSOperation` for verification with a pre-supplied
     /// signature.
-    #[cfg(feature = "pkcs11_3_2")]
     pub fn verify_signature_new(
         mech: &CK_MECHANISM,
         key: &Object,
@@ -913,7 +912,6 @@ impl Verify for RsaPKCSOperation {
     }
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 impl VerifySignature for RsaPKCSOperation {
     fn verify(&mut self, data: &[u8]) -> Result<()> {
         self.verify_internal(data, None)

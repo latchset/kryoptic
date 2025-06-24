@@ -298,7 +298,6 @@ impl Verify for HMACOperation {
     }
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 impl VerifySignature for HMACOperation {
     fn verify(&mut self, data: &[u8]) -> Result<()> {
         self.begin()?;

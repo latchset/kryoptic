@@ -127,7 +127,6 @@ pub struct SessionOperations {
     digest: Option<Box<dyn Digest>>,
     sign: Option<Box<dyn Sign>>,
     verify: Option<Box<dyn Verify>>,
-    #[cfg(feature = "pkcs11_3_2")]
     verifysig: Option<Box<dyn VerifySignature>>,
 }
 
@@ -139,7 +138,6 @@ impl_mop!(Decryption, decryption);
 impl_mop!(Digest, digest);
 impl_mop!(Sign, sign);
 impl_mop!(Verify, verify);
-#[cfg(feature = "pkcs11_3_2")]
 impl_mop!(VerifySignature, verifysig);
 
 impl SessionOperations {
@@ -154,7 +152,6 @@ impl SessionOperations {
             digest: None,
             sign: None,
             verify: None,
-            #[cfg(feature = "pkcs11_3_2")]
             verifysig: None,
         }
     }
@@ -256,7 +253,6 @@ impl Session {
     /// Sets the FIPS flag if the last operation was FIPS approved.
     ///
     /// No other validation types are support at this time.
-    #[cfg(feature = "pkcs11_3_2")]
     pub fn get_last_validation_flags(&self) -> CK_FLAGS {
         #[cfg(feature = "fips")]
         if self.fips_indicator == Some(true) {

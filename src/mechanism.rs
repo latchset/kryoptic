@@ -141,7 +141,6 @@ pub trait Mechanism: Debug + Send + Sync {
     }
 
     /// Key Encapsulation function
-    #[cfg(feature = "pkcs11_3_2")]
     fn encapsulate(
         &self,
         _: &CK_MECHANISM,
@@ -156,13 +155,11 @@ pub trait Mechanism: Debug + Send + Sync {
     /// Get expected length of the encapsulated ciphertext for given key
     ///
     /// Returns the size in bytes or Err if the key does not support this operation
-    #[cfg(feature = "pkcs11_3_2")]
     fn encapsulate_ciphertext_len(&self, _: &Object) -> Result<usize> {
         Err(CKR_MECHANISM_INVALID)?
     }
 
     /// Key Decapsulation function
-    #[cfg(feature = "pkcs11_3_2")]
     fn decapsulate(
         &self,
         _: &CK_MECHANISM,
@@ -179,7 +176,6 @@ pub trait Mechanism: Debug + Send + Sync {
     /// This is identivaly to a Verify operation except that the signature
     /// to be verified is provided at initialization time and not a
     /// finalization time
-    #[cfg(feature = "pkcs11_3_2")]
     fn verify_signature_new(
         &self,
         _: &CK_MECHANISM,
@@ -745,7 +741,6 @@ pub trait DRBG: Debug + Send + Sync {
     }
 }
 
-#[cfg(feature = "pkcs11_3_2")]
 pub trait VerifySignature: MechOperation {
     /// One-step verifySignature function
     ///

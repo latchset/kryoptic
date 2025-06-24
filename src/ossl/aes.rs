@@ -2719,7 +2719,6 @@ impl Verify for AesCmacOperation {
 ///
 /// All methods call the internal methods for computation, and then compare
 /// the result with the signature stashed by the init function
-#[cfg(feature = "pkcs11_3_2")]
 impl VerifySignature for AesCmacOperation {
     fn verify(&mut self, data: &[u8]) -> Result<()> {
         self.begin()?;
@@ -3014,7 +3013,6 @@ impl Verify for AesMacOperation {
 ///
 /// All methods call the internal methods for computation, and then compare
 /// the result with the signature stashed by the init function
-#[cfg(feature = "pkcs11_3_2")]
 impl VerifySignature for AesMacOperation {
     fn verify(&mut self, data: &[u8]) -> Result<()> {
         self.begin()?;

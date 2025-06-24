@@ -13,7 +13,7 @@ license = "GPL-3.0-or-later"
 [workspace.dependencies]
 kryoptic = { version = "1.2.0", path = ".", default-features = false }
 ossl = { version = "1.2.0", path = "ossl", default-features = false }
-pkcs11 = { version = "1.2.0", path = "pkcs11", default-features = false }
+pkcs11 = { version = "1.2.0", path = "pkcs11", default-features = false, features = ["pkcs11_3_2"] }
 
 [package]
 name = "kryoptic"
@@ -96,13 +96,11 @@ fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh", "
 
 dynamic = ["ossl/dynamic"] # Builds against system libcrypto.so
 
-pkcs11_3_2 = ["pkcs11/pkcs11_3_2"] # Exposes PKCS#11 3.2 Interfaces and new functions
-
 log = ["dep:log", "dep:simplelog", "ossl/log"] # Enables error/info tracing
 slow = [] # Enables slow tests
 
-mlkem = ["pkcs11_3_2", "ossl/ossl350"]
-mldsa = ["pkcs11_3_2", "hash", "ossl/ossl350"]
+mlkem = ["ossl/ossl350"]
+mldsa = ["hash", "ossl/ossl350"]
 
 pqc = ["mlkem", "mldsa"]
 

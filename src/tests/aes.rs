@@ -1351,7 +1351,6 @@ fn test_aes_macs() {
         );
 
         /* Again with SignatureVerify API */
-        #[cfg(feature = "pkcs11_3_2")]
         assert_eq!(
             CKR_OK,
             sig_verifysig(
@@ -1485,7 +1484,6 @@ fn test_aes_macs() {
         assert_eq!(check_validation(session, 0), true);
 
         /* Again with SignatureVerify API */
-        #[cfg(feature = "pkcs11_3_2")]
         assert_eq!(
             CKR_OK,
             sig_verifysig(
