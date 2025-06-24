@@ -36,6 +36,9 @@ mod sshkdf;
 #[cfg(feature = "tlskdf")]
 mod tlskdf;
 
+#[cfg(feature = "simplekdf")]
+mod simplekdf;
+
 #[cfg(feature = "mlkem")]
 mod mlkem;
 
@@ -91,6 +94,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "tlskdf")]
     tlskdf::register(mechs, ot);
+
+    #[cfg(feature = "simplekdf")]
+    simplekdf::register(mechs, ot);
 
     #[cfg(feature = "mlkem")]
     mlkem::register(mechs, ot);

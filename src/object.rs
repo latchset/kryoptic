@@ -170,10 +170,12 @@ impl Object {
     create_bool_checker! {make is_token; from CKA_TOKEN; def false}
     create_bool_checker! {make is_private; from CKA_PRIVATE; def true}
     create_bool_checker! {make is_sensitive; from CKA_SENSITIVE; def true}
+    create_bool_checker! {make is_always_sensitive; from CKA_ALWAYS_SENSITIVE; def true}
     create_bool_checker! {make is_copyable; from CKA_COPYABLE; def true}
     create_bool_checker! {make is_modifiable; from CKA_MODIFIABLE; def true}
     create_bool_checker! {make is_destroyable; from CKA_DESTROYABLE; def false}
     create_bool_checker! {make is_extractable; from CKA_EXTRACTABLE; def false}
+    create_bool_checker! {make is_never_extractable; from CKA_NEVER_EXTRACTABLE; def false}
     create_bool_checker! {make always_auth; from CKA_ALWAYS_AUTHENTICATE; def false}
 
     /// Get an attribute from the object by attribute id

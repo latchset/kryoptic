@@ -78,6 +78,7 @@ rsa = []
 sp800_108 = []
 sshkdf = []
 tlskdf = []
+simplekdf = []
 
 # Databases
 memorydb = ["aes", "hkdf", "pbkdf2"] # for encryption
@@ -89,7 +90,7 @@ default = ["standard", "dynamic"]
 ecc_min = ["ecdsa", "ecdh"]
 ecc_all = ["ecc_min", "ec_montgomery", "eddsa"]
 hash_all = ["hash", "hmac"]
-kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf"]
+kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf", "simplekdf"]
 
 standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa"]
 
