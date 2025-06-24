@@ -15,7 +15,6 @@ include!(concat!(env!("OUT_DIR"), "/pkcs11_bindings.rs"));
 // types that need different mutability than bindgen provides
 pub type CK_FUNCTION_LIST_PTR = *const CK_FUNCTION_LIST;
 pub type CK_FUNCTION_LIST_3_0_PTR = *const CK_FUNCTION_LIST_3_0;
-#[cfg(feature = "pkcs11_3_2")]
 pub type CK_FUNCTION_LIST_3_2_PTR = *const CK_FUNCTION_LIST_3_2;
 // this is wrongly converted on 32b architecture to too large value
 // which can not be represented in CK_ULONG.
@@ -33,140 +32,118 @@ unsafe impl Send for CK_INTERFACE {}
 pub mod vendor;
 
 macro_rules! err_to_elem {
-    ($map:expr; $idx:expr; $name:ident) => {
-        $map[$idx] = ($name, stringify!($name));
-        $idx += 1;
+    ($name:ident) => {
+        ($name, stringify!($name))
     };
 }
 
-/// Size of the error map, separately defined as the size can vary
-/// based on enabled features
-const ERRORMAP_SIZE: usize = if cfg!(feature = "pkcs11_3_2") {
-    104
-} else {
-    98
-};
-
 /// Static map with error num -> error string pairs
-static ERRORMAP: [(CK_ULONG, &str); ERRORMAP_SIZE] = {
-    let mut map: [(CK_ULONG, &str); ERRORMAP_SIZE] = [(0, ""); ERRORMAP_SIZE];
-    let mut i = 0;
-    err_to_elem!(map; i; CKR_OK);
-    err_to_elem!(map; i; CKR_CANCEL);
-    err_to_elem!(map; i; CKR_HOST_MEMORY);
-    err_to_elem!(map; i; CKR_SLOT_ID_INVALID);
-    err_to_elem!(map; i; CKR_GENERAL_ERROR);
-    err_to_elem!(map; i; CKR_FUNCTION_FAILED);
-    err_to_elem!(map; i; CKR_ARGUMENTS_BAD);
-    err_to_elem!(map; i; CKR_NO_EVENT);
-    err_to_elem!(map; i; CKR_NEED_TO_CREATE_THREADS);
-    err_to_elem!(map; i; CKR_CANT_LOCK);
-    err_to_elem!(map; i; CKR_ATTRIBUTE_READ_ONLY);
-    err_to_elem!(map; i; CKR_ATTRIBUTE_SENSITIVE);
-    err_to_elem!(map; i; CKR_ATTRIBUTE_TYPE_INVALID);
-    err_to_elem!(map; i; CKR_ATTRIBUTE_VALUE_INVALID);
-    err_to_elem!(map; i; CKR_ACTION_PROHIBITED);
-    err_to_elem!(map; i; CKR_DATA_INVALID);
-    err_to_elem!(map; i; CKR_DATA_LEN_RANGE);
-    err_to_elem!(map; i; CKR_DEVICE_ERROR);
-    err_to_elem!(map; i; CKR_DEVICE_MEMORY);
-    err_to_elem!(map; i; CKR_DEVICE_REMOVED);
-    err_to_elem!(map; i; CKR_ENCRYPTED_DATA_INVALID);
-    err_to_elem!(map; i; CKR_ENCRYPTED_DATA_LEN_RANGE);
-    err_to_elem!(map; i; CKR_AEAD_DECRYPT_FAILED);
-    err_to_elem!(map; i; CKR_FUNCTION_CANCELED);
-    err_to_elem!(map; i; CKR_FUNCTION_NOT_PARALLEL);
-    err_to_elem!(map; i; CKR_FUNCTION_NOT_SUPPORTED);
-    err_to_elem!(map; i; CKR_KEY_HANDLE_INVALID);
-    err_to_elem!(map; i; CKR_KEY_SIZE_RANGE);
-    err_to_elem!(map; i; CKR_KEY_TYPE_INCONSISTENT);
-    err_to_elem!(map; i; CKR_KEY_NOT_NEEDED);
-    err_to_elem!(map; i; CKR_KEY_CHANGED);
-    err_to_elem!(map; i; CKR_KEY_NEEDED);
-    err_to_elem!(map; i; CKR_KEY_INDIGESTIBLE);
-    err_to_elem!(map; i; CKR_KEY_FUNCTION_NOT_PERMITTED);
-    err_to_elem!(map; i; CKR_KEY_NOT_WRAPPABLE);
-    err_to_elem!(map; i; CKR_KEY_UNEXTRACTABLE);
-    err_to_elem!(map; i; CKR_MECHANISM_INVALID);
-    err_to_elem!(map; i; CKR_MECHANISM_PARAM_INVALID);
-    err_to_elem!(map; i; CKR_OBJECT_HANDLE_INVALID);
-    err_to_elem!(map; i; CKR_OPERATION_ACTIVE);
-    err_to_elem!(map; i; CKR_OPERATION_NOT_INITIALIZED);
-    err_to_elem!(map; i; CKR_PIN_INCORRECT);
-    err_to_elem!(map; i; CKR_PIN_INVALID);
-    err_to_elem!(map; i; CKR_PIN_LEN_RANGE);
-    err_to_elem!(map; i; CKR_PIN_EXPIRED);
-    err_to_elem!(map; i; CKR_PIN_LOCKED);
-    err_to_elem!(map; i; CKR_SESSION_CLOSED);
-    err_to_elem!(map; i; CKR_SESSION_COUNT);
-    err_to_elem!(map; i; CKR_SESSION_HANDLE_INVALID);
-    err_to_elem!(map; i; CKR_SESSION_PARALLEL_NOT_SUPPORTED);
-    err_to_elem!(map; i; CKR_SESSION_READ_ONLY);
-    err_to_elem!(map; i; CKR_SESSION_EXISTS);
-    err_to_elem!(map; i; CKR_SESSION_READ_ONLY_EXISTS);
-    err_to_elem!(map; i; CKR_SESSION_READ_WRITE_SO_EXISTS);
-    err_to_elem!(map; i; CKR_SIGNATURE_INVALID);
-    err_to_elem!(map; i; CKR_SIGNATURE_LEN_RANGE);
-    err_to_elem!(map; i; CKR_TEMPLATE_INCOMPLETE);
-    err_to_elem!(map; i; CKR_TEMPLATE_INCONSISTENT);
-    err_to_elem!(map; i; CKR_TOKEN_NOT_PRESENT);
-    err_to_elem!(map; i; CKR_TOKEN_NOT_RECOGNIZED);
-    err_to_elem!(map; i; CKR_TOKEN_WRITE_PROTECTED);
-    err_to_elem!(map; i; CKR_UNWRAPPING_KEY_HANDLE_INVALID);
-    err_to_elem!(map; i; CKR_UNWRAPPING_KEY_SIZE_RANGE);
-    err_to_elem!(map; i; CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT);
-    err_to_elem!(map; i; CKR_USER_ALREADY_LOGGED_IN);
-    err_to_elem!(map; i; CKR_USER_NOT_LOGGED_IN);
-    err_to_elem!(map; i; CKR_USER_PIN_NOT_INITIALIZED);
-    err_to_elem!(map; i; CKR_USER_TYPE_INVALID);
-    err_to_elem!(map; i; CKR_USER_ANOTHER_ALREADY_LOGGED_IN);
-    err_to_elem!(map; i; CKR_USER_TOO_MANY_TYPES);
-    err_to_elem!(map; i; CKR_WRAPPED_KEY_INVALID);
-    err_to_elem!(map; i; CKR_WRAPPED_KEY_LEN_RANGE);
-    err_to_elem!(map; i; CKR_WRAPPING_KEY_HANDLE_INVALID);
-    err_to_elem!(map; i; CKR_WRAPPING_KEY_SIZE_RANGE);
-    err_to_elem!(map; i; CKR_WRAPPING_KEY_TYPE_INCONSISTENT);
-    err_to_elem!(map; i; CKR_RANDOM_SEED_NOT_SUPPORTED);
-    err_to_elem!(map; i; CKR_RANDOM_NO_RNG);
-    err_to_elem!(map; i; CKR_DOMAIN_PARAMS_INVALID);
-    err_to_elem!(map; i; CKR_CURVE_NOT_SUPPORTED);
-    err_to_elem!(map; i; CKR_BUFFER_TOO_SMALL);
-    err_to_elem!(map; i; CKR_SAVED_STATE_INVALID);
-    err_to_elem!(map; i; CKR_INFORMATION_SENSITIVE);
-    err_to_elem!(map; i; CKR_STATE_UNSAVEABLE);
-    err_to_elem!(map; i; CKR_CRYPTOKI_NOT_INITIALIZED);
-    err_to_elem!(map; i; CKR_CRYPTOKI_ALREADY_INITIALIZED);
-    err_to_elem!(map; i; CKR_MUTEX_BAD);
-    err_to_elem!(map; i; CKR_MUTEX_NOT_LOCKED);
-    err_to_elem!(map; i; CKR_NEW_PIN_MODE);
-    err_to_elem!(map; i; CKR_NEXT_OTP);
-    err_to_elem!(map; i; CKR_EXCEEDED_MAX_ITERATIONS);
-    err_to_elem!(map; i; CKR_FIPS_SELF_TEST_FAILED);
-    err_to_elem!(map; i; CKR_LIBRARY_LOAD_FAILED);
-    err_to_elem!(map; i; CKR_PIN_TOO_WEAK);
-    err_to_elem!(map; i; CKR_PUBLIC_KEY_INVALID);
-    err_to_elem!(map; i; CKR_FUNCTION_REJECTED);
-    err_to_elem!(map; i; CKR_TOKEN_RESOURCE_EXCEEDED);
-    err_to_elem!(map; i; CKR_OPERATION_CANCEL_FAILED);
-    err_to_elem!(map; i; CKR_KEY_EXHAUSTED);
-    /* PKCS11 3.2 defines additional errors */
-    #[cfg(feature = "pkcs11_3_2")]
-    {
-        err_to_elem!(map; i; CKR_PENDING);
-        err_to_elem!(map; i; CKR_SESSION_ASYNC_NOT_SUPPORTED);
-        err_to_elem!(map; i; CKR_SEED_RANDOM_REQUIRED);
-        err_to_elem!(map; i; CKR_OPERATION_NOT_VALIDATED);
-        err_to_elem!(map; i; CKR_TOKEN_NOT_INITIALIZED);
-        err_to_elem!(map; i; CKR_PARAMETER_SET_NOT_SUPPORTED);
-    }
-
-    /* Quiet linter by reading the last assignment to i */
-    if i != ERRORMAP_SIZE {
-        panic!();
-    }
-
-    map
-};
+static ERRORMAP: [(CK_ULONG, &str); 104] = [
+    err_to_elem!(CKR_OK),
+    err_to_elem!(CKR_CANCEL),
+    err_to_elem!(CKR_HOST_MEMORY),
+    err_to_elem!(CKR_SLOT_ID_INVALID),
+    err_to_elem!(CKR_GENERAL_ERROR),
+    err_to_elem!(CKR_FUNCTION_FAILED),
+    err_to_elem!(CKR_ARGUMENTS_BAD),
+    err_to_elem!(CKR_NO_EVENT),
+    err_to_elem!(CKR_NEED_TO_CREATE_THREADS),
+    err_to_elem!(CKR_CANT_LOCK),
+    err_to_elem!(CKR_ATTRIBUTE_READ_ONLY),
+    err_to_elem!(CKR_ATTRIBUTE_SENSITIVE),
+    err_to_elem!(CKR_ATTRIBUTE_TYPE_INVALID),
+    err_to_elem!(CKR_ATTRIBUTE_VALUE_INVALID),
+    err_to_elem!(CKR_ACTION_PROHIBITED),
+    err_to_elem!(CKR_DATA_INVALID),
+    err_to_elem!(CKR_DATA_LEN_RANGE),
+    err_to_elem!(CKR_DEVICE_ERROR),
+    err_to_elem!(CKR_DEVICE_MEMORY),
+    err_to_elem!(CKR_DEVICE_REMOVED),
+    err_to_elem!(CKR_ENCRYPTED_DATA_INVALID),
+    err_to_elem!(CKR_ENCRYPTED_DATA_LEN_RANGE),
+    err_to_elem!(CKR_AEAD_DECRYPT_FAILED),
+    err_to_elem!(CKR_FUNCTION_CANCELED),
+    err_to_elem!(CKR_FUNCTION_NOT_PARALLEL),
+    err_to_elem!(CKR_FUNCTION_NOT_SUPPORTED),
+    err_to_elem!(CKR_KEY_HANDLE_INVALID),
+    err_to_elem!(CKR_KEY_SIZE_RANGE),
+    err_to_elem!(CKR_KEY_TYPE_INCONSISTENT),
+    err_to_elem!(CKR_KEY_NOT_NEEDED),
+    err_to_elem!(CKR_KEY_CHANGED),
+    err_to_elem!(CKR_KEY_NEEDED),
+    err_to_elem!(CKR_KEY_INDIGESTIBLE),
+    err_to_elem!(CKR_KEY_FUNCTION_NOT_PERMITTED),
+    err_to_elem!(CKR_KEY_NOT_WRAPPABLE),
+    err_to_elem!(CKR_KEY_UNEXTRACTABLE),
+    err_to_elem!(CKR_MECHANISM_INVALID),
+    err_to_elem!(CKR_MECHANISM_PARAM_INVALID),
+    err_to_elem!(CKR_OBJECT_HANDLE_INVALID),
+    err_to_elem!(CKR_OPERATION_ACTIVE),
+    err_to_elem!(CKR_OPERATION_NOT_INITIALIZED),
+    err_to_elem!(CKR_PIN_INCORRECT),
+    err_to_elem!(CKR_PIN_INVALID),
+    err_to_elem!(CKR_PIN_LEN_RANGE),
+    err_to_elem!(CKR_PIN_EXPIRED),
+    err_to_elem!(CKR_PIN_LOCKED),
+    err_to_elem!(CKR_SESSION_CLOSED),
+    err_to_elem!(CKR_SESSION_COUNT),
+    err_to_elem!(CKR_SESSION_HANDLE_INVALID),
+    err_to_elem!(CKR_SESSION_PARALLEL_NOT_SUPPORTED),
+    err_to_elem!(CKR_SESSION_READ_ONLY),
+    err_to_elem!(CKR_SESSION_EXISTS),
+    err_to_elem!(CKR_SESSION_READ_ONLY_EXISTS),
+    err_to_elem!(CKR_SESSION_READ_WRITE_SO_EXISTS),
+    err_to_elem!(CKR_SIGNATURE_INVALID),
+    err_to_elem!(CKR_SIGNATURE_LEN_RANGE),
+    err_to_elem!(CKR_TEMPLATE_INCOMPLETE),
+    err_to_elem!(CKR_TEMPLATE_INCONSISTENT),
+    err_to_elem!(CKR_TOKEN_NOT_PRESENT),
+    err_to_elem!(CKR_TOKEN_NOT_RECOGNIZED),
+    err_to_elem!(CKR_TOKEN_WRITE_PROTECTED),
+    err_to_elem!(CKR_UNWRAPPING_KEY_HANDLE_INVALID),
+    err_to_elem!(CKR_UNWRAPPING_KEY_SIZE_RANGE),
+    err_to_elem!(CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT),
+    err_to_elem!(CKR_USER_ALREADY_LOGGED_IN),
+    err_to_elem!(CKR_USER_NOT_LOGGED_IN),
+    err_to_elem!(CKR_USER_PIN_NOT_INITIALIZED),
+    err_to_elem!(CKR_USER_TYPE_INVALID),
+    err_to_elem!(CKR_USER_ANOTHER_ALREADY_LOGGED_IN),
+    err_to_elem!(CKR_USER_TOO_MANY_TYPES),
+    err_to_elem!(CKR_WRAPPED_KEY_INVALID),
+    err_to_elem!(CKR_WRAPPED_KEY_LEN_RANGE),
+    err_to_elem!(CKR_WRAPPING_KEY_HANDLE_INVALID),
+    err_to_elem!(CKR_WRAPPING_KEY_SIZE_RANGE),
+    err_to_elem!(CKR_WRAPPING_KEY_TYPE_INCONSISTENT),
+    err_to_elem!(CKR_RANDOM_SEED_NOT_SUPPORTED),
+    err_to_elem!(CKR_RANDOM_NO_RNG),
+    err_to_elem!(CKR_DOMAIN_PARAMS_INVALID),
+    err_to_elem!(CKR_CURVE_NOT_SUPPORTED),
+    err_to_elem!(CKR_BUFFER_TOO_SMALL),
+    err_to_elem!(CKR_SAVED_STATE_INVALID),
+    err_to_elem!(CKR_INFORMATION_SENSITIVE),
+    err_to_elem!(CKR_STATE_UNSAVEABLE),
+    err_to_elem!(CKR_CRYPTOKI_NOT_INITIALIZED),
+    err_to_elem!(CKR_CRYPTOKI_ALREADY_INITIALIZED),
+    err_to_elem!(CKR_MUTEX_BAD),
+    err_to_elem!(CKR_MUTEX_NOT_LOCKED),
+    err_to_elem!(CKR_NEW_PIN_MODE),
+    err_to_elem!(CKR_NEXT_OTP),
+    err_to_elem!(CKR_EXCEEDED_MAX_ITERATIONS),
+    err_to_elem!(CKR_FIPS_SELF_TEST_FAILED),
+    err_to_elem!(CKR_LIBRARY_LOAD_FAILED),
+    err_to_elem!(CKR_PIN_TOO_WEAK),
+    err_to_elem!(CKR_PUBLIC_KEY_INVALID),
+    err_to_elem!(CKR_FUNCTION_REJECTED),
+    err_to_elem!(CKR_TOKEN_RESOURCE_EXCEEDED),
+    err_to_elem!(CKR_OPERATION_CANCEL_FAILED),
+    err_to_elem!(CKR_KEY_EXHAUSTED),
+    err_to_elem!(CKR_PENDING),
+    err_to_elem!(CKR_SESSION_ASYNC_NOT_SUPPORTED),
+    err_to_elem!(CKR_SEED_RANDOM_REQUIRED),
+    err_to_elem!(CKR_OPERATION_NOT_VALIDATED),
+    err_to_elem!(CKR_TOKEN_NOT_INITIALIZED),
+    err_to_elem!(CKR_PARAMETER_SET_NOT_SUPPORTED),
+];
 
 /// Function to return an error string from a CK_RV error.
 ///
