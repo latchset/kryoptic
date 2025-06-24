@@ -283,7 +283,7 @@ struct FipsMechanism {
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 17],
-    mechs: [FipsMechanism; 87],
+    mechs: [FipsMechanism; 91],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -990,6 +990,66 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [
                 restrict!(CKK_AES),
                 restrict!(KRY_UNSPEC, range!(112, 0xffffffff)),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_CONCATENATE_BASE_AND_KEY,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_CONCATENATE_BASE_AND_DATA,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_CONCATENATE_DATA_AND_BASE,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_XOR_BASE_AND_DATA,
+            operations: CKF_DERIVE,
+            restrictions: [
+                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(),
             ],
             genflags: CKF_SIGN
                 | CKF_VERIFY
