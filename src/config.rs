@@ -344,7 +344,7 @@ impl Config {
     }
 
     /// Ensure all slot numbers are consistent, and allocates new slot
-    /// numbers for slots that have the special invalid slow number of
+    /// numbers for slots that have the special invalid slot number of
     /// u32::MAX
     fn fix_slot_numbers(&mut self) {
         let mut slotnum: u32 = 0;
