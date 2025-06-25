@@ -1,5 +1,5 @@
 [package]
-name = "kryoptic_pkcs11"
+name = "kryoptic-dynlib"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
@@ -8,6 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [lib]
+name = "kryoptic_pkcs11"
 crate-type = ["cdylib"]
 
 [dependencies]
