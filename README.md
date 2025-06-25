@@ -10,6 +10,14 @@ Note, the default feature links against the system installed OpenSSL
 libraries, you need the OpenSSL development packages to build with
 the default features selection.
 
+# Crates
+
+To make it easier to deal with some of the tools and bindings kryoptic has
+been changed from a monolithic crate to a workspace that holds multiple
+packages. Specifically the main output artifact, the cdylib named
+libkryoptic_pkcs11.so has been moved to the kryoptic_pkcs11 package in the
+cdylib directory.
+
 # Setup
 
 Kryoptic normally builds and dynamically links against a system version
