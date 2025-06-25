@@ -1304,6 +1304,17 @@ fn add_fips_flag(key: &mut Object) {
         key.set_attr(Attribute::from_ulong(CKA_OBJECT_VALIDATION_FLAGS, flag));
 }
 
+/// Allows to check if a key is considered fips approved for the
+/// requested operation. Checks overall key validity based on minimum
+/// length and type, as well as whether the key allows the specific
+/// operation in FIPS mode
+pub fn is_key_approved(key: &Object, op: CK_FLAGS) -> bool {
+    if has_fips_flag(key) {
+        return true;
+    }
+    check_key(key, op, None, None)
+}
+
 /// Helper to check if an operation is approved
 ///
 /// Applies key checks as well as mechanism checks according to the
@@ -1346,11 +1357,7 @@ pub fn is_approved(
 
         if checks & 1 == 1 {
             let valid_key = if let Some(obj) = iobj {
-                if has_fips_flag(obj) {
-                    true
-                } else {
-                    check_key(obj, op, None, None)
-                }
+                is_key_approved(obj, op)
             } else {
                 false
             };

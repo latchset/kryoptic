@@ -12,6 +12,12 @@ use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::pkcs11::*;
 
+#[cfg(feature = "fips")]
+use ossl::fips::FipsApproval;
+
+#[cfg(feature = "fips")]
+use crate::fips::indicators::is_key_approved;
+
 /// Represents the information about a key we use to derive other keys.
 ///
 /// This is extracted at one place to be able to safely zeroize the
@@ -66,6 +72,8 @@ pub struct SimpleKDFOperation {
     key_info: Option<KeyInfo>,
     /// The additional data to concatenate
     data: Option<Vec<u8>>,
+    #[cfg(feature = "fips")]
+    fips_approval: FipsApproval,
 }
 
 unsafe impl Send for SimpleKDFOperation {}
@@ -85,6 +93,8 @@ impl SimpleKDFOperation {
                     key_handle: Some([object_handle]),
                     key_info: None,
                     data: None,
+                    #[cfg(feature = "fips")]
+                    fips_approval: FipsApproval::init(),
                 })
             }
             CKM_CONCATENATE_BASE_AND_DATA
@@ -102,6 +112,8 @@ impl SimpleKDFOperation {
                     key_handle: None,
                     key_info: None,
                     data: Some(data),
+                    #[cfg(feature = "fips")]
+                    fips_approval: FipsApproval::init(),
                 })
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,
@@ -119,7 +131,7 @@ impl MechOperation for SimpleKDFOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        Some(true)
+        self.fips_approval.approval()
     }
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
         if let Some(h) = &self.key_handle {
@@ -132,6 +144,10 @@ impl MechOperation for SimpleKDFOperation {
             return Err(CKR_GENERAL_ERROR)?;
         }
         self.key_info = Some(KeyInfo::new_from_object(objs[0])?);
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.set(is_key_approved(objs[0], CKF_DERIVE));
+
         Ok(())
     }
 }
@@ -287,6 +303,10 @@ impl Derive for SimpleKDFOperation {
         let mut obj = factory.create(tmpl.as_slice())?;
 
         default_key_attributes(&mut obj, self.mech)?;
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
         Ok(vec![obj])
     }
 }

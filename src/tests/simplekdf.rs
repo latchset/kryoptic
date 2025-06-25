@@ -158,6 +158,8 @@ fn test_concatenate_kdf() {
     let exp_value = hex::decode("88888888").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
+
+    testtokn.finalize();
 }
 
 #[test]
@@ -312,8 +314,53 @@ fn test_concatenate_kdf_fips() {
     assert_eq!(check_validation(session, 1), true);
 
     let exp_value = hex::decode("00112233445566778899aabbccdd").unwrap();
-    let exp_value_len = 14;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
+
+    // Concatenate base with short key
+    let shorter_key = hex::decode("ff").unwrap();
+    let shorter_key_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, shorter_key.as_slice()),],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false)
+        ],
+    ));
+
+    let params = shorter_key_handle;
+    let paramslen = sizeof!(CK_OBJECT_HANDLE);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_CONCATENATE_BASE_AND_KEY,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    let exp_value = hex::decode("000102030405060708090a0b0c0dff").unwrap();
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
+    assert_eq!(value, exp_value);
+    assert_eq!(check_validation(session, 0), true);
+
+    testtokn.finalize();
 }
