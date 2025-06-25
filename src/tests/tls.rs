@@ -338,11 +338,7 @@ fn test_tlskdf_units(
                 panic!("Failed ({}) unit test at line {}", ret, unit.line);
             }
 
-            let value = ret_or_panic!(extract_key_value(
-                session,
-                dk_handle,
-                unit.ms.len()
-            ));
+            let value = ret_or_panic!(extract_key_value(session, dk_handle));
             if value != unit.ms {
                 panic!("Failed ({}) unit test {} at line {} - values differ [{} != {}]",
                        ret, unit.count, unit.line, hex::encode(value), hex::encode(unit.ms));
@@ -417,16 +413,10 @@ fn test_tlskdf_units(
                 panic!("Failed ({}) unit test at line {}", ret, unit.line);
             }
 
-            let clikeyval = ret_or_panic!(extract_key_value(
-                session,
-                mat_out.hClientKey,
-                keylen
-            ));
-            let srvkeyval = ret_or_panic!(extract_key_value(
-                session,
-                mat_out.hServerKey,
-                keylen
-            ));
+            let clikeyval =
+                ret_or_panic!(extract_key_value(session, mat_out.hClientKey));
+            let srvkeyval =
+                ret_or_panic!(extract_key_value(session, mat_out.hServerKey));
 
             let mut value = Vec::<u8>::with_capacity(unit.kb.len());
             value.extend_from_slice(clikeyval.as_slice());
@@ -837,7 +827,7 @@ fn test_tls_ems_vector() {
     assert_eq!(ret, CKR_OK);
 
     let exp_value = hex::decode("4EC38663D2CEFE30EDA0F30957649953A5437D37CDBC409408DA44F30BD8D9F280E07EE55233AFA69E1C90D8A24239E3").unwrap();
-    let value = ret_or_panic!(extract_key_value(session, dk_handle, value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     if value != exp_value {
         panic!("The derived extended master secret value does not match");
     }

@@ -69,9 +69,7 @@ fn test_concatenate_kdf() {
     assert_eq!(check_validation(session, 0), true);
 
     let exp_value = hex::decode("0123456789abcdef").unwrap();
-    let exp_value_len = 8;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 
     // Concatenate base and data
@@ -100,9 +98,7 @@ fn test_concatenate_kdf() {
     assert_eq!(check_validation(session, 0), true);
 
     let exp_value = hex::decode("0123456789abcdef").unwrap();
-    let exp_value_len = 8;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 
     // Concatenate data and base
@@ -131,9 +127,7 @@ fn test_concatenate_kdf() {
     assert_eq!(check_validation(session, 0), true);
 
     let exp_value = hex::decode("89abcdef01234567").unwrap();
-    let exp_value_len = 8;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 
     // XOR key and data
@@ -162,9 +156,7 @@ fn test_concatenate_kdf() {
     assert_eq!(check_validation(session, 0), true);
 
     let exp_value = hex::decode("88888888").unwrap();
-    let exp_value_len = 4;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 }
 
@@ -232,9 +224,7 @@ fn test_concatenate_kdf_fips() {
     let exp_value =
         hex::decode("000102030405060708090a0b0c0d00102030405060708090a0b0c0d0")
             .unwrap();
-    let exp_value_len = 28;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
     assert_eq!(check_validation(session, 1), true);
 
@@ -264,9 +254,7 @@ fn test_concatenate_kdf_fips() {
     assert_eq!(check_validation(session, 1), true);
 
     let exp_value = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
-    let exp_value_len = 16;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 
     // Concatenate data and base
@@ -295,9 +283,7 @@ fn test_concatenate_kdf_fips() {
     assert_eq!(check_validation(session, 1), true);
 
     let exp_value = hex::decode("0e0f000102030405060708090a0b0c0d").unwrap();
-    let exp_value_len = 16;
-    let value =
-        ret_or_panic!(extract_key_value(session, dk_handle, exp_value_len));
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 
     // XOR key and data

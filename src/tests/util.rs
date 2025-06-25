@@ -576,14 +576,21 @@ pub fn check_attributes(
 pub fn extract_key_value(
     session: CK_SESSION_HANDLE,
     handle: CK_OBJECT_HANDLE,
-    keysize: usize,
 ) -> Result<Vec<u8>> {
-    let mut value = vec![0u8; keysize];
-    let mut extract_template = make_ptrs_template(&[(
-        CKA_VALUE,
-        void_ptr!(value.as_mut_ptr()),
-        value.len(),
-    )]);
+    let mut extract_template =
+        make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
+    let ret = fn_get_attribute_value(
+        session,
+        handle,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut value = vec![0u8; extract_template[0].ulValueLen as usize];
+    extract_template[0].pValue = value.as_mut_ptr() as CK_VOID_PTR;
 
     let ret = fn_get_attribute_value(
         session,
@@ -593,6 +600,9 @@ pub fn extract_key_value(
     );
     if ret != CKR_OK {
         return Err(ret)?;
+    }
+    if extract_template[0].ulValueLen as usize != value.len() {
+        return Err(CKR_DATA_LEN_RANGE)?;
     }
     Ok(value)
 }
