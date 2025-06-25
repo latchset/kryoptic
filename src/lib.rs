@@ -38,7 +38,7 @@ use slot::Slot;
 use token::Token;
 
 mod native;
-pub mod ossl;
+mod ossl;
 
 #[cfg(feature = "fips")]
 mod fips;

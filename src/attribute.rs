@@ -31,6 +31,7 @@ pub enum AttrType {
 
 impl AttrType {
     /// Finds and return the attribute id and type from the spec name
+    #[allow(dead_code)]
     pub fn attr_name_to_id_type(s: &String) -> Result<(CK_ULONG, AttrType)> {
         match Attrmap::search_by_name(s) {
             Some(a) => Ok((a.id, a.atype)),
@@ -320,6 +321,7 @@ impl Attribute {
     }
 
     /// Returns the name of the attribute as an allocated String
+    #[allow(dead_code)]
     pub fn name(&self) -> String {
         match Attrmap::search_by_id(self.ck_type) {
             Some(a) => return a.name.to_string(),
@@ -508,6 +510,7 @@ impl Attribute {
     /// Creates an attribute of type AttrType::NumType from a u64
     ///
     /// Note: Does not verify that the attribute id type is correct
+    #[allow(dead_code)]
     pub fn from_u64(t: CK_ULONG, val: u64) -> Attribute {
         let inval = CK_ULONG::try_from(val).unwrap();
         Self::from_ulong(t, inval)

@@ -5,8 +5,6 @@
 //! with the OpenSSL library (`libcrypto`) via its C API, primarily focusing on
 //! the EVP (high-level) interface and parameter handling (`OSSL_PARAM`).
 
-use std::ffi::CStr;
-
 use crate::error::Result;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
@@ -87,10 +85,6 @@ pub fn privkey_from_object(obj: &Object) -> Result<EvpPkey> {
     evp_pkey_from_object(obj, CKO_PRIVATE_KEY)
 }
 
-pub const CIPHER_NAME_AES128: &[u8; 7] = b"AES128\0";
-pub const CIPHER_NAME_AES192: &[u8; 7] = b"AES192\0";
-pub const CIPHER_NAME_AES256: &[u8; 7] = b"AES256\0";
-
 /// Maps a PKCS#11 mechanism type involving a hash to the corresponding
 /// ossl DigestAlg
 pub fn mech_type_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
@@ -160,43 +154,6 @@ pub fn mech_type_to_digest_alg(mech: CK_MECHANISM_TYPE) -> Result<DigestAlg> {
     })
 }
 
-#[cfg(feature = "ecc")]
-pub static EC_NAME: &CStr = c"EC";
-#[cfg(all(feature = "ecc", feature = "fips"))]
-pub static ECDSA_NAME: &CStr = c"ECDSA";
-
-/* Curve names as used in OpenSSL */
-#[cfg(feature = "ecc")]
-const NAME_SECP256R1: &CStr = c"prime256v1";
-#[cfg(feature = "ecc")]
-const NAME_SECP384R1: &CStr = c"secp384r1";
-#[cfg(feature = "ecc")]
-const NAME_SECP521R1: &CStr = c"secp521r1";
-#[cfg(feature = "ecc")]
-const NAME_ED25519: &CStr = c"ED25519";
-#[cfg(feature = "ecc")]
-const NAME_ED448: &CStr = c"ED448";
-#[cfg(feature = "ecc")]
-const NAME_X25519: &CStr = c"X25519";
-#[cfg(feature = "ecc")]
-const NAME_X448: &CStr = c"X448";
-
-/// Maps an ASN.1 Object Identifier for an EC curve to the OpenSSL curve name
-/// string.
-#[cfg(feature = "ecc")]
-fn oid_to_ossl_name(oid: &asn1::ObjectIdentifier) -> Result<&'static CStr> {
-    match oid {
-        &oid::EC_SECP256R1 => Ok(NAME_SECP256R1),
-        &oid::EC_SECP384R1 => Ok(NAME_SECP384R1),
-        &oid::EC_SECP521R1 => Ok(NAME_SECP521R1),
-        &oid::ED25519_OID => Ok(NAME_ED25519),
-        &oid::ED448_OID => Ok(NAME_ED448),
-        &oid::X25519_OID => Ok(NAME_X25519),
-        &oid::X448_OID => Ok(NAME_X448),
-        _ => Err(CKR_GENERAL_ERROR)?,
-    }
-}
-
 /// Maps an ASN.1 Object Identifier for an EC curve to EvpPkeyType
 #[cfg(feature = "ecc")]
 fn oid_to_evp_key_type(oid: &asn1::ObjectIdentifier) -> Result<EvpPkeyType> {
@@ -210,12 +167,6 @@ fn oid_to_evp_key_type(oid: &asn1::ObjectIdentifier) -> Result<EvpPkeyType> {
         &oid::X448_OID => Ok(EvpPkeyType::X448),
         _ => Err(CKR_GENERAL_ERROR)?,
     }
-}
-
-/// Gets the OpenSSL curve name string associated with a PKCS#11 EC key `Object`.
-#[cfg(feature = "ecc")]
-pub fn get_ossl_name_from_obj(key: &Object) -> Result<&'static CStr> {
-    oid_to_ossl_name(&get_oid_from_obj(key)?)
 }
 
 /// Gets the EvpPkeyType associated with a PKCS#11 EC key `Object`.
