@@ -9,6 +9,8 @@ All notable changes to this project should be documented in this file.
 * The project was reorganized in a workspace with several crates
  - [Switch cargo setup to a workspace with several
     packages](https://github.com/latchset/kryoptic/pull/263)
+ - [Rename and restructure some of the crates we recently
+    crated](https://github.com/latchset/kryoptic/pull/281)
 
 * Added support for SP800 ECDH KDF variant
  - [Support Sp800 ECDH KDF
