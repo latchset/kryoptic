@@ -1222,6 +1222,28 @@ fn check_key(
     false
 }
 
+/// Returns true if the key has an ephemeral FIPS validation flag set
+fn has_fips_flag(key: &Object) -> bool {
+    if let Ok(f) = key.get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS) {
+        if (f & KRF_FIPS) == KRF_FIPS {
+            return true;
+        }
+    }
+    false
+}
+
+/// Adds FIPS validation flag to a key object
+fn add_fips_flag(key: &mut Object) {
+    let flag = match key.get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS) {
+        Ok(f) => f,
+        Err(_) => 0,
+    } | KRF_FIPS;
+    /* Ignores failures, as this is ephemeral stuff and the code
+     * always re-checks the key if a flag is not found */
+    let _ =
+        key.set_attr(Attribute::from_ulong(CKA_OBJECT_VALIDATION_FLAGS, flag));
+}
+
 /// Helper to check if an operation is approved
 ///
 /// Applies key checks as well as mechanism checks according to the
@@ -1263,22 +1285,15 @@ pub fn is_approved(
         }
 
         if checks & 1 == 1 {
-            let mut valid_key = false;
-            if let Some(obj) = iobj {
-                if let Ok(f) =
-                    obj.get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS)
-                {
-                    if (f & KRF_FIPS) == KRF_FIPS {
-                        valid_key = true;
-                    } else if let Ok(class) = obj.get_attr_as_ulong(CKA_CLASS) {
-                        if class == CKO_PUBLIC_KEY {
-                            /* Public keys may be imported, so we check if they
-                             * meet the criteria, and that is good enough */
-                            valid_key = check_key(obj, op, None, None);
-                        }
-                    }
+            let valid_key = if let Some(obj) = iobj {
+                if has_fips_flag(obj) {
+                    true
+                } else {
+                    check_key(obj, op, None, None)
                 }
-            }
+            } else {
+                false
+            };
             if !valid_key {
                 return false;
             }
@@ -1296,17 +1311,7 @@ pub fn is_approved(
                     Some(m.genflags),
                     Some(&m.restrictions),
                 ) {
-                    /* add FIPS validation flag */
-                    let flag = match obj
-                        .get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS)
-                    {
-                        Ok(f) => f,
-                        Err(_) => 0,
-                    } | KRF_FIPS;
-                    let _ = obj.set_attr(Attribute::from_ulong(
-                        CKA_OBJECT_VALIDATION_FLAGS,
-                        flag,
-                    ));
+                    add_fips_flag(obj);
                     return true;
                 } else {
                     /* special case for HKDF which can return a DATA object */
