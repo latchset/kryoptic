@@ -11,8 +11,7 @@ use crate::error::Result;
 use crate::mechanism::*;
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::hash::HashOperation;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 pub const INVALID_HASH_SIZE: usize = CK_UNAVAILABLE_INFORMATION as usize;
 

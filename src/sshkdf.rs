@@ -9,9 +9,8 @@ use std::fmt::Debug;
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::object::ObjectFactories;
-
-use pkcs11::vendor::*;
-use pkcs11::*;
+use crate::pkcs11::vendor::*;
+use crate::pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::sshkdf::*;

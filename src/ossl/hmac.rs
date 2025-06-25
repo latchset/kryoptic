@@ -8,10 +8,10 @@ use crate::hmac::*;
 use crate::mechanism::{Mac, MechOperation, Sign, Verify, VerifySignature};
 use crate::misc::zeromem;
 use crate::ossl::common::osslctx;
+use crate::pkcs11::*;
 
 use constant_time_eq::constant_time_eq;
 use ossl::mac::{MacAlg, OsslMac};
-use pkcs11::*;
 
 use ossl::fips::FipsApproval;
 

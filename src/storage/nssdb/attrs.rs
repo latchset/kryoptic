@@ -8,7 +8,7 @@
 //! sensitive, vendor, skippable) and helper functions to check attribute
 //! classifications.
 
-use pkcs11::*;
+use crate::pkcs11::*;
 
 const DEPRECATED_CKA_SECONDARY_AUTH: CK_ULONG = 512;
 const DEPRECATED_CKA_AUTH_PIN_FLAGS: CK_ULONG = 513;

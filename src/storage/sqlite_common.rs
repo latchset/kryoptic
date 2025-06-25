@@ -7,8 +7,8 @@
 use std::sync::MutexGuard;
 
 use crate::error::{Error, Result};
+use crate::pkcs11::*;
 
-use pkcs11::*;
 use rusqlite;
 use rusqlite::{Error as rlError, ErrorCode};
 

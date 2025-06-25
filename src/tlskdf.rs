@@ -11,8 +11,7 @@ use crate::error::Result;
 use crate::mechanism::*;
 use crate::native::tlskdf::*;
 use crate::object::{Object, ObjectFactories};
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 #[cfg(feature = "fips")]
 use crate::fips::check_fips_state_ok;

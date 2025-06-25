@@ -12,10 +12,10 @@ use crate::defaults;
 use crate::error::Result;
 use crate::misc::copy_sized_string;
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::token::TokenFacilities;
 
 use once_cell::sync::Lazy;
-use pkcs11::*;
 
 /// Structure holding basic token information stored persistently.
 #[derive(Clone, Debug)]

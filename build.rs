@@ -39,7 +39,7 @@ fn main() {
     let pkcs11_bindings = out_path.join("pkcs11_bindings.rs");
 
     /* PKCS11 Headers */
-    let pkcs11_header = "headers/3.2/pkcs11.h";
+    let pkcs11_header = "src/pkcs11/headers/3.2/pkcs11.h";
 
     println!("cargo:rerun-if-changed={}", pkcs11_header);
 

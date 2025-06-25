@@ -14,10 +14,10 @@ use crate::mechanism::*;
 use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::common::*;
+use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{OsslSignature, SigAlg};
-use pkcs11::*;
 
 /// Converts a PKCS#11 EC key `Object` into an `EvpPkey`.
 ///

@@ -11,11 +11,11 @@ use crate::error::Result;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
 use crate::object::Object;
+use crate::pkcs11::*;
 
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType};
 use ossl::OsslContext;
-use pkcs11::*;
 
 #[cfg(feature = "ecc")]
 use crate::ec::get_oid_from_obj;

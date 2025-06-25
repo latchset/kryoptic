@@ -10,8 +10,7 @@ use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::native::simplekdf::SimpleKDFOperation;
 use crate::object::ObjectFactories;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /// Registers all Simple KDF mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {

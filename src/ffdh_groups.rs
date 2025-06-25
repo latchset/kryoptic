@@ -7,8 +7,7 @@
 
 use crate::error::Result;
 use crate::object::Object;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /// RFC 7719 Appendix A.1 ffdhe2048 prime
 /// p = 2^2048 - 2^1984 + {[2^1918 * e] + 560316 } * 2^64 - 1

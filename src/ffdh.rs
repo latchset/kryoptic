@@ -13,10 +13,9 @@ use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::bytes_to_vec;
 use crate::object::*;
 use crate::ossl::ffdh::FFDHOperation;
+use crate::pkcs11::*;
 
 use once_cell::sync::Lazy;
-
-use pkcs11::*;
 
 /// Minimum FFDH key size
 pub const MIN_DH_SIZE_BITS: CK_ULONG = 2048;

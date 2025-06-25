@@ -9,9 +9,8 @@ use std::vec::Vec;
 
 use crate::error::Result;
 use crate::mechanism::*;
+use crate::pkcs11::*;
 use crate::token::Token;
-
-use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use crate::fips;

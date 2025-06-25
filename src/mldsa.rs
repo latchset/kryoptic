@@ -15,8 +15,7 @@ use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
 use crate::ossl::mldsa;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /* See FIPS-204, 4. Parameter Sets */
 pub const ML_DSA_44_SK_SIZE: usize = 2560;

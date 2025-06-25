@@ -12,8 +12,7 @@ use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::cast_params;
 use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /// Public entry to register the ECDH Mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {

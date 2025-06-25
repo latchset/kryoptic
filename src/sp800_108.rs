@@ -12,8 +12,7 @@ use crate::error::{map_err, Result};
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, cast_params, sizeof};
 use crate::object::{Object, ObjectFactories};
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::sp800_108::*;

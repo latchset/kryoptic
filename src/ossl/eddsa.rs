@@ -12,11 +12,11 @@ use crate::mechanism::*;
 use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::Object;
 use crate::ossl::common::*;
+use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{eddsa_params, OsslSignature, SigAlg};
 use ossl::ErrorKind;
-use pkcs11::*;
 
 /// Expected signature length for Ed25519 in bytes.
 pub const OUTLEN_ED25519: usize = 64;

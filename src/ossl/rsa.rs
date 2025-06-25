@@ -16,12 +16,12 @@ use crate::object::Object;
 use crate::ossl::common::{
     mech_type_to_digest_alg, osslctx, privkey_from_object, pubkey_from_object,
 };
+use crate::pkcs11::*;
 
 use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData, RsaData};
 use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
-use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;

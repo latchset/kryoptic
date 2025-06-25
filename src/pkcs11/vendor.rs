@@ -3,7 +3,7 @@
 
 //! PKCS#11 API Vendor extensions
 
-use crate::*;
+use crate::pkcs11::*;
 
 pub const KRY_VENDOR_OFFSET: CK_ULONG = CKA_VENDOR_DEFINED + 485259;
 

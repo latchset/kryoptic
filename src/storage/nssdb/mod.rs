@@ -14,13 +14,13 @@ use crate::defaults;
 use crate::error::{Error, Result};
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use itertools::Itertools;
-use pkcs11::*;
 use rusqlite::types::{FromSqlError, Value, ValueRef};
 use rusqlite::{params, Connection, OpenFlags, Rows, Transaction};
 

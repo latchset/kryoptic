@@ -11,11 +11,10 @@ use std::fmt::Debug;
 
 use crate::error::{Error, Result};
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::storage::aci;
 use crate::storage::format;
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
-
-use pkcs11::*;
 
 /// In-memory implementation of the raw storage backend trait (`StorageRaw`).
 /// Uses HashMaps to store objects and user authentication info.

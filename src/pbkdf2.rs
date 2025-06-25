@@ -13,8 +13,7 @@ use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::pbkdf2::pbkdf2_derive;

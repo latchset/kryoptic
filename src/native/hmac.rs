@@ -11,9 +11,9 @@ use crate::hash;
 use crate::hmac::*;
 use crate::mechanism::*;
 use crate::misc::zeromem;
+use crate::pkcs11::*;
 
 use constant_time_eq::constant_time_eq;
-use pkcs11::*;
 
 /// Maximum size for internal buffers
 ///

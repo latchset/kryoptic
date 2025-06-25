@@ -13,11 +13,11 @@ use crate::misc::{
 };
 use crate::object::Object;
 use crate::ossl::common::osslctx;
+use crate::pkcs11::*;
 
 use constant_time_eq::constant_time_eq;
 use ossl::cipher::{AeadParams, AesCtsMode, AesSize, EncAlg, OsslCipher};
 use ossl::mac::{MacAlg, OsslMac};
-use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;

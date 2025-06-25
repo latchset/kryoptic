@@ -10,9 +10,9 @@ use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
 use crate::object::Object;
 use crate::ossl::common::{get_evp_pkey_type_from_obj, osslctx};
+use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
-use pkcs11::*;
 
 /// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into
 /// an `EvpPkey`.

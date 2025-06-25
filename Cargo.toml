@@ -1,6 +1,6 @@
 [workspace]
-members = ["pkcs11", "ossl", "cdylib", "tools/softhsm"]
-default-members = [".", "pkcs11", "ossl", "cdylib"]
+members = ["ossl", "cdylib", "tools/softhsm"]
+default-members = [".", "ossl", "cdylib"]
 
 [workspace.package]
 version = "1.2.0"
@@ -13,7 +13,6 @@ license = "GPL-3.0-or-later"
 [workspace.dependencies]
 kryoptic = { version = "1.2.0", path = ".", default-features = false }
 ossl = { version = "1.2.0", path = "ossl", default-features = false }
-pkcs11 = { version = "1.2.0", path = "pkcs11", default-features = false }
 
 [package]
 name = "kryoptic"
@@ -32,11 +31,11 @@ exclude = [
 [lib]
 test = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[build-dependencies]
+bindgen = "0.71"
 
 [dependencies]
 ossl.workspace = true
-pkcs11.workspace = true
 asn1 = "0.21"
 bimap = "0.6.3"
 bitflags = "2.4.1"

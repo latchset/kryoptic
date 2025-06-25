@@ -8,7 +8,7 @@
 use crate::defaults;
 use crate::error::Result;
 
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /// Holds configuration parameters for the NSSDB storage backend.
 ///

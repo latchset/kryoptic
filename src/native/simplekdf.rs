@@ -10,8 +10,7 @@ use crate::error::Result;
 use crate::mechanism::*;
 use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /// Represents the information about a key we use to derive other keys.
 ///

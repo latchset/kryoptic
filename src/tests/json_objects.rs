@@ -14,12 +14,12 @@ use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::misc::copy_sized_string;
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::storage::aci;
 use crate::storage::format::StorageRaw;
 use crate::storage::StorageTokenInfo;
 
 use data_encoding::BASE64;
-use pkcs11::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, Map, Value};
 

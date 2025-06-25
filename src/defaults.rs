@@ -6,7 +6,7 @@
 
 use std::env;
 
-use pkcs11::CK_VERSION;
+use crate::pkcs11::CK_VERSION;
 
 /// Default slot description.
 pub const SLOT_DESCRIPTION: &str = "Kryoptic Slot";

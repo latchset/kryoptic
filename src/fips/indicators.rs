@@ -5,11 +5,11 @@ use crate::attribute::Attribute;
 use crate::ec::{get_oid_from_obj, oid_to_bits};
 use crate::error::Result;
 use crate::object::*;
+use crate::pkcs11::vendor::KRY_UNSPEC;
+use crate::pkcs11::*;
 use crate::Token;
 
 use once_cell::sync::Lazy;
-use pkcs11::vendor::KRY_UNSPEC;
-use pkcs11::*;
 
 /// The flag returned in the CKA_VALIDATION_FLAG attribute
 ///

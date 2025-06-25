@@ -6,10 +6,10 @@
 use std::error;
 use std::fmt;
 
+use crate::pkcs11::*;
+
 use asn1;
 use ossl;
-use pkcs11;
-use pkcs11::*;
 use serde_json;
 
 /// The Result type used within the project, wraps
@@ -269,13 +269,6 @@ impl From<TryFromSliceError> for Error {
     /// Maps an error to manipulate a slice to a generic error
     fn from(error: TryFromSliceError) -> Error {
         Error::other_error(error)
-    }
-}
-
-impl From<pkcs11::Error> for Error {
-    /// Maps an error from the pkcs11 module to a CK_RV error
-    fn from(error: pkcs11::Error) -> Error {
-        Error::ck_rv(error.rv())
     }
 }
 

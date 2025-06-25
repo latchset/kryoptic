@@ -12,13 +12,13 @@ use std::fmt::Debug;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::{Storage, StorageTokenInfo};
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use hex;
-use pkcs11::*;
 
 /// Calculates and sets PIN status flags based on authentication info.
 ///

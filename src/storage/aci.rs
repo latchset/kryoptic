@@ -14,11 +14,11 @@ use crate::error::Result;
 use crate::kasn1::*;
 use crate::misc::{byte_ptr, sizeof, void_ptr, zeromem};
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use asn1;
-use pkcs11::*;
 
 /// Derives a key using PBKDF2 (CKM_PKCS5_PBKD2) based on PKCS#5 v2.1.
 ///
