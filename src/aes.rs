@@ -18,9 +18,9 @@ use crate::mechanism::*;
 use crate::misc::{cast_params, zeromem};
 use crate::object::*;
 use crate::ossl::aes::*;
+use crate::pkcs11::*;
 
 use once_cell::sync::Lazy;
-use pkcs11::*;
 
 /// Smallest AES Key Size (128 bits)
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */

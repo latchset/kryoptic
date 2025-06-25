@@ -16,8 +16,7 @@ use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::object::*;
 use crate::ossl::mlkem;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /* See FIPS-203, 8. Parameter Sets */
 pub const ML_KEM_512_EK_SIZE: usize = 800;

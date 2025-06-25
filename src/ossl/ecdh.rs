@@ -13,10 +13,10 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
+use crate::pkcs11::*;
 
 use ossl::derive::{EcdhDerive, OneStepKdfDerive, X963KdfDerive};
 use ossl::digest::DigestAlg;
-use pkcs11::*;
 
 /// Maps a PKCS#11 EC KDF type (`CK_EC_KDF_TYPE`) to the corresponding
 /// ossl DigestAlg

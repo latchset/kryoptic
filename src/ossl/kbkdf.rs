@@ -7,11 +7,11 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::bytes_to_slice;
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::osslctx;
+use crate::pkcs11::*;
 use crate::sp800_108::{verify_prf_key, Sp800Params};
 
 use ossl::derive::{KbkdfCounterLen, KbkdfDerive, KbkdfMode};
 use ossl::mac::MacAlg;
-use pkcs11::*;
 
 use ossl::fips::FipsApproval;
 

@@ -15,8 +15,7 @@ use std::fmt::Debug;
 
 use crate::error::Result;
 use crate::object::{Object, ObjectFactories, ObjectFactory};
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 pub trait Mechanism: Debug + Send + Sync {
     /// Returns a reference to the mechanism info

@@ -5,9 +5,9 @@ use crate::error::Result;
 use crate::mechanism::Mechanisms;
 use crate::object::Object;
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
+use crate::pkcs11::*;
 
 use ossl::derive::Pbkdf2Derive;
-use pkcs11::*;
 
 pub fn pbkdf2_derive(
     _: &Mechanisms,

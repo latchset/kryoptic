@@ -11,11 +11,10 @@ use crate::config;
 use crate::defaults;
 use crate::error::Result;
 use crate::misc::copy_sized_string;
+use crate::pkcs11::vendor::KRR_TOKEN_NOT_INITIALIZED;
+use crate::pkcs11::*;
 use crate::session::Session;
 use crate::token::Token;
-
-use pkcs11::vendor::KRR_TOKEN_NOT_INITIALIZED;
-use pkcs11::*;
 
 /// Represents a PKCS#11 Slot, containing information about the slot itself,
 /// the `Token` present in the slot, and currently open `Session`s.

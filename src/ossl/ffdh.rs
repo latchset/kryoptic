@@ -15,10 +15,10 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::zeromem;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
+use crate::pkcs11::*;
 
 use ossl::derive::FfdhDerive;
 use ossl::pkey::{EvpPkey, EvpPkeyType, FfdhData, PkeyData};
-use pkcs11::*;
 
 fn group_to_pkey_type(group: DHGroupName) -> Result<EvpPkeyType> {
     Ok(match group {

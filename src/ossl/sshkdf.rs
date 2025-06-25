@@ -11,10 +11,10 @@ use crate::misc::{
 };
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
+use crate::pkcs11::vendor::KR_SSHKDF_PARAMS;
+use crate::pkcs11::*;
 
 use ossl::derive::{SshKdfPurpose, SshkdfDerive};
-use pkcs11::vendor::KR_SSHKDF_PARAMS;
-use pkcs11::*;
 
 use ossl::fips::FipsApproval;
 

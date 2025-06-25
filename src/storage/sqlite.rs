@@ -11,13 +11,13 @@ use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::misc::copy_sized_string;
 use crate::object::Object;
+use crate::pkcs11::*;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
 use crate::storage::format::{StdStorageFormat, StorageRaw};
 use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
 
 use itertools::Itertools;
-use pkcs11::*;
 use rusqlite::types::{Value, ValueRef};
 use rusqlite::{
     params, params_from_iter, Connection, Rows, Statement, Transaction,

@@ -11,8 +11,7 @@ use crate::error::Result;
 use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::object::Object;
-
-use pkcs11::*;
+use crate::pkcs11::*;
 
 /// Helper function to generate the HMAC of the input data
 /// Using a "password" object for the secret key

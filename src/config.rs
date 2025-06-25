@@ -9,16 +9,16 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::pkcs11::*;
 use crate::storage;
 use crate::storage::StorageDBInfo;
 
-use pkcs11::*;
 use serde::de;
 use serde::{Deserialize, Serialize};
 use toml;
 
 #[cfg(test)]
-use pkcs11::vendor::KRR_SLOT_CONFIG;
+use crate::pkcs11::vendor::KRR_SLOT_CONFIG;
 
 /// The directory where to search the default configuration,
 /// can be changed with the CONFDIR environment variable at

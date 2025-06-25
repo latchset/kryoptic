@@ -7,9 +7,9 @@
 use crate::error::Result;
 use crate::mechanism::{Digest, MechOperation};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
+use crate::pkcs11::*;
 
 use ossl::digest::OsslDigest;
-use pkcs11::*;
 
 /// Represents an active hash (digest) operation.
 #[derive(Debug)]

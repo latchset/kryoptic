@@ -11,9 +11,9 @@ use crate::kasn1::pkcs::*;
 use crate::kasn1::PrivateKeyInfo;
 use crate::misc::zeromem;
 use crate::object::Object;
+use crate::pkcs11::*;
 
 use asn1;
-use pkcs11::*;
 
 #[cfg(feature = "ecdh")]
 pub mod ecdh;

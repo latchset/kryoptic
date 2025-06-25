@@ -7,10 +7,10 @@
 use crate::error::Result;
 use crate::mechanism::DRBG;
 use crate::ossl::common::osslctx;
+use crate::pkcs11::CKR_RANDOM_NO_RNG;
 
 use ossl::digest::DigestAlg;
 use ossl::rand::EvpRandCtx;
-use pkcs11::CKR_RANDOM_NO_RNG;
 
 /// Implements HMAC-DRBG using one of the supported SHA digests as the
 /// underlying hash function.

@@ -13,8 +13,6 @@ use std::ffi::{c_char, CStr};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use once_cell::sync::Lazy;
-use pkcs11::vendor::KRY_UNSPEC;
-use pkcs11::*;
 
 mod attribute;
 mod config;
@@ -22,6 +20,7 @@ mod defaults;
 mod error;
 mod mechanism;
 mod object;
+pub mod pkcs11;
 mod rng;
 mod session;
 mod slot;
@@ -31,6 +30,8 @@ mod token;
 use config::Config;
 use error::{arg_bad, Result};
 use mechanism::*;
+use pkcs11::vendor::KRY_UNSPEC;
+use pkcs11::*;
 use rng::RNG;
 use session::Session;
 use slot::Slot;

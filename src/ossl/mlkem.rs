@@ -9,11 +9,11 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
+use crate::pkcs11::*;
 
 use ossl::asymcipher::OsslEncapsulation;
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use ossl::ErrorKind;
-use pkcs11::*;
 
 /// Maps a PKCS#11 ML-KEM parameter set type (`CK_ML_KEM_PARAMETER_SET_TYPE`)
 /// to the corresponding EvpPkeyType

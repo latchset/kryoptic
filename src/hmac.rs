@@ -12,9 +12,9 @@ use crate::hash;
 use crate::mechanism::*;
 use crate::misc::{sizeof, zeromem};
 use crate::object::*;
+use crate::pkcs11::*;
 
 use once_cell::sync::Lazy;
-use pkcs11::*;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::hmac::HMACOperation;

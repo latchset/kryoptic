@@ -11,10 +11,10 @@ use std::cmp::Ordering;
 
 use crate::error::{Error, Result};
 use crate::misc::{sizeof, void_ptr, zeromem};
+use crate::pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
+use crate::pkcs11::*;
 
 use ossl::BorrowedReference;
-use pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
-use pkcs11::*;
 
 /// List of attribute types we understand
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

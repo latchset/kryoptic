@@ -13,6 +13,7 @@ use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
+use crate::pkcs11::*;
 use crate::{bytes_to_vec, cast_params};
 
 use asn1;
@@ -20,7 +21,6 @@ use bitflags::bitflags;
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use ossl::signature::{mldsa_params, OsslSignature, SigAlg};
 use ossl::OsslParam;
-use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;

@@ -5,10 +5,10 @@ use crate::config::FipsBehavior;
 use crate::error::Result;
 use crate::mechanism::Mechanisms;
 use crate::object::{ObjectFactories, ObjectType};
+use crate::pkcs11::*;
 use crate::token::Token;
 
 use ossl::fips;
-use pkcs11::*;
 
 pub(crate) mod indicators;
 

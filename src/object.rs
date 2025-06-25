@@ -16,11 +16,11 @@ use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::zeromem;
+use crate::pkcs11::*;
 use crate::CSPRNG;
 
 use bitflags::bitflags;
 use once_cell::sync::Lazy;
-use pkcs11::*;
 use uuid::Uuid;
 
 /// Helper macro that generates methods to check specific boolean

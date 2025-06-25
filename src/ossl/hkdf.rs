@@ -18,9 +18,9 @@ use crate::misc::{
 };
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
+use crate::pkcs11::*;
 
 use ossl::derive::{HkdfDerive, HkdfMode};
-use pkcs11::*;
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;
