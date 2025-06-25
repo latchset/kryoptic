@@ -104,8 +104,8 @@ export CONFDIR=%{_sysconfdir}
 # in workspaces does not take a --all, requires to install each package
 # explicitly, and we care only for the tools, as install does not install
 # cdylib package outputs.
-pushd tools/softhsm
-%cargo_install -- --bin softhsm_migrate
+pushd tools
+%cargo_install -f kryoptic/nssdb,kryoptic/pqc,kryoptic/standard,kryoptic/dynamic -- --bin softhsm_migrate
 popd
 install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 

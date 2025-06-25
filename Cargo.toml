@@ -1,5 +1,5 @@
 [workspace]
-members = ["ossl", "cdylib", "tools/softhsm"]
+members = ["ossl", "cdylib", "tools"]
 default-members = [".", "ossl", "cdylib"]
 
 [workspace.package]
