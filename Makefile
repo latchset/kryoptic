@@ -35,8 +35,9 @@ fix-format:
 check-spell:
 	@.github/codespell.sh
 
-tests: build
-	src/tools/softhsm/test.sh
+softhsm-tests:
+	cargo build --workspace
+	tools/softhsm/test.sh
 
 docs:
 	cargo doc --no-default-features --features standard,pqc,nssdb,log --document-private-items

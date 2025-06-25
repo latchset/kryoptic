@@ -1,27 +1,28 @@
 [package]
-name = "softhsm_migrate"
+name = "kryoptic-tools"
 version.workspace = true
 edition.workspace = true
-description = "Migrates SoftHSM2 tokens to the kyoptic database format"
+description = "SoftHSM2 db token migration and other tools"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true
 
 [[bin]]
 name = "softhsm_migrate"
-path = "migrate.rs"
+path = "softhsm/migrate.rs"
 
 [[bin]]
 name = "kryoptic_init"
-path = "test_init.rs"
+path = "softhsm/test_init.rs"
 test = false
 
 [[bin]]
 name = "test_signature"
-path = "test_signature.rs"
+path = "softhsm/test_signature.rs"
 test = false
 
 [dependencies]
 clap = { version = "4.5.26", default-features = false, features = ["cargo", "derive", "help", "std", "usage"] }
+kryoptic.workspace = true
 cryptoki = "0.9.0"
 libc = "0.2.151"
