@@ -1,0 +1,125 @@
+---
+name: OpenJDK Integration Tests
+
+env:
+  OPENSSL_BRANCH: kryoptic_ossl35
+  # List of OpenJDK tests to run, under openjdk/test/jdk/sun/security/pkcs11/.
+  openjdk_tests: |
+    Cipher/EncryptionPadding.java
+  jtreg_version: 7.5.2+1
+  openjdk_feature: 21
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build"]
+    branches: [main]
+    types:
+      - completed
+
+jobs:
+  test-openjdk-integration:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: OpenJDK Integration Tests
+    runs-on: ubuntu-22.04
+    container: fedora:latest
+    steps:
+      - name: Install Dependencies
+        run: |
+          dnf --assumeyes --disable-repo=fedora-cisco-openh264 \
+            install git cargo clang-devel openssl-devel zlib-devel sed \
+            sqlite-devel openssl opensc unzip wget \
+            java-${{ env.openjdk_feature }}-openjdk-devel
+
+      # Kryoptic build steps; try to keep in sync with relevant build.yml steps.
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup OpenSSL
+        id: ossl-setup
+        run: |
+          git config --global --add safe.directory /__w/kryoptic
+          cd ..
+          git clone https://github.com/simo5/openssl.git \
+                    --single-branch --branch $OPENSSL_BRANCH openssl
+          cd openssl
+          echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
+          echo "cacheid=${{ runner.os }}-ossl-$(git rev-parse HEAD)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Restore OpenSSL build
+        uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
+
+      - name: Cache Rust dependencies
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Generate lock file
+        run: cargo generate-lockfile
+
+      - name: Build Kryoptic
+        run: make fips && ./misc/hmacify.sh target/debug/libkryoptic_pkcs11.so
+
+      # OpenJDK steps.
+      - name: Get container OpenJDK version
+        id: get-openjdk-version
+        run: |
+          . /usr/lib/jvm/java-${{ env.openjdk_feature }}-openjdk/release && \
+            echo version=$JAVA_RUNTIME_VERSION >> $GITHUB_OUTPUT
+
+      - name: Clone and check out OpenJDK test cases
+        run: |
+          git clone --depth 1 \
+            --branch \
+            kryoptic-jdk-${{ steps.get-openjdk-version.outputs.version }} \
+            https://github.com/fitzsim/jdk${{ env.openjdk_feature }}u-dev
+
+      # Get pkcs11-provider for kryoptic.nss-init.sh used by jtreg-kryoptic.sh.
+      - name: Get pkcs11-provider
+        id: get-pkcs11-provider
+        run: git clone https://github.com/latchset/pkcs11-provider.git
+
+      # JTReg archive.
+      - name: Restore JTReg binary from cache
+        uses: actions/cache/restore@v4
+        id: restore-jtreg-binary
+        with:
+          path: jtreg-${{ env.jtreg_version }}.zip
+          key: ${{ runner.os }}-jtreg-${{ env.jtreg_version }}
+
+      - if: ${{ steps.restore-jtreg-binary.outputs.cache-hit != 'true' }}
+        name: Download JTReg binary
+        id: download-jtreg-binary
+        run: |
+          wget --no-verbose \
+            https://builds.shipilev.net/jtreg/jtreg-${{ env.jtreg_version }}.zip
+
+      - if: ${{ steps.restore-jtreg-binary.outputs.cache-hit != 'true' }}
+        name: Cache JTReg binary
+        uses: actions/cache/save@v4
+        with:
+          path: jtreg-${{ env.jtreg_version }}.zip
+          key: ${{ runner.os }}-jtreg-${{ env.jtreg_version }}
+
+      # Extract JTReg.
+      - name: Extract JTReg binary
+        id: extract-jtreg-binary
+        run: unzip jtreg-*.zip && chmod +x jtreg/bin/jtreg
+
+      # Run test suite.
+      - name: Run OpenJDK JTReg test cases
+        id: run-openjdk-jtreg-test-cases
+        run: |
+          bash jdk${{ env.openjdk_feature }}u-dev/bin/jtreg-kryoptic.sh \
+            $openjdk_tests
