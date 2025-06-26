@@ -1,0 +1,222 @@
+---
+name: OpenJDK Integration Tests
+
+env:
+  OPENSSL_BRANCH: kryoptic_ossl35
+  # List of OpenJDK tests to run, under openjdk/test/jdk/sun/security/pkcs11/.
+  openjdk_tests: |
+    Cipher/EncryptionPadding.java
+  jtreg_version: 7.5.2+1
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build"]
+    branches: [main]
+    types:
+      - completed
+
+jobs:
+  build:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: Build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [fips]
+        db: [nssdb]
+        exclude: # nssdb doesn't work with no_sha1
+          - name: no_sha1
+            db: nssdb
+    container: fedora:latest
+    steps:
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Restore DNF cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
+      - name: Install Dependencies
+        run: |
+          dnf -y install git cargo clang-devel openssl-devel \
+            'perl(FindBin)' 'perl(lib)' 'perl(File::Compare)' \
+            'perl(File::Copy)' 'perl(bigint)' 'perl(Time::HiRes)' \
+            'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
+            'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
+            'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
+            zlib-devel sed sqlite-devel openssl
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            dnf -y install rust-std-static.i686 openssl-devel.i686 \
+              sqlite-devel.i686
+          fi
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup OpenSSL
+        id: ossl-setup
+        run: |
+          git config --global --add safe.directory /__w/kryoptic
+          cd ..
+          git clone https://github.com/simo5/openssl.git \
+                    --single-branch --branch $OPENSSL_BRANCH openssl
+          cd openssl
+          echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
+          echo "cacheid=${{ runner.os }}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore OpenSSL build
+        uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
+
+      - name: Generate lock file
+        run: cargo generate-lockfile
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build & test
+        run: |
+          FEATURES="${{ matrix.db }}"
+          OPTS="--no-default-features"
+          export CC=clang
+
+          if [ "${{ matrix.name }}" = "fips" ]; then
+            FEATURES="${FEATURES},fips"
+          elif [ "${{ matrix.name }}" = "ossl3" ]; then
+            FEATURES="${FEATURES},standard"
+          elif [ "${{ matrix.name }}" = "release" ]; then
+            FEATURES="${FEATURES},standard"
+            OPTS="--release"
+          elif [ "${{ matrix.name }}" = "dynamic" ]; then
+            FEATURES="${FEATURES},standard,dynamic"
+            OPTS="--release"
+          elif [ "${{ matrix.name }}" = "i686" ]; then
+            FEATURES="${FEATURES},standard,dynamic"
+            OPTS="--target i686-unknown-linux-gnu"
+          elif [ "${{ matrix.name }}" = "minimal" ]; then
+            FEATURES="${FEATURES},dynamic"
+          elif [ "${{ matrix.name }}" = "pqc" ]; then
+            FEATURES="${FEATURES},standard,pqc"
+          elif [ "${{ matrix.name }}" = "no_sha1" ]; then
+            FEATURES="${FEATURES},standard,no_sha1"
+          fi
+
+          # create a bugus configuration file to make sure it is not used during tests
+          mkdir -p ~/.config/kryoptic/
+          cp testdata/test.conf ~/.config/kryoptic/token.conf
+
+          cargo build -vv $OPTS --features "$FEATURES"
+          ./misc/hmacify.sh target/debug/libkryoptic_pkcs11.so
+          # KRYOPTIC_TRACE=trace.log cargo test -vv $OPTS --features "$FEATURES,log"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Build logs ${{ matrix.db }} ${{ matrix.name }}
+          path: |
+            target/debug/build/*/output
+            trace.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kryoptic-library-binary
+          path: target/debug/libkryoptic_pkcs11.so
+
+      - if: ${{ matrix.name == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
+        name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup.outputs.cacheid }}
+
+      - if: ${{ matrix.name == 'i686' && steps.cache.outputs.cache-hit != 'true' }}
+        name: Store DNF cache -- the i686 has the most dependencies
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
+  test-openjdk-integration:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: Run a subset of the OpenJDK SunPKCS11 test suite against Kryoptic
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [fips]
+        db: [nssdb]
+    container: eclipse-temurin:21
+    steps:
+      - name: Install dependencies
+        id: install-dependencies
+        run: apt-get --yes update && apt-get --yes install git opensc unzip file
+
+      - name: Get container OpenJDK version
+        id: get-openjdk-version
+        run: . /opt/java/openjdk/release && echo version=$SEMANTIC_VERSION >> $GITHUB_OUTPUT
+
+      - name: Clone and check out OpenJDK test cases
+        run: git clone --branch kryoptic-jdk-${{ steps.get-openjdk-version.outputs.version }} https://github.com/fitzsim/jdk21u-dev
+
+      # Get pkcs11-provider for kryoptic.nss-init.sh used by jtreg-kryoptic.sh.
+      - name: Get pkcs11-provider
+        id: get-pkcs11-provider
+        run: |
+          git clone https://github.com/latchset/pkcs11-provider.git
+
+      # JTReg archive.
+      - name: Restore JTReg binary from cache
+        uses: actions/cache/restore@v4
+        id: restore-jtreg-binary
+        with:
+          path: jtreg-${{ env.jtreg_version }}.zip
+          key: ${{ runner.os }}-jtreg-${{ env.jtreg_version }}
+
+      - if: ${{ steps.restore-jtreg-binary.outputs.cache-hit != 'true' }}
+        name: Download JTReg binary
+        id: download-jtreg-binary
+        run: wget --no-verbose https://builds.shipilev.net/jtreg/jtreg-${{ env.jtreg_version }}.zip
+
+      - if: ${{ steps.restore-jtreg-binary.outputs.cache-hit != 'true' }}
+        name: Cache JTReg binary
+        uses: actions/cache/save@v4
+        with:
+          path: jtreg-${{ env.jtreg_version }}.zip
+          key: ${{ runner.os }}-jtreg-${{ env.jtreg_version }}
+
+      # Extract JTReg.
+      - name: Extract JTReg binary
+        id: extract-jtreg-binary
+        run: unzip jtreg-*.zip && chmod +x jtreg/bin/jtreg
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kryoptic-library-binary
+          path: kryoptic/target/debug
+
+      # Run test suite.
+      - name: Run OpenJDK JTReg test cases
+        id: run-openjdk-jtreg-test-cases
+        run: |
+          bash jdk21u-dev/bin/jtreg-kryoptic.sh $openjdk_tests
