@@ -190,23 +190,62 @@ impl Derive for FFDHOperation {
         let mut peer = pkey.make_peer(osslctx(), self.public.as_slice())?;
         let mut ffdh = FfdhDerive::new(osslctx(), &mut pkey)?;
 
-        let keylen = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
+        let pkey_size = pkey.get_size()?;
+        let req_len = match template.iter().find(|x| x.type_ == CKA_VALUE_LEN) {
             Some(attr) => {
                 let len = usize::try_from(attr.to_ulong()?)?;
-                if len > pkey.get_size()? {
+                if len > pkey_size {
                     return Err(CKR_TEMPLATE_INCONSISTENT)?;
                 }
                 len
             }
-            None => pkey.get_size()?,
+            None => match factory
+                .as_secret_key_factory()?
+                .recommend_key_size(pkey_size)
+            {
+                Ok(len) => len,
+                Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
+            },
         };
-        ffdh.set_outlen(keylen)?;
 
-        let mut secret = vec![0u8; keylen];
-        let secret_len = ffdh.derive(&mut peer, &mut secret)?;
-        if secret_len != keylen {
-            zeromem(secret.as_mut_slice());
-            return Err(CKR_GENERAL_ERROR)?;
+        ffdh.set_outlen(req_len)?;
+        let mut secret = vec![0u8; req_len];
+
+        let outlen = ffdh.derive(&mut peer, &mut secret)?;
+        if outlen != req_len {
+            if req_len != pkey_size {
+                zeromem(secret.as_mut_slice());
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+            /* FFDH maximum secret length is not fully deterministic and can
+             * vary slightly. The maximum length may have been requested
+             * because no CKA_VALUE_LEN was found and recommend_key_size()
+             * may just reflect back the key size when the underlying key can
+             * be of any length. Recheck if that is the case and accept the
+             * shorter secret if so */
+            let ret = match factory
+                .as_secret_key_factory()?
+                .recommend_key_size(outlen)
+            {
+                Ok(len) => {
+                    if outlen == len {
+                        Ok(())
+                    } else {
+                        Err(CKR_TEMPLATE_INCONSISTENT)?
+                    }
+                }
+                Err(_) => Err(CKR_TEMPLATE_INCONSISTENT)?,
+            };
+            match ret {
+                Ok(()) => {
+                    zeromem(&mut secret[outlen..req_len]);
+                    secret.resize(outlen, 0);
+                }
+                Err(e) => {
+                    zeromem(secret.as_mut_slice());
+                    return Err(e);
+                }
+            }
         }
 
         let mut tmpl = CkAttrs::from(template);
