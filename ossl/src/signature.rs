@@ -126,6 +126,7 @@ fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
         | SigAlg::RsaPssSha2_224
         | SigAlg::RsaPssSha2_256
         | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha2_512
         | SigAlg::RsaPssSha3_224
         | SigAlg::RsaPssSha3_256
         | SigAlg::RsaPssSha3_384
@@ -312,6 +313,7 @@ pub fn rsa_sig_params(
         | SigAlg::RsaSha2_224
         | SigAlg::RsaSha2_256
         | SigAlg::RsaSha2_384
+        | SigAlg::RsaSha2_512
         | SigAlg::RsaSha3_224
         | SigAlg::RsaSha3_256
         | SigAlg::RsaSha3_384
@@ -337,6 +339,7 @@ pub fn rsa_sig_params(
         | SigAlg::RsaPssSha2_224
         | SigAlg::RsaPssSha2_256
         | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha2_512
         | SigAlg::RsaPssSha3_224
         | SigAlg::RsaPssSha3_256
         | SigAlg::RsaPssSha3_384
