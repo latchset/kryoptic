@@ -598,6 +598,7 @@ fn test_rsa_mechs() {
         (CKM_SHA384_RSA_PKCS_PSS, Some((CKM_SHA384, CKG_MGF1_SHA384))),
         (CKM_SHA512_RSA_PKCS_PSS, Some((CKM_SHA512, CKG_MGF1_SHA512))),
     ] {
+        println!("Testing signatures {}", mech.0);
         /* init signature */
         let mechanism: CK_MECHANISM = if let Some(hash) = mech.1 {
             let salt: [u8; 10] =
@@ -649,6 +650,7 @@ fn test_rsa_mechs() {
         (CKM_SHA384, CKG_MGF1_SHA384),
         (CKM_SHA512, CKG_MGF1_SHA512),
     ] {
+        println!("Testing OAEP {}", hash.0);
         let params = CK_RSA_PKCS_OAEP_PARAMS {
             hashAlg: hash.0,
             mgf: hash.1,
