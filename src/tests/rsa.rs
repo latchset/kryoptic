@@ -546,3 +546,149 @@ fn test_rsa_operations() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_rsa_mechs() {
+    let mut testtokn = TestToken::initialized("test_rsa_mechs", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* generate key pair and store it */
+    /* RSA key pair */
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_ENCRYPT, true),
+            (CKA_VERIFY, true),
+            (CKA_WRAP, true),
+        ],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_TOKEN, true),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_DECRYPT, true),
+            (CKA_SIGN, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    assert_eq!(check_validation(session, 1), true);
+
+    /* Classic PKCS 1.5 */
+    for mech in [
+        CKM_SHA224_RSA_PKCS,
+        CKM_SHA256_RSA_PKCS,
+        CKM_SHA384_RSA_PKCS,
+        CKM_SHA512_RSA_PKCS,
+    ] {
+        let mechanism = CK_MECHANISM {
+            mechanism: mech,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        /* Test Signature */
+        let data = "RSA PKCS signed data";
+        let sig = ret_or_panic!(sig_gen(
+            session,
+            prikey,
+            data.as_bytes(),
+            &mechanism,
+        ));
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                pubkey,
+                data.as_bytes(),
+                sig.as_slice(),
+                &mechanism,
+            )
+        );
+    }
+
+    /* RSA PSS */
+    for mech in [
+        (CKM_SHA224_RSA_PKCS_PSS, CKM_SHA224, CKG_MGF1_SHA224),
+        (CKM_SHA256_RSA_PKCS_PSS, CKM_SHA256, CKG_MGF1_SHA256),
+        (CKM_SHA384_RSA_PKCS_PSS, CKM_SHA384, CKG_MGF1_SHA384),
+        (CKM_SHA512_RSA_PKCS_PSS, CKM_SHA512, CKG_MGF1_SHA512),
+    ] {
+        /* init signature */
+        let salt: [u8; 10] =
+            [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
+        let sig_params = CK_RSA_PKCS_PSS_PARAMS {
+            hashAlg: mech.1,
+            mgf: mech.2,
+            sLen: salt.len() as CK_ULONG,
+        };
+        let mechanism = CK_MECHANISM {
+            mechanism: mech.0,
+            pParameter: void_ptr!(&sig_params),
+            ulParameterLen: sizeof!(CK_RSA_PKCS_PSS_PARAMS),
+        };
+
+        /* Test Signature */
+        let data = "RSA PSS signed data";
+        let sig = ret_or_panic!(sig_gen(
+            session,
+            prikey,
+            data.as_bytes(),
+            &mechanism,
+        ));
+
+        assert_eq!(
+            CKR_OK,
+            sig_verify(
+                session,
+                pubkey,
+                data.as_bytes(),
+                sig.as_slice(),
+                &mechanism,
+            )
+        );
+    }
+
+    for hash in [
+        (CKM_SHA224, CKG_MGF1_SHA224),
+        (CKM_SHA256, CKG_MGF1_SHA256),
+        (CKM_SHA384, CKG_MGF1_SHA384),
+        (CKM_SHA512, CKG_MGF1_SHA512),
+    ] {
+        let params = CK_RSA_PKCS_OAEP_PARAMS {
+            hashAlg: hash.0,
+            mgf: hash.1,
+            source: CKZ_DATA_SPECIFIED,
+            pSourceData: std::ptr::null_mut(),
+            ulSourceDataLen: 0,
+        };
+
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_RSA_PKCS_OAEP,
+            pParameter: &params as *const _ as CK_VOID_PTR,
+            ulParameterLen: sizeof!(CK_RSA_PKCS_OAEP_PARAMS),
+        };
+
+        let data = c"RSA OAEP payload";
+
+        let enc = ret_or_panic!(encrypt(
+            session,
+            pubkey,
+            data.to_bytes(),
+            &mechanism
+        ));
+        let result = ret_or_panic!(decrypt(session, prikey, &enc, &mechanism));
+        assert_eq!(data.to_bytes(), result);
+    }
+}
