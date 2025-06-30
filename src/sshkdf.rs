@@ -5,6 +5,7 @@
 //! Function (KDF) as specified in RFC 4253, Section 7.2.
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
@@ -18,27 +19,25 @@ use crate::native::sshkdf::*;
 #[cfg(feature = "fips")]
 use crate::ossl::sshkdf::*;
 
+/// Object that holds the Mechanism for SSHKDF
+static SSH_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(SSHKDFMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: 0,
+            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
+            flags: CKF_DERIVE,
+        },
+    })
+});
+
+/// Registers the SSHKDF mechanism
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    SSHKDFMechanism::register_mechanisms(mechs);
+    mechs.add_mechanism(KRM_SSHKDF_DERIVE, &SSH_KDF_MECH);
 }
 
 #[derive(Debug)]
 struct SSHKDFMechanism {
     info: CK_MECHANISM_INFO,
-}
-impl SSHKDFMechanism {
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            KRM_SSHKDF_DERIVE,
-            Box::new(SSHKDFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-    }
 }
 
 impl Mechanism for SSHKDFMechanism {

@@ -5,6 +5,7 @@
 //! Miscellaneous simple key derivation mechanisms
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
@@ -12,38 +13,33 @@ use crate::native::simplekdf::SimpleKDFOperation;
 use crate::object::ObjectFactories;
 use crate::pkcs11::*;
 
+/// Object that holds Mechanisms for SimpleKDF
+static SIMPLE_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(SimpleKDFMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: 0,
+            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
+            flags: CKF_DERIVE,
+        },
+    })
+});
+
 /// Registers all Simple KDF mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    SimpleKDFMechanism::register_mechanisms(mechs);
+    for ckm in &[
+        CKM_CONCATENATE_BASE_AND_KEY,
+        CKM_CONCATENATE_BASE_AND_DATA,
+        CKM_CONCATENATE_DATA_AND_BASE,
+        CKM_XOR_BASE_AND_DATA,
+    ] {
+        mechs.add_mechanism(*ckm, &(*SIMPLE_KDF_MECH));
+    }
 }
 
 /// Object that represents the Simple KDF mechanism
 #[derive(Debug)]
 struct SimpleKDFMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl SimpleKDFMechanism {
-    /// Instantiates and registers the SimpleKDF related mechanisms
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[
-            CKM_CONCATENATE_BASE_AND_KEY,
-            CKM_CONCATENATE_BASE_AND_DATA,
-            CKM_CONCATENATE_DATA_AND_BASE,
-            CKM_XOR_BASE_AND_DATA,
-        ] {
-            mechs.add_mechanism(
-                *ckm,
-                Box::new(SimpleKDFMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                        flags: CKF_DERIVE,
-                    },
-                }),
-            );
-        }
-    }
 }
 
 impl Mechanism for SimpleKDFMechanism {

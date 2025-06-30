@@ -5,6 +5,7 @@
 //! Hash Algorithm Standards (SHA1, SHA2, SHA3) operations.
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::CkAttrs;
 use crate::error::Result;
@@ -162,6 +163,34 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
     },
 ];
 
+/// Object that holds Mechanisms for Hash
+static HASH_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DIGEST,
+            },
+        }),
+        Box::new(HashMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: 0,
+                flags: CKF_DERIVE,
+            },
+        }),
+    ]
+});
+
+/// Registers all Hash related mechanisms
+pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
+    for hs in &HASH_MECH_SET {
+        mechs.add_mechanism(hs.hash, &HASH_MECHS[0]);
+        mechs.add_mechanism(hs.key_derive, &HASH_MECHS[1]);
+    }
+}
+
 /// function to validate that the hash mechanism is a valid one
 ///
 /// Used only by sshkdf
@@ -203,34 +232,6 @@ pub fn block_size(hash: CK_MECHANISM_TYPE) -> usize {
 #[derive(Debug)]
 struct HashMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl HashMechanism {
-    /// Internally register all hash mechanisms listed in `HASH_MECH_SET`
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        for hs in &HASH_MECH_SET {
-            mechs.add_mechanism(
-                hs.hash,
-                Box::new(HashMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: 0,
-                        flags: CKF_DIGEST,
-                    },
-                }),
-            );
-            mechs.add_mechanism(
-                hs.key_derive,
-                Box::new(HashMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: 0,
-                        flags: CKF_DERIVE,
-                    },
-                }),
-            );
-        }
-    }
 }
 
 impl Mechanism for HashMechanism {
@@ -375,9 +376,4 @@ impl Derive for HashKDFOperation {
 /// Public internal function to initialize a digest operation directly
 pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
-}
-
-/// Registers all Hash related mechanisms
-pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    HashMechanism::register_mechanisms(mechs);
 }

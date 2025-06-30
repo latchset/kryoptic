@@ -6,6 +6,7 @@
 //! [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869)
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
@@ -13,45 +14,32 @@ use crate::object::{GenericSecretKeyMechanism, ObjectFactories};
 use crate::ossl::hkdf::HKDFOperation;
 use crate::pkcs11::*;
 
+/// Object that holds Mechanisms for HKDF
+static HKDF_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(HKDFMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
+                flags: CKF_DERIVE,
+            },
+        }),
+        Box::new(GenericSecretKeyMechanism::new(CKK_HKDF)),
+    ]
+});
+
 /// Registers all HKDF related mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    HKDFMechanism::register_mechanisms(mechs);
+    for ckm in &[CKM_HKDF_DERIVE, CKM_HKDF_DATA] {
+        mechs.add_mechanism(*ckm, &(*HKDF_MECHS)[0]);
+    }
+    mechs.add_mechanism(CKM_HKDF_KEY_GEN, &(*HKDF_MECHS)[1]);
 }
 
 /// Object that represents the HKDF mechanism
 #[derive(Debug)]
 struct HKDFMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl HKDFMechanism {
-    /// Instantiates and registers the HKDF related mechanisms
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_HKDF_DERIVE,
-            Box::new(HKDFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_HKDF_DATA,
-            Box::new(HKDFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_HKDF_KEY_GEN,
-            Box::new(GenericSecretKeyMechanism::new(CKK_HKDF)),
-        );
-    }
 }
 
 impl Mechanism for HKDFMechanism {

@@ -6,6 +6,7 @@
 //! v1.5, PSS, OAEP).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
@@ -16,7 +17,96 @@ use crate::ossl::rsa::*;
 use crate::pkcs11::*;
 
 use asn1;
-use once_cell::sync::Lazy;
+
+/// Object that holds Mechanisms for RSA
+static RSA_MECHS: LazyLock<[Box<dyn Mechanism>; 4]> = LazyLock::new(|| {
+    [
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
+                flags: CKF_ENCRYPT
+                    | CKF_DECRYPT
+                    | CKF_SIGN
+                    | CKF_VERIFY
+                    | CKF_WRAP
+                    | CKF_UNWRAP,
+            },
+        }),
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+        Box::new(RsaPKCSMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
+                flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            },
+        }),
+    ]
+});
+
+/// The static RSA Public Key factory.
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(RSAPubFactory::new()));
+
+/// The static RSA Private Key factory.
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(RSAPrivFactory::new()));
+
+/// Registers all RSA mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    for ckm in &[CKM_RSA_X_509, CKM_RSA_PKCS] {
+        mechs.add_mechanism(*ckm, &RSA_MECHS[0]);
+    }
+    for ckm in &[
+        #[cfg(not(feature = "no_sha1"))]
+        CKM_SHA1_RSA_PKCS,
+        CKM_SHA224_RSA_PKCS,
+        CKM_SHA256_RSA_PKCS,
+        CKM_SHA384_RSA_PKCS,
+        CKM_SHA512_RSA_PKCS,
+        CKM_SHA3_224_RSA_PKCS,
+        CKM_SHA3_256_RSA_PKCS,
+        CKM_SHA3_384_RSA_PKCS,
+        CKM_SHA3_512_RSA_PKCS,
+        CKM_RSA_PKCS_PSS,
+        #[cfg(not(feature = "no_sha1"))]
+        CKM_SHA1_RSA_PKCS_PSS,
+        CKM_SHA224_RSA_PKCS_PSS,
+        CKM_SHA256_RSA_PKCS_PSS,
+        CKM_SHA384_RSA_PKCS_PSS,
+        CKM_SHA512_RSA_PKCS_PSS,
+        CKM_SHA3_224_RSA_PKCS_PSS,
+        CKM_SHA3_256_RSA_PKCS_PSS,
+        CKM_SHA3_384_RSA_PKCS_PSS,
+        CKM_SHA3_512_RSA_PKCS_PSS,
+    ] {
+        mechs.add_mechanism(*ckm, &RSA_MECHS[1]);
+    }
+    mechs.add_mechanism(CKM_RSA_PKCS_KEY_PAIR_GEN, &RSA_MECHS[2]);
+    mechs.add_mechanism(CKM_RSA_PKCS_OAEP, &RSA_MECHS[3]);
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
+        &PUBLIC_KEY_FACTORY,
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_RSA),
+        &PRIVATE_KEY_FACTORY,
+    );
+}
 
 /// Macro to check that an attribute that contains a vector of bytes
 /// exists and contains a vector of length greater than 0
@@ -424,95 +514,10 @@ impl PrivKeyFactory for RSAPrivFactory {
     }
 }
 
-/// The static RSA Public Key factory.
-///
-/// Instantiated once via `Lazy` for thread-safe initialization.
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(RSAPubFactory::new()));
-
-/// The static RSA Private Key factory.
-///
-/// Instantiated once via `Lazy` for thread-safe initialization.
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(RSAPrivFactory::new()));
-
 /// Object representing various RSA mechanisms (PKCS#1 v1.5, PSS, OAEP).
 #[derive(Debug)]
 struct RsaPKCSMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl RsaPKCSMechanism {
-    /// Helper function to create a new `RsaPKCSMechanism` instance with specified flags.
-    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-        Box::new(RsaPKCSMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
-                flags: flags,
-            },
-        })
-    }
-
-    /// Registers all supported RSA mechanisms with the mechanism manager.
-    ///
-    /// This includes CKM_RSA_PKCS, CKM_RSA_X_509, various PKCS#1 v1.5 and PSS signature schemes,
-    /// key generation (CKM_RSA_PKCS_KEY_PAIR_GEN), and OAEP (CKM_RSA_PKCS_OAEP).
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[CKM_RSA_X_509, CKM_RSA_PKCS] {
-            mechs.add_mechanism(
-                *ckm,
-                Self::new_mechanism(
-                    CKF_ENCRYPT
-                        | CKF_DECRYPT
-                        | CKF_SIGN
-                        | CKF_VERIFY
-                        | CKF_WRAP
-                        | CKF_UNWRAP,
-                ),
-            );
-        }
-        for ckm in &[
-            #[cfg(not(feature = "no_sha1"))]
-            CKM_SHA1_RSA_PKCS,
-            CKM_SHA224_RSA_PKCS,
-            CKM_SHA256_RSA_PKCS,
-            CKM_SHA384_RSA_PKCS,
-            CKM_SHA512_RSA_PKCS,
-            CKM_SHA3_224_RSA_PKCS,
-            CKM_SHA3_256_RSA_PKCS,
-            CKM_SHA3_384_RSA_PKCS,
-            CKM_SHA3_512_RSA_PKCS,
-            CKM_RSA_PKCS_PSS,
-            #[cfg(not(feature = "no_sha1"))]
-            CKM_SHA1_RSA_PKCS_PSS,
-            CKM_SHA224_RSA_PKCS_PSS,
-            CKM_SHA256_RSA_PKCS_PSS,
-            CKM_SHA384_RSA_PKCS_PSS,
-            CKM_SHA512_RSA_PKCS_PSS,
-            CKM_SHA3_224_RSA_PKCS_PSS,
-            CKM_SHA3_256_RSA_PKCS_PSS,
-            CKM_SHA3_384_RSA_PKCS_PSS,
-            CKM_SHA3_512_RSA_PKCS_PSS,
-        ] {
-            mechs.add_mechanism(
-                *ckm,
-                Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
-            );
-        }
-
-        mechs.add_mechanism(
-            CKM_RSA_PKCS_KEY_PAIR_GEN,
-            Self::new_mechanism(CKF_GENERATE_KEY_PAIR),
-        );
-
-        mechs.add_mechanism(
-            CKM_RSA_PKCS_OAEP,
-            Self::new_mechanism(
-                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-            ),
-        );
-    }
 }
 
 impl Mechanism for RsaPKCSMechanism {
@@ -748,18 +753,4 @@ impl Mechanism for RsaPKCSMechanism {
             RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info)?;
         key_template.import_from_wrapped(keydata, template)
     }
-}
-
-/// Registers all RSA mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    RsaPKCSMechanism::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_RSA),
-        &PRIVATE_KEY_FACTORY,
-    );
 }

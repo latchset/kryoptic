@@ -6,7 +6,6 @@
 //! signing, verification, and signature format conversions.
 
 use crate::attribute::Attribute;
-use crate::ec::ecdsa::*;
 use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
 use crate::kasn1::DerEncBigUint;
@@ -160,43 +159,6 @@ pub struct EcdsaOperation {
 }
 
 impl EcdsaOperation {
-    /// Helper function to create a new boxed `EcdsaMechanism`.
-    fn new_mechanism() -> Box<dyn Mechanism> {
-        Box::new(EcdsaMechanism::new(
-            CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-            CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-            CKF_SIGN | CKF_VERIFY,
-        ))
-    }
-
-    /// Registers all supported ECDSA mechanisms with the `Mechanisms` registry.
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[
-            CKM_ECDSA,
-            #[cfg(not(feature = "no_sha1"))]
-            CKM_ECDSA_SHA1,
-            CKM_ECDSA_SHA224,
-            CKM_ECDSA_SHA256,
-            CKM_ECDSA_SHA384,
-            CKM_ECDSA_SHA512,
-            CKM_ECDSA_SHA3_224,
-            CKM_ECDSA_SHA3_256,
-            CKM_ECDSA_SHA3_384,
-            CKM_ECDSA_SHA3_512,
-        ] {
-            mechs.add_mechanism(*ckm, Self::new_mechanism());
-        }
-
-        mechs.add_mechanism(
-            CKM_EC_KEY_PAIR_GEN,
-            Box::new(EcdsaMechanism::new(
-                CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                CKF_GENERATE_KEY_PAIR,
-            )),
-        );
-    }
-
     /// Internal constructor to create a new `EcdsaOperation`.
     ///
     /// Sets up the internal state based on whether it's a signature or

@@ -11,6 +11,7 @@
 //! (GCM) and GMAC_).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
@@ -20,14 +21,97 @@ use crate::object::*;
 use crate::ossl::aes::*;
 use crate::pkcs11::*;
 
-use once_cell::sync::Lazy;
-
 /// Smallest AES Key Size (128 bits)
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
 /// Medium AES Key size (192 bits)
 pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
 /// Largest AES Key Size (256 bits)
 pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
+
+/// Object that holds AES Mechanisms
+pub(crate) static AES_MECHS: LazyLock<[Box<dyn Mechanism>; 6]> =
+    LazyLock::new(|| {
+        [
+            Box::new(AesMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
+                        .unwrap(),
+                    flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+                },
+            }),
+            Box::new(AesMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
+                        .unwrap(),
+                    flags: CKF_ENCRYPT
+                        | CKF_DECRYPT
+                        | CKF_WRAP
+                        | CKF_UNWRAP
+                        | CKF_MESSAGE_ENCRYPT
+                        | CKF_MESSAGE_DECRYPT
+                        | CKF_MULTI_MESSAGE,
+                },
+            }),
+            Box::new(AesMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
+                        .unwrap(),
+                    flags: CKF_ENCRYPT | CKF_DECRYPT,
+                },
+            }),
+            Box::new(AesMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
+                        .unwrap(),
+                    flags: CKF_GENERATE,
+                },
+            }),
+            Box::new(AesMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
+                        .unwrap(),
+                    flags: CKF_SIGN | CKF_VERIFY,
+                },
+            }),
+            Box::new(AesMechanism {
+                info: CK_MECHANISM_INFO {
+                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
+                        .unwrap(),
+                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
+                        .unwrap(),
+                    flags: CKF_DERIVE,
+                },
+            }),
+        ]
+    });
+
+/// The AES Key Factory facility.
+static AES_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(AesKeyFactory::new()));
+
+/// Registers all implemented AES Mechanisms and Factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    AesOperation::register_mechanisms(mechs);
+    AesKDFOperation::register_mechanisms(mechs);
+    #[cfg(not(feature = "fips"))]
+    AesMacOperation::register_mechanisms(mechs);
+    AesCmacOperation::register_mechanisms(mechs);
+
+    ot.add_factory(
+        ObjectType::new(CKO_SECRET_KEY, CKK_AES),
+        &(*AES_KEY_FACTORY),
+    );
+}
 
 /// The AES block size is 128 bits (16 bytes) for all currently implemented
 /// variants
@@ -191,14 +275,6 @@ impl SecretKeyFactory for AesKeyFactory {
     }
 }
 
-/// A statically allocated Key Factory facility.
-///
-/// Static allocation allows a single implementation to be shared by all users.
-/// Factories store data that does not change for the life of the application
-/// so it is safe to allocate them only once.
-static AES_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(AesKeyFactory::new()));
-
 /// The Generic AES Mechanism object
 ///
 /// Implements access to the Mechanisms functions applicable to the AES
@@ -210,18 +286,6 @@ static AES_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
 #[derive(Debug)]
 pub(crate) struct AesMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl AesMechanism {
-    pub fn new(min: CK_ULONG, max: CK_ULONG, flags: CK_FLAGS) -> AesMechanism {
-        AesMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: min,
-                ulMaxKeySize: max,
-                flags: flags,
-            },
-        }
-    }
 }
 
 impl Mechanism for AesMechanism {
@@ -518,24 +582,10 @@ impl AesKDFOperation<'_> {
     /// Helper function to register the AES KDF Mechanisms
     fn register_mechanisms(mechs: &mut Mechanisms) {
         if mechs.get(CKM_AES_ECB).is_ok() {
-            mechs.add_mechanism(
-                CKM_AES_ECB_ENCRYPT_DATA,
-                Box::new(AesMechanism::new(
-                    CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
-                    CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
-                    CKF_DERIVE,
-                )),
-            );
+            mechs.add_mechanism(CKM_AES_ECB_ENCRYPT_DATA, &(*AES_MECHS)[5]);
         }
         if mechs.get(CKM_AES_CBC).is_ok() {
-            mechs.add_mechanism(
-                CKM_AES_CBC_ENCRYPT_DATA,
-                Box::new(AesMechanism::new(
-                    CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
-                    CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
-                    CKF_DERIVE,
-                )),
-            );
+            mechs.add_mechanism(CKM_AES_CBC_ENCRYPT_DATA, &(*AES_MECHS)[5]);
         }
     }
 
@@ -647,15 +697,4 @@ impl Derive for AesKDFOperation<'_> {
         }
         Ok(vec![obj])
     }
-}
-
-/// Registers all implemented AES Mechanisms and Factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    AesOperation::register_mechanisms(mechs);
-    AesKDFOperation::register_mechanisms(mechs);
-    #[cfg(not(feature = "fips"))]
-    AesMacOperation::register_mechanisms(mechs);
-    AesCmacOperation::register_mechanisms(mechs);
-
-    ot.add_factory(ObjectType::new(CKO_SECRET_KEY, CKK_AES), &AES_KEY_FACTORY);
 }

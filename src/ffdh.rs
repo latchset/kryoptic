@@ -5,6 +5,7 @@
 //! Diffie-Hellman) key derivation.
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
@@ -15,12 +16,53 @@ use crate::object::*;
 use crate::ossl::ffdh::FFDHOperation;
 use crate::pkcs11::*;
 
-use once_cell::sync::Lazy;
-
 /// Minimum FFDH key size
 pub const MIN_DH_SIZE_BITS: CK_ULONG = 2048;
 /// Maximum FFDH key size
 pub const MAX_DH_SIZE_BITS: CK_ULONG = 8192;
+
+/// Object that holds Mechanisms for FFDH
+static FFDH_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(FFDHMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_DH_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_DH_SIZE_BITS).unwrap(),
+                flags: CKF_DERIVE,
+            },
+        }),
+        Box::new(FFDHMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_DH_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_DH_SIZE_BITS).unwrap(),
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+    ]
+});
+
+/// The static Public Key factory
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(FFDHPubFactory::new()));
+
+/// The static Private Key factory
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(FFDHPrivFactory::new()));
+
+/// Public entry to register the FFDH Mechanisms
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    mechs.add_mechanism(CKM_DH_PKCS_DERIVE, &(*FFDH_MECHS)[0]);
+    mechs.add_mechanism(CKM_DH_PKCS_KEY_PAIR_GEN, &(*FFDH_MECHS)[1]);
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_DH),
+        &(*PUBLIC_KEY_FACTORY),
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_DH),
+        &(*PRIVATE_KEY_FACTORY),
+    );
+}
 
 /// The FFDH Public-Key Factory
 #[derive(Debug, Default)]
@@ -156,37 +198,10 @@ impl CommonKeyFactory for FFDHPrivFactory {}
 
 impl PrivKeyFactory for FFDHPrivFactory {}
 
-/// The static Public Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(FFDHPubFactory::new()));
-
-/// The static Private Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(FFDHPrivFactory::new()));
-
 /// Object that represents an FFDH Mechanism
 #[derive(Debug)]
 pub struct FFDHMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl FFDHMechanism {
-    /// Helper function to instantiate a mechanism to be registered
-    pub fn new(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-        Box::new(FFDHMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_DH_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_DH_SIZE_BITS).unwrap(),
-                flags: flags,
-            },
-        })
-    }
 }
 
 impl Mechanism for FFDHMechanism {
@@ -276,18 +291,4 @@ impl Mechanism for FFDHMechanism {
 
         Ok((pubkey, privkey))
     }
-}
-
-/// Public entry to register the FFDH Mechanisms
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    FFDHOperation::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_DH),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_DH),
-        &PRIVATE_KEY_FACTORY,
-    );
 }

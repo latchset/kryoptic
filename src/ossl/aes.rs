@@ -52,15 +52,6 @@ fn object_to_raw_key(key: &Object) -> Result<AesKey> {
     Ok(AesKey { raw: val.clone() })
 }
 
-/// Helper function to allocate AesMechanism definition objects
-fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-    Box::new(AesMechanism::new(
-        CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
-        CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
-        flags,
-    ))
-}
-
 /// AES Initialization Vector Object
 ///
 /// Defines the characteristics of the IV to be used in the AES operation
@@ -186,27 +177,11 @@ impl AesOperation {
             CKM_AES_KEY_WRAP,
             CKM_AES_KEY_WRAP_KWP,
         ] {
-            mechs.add_mechanism(
-                *ckm,
-                new_mechanism(
-                    CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-                ),
-            );
+            mechs.add_mechanism(*ckm, &(*AES_MECHS)[0]);
         }
 
         for ckm in &[CKM_AES_GCM, CKM_AES_CCM] {
-            mechs.add_mechanism(
-                *ckm,
-                new_mechanism(
-                    CKF_ENCRYPT
-                        | CKF_DECRYPT
-                        | CKF_WRAP
-                        | CKF_UNWRAP
-                        | CKF_MESSAGE_ENCRYPT
-                        | CKF_MESSAGE_DECRYPT
-                        | CKF_MULTI_MESSAGE,
-                ),
-            );
+            mechs.add_mechanism(*ckm, &(*AES_MECHS)[1]);
         }
 
         #[cfg(not(feature = "fips"))]
@@ -217,10 +192,10 @@ impl AesOperation {
             CKM_AES_CFB8,
             /* OpenSSL does not implement AES CFB-64 */
         ] {
-            mechs.add_mechanism(*ckm, new_mechanism(CKF_ENCRYPT | CKF_DECRYPT));
+            mechs.add_mechanism(*ckm, &(*AES_MECHS)[2]);
         }
 
-        mechs.add_mechanism(CKM_AES_KEY_GEN, new_mechanism(CKF_GENERATE));
+        mechs.add_mechanism(CKM_AES_KEY_GEN, &(*AES_MECHS)[3]);
     }
 
     /// Parses the PKCS#11 mechanism parameters (`CK_MECHANISM`) and initializes
@@ -2473,7 +2448,7 @@ impl AesCmacOperation {
     /// Helper to register the CMAC mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[CKM_AES_CMAC, CKM_AES_CMAC_GENERAL] {
-            mechs.add_mechanism(*ckm, new_mechanism(CKF_SIGN | CKF_VERIFY));
+            mechs.add_mechanism(*ckm, &(*AES_MECHS)[4]);
         }
     }
 
@@ -2778,7 +2753,7 @@ impl AesMacOperation {
     /// Helper to register the MAC mechanisms
     pub fn register_mechanisms(mechs: &mut Mechanisms) {
         for ckm in &[CKM_AES_MAC, CKM_AES_MAC_GENERAL] {
-            mechs.add_mechanism(*ckm, new_mechanism(CKF_SIGN | CKF_VERIFY));
+            mechs.add_mechanism(*ckm, &(*AES_MECHS)[4]);
         }
     }
 

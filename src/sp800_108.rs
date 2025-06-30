@@ -7,6 +7,7 @@
 //! _Recommendation for Key Derivation Using Pseudorandom Functions_
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::error::{map_err, Result};
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
@@ -20,34 +21,26 @@ use crate::native::sp800_108::*;
 #[cfg(feature = "fips")]
 use crate::ossl::kbkdf::*;
 
+/// Object that holds Mechanisms for Sp800KDF
+static SP800_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(Sp800KDFMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: 0,
+            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
+            flags: CKF_DERIVE,
+        },
+    })
+});
+
+pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
+    for ckm in &[CKM_SP800_108_COUNTER_KDF, CKM_SP800_108_FEEDBACK_KDF] {
+        mechs.add_mechanism(*ckm, &SP800_KDF_MECH);
+    }
+}
+
 #[derive(Debug)]
 struct Sp800KDFMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl Sp800KDFMechanism {
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_SP800_108_COUNTER_KDF,
-            Box::new(Sp800KDFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_SP800_108_FEEDBACK_KDF,
-            Box::new(Sp800KDFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-    }
 }
 
 impl Mechanism for Sp800KDFMechanism {
@@ -231,8 +224,4 @@ pub fn verify_prf_key(mech: CK_MECHANISM_TYPE, key: &Object) -> Result<()> {
         CKM_AES_CMAC => check_key_op(key, CKK_AES),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
-}
-
-pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    Sp800KDFMechanism::register_mechanisms(mechs);
 }

@@ -6,6 +6,7 @@
 //! and verification for standard NIST curves (e.g., P-256, P-384, P-521).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::ec::*;
@@ -15,12 +16,67 @@ use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::ecdsa::EcdsaOperation;
 
-use once_cell::sync::Lazy;
-
 /// Minimum ECDSA key size
 pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
 /// Maximum ECDSA key size
 pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
+
+/// Object that holds Mechanisms for ECDSA
+static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(EcdsaMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+        Box::new(EcdsaMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+    ]
+});
+
+/// The static Public Key factory
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(ECDSAPubFactory::new()));
+
+/// The static Private Key factory
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(ECDSAPrivFactory::new()));
+
+/// Registers all CKK_EC related mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    for ckm in &[
+        CKM_ECDSA,
+        #[cfg(not(feature = "no_sha1"))]
+        CKM_ECDSA_SHA1,
+        CKM_ECDSA_SHA224,
+        CKM_ECDSA_SHA256,
+        CKM_ECDSA_SHA384,
+        CKM_ECDSA_SHA512,
+        CKM_ECDSA_SHA3_224,
+        CKM_ECDSA_SHA3_256,
+        CKM_ECDSA_SHA3_384,
+        CKM_ECDSA_SHA3_512,
+    ] {
+        mechs.add_mechanism(*ckm, &(*ECDSA_MECHS)[0]);
+    }
+    mechs.add_mechanism(CKM_EC_KEY_PAIR_GEN, &(*ECDSA_MECHS)[1]);
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),
+        &(*PUBLIC_KEY_FACTORY),
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_EC),
+        &(*PRIVATE_KEY_FACTORY),
+    );
+}
 
 /// The ECDSA Public-Key Factory
 #[derive(Debug, Default)]
@@ -221,41 +277,10 @@ impl PrivKeyFactory for ECDSAPrivFactory {
     }
 }
 
-/// The static Public Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ECDSAPubFactory::new()));
-
-/// The static Private Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ECDSAPrivFactory::new()));
-
 /// Object that represents CKK_EC related mechanisms
 #[derive(Debug)]
 pub struct EcdsaMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl EcdsaMechanism {
-    /// Instantiates a new ECDSA Mechanism
-    pub fn new(
-        min: CK_ULONG,
-        max: CK_ULONG,
-        flags: CK_FLAGS,
-    ) -> EcdsaMechanism {
-        EcdsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: min,
-                ulMaxKeySize: max,
-                flags: flags,
-            },
-        }
-    }
 }
 
 impl Mechanism for EcdsaMechanism {
@@ -369,18 +394,4 @@ impl Mechanism for EcdsaMechanism {
 
         Ok((pubkey, privkey))
     }
-}
-
-/// Registers all CKK_EC related mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    EcdsaOperation::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_EC),
-        &PRIVATE_KEY_FACTORY,
-    );
 }

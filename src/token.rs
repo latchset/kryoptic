@@ -109,6 +109,8 @@ pub struct Token {
     session_objects: HashMap<CK_OBJECT_HANDLE, Object>,
     /// Current login state (SO, User, or None).
     logged: CK_USER_TYPE,
+    /// Filtered list of mechanisms, if any
+    filtermechs: Option<Mechanisms>,
 }
 
 impl Token {
@@ -147,6 +149,7 @@ impl Token {
             storage: new_storage(dbtype, &dbargs)?,
             session_objects: HashMap::new(),
             logged: KRY_UNSPEC,
+            filtermechs: None,
         };
 
         /* register mechanisms and factories */
@@ -435,14 +438,31 @@ impl Token {
         self.clear_session_objects(handle);
     }
 
+    /// Sets a filtered mechanisms list with only the mechanism listed
+    pub fn set_mech_allow_list(&mut self, list: Vec<CK_MECHANISM_TYPE>) {
+        self.filtermechs =
+            Some(self.facilities.mechanisms.filter_copy(|k| list.contains(k)));
+    }
+
+    /// Sets a filtered mechanisms list with iall but the mechanism listed
+    pub fn set_mech_deny_list(&mut self, list: Vec<CK_ULONG>) {
+        self.filtermechs = Some(
+            self.facilities
+                .mechanisms
+                .filter_copy(|k| !list.contains(k)),
+        );
+    }
+
     /// Returns the number of mechanisms supported by the token.
     pub fn get_mechs_num(&self) -> usize {
-        self.facilities.mechanisms.len()
+        let mechanisms = self.get_mechanisms();
+        mechanisms.len()
     }
 
     /// Returns a list of all mechanism types supported by the token.
     pub fn get_mechs_list(&self) -> Vec<CK_MECHANISM_TYPE> {
-        self.facilities.mechanisms.list()
+        let mechanisms = self.get_mechanisms();
+        mechanisms.list()
     }
 
     /// Gets the `CK_MECHANISM_INFO` for a specific mechanism type.
@@ -451,7 +471,8 @@ impl Token {
         &self,
         typ: CK_MECHANISM_TYPE,
     ) -> Result<&CK_MECHANISM_INFO> {
-        match self.facilities.mechanisms.info(typ) {
+        let mechanisms = self.get_mechanisms();
+        match mechanisms.info(typ) {
             Some(m) => Ok(m),
             None => Err(CKR_MECHANISM_INVALID)?,
         }
@@ -459,6 +480,9 @@ impl Token {
 
     /// Gets a reference to the token's mechanism registry.
     pub fn get_mechanisms(&self) -> &Mechanisms {
+        if let Some(m) = &self.filtermechs {
+            return m;
+        }
         &self.facilities.mechanisms
     }
 

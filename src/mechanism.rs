@@ -188,7 +188,7 @@ pub trait Mechanism: Debug + Send + Sync {
 /// Object holding a B-Tree with all registered mechanism
 #[derive(Debug)]
 pub struct Mechanisms {
-    tree: BTreeMap<CK_MECHANISM_TYPE, Box<dyn Mechanism>>,
+    tree: BTreeMap<CK_MECHANISM_TYPE, &'static Box<dyn Mechanism>>,
 }
 
 impl Mechanisms {
@@ -199,11 +199,25 @@ impl Mechanisms {
         }
     }
 
+    /// Return iterator for the map
+    pub fn filter_copy<F>(&self, f: F) -> Mechanisms
+    where
+        F: Fn(&CK_ULONG) -> bool,
+    {
+        let mut mechs = Mechanisms::new();
+        for (k, v) in self.tree.iter() {
+            if f(k) {
+                mechs.add_mechanism(*k, v)
+            }
+        }
+        mechs
+    }
+
     /// Add a mechanism to the mechanism register
     pub fn add_mechanism(
         &mut self,
         typ: CK_MECHANISM_TYPE,
-        info: Box<dyn Mechanism>,
+        info: &'static Box<dyn Mechanism>,
     ) {
         self.tree.insert(typ, info);
     }

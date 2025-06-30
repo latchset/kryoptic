@@ -6,6 +6,7 @@
 //! [RFC 2104](https://www.rfc-editor.org/rfc/rfc2104)
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::error::{Error, Result};
 use crate::hash;
@@ -14,13 +15,107 @@ use crate::misc::{sizeof, zeromem};
 use crate::object::*;
 use crate::pkcs11::*;
 
-use once_cell::sync::Lazy;
-
 #[cfg(not(feature = "fips"))]
 use crate::native::hmac::HMACOperation;
 
 #[cfg(feature = "fips")]
 use crate::ossl::hmac::HMACOperation;
+
+/// Object that holds Mechanisms for HMAC
+static HMAC_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =
+    LazyLock::new(|| {
+        let mut v =
+            Vec::<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>::with_capacity(
+                hash::HASH_MECH_SET.len() * 2,
+            );
+        for hs in &hash::HASH_MECH_SET {
+            v.push((
+                hs.mac,
+                Box::new(HMACMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: 0,
+                        ulMaxKeySize: 0,
+                        flags: CKF_SIGN | CKF_VERIFY,
+                    },
+                    keytype: hs.key_type,
+                    minlen: hs.hash_size,
+                    maxlen: hs.hash_size,
+                }),
+            ));
+            v.push((
+                hs.mac_general,
+                Box::new(HMACMechanism {
+                    info: CK_MECHANISM_INFO {
+                        ulMinKeySize: 0,
+                        ulMaxKeySize: 0,
+                        flags: CKF_SIGN | CKF_VERIFY,
+                    },
+                    keytype: hs.key_type,
+                    minlen: 1,
+                    maxlen: hs.hash_size,
+                }),
+            ));
+        }
+        v
+    });
+
+/// Object that holds Key Operations Mechanisms for HMAC
+static HMAC_KEY_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =
+    LazyLock::new(|| {
+        let mut v =
+            Vec::<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>::with_capacity(
+                hash::HASH_MECH_SET.len(),
+            );
+        for hs in &hash::HASH_MECH_SET {
+            /* Key Operations */
+            v.push((
+                hs.key_gen,
+                Box::new(GenericSecretKeyMechanism::new(hs.key_type)),
+            ));
+        }
+        v
+    });
+
+/// Creates static key factories for each key type in HASH_MECH_SET
+/// at process initialization or on first use
+static HMAC_SECRET_KEY_FACTORIES: LazyLock<
+    Vec<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>,
+> = LazyLock::new(|| {
+    let mut v = Vec::<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>::with_capacity(
+        hash::HASH_MECH_SET.len(),
+    );
+    for hs in &hash::HASH_MECH_SET {
+        v.push((
+            hs.key_type,
+            Box::new(GenericSecretKeyFactory::with_key_size(hs.hash_size)),
+        ));
+    }
+    v
+});
+
+/// Internal function to register only the HMAC mechanisms
+///
+/// This is used to provide the `tlskdf` module internal direct
+/// access to HMAC primitives
+#[cfg(feature = "tlskdf")]
+pub fn register_mechs_only(mechs: &mut Mechanisms) {
+    for m in &(*HMAC_MECHS) {
+        mechs.add_mechanism(m.0, &m.1);
+    }
+}
+
+/// Registers all HMAC related mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    for m in &(*HMAC_MECHS) {
+        mechs.add_mechanism(m.0, &m.1);
+    }
+    for m in &(*HMAC_KEY_MECHS) {
+        mechs.add_mechanism(m.0, &m.1);
+    }
+    for f in &(*HMAC_SECRET_KEY_FACTORIES) {
+        ot.add_factory(ObjectType::new(CKO_SECRET_KEY, f.0), &f.1);
+    }
+}
 
 /// Structure that represents an HMAC Key
 #[derive(Debug)]
@@ -89,38 +184,6 @@ struct HMACMechanism {
 }
 
 impl HMACMechanism {
-    /// Internally register all HMAC mechanisms listed in `HASH_MECH_SET`
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for hs in &hash::HASH_MECH_SET {
-            mechs.add_mechanism(
-                hs.mac,
-                Box::new(HMACMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: 0,
-                        flags: CKF_SIGN | CKF_VERIFY,
-                    },
-                    keytype: hs.key_type,
-                    minlen: hs.hash_size,
-                    maxlen: hs.hash_size,
-                }),
-            );
-            mechs.add_mechanism(
-                hs.mac_general,
-                Box::new(HMACMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: 0,
-                        flags: CKF_SIGN | CKF_VERIFY,
-                    },
-                    keytype: hs.key_type,
-                    minlen: 1,
-                    maxlen: hs.hash_size,
-                }),
-            );
-        }
-    }
-
     /// Checks that a key object is usable by the HMAc mechanism and returns
     /// the internal raw key
     ///
@@ -255,48 +318,6 @@ impl Mechanism for HMACMechanism {
             CKF_VERIFY,
             Some(signature),
         )?))
-    }
-}
-
-/// Creates static key factories for each key type in HASH_MECH_SET
-/// at process initialization or on first use
-static HMAC_SECRET_KEY_FACTORIES: Lazy<
-    Vec<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>,
-> = Lazy::new(|| {
-    let mut v = Vec::<(CK_KEY_TYPE, Box<dyn ObjectFactory>)>::with_capacity(
-        hash::HASH_MECH_SET.len(),
-    );
-    for hs in &hash::HASH_MECH_SET {
-        v.push((
-            hs.key_type,
-            Box::new(GenericSecretKeyFactory::with_key_size(hs.hash_size)),
-        ));
-    }
-    v
-});
-
-/// Internal function to register only the HMAC mechanisms
-///
-/// This is used to provide the `tlskdf` module internal direct
-/// access to HMAC primitives
-#[cfg(feature = "tlskdf")]
-pub fn register_mechs_only(mechs: &mut Mechanisms) {
-    HMACMechanism::register_mechanisms(mechs);
-}
-
-/// Registers all HMAC related mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    HMACMechanism::register_mechanisms(mechs);
-
-    /* Key Operations */
-    for hs in &hash::HASH_MECH_SET {
-        mechs.add_mechanism(
-            hs.key_gen,
-            Box::new(GenericSecretKeyMechanism::new(hs.key_type)),
-        );
-    }
-    for f in Lazy::force(&HMAC_SECRET_KEY_FACTORIES) {
-        ot.add_factory(ObjectType::new(CKO_SECRET_KEY, f.0), &f.1);
     }
 }
 

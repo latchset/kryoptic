@@ -7,8 +7,8 @@
 //! according to [FIPS 204](https://doi.org/10.6028/NIST.FIPS.204):
 //! _Module-Lattice-Based Digital Signature Standard_
 
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
@@ -24,6 +24,63 @@ pub const ML_DSA_65_SK_SIZE: usize = 4032;
 pub const ML_DSA_65_PK_SIZE: usize = 1952;
 pub const ML_DSA_87_SK_SIZE: usize = 4896;
 pub const ML_DSA_87_PK_SIZE: usize = 2592;
+
+/// Object that holds Mechanisms for MLDSA
+static MLDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(MlDsaMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(ML_DSA_44_PK_SIZE).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(ML_DSA_87_PK_SIZE).unwrap(),
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+        Box::new(MlDsaMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(ML_DSA_44_PK_SIZE).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(ML_DSA_87_PK_SIZE).unwrap(),
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+    ]
+});
+
+/// The static Private Key factory
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(MlDsaPrivFactory::new()));
+
+/// The static Public Key factory
+/// after process startup
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(MlDsaPubFactory::new()));
+
+/// Registers all ML-DSA related mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    for ckm in &[
+        CKM_ML_DSA,
+        CKM_HASH_ML_DSA,
+        CKM_HASH_ML_DSA_SHA224,
+        CKM_HASH_ML_DSA_SHA256,
+        CKM_HASH_ML_DSA_SHA384,
+        CKM_HASH_ML_DSA_SHA512,
+        CKM_HASH_ML_DSA_SHA3_224,
+        CKM_HASH_ML_DSA_SHA3_256,
+        CKM_HASH_ML_DSA_SHA3_384,
+        CKM_HASH_ML_DSA_SHA3_512,
+    ] {
+        mechs.add_mechanism(*ckm, &(*MLDSA_MECHS)[0]);
+    }
+    mechs.add_mechanism(CKM_ML_DSA_KEY_PAIR_GEN, &(*MLDSA_MECHS)[1]);
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_ML_DSA),
+        &(*PUBLIC_KEY_FACTORY),
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_ML_DSA),
+        &(*PRIVATE_KEY_FACTORY),
+    );
+}
 
 /// Helper to check that the public key value size matches the
 /// declared ML-DSA parameter set
@@ -111,13 +168,6 @@ impl ObjectFactory for MlDsaPubFactory {
 impl CommonKeyFactory for MlDsaPubFactory {}
 
 impl PubKeyFactory for MlDsaPubFactory {}
-
-/// The static Public Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(MlDsaPubFactory::new()));
 
 /// Helper to check that the private key value size (if provided)
 /// matches the declared ML-DSA parameter set, and that the generation
@@ -253,56 +303,10 @@ impl PrivKeyFactory for MlDsaPrivFactory {
     }
 }
 
-/// The static Private Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(MlDsaPrivFactory::new()));
-
 /// Object that represents ML-DSA related mechanisms
 #[derive(Debug)]
 struct MlDsaMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl MlDsaMechanism {
-    /// Instantiates a new ML-DSA Mechanism
-    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-        Box::new(MlDsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(ML_DSA_44_PK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(ML_DSA_87_PK_SIZE).unwrap(),
-                flags: flags,
-            },
-        })
-    }
-
-    /// Registers all ML-DSA related mechanisms
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[
-            CKM_ML_DSA,
-            CKM_HASH_ML_DSA,
-            CKM_HASH_ML_DSA_SHA224,
-            CKM_HASH_ML_DSA_SHA256,
-            CKM_HASH_ML_DSA_SHA384,
-            CKM_HASH_ML_DSA_SHA512,
-            CKM_HASH_ML_DSA_SHA3_224,
-            CKM_HASH_ML_DSA_SHA3_256,
-            CKM_HASH_ML_DSA_SHA3_384,
-            CKM_HASH_ML_DSA_SHA3_512,
-        ] {
-            mechs.add_mechanism(
-                *ckm,
-                Self::new_mechanism(CKF_SIGN | CKF_VERIFY),
-            );
-        }
-
-        mechs.add_mechanism(
-            CKM_ML_DSA_KEY_PAIR_GEN,
-            Self::new_mechanism(CKF_GENERATE_KEY_PAIR),
-        );
-    }
 }
 
 impl Mechanism for MlDsaMechanism {
@@ -420,18 +424,4 @@ impl Mechanism for MlDsaMechanism {
 
         Ok((pubkey, privkey))
     }
-}
-
-/// Registers all ML-DSA related mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    MlDsaMechanism::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_ML_DSA),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_ML_DSA),
-        &PRIVATE_KEY_FACTORY,
-    );
 }
