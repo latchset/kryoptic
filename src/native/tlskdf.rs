@@ -7,6 +7,7 @@
 //! [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 #[cfg(feature = "fips")]
 use crate::attribute::Attribute;
@@ -19,7 +20,6 @@ use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 
 use constant_time_eq::constant_time_eq;
-use once_cell::sync::Lazy;
 
 #[cfg(feature = "fips")]
 use crate::fips::set_fips_error_state;
@@ -172,7 +172,7 @@ struct FIPSSelftest {
 /// FIPS error state and stores `CKR_FIPS_SELF_TEST_FAILED` in
 /// [FIPSSelfTest.result].
 #[cfg(feature = "fips")]
-static TLS_PRF_SELFTEST: Lazy<FIPSSelftest> = Lazy::new(|| {
+static TLS_PRF_SELFTEST: LazyLock<FIPSSelftest> = LazyLock::new(|| {
     let mut status = FIPSSelftest {
         result: CKR_FIPS_SELF_TEST_FAILED,
     };
@@ -291,8 +291,8 @@ impl TLSKDFOperation {
     /// feature is enabled.
     pub fn new(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         #[cfg(feature = "fips")]
-        if TLS_PRF_SELFTEST.result != CKR_OK {
-            return Err(TLS_PRF_SELFTEST.result)?;
+        if (*TLS_PRF_SELFTEST).result != CKR_OK {
+            return Err((*TLS_PRF_SELFTEST).result)?;
         }
 
         match mech.mechanism {
@@ -979,7 +979,7 @@ impl Derive for TLSKDFOperation {
 }
 
 /// Static collection of registered HMAC mechanisms for internal TLS MAC use
-static MAC_MECHANISMS: Lazy<Mechanisms> = Lazy::new(|| {
+static MAC_MECHANISMS: LazyLock<Mechanisms> = LazyLock::new(|| {
     let mut mechanisms = Mechanisms::new();
     register_mechs_only(&mut mechanisms);
     mechanisms
@@ -1009,8 +1009,8 @@ impl TLSMACOperation {
     /// and stores parameters.
     pub fn new(mech: &CK_MECHANISM, key: &Object) -> Result<TLSMACOperation> {
         #[cfg(feature = "fips")]
-        if TLS_PRF_SELFTEST.result != CKR_OK {
-            return Err(TLS_PRF_SELFTEST.result)?;
+        if (*TLS_PRF_SELFTEST).result != CKR_OK {
+            return Err((*TLS_PRF_SELFTEST).result)?;
         }
 
         match mech.mechanism {
@@ -1029,7 +1029,7 @@ impl TLSMACOperation {
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
-        let mac = MAC_MECHANISMS.get(prf)?;
+        let mac = (*MAC_MECHANISMS).get(prf)?;
 
         Ok(TLSMACOperation {
             mech: mech.mechanism,
