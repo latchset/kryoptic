@@ -31,7 +31,7 @@ pub fn token_init(token: &mut Token) -> Result<()> {
 pub fn register(_: &mut Mechanisms, ot: &mut ObjectFactories) {
     ot.add_factory(
         ObjectType::new(CKO_VALIDATION, 0),
-        &indicators::VALIDATION_FACTORY,
+        &(*indicators::VALIDATION_FACTORY),
     );
 }
 

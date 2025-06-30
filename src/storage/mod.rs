@@ -7,6 +7,7 @@
 //! storage backend implementations (e.g., JSON, SQLite, NSS DB).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::defaults;
 use crate::error::Result;
@@ -14,8 +15,6 @@ use crate::misc::copy_sized_string;
 use crate::object::Object;
 use crate::pkcs11::*;
 use crate::token::TokenFacilities;
-
-use once_cell::sync::Lazy;
 
 /// Structure holding basic token information stored persistently.
 #[derive(Clone, Debug)]
@@ -152,20 +151,21 @@ pub mod nssdb;
 
 /// Static list of available storage database backend information providers.
 /// Populated at runtime based on features enabled at compile time.
-static STORAGE_DBS: Lazy<Vec<&'static dyn StorageDBInfo>> = Lazy::new(|| {
-    let mut v = Vec::<&'static dyn StorageDBInfo>::with_capacity(4);
+static STORAGE_DBS: LazyLock<Vec<&'static dyn StorageDBInfo>> =
+    LazyLock::new(|| {
+        let mut v = Vec::<&'static dyn StorageDBInfo>::with_capacity(4);
 
-    #[cfg(feature = "memorydb")]
-    v.push(&memory::DBINFO);
+        #[cfg(feature = "memorydb")]
+        v.push(&memory::DBINFO);
 
-    #[cfg(feature = "sqlitedb")]
-    v.push(&sqlite::DBINFO);
+        #[cfg(feature = "sqlitedb")]
+        v.push(&sqlite::DBINFO);
 
-    #[cfg(feature = "nssdb")]
-    v.push(&nssdb::DBINFO);
+        #[cfg(feature = "nssdb")]
+        v.push(&nssdb::DBINFO);
 
-    v
-});
+        v
+    });
 
 /// Factory function to create a new storage backend instance.
 ///
@@ -175,9 +175,9 @@ pub fn new_storage(
     name: &str,
     conf: &Option<String>,
 ) -> Result<Box<dyn Storage>> {
-    for i in 0..STORAGE_DBS.len() {
-        if name == STORAGE_DBS[i].dbtype() {
-            return STORAGE_DBS[i].new(conf);
+    for i in 0..(*STORAGE_DBS).len() {
+        if name == (*STORAGE_DBS)[i].dbtype() {
+            return (*STORAGE_DBS)[i].new(conf);
         }
     }
     Err(CKR_TOKEN_NOT_RECOGNIZED)?

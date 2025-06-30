@@ -3,8 +3,8 @@
 
 /// The static instance of the library context lazily created on first use
 #[cfg(not(feature = "fips"))]
-static OSSL_CONTEXT: ::once_cell::sync::Lazy<::ossl::OsslContext> =
-    ::once_cell::sync::Lazy::new(|| ::ossl::OsslContext::new_lib_ctx());
+static OSSL_CONTEXT: ::std::sync::LazyLock<::ossl::OsslContext> =
+    ::std::sync::LazyLock::new(|| ::ossl::OsslContext::new_lib_ctx());
 
 pub mod aes;
 pub mod common;

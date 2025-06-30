@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::slice;
+use std::sync::LazyLock;
 
 use crate::bindings::*;
 use crate::pkey::EvpPkey;
@@ -21,7 +22,6 @@ use crate::{cstr, void_ptr, Error, ErrorKind, OsslContext};
 
 use getrandom;
 use libc;
-use once_cell::sync::Lazy;
 
 /* Entropy Stuff */
 unsafe extern "C" fn fips_get_entropy(
@@ -108,7 +108,7 @@ unsafe extern "C" fn fips_get_nonce(
     return out;
 }
 
-static FIPS_MODULE_FILE_NAME: Lazy<&CStr> = Lazy::new(|| {
+static FIPS_MODULE_FILE_NAME: LazyLock<&CStr> = LazyLock::new(|| {
     if cfg!(feature = "dummy-integrity") {
         c"./dummy.txt"
     } else {
@@ -168,7 +168,7 @@ unsafe extern "C" fn fips_get_params(
     set_config_string!(
         params,
         cstr!(OSSL_PROV_PARAM_CORE_MODULE_FILENAME),
-        FIPS_MODULE_FILE_NAME
+        *FIPS_MODULE_FILE_NAME
     );
 
     #[cfg(feature = "dummy-integrity")]
@@ -647,7 +647,7 @@ macro_rules! dispatcher_struct {
     };
 }
 
-static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
+static FIPS_PROVIDER: LazyLock<FipsProvider> = LazyLock::new(|| unsafe {
     let core_dispatch = [
         /* Seeding functions */
         dispatcher_struct!(args5; OSSL_FUNC_GET_ENTROPY; fips_get_entropy),
@@ -721,11 +721,11 @@ static FIPS_PROVIDER: Lazy<FipsProvider> = Lazy::new(|| unsafe {
 });
 
 pub fn init() {
-    assert!(FIPS_PROVIDER.provider != std::ptr::null_mut());
+    assert!((*FIPS_PROVIDER).provider != std::ptr::null_mut());
 }
 
 pub fn get_libctx() -> &'static OsslContext {
-    &FIPS_PROVIDER.context
+    &(*FIPS_PROVIDER).context
 }
 
 /* The Openssl FIPS indicator callback is inadequate for easily
@@ -861,9 +861,10 @@ impl ProviderSignatureCtx {
 
         let ctx = unsafe {
             match (*sigtable).newctx {
-                Some(f) => {
-                    f(FIPS_PROVIDER.provider as *mut c_void, std::ptr::null())
-                }
+                Some(f) => f(
+                    (*FIPS_PROVIDER).provider as *mut c_void,
+                    std::ptr::null(),
+                ),
                 None => return Err(Error::new(ErrorKind::NullPtr)),
             }
         };

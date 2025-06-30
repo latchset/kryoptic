@@ -39,7 +39,7 @@ pub fn osslctx() -> &'static OsslContext {
     }
     #[cfg(not(feature = "fips"))]
     {
-        &crate::ossl::OSSL_CONTEXT
+        &(*crate::ossl::OSSL_CONTEXT)
     }
 }
 

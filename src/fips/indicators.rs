@@ -1,6 +1,8 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::sync::LazyLock;
+
 use crate::attribute::Attribute;
 use crate::ec::{get_oid_from_obj, oid_to_bits};
 use crate::error::Result;
@@ -8,8 +10,6 @@ use crate::object::*;
 use crate::pkcs11::vendor::KRY_UNSPEC;
 use crate::pkcs11::*;
 use crate::Token;
-
-use once_cell::sync::Lazy;
 
 /// The flag returned in the CKA_VALIDATION_FLAG attribute
 ///
@@ -105,8 +105,8 @@ impl ObjectFactory for ValidationFactory {
 ///
 /// This is instantiated only once and finalized to make it unchangeable
 /// after process startup
-pub static VALIDATION_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ValidationFactory::new()));
+pub(crate) static VALIDATION_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(ValidationFactory::new()));
 
 /// Synthesize a FIPS CKO_VALIDATION object
 ///

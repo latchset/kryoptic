@@ -10,9 +10,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-
-use once_cell::sync::Lazy;
+use std::sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 mod attribute;
 mod config;
@@ -380,7 +378,7 @@ impl State {
 }
 
 /// Global, lazily initialized, read-write locked state for the PKCS#11 library.
-static STATE: Lazy<RwLock<State>> = Lazy::new(|| {
+static STATE: LazyLock<RwLock<State>> = LazyLock::new(|| {
     RwLock::new(State {
         slots: HashMap::new(),
         sessionmap: HashMap::new(),
@@ -403,7 +401,7 @@ macro_rules! global_rlock {
             Err(_) => return CKR_GENERAL_ERROR,
         }
     };
-    (noinitcheck $GLOBAL:expr) => {{
+    (noinitcheck; $GLOBAL:expr) => {{
         match $GLOBAL.read() {
             Ok(r) => r,
             Err(_) => return CKR_GENERAL_ERROR,
@@ -426,7 +424,7 @@ macro_rules! global_wlock {
             Err(_) => return CKR_GENERAL_ERROR,
         }
     }};
-    (noinitcheck $GLOBAL:expr) => {{
+    (noinitcheck; $GLOBAL:expr) => {{
         match $GLOBAL.write() {
             Ok(w) => w,
             Err(_) => return CKR_GENERAL_ERROR,
@@ -437,7 +435,7 @@ macro_rules! global_wlock {
 /// tests helper
 #[cfg(test)]
 pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
-    let state = match STATE.read() {
+    let state = match (*STATE).read() {
         Ok(r) => {
             if !r.is_initialized() {
                 return false;
@@ -493,7 +491,7 @@ struct GlobalConfig {
 }
 
 /// Global, lazily initialized, read-write locked configuration instance.
-static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
+static CONFIG: LazyLock<RwLock<GlobalConfig>> = LazyLock::new(|| {
     #[cfg(test)]
     let conf = Config::new();
 
@@ -513,7 +511,7 @@ static CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(|| {
 /// tests helper
 #[cfg(test)]
 pub fn add_slot(slot: config::Slot) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
     if gconf.conf.add_slot(slot).is_err() {
         return CKR_GENERAL_ERROR;
     }
@@ -525,7 +523,7 @@ pub fn add_slot(slot: config::Slot) -> CK_RV {
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255)
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
 
     if !_init_args.is_null() {
         let args = unsafe { *(_init_args as *const CK_C_INITIALIZE_ARGS) };
@@ -541,7 +539,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         }
     }
 
-    let mut wstate = global_wlock!(noinitcheck STATE);
+    let mut wstate = global_wlock!(noinitcheck; (*STATE));
     if !wstate.is_initialized() {
         wstate.initialize();
     }
@@ -576,7 +574,7 @@ fn force_load_config() -> CK_RV {
     if testconf.conf.slots.len() == 0 {
         return CKR_GENERAL_ERROR;
     }
-    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
     for slot in testconf.conf.slots {
         res_or_ret!(gconf.conf.add_slot(slot));
     }
@@ -585,14 +583,14 @@ fn force_load_config() -> CK_RV {
 
 #[cfg(all(test, feature = "eddsa"))]
 fn get_ec_point_encoding(save: &mut config::EcPointEncoding) -> CK_RV {
-    let gconf = global_rlock!(noinitcheck CONFIG);
+    let gconf = global_rlock!(noinitcheck; (*CONFIG));
     *save = gconf.conf.ec_point_encoding;
     CKR_OK
 }
 
 #[cfg(all(test, feature = "eddsa"))]
 fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck CONFIG);
+    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
     gconf.conf.ec_point_encoding = val;
     CKR_OK
 }
@@ -602,7 +600,7 @@ fn get_fips_behavior(
     slot_id: CK_SLOT_ID,
     save: &mut config::FipsBehavior,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let behavior = res_or_ret!(rstate.get_fips_behavior(slot_id));
     *save = behavior.clone();
     CKR_OK
@@ -610,7 +608,7 @@ fn get_fips_behavior(
 
 #[cfg(all(test, feature = "fips"))]
 fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
-    let mut wstate = global_wlock!(STATE);
+    let mut wstate = global_wlock!((*STATE));
     ret_to_rv!(wstate.set_fips_behavior(slot_id, val))
 }
 
@@ -619,7 +617,7 @@ fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256)
 
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
-    global_wlock!(STATE).finalize()
+    global_wlock!((*STATE)).finalize()
 }
 
 /// Implementation of C_GetMechanismList function
@@ -634,7 +632,7 @@ extern "C" fn fn_get_mechanism_list(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
     if mechanism_list.is_null() {
         let cnt = cast_or_ret!(CK_ULONG from token.get_mechs_num());
@@ -672,7 +670,7 @@ extern "C" fn fn_get_mechanism_info(
     typ: CK_MECHANISM_TYPE,
     info: CK_MECHANISM_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
     let mech = res_or_ret!(token.get_mech_info(typ));
     unsafe {
@@ -691,7 +689,7 @@ extern "C" fn fn_init_token(
     pin_len: CK_ULONG,
     label: CK_UTF8CHAR_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     if res_or_ret!(rstate.has_sessions(slot_id)) {
         return CKR_SESSION_EXISTS;
     }
@@ -722,7 +720,7 @@ extern "C" fn fn_init_pin(
     pin: CK_UTF8CHAR_PTR,
     pin_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
     if !token.is_logged_in(CKU_SO) {
         return CKR_USER_NOT_LOGGED_IN;
@@ -744,7 +742,7 @@ extern "C" fn fn_set_pin(
     new_pin: CK_UTF8CHAR_PTR,
     new_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     if !session.is_writable() {
         return CKR_SESSION_READ_ONLY;
@@ -786,7 +784,7 @@ extern "C" fn fn_open_session(
     _notify: CK_NOTIFY,
     ph_session: CK_SESSION_HANDLE_PTR,
 ) -> CK_RV {
-    let mut wstate = global_wlock!(STATE);
+    let mut wstate = global_wlock!((*STATE));
     let token = res_or_ret!(wstate.get_token_from_slot(slot_id));
     let mut user_type = CK_UNAVAILABLE_INFORMATION;
     if token.is_logged_in(CKU_SO) {
@@ -810,7 +808,7 @@ extern "C" fn fn_open_session(
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203273](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203273)
 
 extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let mut wstate = global_wlock!(STATE);
+    let mut wstate = global_wlock!((*STATE));
     let mut token = res_or_ret!(wstate.get_token_from_session_mut(s_handle));
     token.drop_session_objects(s_handle);
     drop(token);
@@ -823,7 +821,7 @@ extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203274](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203274)
 
 extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
-    let mut wstate = global_wlock!(STATE);
+    let mut wstate = global_wlock!((*STATE));
     let dropped_sessions = res_or_ret!(wstate.drop_all_sessions_slot(slot_id));
     let mut token = res_or_ret!(wstate.get_token_from_slot_mut(slot_id));
     for handle in dropped_sessions {
@@ -842,7 +840,7 @@ extern "C" fn fn_get_session_info(
     s_handle: CK_SESSION_HANDLE,
     info: CK_SESSION_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     unsafe {
         core::ptr::write(info as *mut _, *session.get_session_info());
@@ -886,7 +884,7 @@ extern "C" fn fn_login(
     pin: CK_UTF8CHAR_PTR,
     pin_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     /* avoid deadlock later when we change all sessions */
@@ -944,7 +942,7 @@ extern "C" fn fn_login(
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203281](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203281)
 
 extern "C" fn fn_logout(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     /* avoid deadlock later when we change all sessions */
@@ -979,7 +977,7 @@ extern "C" fn fn_create_object(
     count: CK_ULONG,
     object_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -1059,7 +1057,7 @@ extern "C" fn fn_copy_object(
     count: CK_ULONG,
     ph_new_object: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let tmpl: &mut [CK_ATTRIBUTE] =
@@ -1088,7 +1086,7 @@ extern "C" fn fn_destroy_object(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -1109,7 +1107,7 @@ extern "C" fn fn_get_object_size(
     o_handle: CK_OBJECT_HANDLE,
     size: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let token = res_or_ret!(rstate.get_token_from_session(s_handle));
     let len = cast_or_ret!(
         CK_ULONG from res_or_ret!(token.get_object_size(o_handle))
@@ -1137,7 +1135,7 @@ extern "C" fn fn_get_attribute_value(
     #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
     let ec_point_len = match tmpl.iter().find(|a| a.type_ == CKA_EC_POINT) {
         Some(a) => {
-            let gconf = global_rlock!(noinitcheck CONFIG);
+            let gconf = global_rlock!(noinitcheck; (*CONFIG));
             /* enable the whole thing only if we need to convert to backwards
              * compatible DER encoding */
             if gconf.conf.ec_point_encoding == config::EcPointEncoding::Der {
@@ -1151,7 +1149,7 @@ extern "C" fn fn_get_attribute_value(
         None => None,
     };
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
     let result = ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl));
 
@@ -1212,7 +1210,7 @@ extern "C" fn fn_set_attribute_value(
     template: CK_ATTRIBUTE_PTR,
     count: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -1240,7 +1238,7 @@ extern "C" fn fn_find_objects_init(
     template: CK_ATTRIBUTE_PTR,
     count: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -1263,7 +1261,7 @@ extern "C" fn fn_find_objects(
     if ph_object.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn SearchOperation>());
     let moc = cast_or_ret!(usize from max_object_count => CKR_ARGUMENTS_BAD);
@@ -1291,7 +1289,7 @@ extern "C" fn fn_find_objects(
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203291](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203291)
 
 extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     res_or_ret!(session.cancel_operation::<dyn SearchOperation>());
     CKR_OK
@@ -1351,7 +1349,7 @@ extern "C" fn fn_encrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Encryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -1387,7 +1385,7 @@ extern "C" fn fn_encrypt(
     if pdata.is_null() || pul_encrypted_data_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
     let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
@@ -1457,7 +1455,7 @@ extern "C" fn fn_encrypt_update(
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_encrypt_update(
         &mut session,
@@ -1477,7 +1475,7 @@ extern "C" fn fn_encrypt_final(
     last_encrypted_part: CK_BYTE_PTR,
     pul_last_encrypted_part_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     if last_encrypted_part.is_null() && pul_last_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
@@ -1517,7 +1515,7 @@ extern "C" fn fn_decrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Decryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -1553,7 +1551,7 @@ extern "C" fn fn_decrypt(
     if encrypted_data.is_null() || pul_data_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     let elen = cast_or_ret!(usize from encrypted_data_len => CKR_ARGUMENTS_BAD);
@@ -1625,7 +1623,7 @@ extern "C" fn fn_decrypt_update(
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_decrypt_update(
         &mut session,
@@ -1648,7 +1646,7 @@ extern "C" fn fn_decrypt_final(
     if last_part.is_null() && pul_last_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     let pplen = unsafe { *pul_last_part_len as CK_ULONG };
@@ -1684,7 +1682,7 @@ extern "C" fn fn_digest_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Digest; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -1714,7 +1712,7 @@ extern "C" fn fn_digest(
     if pdata.is_null() || pul_digest_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let digest_len = res_or_ret!(operation.digest_len());
@@ -1774,7 +1772,7 @@ extern "C" fn fn_digest_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_digest_update(&mut session, part, part_len))
 }
@@ -1787,7 +1785,7 @@ extern "C" fn fn_digest_key(
     s_handle: CK_SESSION_HANDLE,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
     let operation = res_or_ret!(session.get_operation::<dyn Digest>());
@@ -1827,7 +1825,7 @@ extern "C" fn fn_digest_final(
     if pul_digest_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let digest_len = res_or_ret!(operation.digest_len());
@@ -1869,7 +1867,7 @@ extern "C" fn fn_sign_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Sign; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -1905,7 +1903,7 @@ extern "C" fn fn_sign(
     if pdata.is_null() || pul_signature_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -1966,7 +1964,7 @@ extern "C" fn fn_sign_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_sign_update(&mut session, part, part_len))
 }
@@ -1983,7 +1981,7 @@ extern "C" fn fn_sign_final(
     if pul_signature_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -2051,7 +2049,7 @@ extern "C" fn fn_verify_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Verify; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -2087,7 +2085,7 @@ extern "C" fn fn_verify(
     if pdata.is_null() || psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -2135,7 +2133,7 @@ extern "C" fn fn_verify_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_verify_update(&mut session, part, part_len))
 }
@@ -2152,7 +2150,7 @@ extern "C" fn fn_verify_final(
     if psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -2213,7 +2211,7 @@ extern "C" fn fn_digest_encrypt_update(
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Digest>());
@@ -2246,7 +2244,7 @@ extern "C" fn fn_decrypt_digest_update(
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Digest>());
@@ -2280,7 +2278,7 @@ extern "C" fn fn_sign_encrypt_update(
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Sign>());
@@ -2313,7 +2311,7 @@ extern "C" fn fn_decrypt_verify_update(
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Verify>());
@@ -2344,7 +2342,7 @@ extern "C" fn fn_generate_key(
     count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -2417,7 +2415,7 @@ extern "C" fn fn_generate_key_pair(
     public_key: CK_OBJECT_HANDLE_PTR,
     private_key: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -2507,7 +2505,7 @@ extern "C" fn fn_wrap_key(
     wrapped_key: CK_BYTE_PTR,
     pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -2583,7 +2581,7 @@ extern "C" fn fn_unwrap_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -2662,7 +2660,7 @@ extern "C" fn fn_derive_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -2878,7 +2876,7 @@ extern "C" fn fn_seed_random(
     seed_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    drop(global_rlock!(STATE).get_session(s_handle));
+    drop(global_rlock!((*STATE)).get_session(s_handle));
     let len = cast_or_ret!(usize from seed_len);
     let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
     ret_to_rv!(random_add_seed(data))
@@ -2894,7 +2892,7 @@ extern "C" fn fn_generate_random(
     random_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    drop(global_rlock!(STATE).get_session(s_handle));
+    drop(global_rlock!((*STATE)).get_session(s_handle));
     let rndlen = cast_or_ret!(usize from random_len);
     let data: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
@@ -3019,7 +3017,7 @@ extern "C" fn fn_get_slot_list(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let slotids = global_rlock!(STATE).get_slots_ids();
+    let slotids = global_rlock!((*STATE)).get_slots_ids();
     let silen = cast_or_ret!(CK_ULONG from slotids.len());
     if slot_list.is_null() {
         unsafe {
@@ -3053,7 +3051,7 @@ extern "C" fn fn_get_slot_info(
     slot_id: CK_SLOT_ID,
     info: CK_SLOT_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let slot = match rstate.get_slot(slot_id) {
         Ok(s) => s,
         Err(e) => return e.rv(),
@@ -3073,7 +3071,7 @@ extern "C" fn fn_get_token_info(
     slot_id: CK_SLOT_ID,
     info: CK_TOKEN_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let slot = match rstate.get_slot(slot_id) {
         Ok(s) => s,
         Err(e) => return e.rv(),
@@ -3163,7 +3161,7 @@ extern "C" fn fn_session_cancel(
     s_handle: CK_SESSION_HANDLE,
     flags: CK_FLAGS,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let mut res = CKR_OK;
 
@@ -3227,7 +3225,7 @@ extern "C" fn fn_message_encrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; MsgEncryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -3279,7 +3277,7 @@ extern "C" fn fn_encrypt_message(
     let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
     let clen = cast_or_ret!(usize from pclen => CKR_ARGUMENTS_BAD);
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if operation.busy() {
@@ -3342,7 +3340,7 @@ extern "C" fn fn_encrypt_message_begin(
         usize from associated_data_len => CKR_ARGUMENTS_BAD
     );
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
 
@@ -3402,7 +3400,7 @@ extern "C" fn fn_encrypt_message_next(
         _ => return CKR_ARGUMENTS_BAD,
     };
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if !operation.busy() {
@@ -3454,7 +3452,7 @@ extern "C" fn fn_encrypt_message_next(
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203302](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203302)
 
 extern "C" fn fn_message_encrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     ret_to_rv!(operation.finalize())
@@ -3469,7 +3467,7 @@ extern "C" fn fn_message_decrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; MsgDecryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -3521,7 +3519,7 @@ extern "C" fn fn_decrypt_message(
     let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
     let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if operation.busy() {
@@ -3584,7 +3582,7 @@ extern "C" fn fn_decrypt_message_begin(
         usize from associated_data_len => CKR_ARGUMENTS_BAD
     );
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
 
@@ -3645,7 +3643,7 @@ extern "C" fn fn_decrypt_message_next(
         _ => return CKR_ARGUMENTS_BAD,
     };
 
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if !operation.busy() {
@@ -3697,7 +3695,7 @@ extern "C" fn fn_decrypt_message_next(
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203313](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203313)
 
 extern "C" fn fn_message_decrypt_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     ret_to_rv!(operation.finalize())
@@ -3942,7 +3940,7 @@ extern "C" fn fn_encapsulate_key(
     encrypted_part_len: *mut CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -4035,7 +4033,7 @@ extern "C" fn fn_decapsulate_key(
     encrypted_part_len: CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -4110,7 +4108,7 @@ extern "C" fn fn_verify_signature_init(
     psignature: *mut CK_BYTE,
     psignature_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Verify; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -4148,7 +4146,7 @@ extern "C" fn fn_verify_signature(
     if pdata.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
     let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
@@ -4176,7 +4174,7 @@ extern "C" fn fn_verify_signature_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
     let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
@@ -4189,7 +4187,7 @@ extern "C" fn fn_verify_signature_update(
 /// Version 3.2 Specification: [Link TBD]
 
 extern "C" fn fn_verify_signature_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!(STATE);
+    let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
     let ret = ret_to_rv!(operation.verify_final());
@@ -4215,7 +4213,7 @@ extern "C" fn fn_get_session_validation_flags(
     let flags: CK_FLAGS = if flags_type != CKS_LAST_VALIDATION_OK {
         0
     } else {
-        let rstate = global_rlock!(STATE);
+        let rstate = global_rlock!((*STATE));
         let session = res_or_ret!(rstate.get_session(s_handle));
 
         session.get_last_validation_flags()
@@ -4425,7 +4423,7 @@ unsafe impl Send for InterfaceData {}
 
 /// The set of known interfaces we can return to applications
 
-static INTERFACE_SET: Lazy<Vec<InterfaceData>> = Lazy::new(|| {
+static INTERFACE_SET: LazyLock<Vec<InterfaceData>> = LazyLock::new(|| {
     let mut v = Vec::with_capacity(3);
     v.push(InterfaceData {
         interface: std::ptr::addr_of!(INTERFACE_320),
@@ -4461,7 +4459,7 @@ pub extern "C" fn fn_get_interface_list(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let iflen = cast_or_ret!(CK_ULONG from INTERFACE_SET.len());
+    let iflen = cast_or_ret!(CK_ULONG from (*INTERFACE_SET).len());
     if interfaces_list.is_null() {
         unsafe {
             *count = iflen;
@@ -4473,12 +4471,12 @@ pub extern "C" fn fn_get_interface_list(
             return CKR_BUFFER_TOO_SMALL;
         }
     }
-    for i in 0..INTERFACE_SET.len() {
+    for i in 0..(*INTERFACE_SET).len() {
         let offset = cast_or_ret!(isize from i);
         unsafe {
             core::ptr::write(
                 interfaces_list.offset(offset) as *mut CK_INTERFACE,
-                *(INTERFACE_SET[i].interface),
+                *((*INTERFACE_SET)[i].interface),
             );
         }
     }
@@ -4521,7 +4519,7 @@ pub extern "C" fn fn_get_interface(
         interface_name
     };
 
-    for intf in INTERFACE_SET.iter() {
+    for intf in (*INTERFACE_SET).iter() {
         let found: bool = unsafe {
             let name = (*intf.interface).pInterfaceName as *const c_char;
             libc::strcmp(request_name as *const c_char, name) == 0
