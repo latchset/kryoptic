@@ -6,6 +6,7 @@
 //! Section 5.2
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
@@ -21,9 +22,20 @@ use crate::native::pbkdf2::pbkdf2_derive;
 #[cfg(feature = "fips")]
 use crate::ossl::pbkdf2::pbkdf2_derive;
 
+/// Object that holds Mechanisms for PBKDF2
+static PBKDF2_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(PBKDF2Mechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: 0,
+            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
+            flags: CKF_GENERATE,
+        },
+    })
+});
+
 /// Registers the PBKDF2 mechanism (`CKM_PKCS5_PBKD2`).
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    PBKDF2Mechanism::register_mechanisms(mechs);
+    mechs.add_mechanism(CKM_PKCS5_PBKD2, &PBKDF2_MECH);
 }
 
 /// Structure representing the CKM_PKCS5_PBKD2 mechanism implementation.
@@ -34,22 +46,6 @@ struct PBKDF2Mechanism {
 }
 
 impl PBKDF2Mechanism {
-    /// Static method to register the CKM_PKCS5_PBKD2 mechanism.
-    /// Note: PKCS#11 defines this as a key generation mechanism (`CKF_GENERATE`),
-    /// even though it's functionally a derivation.
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_PKCS5_PBKD2,
-            Box::new(PBKDF2Mechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                    flags: CKF_GENERATE,
-                },
-            }),
-        );
-    }
-
     /// Creates a temporary `Object` representing the input password/secret.
     ///
     /// This is needed because the underlying PBKDF2 implementation (native or

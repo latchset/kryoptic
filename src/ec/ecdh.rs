@@ -5,6 +5,7 @@
 //! Diffie-Hellman) key derivation.
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::ec::ecdsa::{MAX_EC_SIZE_BITS, MIN_EC_SIZE_BITS};
 use crate::error::Result;
@@ -14,35 +15,28 @@ use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
 use crate::pkcs11::*;
 
+/// Object that holds Mechanisms for ECDH
+static ECDH_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(ECDHMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
+            ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
+            flags: CKF_DERIVE,
+        },
+    })
+});
+
 /// Public entry to register the ECDH Mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    ECDHMechanism::register_mechanisms(mechs);
+    for ckm in &[CKM_ECDH1_DERIVE, CKM_ECDH1_COFACTOR_DERIVE] {
+        mechs.add_mechanism(*ckm, &ECDH_MECH);
+    }
 }
 
 /// Object that represents an ECDH Mechanism
 #[derive(Debug)]
 struct ECDHMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl ECDHMechanism {
-    /// Helper function to instantiate a mechanism to be registered
-    fn new_mechanism() -> Box<dyn Mechanism> {
-        Box::new(ECDHMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_DERIVE,
-            },
-        })
-    }
-
-    /// Actual implementation of mechanism registration
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[CKM_ECDH1_DERIVE, CKM_ECDH1_COFACTOR_DERIVE] {
-            mechs.add_mechanism(*ckm, Self::new_mechanism());
-        }
-    }
 }
 
 impl Mechanism for ECDHMechanism {

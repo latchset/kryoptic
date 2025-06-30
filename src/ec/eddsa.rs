@@ -7,6 +7,7 @@
 //! [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::ec::*;
@@ -16,10 +17,51 @@ use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::eddsa::*;
 
-use once_cell::sync::Lazy;
-
 pub const MIN_EDDSA_SIZE_BITS: usize = BITS_ED25519;
 pub const MAX_EDDSA_SIZE_BITS: usize = BITS_ED448;
+
+/// Object that holds Mechanisms for EDDSA
+static EDDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(EddsaMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS).unwrap(),
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+        Box::new(EddsaMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS).unwrap(),
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+    ]
+});
+
+/// The static Public Key factory
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(EDDSAPubFactory::new()));
+
+/// The static Private Key factory
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(EDDSAPrivFactory::new()));
+
+/// Registers all EdDSA related mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    mechs.add_mechanism(CKM_EDDSA, &(*EDDSA_MECHS)[0]);
+    mechs.add_mechanism(CKM_EC_EDWARDS_KEY_PAIR_GEN, &(*EDDSA_MECHS)[1]);
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_EDWARDS),
+        &(*PUBLIC_KEY_FACTORY),
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_EC_EDWARDS),
+        &(*PRIVATE_KEY_FACTORY),
+    );
+}
 
 /// The EdDSA-Edwards Public-Key Factory
 #[derive(Debug, Default)]
@@ -233,55 +275,10 @@ impl PrivKeyFactory for EDDSAPrivFactory {
     }
 }
 
-/// The static Public Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(EDDSAPubFactory::new()));
-
-/// The static Private Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(EDDSAPrivFactory::new()));
-
 /// Object that represents EdDSA related mechanisms
 #[derive(Debug)]
 struct EddsaMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl EddsaMechanism {
-    /// Actual implementation of mechanism registration
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_EDDSA,
-            Box::new(EddsaMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-
-        mechs.add_mechanism(
-            CKM_EC_EDWARDS_KEY_PAIR_GEN,
-            Box::new(EddsaMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS)
-                        .unwrap(),
-                    flags: CKF_GENERATE_KEY_PAIR,
-                },
-            }),
-        );
-    }
 }
 
 impl Mechanism for EddsaMechanism {
@@ -392,18 +389,4 @@ impl Mechanism for EddsaMechanism {
 
         Ok((pubkey, privkey))
     }
-}
-
-/// Registers all EdDSA related mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    EddsaMechanism::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_EDWARDS),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_EC_EDWARDS),
-        &PRIVATE_KEY_FACTORY,
-    );
 }

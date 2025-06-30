@@ -6,6 +6,7 @@
 //! [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748)
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::ec::montgomery::montgomery::ECMontgomeryOperation;
@@ -16,7 +17,40 @@ use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::montgomery;
 
-use once_cell::sync::Lazy;
+/// Object that holds Mechanisms for Montgomery Ecc
+static MONTGOMERY_MECHS: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(ECMontgomeryMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: CK_ULONG::try_from(MIN_EC_MONTGOMERY_SIZE_BITS)
+                .unwrap(),
+            ulMaxKeySize: CK_ULONG::try_from(MAX_EC_MONTGOMERY_SIZE_BITS)
+                .unwrap(),
+            flags: CKF_GENERATE_KEY_PAIR,
+        },
+    })
+});
+
+/// The static Public Key factory
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(ECMontgomeryPubFactory::new()));
+
+/// The static Private Key factory
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(ECMontgomeryPrivFactory::new()));
+
+/// Registers all CKK_EC_MONTGOMERY related mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    mechs.add_mechanism(CKM_EC_MONTGOMERY_KEY_PAIR_GEN, &(*MONTGOMERY_MECHS));
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_MONTGOMERY),
+        &(*PUBLIC_KEY_FACTORY),
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_EC_MONTGOMERY),
+        &(*PRIVATE_KEY_FACTORY),
+    );
+}
 
 pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X25519;
 pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X448;
@@ -224,48 +258,10 @@ impl PrivKeyFactory for ECMontgomeryPrivFactory {
     }
 }
 
-/// The static Public Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ECMontgomeryPubFactory::new()));
-
-/// The static Private Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(ECMontgomeryPrivFactory::new()));
-
 /// Object that represents CKK_EC_MONTGOMERY related mechanisms
 #[derive(Debug)]
 struct ECMontgomeryMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl ECMontgomeryMechanism {
-    /// Actual implementation of mechanism registration
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        /* TODO PKCS #11 defines also CKM_XEDDSA for signatures, but it is not implemented by
-         * OpenSSL */
-        mechs.add_mechanism(
-            CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
-            Box::new(ECMontgomeryMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(
-                        MIN_EC_MONTGOMERY_SIZE_BITS,
-                    )
-                    .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(
-                        MAX_EC_MONTGOMERY_SIZE_BITS,
-                    )
-                    .unwrap(),
-                    flags: CKF_GENERATE_KEY_PAIR,
-                },
-            }),
-        );
-    }
 }
 
 impl Mechanism for ECMontgomeryMechanism {
@@ -328,18 +324,4 @@ impl Mechanism for ECMontgomeryMechanism {
 
         Ok((pubkey, privkey))
     }
-}
-
-/// Registers all CKK_EC_MONTGOMERY related mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    ECMontgomeryMechanism::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_MONTGOMERY),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_EC_MONTGOMERY),
-        &PRIVATE_KEY_FACTORY,
-    );
 }

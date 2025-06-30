@@ -6,6 +6,7 @@
 //! [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246).
 
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::error::Result;
 use crate::mechanism::*;
@@ -16,108 +17,55 @@ use crate::pkcs11::*;
 #[cfg(feature = "fips")]
 use crate::fips::check_fips_state_ok;
 
+/// Object that holds Mechanisms for TLS
+static TLS_MECHS: LazyLock<[Box<dyn Mechanism>; 3]> = LazyLock::new(|| {
+    [
+        Box::new(TLSPRFMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: TLS_MASTER_SECRET_SIZE,
+                ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
+                flags: CKF_DERIVE,
+            },
+        }),
+        Box::new(TLSPRFMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: u32::MAX as CK_ULONG,
+                flags: CKF_DERIVE,
+            },
+        }),
+        Box::new(TLSPRFMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: 0,
+                ulMaxKeySize: u32::MAX as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY,
+            },
+        }),
+    ]
+});
+
+/// Registers all TLS mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    TLSPRFMechanism::register_mechanisms(mechs);
+    for ckm in &[
+        CKM_TLS_KDF,
+        CKM_TLS12_KDF,
+        CKM_TLS12_MASTER_KEY_DERIVE,
+        CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+        CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
+    ] {
+        mechs.add_mechanism(*ckm, &TLS_MECHS[0]);
+    }
+    for ckm in &[CKM_TLS12_KEY_AND_MAC_DERIVE, CKM_TLS12_KEY_SAFE_DERIVE] {
+        mechs.add_mechanism(*ckm, &TLS_MECHS[1]);
+    }
+    for ckm in &[CKM_TLS_MAC, CKM_TLS12_MAC] {
+        mechs.add_mechanism(*ckm, &TLS_MECHS[2]);
+    }
 }
 
 #[derive(Debug)]
 struct TLSPRFMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl TLSPRFMechanism {
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_TLS12_MASTER_KEY_DERIVE,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
-                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS12_KEY_AND_MAC_DERIVE,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: u32::MAX as CK_ULONG,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS12_KEY_SAFE_DERIVE,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: u32::MAX as CK_ULONG,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS_MAC,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: u32::MAX as CK_ULONG,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS12_MAC,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: u32::MAX as CK_ULONG,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS_KDF,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
-                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS12_KDF,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
-                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
-                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-        mechs.add_mechanism(
-            CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
-            Box::new(TLSPRFMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: TLS_MASTER_SECRET_SIZE,
-                    ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
-                    flags: CKF_DERIVE,
-                },
-            }),
-        );
-    }
 }
 
 impl Mechanism for TLSPRFMechanism {

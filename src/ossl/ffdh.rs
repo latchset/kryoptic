@@ -9,7 +9,6 @@ use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::{Error, Result};
-use crate::ffdh::FFDHMechanism;
 use crate::ffdh_groups::{get_group_name, group_prime, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::zeromem;
@@ -148,15 +147,6 @@ impl FFDHOperation {
         }
 
         Ok(())
-    }
-
-    /// Actual implementation of mechanism registration
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(CKM_DH_PKCS_DERIVE, FFDHMechanism::new(CKF_DERIVE));
-        mechs.add_mechanism(
-            CKM_DH_PKCS_KEY_PAIR_GEN,
-            FFDHMechanism::new(CKF_GENERATE_KEY_PAIR),
-        );
     }
 }
 

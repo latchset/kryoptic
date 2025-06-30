@@ -8,8 +8,8 @@
 //! It handles key pair generation, key encapsulation, and key
 //! decapsulation operations.
 
-use once_cell::sync::Lazy;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::Attribute;
 use crate::error::Result;
@@ -30,6 +30,49 @@ pub const ML_KEM_1024_DK_SIZE: usize = 3168;
 pub const ML_KEM_512_CIPHERTEXT_BYTES: usize = 768;
 pub const ML_KEM_768_CIPHERTEXT_BYTES: usize = 1088;
 pub const ML_KEM_1024_CIPHERTEXT_BYTES: usize = 1568;
+
+/// Object that holds Mechanisms for MLKEM
+static MLKEM_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(MlKemMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(ML_KEM_512_EK_SIZE).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(ML_KEM_1024_EK_SIZE).unwrap(),
+                flags: CKF_ENCAPSULATE | CKF_DECAPSULATE,
+            },
+        }),
+        Box::new(MlKemMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(ML_KEM_512_EK_SIZE).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(ML_KEM_1024_EK_SIZE).unwrap(),
+                flags: CKF_GENERATE_KEY_PAIR,
+            },
+        }),
+    ]
+});
+
+/// The static Public Key factory
+static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(MlKemPubFactory::new()));
+
+/// The static Private Key factory
+static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(MlKemPrivFactory::new()));
+
+/// Registers all ML-KEM related mechanisms and key factories
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
+    mechs.add_mechanism(CKM_ML_KEM, &(*MLKEM_MECHS)[0]);
+    mechs.add_mechanism(CKM_ML_KEM_KEY_PAIR_GEN, &(*MLKEM_MECHS)[1]);
+
+    ot.add_factory(
+        ObjectType::new(CKO_PUBLIC_KEY, CKK_ML_KEM),
+        &PUBLIC_KEY_FACTORY,
+    );
+    ot.add_factory(
+        ObjectType::new(CKO_PRIVATE_KEY, CKK_ML_KEM),
+        &PRIVATE_KEY_FACTORY,
+    );
+}
 
 /// Helper to check that the public key value size matches the
 /// declared ML-KEM parameter set
@@ -117,13 +160,6 @@ impl ObjectFactory for MlKemPubFactory {
 impl CommonKeyFactory for MlKemPubFactory {}
 
 impl PubKeyFactory for MlKemPubFactory {}
-
-/// The static Public Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PUBLIC_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(MlKemPubFactory::new()));
 
 /// Helper to check that the private key value size (if provided)
 /// matches the declared ML-KEM parameter set, and that the generation
@@ -268,43 +304,10 @@ impl PrivKeyFactory for MlKemPrivFactory {
     }
 }
 
-/// The static Private Key factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static PRIVATE_KEY_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(MlKemPrivFactory::new()));
-
 /// Object that represents ML-KEM related mechanisms
 #[derive(Debug)]
 struct MlKemMechanism {
     info: CK_MECHANISM_INFO,
-}
-
-impl MlKemMechanism {
-    /// Instantiates a new ML-KEM Mechanism
-    fn new_mechanism(flags: CK_FLAGS) -> Box<dyn Mechanism> {
-        Box::new(MlKemMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(ML_KEM_512_EK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(ML_KEM_1024_EK_SIZE).unwrap(),
-                flags: flags,
-            },
-        })
-    }
-
-    /// Registers all ML-KEM related mechanisms
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(
-            CKM_ML_KEM,
-            Self::new_mechanism(CKF_ENCAPSULATE | CKF_DECAPSULATE),
-        );
-
-        mechs.add_mechanism(
-            CKM_ML_KEM_KEY_PAIR_GEN,
-            Self::new_mechanism(CKF_GENERATE_KEY_PAIR),
-        );
-    }
 }
 
 impl Mechanism for MlKemMechanism {
@@ -425,18 +428,4 @@ impl Mechanism for MlKemMechanism {
 
         Ok((pubkey, privkey))
     }
-}
-
-/// Registers all ML-KEM related mechanisms and key factories
-pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    MlKemMechanism::register_mechanisms(mechs);
-
-    ot.add_factory(
-        ObjectType::new(CKO_PUBLIC_KEY, CKK_ML_KEM),
-        &PUBLIC_KEY_FACTORY,
-    );
-    ot.add_factory(
-        ObjectType::new(CKO_PRIVATE_KEY, CKK_ML_KEM),
-        &PRIVATE_KEY_FACTORY,
-    );
 }

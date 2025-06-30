@@ -17,6 +17,16 @@ use serde::de;
 use serde::{Deserialize, Serialize};
 use toml;
 
+macro_rules! trace_config {
+    ($err:expr, $val:expr) => {
+        #[cfg(feature = "log")]
+        {
+            use log::error;
+            error!("{}:{}: {} {}", file!(), line!(), $err, $val,);
+        }
+    };
+}
+
 #[cfg(test)]
 use crate::pkcs11::vendor::KRR_SLOT_CONFIG;
 
@@ -75,6 +85,15 @@ pub struct Slot {
     pub dbtype: Option<String>,
     /// Storage specific configuration options
     pub dbargs: Option<String>,
+    /// List of allowed mechanisms, if set changes the list
+    /// of mechanism this token claims are implemented.
+    /// NOTE: this can be an allow list like ["CKM_SHA256", ...] where
+    /// only the explicitly mentioned mechanism are available or it can
+    /// be a deny list where the first element must be the string "DENY",
+    /// followed by the mechanism to remove as in ["DENY", "CKM_SHA256"]
+    /// Using "DENY" in any position but the first is not supported and
+    /// will cause an error.
+    pub mechanisms: Option<Vec<String>>,
     /// The FIPS Behavior for the token
     #[cfg(feature = "fips")]
     #[serde(default)]
@@ -92,6 +111,7 @@ impl Slot {
             manufacturer: None,
             dbtype: None,
             dbargs: None,
+            mechanisms: None,
             #[cfg(feature = "fips")]
             fips_behavior: FipsBehavior::default(),
         }
@@ -108,6 +128,7 @@ impl Slot {
             manufacturer: None,
             dbtype: Some(dbtype.to_string()),
             dbargs: dbargs,
+            mechanisms: None,
             #[cfg(feature = "fips")]
             fips_behavior: FipsBehavior {
                 keys_always_sensitive: if dbtype == "nssdb" {
@@ -117,6 +138,45 @@ impl Slot {
                 },
             },
         }
+    }
+
+    /// Parses the configurations option listing mechanisms and produces
+    /// either an allow list or a deny list or none at all.
+    /// Returns an error if the list cannot be parsed successfully.
+    /// The returned boolean indicates if the vector is a deny list.
+    pub fn mech_list(&self) -> Result<(Option<Vec<CK_ULONG>>, bool)> {
+        let list = match &self.mechanisms {
+            Some(l) => l,
+            None => return Ok((None, false)),
+        };
+
+        let mut vec = Vec::<CK_ULONG>::with_capacity(list.len());
+        let mut deny = false;
+        let mut idx = 0;
+        while idx < list.len() {
+            if idx == 0 {
+                if list[0] == "DENY" {
+                    trace_config!("mechanism list type is", "deny");
+                    deny = true;
+                    idx += 1;
+                    continue;
+                } else {
+                    trace_config!("mechanism list type is", "allow");
+                }
+            }
+
+            let mech = match name_to_mech(&list[idx]) {
+                Ok(m) => m,
+                Err(e) => {
+                    trace_config!("invalid mechanism name:", &list[idx]);
+                    return Err(e);
+                }
+            };
+            vec.push(mech);
+            idx += 1;
+        }
+
+        Ok((Some(vec), deny))
     }
 }
 

@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
@@ -20,7 +21,6 @@ use crate::pkcs11::*;
 use crate::CSPRNG;
 
 use bitflags::bitflags;
-use once_cell::sync::Lazy;
 use uuid::Uuid;
 
 /// Helper macro that generates methods to check specific boolean
@@ -1942,42 +1942,35 @@ impl ObjectFactories {
     }
 }
 
+/// Object that holds Mechanisms for Generic Secrets
+static GENERIC_SECRET: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(GenericSecretKeyMechanism::new(CKK_GENERIC_SECRET))
+});
+
 /// The static Data Object factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static DATA_OBJECT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(DataFactory::new()));
+static DATA_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(DataFactory::new()));
 
 /// The static X509 Certificate factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static X509_CERT_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(X509Factory::new()));
+static X509_CERT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(X509Factory::new()));
 
 /// The static Generic Secret factory
-///
-/// This is instantiated only once and finalized to make it unchangeable
-/// after process startup
-static GENERIC_SECRET_FACTORY: Lazy<Box<dyn ObjectFactory>> =
-    Lazy::new(|| Box::new(GenericSecretKeyFactory::new()));
+static GENERIC_SECRET_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(GenericSecretKeyFactory::new()));
 
 /// Registers mechanisms and key factories for Data Objects, X509
 /// Certificates and Generic Secret Keys
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    mechs.add_mechanism(
-        CKM_GENERIC_SECRET_KEY_GEN,
-        Box::new(GenericSecretKeyMechanism::new(CKK_GENERIC_SECRET)),
-    );
+    mechs.add_mechanism(CKM_GENERIC_SECRET_KEY_GEN, &(*GENERIC_SECRET));
 
-    ot.add_factory(ObjectType::new(CKO_DATA, 0), &DATA_OBJECT_FACTORY);
+    ot.add_factory(ObjectType::new(CKO_DATA, 0), &(*DATA_OBJECT_FACTORY));
     ot.add_factory(
         ObjectType::new(CKO_CERTIFICATE, CKC_X_509),
-        &X509_CERT_FACTORY,
+        &(*X509_CERT_FACTORY),
     );
     ot.add_factory(
         ObjectType::new(CKO_SECRET_KEY, CKK_GENERIC_SECRET),
-        &GENERIC_SECRET_FACTORY,
+        &(*GENERIC_SECRET_FACTORY),
     );
 }

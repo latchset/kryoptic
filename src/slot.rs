@@ -47,6 +47,17 @@ impl Slot {
             None => dbargs = None,
         }
 
+        /* Create and config token */
+        let mut token = Token::new(dbtype, dbargs)?;
+        let (list, deny) = config.mech_list()?;
+        if let Some(mechs) = list {
+            if deny {
+                token.set_mech_deny_list(mechs);
+            } else {
+                token.set_mech_allow_list(mechs);
+            }
+        }
+
         let mut slot = Slot {
             slot_info: CK_SLOT_INFO {
                 slotDescription: [0; 64],
@@ -55,7 +66,7 @@ impl Slot {
                 hardwareVersion: defaults::hardware_version(),
                 firmwareVersion: defaults::firmware_version(),
             },
-            token: RwLock::new(Token::new(dbtype, dbargs)?),
+            token: RwLock::new(token),
             sessions: HashMap::new(),
             #[cfg(feature = "fips")]
             fips_behavior: config.fips_behavior.clone(),
@@ -76,6 +87,7 @@ impl Slot {
             },
             &mut slot.slot_info.manufacturerID,
         );
+
         Ok(slot)
     }
 
