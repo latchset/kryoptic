@@ -21,7 +21,7 @@ fn test_token_env(suffix: &str) {
     let dbname = format!("test_token_env{}", suffix);
     let mut testtokn = test_token_setup(&dbname);
     let confname = format!("{}/test_token_env{}.conf", TESTDIR, suffix);
-    testtokn.make_config_file(&confname);
+    testtokn.make_config_file(&confname, None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -52,7 +52,7 @@ fn test_token_null_args(suffix: &str) {
     let dbname = format!("test_token_nullargs{}", suffix);
     let mut testtokn = test_token_setup(&dbname);
     let confname = format!("{}/test_token_nullargs{}.conf", TESTDIR, suffix);
-    testtokn.make_config_file(&confname);
+    testtokn.make_config_file(&confname, None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();
     let pplist = &mut plist;
@@ -86,7 +86,7 @@ fn test_token_datadir() {
     std::fs::create_dir_all(confdir).unwrap();
 
     let mut testtokn = TestToken::new(dbname);
-    testtokn.make_config_file(&confname);
+    testtokn.make_config_file(&confname, None);
     testtokn.setup_db(None);
 
     let mut plist: *mut CK_FUNCTION_LIST = std::ptr::null_mut();

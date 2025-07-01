@@ -132,11 +132,12 @@ impl TestToken<'_> {
         self.slot
     }
 
-    fn make_config_file(&self, confname: &str) {
+    fn make_config_file(&self, confname: &str, mechs: Option<Vec<String>>) {
         let mut conf = config::Config::new();
         let mut slot =
             config::Slot::with_db(&self.dbtype, Some(self.dbargs.clone()));
         slot.slot = u32::try_from(self.get_slot()).unwrap();
+        slot.mechanisms = mechs;
         conf.add_slot(slot).unwrap();
         let data = toml::to_string(&conf).unwrap();
         let mut file = OpenOptions::new()
@@ -150,7 +151,7 @@ impl TestToken<'_> {
 
     fn make_init_string(&self) -> String {
         let confname = format!("{}/{}.conf", TESTDIR, self.name);
-        self.make_config_file(&confname);
+        self.make_config_file(&confname, None);
         format!("kryoptic_conf={}", confname)
     }
 
