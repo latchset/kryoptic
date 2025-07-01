@@ -63,3 +63,78 @@ fn test_get_mechs() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_allow_mechs() {
+    let dbname = String::from("test_allow_mechs");
+    let mut testtokn = TestToken::new(dbname);
+    testtokn.setup_db(None);
+    let confname = format!("{}/test_allow_mechs.conf", TESTDIR);
+    testtokn.make_config_file(
+        &confname,
+        Some(vec![String::from("CKM_AES_KEY_GEN")]),
+    );
+
+    let mut args =
+        TestToken::make_init_args(Some(format!("kryoptic_conf={}", confname)));
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    let mut count: CK_ULONG = 0;
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        std::ptr::null_mut(),
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(mechs[0], CKM_AES_KEY_GEN);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_deny_mechs() {
+    let dbname = String::from("test_deny_mechs");
+    let mut testtokn = TestToken::new(dbname);
+    testtokn.setup_db(None);
+    let confname = format!("{}/test_deny_mechs.conf", TESTDIR);
+    testtokn.make_config_file(
+        &confname,
+        Some(vec![String::from("DENY"), String::from("CKM_AES_KEY_GEN")]),
+    );
+
+    let mut args =
+        TestToken::make_init_args(Some(format!("kryoptic_conf={}", confname)));
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    let mut count: CK_ULONG = 0;
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        std::ptr::null_mut(),
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(mechs.contains(&CKM_AES_KEY_GEN), false);
+
+    testtokn.finalize();
+}
