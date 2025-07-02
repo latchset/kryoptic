@@ -114,6 +114,7 @@ pub enum EncAlg {
     AesCfb8(AesSize),
     AesCfb1(AesSize),
     AesCfb128(AesSize),
+    AesOcb(AesSize),
     AesOfb(AesSize),
     AesWrap(AesSize),
     AesWrapPad(AesSize),
@@ -166,6 +167,11 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
             AesSize::Aes128 => cstr!(LN_aes_128_cfb128),
             AesSize::Aes192 => cstr!(LN_aes_192_cfb128),
             AesSize::Aes256 => cstr!(LN_aes_256_cfb128),
+        },
+        EncAlg::AesOcb(size) => match size {
+            AesSize::Aes128 => cstr!(LN_aes_128_ocb),
+            AesSize::Aes192 => cstr!(LN_aes_192_ocb),
+            AesSize::Aes256 => cstr!(LN_aes_256_ocb),
         },
         EncAlg::AesOfb(size) => match size {
             AesSize::Aes128 => cstr!(LN_aes_128_ofb128),
@@ -273,7 +279,7 @@ impl OsslCipher {
         /* For some modes there is setup that needs to be done
          * early, before the cipher ctx is fully initialized */
         match alg {
-            EncAlg::AesCcm(_) | EncAlg::AesGcm(_) => {
+            EncAlg::AesCcm(_) | EncAlg::AesGcm(_) | EncAlg::AesOcb(_) => {
                 ctx.aead_setup(alg, &aead)?
             }
             EncAlg::AesCts(_, mode) => {
