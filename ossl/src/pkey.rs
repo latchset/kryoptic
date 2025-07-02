@@ -614,9 +614,6 @@ impl EvpPkey {
 
     /// Generates a new key pair based on provided algorithm name and
     /// parameters.
-    ///
-    /// The parameters (`OsslParam`) specify details like key size or curve
-    /// name.
     pub fn generate(
         ctx: &OsslContext,
         pkey_type: EvpPkeyType,
