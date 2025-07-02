@@ -230,7 +230,8 @@ pub struct OsslCipher {
     aad: Option<Vec<u8>>,
     /// The block size used in this operation. It is used to
     /// calculate the minimum acceptable output buffer size in
-    /// update operations. This is 1 for streaming ciphers.
+    /// update operations. This is 1 for streaming ciphers and
+    /// AEAD constructions
     blocksize: usize,
 }
 
@@ -380,14 +381,14 @@ impl OsslCipher {
                     }
                 }
             }
-            None => (),
+            None => {
+                ctx.blocksize = unsafe {
+                    usize::try_from(EVP_CIPHER_CTX_get_block_size(
+                        ctx.ctx.as_mut_ptr(),
+                    ))?
+                };
+            }
         }
-
-        ctx.blocksize = unsafe {
-            usize::try_from(EVP_CIPHER_CTX_get_block_size(
-                ctx.ctx.as_mut_ptr(),
-            ))?
-        };
 
         Ok(ctx)
     }
