@@ -974,7 +974,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             operations: CKF_DERIVE,
             restrictions: [
                 restrict!(CKK_AES),
-                restrict!(KRY_UNSPEC, range!(112, 0xffffffff)),
+                restrict!(KRY_UNSPEC, range!(112, 0x1000000)),
             ],
             genflags: CKF_SIGN
                 | CKF_VERIFY
@@ -989,7 +989,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             operations: CKF_DERIVE,
             restrictions: [
                 restrict!(CKK_AES),
-                restrict!(KRY_UNSPEC, range!(112, 0xffffffff)),
+                restrict!(KRY_UNSPEC, range!(112, 0x1000000)),
             ],
             genflags: CKF_SIGN
                 | CKF_VERIFY
