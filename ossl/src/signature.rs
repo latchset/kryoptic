@@ -9,7 +9,10 @@ use std::ffi::{c_char, c_int, CStr};
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
 use crate::pkey::{EvpPkey, EvpPkeyCtx};
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
+    OsslParamBuilder,
+};
 
 #[cfg(not(feature = "fips"))]
 use crate::digest::EvpMdCtx;
@@ -300,12 +303,12 @@ pub fn rsa_sig_params(
 ) -> Result<Option<OsslParam>, Error> {
     match alg {
         SigAlg::RsaNoPad => {
-            let mut params = OsslParam::new();
-            params.add_const_c_string(
+            let mut params_builder = OsslParamBuilder::new();
+            params_builder.add_const_c_string(
                 cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
                 cstr!(OSSL_PKEY_RSA_PAD_MODE_NONE),
             )?;
-            params.finalize();
+            let params = params_builder.finalize();
             return Ok(Some(params));
         }
         SigAlg::Rsa
@@ -326,12 +329,12 @@ pub fn rsa_sig_params(
                 return Ok(None);
             }
 
-            let mut params = OsslParam::new();
-            params.add_const_c_string(
+            let mut params_builder = OsslParamBuilder::new();
+            params_builder.add_const_c_string(
                 cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
                 cstr!(OSSL_PKEY_RSA_PAD_MODE_PKCSV15),
             )?;
-            params.finalize();
+            let params = params_builder.finalize();
             return Ok(Some(params));
         }
         SigAlg::RsaPss
@@ -347,25 +350,25 @@ pub fn rsa_sig_params(
             /* Pss always uses legacy interfaces, so we need
              * all params set up */
             if let Some(pss) = pss_params {
-                let mut params = OsslParam::new();
+                let mut params_builder = OsslParamBuilder::new();
 
-                params.add_const_c_string(
+                params_builder.add_const_c_string(
                     cstr!(OSSL_SIGNATURE_PARAM_PAD_MODE),
                     cstr!(OSSL_PKEY_RSA_PAD_MODE_PSS),
                 )?;
-                params.add_const_c_string(
+                params_builder.add_const_c_string(
                     cstr!(OSSL_SIGNATURE_PARAM_DIGEST),
                     digest_to_string(pss.digest),
                 )?;
-                params.add_const_c_string(
+                params_builder.add_const_c_string(
                     cstr!(OSSL_SIGNATURE_PARAM_MGF1_DIGEST),
                     digest_to_string(pss.mgf1),
                 )?;
-                params.add_owned_int(
+                params_builder.add_owned_int(
                     cstr!(OSSL_SIGNATURE_PARAM_PSS_SALTLEN),
                     c_int::try_from(pss.saltlen)?,
                 )?;
-                params.finalize();
+                let params = params_builder.finalize();
                 return Ok(Some(params));
             } else {
                 return Err(Error::new(ErrorKind::NullPtr));
@@ -397,22 +400,22 @@ pub fn eddsa_params(
         return Ok(None);
     }
 
-    let mut params = OsslParam::new();
+    let mut params_builder = OsslParamBuilder::new();
 
     #[cfg(not(ossl_v350))]
-    params.add_const_c_string(
+    params_builder.add_const_c_string(
         cstr!(OSSL_SIGNATURE_PARAM_INSTANCE),
         sigalg_to_ossl_name(alg),
     )?;
 
     if let Some(v) = context {
-        params.add_owned_octet_string(
+        params_builder.add_owned_octet_string(
             cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
             v,
         )?;
     }
 
-    params.finalize();
+    let params = params_builder.finalize();
     return Ok(Some(params));
 }
 
@@ -423,21 +426,22 @@ pub fn mldsa_params<'a>(
     context: Option<&'a Vec<u8>>,
     deterministic: bool,
 ) -> Result<Option<OsslParam<'a>>, Error> {
-    let mut params = OsslParam::with_capacity(3);
+    let mut params_builder = OsslParamBuilder::with_capacity(3);
     if raw {
-        params
+        params_builder
             .add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING), 0)?;
     }
     if let Some(ctx) = context {
-        params.add_octet_string(
+        params_builder.add_octet_string(
             cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
             ctx,
         )?;
     }
     if deterministic {
-        params.add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC), 1)?;
+        params_builder
+            .add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC), 1)?;
     }
-    params.finalize();
+    let params = params_builder.finalize();
     return Ok(Some(params));
 }
 

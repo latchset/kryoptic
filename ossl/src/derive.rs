@@ -10,7 +10,10 @@ use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
 use crate::mac::{add_mac_alg_to_params, mac_to_digest_and_type, MacAlg};
 use crate::pkey::{EvpPkey, EvpPkeyCtx};
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
+    OsslParamBuilder,
+};
 
 /// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
 #[derive(Debug)]
@@ -142,27 +145,33 @@ impl<'a> HkdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params.add_const_c_string(
+        let mut params_builder = OsslParamBuilder::with_capacity(5);
+        params_builder.zeroize = true;
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
             digest_to_string(self.digest),
         )?;
-        params.add_int(cstr!(OSSL_KDF_PARAM_MODE), &self.mode)?;
+        params_builder.add_int(cstr!(OSSL_KDF_PARAM_MODE), &self.mode)?;
 
         match &self.key {
-            Some(k) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), k)?,
+            Some(k) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), k)?
+            }
             None => return Err(Error::new(ErrorKind::KeyError)),
         }
         match &self.salt {
-            Some(s) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?,
+            Some(s) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?
+            }
             None => (),
         }
         match &self.info {
-            Some(i) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), i)?,
+            Some(i) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), i)?
+            }
             None => (),
         }
-        params.finalize();
+        let params = params_builder.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -217,24 +226,25 @@ impl<'a> Pbkdf2Derive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(4);
-        params.zeroize = true;
-        params.add_const_c_string(
+        let mut params_builder = OsslParamBuilder::with_capacity(4);
+        params_builder.zeroize = true;
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
             digest_to_string(self.digest),
         )?;
-        params.add_uint(cstr!(OSSL_KDF_PARAM_ITER), &self.iter)?;
+        params_builder.add_uint(cstr!(OSSL_KDF_PARAM_ITER), &self.iter)?;
         match &self.password {
-            Some(p) => {
-                params.add_octet_slice(cstr!(OSSL_KDF_PARAM_PASSWORD), p)?
-            }
+            Some(p) => params_builder
+                .add_octet_slice(cstr!(OSSL_KDF_PARAM_PASSWORD), p)?,
             None => return Err(Error::new(ErrorKind::KeyError)),
         }
         match &self.salt {
-            Some(s) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?,
+            Some(s) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?
+            }
             None => (),
         }
-        params.finalize();
+        let params = params_builder.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -359,16 +369,17 @@ impl<'a> KbkdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(10);
-        params.zeroize = true;
+        let mut params_builder = OsslParamBuilder::with_capacity(10);
+        params_builder.zeroize = true;
         let mac_type = add_mac_alg_to_params(
-            &mut params,
+            &mut params_builder,
             self.mac,
             cstr!(OSSL_KDF_PARAM_DIGEST),
             cstr!(OSSL_KDF_PARAM_CIPHER),
         )?;
-        params.add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac_type)?;
-        params.add_const_c_string(
+        params_builder
+            .add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac_type)?;
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_MODE),
             match self.mode {
                 KbkdfMode::Counter => c"counter",
@@ -377,31 +388,41 @@ impl<'a> KbkdfDerive<'a> {
         )?;
 
         #[cfg(ossl_v320)]
-        params.add_int(cstr!(OSSL_KDF_PARAM_KBKDF_R), &self.counter_len)?;
+        params_builder
+            .add_int(cstr!(OSSL_KDF_PARAM_KBKDF_R), &self.counter_len)?;
 
-        params.add_int(
+        params_builder.add_int(
             cstr!(OSSL_KDF_PARAM_KBKDF_USE_SEPARATOR),
             &self.separator,
         )?;
-        params.add_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_L), &self.fixed_len)?;
+        params_builder
+            .add_int(cstr!(OSSL_KDF_PARAM_KBKDF_USE_L), &self.fixed_len)?;
 
         match &self.key {
-            Some(k) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), k)?,
+            Some(k) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), k)?
+            }
             None => return Err(Error::new(ErrorKind::KeyError)),
         }
         match &self.info {
-            Some(i) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), i)?,
+            Some(i) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), i)?
+            }
             None => (),
         }
         match &self.salt {
-            Some(s) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?,
+            Some(s) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?
+            }
             None => (),
         }
         match &self.seed {
-            Some(s) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SEED), s)?,
+            Some(s) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_SEED), s)?
+            }
             None => (),
         }
-        params.finalize();
+        let params = params_builder.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -482,32 +503,34 @@ impl<'a> SshkdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params.add_const_c_string(
+        let mut params_builder = OsslParamBuilder::with_capacity(5);
+        params_builder.zeroize = true;
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
             digest_to_string(self.digest),
         )?;
 
         match &self.key {
-            Some(k) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), k)?,
+            Some(k) => {
+                params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), k)?
+            }
             None => return Err(Error::new(ErrorKind::KeyError)),
         }
         match &self.hash {
-            Some(h) => params
+            Some(h) => params_builder
                 .add_octet_slice(cstr!(OSSL_KDF_PARAM_SSHKDF_XCGHASH), h)?,
             None => (),
         }
-        params.add_const_c_string(
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_SSHKDF_TYPE),
             self.purpose,
         )?;
         match &self.session {
-            Some(s) => params
+            Some(s) => params_builder
                 .add_octet_slice(cstr!(OSSL_KDF_PARAM_SSHKDF_SESSION_ID), s)?,
             None => (),
         }
-        params.finalize();
+        let params = params_builder.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -589,29 +612,29 @@ impl<'a> OneStepKdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
-        params.add_const_c_string(
+        let mut params_builder = OsslParamBuilder::with_capacity(5);
+        params_builder.zeroize = true;
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
             digest_to_string(self.digest),
         )?;
         match &self.key {
-            Some(key) => {
-                params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), key)?
-            }
+            Some(key) => params_builder
+                .add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), key)?,
             None => return Err(Error::new(ErrorKind::KeyError)),
         }
         if let Some(mac) = self.mac {
-            params.add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac)?;
+            params_builder
+                .add_const_c_string(cstr!(OSSL_KDF_PARAM_MAC), mac)?;
         }
         if let Some(salt) = self.salt {
-            params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), salt)?;
+            params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), salt)?;
         }
         if let Some(info) = &self.info {
-            params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
+            params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
         }
 
-        params.finalize();
+        let params = params_builder.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -661,23 +684,22 @@ impl<'a> X963KdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(3);
-        params.zeroize = true;
-        params.add_const_c_string(
+        let mut params_builder = OsslParamBuilder::with_capacity(3);
+        params_builder.zeroize = true;
+        params_builder.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
             digest_to_string(self.digest),
         )?;
         match &self.key {
-            Some(key) => {
-                params.add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), key)?
-            }
+            Some(key) => params_builder
+                .add_octet_slice(cstr!(OSSL_KDF_PARAM_KEY), key)?,
             None => return Err(Error::new(ErrorKind::KeyError)),
         }
         if let Some(info) = &self.info {
-            params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
+            params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
         }
 
-        params.finalize();
+        let params = params_builder.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -751,36 +773,37 @@ impl<'a> EcdhDerive<'a> {
         peer: &mut EvpPkey,
         output: &mut [u8],
     ) -> Result<usize, Error> {
-        let mut params = OsslParam::with_capacity(5);
-        params.zeroize = true;
+        let mut params_builder = OsslParamBuilder::with_capacity(5);
+        params_builder.zeroize = true;
         if let Some(mode) = &self.mode {
-            params.add_int(
+            params_builder.add_int(
                 cstr!(OSSL_EXCHANGE_PARAM_EC_ECDH_COFACTOR_MODE),
                 mode,
             )?;
         }
         if let Some(kdf_type) = self.kdf_type {
-            params.add_const_c_string(
+            params_builder.add_const_c_string(
                 cstr!(OSSL_EXCHANGE_PARAM_KDF_TYPE),
                 kdf_type,
             )?;
         }
         if let Some(alg) = self.digest {
-            params.add_const_c_string(
+            params_builder.add_const_c_string(
                 cstr!(OSSL_EXCHANGE_PARAM_KDF_DIGEST),
                 digest_to_string(alg),
             )?;
         }
         if let Some(ukm) = self.ukm {
-            params.add_octet_slice(cstr!(OSSL_EXCHANGE_PARAM_KDF_UKM), ukm)?;
+            params_builder
+                .add_octet_slice(cstr!(OSSL_EXCHANGE_PARAM_KDF_UKM), ukm)?;
         }
         if self.outlen != 0 {
-            params.add_uint(
+            params_builder.add_uint(
                 cstr!(OSSL_EXCHANGE_PARAM_KDF_OUTLEN),
                 &self.outlen,
             )?;
         }
-        params.finalize();
+        let params = params_builder.finalize();
 
         if params.len() > 0 {
             let ret = unsafe {
