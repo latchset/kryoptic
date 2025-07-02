@@ -83,6 +83,21 @@ pub enum ErrorKind {
     BadArg,
 }
 
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ErrorKind::NullPtr => "OpenSSL returned a NULL ptr as an error",
+            ErrorKind::OsslError => "OpenSSL returned a 0 c_int as an error",
+            ErrorKind::KeyError => "A falure resulting from wrong key usage",
+            ErrorKind::WrapperError => "A wrapper error",
+            ErrorKind::BufferSize => "A buffer is not of the correct size",
+            ErrorKind::BadArg => {
+                "An optional argument is required or has a bad value"
+            }
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
@@ -95,6 +110,14 @@ impl Error {
 
     pub fn kind(&self) -> ErrorKind {
         self.kind
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind())
     }
 }
 
