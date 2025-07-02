@@ -5,7 +5,9 @@
 
 use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParamBuilder,
+};
 
 /// Wrapper around OpenSSL's `EVP_RAND_CTX`.
 /// Represents a random generator instance, using
@@ -45,13 +47,13 @@ impl EvpRandCtx {
             return Err(Error::new(ErrorKind::OsslError));
         }
 
-        let mut params = OsslParam::with_capacity(2);
+        let mut params = OsslParamBuilder::with_capacity(2);
         params.add_const_c_string(cstr!(OSSL_DRBG_PARAM_MAC), c"HMAC")?;
         params.add_const_c_string(
             cstr!(OSSL_DRBG_PARAM_DIGEST),
             digest_to_string(digest),
         )?;
-        params.finalize();
+        let params = params.finalize();
 
         let ret = unsafe {
             EVP_RAND_instantiate(
