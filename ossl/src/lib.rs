@@ -98,7 +98,7 @@ impl std::fmt::Display for ErrorKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Error {
     kind: ErrorKind,
 }
