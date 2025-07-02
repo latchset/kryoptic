@@ -8,7 +8,8 @@ use std::ffi::{c_int, c_uint, CStr};
 
 use crate::bindings::*;
 use crate::{
-    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam, OsslSecret,
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
+    OsslParamBuilder, OsslSecret,
 };
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
@@ -108,7 +109,7 @@ pub enum EvpPkeyType {
 /// Adds group name to params if needed, and returns the ossl key type name
 fn pkey_type_to_params(
     pt: &EvpPkeyType,
-    params: &mut OsslParam,
+    params: &mut OsslParamBuilder,
 ) -> Result<&'static CStr, Error> {
     let name = match pt {
         EvpPkeyType::Ffdhe2048 => {
@@ -515,7 +516,7 @@ fn params_to_rsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
 
 fn rsa_data_to_params(
     rsa: &RsaData,
-    params: &mut OsslParam,
+    params: &mut OsslParamBuilder,
 ) -> Result<bool, Error> {
     let mut is_priv = false;
     params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_N), rsa.n.as_slice())?;
@@ -618,9 +619,9 @@ impl EvpPkey {
         ctx: &OsslContext,
         pkey_type: EvpPkeyType,
     ) -> Result<EvpPkey, Error> {
-        let mut params = OsslParam::new();
-        let name = pkey_type_to_params(&pkey_type, &mut params)?;
-        params.finalize();
+        let mut params_builder = OsslParamBuilder::new();
+        let name = pkey_type_to_params(&pkey_type, &mut params_builder)?;
+        let params = params_builder.finalize();
         let mut pctx = EvpPkeyCtx::new(ctx, name)?;
         let res = unsafe { EVP_PKEY_keygen_init(pctx.as_mut_ptr()) };
         if res != 1 {
@@ -669,10 +670,10 @@ impl EvpPkey {
         data: PkeyData,
     ) -> Result<EvpPkey, Error> {
         let mut pkey_class: u32 = 0;
-        let mut params = OsslParam::with_capacity(2);
-        params.zeroize = true;
+        let mut params_builder = OsslParamBuilder::with_capacity(2);
+        params_builder.zeroize = true;
 
-        let name = pkey_type_to_params(&pkey_type, &mut params)?;
+        let name = pkey_type_to_params(&pkey_type, &mut params_builder)?;
 
         match pkey_type {
             EvpPkeyType::P256
@@ -684,14 +685,15 @@ impl EvpPkey {
                 PkeyData::Ecc(ecc) => {
                     if let Some(p) = &ecc.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &ecc.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
+                        params_builder
+                            .add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
@@ -703,14 +705,14 @@ impl EvpPkey {
                 PkeyData::Ecc(ecc) => {
                     if let Some(p) = &ecc.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &ecc.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
                         )?
@@ -731,14 +733,15 @@ impl EvpPkey {
                 PkeyData::Ffdh(ffdh) => {
                     if let Some(p) = &ffdh.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_bn(
+                        params_builder.add_bn(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &ffdh.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
+                        params_builder
+                            .add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
@@ -750,21 +753,21 @@ impl EvpPkey {
                 PkeyData::Mlkey(mlk) => {
                     if let Some(p) = &mlk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &mlk.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
                         )?
                     }
                     if let Some(p) = &mlk.seed {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED),
                             p,
                         )?
@@ -779,21 +782,21 @@ impl EvpPkey {
                 PkeyData::Mlkey(mlk) => {
                     if let Some(p) = &mlk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &mlk.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
                         )?
                     }
                     if let Some(p) = &mlk.seed {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_octet_slice(
+                        params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED),
                             p,
                         )?
@@ -803,7 +806,7 @@ impl EvpPkey {
             },
             EvpPkeyType::Rsa(_, _) => match &data {
                 PkeyData::Rsa(rsa) => {
-                    if rsa_data_to_params(&rsa, &mut params)? {
+                    if rsa_data_to_params(&rsa, &mut params_builder)? {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                     } else {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
@@ -812,7 +815,7 @@ impl EvpPkey {
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
         }
-        params.finalize();
+        let params = params_builder.finalize();
 
         EvpPkey::fromdata(ctx, name, pkey_class, &params)
     }
@@ -920,12 +923,12 @@ impl EvpPkey {
         ctx: &OsslContext,
         public: &[u8],
     ) -> Result<EvpPkey, Error> {
-        let mut params = OsslParam::with_capacity(1);
-        params.add_empty_utf8_string(
+        let mut params_builder = OsslParamBuilder::with_capacity(1);
+        params_builder.add_empty_utf8_string(
             cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
             MAX_GROUP_NAME_LEN + 1,
         )?;
-        params.finalize();
+        let mut params = params_builder.finalize();
         self.get_params(&mut params)?;
         let pkey_type = pkey_to_type(&self, &params)?;
         let data = match pkey_type {

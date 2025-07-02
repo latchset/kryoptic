@@ -8,7 +8,8 @@ use std::ffi::CStr;
 use crate::bindings::*;
 use crate::digest::DigestAlg;
 use crate::{
-    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam, OsslSecret,
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParamBuilder,
+    OsslSecret,
 };
 
 /// Wrapper around OpenSSL's `EVP_MAC_CTX`, managing its lifecycle.
@@ -114,7 +115,7 @@ pub(crate) fn mac_to_digest_and_type(
 }
 
 pub(crate) fn add_mac_alg_to_params(
-    params: &mut OsslParam,
+    params: &mut OsslParamBuilder,
     mac: MacAlg,
     digest_key_str: &CStr,
     cipher_key_str: &CStr,
@@ -229,14 +230,14 @@ impl OsslMac {
         mac: MacAlg,
         key: OsslSecret,
     ) -> Result<OsslMac, Error> {
-        let mut params = OsslParam::with_capacity(1);
+        let mut params = OsslParamBuilder::with_capacity(1);
         let mac_type = add_mac_alg_to_params(
             &mut params,
             mac,
             cstr!(OSSL_MAC_PARAM_DIGEST),
             cstr!(OSSL_MAC_PARAM_CIPHER),
         )?;
-        params.finalize();
+        let params = params.finalize();
 
         let mut mctx = OsslMac {
             ctx: EvpMacCtx::new(ctx, mac_type)?,
