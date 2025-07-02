@@ -572,6 +572,16 @@ impl OsslCipher {
         Ok(())
     }
 
+    /// Returns the block size, or `None` for stream ciphers and AEAD
+    /// constructions.
+    pub fn block_size(&self) -> Option<usize> {
+        if self.blocksize == 1 {
+            None
+        } else {
+            Some(self.blocksize)
+        }
+    }
+
     pub fn buffer_size(&self, input: usize) -> usize {
         if self.blocksize == 1 {
             return input;
