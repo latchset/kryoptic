@@ -10,7 +10,10 @@ use crate::bindings::*;
 use crate::digest::{digest_to_string, DigestAlg};
 use crate::mac::{add_mac_alg_to_params, mac_to_digest_and_type, MacAlg};
 use crate::pkey::{EvpPkey, EvpPkeyCtx};
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
+    OsslParamBuilder,
+};
 
 /// Wrapper around OpenSSL's `EVP_KDF_CTX`, managing its lifecycle.
 #[derive(Debug)]
@@ -142,7 +145,7 @@ impl<'a> HkdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(5);
+        let mut params = OsslParamBuilder::with_capacity(5);
         params.zeroize = true;
         params.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
@@ -162,7 +165,7 @@ impl<'a> HkdfDerive<'a> {
             Some(i) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), i)?,
             None => (),
         }
-        params.finalize();
+        let params = params.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -217,7 +220,7 @@ impl<'a> Pbkdf2Derive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(4);
+        let mut params = OsslParamBuilder::with_capacity(4);
         params.zeroize = true;
         params.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
@@ -234,7 +237,7 @@ impl<'a> Pbkdf2Derive<'a> {
             Some(s) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SALT), s)?,
             None => (),
         }
-        params.finalize();
+        let params = params.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -359,7 +362,7 @@ impl<'a> KbkdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(10);
+        let mut params = OsslParamBuilder::with_capacity(10);
         params.zeroize = true;
         let mac_type = add_mac_alg_to_params(
             &mut params,
@@ -401,7 +404,7 @@ impl<'a> KbkdfDerive<'a> {
             Some(s) => params.add_octet_slice(cstr!(OSSL_KDF_PARAM_SEED), s)?,
             None => (),
         }
-        params.finalize();
+        let params = params.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -482,7 +485,7 @@ impl<'a> SshkdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(5);
+        let mut params = OsslParamBuilder::with_capacity(5);
         params.zeroize = true;
         params.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
@@ -507,7 +510,7 @@ impl<'a> SshkdfDerive<'a> {
                 .add_octet_slice(cstr!(OSSL_KDF_PARAM_SSHKDF_SESSION_ID), s)?,
             None => (),
         }
-        params.finalize();
+        let params = params.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -589,7 +592,7 @@ impl<'a> OneStepKdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(5);
+        let mut params = OsslParamBuilder::with_capacity(5);
         params.zeroize = true;
         params.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
@@ -611,7 +614,7 @@ impl<'a> OneStepKdfDerive<'a> {
             params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
         }
 
-        params.finalize();
+        let params = params.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -661,7 +664,7 @@ impl<'a> X963KdfDerive<'a> {
     /// The key parameter must have been set
     /// Returns the output in the provided output buffer
     pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
-        let mut params = OsslParam::with_capacity(3);
+        let mut params = OsslParamBuilder::with_capacity(3);
         params.zeroize = true;
         params.add_const_c_string(
             cstr!(OSSL_KDF_PARAM_DIGEST),
@@ -677,7 +680,7 @@ impl<'a> X963KdfDerive<'a> {
             params.add_octet_slice(cstr!(OSSL_KDF_PARAM_INFO), info)?;
         }
 
-        params.finalize();
+        let params = params.finalize();
 
         self.ctx.derive(&params, output)
     }
@@ -751,7 +754,7 @@ impl<'a> EcdhDerive<'a> {
         peer: &mut EvpPkey,
         output: &mut [u8],
     ) -> Result<usize, Error> {
-        let mut params = OsslParam::with_capacity(5);
+        let mut params = OsslParamBuilder::with_capacity(5);
         params.zeroize = true;
         if let Some(mode) = &self.mode {
             params.add_int(
@@ -780,7 +783,7 @@ impl<'a> EcdhDerive<'a> {
                 &self.outlen,
             )?;
         }
-        params.finalize();
+        let params = params.finalize();
 
         if params.len() > 0 {
             let ret = unsafe {

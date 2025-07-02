@@ -29,7 +29,7 @@ pub fn rsa_enc_params(
     alg: EncAlg,
     oaep_params: Option<&RsaOaepParams>,
 ) -> Result<OsslParam, Error> {
-    let mut params = OsslParam::new();
+    let mut params = crate::OsslParamBuilder::new();
 
     match alg {
         EncAlg::RsaNoPad => params.add_const_c_string(
@@ -67,8 +67,7 @@ pub fn rsa_enc_params(
         )?,
     }
 
-    params.finalize();
-    return Ok(params);
+    Ok(params.finalize())
 }
 
 /// Higher level wrapper for asymmetric encryption operations with OpenSSL
