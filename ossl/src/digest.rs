@@ -37,6 +37,17 @@ impl EvpMd {
     pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD {
         self.ptr
     }
+
+    /// Tries to clone the `EvpMd`.
+    pub fn try_clone(&self) -> Result<EvpMd, Error> {
+        let success = unsafe { EVP_MD_up_ref(self.ptr) == 1 };
+
+        if success {
+            Ok(EvpMd { ptr: self.ptr })
+        } else {
+            Err(Error::new(ErrorKind::OsslError))
+        }
+    }
 }
 
 impl Drop for EvpMd {
@@ -75,6 +86,19 @@ impl EvpMdCtx {
     /// Returns a mutable pointer to the underlying `EVP_MD_CTX`.
     pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MD_CTX {
         self.ptr
+    }
+
+    /// Tries to clone the context.
+    pub fn try_clone(&self) -> Result<EvpMdCtx, Error> {
+        let mut new = Self::new()?;
+        let success =
+            unsafe { EVP_MD_CTX_copy_ex(new.as_mut_ptr(), self.as_ptr()) == 1 };
+
+        if success {
+            Ok(new)
+        } else {
+            Err(Error::new(ErrorKind::OsslError))
+        }
     }
 }
 
@@ -209,6 +233,15 @@ impl OsslDigest {
     /// Provides the size of the expected output digest
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    /// Tries to clone the digest.
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        Ok(OsslDigest {
+            ctx: self.ctx.try_clone()?,
+            md: self.md.try_clone()?,
+            size: self.size,
+        })
     }
 }
 
