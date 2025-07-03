@@ -107,8 +107,23 @@ fn build_ossl(out_file: &Path) {
         "no-sm2",
         "no-sm3",
         "no-sm4",
-        "enable-ec_nistp_64_gcc_128",
     ];
+
+    match std::env::var("CARGO_CFG_TARGET_ARCH") {
+        Ok(arch) => match arch.as_str() {
+            "x86" => {
+                buildargs.insert(0, "linux-elf");
+                buildargs.push("-m32");
+                buildargs.push("-latomic");
+            }
+            "x86_64" => buildargs.push("enable-ec_nistp_64_gcc_128"),
+            "aarch64" => buildargs.push("enable-ec_nistp_64_gcc_128"),
+            "powerpc64" => buildargs.push("enable-ec_nistp_64_gcc_128"),
+            "s390x" => buildargs.push("no-ec_nistp_64_gcc_128"),
+            _ => (),
+        },
+        _ => panic!("No arch available in CARGO_CFG_TARGET_ARCH"),
+    }
 
     if env::var("PROFILE").unwrap().as_str() == "debug" {
         buildargs.push("--debug");
@@ -168,6 +183,17 @@ fn build_ossl(out_file: &Path) {
     println!("cargo:rustc-link-search={}", ar_path.to_string_lossy());
     println!("cargo:rustc-link-lib=static={}", ar_name);
     println!("cargo:rerun-if-changed={}", libpath);
+
+    /* must declare this after the static one or builds will fail */
+    match std::env::var("CARGO_CFG_TARGET_ARCH") {
+        Ok(arch) => match arch.as_str() {
+            "x86" => {
+                println!("cargo::rustc-link-lib=atomic");
+            }
+            _ => (),
+        },
+        _ => panic!("No arch available in CARGO_CFG_TARGET_ARCH"),
+    }
 
     match std::path::Path::new(&libpath).try_exists() {
         Ok(true) => (),
