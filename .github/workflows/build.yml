@@ -152,6 +152,12 @@ jobs:
           path: |
             target/debug/build/*/output
 
+      - name: Show Build configs and logs on error
+        if: failure()
+        run: |
+          cd ../openssl
+          perl configdata.pm --dump
+
       - if: ${{ matrix.linking == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
         name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
         uses: actions/cache/save@v4
