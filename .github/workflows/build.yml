@@ -17,11 +17,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [ossl3, fips, release, dynamic, i686, minimal, pqc, no_sha1]
+        name: [standard, i686, minimal, pqc, no_sha1]
+        linking: [dynamic, static, fips]
+        build: [debug, release]
         db: [sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
-        exclude: # nssdb doesn't work with no_sha1
-          - name: no_sha1
+        exclude:
+          - name: no_sha1 # nssdb doesn't work with no_sha1
             db: nssdb
+          - name: minimal
+            linking: fips
+          - name: standard
+            linking: fips
+          - name: pqc # only works with openssl 3.5.0 so exclude dynamic
+            linking: dynamic
+          - name: pqc # already part of normal fips tests
+            linking: fips
+          - name: no_sha1 # already tested in fips and dynamic build
+            linking: static
+          - name: no_sha1
+            linking: fips
     container: fedora:latest
     steps:
       - name: Get Date for DNF cache entry
@@ -49,12 +63,16 @@ jobs:
           if [ "${{ matrix.name }}" = "i686" ]; then
             dnf -y install rust-std-static.i686 openssl-devel.i686 \
               sqlite-devel.i686
+            if [ "${{ matrix.linking }}" != "dynamic" ]; then
+              dnf -y install libatomic.i686
+            fi
           fi
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup OpenSSL
+        if: ${{ matrix.linking == 'fips' || matrix.linking == 'static' }}
         id: ossl-setup
         run: |
           git config --global --add safe.directory /__w/kryoptic
@@ -63,9 +81,14 @@ jobs:
                     --single-branch --branch $OPENSSL_BRANCH openssl
           cd openssl
           echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
-          echo "cacheid=${{ runner.os }}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          OS=${{ runner.os }}
+          if [ "${{ matrix.name }}" = "i686" ]; then
+              OS="${OS}-i686"
+          fi
+          echo "cacheid=${OS}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Restore OpenSSL build
+        if: ${{ matrix.linking == 'fips' || matrix.linking == 'static' }}
         uses: actions/cache/restore@v4
         id: cache
         with:
@@ -90,27 +113,29 @@ jobs:
         run: |
           FEATURES="${{ matrix.db }}"
           OPTS="--no-default-features"
+          FEATURE_SET="standard"
           export CC=clang
 
-          if [ "${{ matrix.name }}" = "fips" ]; then
-            FEATURES="${FEATURES},fips"
-          elif [ "${{ matrix.name }}" = "ossl3" ]; then
-            FEATURES="${FEATURES},standard"
-          elif [ "${{ matrix.name }}" = "release" ]; then
-            FEATURES="${FEATURES},standard"
-            OPTS="--release"
-          elif [ "${{ matrix.name }}" = "dynamic" ]; then
-            FEATURES="${FEATURES},standard,dynamic"
-            OPTS="--release"
-          elif [ "${{ matrix.name }}" = "i686" ]; then
-            FEATURES="${FEATURES},standard,dynamic"
-            OPTS="--target i686-unknown-linux-gnu"
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            OPTS="${OPTS} --target i686-unknown-linux-gnu"
           elif [ "${{ matrix.name }}" = "minimal" ]; then
-            FEATURES="${FEATURES},dynamic"
+            FEATURE_SET="minimal"
           elif [ "${{ matrix.name }}" = "pqc" ]; then
-            FEATURES="${FEATURES},standard,pqc"
+            FEATURES="${FEATURES},pqc"
           elif [ "${{ matrix.name }}" = "no_sha1" ]; then
-            FEATURES="${FEATURES},standard,no_sha1"
+            FEATURES="${FEATURES},no_sha1"
+          fi
+
+          if [ "${{ matrix.linking }}" = "dynamic" ]; then
+            FEATURES="${FEATURES},${FEATURE_SET},dynamic"
+          elif [ "${{ matrix.linking }}" = "static" ]; then
+            FEATURES="${FEATURES},${FEATURE_SET}"
+          elif [ "${{ matrix.linking }}" = "fips" ]; then
+            FEATURES="${FEATURES},fips"
+          fi
+
+          if [ "${{ matrix.build }}" = "release" ]; then
+            OPTS="${OPTS} --release"
           fi
 
           # create a bugus configuration file to make sure it is not used during tests
@@ -118,17 +143,16 @@ jobs:
           cp testdata/test.conf ~/.config/kryoptic/token.conf
 
           cargo build -vv $OPTS --features "$FEATURES"
-          KRYOPTIC_TRACE=trace.log cargo test -vv $OPTS --features "$FEATURES,log"
+          cargo test -vv $OPTS --features "$FEATURES"
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: Build logs ${{ matrix.db }} ${{ matrix.name }}
+          name: Build logs ${{ matrix.name }}-${{ matrix.linking }}-${{ matrix.build }}-${{ matrix.db }}
           path: |
             target/debug/build/*/output
-            trace.log
 
-      - if: ${{ matrix.name == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
+      - if: ${{ matrix.linking == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
         name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
         uses: actions/cache/save@v4
         with:
