@@ -107,8 +107,25 @@ fn build_ossl(out_file: &Path) {
         "no-sm2",
         "no-sm3",
         "no-sm4",
-        "enable-ec_nistp_64_gcc_128",
     ];
+
+    match std::env::var("CARGO_CFG_TARGET_ARCH") {
+        Ok(arch) => match arch.as_str() {
+            "x86" => {
+                buildargs.insert(0, "linux-elf");
+                buildargs.push("-m32");
+                buildargs.push("-latomic");
+                println!("cargo::rustc-link-lib=atomic");
+                println!("cargo::rustc-link-arg=-Wl,--no-as-needed");
+            }
+            "x86_64" => buildargs.push("enable-ec_nistp_64_gcc_128"),
+            "aarch64" => buildargs.push("enable-ec_nistp_64_gcc_128"),
+            "powerpc64" => buildargs.push("enable-ec_nistp_64_gcc_128"),
+            "s390x" => buildargs.push("no-ec_nistp_64_gcc_128"),
+            _ => (),
+        },
+        _ => panic!("No arch availabel in CARGO_CFG_TARGET_ARCH"),
+    }
 
     if env::var("PROFILE").unwrap().as_str() == "debug" {
         buildargs.push("--debug");
