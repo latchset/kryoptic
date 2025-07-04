@@ -213,6 +213,15 @@ impl OsslContext {
         }
     }
 
+    /// Returns the default global context.
+    ///
+    /// See `OSSL_LIB_CTX_get0_global_default` for details.
+    pub fn global_default() -> OsslContext {
+        OsslContext {
+            context: unsafe { OSSL_LIB_CTX_get0_global_default() },
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn from_ctx(ctx: *mut OSSL_LIB_CTX) -> OsslContext {
         OsslContext { context: ctx }
