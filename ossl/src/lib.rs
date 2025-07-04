@@ -245,6 +245,19 @@ impl BigNum {
     pub fn as_mut_ptr(&mut self) -> *mut BIGNUM {
         self.bn
     }
+
+    /// Allocates a new BIGNUM.
+    pub fn new() -> Result<BigNum, Error> {
+        let bn = unsafe { BN_secure_new() };
+
+        if bn.is_null() {
+            trace_ossl!("BN_secure_new()");
+            Err(Error::new(ErrorKind::NullPtr))
+        } else {
+            Ok(BigNum { bn })
+        }
+    }
+
     /// Allocates a new BIGNUM from a slice of bytes with the binary
     /// representation of the number in big endian byte order (most
     /// significant byte first).
