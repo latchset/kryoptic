@@ -235,6 +235,11 @@ struct BigNum {
 }
 
 impl BigNum {
+    /// Returns a const pointer to the underlying `BIGNUM`.
+    #[allow(dead_code)]
+    pub fn as_ptr(&self) -> *const BIGNUM {
+        self.bn
+    }
     /// Allocates a new BIGNUM from a slice of bytes with the binary
     /// representation of the number in big endian byte order (most
     /// significant byte first).
@@ -259,7 +264,7 @@ impl BigNum {
 
     /// Calculates the minimum number of bytes needed to represent the `BIGNUM`.
     pub fn len(&self) -> Result<usize, Error> {
-        let x = unsafe { (BN_num_bits(self.bn) + 7) / 8 };
+        let x = unsafe { (BN_num_bits(self.as_ptr()) + 7) / 8 };
         Ok(usize::try_from(x)?)
     }
 
@@ -283,7 +288,11 @@ impl BigNum {
             v.push(0);
         }
         let ret = unsafe {
-            BN_bn2nativepad(self.bn, v.as_mut_ptr(), c_int::try_from(v.len())?)
+            BN_bn2nativepad(
+                self.as_ptr(),
+                v.as_mut_ptr(),
+                c_int::try_from(v.len())?,
+            )
         };
         if ret < 1 {
             trace_ossl!("BN_bn2nativepad()");
@@ -297,7 +306,7 @@ impl BigNum {
     pub fn to_bigendian_vec(&self) -> Result<Vec<u8>, Error> {
         let len = self.len()?;
         let mut v = vec![0u8; self.len()?];
-        let ret = unsafe { BN_bn2bin(self.bn, v.as_mut_ptr()) };
+        let ret = unsafe { BN_bn2bin(self.as_ptr(), v.as_mut_ptr()) };
         if usize::try_from(ret)? != len {
             return Err(Error::new(ErrorKind::WrapperError));
         }
