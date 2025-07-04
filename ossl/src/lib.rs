@@ -231,13 +231,18 @@ unsafe impl Sync for OsslContext {}
 /// Manages the lifecycle and provides conversion methods.
 #[derive(Debug)]
 struct BigNum {
-    bn: *const BIGNUM,
+    bn: *mut BIGNUM,
 }
 
 impl BigNum {
     /// Returns a const pointer to the underlying `BIGNUM`.
     #[allow(dead_code)]
     pub fn as_ptr(&self) -> *const BIGNUM {
+        self.bn
+    }
+
+    /// Returns a mutable pointer to the underlying `BIGNUM`.
+    pub fn as_mut_ptr(&mut self) -> *mut BIGNUM {
         self.bn
     }
     /// Allocates a new BIGNUM from a slice of bytes with the binary
@@ -257,9 +262,7 @@ impl BigNum {
             trace_ossl!("BN_bin2bn()");
             return Err(Error::new(ErrorKind::NullPtr));
         }
-        Ok(BigNum {
-            bn: bn as *const BIGNUM,
-        })
+        Ok(BigNum { bn })
     }
 
     /// Calculates the minimum number of bytes needed to represent the `BIGNUM`.
@@ -274,9 +277,7 @@ impl BigNum {
         if unsafe { OSSL_PARAM_get_BN(p, &mut bn) } != 1 {
             return Err(Error::new(ErrorKind::OsslError));
         }
-        Ok(BigNum {
-            bn: bn as *const BIGNUM,
-        })
+        Ok(BigNum { bn })
     }
 
     /// Converts the `BIGNUM` to a byte vector in native-endian format, padded
@@ -317,7 +318,7 @@ impl BigNum {
 impl Drop for BigNum {
     fn drop(&mut self) {
         unsafe {
-            BN_free(self.bn as *mut BIGNUM);
+            BN_free(self.as_mut_ptr());
         }
     }
 }
