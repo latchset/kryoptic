@@ -7,7 +7,10 @@
 use std::ffi::{c_int, c_uint, CStr};
 
 use crate::bindings::*;
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
+    OsslParamBuilder,
+};
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
 /// Used for various public key algorithm operations (key generation, signing,
@@ -103,7 +106,7 @@ pub enum EvpPkeyType {
 /// Adds group name to params if needed, and returns the ossl key type name
 fn pkey_type_to_params(
     pt: &EvpPkeyType,
-    params: &mut OsslParam,
+    params: &mut OsslParamBuilder,
 ) -> Result<&'static CStr, Error> {
     let name = match pt {
         EvpPkeyType::Ffdhe2048 => {
@@ -447,7 +450,7 @@ fn params_to_rsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
 
 fn rsa_data_to_params(
     rsa: &RsaData,
-    params: &mut OsslParam,
+    params: &mut OsslParamBuilder,
 ) -> Result<bool, Error> {
     let mut is_priv = false;
     params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_N), rsa.n.as_slice())?;
@@ -546,16 +549,13 @@ impl EvpPkey {
 
     /// Generates a new key pair based on provided algorithm name and
     /// parameters.
-    ///
-    /// The parameters (`OsslParam`) specify details like key size or curve
-    /// name.
     pub fn generate(
         ctx: &OsslContext,
         pkey_type: EvpPkeyType,
     ) -> Result<EvpPkey, Error> {
-        let mut params = OsslParam::new();
+        let mut params = OsslParamBuilder::new();
         let name = pkey_type_to_params(&pkey_type, &mut params)?;
-        params.finalize();
+        let params = params.finalize();
         let mut pctx = EvpPkeyCtx::new(ctx, name)?;
         let res = unsafe { EVP_PKEY_keygen_init(pctx.as_mut_ptr()) };
         if res != 1 {
@@ -604,7 +604,7 @@ impl EvpPkey {
         data: PkeyData,
     ) -> Result<EvpPkey, Error> {
         let mut pkey_class: u32 = 0;
-        let mut params = OsslParam::with_capacity(2);
+        let mut params = OsslParamBuilder::with_capacity(2);
         params.zeroize = true;
 
         let name = pkey_type_to_params(&pkey_type, &mut params)?;
@@ -750,7 +750,7 @@ impl EvpPkey {
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
         }
-        params.finalize();
+        let params = params.finalize();
 
         EvpPkey::fromdata(ctx, name, pkey_class, &params)
     }
@@ -856,12 +856,12 @@ impl EvpPkey {
         ctx: &OsslContext,
         public: &[u8],
     ) -> Result<EvpPkey, Error> {
-        let mut params = OsslParam::with_capacity(1);
+        let mut params = OsslParamBuilder::with_capacity(1);
         params.add_empty_utf8_string(
             cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
             MAX_GROUP_NAME_LEN + 1,
         )?;
-        params.finalize();
+        let mut params = params.finalize();
         self.get_params(&mut params)?;
         let pkey_type = pkey_to_type(&self, &params)?;
         let data = match pkey_type {

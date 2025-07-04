@@ -75,7 +75,7 @@ pub enum ErrorKind {
     OsslError,
     /// A falure resulting from wrong key usage
     KeyError,
-    /// A warpper error
+    /// A wrapper error
     WrapperError,
     /// A buffer is not of the correct size
     BufferSize,
@@ -83,7 +83,22 @@ pub enum ErrorKind {
     BadArg,
 }
 
-#[derive(Debug)]
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ErrorKind::NullPtr => "OpenSSL returned a NULL ptr as an error",
+            ErrorKind::OsslError => "OpenSSL returned a 0 c_int as an error",
+            ErrorKind::KeyError => "A falure resulting from wrong key usage",
+            ErrorKind::WrapperError => "A wrapper error",
+            ErrorKind::BufferSize => "A buffer is not of the correct size",
+            ErrorKind::BadArg => {
+                "An optional argument is required or has a bad value"
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Error {
     kind: ErrorKind,
 }
@@ -95,6 +110,14 @@ impl Error {
 
     pub fn kind(&self) -> ErrorKind {
         self.kind
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind())
     }
 }
 
@@ -187,6 +210,15 @@ impl OsslContext {
     pub fn new_lib_ctx() -> OsslContext {
         OsslContext {
             context: unsafe { OSSL_LIB_CTX_new() },
+        }
+    }
+
+    /// Returns the default global context.
+    ///
+    /// See `OSSL_LIB_CTX_get0_global_default` for details.
+    pub fn global_default() -> OsslContext {
+        OsslContext {
+            context: unsafe { OSSL_LIB_CTX_get0_global_default() },
         }
     }
 
@@ -312,13 +344,11 @@ pub enum BorrowedReference<'a> {
 /// This struct handles memory management (including optional zeroization) and
 /// lifetime complexities when constructing these arrays from Rust types.
 #[derive(Debug)]
-pub struct OsslParam<'a> {
+pub struct OsslParamBuilder<'a> {
     /// Storage for owned byte buffers backing some parameters.
     v: Vec<Vec<u8>>,
     /// The actual `OSSL_PARAM` array, potentially borrowed or owned.
     p: Cow<'a, [OSSL_PARAM]>,
-    /// Flag indicating if the construction of the params has been finalized
-    finalized: bool,
     /// Flag indicating the storage buffer should be zeroized on drop
     pub zeroize: bool,
     /// Flag indicating `p` contains an owned pointer we are responsible
@@ -329,7 +359,11 @@ pub struct OsslParam<'a> {
     br: Vec<BorrowedReference<'a>>,
 }
 
-impl Drop for OsslParam<'_> {
+/// A finalized OpenSSL `OSSL_PARAM` array.
+#[derive(Debug)]
+pub struct OsslParam<'a>(OsslParamBuilder<'a>);
+
+impl Drop for OsslParamBuilder<'_> {
     fn drop(&mut self) {
         if self.zeroize {
             while let Some(mut v) = self.v.pop() {
@@ -346,70 +380,23 @@ impl Drop for OsslParam<'_> {
     }
 }
 
-impl<'a> OsslParam<'a> {
+impl<'a> OsslParamBuilder<'a> {
     /// Creates a new, empty `OsslParam` builder.
     #[allow(dead_code)]
-    pub fn new() -> OsslParam<'a> {
+    pub fn new() -> OsslParamBuilder<'a> {
         Self::with_capacity(0)
     }
 
     /// Creates a new, empty `OsslParam` builder with a specific initial
     /// capacity.
-    pub fn with_capacity(capacity: usize) -> OsslParam<'a> {
-        OsslParam {
+    pub fn with_capacity(capacity: usize) -> OsslParamBuilder<'a> {
+        OsslParamBuilder {
             v: Vec::new(),
             p: Cow::Owned(Vec::with_capacity(capacity + 1)),
-            finalized: false,
             zeroize: false,
             freeptr: false,
             br: Vec::new(),
         }
-    }
-
-    /// Creates an `OsslParam` instance by borrowing an existing `OSSL_PARAM`
-    /// array from OpenSSL. Takes ownership of the pointer and marks it to be
-    /// freed on drop.
-    #[allow(dead_code)]
-    pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>, Error> {
-        if ptr.is_null() {
-            return Err(Error::new(ErrorKind::NullPtr));
-        }
-        /* get num of elements */
-        let mut nelem = 0;
-        let mut counter = ptr;
-        unsafe {
-            while !(*counter).key.is_null() {
-                nelem += 1;
-                counter = counter.offset(1);
-            }
-        }
-        /* Mark as finalized as no changes are allowed to imported params */
-        Ok(OsslParam {
-            v: Vec::new(),
-            p: Cow::Borrowed(unsafe {
-                std::slice::from_raw_parts(ptr, nelem + 1)
-            }),
-            finalized: true,
-            zeroize: false,
-            freeptr: true,
-            br: Vec::new(),
-        })
-    }
-
-    /// Creates an empty, finalized `OsslParam` array (contains only the end
-    /// marker).
-    #[allow(dead_code)]
-    pub fn empty() -> OsslParam<'static> {
-        let mut p = OsslParam {
-            v: Vec::new(),
-            p: Cow::Owned(Vec::with_capacity(1)),
-            finalized: false,
-            zeroize: false,
-            freeptr: false,
-            br: Vec::new(),
-        };
-        p.finalize();
-        p
     }
 
     /// Adds a BIGNUM parameter from a big-endian byte slice.
@@ -417,10 +404,6 @@ impl<'a> OsslParam<'a> {
     /// Handles the necessary conversions for OpenSSL's native-endian BIGNUM
     /// representation within `OSSL_PARAM`.
     pub fn add_bn(&mut self, key: &CStr, v: &[u8]) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         /* need to go through all these functions because,
          * BN_bin2bn() takes a Big Endian number,
          * but BN_bn2nativepad() later will convert it to
@@ -448,10 +431,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         v: &'a Vec<u8>,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
                 key.as_ptr(),
@@ -471,10 +450,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         mut v: Vec<u8>,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
                 key.as_ptr(),
@@ -494,10 +469,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         len: usize,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let mut v = vec![0u8; len];
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
@@ -523,10 +494,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         val: &CStr,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_utf8_string(
                 key.as_ptr(),
@@ -548,10 +515,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         v: &'a Vec<u8>,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_octet_string(
                 key.as_ptr(),
@@ -569,10 +532,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         s: &'a [u8],
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_octet_string(
                 key.as_ptr(),
@@ -592,10 +551,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         v: Vec<u8>,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_octet_string(
                 key.as_ptr(),
@@ -618,10 +573,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         val: &'a usize,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_size_t(
                 key.as_ptr(),
@@ -643,10 +594,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         val: &'a c_uint,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_uint(
                 key.as_ptr(),
@@ -664,10 +611,6 @@ impl<'a> OsslParam<'a> {
     /// usage.
     #[allow(dead_code)]
     pub fn add_int(&mut self, key: &CStr, val: &'a c_int) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let param = unsafe {
             OSSL_PARAM_construct_int(
                 key.as_ptr(),
@@ -686,10 +629,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         val: c_uint,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let v = val.to_ne_bytes().to_vec();
 
         let param = unsafe {
@@ -710,10 +649,6 @@ impl<'a> OsslParam<'a> {
         key: &CStr,
         val: c_int,
     ) -> Result<(), Error> {
-        if self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
-
         let v = val.to_ne_bytes().to_vec();
 
         let param = unsafe {
@@ -728,35 +663,66 @@ impl<'a> OsslParam<'a> {
     }
 
     /// Finalizes the `OSSL_PARAM` array by adding the end marker.
-    ///
-    /// Must be called before `as_ptr` or `as_mut_ptr` can be safely used.
-    pub fn finalize(&mut self) {
-        if !self.finalized {
-            self.p.to_mut().push(unsafe { OSSL_PARAM_construct_end() });
-            self.finalized = true;
+    pub fn finalize(mut self) -> OsslParam<'a> {
+        self.p.to_mut().push(unsafe { OSSL_PARAM_construct_end() });
+        OsslParam(self)
+    }
+}
+
+impl<'a> OsslParam<'a> {
+    /// Creates an empty, finalized `OsslParam` array (contains only the end
+    /// marker).
+    #[allow(dead_code)]
+    pub fn empty() -> OsslParam<'static> {
+        let p = OsslParamBuilder {
+            v: Vec::new(),
+            p: Cow::Owned(Vec::with_capacity(1)),
+            zeroize: false,
+            freeptr: false,
+            br: Vec::new(),
+        };
+        p.finalize()
+    }
+
+    /// Creates an `OsslParam` instance by borrowing an existing `OSSL_PARAM`
+    /// array from OpenSSL. Takes ownership of the pointer and marks it to be
+    /// freed on drop.
+    #[allow(dead_code)]
+    pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>, Error> {
+        if ptr.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
         }
+        /* get num of elements */
+        let mut nelem = 0;
+        let mut counter = ptr;
+        unsafe {
+            while !(*counter).key.is_null() {
+                nelem += 1;
+                counter = counter.offset(1);
+            }
+        }
+        /* Mark as finalized as no changes are allowed to imported params */
+        Ok(OsslParam(OsslParamBuilder {
+            v: Vec::new(),
+            p: Cow::Borrowed(unsafe {
+                std::slice::from_raw_parts(ptr, nelem + 1)
+            }),
+            zeroize: false,
+            freeptr: true,
+            br: Vec::new(),
+        }))
     }
 
     /// Returns a const pointer to the finalized `OSSL_PARAM` array.
-    ///
-    /// Panics if the array has not been finalized.
     #[allow(dead_code)]
     pub fn as_ptr(&self) -> *const OSSL_PARAM {
-        if !self.finalized {
-            panic!("Unfinalized OsslParam");
-        }
-        self.p.as_ref().as_ptr()
+        self.0.p.as_ref().as_ptr()
     }
 
     /// Returns a mutable pointer to the finalized `OSSL_PARAM` array.
-    ///
-    /// Panics if the array has not been finalized.
     #[allow(dead_code)]
     pub fn as_mut_ptr(&mut self) -> *mut OSSL_PARAM {
-        if !self.finalized {
-            panic!("Unfinalized OsslParam");
-        }
-        self.p.to_mut().as_mut_ptr()
+        self.0.p.to_mut().as_mut_ptr()
     }
 
     /// Internal functions to convert an immutable reference to a mutable
@@ -764,18 +730,12 @@ impl<'a> OsslParam<'a> {
     /// mark as mutable but we know the interface contract means the pointer
     /// is effectively a const.
     unsafe fn int_mut_ptr(&self) -> *mut OSSL_PARAM {
-        if !self.finalized {
-            panic!("Unfinalized OsslParam");
-        }
-        self.p.as_ref().as_ptr() as *mut OSSL_PARAM
+        self.as_ptr() as *mut OSSL_PARAM
     }
 
     /// Gets the value of an integer parameter by its key name.
     #[allow(dead_code)]
     pub fn get_int(&self, key: &CStr) -> Result<c_int, Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -791,9 +751,6 @@ impl<'a> OsslParam<'a> {
 
     /// Gets the value of an unsigend integer parameter by its key name.
     pub fn get_uint(&self, key: &CStr) -> Result<c_uint, Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -810,9 +767,6 @@ impl<'a> OsslParam<'a> {
     /// Gets the value of a long parameter by its key name.
     #[allow(dead_code)]
     pub fn get_long(&self, key: &CStr) -> Result<c_long, Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -829,9 +783,6 @@ impl<'a> OsslParam<'a> {
     /// Gets the value of a BIGNUM parameter by its key name as a big-endian
     /// byte vector.
     pub fn get_bn(&self, key: &CStr) -> Result<Vec<u8>, Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -844,9 +795,6 @@ impl<'a> OsslParam<'a> {
     /// slice.
     #[allow(dead_code)]
     pub fn get_octet_string(&self, key: &CStr) -> Result<&'a [u8], Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -868,9 +816,6 @@ impl<'a> OsslParam<'a> {
     /// Gets a UTF8 String as a &CStr
     #[allow(dead_code)]
     pub fn get_utf8_string(&self, key: &CStr) -> Result<&'a CStr, Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         if p.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -887,22 +832,14 @@ impl<'a> OsslParam<'a> {
     /// Checks if a parameter with the given key name exists in the array.
     #[allow(dead_code)]
     pub fn has_param(&self, key: &CStr) -> Result<bool, Error> {
-        if !self.finalized {
-            return Err(Error::new(ErrorKind::WrapperError));
-        }
         let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
         Ok(!p.is_null())
     }
 
     /// Returns the number of elements in the array, excluding the terminating
     /// null element
-    ///
-    /// Panics if the array has not been finalized.
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        if !self.finalized {
-            panic!("Unfinalized OsslParam");
-        }
-        self.p.as_ref().len() - 1
+        self.0.p.as_ref().len() - 1
     }
 }
