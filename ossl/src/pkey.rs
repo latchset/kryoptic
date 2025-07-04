@@ -385,6 +385,201 @@ impl Drop for RsaData {
     }
 }
 
+#[cfg(feature = "rfc9580")]
+impl RsaData {
+    /// Creates a parameter set from `d`, `p`, and `q`.
+    pub fn from_dpq(
+        d: &[u8],
+        p: &[u8],
+        q: &[u8],
+    ) -> Result<(Vec<u8>, RsaData), Error> {
+        use crate::BigNum;
+
+        /// Subtracts `b` from `a` storing the result in `res`.
+        fn checked_sub(
+            res: &mut BigNum,
+            a: &BigNum,
+            b: &BigNum,
+        ) -> Result<(), Error> {
+            let ret =
+                unsafe { BN_sub(res.as_mut_ptr(), a.as_ptr(), b.as_ptr()) };
+
+            if ret == 1 {
+                Ok(())
+            } else {
+                trace_ossl!("BN_sub()");
+                Err(Error::new(ErrorKind::OsslError))
+            }
+        }
+
+        /// Computes the product of the given numbers storing the result
+        /// in `res`.
+        fn checked_mul(
+            res: &mut BigNum,
+            a: &BigNum,
+            b: &BigNum,
+        ) -> Result<(), Error> {
+            unsafe {
+                let ctx = BN_CTX_secure_new();
+                if ctx.is_null() {
+                    return Err(Error::new(ErrorKind::NullPtr));
+                }
+
+                let ret = BN_mul(res.as_mut_ptr(), a.as_ptr(), b.as_ptr(), ctx);
+
+                BN_CTX_free(ctx);
+
+                if ret == 1 {
+                    Ok(())
+                } else {
+                    trace_ossl!("BN_mul()");
+                    Err(Error::new(ErrorKind::OsslError))
+                }
+            }
+        }
+
+        /// Computes the inverse of `a` modulo `n` storing the result in
+        /// `res`.
+        fn checked_mod_inverse(
+            res: &mut BigNum,
+            a: &BigNum,
+            n: &BigNum,
+        ) -> Result<(), Error> {
+            unsafe {
+                let ctx = BN_CTX_secure_new();
+                if ctx.is_null() {
+                    return Err(Error::new(ErrorKind::NullPtr));
+                }
+
+                let ret = BN_mod_inverse(
+                    res.as_mut_ptr(),
+                    a.as_ptr(),
+                    n.as_ptr(),
+                    ctx,
+                );
+
+                BN_CTX_free(ctx);
+
+                if !ret.is_null() {
+                    Ok(())
+                } else {
+                    trace_ossl!("BN_mod_inverse()");
+                    Err(Error::new(ErrorKind::OsslError))
+                }
+            }
+        }
+
+        /// Configures the given `BigNum` to use constant-time
+        /// operations.
+        fn use_constant_time_ops(bn: &mut BigNum) {
+            unsafe {
+                BN_set_flags(bn.as_mut_ptr(), BN_FLG_CONSTTIME as i32);
+            }
+        }
+
+        let (e, n) = {
+            use crate::BigNum;
+
+            // Compute n = p * q.
+            let p = BigNum::from_bigendian_slice(p)?;
+            let q = BigNum::from_bigendian_slice(q)?;
+
+            let mut n = BigNum::new()?;
+            use_constant_time_ops(&mut n);
+            checked_mul(&mut n, &p, &q)?;
+
+            // Compute 𝜙 = (p - 1) * (q - 1).
+            let one = BigNum::from_bigendian_slice(&[1])?;
+            let mut p_dec = BigNum::new()?;
+            use_constant_time_ops(&mut p_dec);
+            checked_sub(&mut p_dec, &p, &one)?;
+            let mut q_dec = BigNum::new()?;
+            use_constant_time_ops(&mut q_dec);
+            checked_sub(&mut q_dec, &q, &one)?;
+
+            let mut phi = BigNum::new()?;
+            use_constant_time_ops(&mut phi);
+            checked_mul(&mut phi, &p_dec, &q_dec)?;
+
+            // Compute e ≡ d⁻¹ (mod 𝜙).
+            let d = BigNum::from_bigendian_slice(d)?;
+            let mut e = BigNum::new()?;
+            checked_mod_inverse(&mut e, &d, &phi)?;
+
+            (e, n)
+        };
+
+        Ok((
+            e.to_bigendian_vec()?,
+            RsaData {
+                n: n.to_bigendian_vec()?,
+                d: Some(OsslSecret::from_vec(d.to_vec())),
+                p: Some(OsslSecret::from_vec(p.to_vec())),
+                q: Some(OsslSecret::from_vec(q.to_vec())),
+                a: None,
+                b: None,
+                c: None,
+            },
+        ))
+    }
+
+    /// Computes the inverse of p modulo q, i.e. u ≡ p⁻¹ (mod q).
+    pub fn inverse_p_mod_q(&self) -> Result<Vec<u8>, Error> {
+        use crate::BigNum;
+
+        /// Computes the inverse of `a` modulo `n` storing the result in
+        /// `res`.
+        fn checked_mod_inverse(
+            res: &mut BigNum,
+            a: &BigNum,
+            n: &BigNum,
+        ) -> Result<(), Error> {
+            unsafe {
+                let ctx = BN_CTX_secure_new();
+                if ctx.is_null() {
+                    return Err(Error::new(ErrorKind::NullPtr));
+                }
+
+                let ret = BN_mod_inverse(
+                    res.as_mut_ptr(),
+                    a.as_ptr(),
+                    n.as_ptr(),
+                    ctx,
+                );
+
+                BN_CTX_free(ctx);
+
+                if !ret.is_null() {
+                    Ok(())
+                } else {
+                    trace_ossl!("BN_mod_inverse()");
+                    Err(Error::new(ErrorKind::OsslError))
+                }
+            }
+        }
+
+        /// Configures the given `BigNum` to use constant-time
+        /// operations.
+        fn use_constant_time_ops(bn: &mut BigNum) {
+            unsafe {
+                BN_set_flags(bn.as_mut_ptr(), BN_FLG_CONSTTIME as i32);
+            }
+        }
+
+        let p = BigNum::from_bigendian_slice(
+            self.p.as_ref().ok_or(Error::new(ErrorKind::NullPtr))?,
+        )?;
+        let q = BigNum::from_bigendian_slice(
+            self.q.as_ref().ok_or(Error::new(ErrorKind::NullPtr))?,
+        )?;
+        let mut u = BigNum::new()?;
+        use_constant_time_ops(&mut u);
+        checked_mod_inverse(&mut u, &p, &q)?;
+
+        Ok(u.to_bigendian_vec()?)
+    }
+}
+
 /// Wrapper to handle import/export data based on the type
 #[derive(Debug)]
 pub enum PkeyData {
@@ -1080,3 +1275,32 @@ impl Drop for EvpPkey {
 
 unsafe impl Send for EvpPkey {}
 unsafe impl Sync for EvpPkey {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tests importing a key from d, p, and q, and the computation of
+    /// the inverse of p mod q.
+    ///
+    /// This test vector has been extracted from Sequoia's test suite.
+    #[cfg(feature = "rfc9580")]
+    #[test]
+    fn import_rsa_dpq() -> Result<(), Error> {
+        // The inputs.
+        let d = b"\x14\xC4\x3A\x0C\x3A\x79\xA4\xF7\x63\x0D\x89\x93\x63\x8B\x56\x9C\x29\x2E\xCD\xCF\xBF\xB0\xEC\x66\x52\xC3\x70\x1B\x19\x21\x73\xDE\x8B\xAC\x0E\xF2\xE1\x28\x42\x66\x56\x55\x00\x3B\xFD\x50\xC4\x7C\xBC\x9D\xEB\x7D\xF4\x81\xFC\xC3\xBF\xF7\xFF\xD0\x41\x3E\x50\x3B\x5F\x5D\x5F\x56\x67\x5E\x00\xCE\xA4\x53\xB8\x59\xA0\x40\xC8\x96\x6D\x12\x09\x27\xBE\x1D\xF1\xC2\x68\xFC\xF0\x14\xD6\x52\x77\x07\xC8\x12\x36\x9C\x9A\x5C\xAF\x43\xCC\x95\x20\xBB\x0A\x44\x94\xDD\xB4\x4F\x45\x4E\x3A\x1A\x30\x0D\x66\x40\xAC\x68\xE8\xB0\xFD\xCD\x6C\x6B\x6C\xB5\xF7\xE4\x36\x95\xC2\x96\x98\xFD\xCA\x39\x6C\x1A\x2E\x55\xAD\xB6\xE0\xF8\x2C\xFF\xBC\xD3\x32\x15\x52\x39\xB3\x92\x35\xDB\x8B\x68\xAF\x2D\x4A\x6E\x64\xB8\x28\x63\xC4\x24\x94\x2D\xA9\xDB\x93\x56\xE3\xBC\xD0\xB6\x38\x84\x04\xA4\xC6\x18\x48\xFE\xB2\xF8\xE1\x60\x37\x52\x96\x41\xA5\x79\xF6\x3D\xB7\x2A\x71\x5B\x7A\x75\xBF\x7F\xA2\x5A\xC8\xA1\x38\xF2\x5A\xBD\x14\xFC\xAF\xB4\x54\x83\xA4\xBD\x49\xA2\x8B\x91\xB0\xE0\x4A\x1B\x21\x54\x07\x19\x70\x64\x7C\x3E\x9F\x8D\x8B\xE4\x70\xD1\xE7\xBE\x4E\x5C\xCE\xF1";
+        let p = b"\xC8\x32\xD1\x17\x41\x4D\x8F\x37\x09\x18\x32\x4C\x4C\xF4\xA2\x15\x27\x43\x3D\xBB\xB5\xF6\x1F\xCF\xD2\xE4\x43\x61\x07\x0E\x9E\x35\x1F\x0A\x5D\xFB\x3A\x45\x74\x61\x73\x73\x7B\x5F\x1F\x87\xFB\x54\x8D\xA8\x85\x3E\xB0\xB7\xC7\xF5\xC9\x13\x99\x8D\x40\xE6\xA6\xD0\x71\x3A\xE3\x2D\x4A\xC3\xA3\xFF\xF7\x72\x82\x14\x52\xA4\xBA\x63\x0E\x17\xCA\xCA\x18\xC4\x3A\x40\x79\xF1\x86\xB3\x10\x4B\x9F\xB2\xAE\x2E\x13\x38\x8D\x2C\xF9\x88\x4C\x25\x53\xEF\xF9\xD1\x8B\x1A\x7C\xE7\xF6\x4B\x73\x51\x31\xFA\x44\x1D\x36\x65\x71\xDA\xFC\x6F";
+        let q = b"\xCC\x30\xE9\xCC\xCB\x31\x28\xB5\x90\xFF\x06\x62\x42\x5B\x24\x0E\x00\xFE\xE2\x37\xC4\xAC\xBB\x3B\x8F\xF2\x0E\x3F\x78\xCF\x6B\x7C\xE8\x75\x57\x7C\x15\x9D\x1A\x66\xF2\x0A\xE5\xD3\x0B\xE7\x40\xF7\xE7\x00\xB6\x86\xB5\xD9\x20\x67\xE0\x4A\xC0\x90\xA4\x13\x4D\xC9\xB0\x12\xC5\xCD\x4C\xEB\xA1\x91\x2D\x43\x58\x6E\xB6\x75\xA0\x93\xF0\x5B\xC5\x31\xCA\xB7\xC6\x22\x0C\xD3\xEC\x84\xC5\x91\xA1\x5F\x2C\x8E\x07\x5D\xA1\x98\x67\xC5\x7A\x58\x16\x71\x3D\xED\x91\x03\x0D\xD4\x25\x07\x89\x9B\x33\x98\xA3\x70\xD9\xE7\xC8\x17\xA3\xD9";
+
+        // The expected outputs.
+        let expect_e = b"\x01\x00\x01";
+        let expect_n = b"\x9f\xae\xbe\xfc\x24\x19\x92\xff\xba\xf1\xb1\x08\x3b\xcb\x52\x22\x6a\x5b\x94\xaa\xa6\xd7\x9a\x93\x17\xcf\xc9\xa6\x77\xfb\x58\x28\x1d\x64\xca\x69\xca\x91\xc8\x82\xbd\x82\x77\x08\xaa\xbf\xdd\xcd\xc0\x95\x39\x55\xef\x1e\x2a\x29\xc5\xc8\x2f\x95\xd2\xb8\xe3\x5d\xab\xdc\x47\x1e\x91\x72\xc6\x33\x09\x2c\x06\x0c\x36\x7f\x8f\x47\xa0\x60\xc8\xb2\x46\x27\xd3\x13\x84\x1c\x44\x2d\x01\xb0\xec\xc1\x0b\xfb\xfe\xe2\x15\x3e\x8d\xf7\x67\xae\xf0\xf4\xf2\x52\x74\x30\x74\x35\xc0\xe8\x95\x79\x33\x8f\x5f\x6d\x80\xa2\x1b\xfd\xac\x09\x74\xb2\x56\xd2\x49\x0d\xc4\x16\x91\x64\x12\x65\xab\x02\xf3\x63\xe6\x15\x7e\x02\xff\x94\x2a\xba\x76\x7a\x9d\x74\x4b\x93\x1e\xfd\x12\xb1\xf0\x0b\x3a\x8e\xf4\x6a\x98\xee\xb8\x0f\x12\xb9\x95\xd0\x77\x76\x2d\x75\x2d\x01\xeb\x02\x99\x20\x45\x89\x1d\xce\x95\xed\x4c\xc0\xdc\x29\xeb\xb8\x73\x42\x61\x48\x2e\xaa\x01\x44\xa9\x89\xa0\x43\x9f\x86\x33\xa2\x4c\x23\x04\x4f\x84\x8f\xec\x81\x36\xa5\xca\x46\x28\x9c\x8f\xc8\x91\xf0\x95\xfb\x06\xf1\x22\x93\x5c\x13\xac\xbb\xd3\x54\x8b\x35\xf8\x1e\xf4\x99\xe2\x88\x57\x53\xa7\x17";
+        let expect_u = b"\x32\xd4\xd9\x5a\x71\xa5\x4f\xf7\x04\xaa\xd1\x3b\x90\x32\xbd\xf3\x14\x29\x69\x4a\x5e\x57\x93\xa6\x88\x1d\xc1\xcb\xb4\x84\x76\x27\xb4\xaa\xf8\x99\xc7\xbb\xb4\x19\x51\x41\x18\x6d\x52\xfe\x1d\xcd\x14\x3c\x38\x9e\xf9\xa3\x2b\xed\x97\xd9\x8d\x7d\x66\x88\x38\x1f\xc9\xbf\x95\x0e\xc5\xe5\xe1\x8e\x1d\xb4\x3f\x6d\xcd\x0a\x5a\xed\xa0\xcf\xb9\x95\x88\x9a\x2c\x4c\x74\x65\xf0\xfc\xc6\xaf\x39\x00\xaa\xab\x84\xcc\x1c\xc3\x88\xc7\xd2\x58\x49\x79\xb4\xd8\x38\x47\x8a\xad\xf0\xfa\x48\xf6\xcb\x6f\x30\x6f\xf3\x95\xf9\x58\x2c\x3b";
+
+        let (e, data) = RsaData::from_dpq(d, p, q)?;
+        assert_eq!(e, expect_e);
+        assert_eq!(&data.n, expect_n);
+        assert_eq!(&data.inverse_p_mod_q()?, expect_u);
+        Ok(())
+    }
+}
