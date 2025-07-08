@@ -690,6 +690,11 @@ static FIPS_PROVIDER: LazyLock<FipsProvider> = LazyLock::new(|| unsafe {
         dispatcher_struct!(args1; OSSL_FUNC_CRYPTO_SECURE_ALLOCATED; fips_secure_allocated),
         /* Indicator function */
         dispatcher_struct!(args2; OSSL_FUNC_INDICATOR_CB; fips_get_indicator_cb),
+        /* terminate table */
+        OSSL_DISPATCH {
+            function_id: 0,
+            function: None,
+        },
     ];
 
     let mut provider: *mut PROV_CTX = std::ptr::null_mut();
