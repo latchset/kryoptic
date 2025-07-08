@@ -28,8 +28,6 @@ pub fn mlkem_param_set_to_pkey_type(
     }
 }
 
-/// (`OsslParam`).
-///
 /// Extracts the parameter set (`CKA_PARAMETER_SET`) to determine the algorithm
 /// name. Extracts key components (`CKA_VALUE` for public/private key,
 /// `CKA_SEED`) based on the object `class` and populates a `MlkeyData`
