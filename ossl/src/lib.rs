@@ -320,10 +320,10 @@ pub struct OsslParam<'a> {
     /// Flag indicating if the construction of the params has been finalized
     finalized: bool,
     /// Flag indicating the storage buffer should be zeroized on drop
-    pub zeroize: bool,
+    zeroize: bool,
     /// Flag indicating `p` contains an owned pointer we are responsible
     /// for freeing
-    pub freeptr: bool,
+    freeptr: bool,
     /// Use an enum to hold references to data we need to keep around as
     /// a pointer to their data is stored in the OSSL_PARAM array
     br: Vec<BorrowedReference<'a>>,
