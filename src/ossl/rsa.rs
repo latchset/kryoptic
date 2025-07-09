@@ -290,7 +290,7 @@ impl RsaPKCSOperation {
             osslctx(),
             op,
             &mut pkey,
-            &rsa_enc_params(alg, params.as_ref())?,
+            Some(&rsa_enc_params(alg, params.as_ref())?),
         )?;
         let keysize = Self::get_key_size(key, info)?;
         let maxinput = Self::max_message_len(keysize, mech)?;
