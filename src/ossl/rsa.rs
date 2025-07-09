@@ -18,7 +18,9 @@ use crate::ossl::common::{
 };
 use crate::pkcs11::*;
 
-use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
+use ossl::asymcipher::{
+    rsa_enc_params, EncAlg, EncOp, OsslAsymcipher, RsaOaepParams,
+};
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData, RsaData};
 use ossl::signature::{
@@ -279,19 +281,17 @@ impl RsaPKCSOperation {
         let mut fips_approval = FipsApproval::init();
 
         let (alg, params) = parse_enc_params(mech)?;
-        let encctx = match flag {
-            CKF_ENCRYPT => OsslAsymcipher::message_encrypt_new(
-                osslctx(),
-                &mut pubkey_from_object(key)?,
-                &rsa_enc_params(alg, params.as_ref())?,
-            )?,
-            CKF_DECRYPT => OsslAsymcipher::message_decrypt_new(
-                osslctx(),
-                &mut privkey_from_object(key)?,
-                &rsa_enc_params(alg, params.as_ref())?,
-            )?,
+        let (op, mut pkey) = match flag {
+            CKF_ENCRYPT => (EncOp::Encrypt, pubkey_from_object(key)?),
+            CKF_DECRYPT => (EncOp::Decrypt, privkey_from_object(key)?),
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
+        let encctx = OsslAsymcipher::new(
+            osslctx(),
+            op,
+            &mut pkey,
+            &rsa_enc_params(alg, params.as_ref())?,
+        )?;
         let keysize = Self::get_key_size(key, info)?;
         let maxinput = Self::max_message_len(keysize, mech)?;
 
@@ -559,7 +559,7 @@ impl Encryption for RsaPKCSOperation {
         self.fips_approval.clear();
 
         let len = if let Some(ctx) = &mut self.encctx {
-            let outlen = ctx.message_encrypt(plain, None)?;
+            let outlen = ctx.encrypt(plain, None)?;
             if cipher.len() == 0 {
                 return Ok(outlen);
             } else {
@@ -570,7 +570,7 @@ impl Encryption for RsaPKCSOperation {
 
             self.finalized = true;
 
-            ctx.message_encrypt(plain, Some(cipher))?
+            ctx.encrypt(plain, Some(cipher))?
         } else {
             self.finalized = true;
             return Err(CKR_GENERAL_ERROR)?;
@@ -617,7 +617,7 @@ impl Decryption for RsaPKCSOperation {
         self.fips_approval.clear();
 
         let len = if let Some(ctx) = &mut self.encctx {
-            let mut outlen = ctx.message_decrypt(cipher, None)?;
+            let mut outlen = ctx.decrypt(cipher, None)?;
             if plain.len() == 0 {
                 return Ok(outlen);
             }
@@ -634,15 +634,14 @@ impl Decryption for RsaPKCSOperation {
                  * a full modulus long buffer, so we need to use a
                  * temporary buffer here to bridge this mismatch */
                 let mut tmp = vec![0u8; outlen];
-                let len =
-                    ctx.message_decrypt(cipher, Some(tmp.as_mut_slice()))?;
+                let len = ctx.decrypt(cipher, Some(tmp.as_mut_slice()))?;
                 if len <= plain.len() {
                     plain[..len].copy_from_slice(&tmp[..len]);
                 }
                 zeromem(tmp.as_mut_slice());
                 outlen = len;
             } else {
-                outlen = ctx.message_decrypt(cipher, Some(plain))?;
+                outlen = ctx.decrypt(cipher, Some(plain))?;
             }
             if outlen > plain.len() {
                 return Err(CKR_GENERAL_ERROR)?;

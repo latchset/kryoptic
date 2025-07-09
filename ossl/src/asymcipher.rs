@@ -71,27 +71,57 @@ pub fn rsa_enc_params(
     return Ok(params);
 }
 
+/// Asymmetric Cipher Operation
+#[derive(Debug, PartialEq)]
+pub enum EncOp {
+    Encrypt,
+    Decrypt,
+}
+
 /// Higher level wrapper for asymmetric encryption operations with OpenSSL
 #[derive(Debug)]
 pub struct OsslAsymcipher {
     /// The underlying OpenSSL EVP PKEY context.
     pkey_ctx: EvpPkeyCtx,
+    /// The requested operation type
+    op: EncOp,
 }
 
 impl OsslAsymcipher {
-    /// Initializes a new asymmetric encryption operation
-    pub fn message_encrypt_new(
+    /// Initializes a new asymmetric encryption or decryption operation
+    pub fn new(
         libctx: &OsslContext,
+        op: EncOp,
         key: &mut EvpPkey,
         params: &OsslParam,
     ) -> Result<OsslAsymcipher, Error> {
         let mut ctx = OsslAsymcipher {
             pkey_ctx: key.new_ctx(libctx)?,
+            op: op,
         };
-        let ret = unsafe {
-            EVP_PKEY_encrypt_init_ex(ctx.pkey_ctx.as_mut_ptr(), params.as_ptr())
+        let ret = match ctx.op {
+            EncOp::Encrypt => unsafe {
+                EVP_PKEY_encrypt_init_ex(
+                    ctx.pkey_ctx.as_mut_ptr(),
+                    params.as_ptr(),
+                )
+            },
+            EncOp::Decrypt => unsafe {
+                EVP_PKEY_decrypt_init_ex(
+                    ctx.pkey_ctx.as_mut_ptr(),
+                    params.as_ptr(),
+                )
+            },
         };
         if ret != 1 {
+            match ctx.op {
+                EncOp::Encrypt => {
+                    trace_ossl!("EVP_PKEY_encrypt_init()");
+                }
+                EncOp::Decrypt => {
+                    trace_ossl!("EVP_PKEY_decrypt_init()");
+                }
+            }
             trace_ossl!("EVP_PKEY_encrypt_init()");
             return Err(Error::new(ErrorKind::OsslError));
         }
@@ -100,11 +130,14 @@ impl OsslAsymcipher {
 
     /// Executes an encryption operation if 'output' contains a buffer
     /// or probes and returns the expected output length if 'output' is None
-    pub fn message_encrypt(
+    pub fn encrypt(
         &mut self,
         plaintext: &[u8],
         output: Option<&mut [u8]>,
     ) -> Result<usize, Error> {
+        if self.op != EncOp::Encrypt {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
         let (mut outlen, outbuf_ptr) = match output {
             Some(o) => (o.len(), o.as_mut_ptr()),
             None => (0, std::ptr::null_mut()),
@@ -127,32 +160,16 @@ impl OsslAsymcipher {
         Ok(outlen)
     }
 
-    /// Initializes a new asymmetric decryption operation
-    pub fn message_decrypt_new(
-        libctx: &OsslContext,
-        key: &mut EvpPkey,
-        params: &OsslParam,
-    ) -> Result<OsslAsymcipher, Error> {
-        let mut ctx = OsslAsymcipher {
-            pkey_ctx: key.new_ctx(libctx)?,
-        };
-        let ret = unsafe {
-            EVP_PKEY_decrypt_init_ex(ctx.pkey_ctx.as_mut_ptr(), params.as_ptr())
-        };
-        if ret != 1 {
-            trace_ossl!("EVP_PKEY_decrypt_init()");
-            return Err(Error::new(ErrorKind::OsslError));
-        }
-        Ok(ctx)
-    }
-
     /// Executes an decryption operation if 'output' contains a buffer
     /// or probes and returns the expected output length if 'output' is None
-    pub fn message_decrypt(
+    pub fn decrypt(
         &mut self,
         ciphertext: &[u8],
         output: Option<&mut [u8]>,
     ) -> Result<usize, Error> {
+        if self.op != EncOp::Decrypt {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
         let (mut outlen, outbuf_ptr) = match output {
             Some(o) => (o.len(), o.as_mut_ptr()),
             None => (0, std::ptr::null_mut()),
