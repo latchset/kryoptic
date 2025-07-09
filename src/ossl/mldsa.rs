@@ -19,7 +19,7 @@ use crate::{bytes_to_vec, cast_params};
 use asn1;
 use bitflags::bitflags;
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
-use ossl::signature::{mldsa_params, OsslSignature, SigAlg};
+use ossl::signature::{mldsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::OsslParam;
 
 #[cfg(feature = "fips")]
@@ -297,27 +297,24 @@ impl MlDsaOperation {
         let params =
             MlDsaParams::new(mech, key.get_attr_as_ulong(CKA_PARAMETER_SET)?)?;
 
-        let sigctx = match flag {
+        let (op, mut pkey) = match flag {
             CKF_SIGN => {
                 pflags = pflags | ParmFlags::Sign;
-                OsslSignature::message_sign_new(
-                    osslctx(),
-                    mldsa_param_set_to_sigalg(params.param_set)?,
-                    &mut privkey_from_object(key)?,
-                    params.ossl_params(pflags)?.as_ref(),
-                )?
+                (SigOp::Sign, privkey_from_object(key)?)
             }
             CKF_VERIFY => {
-                pflags = pflags | ParmFlags::Verify;
-                OsslSignature::message_verify_new(
-                    osslctx(),
-                    mldsa_param_set_to_sigalg(params.param_set)?,
-                    &mut pubkey_from_object(key)?,
-                    params.ossl_params(pflags)?.as_ref(),
-                )?
+                pflags = pflags | ParmFlags::Sign;
+                (SigOp::Verify, pubkey_from_object(key)?)
             }
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
+        let sigctx = OsslSignature::new(
+            osslctx(),
+            op,
+            mldsa_param_set_to_sigalg(params.param_set)?,
+            &mut pkey,
+            params.ossl_params(pflags)?.as_ref(),
+        )?;
 
         let mut op = MlDsaOperation {
             mech: mech.mechanism,
@@ -494,7 +491,7 @@ impl MlDsaOperation {
                 None => return Err(CKR_SIGNATURE_LEN_RANGE)?,
             },
         };
-        Ok(self.sigctx.message_verify(mprime.as_slice(), Some(sig))?)
+        Ok(self.sigctx.verify(mprime.as_slice(), Some(sig))?)
     }
 
     fn sign_hash(
@@ -503,9 +500,7 @@ impl MlDsaOperation {
         signature: &mut [u8],
     ) -> Result<usize> {
         let mprime = self.hash_mldsa_m_prime(hash)?;
-        Ok(self
-            .sigctx
-            .message_sign(mprime.as_slice(), Some(signature))?)
+        Ok(self.sigctx.sign(mprime.as_slice(), Some(signature))?)
     }
 
     /// Internal helper for performing one-shot or final verification step.
@@ -550,7 +545,7 @@ impl MlDsaOperation {
         self.fips_approval.clear();
 
         match self.mech {
-            CKM_ML_DSA => match self.sigctx.message_verify_update(data) {
+            CKM_ML_DSA => match self.sigctx.update(data) {
                 Ok(()) => (),
                 Err(e) => {
                     self.finalized = true;
@@ -596,7 +591,7 @@ impl MlDsaOperation {
         self.fips_approval.clear();
 
         match self.mech {
-            CKM_ML_DSA => self.sigctx.message_verify_final(signature)?,
+            CKM_ML_DSA => self.sigctx.verify_final(signature)?,
             CKM_HASH_ML_DSA_SHA224
             | CKM_HASH_ML_DSA_SHA256
             | CKM_HASH_ML_DSA_SHA384
@@ -660,7 +655,7 @@ impl Sign for MlDsaOperation {
         self.fips_approval.clear();
 
         match self.mech {
-            CKM_ML_DSA => match self.sigctx.message_sign_update(data) {
+            CKM_ML_DSA => match self.sigctx.update(data) {
                 Ok(()) => (),
                 Err(e) => {
                     self.finalized = true;
@@ -702,7 +697,7 @@ impl Sign for MlDsaOperation {
         self.fips_approval.clear();
 
         let siglen = match self.mech {
-            CKM_ML_DSA => self.sigctx.message_sign_final(signature)?,
+            CKM_ML_DSA => self.sigctx.sign_final(signature)?,
             CKM_HASH_ML_DSA_SHA224
             | CKM_HASH_ML_DSA_SHA256
             | CKM_HASH_ML_DSA_SHA384
