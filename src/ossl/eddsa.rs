@@ -15,7 +15,7 @@ use crate::ossl::common::*;
 use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
-use ossl::signature::{eddsa_params, OsslSignature, SigAlg};
+use ossl::signature::{eddsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::ErrorKind;
 
 /// Expected signature length for Ed25519 in bytes.
@@ -124,39 +124,16 @@ impl EddsaOperation {
         key: &Object,
         signature: Option<Vec<u8>>,
     ) -> Result<EddsaOperation> {
-        let output_len: usize;
-        let mut sigctx = match flag {
-            CKF_SIGN => {
-                let mut pkey = privkey_from_object(key)?;
-                output_len = 2 * ((pkey.get_bits()? + 7) / 8);
-                let (sigalg, context) = parse_params(mech, output_len)?;
-                let params = eddsa_params(sigalg, context)?;
-                OsslSignature::message_sign_new(
-                    osslctx(),
-                    sigalg,
-                    &mut pkey,
-                    params.as_ref(),
-                )?
-            }
-            CKF_VERIFY => {
-                let mut pkey = pubkey_from_object(key)?;
-                output_len = 2 * ((pkey.get_bits()? + 7) / 8);
-                if let Some(s) = &signature {
-                    if s.len() != output_len {
-                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
-                    }
-                }
-                let (sigalg, context) = parse_params(mech, output_len)?;
-                let params = eddsa_params(sigalg, context)?;
-                OsslSignature::message_verify_new(
-                    osslctx(),
-                    sigalg,
-                    &mut pkey,
-                    params.as_ref(),
-                )?
-            }
+        let (op, mut pkey) = match flag {
+            CKF_SIGN => (SigOp::Sign, privkey_from_object(key)?),
+            CKF_VERIFY => (SigOp::Verify, pubkey_from_object(key)?),
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
+        let output_len = 2 * ((pkey.get_bits()? + 7) / 8);
+        let (alg, context) = parse_params(mech, output_len)?;
+        let params = eddsa_params(alg, context)?;
+        let mut sigctx =
+            OsslSignature::new(osslctx(), op, alg, &mut pkey, params.as_ref())?;
         if let Some(sig) = &signature {
             sigctx.set_signature(sig)?;
         }
@@ -261,7 +238,7 @@ impl Sign for EddsaOperation {
         }
         self.in_use = true;
 
-        match self.sigctx.message_sign_update(data) {
+        match self.sigctx.update(data) {
             Ok(()) => Ok(()),
             Err(e) => {
                 if e.kind() == ErrorKind::BufferSize {
@@ -282,7 +259,7 @@ impl Sign for EddsaOperation {
         }
         self.finalized = true;
 
-        let siglen = self.sigctx.message_sign_final(signature)?;
+        let siglen = self.sigctx.sign_final(signature)?;
         if siglen != signature.len() {
             return Err(CKR_DEVICE_ERROR)?;
         }
@@ -320,7 +297,7 @@ impl EddsaOperation {
         }
         self.in_use = true;
 
-        match self.sigctx.message_verify_update(data) {
+        match self.sigctx.update(data) {
             Ok(()) => Ok(()),
             Err(e) => {
                 if e.kind() == ErrorKind::BufferSize {
@@ -344,7 +321,7 @@ impl EddsaOperation {
 
         self.finalized = true;
 
-        if self.sigctx.message_verify_final(signature).is_ok() {
+        if self.sigctx.verify_final(signature).is_ok() {
             return Ok(());
         }
 

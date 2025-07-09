@@ -21,7 +21,9 @@ use crate::pkcs11::*;
 use ossl::asymcipher::{rsa_enc_params, EncAlg, OsslAsymcipher, RsaOaepParams};
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData, RsaData};
-use ossl::signature::{rsa_sig_params, OsslSignature, RsaPssParams, SigAlg};
+use ossl::signature::{
+    rsa_sig_params, OsslSignature, RsaPssParams, SigAlg, SigOp,
+};
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;
@@ -341,21 +343,19 @@ impl RsaPKCSOperation {
         let mut fips_approval = FipsApproval::init();
 
         let (alg, params) = parse_sig_params(mech)?;
-        let mut sigctx = match flag {
-            CKF_SIGN => OsslSignature::message_sign_new(
-                osslctx(),
-                alg,
-                &mut privkey_from_object(key)?,
-                rsa_sig_params(alg, &params)?.as_ref(),
-            )?,
-            CKF_VERIFY => OsslSignature::message_verify_new(
-                osslctx(),
-                alg,
-                &mut pubkey_from_object(key)?,
-                rsa_sig_params(alg, &params)?.as_ref(),
-            )?,
+        let (op, mut pkey) = match flag {
+            CKF_SIGN => (SigOp::Sign, privkey_from_object(key)?),
+            CKF_VERIFY => (SigOp::Verify, pubkey_from_object(key)?),
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
+        let mut sigctx = OsslSignature::new(
+            osslctx(),
+            op,
+            alg,
+            &mut pkey,
+            rsa_sig_params(alg, &params)?.as_ref(),
+        )?;
+
         let keysize = Self::get_key_size(key, info)?;
         let maxinput = Self::max_message_len(keysize, mech)?;
         if let Some(sig) = &signature {
@@ -707,10 +707,10 @@ impl Sign for RsaPKCSOperation {
                 }
 
                 if let Some(ctx) = &mut self.sigctx {
-                    if ctx.message_sign(data, None)? != signature.len() {
+                    if ctx.sign(data, None)? != signature.len() {
                         return Err(CKR_GENERAL_ERROR)?;
                     }
-                    let _ = ctx.message_sign(data, Some(signature))?;
+                    let _ = ctx.sign(data, Some(signature))?;
                 } else {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
@@ -745,7 +745,7 @@ impl Sign for RsaPKCSOperation {
         self.fips_approval.clear();
 
         if let Some(ctx) = &mut self.sigctx {
-            ctx.message_sign_update(data)?;
+            ctx.update(data)?;
         } else {
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -769,7 +769,7 @@ impl Sign for RsaPKCSOperation {
         self.fips_approval.clear();
 
         if let Some(ctx) = &mut self.sigctx {
-            let len = ctx.message_sign_final(signature)?;
+            let len = ctx.sign_final(signature)?;
             if len != signature.len() {
                 return Err(CKR_DEVICE_ERROR)?;
             }
@@ -817,7 +817,7 @@ impl RsaPKCSOperation {
                     }
                 }
                 if let Some(ctx) = &mut self.sigctx {
-                    ctx.message_verify(data, signature)?;
+                    ctx.verify(data, signature)?;
                 } else {
                     return Err(CKR_GENERAL_ERROR)?;
                 }
@@ -853,7 +853,7 @@ impl RsaPKCSOperation {
         self.fips_approval.clear();
 
         if let Some(ctx) = &mut self.sigctx {
-            ctx.message_verify_update(data)?;
+            ctx.update(data)?;
         } else {
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -878,7 +878,7 @@ impl RsaPKCSOperation {
         self.fips_approval.clear();
 
         if let Some(ctx) = &mut self.sigctx {
-            ctx.message_verify_final(signature)?;
+            ctx.verify_final(signature)?;
         } else {
             return Err(CKR_GENERAL_ERROR)?;
         }

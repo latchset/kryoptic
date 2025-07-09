@@ -445,11 +445,20 @@ pub fn mldsa_params<'a>(
 /// operations for OpenSSL versions that only support one-shot operations.
 const MAX_BUFFER_LEN: usize = 1024 * 1024;
 
+/// Operation type for OsslSignature
+#[derive(Debug, PartialEq)]
+pub enum SigOp {
+    Sign,
+    Verify,
+}
+
 /// Higher level wrapper for signature operations with OpenSSL
 #[derive(Debug)]
 pub struct OsslSignature {
     /// The underlying OpenSSL EVP PKEY context.
     pkey_ctx: EvpPkeyCtx,
+    /// The requested operation type
+    op: SigOp,
     /// The MD Ctx for cases when the old EVP_Digest interfaces need to be used
     #[cfg(not(feature = "fips"))]
     legacy_ctx: Option<EvpMdCtx>,
@@ -466,18 +475,194 @@ pub struct OsslSignature {
 }
 
 impl OsslSignature {
-    /// Internal function to init the signature structure from a key
-    fn init(
-        ctx: &OsslContext,
+    /// Creates a new message sign/verify context.
+    pub fn new(
+        libctx: &OsslContext,
+        op: SigOp,
+        alg: SigAlg,
         key: &mut EvpPkey,
+        params: Option<&OsslParam>,
     ) -> Result<OsslSignature, Error> {
-        Ok(OsslSignature {
-            pkey_ctx: key.new_ctx(ctx)?,
+        let mut ctx = OsslSignature {
+            pkey_ctx: key.new_ctx(libctx)?,
+            op: op,
             legacy_ctx: None,
             supports_updates: false,
             data: None,
             signature: None,
-        })
+        };
+
+        if sigalg_is_oneshot(alg) {
+            /* Single shot algorithms must always use EVP_PKEY_..._init */
+            let ret = unsafe {
+                match ctx.op {
+                    SigOp::Sign => {
+                        EVP_PKEY_sign_init(ctx.pkey_ctx.as_mut_ptr())
+                    }
+                    SigOp::Verify => {
+                        EVP_PKEY_verify_init(ctx.pkey_ctx.as_mut_ptr())
+                    }
+                }
+            };
+            if ret != 1 {
+                match ctx.op {
+                    SigOp::Sign => {
+                        trace_ossl!("EVP_PKEY_sign_init()");
+                    }
+                    SigOp::Verify => {
+                        trace_ossl!("EVP_PKEY_verify_init()");
+                    }
+                }
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            if let Some(p) = params {
+                let ret = unsafe {
+                    EVP_PKEY_CTX_set_params(
+                        ctx.pkey_ctx.as_mut_ptr(),
+                        p.as_ptr(),
+                    )
+                };
+                if ret != 1 {
+                    trace_ossl!("EVP_PKEY_CTX_set_params()");
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+            }
+            return Ok(ctx);
+        }
+
+        if sigalg_uses_legacy_api(alg) {
+            let params_ptr = match params {
+                Some(p) => p.as_ptr(),
+                None => std::ptr::null(),
+            };
+            let digest_ptr = sigalg_to_digest_ptr(alg);
+            #[cfg(not(feature = "fips"))]
+            {
+                let mut lctx = EvpMdCtx::new()?;
+                let ret = unsafe {
+                    match ctx.op {
+                        SigOp::Sign => EVP_DigestSignInit_ex(
+                            lctx.as_mut_ptr(),
+                            std::ptr::null_mut(),
+                            digest_ptr,
+                            libctx.ptr(),
+                            std::ptr::null(),
+                            key.as_mut_ptr(),
+                            params_ptr,
+                        ),
+                        SigOp::Verify => EVP_DigestVerifyInit_ex(
+                            lctx.as_mut_ptr(),
+                            std::ptr::null_mut(),
+                            digest_ptr,
+                            libctx.ptr(),
+                            std::ptr::null(),
+                            key.as_mut_ptr(),
+                            params_ptr,
+                        ),
+                    }
+                };
+                if ret != 1 {
+                    match ctx.op {
+                        SigOp::Sign => {
+                            trace_ossl!("EVP_DigestSignInit_ex()");
+                        }
+                        SigOp::Verify => {
+                            trace_ossl!("EVP_DigestVerifyInit_ex()");
+                        }
+                    }
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                ctx.legacy_ctx = Some(lctx);
+            }
+            #[cfg(feature = "fips")]
+            {
+                let mut lctx = ProviderSignatureCtx::new(alg)?;
+                match ctx.op {
+                    SigOp::Sign => {
+                        lctx.digest_sign_init(digest_ptr, key, params_ptr)?
+                    }
+                    SigOp::Verify => {
+                        lctx.digest_verify_init(digest_ptr, key, params_ptr)?
+                    }
+                }
+                ctx.legacy_ctx = Some(lctx);
+            }
+            ctx.supports_updates = match sigalg_supports_updates(alg) {
+                Some(b) => b,
+                None => false,
+            };
+            return Ok(ctx);
+        }
+
+        #[cfg(ossl_v350)]
+        {
+            let mut sig = EvpSignature::new(libctx, sigalg_to_ossl_name(alg))?;
+            let params_ptr = match params {
+                Some(p) => p.as_ptr(),
+                None => std::ptr::null(),
+            };
+            let ret = unsafe {
+                match ctx.op {
+                    SigOp::Sign => EVP_PKEY_sign_message_init(
+                        ctx.pkey_ctx.as_mut_ptr(),
+                        sig.as_mut_ptr(),
+                        params_ptr,
+                    ),
+                    SigOp::Verify => EVP_PKEY_verify_message_init(
+                        ctx.pkey_ctx.as_mut_ptr(),
+                        sig.as_mut_ptr(),
+                        params_ptr,
+                    ),
+                }
+            };
+            if ret != 1 {
+                match ctx.op {
+                    SigOp::Sign => {
+                        trace_ossl!("EVP_PKEY_sign_message_init()");
+                    }
+                    SigOp::Verify => {
+                        trace_ossl!("EVP_PKEY_verify_message_init()");
+                    }
+                }
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            ctx.supports_updates = match sigalg_supports_updates(alg) {
+                Some(true) => true,
+                Some(false) => false,
+                None => {
+                    /* OpenSSL 3.5 implements only one shot ML-DSA,
+                     * while later implementations can deal with
+                     * update()/final() operations. Probe here, and
+                     * set up a backup buffer if update()s are not
+                     * supported.
+                     */
+                    let ret = unsafe {
+                        match ctx.op {
+                            SigOp::Sign => EVP_PKEY_sign_message_update(
+                                ctx.pkey_ctx.as_mut_ptr(),
+                                std::ptr::null(),
+                                0,
+                            ),
+                            SigOp::Verify => EVP_PKEY_verify_message_update(
+                                ctx.pkey_ctx.as_mut_ptr(),
+                                std::ptr::null(),
+                                0,
+                            ),
+                        }
+                    };
+                    if ret == 1 {
+                        true
+                    } else {
+                        trace_ossl!("update() not supported, fallback enabled");
+                        false
+                    }
+                }
+            };
+            return Ok(ctx);
+        }
+
+        #[cfg(not(ossl_v350))]
+        Err(Error::new(ErrorKind::WrapperError))
     }
 
     /// Accumulates data when native update is not available
@@ -500,133 +685,18 @@ impl OsslSignature {
         Ok(())
     }
 
-    /// Creates a new message sign context for a specific
-    /// algorithm name, requires a private key and parameters.
-    pub fn message_sign_new(
-        libctx: &OsslContext,
-        alg: SigAlg,
-        key: &mut EvpPkey,
-        params: Option<&OsslParam>,
-    ) -> Result<OsslSignature, Error> {
-        let mut ctx = Self::init(libctx, key)?;
-
-        if sigalg_is_oneshot(alg) {
-            /* Single shot algorithms must always use EVP_PKEY_sign_init */
-            if unsafe { EVP_PKEY_sign_init(ctx.pkey_ctx.as_mut_ptr()) } != 1 {
-                trace_ossl!("EVP_PKEY_sign_init()");
-                return Err(Error::new(ErrorKind::OsslError));
-            }
-            if let Some(p) = params {
-                let ret = unsafe {
-                    EVP_PKEY_CTX_set_params(
-                        ctx.pkey_ctx.as_mut_ptr(),
-                        p.as_ptr(),
-                    )
-                };
-                if ret != 1 {
-                    trace_ossl!("EVP_CTX_set_param()");
-                    return Err(Error::new(ErrorKind::OsslError));
-                }
-            }
-            return Ok(ctx);
-        }
-
-        if sigalg_uses_legacy_api(alg) {
-            #[cfg(not(feature = "fips"))]
-            {
-                let mut lctx = EvpMdCtx::new()?;
-                let ret = unsafe {
-                    EVP_DigestSignInit_ex(
-                        lctx.as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        sigalg_to_digest_ptr(alg),
-                        libctx.ptr(),
-                        std::ptr::null(),
-                        key.as_mut_ptr(),
-                        match params {
-                            Some(p) => p.as_ptr(),
-                            None => std::ptr::null(),
-                        },
-                    )
-                };
-                if ret != 1 {
-                    trace_ossl!("EVP_DigestSignInit_ex()");
-                    return Err(Error::new(ErrorKind::OsslError));
-                }
-                ctx.legacy_ctx = Some(lctx);
-            }
-            #[cfg(feature = "fips")]
-            {
-                let mut lctx = ProviderSignatureCtx::new(alg)?;
-                lctx.digest_sign_init(
-                    sigalg_to_digest_ptr(alg),
-                    key,
-                    match params {
-                        Some(p) => p.as_ptr(),
-                        None => std::ptr::null(),
-                    },
-                )?;
-                ctx.legacy_ctx = Some(lctx);
-            }
-            ctx.supports_updates = match sigalg_supports_updates(alg) {
-                Some(b) => b,
-                None => false,
-            };
-            return Ok(ctx);
-        }
-
-        #[cfg(ossl_v350)]
-        {
-            let ret = unsafe {
-                EVP_PKEY_sign_message_init(
-                    ctx.pkey_ctx.as_mut_ptr(),
-                    EvpSignature::new(libctx, sigalg_to_ossl_name(alg))?
-                        .as_mut_ptr(),
-                    match params {
-                        Some(p) => p.as_ptr(),
-                        None => std::ptr::null(),
-                    },
-                )
-            };
-            if ret != 1 {
-                return Err(Error::new(ErrorKind::OsslError));
-            }
-            ctx.supports_updates = match sigalg_supports_updates(alg) {
-                Some(true) => true,
-                Some(false) => false,
-                None => {
-                    /* OpenSSL 3.5 implements only one shot ML-DSA,
-                     * while later implementations can deal with
-                     * update()/final() operations. Probe here, and
-                     * set up a backup buffer if update()s are not
-                     * supported.
-                     */
-                    let ret = unsafe {
-                        EVP_PKEY_sign_message_update(
-                            ctx.pkey_ctx.as_mut_ptr(),
-                            std::ptr::null(),
-                            0,
-                        )
-                    };
-                    ret == 1
-                }
-            };
-            return Ok(ctx);
-        }
-
-        #[cfg(not(ossl_v350))]
-        Err(Error::new(ErrorKind::WrapperError))
-    }
-
     /// One shot signature, takes data and a buffer where to store
     /// the signature. The signature buffer must have enough space
     /// to receive the signature. On success the siganture length is
     /// returned.
-    pub fn message_sign(
+    pub fn sign(
         &mut self,
         data: &[u8],
         signature: Option<&mut [u8]>,
     ) -> Result<usize, Error> {
+        if self.op != SigOp::Sign {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
         let mut siglen = match &signature {
             Some(sig) => sig.len(),
             None => 0,
@@ -717,8 +787,63 @@ impl OsslSignature {
         Ok(siglen)
     }
 
+    /// One shot verification function
+    pub fn verify(
+        &mut self,
+        data: &[u8],
+        signature: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        if self.op != SigOp::Verify {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+        let sig = match &signature {
+            Some(s) => s,
+            None => match &self.signature {
+                Some(v) => v.as_slice(),
+                None => return Err(Error::new(ErrorKind::WrapperError)),
+            },
+        };
+        if let Some(ctx) = &mut self.legacy_ctx {
+            #[cfg(not(feature = "fips"))]
+            {
+                let ret = unsafe {
+                    EVP_DigestVerify(
+                        ctx.as_mut_ptr(),
+                        sig.as_ptr(),
+                        sig.len(),
+                        data.as_ptr(),
+                        data.len(),
+                    )
+                };
+                if ret != 1 {
+                    trace_ossl!("EVP_DigestVerify()");
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+            }
+            #[cfg(feature = "fips")]
+            {
+                ctx.digest_verify(sig, data)?;
+            }
+        } else {
+            let ret = unsafe {
+                EVP_PKEY_verify(
+                    self.pkey_ctx.as_mut_ptr(),
+                    sig.as_ptr(),
+                    sig.len(),
+                    data.as_ptr(),
+                    data.len(),
+                )
+            };
+            if ret != 1 {
+                trace_ossl!("EVP_PKEY_verify()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+        }
+        Ok(())
+    }
+
     /// Feeds data to the message sign provider
-    pub fn message_sign_update(&mut self, data: &[u8]) -> Result<(), Error> {
+    pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
         if !self.supports_updates {
             return self.store_data(data);
         }
@@ -726,35 +851,70 @@ impl OsslSignature {
         if let Some(ctx) = &mut self.legacy_ctx {
             #[cfg(not(feature = "fips"))]
             {
-                let ret = unsafe {
-                    EVP_DigestSignUpdate(
-                        ctx.as_mut_ptr(),
-                        data.as_ptr() as *const std::ffi::c_void,
-                        data.len(),
-                    )
+                let ret = match self.op {
+                    SigOp::Sign => unsafe {
+                        EVP_DigestSignUpdate(
+                            ctx.as_mut_ptr(),
+                            data.as_ptr() as *const std::ffi::c_void,
+                            data.len(),
+                        )
+                    },
+                    SigOp::Verify => unsafe {
+                        EVP_DigestVerifyUpdate(
+                            ctx.as_mut_ptr(),
+                            data.as_ptr() as *const std::ffi::c_void,
+                            data.len(),
+                        )
+                    },
                 };
                 if ret != 1 {
-                    trace_ossl!("EVP_DigestSignUpdate()");
+                    match self.op {
+                        SigOp::Sign => {
+                            trace_ossl!("EVP_DigestSignUpdate()");
+                        }
+                        SigOp::Verify => {
+                            trace_ossl!("EVP_DigestVerifyUpdate()");
+                        }
+                    }
                     return Err(Error::new(ErrorKind::OsslError));
                 }
             }
             #[cfg(feature = "fips")]
-            ctx.digest_sign_update(data)?;
+            match self.op {
+                SigOp::Sign => ctx.digest_sign_update(data)?,
+                SigOp::Verify => ctx.digest_verify_update(data)?,
+            }
 
             return Ok(());
         }
 
         #[cfg(ossl_v350)]
         {
-            let ret = unsafe {
-                EVP_PKEY_sign_message_update(
-                    self.pkey_ctx.as_mut_ptr(),
-                    data.as_ptr(),
-                    data.len(),
-                )
+            let ret = match self.op {
+                SigOp::Sign => unsafe {
+                    EVP_PKEY_sign_message_update(
+                        self.pkey_ctx.as_mut_ptr(),
+                        data.as_ptr(),
+                        data.len(),
+                    )
+                },
+                SigOp::Verify => unsafe {
+                    EVP_PKEY_verify_message_update(
+                        self.pkey_ctx.as_mut_ptr(),
+                        data.as_ptr(),
+                        data.len(),
+                    )
+                },
             };
             if ret != 1 {
-                trace_ossl!("EVP_PKEY_sign_mesage_update()");
+                match self.op {
+                    SigOp::Sign => {
+                        trace_ossl!("EVP_PKEY_sign_mesage_update()");
+                    }
+                    SigOp::Verify => {
+                        trace_ossl!("EVP_PKEY_verify_message_update()");
+                    }
+                }
                 return Err(Error::new(ErrorKind::OsslError));
             }
 
@@ -766,13 +926,13 @@ impl OsslSignature {
     }
 
     /// Finalizes data and generates signature
-    pub fn message_sign_final(
-        &mut self,
-        signature: &mut [u8],
-    ) -> Result<usize, Error> {
+    pub fn sign_final(&mut self, signature: &mut [u8]) -> Result<usize, Error> {
+        if self.op != SigOp::Sign {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
         if !self.supports_updates {
             if let Some(buffer) = self.data.take() {
-                return self.message_sign(buffer.as_slice(), Some(signature));
+                return self.sign(buffer.as_slice(), Some(signature));
             }
 
             return Err(Error::new(ErrorKind::WrapperError));
@@ -825,183 +985,14 @@ impl OsslSignature {
         Err(Error::new(ErrorKind::WrapperError))
     }
 
-    /// Creates a new message verify context for a specific
-    /// algorithm name, requires a public key and parameters.
-    pub fn message_verify_new(
-        libctx: &OsslContext,
-        alg: SigAlg,
-        key: &mut EvpPkey,
-        params: Option<&OsslParam>,
-    ) -> Result<OsslSignature, Error> {
-        let mut ctx = Self::init(libctx, key)?;
-
-        if sigalg_is_oneshot(alg) {
-            /* Single shot algorithms must always use EVP_PKEY_verify_init */
-            if unsafe { EVP_PKEY_verify_init(ctx.pkey_ctx.as_mut_ptr()) } != 1 {
-                trace_ossl!("EVP_PKEY_verify_init()");
-                return Err(Error::new(ErrorKind::OsslError));
-            }
-            if let Some(p) = params {
-                let ret = unsafe {
-                    EVP_PKEY_CTX_set_params(
-                        ctx.pkey_ctx.as_mut_ptr(),
-                        p.as_ptr(),
-                    )
-                };
-                if ret != 1 {
-                    trace_ossl!("EVP_PKEY_CTX_set_params()");
-                    return Err(Error::new(ErrorKind::OsslError));
-                }
-            }
-            return Ok(ctx);
-        }
-
-        if sigalg_uses_legacy_api(alg) {
-            #[cfg(not(feature = "fips"))]
-            {
-                let mut lctx = EvpMdCtx::new()?;
-                let ret = unsafe {
-                    EVP_DigestVerifyInit_ex(
-                        lctx.as_mut_ptr(),
-                        std::ptr::null_mut(),
-                        sigalg_to_digest_ptr(alg),
-                        libctx.ptr(),
-                        std::ptr::null(),
-                        key.as_mut_ptr(),
-                        match params {
-                            Some(p) => p.as_ptr(),
-                            None => std::ptr::null(),
-                        },
-                    )
-                };
-                if ret != 1 {
-                    trace_ossl!("EVP_DigestVerifyInit_ex()");
-                    return Err(Error::new(ErrorKind::OsslError));
-                }
-                ctx.legacy_ctx = Some(lctx);
-            }
-            #[cfg(feature = "fips")]
-            {
-                let mut lctx = ProviderSignatureCtx::new(alg)?;
-                lctx.digest_verify_init(
-                    sigalg_to_digest_ptr(alg),
-                    key,
-                    match params {
-                        Some(p) => p.as_ptr(),
-                        None => std::ptr::null(),
-                    },
-                )?;
-                ctx.legacy_ctx = Some(lctx);
-            }
-            ctx.supports_updates = match sigalg_supports_updates(alg) {
-                Some(true) => true,
-                Some(false) => false,
-                None => false,
-            };
-            return Ok(ctx);
-        }
-
-        #[cfg(ossl_v350)]
-        {
-            let ret = unsafe {
-                EVP_PKEY_verify_message_init(
-                    ctx.pkey_ctx.as_mut_ptr(),
-                    EvpSignature::new(libctx, sigalg_to_ossl_name(alg))?
-                        .as_mut_ptr(),
-                    match params {
-                        Some(p) => p.as_ptr(),
-                        None => std::ptr::null(),
-                    },
-                )
-            };
-            if ret != 1 {
-                trace_ossl!("EVP_PKEY_verify_message_init()");
-                return Err(Error::new(ErrorKind::OsslError));
-            }
-            ctx.supports_updates = match sigalg_supports_updates(alg) {
-                Some(true) => true,
-                Some(false) => false,
-                None => {
-                    /* OpenSSL 3.5 implements only one shot ML-DSA,
-                     * while later implementations can deal with
-                     * update()/final() operations. Probe here, and
-                     * set up a backup buffer if update()s are not
-                     * supported.
-                     */
-                    let ret = unsafe {
-                        EVP_PKEY_verify_message_update(
-                            ctx.pkey_ctx.as_mut_ptr(),
-                            std::ptr::null(),
-                            0,
-                        )
-                    };
-                    ret == 1
-                }
-            };
-            return Ok(ctx);
-        }
-
-        #[cfg(not(ossl_v350))]
-        Err(Error::new(ErrorKind::WrapperError))
-    }
-
-    /// One shot verification function
-    pub fn message_verify(
-        &mut self,
-        data: &[u8],
-        signature: Option<&[u8]>,
-    ) -> Result<(), Error> {
-        let sig = match &signature {
-            Some(s) => s,
-            None => match &self.signature {
-                Some(v) => v.as_slice(),
-                None => return Err(Error::new(ErrorKind::WrapperError)),
-            },
-        };
-        if let Some(ctx) = &mut self.legacy_ctx {
-            #[cfg(not(feature = "fips"))]
-            {
-                let ret = unsafe {
-                    EVP_DigestVerify(
-                        ctx.as_mut_ptr(),
-                        sig.as_ptr(),
-                        sig.len(),
-                        data.as_ptr(),
-                        data.len(),
-                    )
-                };
-                if ret != 1 {
-                    trace_ossl!("EVP_DigestVerify()");
-                    return Err(Error::new(ErrorKind::OsslError));
-                }
-            }
-            #[cfg(feature = "fips")]
-            {
-                ctx.digest_verify(sig, data)?;
-            }
-        } else {
-            let ret = unsafe {
-                EVP_PKEY_verify(
-                    self.pkey_ctx.as_mut_ptr(),
-                    sig.as_ptr(),
-                    sig.len(),
-                    data.as_ptr(),
-                    data.len(),
-                )
-            };
-            if ret != 1 {
-                trace_ossl!("EVP_PKEY_verify()");
-                return Err(Error::new(ErrorKind::OsslError));
-            }
-        }
-        Ok(())
-    }
-
     /// Sets the signature for a VerifySignature operation.
     /// If the OpenSSL backend supports setting it early (via
     /// `EVP_PKEY_CTX_set_signature`), it does so; otherwise, it stores the
     /// signature internally for later use.
     pub fn set_signature(&mut self, signature: &[u8]) -> Result<(), Error> {
+        if self.op != SigOp::Verify {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
         if self.legacy_ctx.is_some() || !self.supports_updates {
             self.signature = Some(signature.to_vec());
             return Ok(());
@@ -1030,62 +1021,17 @@ impl OsslSignature {
         }
     }
 
-    /// Feeds data to the message verify provider
-    pub fn message_verify_update(&mut self, data: &[u8]) -> Result<(), Error> {
-        if !self.supports_updates {
-            return self.store_data(data);
-        }
-
-        if let Some(ctx) = &mut self.legacy_ctx {
-            #[cfg(not(feature = "fips"))]
-            {
-                let ret = unsafe {
-                    EVP_DigestVerifyUpdate(
-                        ctx.as_mut_ptr(),
-                        data.as_ptr() as *const std::ffi::c_void,
-                        data.len(),
-                    )
-                };
-                if ret != 1 {
-                    trace_ossl!("EVP_DigestVerifyUpdate()");
-                    return Err(Error::new(ErrorKind::OsslError));
-                }
-            }
-            #[cfg(feature = "fips")]
-            ctx.digest_sign_update(data)?;
-
-            return Ok(());
-        }
-
-        #[cfg(ossl_v350)]
-        {
-            let ret = unsafe {
-                EVP_PKEY_verify_message_update(
-                    self.pkey_ctx.as_mut_ptr(),
-                    data.as_ptr(),
-                    data.len(),
-                )
-            };
-            if ret != 1 {
-                trace_ossl!("EVP_PKEY_verify_message_update()");
-                return Err(Error::new(ErrorKind::OsslError));
-            }
-
-            return Ok(());
-        }
-
-        #[cfg(not(ossl_v350))]
-        Err(Error::new(ErrorKind::WrapperError))
-    }
-
     /// Finalizes data and verifies signature
-    pub fn message_verify_final(
+    pub fn verify_final(
         &mut self,
         signature: Option<&[u8]>,
     ) -> Result<(), Error> {
+        if self.op != SigOp::Verify {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
         if !self.supports_updates {
             if let Some(buffer) = self.data.take() {
-                return self.message_verify(buffer.as_slice(), signature);
+                return self.verify(buffer.as_slice(), signature);
             }
 
             return Err(Error::new(ErrorKind::WrapperError));

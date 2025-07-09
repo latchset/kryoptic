@@ -16,7 +16,7 @@ use crate::ossl::common::*;
 use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
-use ossl::signature::{OsslSignature, SigAlg};
+use ossl::signature::{OsslSignature, SigAlg, SigOp};
 
 /// Converts a PKCS#11 EC key `Object` into an `EvpPkey`.
 ///
@@ -170,35 +170,19 @@ impl EcdsaOperation {
         key: &Object,
         signature: Option<Vec<u8>>,
     ) -> Result<EcdsaOperation> {
-        let output_len: usize;
-        let mut sigctx = match flag {
-            CKF_SIGN => {
-                let mut pkey = privkey_from_object(key)?;
-                output_len = 2 * ((pkey.get_bits()? + 7) / 8);
-                OsslSignature::message_sign_new(
-                    osslctx(),
-                    ecdsa_type_to_ossl_alg(mech.mechanism)?,
-                    &mut pkey,
-                    None,
-                )?
-            }
-            CKF_VERIFY => {
-                let mut pkey = pubkey_from_object(key)?;
-                output_len = 2 * ((pkey.get_bits()? + 7) / 8);
-                if let Some(s) = &signature {
-                    if s.len() != output_len {
-                        return Err(CKR_SIGNATURE_LEN_RANGE)?;
-                    }
-                }
-                OsslSignature::message_verify_new(
-                    osslctx(),
-                    ecdsa_type_to_ossl_alg(mech.mechanism)?,
-                    &mut pkey,
-                    None,
-                )?
-            }
+        let (op, mut pkey) = match flag {
+            CKF_SIGN => (SigOp::Sign, privkey_from_object(key)?),
+            CKF_VERIFY => (SigOp::Verify, pubkey_from_object(key)?),
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
+        let output_len = 2 * ((pkey.get_bits()? + 7) / 8);
+        let mut sigctx = OsslSignature::new(
+            osslctx(),
+            op,
+            ecdsa_type_to_ossl_alg(mech.mechanism)?,
+            &mut pkey,
+            None,
+        )?;
         if let Some(s) = &signature {
             if s.len() != output_len {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
@@ -309,9 +293,8 @@ impl Sign for EcdsaOperation {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
 
-            let mut sig = vec![0u8; self.sigctx.message_sign(data, None)?];
-            let len =
-                self.sigctx.message_sign(data, Some(sig.as_mut_slice()))?;
+            let mut sig = vec![0u8; self.sigctx.sign(data, None)?];
+            let len = self.sigctx.sign(data, Some(sig.as_mut_slice()))?;
             sig.resize(len, 0);
             let ret = ossl_to_pkcs11_signature(&sig, signature);
             zeromem(sig.as_mut_slice());
@@ -330,7 +313,7 @@ impl Sign for EcdsaOperation {
         }
         self.in_use = true;
 
-        Ok(self.sigctx.message_sign_update(data)?)
+        Ok(self.sigctx.update(data)?)
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
@@ -344,7 +327,7 @@ impl Sign for EcdsaOperation {
 
         let mut sig = vec![0u8; signature.len() + 10];
 
-        let len = self.sigctx.message_sign_final(sig.as_mut_slice())?;
+        let len = self.sigctx.sign_final(sig.as_mut_slice())?;
         if len > sig.len() {
             return Err(CKR_DEVICE_ERROR)?;
         }
@@ -382,12 +365,11 @@ impl EcdsaOperation {
                     return Err(CKR_SIGNATURE_LEN_RANGE)?;
                 }
                 let mut sig = pkcs11_to_ossl_signature(s)?;
-                let ret =
-                    self.sigctx.message_verify(data, Some(sig.as_slice()));
+                let ret = self.sigctx.verify(data, Some(sig.as_slice()));
                 zeromem(sig.as_mut_slice());
                 return Ok(ret?);
             } else {
-                return Ok(self.sigctx.message_verify(data, None)?);
+                return Ok(self.sigctx.verify(data, None)?);
             }
         }
         self.verify_int_update(data)?;
@@ -404,7 +386,7 @@ impl EcdsaOperation {
         }
         self.in_use = true;
 
-        Ok(self.sigctx.message_verify_update(data)?)
+        Ok(self.sigctx.update(data)?)
     }
 
     /// Internal helper for the final step of multi-part verification.
@@ -423,11 +405,11 @@ impl EcdsaOperation {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
             let mut sig = pkcs11_to_ossl_signature(s)?;
-            let ret = self.sigctx.message_verify_final(Some(sig.as_slice()));
+            let ret = self.sigctx.verify_final(Some(sig.as_slice()));
             zeromem(sig.as_mut_slice());
             Ok(ret?)
         } else {
-            Ok(self.sigctx.message_verify_final(None)?)
+            Ok(self.sigctx.verify_final(None)?)
         }
     }
 }
