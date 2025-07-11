@@ -430,7 +430,7 @@ impl RsaPKCSOperation {
             osslctx(),
             EvpPkeyType::Rsa(bits, exponent.clone()),
         )?;
-        let rsa = match pkey.export()? {
+        let mut rsa = match pkey.export()? {
             PkeyData::Rsa(r) => r,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
@@ -439,37 +439,37 @@ impl RsaPKCSOperation {
         pubkey.set_attr(Attribute::from_bytes(CKA_MODULUS, rsa.n.clone()))?;
 
         /* Private Key */
-        privkey.set_attr(Attribute::from_bytes(CKA_MODULUS, rsa.n))?;
+        privkey.set_attr(Attribute::from_bytes(CKA_MODULUS, rsa.n.clone()))?;
         privkey.set_attr(Attribute::from_bytes(
             CKA_PUBLIC_EXPONENT,
             exponent.clone(),
         ))?;
-        if let Some(d) = rsa.d {
+        if let Some(d) = rsa.d.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_PRIVATE_EXPONENT, d))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
-        if let Some(p) = rsa.p {
+        if let Some(p) = rsa.p.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_PRIME_1, p))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
-        if let Some(q) = rsa.q {
+        if let Some(q) = rsa.q.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_PRIME_2, q))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
-        if let Some(a) = rsa.a {
+        if let Some(a) = rsa.a.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_EXPONENT_1, a))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
-        if let Some(b) = rsa.b {
+        if let Some(b) = rsa.b.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_EXPONENT_2, b))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
-        if let Some(c) = rsa.c {
+        if let Some(c) = rsa.c.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_COEFFICIENT, c))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
