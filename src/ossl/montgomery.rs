@@ -67,20 +67,20 @@ impl ECMontgomeryOperation {
     ) -> Result<()> {
         let pkey =
             EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
-        let ecc = match pkey.export()? {
+        let mut ecc = match pkey.export()? {
             PkeyData::Ecc(e) => e,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
 
         /* Set Public Key */
-        if let Some(key) = ecc.pubkey {
+        if let Some(key) = ecc.pubkey.take() {
             pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, key))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
         /* Set Private Key */
-        if let Some(key) = ecc.prikey {
+        if let Some(key) = ecc.prikey.take() {
             privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
