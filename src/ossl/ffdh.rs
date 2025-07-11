@@ -114,13 +114,13 @@ impl FFDHOperation {
     ) -> Result<()> {
         let pkey = EvpPkey::generate(osslctx(), group_to_pkey_type(group)?)?;
 
-        let ffdh = match pkey.export()? {
+        let mut ffdh = match pkey.export()? {
             PkeyData::Ffdh(f) => f,
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
 
         /* Set Public Key */
-        if let Some(key) = ffdh.pubkey {
+        if let Some(key) = ffdh.pubkey.take() {
             pubkey.check_or_set_attr(Attribute::from_bytes(
                 CKA_PRIME,
                 group_prime(group)?,
@@ -132,7 +132,7 @@ impl FFDHOperation {
         }
 
         /* Set Private Key */
-        if let Some(key) = ffdh.prikey {
+        if let Some(key) = ffdh.prikey.take() {
             privkey.check_or_set_attr(Attribute::from_bytes(
                 CKA_PRIME,
                 group_prime(group)?,
