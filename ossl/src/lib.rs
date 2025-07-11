@@ -17,7 +17,7 @@ pub mod bindings {
 }
 
 use std::borrow::Cow;
-use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
+use std::ffi::{c_char, c_int, c_long, c_uint, c_void, CStr};
 
 use crate::bindings::*;
 
@@ -312,21 +312,6 @@ impl Drop for BigNum {
     }
 }
 
-/// Helper container to keep references around in structure that deal with
-/// FFI structures that reference pointers, like arrays of CK_ATTRIBUTEs and
-/// OSSL_PARAMs
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum BorrowedReference<'a> {
-    CharBool(&'a c_uchar),
-    Int(&'a c_int),
-    Slice(&'a [u8]),
-    Vector(&'a Vec<u8>),
-    Uint(&'a c_uint),
-    Ulong(&'a c_ulong),
-    Usize(&'a usize),
-}
-
 /// A safe builder and manager for OpenSSL `OSSL_PARAM` arrays.
 ///
 /// `OSSL_PARAM` is the primary way to pass detailed parameters (like key
@@ -345,9 +330,6 @@ pub struct OsslParamBuilder<'a> {
     /// Flag indicating `p` contains an owned pointer we are responsible
     /// for freeing
     freeptr: bool,
-    /// Use an enum to hold references to data we need to keep around as
-    /// a pointer to their data is stored in the OSSL_PARAM array
-    br: Vec<BorrowedReference<'a>>,
 }
 
 /// A finalized OpenSSL `OSSL_PARAM` array.
@@ -386,7 +368,6 @@ impl<'a> OsslParamBuilder<'a> {
             p: Cow::Owned(Vec::with_capacity(capacity + 1)),
             zeroize: false,
             freeptr: false,
-            br: Vec::new(),
         }
     }
 
@@ -430,7 +411,6 @@ impl<'a> OsslParamBuilder<'a> {
             )
         };
         self.p.to_mut().push(param);
-        self.br.push(BorrowedReference::Vector(v));
         Ok(())
     }
 
@@ -514,7 +494,6 @@ impl<'a> OsslParamBuilder<'a> {
             )
         };
         self.p.to_mut().push(param);
-        self.br.push(BorrowedReference::Vector(v));
         Ok(())
     }
 
@@ -531,7 +510,6 @@ impl<'a> OsslParamBuilder<'a> {
             )
         };
         self.p.to_mut().push(param);
-        self.br.push(BorrowedReference::Slice(s));
         Ok(())
     }
 
@@ -571,7 +549,6 @@ impl<'a> OsslParamBuilder<'a> {
             )
         };
         self.p.to_mut().push(param);
-        self.br.push(BorrowedReference::Usize(val));
         Ok(())
     }
 
@@ -592,7 +569,6 @@ impl<'a> OsslParamBuilder<'a> {
             )
         };
         self.p.to_mut().push(param);
-        self.br.push(BorrowedReference::Uint(val));
         Ok(())
     }
 
@@ -609,7 +585,6 @@ impl<'a> OsslParamBuilder<'a> {
             )
         };
         self.p.to_mut().push(param);
-        self.br.push(BorrowedReference::Int(val));
         Ok(())
     }
 
@@ -670,7 +645,6 @@ impl<'a> OsslParam<'a> {
             p: Cow::Owned(Vec::with_capacity(1)),
             zeroize: false,
             freeptr: false,
-            br: Vec::new(),
         };
         p.finalize()
     }
@@ -700,7 +674,6 @@ impl<'a> OsslParam<'a> {
             }),
             zeroize: false,
             freeptr: true,
-            br: Vec::new(),
         }))
     }
 
