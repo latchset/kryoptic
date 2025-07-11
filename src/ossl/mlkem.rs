@@ -117,13 +117,13 @@ pub fn generate_keypair(
     let pkey =
         EvpPkey::generate(osslctx(), mlkem_param_set_to_pkey_type(param_set)?)?;
 
-    let mlk = match pkey.export()? {
+    let mut mlk = match pkey.export()? {
         PkeyData::Mlkey(m) => m,
         _ => return Err(CKR_GENERAL_ERROR)?,
     };
 
     /* Set Public Key */
-    if let Some(key) = mlk.pubkey {
+    if let Some(key) = mlk.pubkey.take() {
         pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
     } else {
         return Err(CKR_DEVICE_ERROR)?;
@@ -133,10 +133,10 @@ pub fn generate_keypair(
     if mlk.prikey.is_none() && mlk.seed.is_none() {
         return Err(CKR_DEVICE_ERROR)?;
     }
-    if let Some(key) = mlk.prikey {
+    if let Some(key) = mlk.prikey.take() {
         privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
     }
-    if let Some(seed) = mlk.seed {
+    if let Some(seed) = mlk.seed.take() {
         privkey.set_attr(Attribute::from_bytes(CKA_SEED, seed))?;
     }
 

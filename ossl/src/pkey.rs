@@ -289,11 +289,41 @@ pub struct EccData {
     pub prikey: Option<Vec<u8>>,
 }
 
+impl Drop for EccData {
+    fn drop(&mut self) {
+        if let Some(mut v) = self.pubkey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.prikey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+    }
+}
+
 /// Structure that holds Ffdh key data
 #[derive(Debug)]
 pub struct FfdhData {
     pub pubkey: Option<Vec<u8>>,
     pub prikey: Option<Vec<u8>>,
+}
+
+impl Drop for FfdhData {
+    fn drop(&mut self) {
+        if let Some(mut v) = self.pubkey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.prikey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+    }
 }
 
 /// Structure that holds ML Keys data (MlDsa and MlKem)
@@ -302,6 +332,26 @@ pub struct MlkeyData {
     pub pubkey: Option<Vec<u8>>,
     pub prikey: Option<Vec<u8>>,
     pub seed: Option<Vec<u8>>,
+}
+
+impl Drop for MlkeyData {
+    fn drop(&mut self) {
+        if let Some(mut v) = self.pubkey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.prikey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.seed.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+    }
 }
 
 /// Structure that holds RSA key data
@@ -314,6 +364,44 @@ pub struct RsaData {
     pub a: Option<Vec<u8>>,
     pub b: Option<Vec<u8>>,
     pub c: Option<Vec<u8>>,
+}
+
+impl Drop for RsaData {
+    fn drop(&mut self) {
+        unsafe {
+            OPENSSL_cleanse(self.n.as_mut_ptr() as *mut _, self.n.len());
+        }
+        if let Some(mut v) = self.d.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.p.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.q.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.a.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.b.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+        if let Some(mut v) = self.c.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+    }
 }
 
 /// Wrapper to handle import/export data based on the type
@@ -611,16 +699,16 @@ impl EvpPkey {
 
         match pkey_type {
             EvpPkeyType::P256 | EvpPkeyType::P384 | EvpPkeyType::P521 => {
-                match data {
+                match &data {
                     PkeyData::Ecc(ecc) => {
-                        if let Some(p) = ecc.pubkey {
+                        if let Some(p) = &ecc.pubkey {
                             pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                            params.add_owned_octet_string(
+                            params.add_octet_slice(
                                 cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                                p,
+                                p.as_slice(),
                             )?
                         }
-                        if let Some(p) = ecc.prikey {
+                        if let Some(p) = &ecc.prikey {
                             pkey_class |= EVP_PKEY_PRIVATE_KEY;
                             params.add_bn(
                                 cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
@@ -634,20 +722,20 @@ impl EvpPkey {
             EvpPkeyType::Ed25519
             | EvpPkeyType::Ed448
             | EvpPkeyType::X25519
-            | EvpPkeyType::X448 => match data {
+            | EvpPkeyType::X448 => match &data {
                 PkeyData::Ecc(ecc) => {
-                    if let Some(p) = ecc.pubkey {
+                    if let Some(p) = &ecc.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                            p,
+                            p.as_slice(),
                         )?
                     }
-                    if let Some(p) = ecc.prikey {
+                    if let Some(p) = &ecc.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p,
+                            p.as_slice(),
                         )?
                     }
                 }
@@ -662,16 +750,16 @@ impl EvpPkey {
             | EvpPkeyType::Modp3072
             | EvpPkeyType::Modp4096
             | EvpPkeyType::Modp6144
-            | EvpPkeyType::Modp8192 => match data {
+            | EvpPkeyType::Modp8192 => match &data {
                 PkeyData::Ffdh(ffdh) => {
-                    if let Some(p) = ffdh.pubkey {
+                    if let Some(p) = &ffdh.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
                         params.add_bn(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
-                    if let Some(p) = ffdh.prikey {
+                    if let Some(p) = &ffdh.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                         params.add_bn(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
@@ -683,28 +771,28 @@ impl EvpPkey {
             },
             EvpPkeyType::Mldsa44
             | EvpPkeyType::Mldsa65
-            | EvpPkeyType::Mldsa87 => match data {
+            | EvpPkeyType::Mldsa87 => match &data {
                 #[cfg(ossl_mldsa)]
                 PkeyData::Mlkey(mlk) => {
-                    if let Some(p) = mlk.pubkey {
+                    if let Some(p) = &mlk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                            p,
+                            p.as_slice(),
                         )?
                     }
-                    if let Some(p) = mlk.prikey {
+                    if let Some(p) = &mlk.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p,
+                            p.as_slice(),
                         )?
                     }
-                    if let Some(p) = mlk.seed {
+                    if let Some(p) = &mlk.seed {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED),
-                            p,
+                            p.as_slice(),
                         )?
                     }
                 }
@@ -712,34 +800,34 @@ impl EvpPkey {
             },
             EvpPkeyType::MlKem512
             | EvpPkeyType::MlKem768
-            | EvpPkeyType::MlKem1024 => match data {
+            | EvpPkeyType::MlKem1024 => match &data {
                 #[cfg(ossl_mlkem)]
                 PkeyData::Mlkey(mlk) => {
-                    if let Some(p) = mlk.pubkey {
+                    if let Some(p) = &mlk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                            p,
+                            p.as_slice(),
                         )?
                     }
-                    if let Some(p) = mlk.prikey {
+                    if let Some(p) = &mlk.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p,
+                            p.as_slice(),
                         )?
                     }
-                    if let Some(p) = mlk.seed {
+                    if let Some(p) = &mlk.seed {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_owned_octet_string(
+                        params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED),
-                            p,
+                            p.as_slice(),
                         )?
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
-            EvpPkeyType::Rsa(_, _) => match data {
+            EvpPkeyType::Rsa(_, _) => match &data {
                 PkeyData::Rsa(rsa) => {
                     if rsa_data_to_params(&rsa, &mut params)? {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
