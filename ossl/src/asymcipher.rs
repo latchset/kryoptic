@@ -29,30 +29,30 @@ pub fn rsa_enc_params(
     alg: EncAlg,
     oaep_params: Option<&RsaOaepParams>,
 ) -> Result<OsslParam, Error> {
-    let mut params = OsslParam::new();
+    let mut params_builder = crate::OsslParamBuilder::new();
 
     match alg {
-        EncAlg::RsaNoPad => params.add_const_c_string(
+        EncAlg::RsaNoPad => params_builder.add_const_c_string(
             cstr!(OSSL_PKEY_PARAM_PAD_MODE),
             cstr!(OSSL_PKEY_RSA_PAD_MODE_NONE),
         )?,
         EncAlg::RsaOaep => {
             if let Some(oaep) = &oaep_params {
-                params.add_const_c_string(
+                params_builder.add_const_c_string(
                     cstr!(OSSL_PKEY_PARAM_PAD_MODE),
                     cstr!(OSSL_PKEY_RSA_PAD_MODE_OAEP),
                 )?;
-                params.add_const_c_string(
+                params_builder.add_const_c_string(
                     cstr!(OSSL_ASYM_CIPHER_PARAM_OAEP_DIGEST),
                     digest_to_string(oaep.digest),
                 )?;
-                params.add_const_c_string(
+                params_builder.add_const_c_string(
                     cstr!(OSSL_PKEY_PARAM_MGF1_DIGEST),
                     digest_to_string(oaep.mgf1),
                 )?;
                 match &oaep.label {
                     None => (),
-                    Some(label) => params.add_octet_string(
+                    Some(label) => params_builder.add_octet_string(
                         cstr!(OSSL_ASYM_CIPHER_PARAM_OAEP_LABEL),
                         &label,
                     )?,
@@ -61,14 +61,13 @@ pub fn rsa_enc_params(
                 return Err(Error::new(ErrorKind::NullPtr));
             }
         }
-        EncAlg::RsaPkcs1_5 => params.add_const_c_string(
+        EncAlg::RsaPkcs1_5 => params_builder.add_const_c_string(
             cstr!(OSSL_PKEY_PARAM_PAD_MODE),
             cstr!(OSSL_PKEY_RSA_PAD_MODE_PKCSV15),
         )?,
     }
 
-    params.finalize();
-    return Ok(params);
+    Ok(params_builder.finalize())
 }
 
 /// Asymmetric Cipher Operation

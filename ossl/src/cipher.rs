@@ -7,7 +7,10 @@
 use std::ffi::{c_int, c_void, CStr};
 
 use crate::bindings::*;
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
+    OsslParamBuilder,
+};
 
 /// Wrapper around OpenSSL's `EVP_CIPHER`, managing its lifecycle.
 #[derive(Debug)]
@@ -275,7 +278,7 @@ impl OsslCipher {
             return Err(Error::new(ErrorKind::OsslError));
         }
 
-        let mut params: OsslParam;
+        let params: OsslParam;
         let mut params_ptr = std::ptr::null() as *const OSSL_PARAM;
 
         /* For some modes there is setup that needs to be done
@@ -285,8 +288,8 @@ impl OsslCipher {
                 ctx.aead_setup(alg, &aead)?
             }
             EncAlg::AesCts(_, mode) => {
-                params = OsslParam::with_capacity(1);
-                params.add_const_c_string(
+                let mut params_builder = OsslParamBuilder::with_capacity(1);
+                params_builder.add_const_c_string(
                     cstr!(OSSL_CIPHER_PARAM_CTS_MODE),
                     match mode {
                         AesCtsMode::CtsModeCS1 => {
@@ -300,7 +303,7 @@ impl OsslCipher {
                         }
                     },
                 )?;
-                params.finalize();
+                params = params_builder.finalize();
                 params_ptr = params.as_ptr();
             }
             _ => (),
