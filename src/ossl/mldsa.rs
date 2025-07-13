@@ -20,7 +20,7 @@ use asn1;
 use bitflags::bitflags;
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use ossl::signature::{mldsa_params, OsslSignature, SigAlg, SigOp};
-use ossl::OsslParam;
+use ossl::{OsslParam, OsslSecret};
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;
@@ -96,9 +96,11 @@ pub fn mldsa_object_to_pkey(
             mldsa_param_set_to_pkey_type(param_set)?,
             PkeyData::Mlkey(MlkeyData {
                 pubkey: None,
-                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                prikey: Some(OsslSecret::from_vec(
+                    key.get_attr_as_bytes(CKA_VALUE)?.clone(),
+                )),
                 seed: match key.get_attr_as_bytes(CKA_SEED) {
-                    Ok(s) => Some(s.clone()),
+                    Ok(s) => Some(OsslSecret::from_vec(s.clone())),
                     Err(_) => None,
                 },
             }),
@@ -787,10 +789,10 @@ pub fn generate_keypair(
         return Err(CKR_DEVICE_ERROR)?;
     }
     if let Some(key) = mlk.prikey.take() {
-        privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key.to_vec()))?;
     }
     if let Some(seed) = mlk.seed.take() {
-        privkey.set_attr(Attribute::from_bytes(CKA_SEED, seed))?;
+        privkey.set_attr(Attribute::from_bytes(CKA_SEED, seed.to_vec()))?;
     }
 
     Ok(())
