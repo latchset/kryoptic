@@ -940,6 +940,14 @@ impl OsslSecret {
         }
     }
 
+    /// Creates a new `OsslSecret` from an existing vector.
+    ///
+    /// This method takes ownership of the provided `Vec<u8>`, avoiding an
+    /// unnecessary copy of the secret data.
+    pub fn from_vec(secret: Vec<u8>) -> OsslSecret {
+        OsslSecret { data: secret }
+    }
+
     /// Returns the number of bytes in the secret.
     pub fn len(&self) -> usize {
         self.data.len()
