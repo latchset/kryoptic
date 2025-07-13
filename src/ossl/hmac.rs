@@ -12,6 +12,7 @@ use crate::pkcs11::*;
 
 use constant_time_eq::constant_time_eq;
 use ossl::mac::{MacAlg, OsslMac};
+use ossl::OsslSecret;
 
 use ossl::fips::FipsApproval;
 
@@ -59,8 +60,9 @@ impl HMACOperation {
         #[cfg(feature = "fips")]
         let mut fips_approval = FipsApproval::init();
 
-        let ctx =
-            OsslMac::new(osslctx(), hmac_mech_to_mac_alg(mech)?, key.take())?;
+        let secret = OsslSecret::from_vec(key.take());
+
+        let ctx = OsslMac::new(osslctx(), hmac_mech_to_mac_alg(mech)?, secret)?;
 
         #[cfg(feature = "fips")]
         fips_approval.update();

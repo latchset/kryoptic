@@ -8,7 +8,7 @@ use std::ffi::CStr;
 use crate::bindings::*;
 use crate::digest::DigestAlg;
 use crate::{
-    cstr, trace_ossl, void_ptr, Error, ErrorKind, OsslContext, OsslParam,
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam, OsslSecret,
 };
 
 /// Wrapper around OpenSSL's `EVP_MAC_CTX`, managing its lifecycle.
@@ -218,24 +218,16 @@ pub struct OsslMac {
     /// The OpenSSL message mac context (`EVP_MAC_CTX`).
     ctx: EvpMacCtx,
     /// The input key material
-    key: Vec<u8>,
+    key: OsslSecret,
     /// The MAC output size as reported by `EVP_MAC_CTX_get_mac_size`
     size: usize,
-}
-
-impl Drop for OsslMac {
-    fn drop(&mut self) {
-        unsafe {
-            OPENSSL_cleanse(void_ptr!(self.key.as_mut_ptr()), self.key.len());
-        }
-    }
 }
 
 impl OsslMac {
     pub fn new(
         ctx: &OsslContext,
         mac: MacAlg,
-        key: Vec<u8>,
+        key: OsslSecret,
     ) -> Result<OsslMac, Error> {
         let mut params = OsslParam::with_capacity(1);
         let mac_type = add_mac_alg_to_params(
@@ -248,7 +240,7 @@ impl OsslMac {
 
         let mut mctx = OsslMac {
             ctx: EvpMacCtx::new(ctx, mac_type)?,
-            key: key,
+            key,
             size: 0,
         };
 

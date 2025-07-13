@@ -30,27 +30,12 @@ const MIN_RANDOM_IV_BITS: usize = 64;
 
 const AES_KWP_BLOCK: usize = AES_BLOCK_SIZE / 2;
 
-/// A raw AES Key wrapper
-///
-/// Ensures the data is zeroized on deallocation
-#[derive(Debug)]
-struct AesKey {
-    /// Raw key bytes.
-    raw: Vec<u8>,
-}
-
-impl Drop for AesKey {
-    fn drop(&mut self) {
-        zeromem(self.raw.as_mut_slice());
-    }
-}
-
 /// Extracts the raw key bytes from a PKCS#11 `Object` into an `AesKey`.
 /// Validates the key length.
-fn object_to_raw_key(key: &Object) -> Result<AesKey> {
+fn object_to_raw_key(key: &Object) -> Result<OsslSecret> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
     check_key_len(val.len())?;
-    Ok(AesKey { raw: val.clone() })
+    Ok(OsslSecret::from_slice(&val))
 }
 
 /// AES Initialization Vector Object
@@ -142,7 +127,7 @@ pub struct AesOperation {
     /// The operation type flags (CKF_ENCRYPT, CKF_DECRYPT, etc.).
     op: CK_FLAGS,
     /// The wrapped AES key being used.
-    key: AesKey,
+    key: OsslSecret,
     /// Parameters specific to the current operation (IV, AAD, etc.).
     params: AesParams,
     /// Flag indicating if the operation has been finalized.
@@ -543,7 +528,7 @@ impl AesOperation {
     fn cipher_initialize(
         mech: CK_MECHANISM_TYPE,
         params: &mut AesParams,
-        key: &Vec<u8>,
+        key: &[u8],
         enc: bool,
     ) -> Result<OsslCipher> {
         /* Generates IV for some AEAD modes */
@@ -555,7 +540,7 @@ impl AesOperation {
             osslctx(),
             Self::get_cipher(mech, params, key.len())?,
             enc,
-            OsslSecret::from_slice(key.as_slice()),
+            OsslSecret::from_slice(key),
             if params.iv.buf.len() > 0 {
                 Some(params.iv.buf.clone())
             } else {
@@ -604,7 +589,7 @@ impl AesOperation {
         let ctx = Self::cipher_initialize(
             mech.mechanism,
             &mut params,
-            &aeskey.raw,
+            &aeskey,
             true,
         )?;
 
@@ -643,7 +628,7 @@ impl AesOperation {
         let ctx = Self::cipher_initialize(
             mech.mechanism,
             &mut params,
-            &aeskey.raw,
+            &aeskey,
             false,
         )?;
 
@@ -1045,7 +1030,7 @@ impl AesOperation {
         self.ctx = Some(Self::cipher_initialize(
             self.mech,
             &mut self.params,
-            &self.key.raw,
+            &self.key,
             true,
         )?);
 
@@ -1114,7 +1099,7 @@ impl AesOperation {
         self.ctx = Some(Self::cipher_initialize(
             self.mech,
             &mut self.params,
-            &self.key.raw,
+            &self.key,
             false,
         )?);
 
@@ -2477,8 +2462,8 @@ impl AesCmacOperation {
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
 
-        let key = key.get_attr_as_bytes(CKA_VALUE)?.clone();
-        let mac = match key.len() {
+        let key_data = key.get_attr_as_bytes(CKA_VALUE)?;
+        let mac = match key_data.len() {
             16 => MacAlg::CmacAes128,
             24 => MacAlg::CmacAes192,
             32 => MacAlg::CmacAes256,
@@ -2488,7 +2473,8 @@ impl AesCmacOperation {
         #[cfg(feature = "fips")]
         let mut fips_approval = FipsApproval::init();
 
-        let ctx = OsslMac::new(osslctx(), mac, key)?;
+        let ctx =
+            OsslMac::new(osslctx(), mac, OsslSecret::from_slice(&key_data))?;
 
         #[cfg(feature = "fips")]
         fips_approval.update();
