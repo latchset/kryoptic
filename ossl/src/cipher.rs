@@ -7,7 +7,9 @@
 use std::ffi::{c_int, c_void, CStr};
 
 use crate::bindings::*;
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam, OsslSecret,
+};
 
 /// Wrapper around OpenSSL's `EVP_CIPHER`, managing its lifecycle.
 #[derive(Debug)]
@@ -214,7 +216,7 @@ pub struct OsslCipher {
     /// Wheter we encrypt (1) or decrypt (0)
     enc: c_int,
     /// The Key material
-    key: Vec<u8>,
+    key: OsslSecret,
     /// Optional IV buffer storage
     iv: Option<Vec<u8>>,
     /// Optional AAD buffer storage
@@ -225,24 +227,13 @@ pub struct OsslCipher {
     blocksize: usize,
 }
 
-impl Drop for OsslCipher {
-    fn drop(&mut self) {
-        unsafe {
-            OPENSSL_cleanse(
-                self.key.as_mut_ptr() as *mut c_void,
-                self.key.len(),
-            );
-        }
-    }
-}
-
 impl OsslCipher {
     /// Initializes a cipher operation
-    pub fn cipher_new(
+    pub fn new(
         libctx: &OsslContext,
         alg: EncAlg,
         enc: bool,
-        key: Vec<u8>,
+        key: OsslSecret,
         iv: Option<Vec<u8>>,
         aead: Option<AeadParams>,
     ) -> Result<OsslCipher, Error> {
@@ -251,8 +242,8 @@ impl OsslCipher {
         let mut ctx = OsslCipher {
             ctx: EvpCipherCtx::new()?,
             enc: if enc { 1 } else { 0 },
-            key: key,
-            iv: iv,
+            key,
+            iv,
             aad: None,
             blocksize: 1,
         };
