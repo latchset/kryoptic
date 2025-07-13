@@ -18,6 +18,7 @@ use crate::pkcs11::*;
 use constant_time_eq::constant_time_eq;
 use ossl::cipher::{AeadParams, AesCtsMode, AesSize, EncAlg, OsslCipher};
 use ossl::mac::{MacAlg, OsslMac};
+use ossl::OsslSecret;
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;
@@ -550,11 +551,11 @@ impl AesOperation {
             Self::generate_iv(params)?;
         }
 
-        let mut ctx = OsslCipher::cipher_new(
+        let mut ctx = OsslCipher::new(
             osslctx(),
             Self::get_cipher(mech, params, key.len())?,
             enc,
-            key.clone(),
+            OsslSecret::from_slice(key.as_slice()),
             if params.iv.buf.len() > 0 {
                 Some(params.iv.buf.clone())
             } else {
