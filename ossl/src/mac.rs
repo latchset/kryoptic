@@ -19,7 +19,7 @@ pub struct EvpMacCtx {
 
 /// Methods for creating (from a named MAC) and accessing `EvpMacCtx`.
 impl EvpMacCtx {
-    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMacCtx, Error> {
+    fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMacCtx, Error> {
         let arg = unsafe {
             EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
         };
@@ -38,13 +38,8 @@ impl EvpMacCtx {
         Ok(EvpMacCtx { ptr })
     }
 
-    /// Returns a const pointer to the underlying `EVP_MAC_CTX`.
-    pub unsafe fn as_ptr(&self) -> *const EVP_MAC_CTX {
-        self.ptr
-    }
-
     /// Returns a mutable pointer to the underlying `EVP_MAC_CTX`.
-    pub unsafe fn as_mut_ptr(&mut self) -> *mut EVP_MAC_CTX {
+    fn as_mut_ptr(&mut self) -> *mut EVP_MAC_CTX {
         self.ptr
     }
 }
