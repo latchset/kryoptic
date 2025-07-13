@@ -906,3 +906,145 @@ impl<'a> OsslParam<'a> {
         self.p.as_ref().len() - 1
     }
 }
+
+/// A container for sensitive data that is securely zeroized on drop.
+///
+/// `OsslSecret` provides a fixed-size, vector-like interface to a byte buffer.
+/// It is designed to hold cryptographic keys, passwords, or any other secret
+/// material that should not persist in memory longer than necessary.
+///
+/// Once created, the capacity of an `OsslSecret` cannot be changed, preventing
+/// accidental reallocations that might leave copies of the secret data in
+/// unmanaged memory.
+#[derive(Debug)]
+pub struct OsslSecret {
+    data: Vec<u8>,
+}
+
+impl OsslSecret {
+    /// Creates a new `OsslSecret` of a specified size, initialized with zeros.
+    ///
+    /// The buffer is allocated with a fixed capacity and cannot be resized.
+    pub fn new(size: usize) -> OsslSecret {
+        OsslSecret {
+            data: vec![0u8; size],
+        }
+    }
+
+    /// Creates a new `OsslSecret` by copying data from a slice.
+    ///
+    /// The new buffer will have a fixed capacity equal to the length of the slice.
+    pub fn from_slice(secret: &[u8]) -> OsslSecret {
+        OsslSecret {
+            data: secret.to_vec(),
+        }
+    }
+
+    /// Returns the number of bytes in the secret.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Returns `true` if the secret has a length of 0.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Returns a raw pointer to the secret's buffer.
+    ///
+    /// The caller must ensure that the `OsslSecret` outlives the pointer.
+    pub fn as_ptr(&self) -> *const u8 {
+        self.data.as_ptr()
+    }
+
+    /// Returns a raw, mutable pointer to the secret's buffer.
+    ///
+    /// The caller must ensure that the `OsslSecret` outlives the pointer.
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.data.as_mut_ptr()
+    }
+
+    /// Reduces the size of the secret, securely clearing the discarded portion.
+    ///
+    /// It copies `new_size` bytes starting from `starting_point` from the
+    /// original secret into a new, smaller buffer. The original buffer is
+    /// then securely cleared.
+    ///
+    /// # Arguments
+    ///
+    /// * `new_size` - The new size of the secret.
+    /// * `starting_point` - The offset within the original secret to start
+    ///   copying from.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ErrorKind::BufferSize` if the range specified by
+    /// `starting_point` and `new_size` is out of bounds of the current
+    /// secret's length.
+    pub fn reduce(
+        &mut self,
+        new_size: usize,
+        starting_point: usize,
+    ) -> Result<(), Error> {
+        let end_point = match starting_point.checked_add(new_size) {
+            Some(end) => end,
+            None => return Err(Error::new(ErrorKind::BufferSize)),
+        };
+
+        if end_point > self.len() {
+            return Err(Error::new(ErrorKind::BufferSize));
+        }
+
+        // no-op if the requested slice is the same as the current data
+        if new_size == self.len() && starting_point == 0 {
+            return Ok(());
+        }
+
+        let mut new_data = vec![0u8; new_size];
+        new_data.copy_from_slice(&self.data[starting_point..end_point]);
+
+        unsafe {
+            OPENSSL_cleanse(void_ptr!(self.data.as_mut_ptr()), self.data.len());
+        }
+
+        std::mem::swap(&mut self.data, &mut new_data);
+
+        Ok(())
+    }
+}
+
+impl Drop for OsslSecret {
+    /// Securely zeroizes the secret data when the object is dropped.
+    fn drop(&mut self) {
+        unsafe {
+            OPENSSL_cleanse(void_ptr!(self.data.as_mut_ptr()), self.data.len());
+        }
+    }
+}
+
+impl AsRef<[u8]> for OsslSecret {
+    fn as_ref(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl AsMut<[u8]> for OsslSecret {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+}
+
+impl std::ops::Deref for OsslSecret {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for OsslSecret {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
