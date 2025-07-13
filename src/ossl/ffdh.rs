@@ -11,13 +11,13 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::{Error, Result};
 use crate::ffdh_groups::{get_group_name, group_prime, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::zeromem;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
 use crate::pkcs11::*;
 
 use ossl::derive::FfdhDerive;
 use ossl::pkey::{EvpPkey, EvpPkeyType, FfdhData, PkeyData};
+use ossl::OsslSecret;
 
 fn group_to_pkey_type(group: DHGroupName) -> Result<EvpPkeyType> {
     Ok(match group {
@@ -67,7 +67,9 @@ pub fn ffdh_object_to_pkey(
             pkey_type,
             PkeyData::Ffdh(FfdhData {
                 pubkey: None,
-                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                prikey: Some(OsslSecret::from_vec(
+                    key.get_attr_as_bytes(CKA_VALUE)?.clone(),
+                )),
             }),
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
@@ -91,7 +93,7 @@ impl FFDHOperation {
         mechanism: CK_MECHANISM_TYPE,
         peerpub: Vec<u8>,
     ) -> Result<FFDHOperation> {
-        if peerpub.len() == 0 {
+        if peerpub.is_empty() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
@@ -141,7 +143,7 @@ impl FFDHOperation {
                 CKA_VALUE_BITS,
                 CK_ULONG::try_from(key.len() * 8)?,
             ))?;
-            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key.to_vec()))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
@@ -199,12 +201,11 @@ impl Derive for FFDHOperation {
         };
 
         ffdh.set_outlen(req_len)?;
-        let mut secret = vec![0u8; req_len];
+        let mut secret = OsslSecret::new(req_len);
 
         let outlen = ffdh.derive(&mut peer, &mut secret)?;
         if outlen != req_len {
             if req_len != pkey_size {
-                zeromem(secret.as_mut_slice());
                 return Err(CKR_GENERAL_ERROR)?;
             }
             /* FFDH maximum secret length is not fully deterministic and can
@@ -228,18 +229,16 @@ impl Derive for FFDHOperation {
             };
             match ret {
                 Ok(()) => {
-                    zeromem(&mut secret[outlen..req_len]);
-                    secret.resize(outlen, 0);
+                    secret.reduce(outlen, 0)?;
                 }
                 Err(e) => {
-                    zeromem(secret.as_mut_slice());
                     return Err(e);
                 }
             }
         }
 
         let mut tmpl = CkAttrs::from(template);
-        tmpl.add_vec(CKA_VALUE, secret)?;
+        tmpl.add_vec(CKA_VALUE, secret.to_vec())?;
         tmpl.zeroize = true;
         let mut obj = factory.create(tmpl.as_slice())?;
 

@@ -13,6 +13,7 @@ use crate::ossl::common::{get_evp_pkey_type_from_obj, osslctx};
 use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
+use ossl::OsslSecret;
 
 /// Converts a PKCS#11 Montgomery curve key `Object` (X25519/X448) into
 /// an `EvpPkey`.
@@ -42,7 +43,9 @@ pub fn ecm_object_to_pkey(
             get_evp_pkey_type_from_obj(key)?,
             PkeyData::Ecc(EccData {
                 pubkey: None,
-                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                prikey: Some(OsslSecret::from_vec(
+                    key.get_attr_as_bytes(CKA_VALUE)?.clone(),
+                )),
             }),
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
@@ -74,14 +77,18 @@ impl ECMontgomeryOperation {
 
         /* Set Public Key */
         if let Some(key) = ecc.pubkey.take() {
-            pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, key))?;
+            pubkey.set_attr(Attribute::from_bytes(
+                CKA_EC_POINT,
+                (&key).to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
         /* Set Private Key */
         if let Some(key) = ecc.prikey.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+            privkey
+                .set_attr(Attribute::from_bytes(CKA_VALUE, (&key).to_vec()))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }

@@ -16,7 +16,7 @@ use crate::pkcs11::*;
 
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{eddsa_params, OsslSignature, SigAlg, SigOp};
-use ossl::ErrorKind;
+use ossl::{ErrorKind, OsslSecret};
 
 /// Expected signature length for Ed25519 in bytes.
 pub const OUTLEN_ED25519: usize = 64;
@@ -90,7 +90,9 @@ pub fn eddsa_object_to_pkey(
             get_evp_pkey_type_from_obj(key)?,
             PkeyData::Ecc(EccData {
                 pubkey: None,
-                prikey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
+                prikey: Some(OsslSecret::from_vec(
+                    key.get_attr_as_bytes(CKA_VALUE)?.to_vec(),
+                )),
             }),
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
@@ -194,14 +196,18 @@ impl EddsaOperation {
 
         /* Set Public Key */
         if let Some(key) = ecc.pubkey.take() {
-            pubkey.set_attr(Attribute::from_bytes(CKA_EC_POINT, key))?;
+            pubkey.set_attr(Attribute::from_bytes(
+                CKA_EC_POINT,
+                (&key).to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
 
         /* Set Private Key */
         if let Some(key) = ecc.prikey.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+            privkey
+                .set_attr(Attribute::from_bytes(CKA_VALUE, (&key).to_vec()))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }

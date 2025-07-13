@@ -26,6 +26,7 @@ use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData, RsaData};
 use ossl::signature::{
     rsa_sig_params, OsslSignature, RsaPssParams, SigAlg, SigOp,
 };
+use ossl::OsslSecret;
 
 #[cfg(feature = "fips")]
 use ossl::fips::FipsApproval;
@@ -54,14 +55,16 @@ pub fn rsa_object_to_pkey(
     let (d, p, q, a, b, c) = match kclass {
         CKO_PUBLIC_KEY => (None, None, None, None, None, None),
         CKO_PRIVATE_KEY => {
-            let d = Some(key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?.clone());
+            let d = Some(OsslSecret::from_vec(
+                key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?.clone(),
+            ));
             let pa = key.get_attr(CKA_PRIME_1);
-            let qa = key.get_attr(CKA_PRIME_1);
+            let qa = key.get_attr(CKA_PRIME_2);
             /* OpenSSL can compute a,b,c with just p,q */
             let (p, q) = if pa.is_some() && qa.is_some() {
                 (
-                    Some(pa.unwrap().get_value().clone()),
-                    Some(qa.unwrap().get_value().clone()),
+                    Some(OsslSecret::from_vec(pa.unwrap().get_value().clone())),
+                    Some(OsslSecret::from_vec(qa.unwrap().get_value().clone())),
                 )
             } else {
                 (None, None)
@@ -71,9 +74,9 @@ pub fn rsa_object_to_pkey(
             let ca = key.get_attr(CKA_COEFFICIENT);
             let (a, b, c) = if aa.is_some() && ba.is_some() && ca.is_some() {
                 (
-                    Some(aa.unwrap().get_value().clone()),
-                    Some(ba.unwrap().get_value().clone()),
-                    Some(ca.unwrap().get_value().clone()),
+                    Some(OsslSecret::from_vec(aa.unwrap().get_value().clone())),
+                    Some(OsslSecret::from_vec(ba.unwrap().get_value().clone())),
+                    Some(OsslSecret::from_vec(ca.unwrap().get_value().clone())),
                 )
             } else {
                 (None, None, None)
@@ -445,32 +448,50 @@ impl RsaPKCSOperation {
             exponent.clone(),
         ))?;
         if let Some(d) = rsa.d.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_PRIVATE_EXPONENT, d))?;
+            privkey.set_attr(Attribute::from_bytes(
+                CKA_PRIVATE_EXPONENT,
+                d.as_ref().to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
         if let Some(p) = rsa.p.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_PRIME_1, p))?;
+            privkey.set_attr(Attribute::from_bytes(
+                CKA_PRIME_1,
+                p.as_ref().to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
         if let Some(q) = rsa.q.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_PRIME_2, q))?;
+            privkey.set_attr(Attribute::from_bytes(
+                CKA_PRIME_2,
+                q.as_ref().to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
         if let Some(a) = rsa.a.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_EXPONENT_1, a))?;
+            privkey.set_attr(Attribute::from_bytes(
+                CKA_EXPONENT_1,
+                a.as_ref().to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
         if let Some(b) = rsa.b.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_EXPONENT_2, b))?;
+            privkey.set_attr(Attribute::from_bytes(
+                CKA_EXPONENT_2,
+                b.as_ref().to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }
         if let Some(c) = rsa.c.take() {
-            privkey.set_attr(Attribute::from_bytes(CKA_COEFFICIENT, c))?;
+            privkey.set_attr(Attribute::from_bytes(
+                CKA_COEFFICIENT,
+                c.as_ref().to_vec(),
+            ))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
         }

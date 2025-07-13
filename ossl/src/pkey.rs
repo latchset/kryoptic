@@ -7,7 +7,9 @@
 use std::ffi::{c_int, c_uint, CStr};
 
 use crate::bindings::*;
-use crate::{cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam};
+use crate::{
+    cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam, OsslSecret,
+};
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
 /// Used for various public key algorithm operations (key generation, signing,
@@ -286,17 +288,12 @@ fn pkey_to_type(
 #[derive(Debug)]
 pub struct EccData {
     pub pubkey: Option<Vec<u8>>,
-    pub prikey: Option<Vec<u8>>,
+    pub prikey: Option<OsslSecret>,
 }
 
 impl Drop for EccData {
     fn drop(&mut self) {
         if let Some(mut v) = self.pubkey.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.prikey.take() {
             unsafe {
                 OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
             }
@@ -308,17 +305,12 @@ impl Drop for EccData {
 #[derive(Debug)]
 pub struct FfdhData {
     pub pubkey: Option<Vec<u8>>,
-    pub prikey: Option<Vec<u8>>,
+    pub prikey: Option<OsslSecret>,
 }
 
 impl Drop for FfdhData {
     fn drop(&mut self) {
         if let Some(mut v) = self.pubkey.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.prikey.take() {
             unsafe {
                 OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
             }
@@ -330,23 +322,13 @@ impl Drop for FfdhData {
 #[derive(Debug)]
 pub struct MlkeyData {
     pub pubkey: Option<Vec<u8>>,
-    pub prikey: Option<Vec<u8>>,
-    pub seed: Option<Vec<u8>>,
+    pub prikey: Option<OsslSecret>,
+    pub seed: Option<OsslSecret>,
 }
 
 impl Drop for MlkeyData {
     fn drop(&mut self) {
         if let Some(mut v) = self.pubkey.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.prikey.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.seed.take() {
             unsafe {
                 OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
             }
@@ -358,48 +340,18 @@ impl Drop for MlkeyData {
 #[derive(Debug)]
 pub struct RsaData {
     pub n: Vec<u8>,
-    pub d: Option<Vec<u8>>,
-    pub p: Option<Vec<u8>>,
-    pub q: Option<Vec<u8>>,
-    pub a: Option<Vec<u8>>,
-    pub b: Option<Vec<u8>>,
-    pub c: Option<Vec<u8>>,
+    pub d: Option<OsslSecret>,
+    pub p: Option<OsslSecret>,
+    pub q: Option<OsslSecret>,
+    pub a: Option<OsslSecret>,
+    pub b: Option<OsslSecret>,
+    pub c: Option<OsslSecret>,
 }
 
 impl Drop for RsaData {
     fn drop(&mut self) {
         unsafe {
             OPENSSL_cleanse(self.n.as_mut_ptr() as *mut _, self.n.len());
-        }
-        if let Some(mut v) = self.d.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.p.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.q.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.a.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.b.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
-        }
-        if let Some(mut v) = self.c.take() {
-            unsafe {
-                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
-            }
         }
     }
 }
@@ -440,7 +392,7 @@ fn params_to_mldsa_data(
             },
         },
         prikey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
-            Ok(p) => Some(p.to_vec()),
+            Ok(p) => Some(OsslSecret::from_slice(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
@@ -448,7 +400,7 @@ fn params_to_mldsa_data(
         },
         seed: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED))
         {
-            Ok(p) => Some(p.to_vec()),
+            Ok(p) => Some(OsslSecret::from_slice(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
@@ -468,7 +420,7 @@ fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
             },
         },
         prikey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
-            Ok(p) => Some(p.to_vec()),
+            Ok(p) => Some(OsslSecret::from_slice(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
@@ -476,7 +428,7 @@ fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
         },
         seed: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED))
         {
-            Ok(p) => Some(p.to_vec()),
+            Ok(p) => Some(OsslSecret::from_slice(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
@@ -489,42 +441,42 @@ fn params_to_rsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
     Ok(PkeyData::Rsa(RsaData {
         n: params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?,
         d: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_D)) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(OsslSecret::from_vec(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
             },
         },
         p: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1)) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(OsslSecret::from_vec(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
             },
         },
         q: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2)) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(OsslSecret::from_vec(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
             },
         },
         a: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1)) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(OsslSecret::from_vec(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
             },
         },
         b: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2)) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(OsslSecret::from_vec(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
             },
         },
         c: match params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1)) {
-            Ok(p) => Some(p),
+            Ok(p) => Some(OsslSecret::from_vec(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
                 _ => return Err(e),
@@ -541,27 +493,27 @@ fn rsa_data_to_params(
     params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_N), rsa.n.as_slice())?;
     if let Some(p) = &rsa.d {
         is_priv = true;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_D), p.as_slice())?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_D), p)?;
     }
     if let Some(p) = &rsa.p {
         is_priv = true;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1), p.as_slice())?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR1), p)?;
     }
     if let Some(p) = &rsa.q {
         is_priv = true;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2), p.as_slice())?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_FACTOR2), p)?;
     }
     if let Some(p) = &rsa.a {
         is_priv = true;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1), p.as_slice())?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT1), p)?;
     }
     if let Some(p) = &rsa.b {
         is_priv = true;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2), p.as_slice())?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_EXPONENT2), p)?;
     }
     if let Some(p) = &rsa.c {
         is_priv = true;
-        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1), p.as_slice())?;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1), p)?;
     }
     Ok(is_priv)
 }
@@ -710,10 +662,7 @@ impl EvpPkey {
                         }
                         if let Some(p) = &ecc.prikey {
                             pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                            params.add_bn(
-                                cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                                p.as_slice(),
-                            )?
+                            params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
                         }
                     }
                     _ => return Err(Error::new(ErrorKind::WrapperError)),
@@ -735,7 +684,7 @@ impl EvpPkey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                         params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p.as_slice(),
+                            p,
                         )?
                     }
                 }
@@ -761,10 +710,7 @@ impl EvpPkey {
                     }
                     if let Some(p) = &ffdh.prikey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                        params.add_bn(
-                            cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p.as_slice(),
-                        )?
+                        params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
@@ -785,14 +731,14 @@ impl EvpPkey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                         params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p.as_slice(),
+                            p,
                         )?
                     }
                     if let Some(p) = &mlk.seed {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                         params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED),
-                            p.as_slice(),
+                            p,
                         )?
                     }
                 }
@@ -814,14 +760,14 @@ impl EvpPkey {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                         params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
-                            p.as_slice(),
+                            p,
                         )?
                     }
                     if let Some(p) = &mlk.seed {
                         pkey_class |= EVP_PKEY_PRIVATE_KEY;
                         params.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED),
-                            p.as_slice(),
+                            p,
                         )?
                     }
                 }
@@ -861,7 +807,7 @@ impl EvpPkey {
                     },
                     prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
                     {
-                        Ok(p) => Some(p),
+                        Ok(p) => Some(OsslSecret::from_vec(p)),
                         Err(e) => match e.kind() {
                             ErrorKind::NullPtr => None,
                             _ => return Err(e),
@@ -885,7 +831,7 @@ impl EvpPkey {
                 prikey: match params
                     .get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
                 {
-                    Ok(p) => Some(p.to_vec()),
+                    Ok(p) => Some(OsslSecret::from_slice(p)),
                     Err(e) => match e.kind() {
                         ErrorKind::NullPtr => None,
                         _ => return Err(e),
@@ -910,7 +856,7 @@ impl EvpPkey {
                     },
                 },
                 prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
-                    Ok(p) => Some(p),
+                    Ok(p) => Some(OsslSecret::from_vec(p)),
                     Err(e) => match e.kind() {
                         ErrorKind::NullPtr => None,
                         _ => return Err(e),
