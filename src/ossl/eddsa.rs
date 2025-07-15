@@ -14,6 +14,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 use crate::pkcs11::*;
 
+#[cfg(feature = "fips")]
+use ossl::fips::FipsApproval;
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{eddsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::{ErrorKind, OsslSecret};
@@ -112,6 +114,9 @@ pub struct EddsaOperation {
     in_use: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: OsslSignature,
+    /// FIPS approval status for the operation.
+    #[cfg(feature = "fips")]
+    fips_approval: FipsApproval,
 }
 
 impl EddsaOperation {
@@ -126,6 +131,9 @@ impl EddsaOperation {
         key: &Object,
         signature: Option<Vec<u8>>,
     ) -> Result<EddsaOperation> {
+        #[cfg(feature = "fips")]
+        let mut fips_approval = FipsApproval::init();
+
         let (op, mut pkey) = match flag {
             CKF_SIGN => (SigOp::Sign, privkey_from_object(key)?),
             CKF_VERIFY => (SigOp::Verify, pubkey_from_object(key)?),
@@ -139,12 +147,18 @@ impl EddsaOperation {
         if let Some(sig) = &signature {
             sigctx.set_signature(sig)?;
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval.update();
+
         Ok(EddsaOperation {
             mech: mech.mechanism,
             output_len: output_len,
             finalized: false,
             in_use: false,
             sigctx: sigctx,
+            #[cfg(feature = "fips")]
+            fips_approval: fips_approval,
         })
     }
 
@@ -224,6 +238,11 @@ impl MechOperation for EddsaOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
+
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approval.approval()
+    }
 }
 
 impl Sign for EddsaOperation {
@@ -244,8 +263,16 @@ impl Sign for EddsaOperation {
         }
         self.in_use = true;
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         match self.sigctx.update(data) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                #[cfg(feature = "fips")]
+                self.fips_approval.update();
+
+                Ok(())
+            }
             Err(e) => {
                 if e.kind() == ErrorKind::BufferSize {
                     Err(CKR_TOKEN_RESOURCE_EXCEEDED)?
@@ -265,10 +292,16 @@ impl Sign for EddsaOperation {
         }
         self.finalized = true;
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         let siglen = self.sigctx.sign_final(signature)?;
         if siglen != signature.len() {
             return Err(CKR_DEVICE_ERROR)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
 
         Ok(())
     }
@@ -303,8 +336,16 @@ impl EddsaOperation {
         }
         self.in_use = true;
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         match self.sigctx.update(data) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                #[cfg(feature = "fips")]
+                self.fips_approval.update();
+
+                Ok(())
+            }
             Err(e) => {
                 if e.kind() == ErrorKind::BufferSize {
                     Err(CKR_TOKEN_RESOURCE_EXCEEDED)?
@@ -327,11 +368,17 @@ impl EddsaOperation {
 
         self.finalized = true;
 
-        if self.sigctx.verify_final(signature).is_ok() {
-            return Ok(());
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
+        if self.sigctx.verify_final(signature).is_err() {
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
 
-        return Err(CKR_SIGNATURE_INVALID)?;
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
+        Ok(())
     }
 }
 
