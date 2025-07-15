@@ -1328,11 +1328,7 @@ fn check_allowed_mechs(mech: &CK_MECHANISM, key: &object::Object) -> CK_RV {
         let mut mslice = [0u8; misc::CK_ULONG_SIZE];
         mslice
             .copy_from_slice(&mechsvec[cursor..(cursor + misc::CK_ULONG_SIZE)]);
-        let m = unsafe {
-            std::mem::transmute::<[u8; misc::CK_ULONG_SIZE], CK_MECHANISM_TYPE>(
-                mslice,
-            )
-        };
+        let m = CK_MECHANISM_TYPE::from_ne_bytes(mslice);
         if mech.mechanism == m {
             return CKR_OK;
         }
