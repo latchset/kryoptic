@@ -1056,3 +1056,6 @@ impl std::ops::DerefMut for OsslSecret {
         &mut self.data
     }
 }
+
+#[cfg(test)]
+mod tests;
