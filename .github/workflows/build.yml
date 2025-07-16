@@ -26,8 +26,6 @@ jobs:
             db: nssdb
           - name: minimal
             linking: fips
-          - name: standard
-            linking: fips
           - name: pqc # only works with openssl 3.5.0 so exclude dynamic
             linking: dynamic
           - name: pqc # already part of normal fips tests
