@@ -182,3 +182,51 @@ fn test_ecdh_brainpool_p512r1() {
         z_hex,
     );
 }
+
+use crate::signature::{OsslSignature, SigAlg, SigOp};
+
+#[test]
+#[parallel]
+fn test_brainpool_p256r1_signature() {
+    let ctx = OsslContext::new_lib_ctx();
+
+    // Generate a key pair
+    let mut key =
+        EvpPkey::generate(&ctx, EvpPkeyType::BrainpoolP256r1).unwrap();
+
+    // Sample data to sign. Use ECDSA without a pre-computed digest.
+    let data = b"some sample data to sign";
+
+    // --- Sign ---
+    let mut signer =
+        OsslSignature::new(&ctx, SigOp::Sign, SigAlg::Ecdsa, &mut key, None)
+            .unwrap();
+    let mut signature = vec![0u8; signer.sign(data, None).unwrap()];
+    let sig_len = signer.sign(data, Some(&mut signature)).unwrap();
+    signature.truncate(sig_len);
+
+    // --- Verify ---
+    let mut verifier =
+        OsslSignature::new(&ctx, SigOp::Verify, SigAlg::Ecdsa, &mut key, None)
+            .unwrap();
+    verifier.verify(data, Some(&signature)).unwrap();
+
+    // --- Verify with wrong data should fail ---
+    let wrong_data = b"some other data";
+    let mut verifier_fail_data =
+        OsslSignature::new(&ctx, SigOp::Verify, SigAlg::Ecdsa, &mut key, None)
+            .unwrap();
+    assert!(verifier_fail_data
+        .verify(wrong_data, Some(&signature))
+        .is_err());
+
+    // --- Verify with wrong signature should fail ---
+    let mut wrong_signature = signature.clone();
+    wrong_signature[0] = wrong_signature[0].wrapping_add(1);
+    let mut verifier_fail_sig =
+        OsslSignature::new(&ctx, SigOp::Verify, SigAlg::Ecdsa, &mut key, None)
+            .unwrap();
+    assert!(verifier_fail_sig
+        .verify(data, Some(&wrong_signature))
+        .is_err());
+}
