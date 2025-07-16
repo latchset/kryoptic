@@ -70,7 +70,7 @@ impl Drop for EvpPkeyCtx {
 unsafe impl Send for EvpPkeyCtx {}
 unsafe impl Sync for EvpPkeyCtx {}
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum EvpPkeyType {
     /* DH */
     Ffdhe2048,
@@ -91,6 +91,9 @@ pub enum EvpPkeyType {
     Ed448,
     X25519,
     X448,
+    BrainpoolP256r1,
+    BrainpoolP384r1,
+    BrainpoolP512r1,
     /* ML */
     Mldsa44,
     Mldsa65,
@@ -199,6 +202,27 @@ fn pkey_type_to_params(
             )?;
             c"EC"
         }
+        EvpPkeyType::BrainpoolP256r1 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"brainpoolP256r1",
+            )?;
+            c"EC"
+        }
+        EvpPkeyType::BrainpoolP384r1 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"brainpoolP384r1",
+            )?;
+            c"EC"
+        }
+        EvpPkeyType::BrainpoolP512r1 => {
+            params.add_const_c_string(
+                cstr!(OSSL_PKEY_PARAM_GROUP_NAME),
+                c"brainpoolP512r1",
+            )?;
+            c"EC"
+        }
         EvpPkeyType::Ed25519 => c"ED25519",
         EvpPkeyType::Ed448 => c"ED448",
         EvpPkeyType::X25519 => c"X25519",
@@ -221,7 +245,8 @@ fn pkey_type_to_params(
     Ok(name)
 }
 
-const MAX_GROUP_NAME_LEN: usize = 10;
+/* Allocate enough space for a large name */
+const MAX_GROUP_NAME_LEN: usize = 128;
 
 /// Helper function to get pkey_type
 fn pkey_to_type(
@@ -244,6 +269,9 @@ fn pkey_to_type(
                 b"prime256v1" => Ok(EvpPkeyType::P256),
                 b"secp384r1" => Ok(EvpPkeyType::P384),
                 b"secp521r1" => Ok(EvpPkeyType::P521),
+                b"brainpoolP256r1" => Ok(EvpPkeyType::BrainpoolP256r1),
+                b"brainpoolP384r1" => Ok(EvpPkeyType::BrainpoolP384r1),
+                b"brainpoolP512r1" => Ok(EvpPkeyType::BrainpoolP512r1),
                 _ => Err(Error::new(ErrorKind::WrapperError)),
             }
         }
@@ -650,24 +678,27 @@ impl EvpPkey {
         let name = pkey_type_to_params(&pkey_type, &mut params)?;
 
         match pkey_type {
-            EvpPkeyType::P256 | EvpPkeyType::P384 | EvpPkeyType::P521 => {
-                match &data {
-                    PkeyData::Ecc(ecc) => {
-                        if let Some(p) = &ecc.pubkey {
-                            pkey_class |= EVP_PKEY_PUBLIC_KEY;
-                            params.add_octet_slice(
-                                cstr!(OSSL_PKEY_PARAM_PUB_KEY),
-                                p.as_slice(),
-                            )?
-                        }
-                        if let Some(p) = &ecc.prikey {
-                            pkey_class |= EVP_PKEY_PRIVATE_KEY;
-                            params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
-                        }
+            EvpPkeyType::P256
+            | EvpPkeyType::P384
+            | EvpPkeyType::P521
+            | EvpPkeyType::BrainpoolP256r1
+            | EvpPkeyType::BrainpoolP384r1
+            | EvpPkeyType::BrainpoolP512r1 => match &data {
+                PkeyData::Ecc(ecc) => {
+                    if let Some(p) = &ecc.pubkey {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        params.add_octet_slice(
+                            cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                            p.as_slice(),
+                        )?
                     }
-                    _ => return Err(Error::new(ErrorKind::WrapperError)),
+                    if let Some(p) = &ecc.prikey {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
+                    }
                 }
-            }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
             EvpPkeyType::Ed25519
             | EvpPkeyType::Ed448
             | EvpPkeyType::X25519
@@ -794,27 +825,29 @@ impl EvpPkey {
         let params = self.todata(EVP_PKEY_KEYPAIR)?;
         let pkey_type = pkey_to_type(&self, &params)?;
         Ok(match pkey_type {
-            EvpPkeyType::P256 | EvpPkeyType::P384 | EvpPkeyType::P521 => {
-                PkeyData::Ecc(EccData {
-                    pubkey: match params
-                        .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
-                    {
-                        Ok(p) => Some(p.to_vec()),
-                        Err(e) => match e.kind() {
-                            ErrorKind::NullPtr => None,
-                            _ => return Err(e),
-                        },
+            EvpPkeyType::P256
+            | EvpPkeyType::P384
+            | EvpPkeyType::P521
+            | EvpPkeyType::BrainpoolP256r1
+            | EvpPkeyType::BrainpoolP384r1
+            | EvpPkeyType::BrainpoolP512r1 => PkeyData::Ecc(EccData {
+                pubkey: match params
+                    .get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY))
+                {
+                    Ok(p) => Some(p.to_vec()),
+                    Err(e) => match e.kind() {
+                        ErrorKind::NullPtr => None,
+                        _ => return Err(e),
                     },
-                    prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY))
-                    {
-                        Ok(p) => Some(OsslSecret::from_vec(p)),
-                        Err(e) => match e.kind() {
-                            ErrorKind::NullPtr => None,
-                            _ => return Err(e),
-                        },
+                },
+                prikey: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
+                    Ok(p) => Some(OsslSecret::from_vec(p)),
+                    Err(e) => match e.kind() {
+                        ErrorKind::NullPtr => None,
+                        _ => return Err(e),
                     },
-                })
-            }
+                },
+            }),
             EvpPkeyType::Ed25519
             | EvpPkeyType::Ed448
             | EvpPkeyType::X25519
@@ -902,6 +935,9 @@ impl EvpPkey {
             EvpPkeyType::P256
             | EvpPkeyType::P384
             | EvpPkeyType::P521
+            | EvpPkeyType::BrainpoolP256r1
+            | EvpPkeyType::BrainpoolP384r1
+            | EvpPkeyType::BrainpoolP512r1
             | EvpPkeyType::Ed25519
             | EvpPkeyType::Ed448
             | EvpPkeyType::X25519
