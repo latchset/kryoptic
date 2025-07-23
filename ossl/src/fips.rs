@@ -7,11 +7,12 @@
 //! it through libcrypto.
 
 use std::cell::Cell;
-use std::ffi::CStr;
+use std::env;
 use std::ffi::{c_char, c_int, c_uchar, c_void};
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::slice;
 use std::sync::LazyLock;
 
@@ -108,10 +109,23 @@ unsafe extern "C" fn fips_get_nonce(
     return out;
 }
 
-static FIPS_MODULE_FILE_NAME: LazyLock<&CStr> = LazyLock::new(|| {
-    if cfg!(feature = "dummy-integrity") {
-        c"./dummy.txt"
-    } else {
+#[cfg(feature = "dummy-integrity")]
+static FIPS_MODULE_MAC: &CStr = c"2B:50:2F:5B:7C:78:13:E5:32:F2:EA:70:1F:D7:E1:96:A6:18:FB:00:D3:80:51:EA:D0:7F:A8:3C:11:9C:59:32";
+
+#[cfg(feature = "dummy-integrity")]
+static FIPS_DUMMY_CONTENT: &[u8; 59] =
+    b"Dummy content for self-test integrity check with cargo test";
+
+static FIPS_MODULE_FILE_NAME: LazyLock<CString> = LazyLock::new(|| {
+    #[cfg(feature = "dummy-integrity")]
+    {
+        let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+        let dummy_file = out_path.join("dummy.txt");
+        std::fs::write(&dummy_file, FIPS_DUMMY_CONTENT).unwrap();
+        CString::new(dummy_file.to_string_lossy().as_bytes()).unwrap()
+    }
+    #[cfg(not(feature = "dummy-integrity"))]
+    {
         unsafe {
             let mut dlinfo = libc::Dl_info {
                 dli_fname: std::ptr::null(),
@@ -125,16 +139,13 @@ static FIPS_MODULE_FILE_NAME: LazyLock<&CStr> = LazyLock::new(|| {
             );
             if res == 0 {
                 /* uh oh! */
-                CStr::from_bytes_with_nul(&[0u8; 1]).unwrap()
+                CStr::from_bytes_with_nul(&[0u8; 1]).unwrap().to_owned()
             } else {
-                CStr::from_ptr(dlinfo.dli_fname)
+                CStr::from_ptr(dlinfo.dli_fname).to_owned()
             }
         }
     }
 });
-
-#[cfg(feature = "dummy-integrity")]
-static FIPS_MODULE_MAC: &CStr = c"C5:91:22:79:AF:0D:28:F7:DD:6B:BF:03:6B:01:D0:E5:50:81:C5:93:18:8C:7C:77:A3:97:98:CE:56:1B:67:80";
 
 /* Lets always run KATS for now:
  * static FIPS_INSTALL_MAC: &str = "41:9C:38:C2:8F:59:09:43:2C:AA:2F:58:36:2D:D9:04:F9:6C:56:8B:09:E0:18:3A:2E:D6:CC:69:05:04:E1:11\0";
@@ -168,7 +179,7 @@ unsafe extern "C" fn fips_get_params(
     set_config_string!(
         params,
         cstr!(OSSL_PROV_PARAM_CORE_MODULE_FILENAME),
-        *FIPS_MODULE_FILE_NAME
+        FIPS_MODULE_FILE_NAME
     );
 
     #[cfg(feature = "dummy-integrity")]
