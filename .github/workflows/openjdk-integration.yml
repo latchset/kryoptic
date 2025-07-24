@@ -52,7 +52,7 @@ jobs:
           path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
           key: ${{ steps.ossl-setup.outputs.cacheid }}
 
-      - name: Cache Rust dependencies
+      - name: Restore Rust dependencies
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -78,10 +78,28 @@ jobs:
 
       - name: Clone and check out OpenJDK test cases
         run: |
-          git clone --depth 1 \
+          # Clone depth 10 for "git describe".
+          git clone --depth 10 \
             --branch \
-            kryoptic-jdk-${{ steps.get-openjdk-version.outputs.version }} \
+            kryoptic-jdk-${{ env.openjdk_feature }} \
             https://github.com/fitzsim/jdk${{ env.openjdk_feature }}u-dev
+
+      - name: Compare container OpenJDK and test versions
+        run: |
+          CONTAINER_VERSION="${{ steps.get-openjdk-version.outputs.version }}"
+          cd jdk${{ env.openjdk_feature }}u-dev
+          OPENJDK_SOURCE_VERSION=$(git tag --contains $(git describe --abbrev=0) \
+            | head --lines 1 | sed 's/^jdk-//')
+          echo OpenJDK test cases are based on "${OPENJDK_SOURCE_VERSION}"
+          cd ..
+          if test "${CONTAINER_VERSION}" != "${OPENJDK_SOURCE_VERSION}"
+          then
+              echo Warning: container/tests version mismatch:
+              echo "container: ${CONTAINER_VERSION}"
+              echo "source:    ${OPENJDK_SOURCE_VERSION}"
+              BRANCH=kryoptic-jdk-${{ env.openjdk_feature }}
+              echo Please rebase "${BRANCH}" branch on jdk-${CONTAINER_VERSION}
+          fi
 
       # Get pkcs11-provider for kryoptic.nss-init.sh used by jtreg-kryoptic.sh.
       - name: Get pkcs11-provider
