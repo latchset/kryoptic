@@ -1,11 +1,10 @@
 ---
 name: OpenJDK Integration Tests
 
+# Run OpenJDK tests listed in testdata/openjdk/openjdk-jtreg-tests.txt.
+
 env:
   OPENSSL_BRANCH: kryoptic_ossl35
-  # List of OpenJDK tests to run, under openjdk/test/jdk/sun/security/pkcs11/.
-  openjdk_tests: |
-    Cipher/EncryptionPadding.java
   jtreg_version: 7.5.2+1
   openjdk_feature: 21
 
@@ -78,20 +77,23 @@ jobs:
 
       - name: Clone and check out OpenJDK test cases
         run: |
+          mkdir -p testdata/openjdk/deps
+          cd testdata/openjdk/deps
           # Clone depth 10 for "git describe".
           git clone --depth 10 \
             --branch \
             kryoptic-jdk-${{ env.openjdk_feature }} \
             https://github.com/fitzsim/jdk${{ env.openjdk_feature }}u-dev
+          cd ../../..
 
       - name: Compare container OpenJDK and test versions
         run: |
           CONTAINER_VERSION="${{ steps.get-openjdk-version.outputs.version }}"
-          cd jdk${{ env.openjdk_feature }}u-dev
+          cd testdata/openjdk/deps/jdk${{ env.openjdk_feature }}u-dev
           OPENJDK_SOURCE_VERSION=$(git tag --contains $(git describe --abbrev=0) \
             | head --lines 1 | sed 's/^jdk-//')
           echo OpenJDK test cases are based on "${OPENJDK_SOURCE_VERSION}"
-          cd ..
+          cd ../../../..
           if test "${CONTAINER_VERSION}" != "${OPENJDK_SOURCE_VERSION}"
           then
               echo Warning: container/tests version mismatch:
@@ -104,7 +106,11 @@ jobs:
       # Get pkcs11-provider for kryoptic.nss-init.sh used by jtreg-kryoptic.sh.
       - name: Get pkcs11-provider
         id: get-pkcs11-provider
-        run: git clone https://github.com/latchset/pkcs11-provider.git
+        run: |
+          mkdir -p testdata/openjdk/deps
+          cd testdata/openjdk/deps
+          git clone https://github.com/latchset/pkcs11-provider.git
+          cd ../../..
 
       # JTReg archive.
       - name: Restore JTReg binary from cache
@@ -131,11 +137,15 @@ jobs:
       # Extract JTReg.
       - name: Extract JTReg binary
         id: extract-jtreg-binary
-        run: unzip jtreg-*.zip && chmod +x jtreg/bin/jtreg
+        run: |
+          mkdir -p testdata/openjdk/deps
+          cd testdata/openjdk/deps
+          unzip ../../../jtreg-${{ env.jtreg_version }}.zip
+          chmod +x jtreg/bin/jtreg
+          cd ../../..
 
       # Run test suite.
       - name: Run OpenJDK JTReg test cases
         id: run-openjdk-jtreg-test-cases
         run: |
-          bash jdk${{ env.openjdk_feature }}u-dev/bin/jtreg-kryoptic.sh \
-            $openjdk_tests
+          testdata/openjdk/jtreg-kryoptic.sh check-jtreg
