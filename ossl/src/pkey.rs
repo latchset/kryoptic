@@ -600,7 +600,7 @@ impl EvpPkey {
             trace_ossl!("EVP_PKEY_todata()");
             return Err(Error::new(ErrorKind::OsslError));
         }
-        OsslParam::from_ptr(params)
+        OsslParam::from_zeroizable_ptr(params)
     }
 
     /// Allow to get parameters from a key.
