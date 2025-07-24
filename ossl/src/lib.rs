@@ -654,6 +654,44 @@ impl<'a> OsslParamBuilder<'a> {
         Ok(())
     }
 
+    /// Copies an existing `OSSL_PARAM` array into the builder.
+    ///
+    /// This method performs a deep copy of each parameter, including its key
+    /// and data. This is useful for persisting parameters that may have been
+    /// returned by OpenSSL and point to temporary internal buffers.
+    pub fn copy_params(&mut self, params: &[OSSL_PARAM]) -> Result<(), Error> {
+        for p in params {
+            if p.data.is_null() {
+                return Err(Error::new(ErrorKind::NullPtr));
+            }
+            let k = unsafe { CStr::from_ptr(p.key as *const c_char) };
+            let key = k.to_bytes_with_nul().to_vec();
+            let data_size = if p.data_type == OSSL_PARAM_UTF8_STRING {
+                /* For OSSL_PARAM_UTF8_STRING, OpenSSL gives the strlen() as
+                 * size instead of the actual allocated size which include the
+                 * terminating zero byte */
+                p.data_size + 1
+            } else {
+                p.data_size
+            };
+            let val = unsafe {
+                std::slice::from_raw_parts(p.data as *const u8, data_size)
+            }
+            .to_vec();
+            let param = OSSL_PARAM {
+                key: key.as_ptr() as *const c_char,
+                data_type: p.data_type,
+                data: val.as_ptr() as *mut c_void,
+                data_size: p.data_size,
+                return_size: 0,
+            };
+            self.v.push(key);
+            self.v.push(val);
+            self.p.to_mut().push(param);
+        }
+        Ok(())
+    }
+
     /// Finalizes the `OSSL_PARAM` array by adding the end marker.
     pub fn finalize(mut self) -> OsslParam<'a> {
         self.p.to_mut().push(unsafe { OSSL_PARAM_construct_end() });
@@ -679,7 +717,6 @@ impl<'a> OsslParam<'a> {
     /// Creates an `OsslParam` instance by borrowing an existing `OSSL_PARAM`
     /// array from OpenSSL. Takes ownership of the pointer and marks it to be
     /// freed on drop.
-    #[allow(dead_code)]
     pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>, Error> {
         if ptr.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));

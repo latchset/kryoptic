@@ -4,7 +4,7 @@
 //! This module provides a coherent abstraction for OpenSSL asymmetric Key
 //! management. It handles import/export and key generation
 
-use std::ffi::{c_int, c_uint, CStr};
+use std::ffi::{c_int, c_uint, c_void, CStr};
 
 use crate::bindings::*;
 use crate::{
@@ -408,7 +408,7 @@ fn params_to_mldsa_data(
                     // asked for key pair here so if it not available,
                     // retry exporting just public key part
                     // https://github.com/openssl/openssl/issues/27542
-                    let p2 = pkey.todata(EVP_PKEY_PUBLIC_KEY)?;
+                    let p2 = pkey.export_params(EVP_PKEY_PUBLIC_KEY)?;
                     match p2.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
                         Ok(p) => Some(p.to_vec()),
                         Err(e) => match e.kind() {
@@ -547,6 +547,64 @@ fn rsa_data_to_params(
     Ok(is_priv)
 }
 
+/// An `extern "C"` callback function for `EVP_PKEY_export`.
+///
+/// This function is passed to the OpenSSL `EVP_PKEY_export` function to handle
+/// the exported key material. It receives an array of `OSSL_PARAM` structures
+/// from OpenSSL and an argument pointer, which is a mutable pointer to an
+/// `OsslParamBuilder`.
+///
+/// Critically this function will zeroize allocated parameters after makig a
+/// full copy of them, before returning control to OpenSSL.
+unsafe extern "C" fn export_params_callback(
+    params: *const OSSL_PARAM,
+    arg: *mut c_void,
+) -> c_int {
+    if params.is_null() || arg.is_null() {
+        return 0;
+    }
+
+    /* get num of elements */
+    let mut nelem = 0;
+    let mut total_size = 0;
+    let mut counter = params;
+    unsafe {
+        while !(*counter).key.is_null() {
+            nelem += 1;
+            total_size += std::mem::size_of::<OSSL_PARAM>();
+            total_size += (*counter).data_size;
+            counter = counter.offset(1);
+        }
+    }
+    let pslice = unsafe { std::slice::from_raw_parts(params, nelem) };
+
+    let params_builder = &mut *(arg as *mut OsslParamBuilder);
+    let ret = params_builder.copy_params(&pslice);
+
+    /* Zeroize any allocated data wich may hold copies of secrets.
+     * This is not the most clean way to do it, because this depends
+     * on knowing how OpenSSL internally builds parameter slices, and if
+     * that ever changes we may be overwrting memory that was not a
+     * temporary copy */
+    let max_ptr = pslice.as_ptr().wrapping_add(total_size) as *const c_void;
+    let base_ptr = pslice.as_ptr() as *const c_void;
+    for p in pslice {
+        if p.data.is_null() {
+            continue;
+        }
+        let pdata = p.data as *const c_void;
+        if pdata > base_ptr && pdata < max_ptr {
+            unsafe {
+                OPENSSL_cleanse(p.data, p.data_size);
+            }
+        }
+    }
+    if ret.is_ok() {
+        return 1;
+    }
+    return 0;
+}
+
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
 /// private key. Manages the key's lifecycle.
 #[derive(Debug)]
@@ -591,16 +649,22 @@ impl EvpPkey {
     ///
     /// The `selection` argument specifies which components to export
     /// (e.g., public, private, parameters).
-    pub fn todata(&self, selection: u32) -> Result<OsslParam, Error> {
-        let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
+    fn export_params(&self, selection: u32) -> Result<OsslParam, Error> {
+        let mut params_builder = OsslParamBuilder::new();
+        params_builder.zeroize = true;
         let ret = unsafe {
-            EVP_PKEY_todata(self.ptr, c_int::try_from(selection)?, &mut params)
+            EVP_PKEY_export(
+                self.ptr,
+                c_int::try_from(selection)?,
+                Some(export_params_callback),
+                &mut params_builder as *mut OsslParamBuilder as *mut c_void,
+            )
         };
         if ret != 1 {
-            trace_ossl!("EVP_PKEY_todata()");
+            trace_ossl!("EVP_PKEY_export()");
             return Err(Error::new(ErrorKind::OsslError));
         }
-        OsslParam::from_ptr(params)
+        Ok(params_builder.finalize())
     }
 
     /// Allow to get parameters from a key.
@@ -822,7 +886,7 @@ impl EvpPkey {
 
     /// Export public point in encoded form and/or private key
     pub fn export(&self) -> Result<PkeyData, Error> {
-        let params = self.todata(EVP_PKEY_KEYPAIR)?;
+        let params = self.export_params(EVP_PKEY_KEYPAIR)?;
         let pkey_type = pkey_to_type(&self, &params)?;
         Ok(match pkey_type {
             EvpPkeyType::P256
