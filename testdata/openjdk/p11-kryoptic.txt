@@ -1,0 +1,34 @@
+name = Kryoptic
+slot = 42
+showInfo = true
+library = ${pkcs11test.nss.lib}
+nssArgs = "kryoptic_conf=${pkcs11test.nss.db}/kryoptic.conf"
+disabledMechanisms = {
+  CKM_DSA_SHA224
+  CKM_DSA_SHA256
+  CKM_DSA_SHA384
+  CKM_DSA_SHA512
+  CKM_DSA_SHA3_224
+  CKM_DSA_SHA3_256
+  CKM_DSA_SHA3_384
+  CKM_DSA_SHA3_512
+  CKM_ECDSA_SHA224
+  CKM_ECDSA_SHA256
+  CKM_ECDSA_SHA384
+  CKM_ECDSA_SHA512
+  CKM_ECDSA_SHA3_224
+  CKM_ECDSA_SHA3_256
+  CKM_ECDSA_SHA3_384
+  CKM_ECDSA_SHA3_512
+}
+attributes = compatibility
+attributes(*,CKO_SECRET_KEY,*) = {
+  CKA_EXTRACTABLE = true
+  CKA_SENSITIVE = false
+  CKA_ENCRYPT = true
+}
+attributes(*,CKO_PRIVATE_KEY,*) = {
+  CKA_EXTRACTABLE = true
+  CKA_SENSITIVE = false
+  CKA_SIGN = true
+}

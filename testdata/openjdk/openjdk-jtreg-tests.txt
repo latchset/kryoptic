@@ -1,0 +1,23 @@
+# Successful FIPS tests.
+test/jdk/sun/security/pkcs11/Cipher/KeyWrap/XMLEncKAT.java
+test/jdk/sun/security/pkcs11/Cipher/Test4512704.java
+test/jdk/sun/security/pkcs11/Cipher/TestCICOWithGCM.java
+test/jdk/sun/security/pkcs11/Cipher/TestCICOWithGCMAndAAD.java
+test/jdk/sun/security/pkcs11/Cipher/TestGCMKeyAndIvCheck.java
+test/jdk/sun/security/pkcs11/Cipher/TestKATForGCM.java
+test/jdk/sun/security/pkcs11/Cipher/TestPaddingOOB.java
+test/jdk/sun/security/pkcs11/KeyAgreement/UnsupportedDHKeys.java
+test/jdk/sun/security/pkcs11/KeyGenerator/HmacDefKeySizeTest.java
+test/jdk/sun/security/pkcs11/KeyGenerator/TestAES.java
+test/jdk/sun/security/pkcs11/MessageDigest/ByteBuffers.java
+test/jdk/sun/security/pkcs11/Provider/Absolute.java
+test/jdk/sun/security/pkcs11/Provider/CheckRegistration.java
+test/jdk/sun/security/pkcs11/Provider/ConfigShortPath.java
+test/jdk/sun/security/pkcs11/Provider/LoginISE.java
+test/jdk/sun/security/pkcs11/SampleTest.java
+test/jdk/sun/security/pkcs11/Signature/ByteBuffers.java
+test/jdk/sun/security/pkcs11/Signature/InitAgainPSS.java
+test/jdk/sun/security/pkcs11/ec/TestECDH.java
+test/jdk/sun/security/pkcs11/ec/TestECDH2.java
+test/jdk/sun/security/pkcs11/ec/TestECDSA2.java
+test/jdk/sun/security/pkcs11/ec/TestECGenSpec.java
