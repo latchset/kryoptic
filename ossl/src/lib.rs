@@ -357,6 +357,13 @@ pub struct OsslParam<'a>(OsslParamBuilder<'a>);
 impl Drop for OsslParamBuilder<'_> {
     fn drop(&mut self) {
         if self.zeroize {
+            if let Cow::Borrowed(params) = self.p {
+                for p in params {
+                    unsafe {
+                        OPENSSL_cleanse(void_ptr!(p.data), p.data_size);
+                    }
+                }
+            }
             while let Some(mut v) = self.v.pop() {
                 unsafe {
                     OPENSSL_cleanse(void_ptr!(v.as_mut_ptr()), v.len());
@@ -678,7 +685,6 @@ impl<'a> OsslParam<'a> {
     /// Creates an `OsslParam` instance by borrowing an existing `OSSL_PARAM`
     /// array from OpenSSL. Takes ownership of the pointer and marks it to be
     /// freed on drop.
-    #[allow(dead_code)]
     pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>, Error> {
         if ptr.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -702,6 +708,17 @@ impl<'a> OsslParam<'a> {
             freeptr: true,
             br: Vec::new(),
         }))
+    }
+
+    /// Creates an `OsslParam` from an OpenSSL provided pointer that contains
+    /// allocated data that can be safely zeroized before freeing the pointer.
+    /// Use with care as it will overwrite any data pointed by the params.
+    pub fn from_zeroizable_ptr(
+        ptr: *mut OSSL_PARAM,
+    ) -> Result<OsslParam<'static>, Error> {
+        let mut params = Self::from_ptr(ptr)?;
+        params.0.zeroize = true;
+        Ok(params)
     }
 
     /// Returns a const pointer to the finalized `OSSL_PARAM` array.
