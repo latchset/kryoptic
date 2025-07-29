@@ -55,7 +55,8 @@ jobs:
                 'crate(num-integer/default)' 'crate(num-traits/default)' \
                 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
                 'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
-                'crate(serial_test/default)' 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' \
+                'crate(serial_test/default)' \
+                'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' 'crate(toml/serde)' \
                 'crate(uuid/default)' 'crate(uuid/v4)' 'crate(cryptoki/default)' 'crate(vsprintf/default)'
           fi
 
