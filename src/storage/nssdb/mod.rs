@@ -951,6 +951,12 @@ impl Storage for NSSStorage {
             for a in NSS_SKIP_ATTRIBUTES {
                 let _ = attrs.remove_ulong(a);
             }
+            /* remove unknown attributes from query */
+            for a in attributes {
+                if !is_db_attribute(a.type_) {
+                    let _ = attrs.remove_ulong(a.type_);
+                }
+            }
         }
         let mut obj =
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
