@@ -264,18 +264,21 @@ impl BigNum {
     ///
     /// Returns a wrapped `BigNum` or an error if the import fails.
     pub fn from_bigendian_slice(v: &[u8]) -> Result<BigNum, Error> {
-        let bn = unsafe {
+        let mut bn = BigNum::new()?;
+
+        let ret = unsafe {
             BN_bin2bn(
                 v.as_ptr() as *mut u8,
                 c_int::try_from(v.len())?,
-                std::ptr::null_mut(),
+                bn.as_mut_ptr(),
             )
         };
-        if bn.is_null() {
+        if ret.is_null() {
             trace_ossl!("BN_bin2bn()");
             return Err(Error::new(ErrorKind::NullPtr));
         }
-        Ok(BigNum { bn })
+
+        Ok(bn)
     }
 
     /// Calculates the minimum number of bytes needed to represent the `BIGNUM`.
