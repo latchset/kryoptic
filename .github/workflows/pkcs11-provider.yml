@@ -11,7 +11,7 @@ jobs:
   build:
     name: Integration test with pkcs11-provider
     runs-on: ubuntu-22.04
-    container: fedora:latest
+    container: fedora:rawhide
     steps:
       - name: Get Date for DNF cache entry
         id: get-date
@@ -53,8 +53,8 @@ jobs:
 
       - name: Build & test
         run: |
-          cargo build --no-default-features --features dynamic,standard,nssdb
-          cargo test --no-default-features --features dynamic,standard,nssdb | tee testout.log 2>&1
+          cargo build --no-default-features --features dynamic,standard,nssdb,pqc
+          cargo test --no-default-features --features dynamic,standard,nssdb,pqc | tee testout.log 2>&1
           grep -q "0 failed" testout.log
 
       - name: Get pkcs11-provider
