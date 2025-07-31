@@ -224,6 +224,14 @@ impl OsslContext {
     }
 }
 
+impl Drop for OsslContext {
+    fn drop(&mut self) {
+        unsafe {
+            OSSL_LIB_CTX_free(self.context);
+        }
+    }
+}
+
 unsafe impl Send for OsslContext {}
 unsafe impl Sync for OsslContext {}
 
