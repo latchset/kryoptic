@@ -76,7 +76,7 @@ impl Default for KeysWithCaching {
 
 impl Drop for KeysWithCaching {
     fn drop(&mut self) {
-        if let Some(ref mut key) = &mut self.enckey {
+        if let Some(key) = &mut self.enckey {
             zeromem(key.as_mut_slice());
         }
     }
@@ -92,7 +92,7 @@ impl KeysWithCaching {
     /// Gets a slice reference to the raw master encryption key bytes.
     fn get_key(&self) -> Result<&[u8]> {
         match &self.enckey {
-            Some(ref key) => Ok(key.as_slice()),
+            Some(key) => Ok(key.as_slice()),
             None => Err(CKR_USER_NOT_LOGGED_IN)?,
         }
     }
@@ -101,14 +101,14 @@ impl KeysWithCaching {
     /// encryption key.
     pub fn check_key(&self, check: &[u8]) -> bool {
         match &self.enckey {
-            Some(ref key) => key.as_slice() == check,
+            Some(key) => key.as_slice() == check,
             None => false,
         }
     }
 
     /// Sets the master encryption key, zeroizing any previous key.
     pub fn set_key(&mut self, key: Vec<u8>) {
-        if let Some(ref mut oldkey) = &mut self.enckey {
+        if let Some(oldkey) = &mut self.enckey {
             zeromem(oldkey.as_mut_slice());
         }
         self.enckey = Some(key);
@@ -117,7 +117,7 @@ impl KeysWithCaching {
     /// Unsets the master encryption key (zeroizing it) and clears the derived
     /// key cache.
     pub fn unset_key(&mut self) {
-        if let Some(ref mut key) = &mut self.enckey {
+        if let Some(key) = &mut self.enckey {
             zeromem(key.as_mut_slice());
             self.enckey = None;
         }
@@ -405,12 +405,12 @@ pub fn decrypt_data(
     };
 
     let pbes2 = match &info.algorithm.params {
-        BrokenAlgorithmParameters::Pbes2(ref params) => params,
+        BrokenAlgorithmParameters::Pbes2(params) => params,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
 
     let lockedkey = match &pbes2.key_derivation_func.params {
-        AlgorithmParameters::Pbkdf2(ref params) => {
+        AlgorithmParameters::Pbkdf2(params) => {
             derive_key_internal(facilities, keys, params, KeyOp::Encryption)?
         }
         _ => return Err(CKR_MECHANISM_INVALID)?,
@@ -422,10 +422,10 @@ pub fn decrypt_data(
     };
 
     let result = match &pbes2.encryption_scheme.params {
-        BrokenAlgorithmParameters::Aes128Cbc(ref iv) => {
+        BrokenAlgorithmParameters::Aes128Cbc(iv) => {
             aes_cbc_decrypt(facilities, key, iv, info.enc_or_sig_data)
         }
-        BrokenAlgorithmParameters::Aes256Cbc(ref iv) => {
+        BrokenAlgorithmParameters::Aes256Cbc(iv) => {
             aes_cbc_decrypt(facilities, key, iv, info.enc_or_sig_data)
         }
         _ => Err(CKR_MECHANISM_INVALID)?,
@@ -554,12 +554,12 @@ pub fn check_signature(
     };
 
     let pbmac1 = match &info.algorithm.params {
-        BrokenAlgorithmParameters::Pbmac1(ref params) => params,
+        BrokenAlgorithmParameters::Pbmac1(params) => params,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
 
     let lockedkey = match &pbmac1.key_derivation_func.params {
-        AlgorithmParameters::Pbkdf2(ref params) => {
+        AlgorithmParameters::Pbkdf2(params) => {
             derive_key_internal(facilities, keys, params, KeyOp::Signature)?
         }
         _ => return Err(CKR_MECHANISM_INVALID)?,
