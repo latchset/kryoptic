@@ -850,6 +850,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
             match attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
                 Some(attr) => {
+                    if attr.is(OAFlags::NeverSettable) {
+                        return Err(CKR_ACTION_PROHIBITED)?;
+                    }
                     if attr.is(OAFlags::Unchangeable) {
                         if attr.attribute.get_attrtype() == AttrType::BoolType {
                             let val = ck_attr.to_bool()?;
