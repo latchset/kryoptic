@@ -340,7 +340,7 @@ struct MemBio<'a> {
 }
 
 impl MemBio<'_> {
-    fn new(v: &mut [u8]) -> MemBio {
+    fn new(v: &mut [u8]) -> MemBio<'_> {
         MemBio { mem: v, cursor: 0 }
     }
 

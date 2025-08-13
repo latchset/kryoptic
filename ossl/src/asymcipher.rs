@@ -28,7 +28,7 @@ pub struct RsaOaepParams {
 pub fn rsa_enc_params(
     alg: EncAlg,
     oaep_params: Option<&RsaOaepParams>,
-) -> Result<OsslParam, Error> {
+) -> Result<OsslParam<'_>, Error> {
     let mut params_builder = crate::OsslParamBuilder::new();
 
     match alg {

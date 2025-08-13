@@ -128,7 +128,7 @@ impl KeysWithCaching {
     ///
     /// Returns `None` if the master key is not set (user not authenticated) or
     /// if the lock cannot be acquired.
-    fn get_cached_key(&self, id: &[u8; SHA256_LEN]) -> Option<LockedKey> {
+    fn get_cached_key(&self, id: &[u8; SHA256_LEN]) -> Option<LockedKey<'_>> {
         if self.enckey.is_none() {
             /* access to the cache is available only if enckey is set.
              * When unset it means the user logged off and no

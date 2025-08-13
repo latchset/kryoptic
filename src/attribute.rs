@@ -462,6 +462,7 @@ impl Attribute {
     }
 
     /// Constructs an attribute passing in the value as a slice
+    #[cfg(feature = "nssdb")]
     pub fn from_attr_slice(
         id: CK_ULONG,
         at: AttrType,

@@ -207,7 +207,7 @@ impl PrivateKeyInfo<'_> {
     }
 
     /// Returns the key type (as an OID)
-    pub fn get_algorithm(&self) -> &pkcs::AlgorithmIdentifier {
+    pub fn get_algorithm(&self) -> &pkcs::AlgorithmIdentifier<'_> {
         &self.algorithm
     }
 

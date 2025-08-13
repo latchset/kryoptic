@@ -300,7 +300,7 @@ pub struct RsaPssParams {
 pub fn rsa_sig_params(
     alg: SigAlg,
     pss_params: &Option<RsaPssParams>,
-) -> Result<Option<OsslParam>, Error> {
+) -> Result<Option<OsslParam<'_>>, Error> {
     match alg {
         SigAlg::RsaNoPad => {
             let mut params_builder = OsslParamBuilder::new();
