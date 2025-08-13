@@ -204,7 +204,22 @@ fn test_set_attr_rsa() {
         template.as_ptr() as *mut _,
         1,
     );
-    assert_eq!(ret, CKR_ATTRIBUTE_READ_ONLY);
+    assert_eq!(ret, CKR_ACTION_PROHIBITED);
+
+    let flag: CK_ULONG = 0x03;
+    let template = make_ptrs_template(&[(
+        CKA_OBJECT_VALIDATION_FLAGS,
+        void_ptr!(std::ptr::addr_of!(flag)),
+        std::mem::size_of::<CK_ULONG>(),
+    )]);
+
+    let ret = fn_set_attribute_value(
+        session2,
+        handle,
+        template.as_ptr() as *mut _,
+        1,
+    );
+    assert_eq!(ret, CKR_ACTION_PROHIBITED);
 
     let ret = fn_close_session(session2);
     assert_eq!(ret, CKR_OK);
