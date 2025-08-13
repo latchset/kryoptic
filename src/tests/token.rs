@@ -10,7 +10,7 @@ use crate::tests::*;
 use serial_test::{parallel, serial};
 
 #[cfg(feature = "sqlitedb")]
-fn test_token_setup(name: &str) -> TestToken {
+fn test_token_setup(name: &str) -> TestToken<'_> {
     let mut testtokn = TestToken::new(String::from(name));
     testtokn.setup_db(None);
     testtokn
