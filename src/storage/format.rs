@@ -11,6 +11,8 @@ use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
+#[cfg(feature = "fips")]
+use crate::fips::indicators::add_missing_validation_flag;
 use crate::object::Object;
 use crate::pkcs11::*;
 use crate::storage::aci::{StorageACI, StorageAuthInfo};
@@ -297,6 +299,13 @@ impl Storage for StdStorageFormat {
              * some attributes or not */
             attrs.add_missing_ulong(CKA_SENSITIVE, &dnm);
             attrs.add_missing_ulong(CKA_EXTRACTABLE, &dnm);
+            #[cfg(feature = "fips")]
+            {
+                /* We need these to be able to derive object validation flag */
+                attrs.add_missing_ulong(CKA_EC_PARAMS, &dnm);
+                attrs.add_missing_ulong(CKA_VALUE_LEN, &dnm);
+                attrs.add_missing_ulong(CKA_MODULUS, &dnm);
+            }
         }
 
         let mut obj = self.store.fetch_by_uid(&uid, attrs.as_slice())?;
@@ -314,6 +323,9 @@ impl Storage for StdStorageFormat {
                 obj.set_attr(Attribute::from_bytes(*typ, plain))?;
             }
         }
+
+        #[cfg(feature = "fips")]
+        add_missing_validation_flag(&mut obj);
 
         obj.set_handle(handle);
         Ok(obj)
