@@ -474,6 +474,8 @@ fn test_tls_mechanisms() {
             (CKA_DERIVE, true),
         ],
     ));
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     let params = CK_TLS_MAC_PARAMS {
         prfHashMechanism: CKM_SHA256,
@@ -566,6 +568,7 @@ fn test_tls_mechanisms() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     /* Try again with non-FIPS-approved hash */
     let params = CK_TLS12_KEY_MAT_PARAMS {
@@ -588,13 +591,14 @@ fn test_tls_mechanisms() {
         pParameter: void_ptr!(&params),
         ulParameterLen: paramslen,
     };
+    let mut dk_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
         &derive_mech as *const _ as CK_MECHANISM_PTR,
         handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
-        std::ptr::null_mut(),
+        &mut dk_handle,
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
@@ -639,6 +643,7 @@ fn test_tls_mechanisms() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     /* The End */
     testtokn.finalize();
@@ -666,6 +671,8 @@ fn test_tls_ems_mechanisms() {
             (CKA_DERIVE, true),
         ],
     ));
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     /* test CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE */
     let hash = hex::decode("9bbe436ba940f017b17652849a71db35").unwrap();
@@ -704,6 +711,7 @@ fn test_tls_ems_mechanisms() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, dk_handle, 1), true);
 
     /* Try again with non-FIPS-approved hash */
     let params = CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS {
@@ -728,6 +736,7 @@ fn test_tls_ems_mechanisms() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     /* ensure Version fields were filled */
     //assert_not_eq!(version.major.as_slice(), 0);
@@ -756,6 +765,7 @@ fn test_tls_ems_mechanisms() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     /* ensure Version fields were filled */
     //assert_not_eq!(version.major.as_slice(), 0);

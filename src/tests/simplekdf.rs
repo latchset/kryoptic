@@ -67,6 +67,7 @@ fn test_concatenate_kdf() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     let exp_value = hex::decode("0123456789abcdef").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -96,6 +97,7 @@ fn test_concatenate_kdf() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     let exp_value = hex::decode("0123456789abcdef").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -125,6 +127,7 @@ fn test_concatenate_kdf() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     let exp_value = hex::decode("89abcdef01234567").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -154,6 +157,7 @@ fn test_concatenate_kdf() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     let exp_value = hex::decode("88888888").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -229,6 +233,7 @@ fn test_concatenate_kdf_fips() {
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, dk_handle, 1), true);
 
     // Concatenate base and data
     let data = hex::decode("0e0f").unwrap();
@@ -254,6 +259,7 @@ fn test_concatenate_kdf_fips() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, dk_handle, 1), true);
 
     let exp_value = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -283,6 +289,7 @@ fn test_concatenate_kdf_fips() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, dk_handle, 1), true);
 
     let exp_value = hex::decode("0e0f000102030405060708090a0b0c0d").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -312,6 +319,7 @@ fn test_concatenate_kdf_fips() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, dk_handle, 1), true);
 
     let exp_value = hex::decode("00112233445566778899aabbccdd").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
@@ -361,6 +369,7 @@ fn test_concatenate_kdf_fips() {
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
     assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     testtokn.finalize();
 }

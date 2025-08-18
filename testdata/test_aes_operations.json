@@ -11,6 +11,7 @@
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
         "CKA_VALUE": "LBRBN1HDHicwVwujNhx4aw==",
+        "CKA_VALUE_LEN": 16,
         "CKA_TOKEN": true
     }
 }, {
@@ -26,6 +27,7 @@
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
         "CKA_VALUE": "qB/WylZoPQ9URWWd3k2ZXcZfS84giWMFPijX8t9RfOQ=",
+        "CKA_VALUE_LEN": 32,
         "CKA_TOKEN": true
     }
 }, {
@@ -41,6 +43,7 @@
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
         "CKA_VALUE": "Zg63bz2LbsVOAbijYmMSSw==",
+        "CKA_VALUE_LEN": 16,
         "CKA_TOKEN": true
     }
 }, {
@@ -56,6 +59,7 @@
         "CKA_PRIVATE": true,
         "CKA_SENSITIVE": true,
         "CKA_VALUE": "Ar85HujssVm5WWF7CWUnm/WbYKeG0+D+",
+        "CKA_VALUE_LEN": 24,
         "CKA_TOKEN": true
     }
 }]}

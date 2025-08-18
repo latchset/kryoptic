@@ -392,6 +392,8 @@ fn test_rsa_operations() {
     ));
 
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, hpri, 1), true);
+    assert_eq!(check_object_validation(session, hpub, 1), true);
 
     let label = "Public Key test 1";
     let mut template = make_ptrs_template(&[(
@@ -583,6 +585,8 @@ fn test_rsa_mechs() {
     ));
 
     assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, pubkey, 1), true);
+    assert_eq!(check_object_validation(session, prikey, 1), true);
 
     /* Classic PKCS 1.5 */
     for mech in [

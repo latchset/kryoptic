@@ -50,6 +50,8 @@ fn test_aes_operations() {
             (CKA_UNWRAP, true),
         ],
     ));
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     {
         /* AES ECB */
@@ -690,6 +692,7 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
+        assert_eq!(check_object_validation(session, key_handle, 1), true);
 
         let ciphertext = hex::decode("4154c0be71072945d8156f5f046d198d")
             .expect("Failed to decode ciphertext");
@@ -718,6 +721,8 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
+        assert_eq!(check_object_validation(session, key_handle, 1), true);
+
         let iv = hex::decode("1dbbeb2f19abb448af849796244a19d7")
             .expect("Failed to decode IV");
         let plaintext = hex::decode(
@@ -759,6 +764,8 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
+        assert_eq!(check_object_validation(session, key_handle, 1), true);
+
         let (iv, aad, tag, ct, plaintext) = get_gcm_test_data();
 
         let param = CK_GCM_PARAMS {
@@ -795,6 +802,8 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
+        assert_eq!(check_object_validation(session, key_handle, 1), true);
+
         let iv = hex::decode("0007bdfd5cbd60278dcc091200000001")
             .expect("failed to decode iv");
         let plaintext = hex::decode(
@@ -911,6 +920,7 @@ fn test_aes_operations() {
             &mut wp_handle2,
         );
         assert_eq!(ret, CKR_OK);
+        assert_eq!(check_object_validation(session, wp_handle2, 1), true);
 
         let mut value = [0u8; AES_BLOCK_SIZE];
         let mut extract_template = make_ptrs_template(&[(
@@ -1033,6 +1043,7 @@ fn test_aes_operations() {
                 Ok(k) => k,
                 Err(e) => panic!("{}", e),
             };
+        assert_eq!(check_object_validation(session, key_handle, 1), true);
         let (iv, aad, tag, ct, plaintext) = get_gcm_test_data();
 
         let ret = fn_message_decrypt_init(session, &mut mechanism, key_handle);
@@ -1272,6 +1283,7 @@ fn test_aes_macs() {
         &[],
         &[(CKA_SIGN, true), (CKA_VERIFY, true),],
     ));
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     #[cfg(not(feature = "fips"))]
     {
