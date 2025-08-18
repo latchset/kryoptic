@@ -26,7 +26,12 @@ jobs:
           dnf --assumeyes --disable-repo=fedora-cisco-openh264 \
             install git cargo clang-devel openssl-devel zlib-devel sed \
             sqlite-devel openssl opensc unzip wget \
-            java-${{ env.openjdk_feature }}-openjdk-devel
+            java-${{ env.openjdk_feature }}-openjdk-devel \
+            'perl(FindBin)' 'perl(lib)' 'perl(File::Compare)' \
+            'perl(File::Copy)' 'perl(bigint)' 'perl(Time::HiRes)' \
+            'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
+            'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
+            'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)'
 
       # Kryoptic build steps; try to keep in sync with relevant build.yml steps.
       - name: Checkout Repository
