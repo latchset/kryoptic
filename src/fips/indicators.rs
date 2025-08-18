@@ -1315,6 +1315,17 @@ pub fn is_key_approved(key: &Object, op: CK_FLAGS) -> bool {
     check_key(key, op, None, None)
 }
 
+/// Adds validation flag to the object, if it is not yet present
+/// and if the object passes validation rules.
+pub fn add_missing_validation_flag(key: &mut Object) {
+    if let Ok(_) = key.get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS) {
+        return;
+    }
+    if is_key_approved(key, CK_UNAVAILABLE_INFORMATION) {
+        add_fips_flag(key);
+    }
+}
+
 /// Helper to check if an operation is approved
 ///
 /// Applies key checks as well as mechanism checks according to the
