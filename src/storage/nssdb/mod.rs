@@ -1009,17 +1009,6 @@ impl Storage for NSSStorage {
             match attributes.iter().position(|r| r.type_ == a) {
                 Some(_) => {
                     factory.set_attribute_default(a, &mut obj)?;
-                    #[cfg(feature = "fips")]
-                    if a == CKA_OBJECT_VALIDATION_FLAGS {
-                        /* All keys stored in the database are considered
-                         * FIPS approved, on the assumption you can't import
-                         * or create non-approved keys in the first place
-                         */
-                        obj.set_attr(Attribute::from_ulong(
-                            CKA_OBJECT_VALIDATION_FLAGS,
-                            crate::fips::indicators::KRF_FIPS,
-                        ))?;
-                    }
                 }
                 None => (),
             }
