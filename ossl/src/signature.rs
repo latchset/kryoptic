@@ -20,7 +20,7 @@ use crate::digest::EvpMdCtx;
 #[cfg(feature = "fips")]
 use crate::fips::ProviderSignatureCtx;
 
-/// Wrapper around OpenSSL's `EVP_SIGNATURE`, used for ML-DSA operations.
+/// Wrapper around OpenSSL's `EVP_SIGNATURE`, used for ML-DSA and SLH-DSA operations.
 #[cfg(ossl_v350)]
 struct EvpSignature {
     ptr: *mut EVP_SIGNATURE,
@@ -103,6 +103,19 @@ pub enum SigAlg {
     RsaPssSha3_256,
     RsaPssSha3_384,
     RsaPssSha3_512,
+    /* SLH-DSA */
+    SlhdsaSha2_128s,
+    SlhdsaShake128s,
+    SlhdsaSha2_128f,
+    SlhdsaShake128f,
+    SlhdsaSha2_192s,
+    SlhdsaShake192s,
+    SlhdsaSha2_192f,
+    SlhdsaShake192f,
+    SlhdsaSha2_256s,
+    SlhdsaShake256s,
+    SlhdsaSha2_256f,
+    SlhdsaShake256f,
 }
 
 /// Helper that indicates if a signature algorithm should use oneshot apis
@@ -121,6 +134,18 @@ fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
             false
         }
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => false,
+        SigAlg::SlhdsaSha2_128s
+        | SigAlg::SlhdsaShake128s
+        | SigAlg::SlhdsaSha2_128f
+        | SigAlg::SlhdsaShake128f
+        | SigAlg::SlhdsaSha2_192s
+        | SigAlg::SlhdsaShake192s
+        | SigAlg::SlhdsaSha2_192f
+        | SigAlg::SlhdsaShake192f
+        | SigAlg::SlhdsaSha2_256s
+        | SigAlg::SlhdsaShake256s
+        | SigAlg::SlhdsaSha2_256f
+        | SigAlg::SlhdsaShake256f => false,
         _ => true,
     }
     #[cfg(ossl_v350)]
@@ -152,6 +177,18 @@ fn sigalg_supports_updates(alg: SigAlg) -> Option<bool> {
         | SigAlg::RsaPss
         | SigAlg::RsaNoPad => Some(false),
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => None,
+        SigAlg::SlhdsaSha2_128s
+        | SigAlg::SlhdsaShake128s
+        | SigAlg::SlhdsaSha2_128f
+        | SigAlg::SlhdsaShake128f
+        | SigAlg::SlhdsaSha2_192s
+        | SigAlg::SlhdsaShake192s
+        | SigAlg::SlhdsaSha2_192f
+        | SigAlg::SlhdsaShake192f
+        | SigAlg::SlhdsaSha2_256s
+        | SigAlg::SlhdsaShake256s
+        | SigAlg::SlhdsaSha2_256f
+        | SigAlg::SlhdsaShake256f => Some(false),
         _ => Some(true),
     }
 }
@@ -184,6 +221,18 @@ static RSASHA3_224_NAME: &CStr = c"RSA-SHA3-224";
 static RSASHA3_256_NAME: &CStr = c"RSA-SHA3-256";
 static RSASHA3_384_NAME: &CStr = c"RSA-SHA3-384";
 static RSASHA3_512_NAME: &CStr = c"RSA-SHA3-512";
+static SLHDSASHA2_128F_NAME: &CStr = c"SLH-DSA-SHA2-128f";
+static SLHDSASHA2_128S_NAME: &CStr = c"SLH-DSA-SHA2-128s";
+static SLHDSASHA2_192F_NAME: &CStr = c"SLH-DSA-SHA2-192f";
+static SLHDSASHA2_192S_NAME: &CStr = c"SLH-DSA-SHA2-192s";
+static SLHDSASHA2_256F_NAME: &CStr = c"SLH-DSA-SHA2-256f";
+static SLHDSASHA2_256S_NAME: &CStr = c"SLH-DSA-SHA2-256s";
+static SLHDSASHAKE128F_NAME: &CStr = c"SLH-DSA-SHAKE-128f";
+static SLHDSASHAKE128S_NAME: &CStr = c"SLH-DSA-SHAKE-128s";
+static SLHDSASHAKE192F_NAME: &CStr = c"SLH-DSA-SHAKE-192f";
+static SLHDSASHAKE192S_NAME: &CStr = c"SLH-DSA-SHAKE-192s";
+static SLHDSASHAKE256F_NAME: &CStr = c"SLH-DSA-SHAKE-256f";
+static SLHDSASHAKE256S_NAME: &CStr = c"SLH-DSA-SHAKE-256s";
 /* The following names are not actually recognized by
  * OpenSSL and will cause a fetch error if used, they
  * have been made up for completeness, and debugging */
@@ -241,10 +290,24 @@ fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
         SigAlg::RsaPssSha3_384 => RSAPSSSHA3_384_NAME,
         SigAlg::RsaPssSha3_512 => RSAPSSSHA3_512_NAME,
         SigAlg::RsaNoPad => RSANOPAD_NAME,
+        SigAlg::SlhdsaSha2_128f => SLHDSASHA2_128F_NAME,
+        SigAlg::SlhdsaSha2_128s => SLHDSASHA2_128S_NAME,
+        SigAlg::SlhdsaSha2_192f => SLHDSASHA2_192F_NAME,
+        SigAlg::SlhdsaSha2_192s => SLHDSASHA2_192S_NAME,
+        SigAlg::SlhdsaSha2_256f => SLHDSASHA2_256F_NAME,
+        SigAlg::SlhdsaSha2_256s => SLHDSASHA2_256S_NAME,
+        SigAlg::SlhdsaShake128f => SLHDSASHAKE128F_NAME,
+        SigAlg::SlhdsaShake128s => SLHDSASHAKE128S_NAME,
+        SigAlg::SlhdsaShake192f => SLHDSASHAKE192F_NAME,
+        SigAlg::SlhdsaShake192s => SLHDSASHAKE192S_NAME,
+        SigAlg::SlhdsaShake256f => SLHDSASHAKE256F_NAME,
+        SigAlg::SlhdsaShake256s => SLHDSASHAKE256S_NAME,
     }
 }
 
 /// Helper that returns the OpenSSL digest name associated to a sigalg
+///
+/// note, that this is relevant only for the mechanism using legacy API
 fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
     match alg {
         SigAlg::EcdsaSha1 | SigAlg::RsaSha1 | SigAlg::RsaPssSha1 => {
@@ -285,7 +348,19 @@ fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
         | SigAlg::Ed448ph
         | SigAlg::Rsa
         | SigAlg::RsaPss
-        | SigAlg::RsaNoPad => std::ptr::null(),
+        | SigAlg::RsaNoPad
+        | SigAlg::SlhdsaSha2_128f
+        | SigAlg::SlhdsaSha2_128s
+        | SigAlg::SlhdsaSha2_192f
+        | SigAlg::SlhdsaSha2_192s
+        | SigAlg::SlhdsaSha2_256f
+        | SigAlg::SlhdsaSha2_256s
+        | SigAlg::SlhdsaShake128f
+        | SigAlg::SlhdsaShake128s
+        | SigAlg::SlhdsaShake192f
+        | SigAlg::SlhdsaShake192s
+        | SigAlg::SlhdsaShake256f
+        | SigAlg::SlhdsaShake256s => std::ptr::null(),
     }
 }
 
@@ -422,6 +497,33 @@ pub fn eddsa_params(
 /// Helper to generate OsslParam arrays for Mldsa initialization
 #[cfg(ossl_v350)]
 pub fn mldsa_params<'a>(
+    raw: bool,
+    context: Option<&'a Vec<u8>>,
+    deterministic: bool,
+) -> Result<Option<OsslParam<'a>>, Error> {
+    let mut params_builder = OsslParamBuilder::with_capacity(3);
+    if raw {
+        params_builder
+            .add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING), 0)?;
+    }
+    if let Some(ctx) = context {
+        params_builder.add_octet_string(
+            cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+            ctx,
+        )?;
+    }
+    if deterministic {
+        params_builder
+            .add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC), 1)?;
+    }
+    let params = params_builder.finalize();
+    return Ok(Some(params));
+}
+
+/// Helper to generate OsslParam arrays for SLH-DSA initialization
+/// FIXME: The same as mldsa_params?
+#[cfg(ossl_v350)]
+pub fn slhdsa_params<'a>(
     raw: bool,
     context: Option<&'a Vec<u8>>,
     deterministic: bool,
