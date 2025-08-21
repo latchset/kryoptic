@@ -119,7 +119,7 @@ jobs:
           elif [ "${{ matrix.name }}" = "minimal" ]; then
             FEATURE_SET="minimal"
           elif [ "${{ matrix.name }}" = "pqc" ]; then
-            FEATURES="${FEATURES},pqc"
+            FEATURES="${FEATURES},pqc,slow"
           elif [ "${{ matrix.name }}" = "no_sha1" ]; then
             FEATURES="${FEATURES},no_sha1"
           fi
