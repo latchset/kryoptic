@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+use serde_json::{from_reader, Value};
 
 use serial_test::parallel;
 
@@ -3996,4 +3997,353 @@ fn test_slhdsa_operations() {
         &mechanism
     ));
     assert_eq!(out, signature);
+}
+
+fn run_test(
+    session: CK_SESSION_HANDLE,
+    test: &Value,
+    ckp: CK_SLH_DSA_PARAMETER_SET_TYPE,
+    pre_hash: bool,
+) {
+    let tnum = match test["tcId"].as_u64() {
+        Some(n) => n,
+        None => panic!("No tcId value"),
+    };
+
+    let pk = if let Some(pk_str) = test["pk"].as_str() {
+        hex::decode(pk_str).expect("failed to decode SLH-DSA public key")
+    } else {
+        panic!("no pk value");
+    };
+    let sk = if let Some(sk_str) = test["sk"].as_str() {
+        hex::decode(sk_str).expect("failed to decode SLH-DSA private key")
+    } else {
+        panic!("no sk value");
+    };
+    let message = if let Some(message_str) = test["message"].as_str() {
+        hex::decode(message_str).expect("failed to decode message")
+    } else {
+        panic!("no message value");
+    };
+    let signature = if let Some(signature_str) = test["signature"].as_str() {
+        hex::decode(signature_str).expect("failed to decode signature value")
+    } else {
+        panic!("no signature value");
+    };
+    let context = if let Some(context_str) = test["context"].as_str() {
+        hex::decode(context_str).expect("failed to decode signature value")
+    } else {
+        panic!("no context value");
+    };
+
+    let hash_alg = match test["hashAlg"].as_str() {
+        Some(p) => p,
+        None => panic!("No hashAlg value"),
+    };
+    let (hash_mech, sign_mech) = match hash_alg {
+        "SHA2-224" => (CKM_SHA224, CKM_HASH_SLH_DSA_SHA224),
+        "SHA2-256" => (CKM_SHA256, CKM_HASH_SLH_DSA_SHA256),
+        "SHA2-384" => (CKM_SHA384, CKM_HASH_SLH_DSA_SHA384),
+        "SHA2-512" => (CKM_SHA512, CKM_HASH_SLH_DSA_SHA512),
+        "SHA3-224" => (CKM_SHA3_224, CKM_HASH_SLH_DSA_SHA3_224),
+        "SHA3-256" => (CKM_SHA3_256, CKM_HASH_SLH_DSA_SHA3_256),
+        "SHA3-384" => (CKM_SHA3_384, CKM_HASH_SLH_DSA_SHA3_384),
+        "SHA3-512" => (CKM_SHA3_512, CKM_HASH_SLH_DSA_SHA3_512),
+        "none" => {
+            if pre_hash {
+                println!("Prehash requested but no hash algorithm provided, skipping!");
+                return;
+            }
+            (0, 0)
+        }
+        _ => {
+            println!("Unsupported hash algorithm {hash_alg}, skipping!");
+            return;
+        }
+    };
+
+    println!(
+        "Executing Test: {} (pre_hash={}) (hash_alg={})",
+        tnum, pre_hash, hash_alg
+    );
+
+    let priv_handle = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_SLH_DSA), (CKA_PARAMETER_SET, ckp),],
+        &[(CKA_VALUE, &sk),],
+        &[(CKA_SIGN, true)],
+    ));
+
+    let pub_handle = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_SLH_DSA), (CKA_PARAMETER_SET, ckp),],
+        &[(CKA_VALUE, &pk)],
+        &[(CKA_VERIFY, true)],
+    ));
+
+    if pre_hash {
+        /* Compute Hash to feed to signature/verify functions */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: hash_mech,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let mut ret = fn_digest_init(session, &mut mechanism);
+        assert_eq!(ret, CKR_OK);
+
+        let mut digest_len: CK_ULONG = 0;
+        ret = fn_digest(
+            session,
+            byte_ptr!(message.as_ptr()),
+            message.len() as CK_ULONG,
+            std::ptr::null_mut(),
+            &mut digest_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        let mut digest: Vec<u8> = vec![0; digest_len as usize];
+        ret = fn_digest(
+            session,
+            byte_ptr!(message.as_ptr()),
+            message.len() as CK_ULONG,
+            digest.as_mut_ptr(),
+            &mut digest_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let params = CK_HASH_SIGN_ADDITIONAL_CONTEXT {
+            hedgeVariant: CKH_DETERMINISTIC_REQUIRED,
+            pContext: byte_ptr!(context.as_ptr()),
+            ulContextLen: context.len() as CK_ULONG,
+            hash: hash_mech,
+        };
+
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_HASH_SLH_DSA,
+            pParameter: void_ptr!(&params),
+            ulParameterLen: sizeof!(CK_HASH_SIGN_ADDITIONAL_CONTEXT),
+        };
+
+        let ret = sig_verify(
+            session,
+            pub_handle,
+            &digest,
+            signature.as_slice(),
+            &mechanism,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let out =
+            ret_or_panic!(sig_gen(session, priv_handle, &digest, &mechanism));
+        assert_eq!(out, signature);
+
+        /* re-test but using the C_VerifySignature API */
+        let ret = sig_verifysig(
+            session,
+            pub_handle,
+            &digest,
+            signature.as_slice(),
+            &mechanism,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        /* Test message digesting variant of HashSLH-DSA */
+
+        let params = CK_SIGN_ADDITIONAL_CONTEXT {
+            hedgeVariant: CKH_DETERMINISTIC_REQUIRED,
+            pContext: byte_ptr!(context.as_ptr()),
+            ulContextLen: context.len() as CK_ULONG,
+        };
+
+        let mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: sign_mech,
+            pParameter: void_ptr!(&params),
+            ulParameterLen: sizeof!(CK_SIGN_ADDITIONAL_CONTEXT),
+        };
+
+        let ret = fn_verify_signature_init(
+            session,
+            &mechanism as *const _ as CK_MECHANISM_PTR,
+            pub_handle,
+            byte_ptr!(signature.as_ptr()),
+            signature.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        /* ingest msg in chunks to verify update functions work correctly */
+        let mut cursor: usize = 0;
+        let mut avail: usize = message.len();
+        while avail > 0 {
+            let size = if avail > 1000 { 1000 } else { avail };
+            avail -= size;
+
+            let ret = fn_verify_signature_update(
+                session,
+                byte_ptr!(message[cursor..(cursor + size)].as_ptr()),
+                size as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            cursor += size;
+        }
+
+        let ret = fn_verify_signature_final(session);
+        assert_eq!(ret, CKR_OK);
+
+        /* test signature code too */
+        let out = ret_or_panic!(sig_gen(
+            session,
+            priv_handle,
+            message.as_slice(),
+            &mechanism
+        ));
+        assert_eq!(out, signature);
+
+        return;
+    }
+
+    /* non-prehash variant */
+
+    let params = CK_SIGN_ADDITIONAL_CONTEXT {
+        hedgeVariant: CKH_DETERMINISTIC_REQUIRED,
+        pContext: byte_ptr!(context.as_ptr()),
+        ulContextLen: context.len() as CK_ULONG,
+    };
+
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SLH_DSA,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: sizeof!(CK_SIGN_ADDITIONAL_CONTEXT),
+    };
+
+    /* Verify using the old one-shot API */
+    let ret = sig_verify(
+        session,
+        pub_handle,
+        message.as_slice(),
+        signature.as_slice(),
+        &mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* Verify we generate the same signature */
+    let out = ret_or_panic!(sig_gen(
+        session,
+        priv_handle,
+        message.as_slice(),
+        &mechanism
+    ));
+    assert_eq!(out, signature);
+
+    /* re-test but using the C_VerifySignature API */
+    let ret = sig_verifysig(
+        session,
+        pub_handle,
+        message.as_slice(),
+        signature.as_slice(),
+        &mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
+}
+
+fn test_groups(session: CK_SESSION_HANDLE, data: Value) {
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SLH_DSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let test_groups: &Vec<Value> = match data["testGroups"].as_array() {
+        Some(g) => g,
+        None => panic!("No testGroups value"),
+    };
+    for group in test_groups {
+        let gnum = match group["tgId"].as_u64() {
+            Some(n) => n,
+            None => panic!("No tgId value"),
+        };
+        match group["testType"].as_str() {
+            Some(s) => {
+                if s != "AFT" {
+                    continue;
+                }
+            }
+            None => panic!("No testType value"),
+        }
+        let parameter_set = match group["parameterSet"].as_str() {
+            Some(p) => p,
+            None => panic!("No parameterSet value"),
+        };
+        println!("Executing Test group: {}, paramset:{}", gnum, parameter_set);
+        let ckp = match parameter_set {
+            "SLH-DSA-SHA2-128s" => CKP_SLH_DSA_SHA2_128S,
+            "SLH-DSA-SHAKE-128s" => CKP_SLH_DSA_SHAKE_128S,
+            "SLH-DSA-SHA2-128f" => CKP_SLH_DSA_SHA2_128F,
+            "SLH-DSA-SHAKE-128f" => CKP_SLH_DSA_SHAKE_128F,
+            "SLH-DSA-SHA2-192s" => CKP_SLH_DSA_SHA2_192S,
+            "SLH-DSA-SHAKE-192s" => CKP_SLH_DSA_SHAKE_192S,
+            "SLH-DSA-SHA2-192f" => CKP_SLH_DSA_SHA2_192F,
+            "SLH-DSA-SHAKE-192f" => CKP_SLH_DSA_SHAKE_192F,
+            "SLH-DSA-SHA2-256s" => CKP_SLH_DSA_SHA2_256S,
+            "SLH-DSA-SHAKE-256s" => CKP_SLH_DSA_SHAKE_256S,
+            "SLH-DSA-SHA2-256f" => CKP_SLH_DSA_SHA2_256F,
+            "SLH-DSA-SHAKE-256f" => CKP_SLH_DSA_SHAKE_256F,
+            _ => {
+                println!("Unknown set, skipping!");
+                continue;
+            }
+        };
+
+        /* only deterministic tests for now */
+        match group["deterministic"].as_bool() {
+            Some(true) => (),
+            Some(false) => {
+                println!("Skipping non-deterministic tests");
+                continue;
+            }
+            None => panic!("No deterministic value"),
+        }
+
+        /* skip "none" preHash */
+        let pre_hash = match group["preHash"].as_str() {
+            Some(p) => p,
+            None => panic!("No preHash value"),
+        };
+        let pre_hash = match pre_hash {
+            "pure" => false,
+            "preHash" => true,
+            p => {
+                println!("Skipping preHash tests with value {p}");
+                return;
+            }
+        };
+
+        let tests = match group["tests"].as_array() {
+            Some(t) => t,
+            None => panic!("No tests value"),
+        };
+        for test in tests {
+            run_test(session, &test, ckp, pre_hash);
+        }
+    }
+}
+
+#[test]
+#[parallel]
+#[cfg(feature = "slow")]
+fn test_slhdsa_vector() {
+    let file =
+        std::fs::File::open("testdata/slh_dsa_test_vectors.json").unwrap();
+    let data = from_reader(file).unwrap();
+
+    let mut testtokn = TestToken::initialized("test_slhdsa_test_vector", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    test_groups(session, data);
+
+    testtokn.finalize();
 }
