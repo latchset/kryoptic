@@ -24,6 +24,9 @@ All notable changes to this project should be documented in this file.
   a base key with provided data.
  - [Implement simple KDFs](https://github.com/latchset/kryoptic/pull/278)
 
+* Added support for SLH-DSA keys and operations
+ - [Add support for SLH-DSA](https://github.com/latchset/kryoptic/pull/316)
+
 # [1.2.0]
 ## 2025-06-09
 
