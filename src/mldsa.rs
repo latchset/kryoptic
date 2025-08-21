@@ -50,7 +50,6 @@ static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(MlDsaPrivFactory::new()));
 
 /// The static Public Key factory
-/// after process startup
 static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(MlDsaPubFactory::new()));
 
@@ -330,6 +329,7 @@ impl Mechanism for MlDsaMechanism {
             mech, key, CKF_SIGN, None,
         )?))
     }
+
     fn verify_new(
         &self,
         mech: &CK_MECHANISM,
