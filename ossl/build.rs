@@ -48,6 +48,9 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
     }
 
     fn str_macro(&self, name: &str, _value: &[u8]) {
+        if name == "OSSL_PKEY_PARAM_SLH_DSA_SEED" {
+            println!("cargo::rustc-cfg=ossl_slhdsa")
+        }
         if name == "OSSL_PKEY_PARAM_ML_DSA_SEED" {
             println!("cargo::rustc-cfg=ossl_mldsa")
         }
@@ -282,7 +285,7 @@ fn main() {
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* Always emit known configs */
-    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa,ossl_mlkem)");
+    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa,ossl_mlkem,ossl_slhdsa)");
 
     /* OpenSSL Cryptography */
     if cfg!(feature = "dynamic") {

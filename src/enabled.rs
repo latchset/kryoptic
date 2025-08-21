@@ -45,6 +45,9 @@ mod mlkem;
 #[cfg(feature = "mldsa")]
 mod mldsa;
 
+#[cfg(feature = "slhdsa")]
+mod slhdsa;
+
 use mechanism::Mechanisms;
 use object::ObjectFactories;
 
@@ -103,6 +106,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "mldsa")]
     mldsa::register(mechs, ot);
+
+    #[cfg(feature = "slhdsa")]
+    slhdsa::register(mechs, ot);
 
     #[cfg(feature = "fips")]
     fips::register(mechs, ot);
