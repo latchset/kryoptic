@@ -100,13 +100,27 @@ pub enum EvpPkeyType {
     BrainpoolP256r1,
     BrainpoolP384r1,
     BrainpoolP512r1,
-    /* ML */
+    /* ML-DSA */
     Mldsa44,
     Mldsa65,
     Mldsa87,
+    /* ML-KEM */
     MlKem512,
     MlKem768,
     MlKem1024,
+    /* SLH-DSA */
+    SlhdsaSha2_128s,
+    SlhdsaShake128s,
+    SlhdsaSha2_128f,
+    SlhdsaShake128f,
+    SlhdsaSha2_192s,
+    SlhdsaShake192s,
+    SlhdsaSha2_192f,
+    SlhdsaShake192f,
+    SlhdsaSha2_256s,
+    SlhdsaShake256s,
+    SlhdsaSha2_256f,
+    SlhdsaShake256f,
     /* RSA */
     Rsa(usize, Vec<u8>),
 }
@@ -239,6 +253,18 @@ fn pkey_type_to_params(
         EvpPkeyType::MlKem512 => c"ML-KEM-512",
         EvpPkeyType::MlKem768 => c"ML-KEM-768",
         EvpPkeyType::MlKem1024 => c"ML-KEM-1024",
+        EvpPkeyType::SlhdsaSha2_128f => c"SLH-DSA-SHA2-128f",
+        EvpPkeyType::SlhdsaSha2_128s => c"SLH-DSA-SHA2-128s",
+        EvpPkeyType::SlhdsaSha2_192f => c"SLH-DSA-SHA2-192f",
+        EvpPkeyType::SlhdsaSha2_192s => c"SLH-DSA-SHA2-192s",
+        EvpPkeyType::SlhdsaSha2_256f => c"SLH-DSA-SHA2-256f",
+        EvpPkeyType::SlhdsaSha2_256s => c"SLH-DSA-SHA2-256s",
+        EvpPkeyType::SlhdsaShake128f => c"SLH-DSA-SHAKE-128f",
+        EvpPkeyType::SlhdsaShake128s => c"SLH-DSA-SHAKE-128s",
+        EvpPkeyType::SlhdsaShake192f => c"SLH-DSA-SHAKE-192f",
+        EvpPkeyType::SlhdsaShake192s => c"SLH-DSA-SHAKE-192s",
+        EvpPkeyType::SlhdsaShake256f => c"SLH-DSA-SHAKE-256f",
+        EvpPkeyType::SlhdsaShake256s => c"SLH-DSA-SHAKE-256s",
         EvpPkeyType::Rsa(size, exp) => {
             params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_E), &exp)?;
             params.add_owned_uint(
@@ -308,6 +334,18 @@ fn pkey_to_type(
         b"ML-KEM-512" => Ok(EvpPkeyType::MlKem512),
         b"ML-KEM-768" => Ok(EvpPkeyType::MlKem768),
         b"ML-KEM-1024" => Ok(EvpPkeyType::MlKem1024),
+        b"SLH-DSA-SHA2-128f" => Ok(EvpPkeyType::SlhdsaSha2_128f),
+        b"SLH-DSA-SHA2-128s" => Ok(EvpPkeyType::SlhdsaSha2_128s),
+        b"SLH-DSA-SHA2-192f" => Ok(EvpPkeyType::SlhdsaSha2_192f),
+        b"SLH-DSA-SHA2-192s" => Ok(EvpPkeyType::SlhdsaSha2_192s),
+        b"SLH-DSA-SHA2-256f" => Ok(EvpPkeyType::SlhdsaSha2_256f),
+        b"SLH-DSA-SHA2-256s" => Ok(EvpPkeyType::SlhdsaSha2_256s),
+        b"SLH-DSA-SHAKE-128f" => Ok(EvpPkeyType::SlhdsaShake128f),
+        b"SLH-DSA-SHAKE-128s" => Ok(EvpPkeyType::SlhdsaShake128s),
+        b"SLH-DSA-SHAKE-192f" => Ok(EvpPkeyType::SlhdsaShake192f),
+        b"SLH-DSA-SHAKE-192s" => Ok(EvpPkeyType::SlhdsaShake192s),
+        b"SLH-DSA-SHAKE-256f" => Ok(EvpPkeyType::SlhdsaShake256f),
+        b"SLH-DSA-SHAKE-256s" => Ok(EvpPkeyType::SlhdsaShake256s),
         b"RSA" => {
             let e = params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_E))?;
             let n = params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?;
@@ -361,6 +399,23 @@ pub struct MlkeyData {
 }
 
 impl Drop for MlkeyData {
+    fn drop(&mut self) {
+        if let Some(mut v) = self.pubkey.take() {
+            unsafe {
+                OPENSSL_cleanse(v.as_mut_ptr() as *mut _, v.len());
+            }
+        }
+    }
+}
+
+/// Structure that holds SLH-DSA Keys data
+#[derive(Debug)]
+pub struct SlhDsaKeyData {
+    pub pubkey: Option<Vec<u8>>,
+    pub prikey: Option<OsslSecret>,
+}
+
+impl Drop for SlhDsaKeyData {
     fn drop(&mut self) {
         if let Some(mut v) = self.pubkey.take() {
             unsafe {
@@ -591,6 +646,7 @@ pub enum PkeyData {
     Ecc(EccData),
     Ffdh(FfdhData),
     Mlkey(MlkeyData),
+    SlhDsaKey(SlhDsaKeyData),
     Rsa(RsaData),
 }
 
@@ -657,6 +713,42 @@ fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
         },
         seed: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED))
         {
+            Ok(p) => Some(OsslSecret::from_slice(p)),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+    }))
+}
+
+#[cfg(ossl_slhdsa)]
+fn params_to_slhdsa_data(
+    pkey: &EvpPkey,
+    params: &OsslParam,
+) -> Result<PkeyData, Error> {
+    Ok(PkeyData::SlhDsaKey(SlhDsaKeyData {
+        pubkey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+            Ok(p) => Some(p.to_vec()),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => {
+                    // OpenSSL does not always provide public key when
+                    // asked for key pair here so if it not available,
+                    // retry exporting just public key part
+                    // https://github.com/openssl/openssl/issues/27542
+                    let p2 = pkey.export_params(EVP_PKEY_PUBLIC_KEY)?;
+                    match p2.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+                        Ok(p) => Some(p.to_vec()),
+                        Err(e) => match e.kind() {
+                            ErrorKind::NullPtr => None,
+                            _ => return Err(e),
+                        },
+                    }
+                }
+                _ => return Err(e),
+            },
+        },
+        prikey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
             Ok(p) => Some(OsslSecret::from_slice(p)),
             Err(e) => match e.kind() {
                 ErrorKind::NullPtr => None,
@@ -1071,6 +1163,37 @@ impl EvpPkey {
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
+            EvpPkeyType::SlhdsaSha2_128s
+            | EvpPkeyType::SlhdsaShake128s
+            | EvpPkeyType::SlhdsaSha2_128f
+            | EvpPkeyType::SlhdsaShake128f
+            | EvpPkeyType::SlhdsaSha2_192s
+            | EvpPkeyType::SlhdsaShake192s
+            | EvpPkeyType::SlhdsaSha2_192f
+            | EvpPkeyType::SlhdsaShake192f
+            | EvpPkeyType::SlhdsaSha2_256s
+            | EvpPkeyType::SlhdsaShake256s
+            | EvpPkeyType::SlhdsaSha2_256f
+            | EvpPkeyType::SlhdsaShake256f => match &data {
+                #[cfg(ossl_slhdsa)]
+                PkeyData::SlhDsaKey(sdk) => {
+                    if let Some(p) = &sdk.pubkey {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        params_builder.add_octet_slice(
+                            cstr!(OSSL_PKEY_PARAM_PUB_KEY),
+                            p.as_slice(),
+                        )?
+                    }
+                    if let Some(p) = &sdk.prikey {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        params_builder.add_octet_slice(
+                            cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
+                            p,
+                        )?
+                    }
+                }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
             EvpPkeyType::Rsa(_, _) => match &data {
                 PkeyData::Rsa(rsa) => {
                     if rsa_data_to_params(&rsa, &mut params_builder)? {
@@ -1177,6 +1300,23 @@ impl EvpPkey {
                 #[cfg(ossl_mlkem)]
                 return params_to_mlkem_data(&params);
                 #[cfg(not(ossl_mlkem))]
+                return Err(Error::new(ErrorKind::WrapperError));
+            }
+            EvpPkeyType::SlhdsaSha2_128s
+            | EvpPkeyType::SlhdsaShake128s
+            | EvpPkeyType::SlhdsaSha2_128f
+            | EvpPkeyType::SlhdsaShake128f
+            | EvpPkeyType::SlhdsaSha2_192s
+            | EvpPkeyType::SlhdsaShake192s
+            | EvpPkeyType::SlhdsaSha2_192f
+            | EvpPkeyType::SlhdsaShake192f
+            | EvpPkeyType::SlhdsaSha2_256s
+            | EvpPkeyType::SlhdsaShake256s
+            | EvpPkeyType::SlhdsaSha2_256f
+            | EvpPkeyType::SlhdsaShake256f => {
+                #[cfg(ossl_slhdsa)]
+                return params_to_slhdsa_data(&self, &params);
+                #[cfg(not(ossl_slhdsa))]
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             EvpPkeyType::Rsa(_, _) => return params_to_rsa_data(&params),

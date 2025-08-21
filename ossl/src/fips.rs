@@ -851,6 +851,18 @@ fn sigalg_to_legacy_name(alg: SigAlg) -> &'static CStr {
         | SigAlg::RsaPssSha3_384
         | SigAlg::RsaPssSha3_512 => c"RSA",
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => c"",
+        SigAlg::SlhdsaSha2_128s
+        | SigAlg::SlhdsaShake128s
+        | SigAlg::SlhdsaSha2_128f
+        | SigAlg::SlhdsaShake128f
+        | SigAlg::SlhdsaSha2_192s
+        | SigAlg::SlhdsaShake192s
+        | SigAlg::SlhdsaSha2_192f
+        | SigAlg::SlhdsaShake192f
+        | SigAlg::SlhdsaSha2_256s
+        | SigAlg::SlhdsaShake256s
+        | SigAlg::SlhdsaSha2_256f
+        | SigAlg::SlhdsaShake256f => c"",
     }
 }
 
