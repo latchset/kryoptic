@@ -90,6 +90,7 @@ pub fn mldsa_object_to_pkey(
                 prikey: None,
                 seed: None,
             }),
+            None,
         )?),
         CKO_PRIVATE_KEY => Ok(EvpPkey::import(
             osslctx(),
@@ -104,6 +105,7 @@ pub fn mldsa_object_to_pkey(
                     Err(_) => None,
                 },
             }),
+            None,
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
@@ -770,8 +772,11 @@ pub fn generate_keypair(
     pubkey: &mut Object,
     privkey: &mut Object,
 ) -> Result<()> {
-    let pkey =
-        EvpPkey::generate(osslctx(), mldsa_param_set_to_pkey_type(param_set)?)?;
+    let pkey = EvpPkey::generate(
+        osslctx(),
+        mldsa_param_set_to_pkey_type(param_set)?,
+        None,
+    )?;
     let mut mlk = match pkey.export()? {
         PkeyData::Mlkey(m) => m,
         _ => return Err(CKR_GENERAL_ERROR)?,
