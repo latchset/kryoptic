@@ -61,6 +61,7 @@ pub fn ffdh_object_to_pkey(
                 pubkey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
                 prikey: None,
             }),
+            None,
         )?),
         CKO_PRIVATE_KEY => Ok(EvpPkey::import(
             osslctx(),
@@ -71,6 +72,7 @@ pub fn ffdh_object_to_pkey(
                     key.get_attr_as_bytes(CKA_VALUE)?.clone(),
                 )),
             }),
+            None,
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
@@ -114,7 +116,8 @@ impl FFDHOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let pkey = EvpPkey::generate(osslctx(), group_to_pkey_type(group)?)?;
+        let pkey =
+            EvpPkey::generate(osslctx(), group_to_pkey_type(group)?, None)?;
 
         let mut ffdh = match pkey.export()? {
             PkeyData::Ffdh(f) => f,
@@ -179,7 +182,8 @@ impl Derive for FFDHOperation {
             objectfactories.get_obj_factory_from_key_template(template)?;
 
         let mut pkey = privkey_from_object(key)?;
-        let mut peer = pkey.make_peer(osslctx(), self.public.as_slice())?;
+        let mut peer =
+            pkey.make_peer(osslctx(), self.public.as_slice(), None)?;
         let mut ffdh = FfdhDerive::new(osslctx(), &mut pkey)?;
 
         let pkey_size = pkey.get_size()?;

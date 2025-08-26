@@ -23,13 +23,18 @@ pub struct EvpPkeyCtx {
 /// Methods for creating and accessing `EvpPkeyCtx`.
 impl EvpPkeyCtx {
     /// Fetches an algorithm by name and returns a wrapper `EvpPkeyCtx`
-    pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpPkeyCtx, Error> {
+    pub fn new(
+        ctx: &OsslContext,
+        name: &CStr,
+        propq: Option<&CStr>,
+    ) -> Result<EvpPkeyCtx, Error> {
+        let propqp = if let Some(p) = propq {
+            p.as_ptr()
+        } else {
+            std::ptr::null()
+        };
         let ptr = unsafe {
-            EVP_PKEY_CTX_new_from_name(
-                ctx.ptr(),
-                name.as_ptr(),
-                std::ptr::null(),
-            )
+            EVP_PKEY_CTX_new_from_name(ctx.ptr(), name.as_ptr(), propqp)
         };
         if ptr.is_null() {
             trace_ossl!("EVP_PKEY_CTX_new_from_name()");
@@ -817,8 +822,9 @@ impl EvpPkey {
         pkey_name: &CStr,
         pkey_type: u32,
         params: &OsslParam,
+        propq: Option<&CStr>,
     ) -> Result<EvpPkey, Error> {
-        let mut pctx = EvpPkeyCtx::new(ctx, pkey_name)?;
+        let mut pctx = EvpPkeyCtx::new(ctx, pkey_name, propq)?;
         let res = unsafe { EVP_PKEY_fromdata_init(pctx.as_mut_ptr()) };
         if res != 1 {
             trace_ossl!("EVP_PKEY_fromdata_init()");
@@ -877,11 +883,12 @@ impl EvpPkey {
     pub fn generate(
         ctx: &OsslContext,
         pkey_type: EvpPkeyType,
+        propq: Option<&CStr>,
     ) -> Result<EvpPkey, Error> {
         let mut params_builder = OsslParamBuilder::new();
         let name = pkey_type_to_params(&pkey_type, &mut params_builder)?;
         let params = params_builder.finalize();
-        let mut pctx = EvpPkeyCtx::new(ctx, name)?;
+        let mut pctx = EvpPkeyCtx::new(ctx, name, propq)?;
         let res = unsafe { EVP_PKEY_keygen_init(pctx.as_mut_ptr()) };
         if res != 1 {
             trace_ossl!("EVP_PKEY_keygen_init()");
@@ -927,6 +934,7 @@ impl EvpPkey {
         ctx: &OsslContext,
         pkey_type: EvpPkeyType,
         data: PkeyData,
+        propq: Option<&CStr>,
     ) -> Result<EvpPkey, Error> {
         let mut pkey_class: u32 = 0;
         let mut params_builder = OsslParamBuilder::with_capacity(2);
@@ -1076,7 +1084,7 @@ impl EvpPkey {
         }
         let params = params_builder.finalize();
 
-        EvpPkey::fromdata(ctx, name, pkey_class, &params)
+        EvpPkey::fromdata(ctx, name, pkey_class, &params, propq)
     }
 
     /// Export public point in encoded form and/or private key
@@ -1181,6 +1189,7 @@ impl EvpPkey {
         &self,
         ctx: &OsslContext,
         public: &[u8],
+        propq: Option<&CStr>,
     ) -> Result<EvpPkey, Error> {
         let mut params_builder = OsslParamBuilder::with_capacity(1);
         params_builder.add_empty_utf8_string(
@@ -1219,7 +1228,7 @@ impl EvpPkey {
             }),
             _ => return Err(Error::new(ErrorKind::WrapperError)),
         };
-        Self::import(ctx, pkey_type, data)
+        Self::import(ctx, pkey_type, data, propq)
     }
 
     /// Returns a const pointer to the underlying `EVP_PKEY`.

@@ -97,6 +97,7 @@ pub fn rsa_object_to_pkey(
             b: b,
             c: c,
         }),
+        None,
     )?)
 }
 
@@ -432,6 +433,7 @@ impl RsaPKCSOperation {
         let pkey = EvpPkey::generate(
             osslctx(),
             EvpPkeyType::Rsa(bits, exponent.clone()),
+            None,
         )?;
         let mut rsa = match pkey.export()? {
             PkeyData::Rsa(r) => r,
