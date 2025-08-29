@@ -353,3 +353,6 @@ mod mlkem;
 
 #[cfg(feature = "mldsa")]
 mod mldsa;
+
+#[cfg(feature = "slhdsa")]
+mod slhdsa;

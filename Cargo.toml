@@ -101,7 +101,8 @@ slow = [] # Enables slow tests
 
 mlkem = ["ossl/ossl350"]
 mldsa = ["hash", "ossl/ossl350"]
+slhdsa = ["hash", "ossl/ossl350"]
 
-pqc = ["mlkem", "mldsa"]
+pqc = ["mlkem", "mldsa", "slhdsa"]
 
 minimal = ["sqlitedb", "aes", "ecc_min", "hash_all", "rsa"]

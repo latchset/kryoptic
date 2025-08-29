@@ -64,6 +64,20 @@ fn mldsa_param_set_to_sigalg(
     }
 }
 
+/// Maps a PKCS#11 ML-DSA parameter set type (`CK_ML_DSA_PARAMETER_SET_TYPE`)
+/// to the corresponding signature size
+fn mldsa_param_to_sig_size(
+    pset: CK_ML_DSA_PARAMETER_SET_TYPE,
+) -> Result<usize> {
+    let size = match pset {
+        CKP_ML_DSA_44 => ML_DSA_44_SIG_SIZE,
+        CKP_ML_DSA_65 => ML_DSA_65_SIG_SIZE,
+        CKP_ML_DSA_87 => ML_DSA_87_SIG_SIZE,
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+    Ok(size)
+}
+
 /// Converts a PKCS#11 ML-DSA key `Object` into an `EvpPkey`.
 ///
 /// Extracts the parameter set (`CKA_PARAMETER_SET`) to determine the algorithm
@@ -147,12 +161,7 @@ impl MlDsaParams {
             hedge: CKH_HEDGE_PREFERRED,
             context: None,
             hash: CK_UNAVAILABLE_INFORMATION,
-            sigsize: match param_set {
-                CKP_ML_DSA_44 => ML_DSA_44_SIG_SIZE,
-                CKP_ML_DSA_65 => ML_DSA_65_SIG_SIZE,
-                CKP_ML_DSA_87 => ML_DSA_87_SIG_SIZE,
-                _ => return Err(CKR_KEY_INDIGESTIBLE)?,
-            },
+            sigsize: mldsa_param_to_sig_size(param_set)?,
         };
 
         if !mech.pParameter.is_null() {
@@ -352,6 +361,7 @@ impl MlDsaOperation {
             CKM_HASH_ML_DSA_SHA3_256 => op.setup_digest(CKM_SHA3_256)?,
             CKM_HASH_ML_DSA_SHA3_384 => op.setup_digest(CKM_SHA3_384)?,
             CKM_HASH_ML_DSA_SHA3_512 => op.setup_digest(CKM_SHA3_512)?,
+            /* TODO SHAKE hashes? */
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
 
@@ -375,12 +385,7 @@ impl MlDsaOperation {
 
     /// Sets the signature for a VerifySignature operation.
     fn set_signature(&mut self, signature: &[u8]) -> Result<()> {
-        let size = match self.params.param_set {
-            CKP_ML_DSA_44 => ML_DSA_44_SIG_SIZE,
-            CKP_ML_DSA_65 => ML_DSA_65_SIG_SIZE,
-            CKP_ML_DSA_87 => ML_DSA_87_SIG_SIZE,
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        };
+        let size = mldsa_param_to_sig_size(self.params.param_set)?;
         if signature.len() != size {
             return Err(CKR_SIGNATURE_LEN_RANGE)?;
         }
@@ -446,6 +451,7 @@ impl MlDsaOperation {
             CKM_SHA3_256 => SHA3_256_OID,
             CKM_SHA3_384 => SHA3_384_OID,
             CKM_SHA3_512 => SHA3_512_OID,
+            /* TODO SHAKE hashes? */
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
