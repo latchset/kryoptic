@@ -447,6 +447,15 @@ fn test_ec_keys() {
                 (CKA_EXTRACTABLE, true),
             ],
         ));
+        assert_eq!(check_validation(session, t.fips_indicator), true);
+        assert_eq!(
+            check_object_validation(session, pubkey, t.fips_indicator),
+            true
+        );
+        assert_eq!(
+            check_object_validation(session, prikey, t.fips_indicator),
+            true
+        );
 
         if t.op_flags.1 == CKA_SIGN {
             let sig = ret_or_panic!(sig_gen(
@@ -526,6 +535,10 @@ fn test_ec_keys() {
         assert_eq!(ret, CKR_OK);
 
         assert_eq!(check_validation(session, t.fips_indicator), true);
+        assert_eq!(
+            check_object_validation(session, prikey2, t.fips_indicator),
+            true
+        );
 
         if t.op_flags.1 == CKA_SIGN {
             /* Test the unwrapped key can be used */

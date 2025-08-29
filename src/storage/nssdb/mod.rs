@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::attribute::{AttrType, Attribute, CkAttrs};
 use crate::defaults;
 use crate::error::{Error, Result};
+#[cfg(feature = "fips")]
+use crate::fips::indicators::add_missing_validation_flag;
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
 use crate::pkcs11::*;
@@ -957,6 +959,13 @@ impl Storage for NSSStorage {
                     let _ = attrs.remove_ulong(a.type_);
                 }
             }
+            #[cfg(feature = "fips")]
+            {
+                /* We need these to be able to derive object validation flag */
+                attrs.add_missing_ulong(CKA_EC_PARAMS, &dnm);
+                attrs.add_missing_ulong(CKA_VALUE_LEN, &dnm);
+                attrs.add_missing_ulong(CKA_MODULUS, &dnm);
+            }
         }
         let mut obj =
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
@@ -1000,21 +1009,13 @@ impl Storage for NSSStorage {
             match attributes.iter().position(|r| r.type_ == a) {
                 Some(_) => {
                     factory.set_attribute_default(a, &mut obj)?;
-                    #[cfg(feature = "fips")]
-                    if a == CKA_OBJECT_VALIDATION_FLAGS {
-                        /* All keys stored in the database are considered
-                         * FIPS approved, on the assumption you can't import
-                         * or create non-approved keys in the first place
-                         */
-                        obj.set_attr(Attribute::from_ulong(
-                            CKA_OBJECT_VALIDATION_FLAGS,
-                            crate::fips::indicators::KRF_FIPS,
-                        ))?;
-                    }
                 }
                 None => (),
             }
         }
+
+        #[cfg(feature = "fips")]
+        add_missing_validation_flag(&mut obj);
 
         obj.set_handle(handle);
         Ok(obj)

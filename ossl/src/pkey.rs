@@ -850,7 +850,7 @@ impl EvpPkey {
     ///
     /// The `selection` argument specifies which components to export
     /// (e.g., public, private, parameters).
-    fn export_params(&self, selection: u32) -> Result<OsslParam, Error> {
+    fn export_params(&self, selection: u32) -> Result<OsslParam<'_>, Error> {
         let mut params_builder = OsslParamBuilder::new();
         params_builder.zeroize = true;
         let ret = unsafe {

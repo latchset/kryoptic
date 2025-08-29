@@ -283,7 +283,7 @@ struct FipsMechanism {
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 17],
-    mechs: [FipsMechanism; 91],
+    mechs: [FipsMechanism; 93],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -550,6 +550,19 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_ECDSA_SHA512,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [restrict!(CKK_EC), restrict!()],
+            genflags: 0,
+        },
+        /* EDDSA */
+        FipsMechanism {
+            mechanism: CKM_EC_EDWARDS_KEY_PAIR_GEN,
+            operations: CKF_GENERATE_KEY_PAIR,
+            restrictions: [restrict!(CKK_EC_EDWARDS), restrict!()],
+            genflags: CKF_SIGN | CKF_VERIFY,
+        },
+        FipsMechanism {
+            mechanism: CKM_EDDSA,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_EC_EDWARDS), restrict!()],
             genflags: 0,
         },
         /* AES */
@@ -1313,6 +1326,17 @@ pub fn is_key_approved(key: &Object, op: CK_FLAGS) -> bool {
         return true;
     }
     check_key(key, op, None, None)
+}
+
+/// Adds validation flag to the object, if it is not yet present
+/// and if the object passes validation rules.
+pub fn add_missing_validation_flag(key: &mut Object) {
+    if let Ok(_) = key.get_attr_as_ulong(CKA_OBJECT_VALIDATION_FLAGS) {
+        return;
+    }
+    if is_key_approved(key, CK_UNAVAILABLE_INFORMATION) {
+        add_fips_flag(key);
+    }
 }
 
 /// Helper to check if an operation is approved

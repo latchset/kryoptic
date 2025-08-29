@@ -622,3 +622,32 @@ pub fn check_validation(session: CK_SESSION_HANDLE, expect: CK_FLAGS) -> bool {
 pub fn check_validation(_: CK_SESSION_HANDLE, _: CK_FLAGS) -> bool {
     return true;
 }
+
+#[cfg(feature = "fips")]
+pub fn check_object_validation(
+    session: CK_SESSION_HANDLE,
+    handle: CK_OBJECT_HANDLE,
+    expect: CK_FLAGS,
+) -> bool {
+    #[allow(unused_mut)]
+    let mut flag: CK_ULONG = 0;
+    let mut template = make_ptrs_template(&[(
+        CKA_OBJECT_VALIDATION_FLAGS,
+        void_ptr!(std::ptr::addr_of!(flag)),
+        std::mem::size_of::<CK_ULONG>(),
+    )]);
+    let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
+    if ret != CKR_OK {
+        return false;
+    }
+    return flag == expect;
+}
+
+#[cfg(not(feature = "fips"))]
+pub fn check_object_validation(
+    _: CK_SESSION_HANDLE,
+    _: CK_OBJECT_HANDLE,
+    _: CK_FLAGS,
+) -> bool {
+    return true;
+}
