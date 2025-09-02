@@ -3,7 +3,7 @@ use std::fs::File;
 use simplelog::{Config, LevelFilter, SimpleLogger, WriteLogger};
 
 #[used]
-#[cfg_attr(target_os = "linux", link_section = ".init_array")]
+#[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
 pub static INITIALIZE: extern "C" fn() = kryoptic_log_init;
 
 /// Initializes a simple logger for tracing purposes based on the values of
@@ -20,7 +20,7 @@ pub static INITIALIZE: extern "C" fn() = kryoptic_log_init;
 /// Valid values are: off, error, warn, info, debug, trace.
 /// Any incorrect value triggers the highest logging level: LevelFilter::Trace
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn kryoptic_log_init() {
     let level = match std::env::var("KRYOPTIC_TRACE_LEVEL") {
         Err(_) => LevelFilter::Error,
