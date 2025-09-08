@@ -182,14 +182,16 @@ pub const SHA384_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 2);
 pub const SHA512_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 3);
-pub const SHA3_224_OID: asn1::ObjectIdentifier =
-    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 224);
-pub const SHA3_256_OID: asn1::ObjectIdentifier =
-    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 256);
-pub const SHA3_384_OID: asn1::ObjectIdentifier =
-    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 384);
-pub const SHA3_512_OID: asn1::ObjectIdentifier =
-    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 512);
+// The SHA3 OIDs are wrong in pyca -- redefined in ../oids.rs
+// https://github.com/pyca/cryptography/issues/13331
+//pub const SHA3_224_OID: asn1::ObjectIdentifier =
+//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 224);
+//pub const SHA3_256_OID: asn1::ObjectIdentifier =
+//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 256);
+//pub const SHA3_384_OID: asn1::ObjectIdentifier =
+//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 384);
+//pub const SHA3_512_OID: asn1::ObjectIdentifier =
+//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 512);
 
 pub const MGF1_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 1, 8);
