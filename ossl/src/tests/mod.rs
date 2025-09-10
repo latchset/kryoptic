@@ -18,3 +18,6 @@ pub fn test_ossl_context() -> &'static crate::OsslContext {
 
 #[cfg(not(feature = "fips"))]
 mod brainpool;
+
+#[cfg(feature = "legacy")]
+mod dsa;

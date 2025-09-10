@@ -123,6 +123,9 @@ pub enum EvpPkeyType {
     SlhdsaShake256f,
     /* RSA */
     Rsa(usize, Vec<u8>),
+    /* DSA */
+    #[cfg(feature = "legacy")]
+    Dsa(usize),
 }
 
 /// Adds group name to params if needed, and returns the ossl key type name
@@ -273,6 +276,14 @@ fn pkey_type_to_params(
             )?;
             c"RSA"
         }
+        #[cfg(feature = "legacy")]
+        EvpPkeyType::Dsa(pbits) => {
+            params.add_owned_uint(
+                cstr!(OSSL_PKEY_PARAM_FFC_PBITS),
+                c_uint::try_from(*pbits)?,
+            )?;
+            c"DSA"
+        }
     };
     Ok(name)
 }
@@ -351,6 +362,12 @@ fn pkey_to_type(
             let n = params.get_bn(cstr!(OSSL_PKEY_PARAM_RSA_N))?;
             let size = n.len() * 8;
             Ok(EvpPkeyType::Rsa(size, e))
+        }
+        #[cfg(feature = "legacy")]
+        b"DSA" => {
+            let p = params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P))?;
+            let pbits = p.len() * 8;
+            Ok(EvpPkeyType::Dsa(pbits))
         }
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
@@ -640,6 +657,17 @@ impl RsaData {
     }
 }
 
+/// Structure that holds DSA key data
+#[cfg(feature = "legacy")]
+#[derive(Debug)]
+pub struct DsaData {
+    pub p: Vec<u8>,
+    pub q: Vec<u8>,
+    pub g: Vec<u8>,
+    pub priv_key: Option<OsslSecret>,
+    pub pub_key: Vec<u8>,
+}
+
 /// Wrapper to handle import/export data based on the type
 #[derive(Debug)]
 pub enum PkeyData {
@@ -648,6 +676,8 @@ pub enum PkeyData {
     Mlkey(MlkeyData),
     SlhDsaKey(SlhDsaKeyData),
     Rsa(RsaData),
+    #[cfg(feature = "legacy")]
+    Dsa(DsaData),
 }
 
 #[cfg(ossl_mldsa)]
@@ -806,6 +836,35 @@ fn params_to_rsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
     }))
 }
 
+#[cfg(feature = "legacy")]
+fn params_to_dsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
+    Ok(PkeyData::Dsa(DsaData {
+        p: match params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P)) {
+            Ok(p) => p,
+            Err(e) => return Err(e),
+        },
+        q: match params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_Q)) {
+            Ok(p) => p,
+            Err(e) => return Err(e),
+        },
+        g: match params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_G)) {
+            Ok(p) => p,
+            Err(e) => return Err(e),
+        },
+        priv_key: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY)) {
+            Ok(p) => Some(OsslSecret::from_vec(p)),
+            Err(e) => match e.kind() {
+                ErrorKind::NullPtr => None,
+                _ => return Err(e),
+            },
+        },
+        pub_key: match params.get_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
+            Ok(p) => p,
+            Err(e) => return Err(e),
+        },
+    }))
+}
+
 fn rsa_data_to_params(
     rsa: &RsaData,
     params: &mut OsslParamBuilder,
@@ -836,6 +895,23 @@ fn rsa_data_to_params(
         is_priv = true;
         params.add_bn(cstr!(OSSL_PKEY_PARAM_RSA_COEFFICIENT1), p)?;
     }
+    Ok(is_priv)
+}
+
+#[cfg(feature = "legacy")]
+fn dsa_data_to_params(
+    dsa: &DsaData,
+    params: &mut OsslParamBuilder,
+) -> Result<bool, Error> {
+    let mut is_priv = false;
+    params.add_bn(cstr!(OSSL_PKEY_PARAM_FFC_P), &dsa.p)?;
+    params.add_bn(cstr!(OSSL_PKEY_PARAM_FFC_Q), &dsa.q)?;
+    params.add_bn(cstr!(OSSL_PKEY_PARAM_FFC_G), &dsa.g)?;
+    if let Some(p) = &dsa.priv_key {
+        is_priv = true;
+        params.add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?;
+    }
+    params.add_bn(cstr!(OSSL_PKEY_PARAM_PUB_KEY), &dsa.pub_key)?;
     Ok(is_priv)
 }
 
@@ -980,7 +1056,36 @@ impl EvpPkey {
         let mut params_builder = OsslParamBuilder::new();
         let name = pkey_type_to_params(&pkey_type, &mut params_builder)?;
         let params = params_builder.finalize();
-        let mut pctx = EvpPkeyCtx::new(ctx, name, propq)?;
+        let mut pctx = match pkey_type {
+            #[cfg(feature = "legacy")]
+            EvpPkeyType::Dsa(_) => {
+                // The DSA first needs to generate domain parameters
+                // and only from them we can generate the key itself
+                let mut pctx = EvpPkeyCtx::new(ctx, name, propq)?;
+                let res = unsafe { EVP_PKEY_paramgen_init(pctx.as_mut_ptr()) };
+                if res != 1 {
+                    trace_ossl!("EVP_PKEY_paramgen_init()");
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                let res = unsafe {
+                    EVP_PKEY_CTX_set_params(pctx.as_mut_ptr(), params.as_ptr())
+                };
+                if res != 1 {
+                    trace_ossl!("EVP_PKEY_CTX_set_params()");
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                let mut pkey: *mut EVP_PKEY = std::ptr::null_mut();
+                let res =
+                    unsafe { EVP_PKEY_generate(pctx.as_mut_ptr(), &mut pkey) };
+                if res != 1 {
+                    trace_ossl!("EVP_PKEY_generate()");
+                    return Err(Error::new(ErrorKind::OsslError));
+                }
+                let mut paramkey = EvpPkey { ptr: pkey };
+                paramkey.new_ctx(ctx)?
+            }
+            _ => EvpPkeyCtx::new(ctx, name, propq)?,
+        };
         let res = unsafe { EVP_PKEY_keygen_init(pctx.as_mut_ptr()) };
         if res != 1 {
             trace_ossl!("EVP_PKEY_keygen_init()");
@@ -1204,6 +1309,17 @@ impl EvpPkey {
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
+            #[cfg(feature = "legacy")]
+            EvpPkeyType::Dsa(_) => match &data {
+                PkeyData::Dsa(dsa) => {
+                    if dsa_data_to_params(&dsa, &mut params_builder)? {
+                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                    } else {
+                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                    }
+                }
+                _ => return Err(Error::new(ErrorKind::WrapperError)),
+            },
         }
         let params = params_builder.finalize();
 
@@ -1320,6 +1436,8 @@ impl EvpPkey {
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             EvpPkeyType::Rsa(_, _) => return params_to_rsa_data(&params),
+            #[cfg(feature = "legacy")]
+            EvpPkeyType::Dsa(_) => return params_to_dsa_data(&params),
         })
     }
 
