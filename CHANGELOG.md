@@ -27,6 +27,9 @@ All notable changes to this project should be documented in this file.
 * Added support for SLH-DSA keys and operations
  - [Add support for SLH-DSA](https://github.com/latchset/kryoptic/pull/316)
 
+* Change the OSSL bindings license to Apache 2.0
+ - [Change ossl lisence to ASL 2.0](https://github.com/latchset/kryoptic/pull/322)
+
 # [1.2.0]
 ## 2025-06-09
 
