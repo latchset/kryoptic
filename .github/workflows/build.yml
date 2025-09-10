@@ -57,7 +57,7 @@ jobs:
             'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
             'perl(Module::Load::Conditional)' 'perl(File::Temp)' \
             'perl(Test::Harness)' 'perl(Test::More)' 'perl(Math::BigInt)' \
-            zlib-devel sed sqlite-devel
+            'perl(Time::Piece)' zlib-devel sed sqlite-devel
           if [ "${{ matrix.name }}" = "i686" ]; then
             dnf -y install rust-std-static.i686 openssl-devel.i686 \
               sqlite-devel.i686
