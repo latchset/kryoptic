@@ -116,12 +116,16 @@ pub enum SigAlg {
     SlhdsaShake256s,
     SlhdsaSha2_256f,
     SlhdsaShake256f,
+    #[cfg(feature = "legacy")]
+    Dsa,
 }
 
 /// Helper that indicates if a signature algorithm should use oneshot apis
 fn sigalg_is_oneshot(alg: SigAlg) -> bool {
     match alg {
         SigAlg::Ecdsa | SigAlg::Rsa | SigAlg::RsaPss | SigAlg::RsaNoPad => true,
+        #[cfg(feature = "legacy")]
+        SigAlg::Dsa => true,
         _ => false,
     }
 }
@@ -163,7 +167,7 @@ fn sigalg_uses_legacy_api(alg: SigAlg) -> bool {
     }
 }
 
-/// Helper that indicates is a signature algorithm supports updates
+/// Helper that indicates if a signature algorithm supports updates
 /// a value of None indicates autodetection should be performed
 fn sigalg_supports_updates(alg: SigAlg) -> Option<bool> {
     match alg {
@@ -176,6 +180,8 @@ fn sigalg_supports_updates(alg: SigAlg) -> Option<bool> {
         | SigAlg::Rsa
         | SigAlg::RsaPss
         | SigAlg::RsaNoPad => Some(false),
+        #[cfg(feature = "legacy")]
+        SigAlg::Dsa => Some(false),
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => None,
         SigAlg::SlhdsaSha2_128s
         | SigAlg::SlhdsaShake128s
@@ -233,6 +239,8 @@ static SLHDSASHAKE192F_NAME: &CStr = c"SLH-DSA-SHAKE-192f";
 static SLHDSASHAKE192S_NAME: &CStr = c"SLH-DSA-SHAKE-192s";
 static SLHDSASHAKE256F_NAME: &CStr = c"SLH-DSA-SHAKE-256f";
 static SLHDSASHAKE256S_NAME: &CStr = c"SLH-DSA-SHAKE-256s";
+#[cfg(feature = "legacy")]
+static DSA_NAME: &CStr = c"DSA";
 /* The following names are not actually recognized by
  * OpenSSL and will cause a fetch error if used, they
  * have been made up for completeness, and debugging */
@@ -302,6 +310,8 @@ fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
         SigAlg::SlhdsaShake192s => SLHDSASHAKE192S_NAME,
         SigAlg::SlhdsaShake256f => SLHDSASHAKE256F_NAME,
         SigAlg::SlhdsaShake256s => SLHDSASHAKE256S_NAME,
+        #[cfg(feature = "legacy")]
+        SigAlg::Dsa => DSA_NAME,
     }
 }
 
@@ -361,6 +371,8 @@ fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
         | SigAlg::SlhdsaShake192s
         | SigAlg::SlhdsaShake256f
         | SigAlg::SlhdsaShake256s => std::ptr::null(),
+        #[cfg(feature = "legacy")]
+        SigAlg::Dsa => std::ptr::null(),
     }
 }
 
