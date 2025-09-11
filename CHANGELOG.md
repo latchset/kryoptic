@@ -30,6 +30,9 @@ All notable changes to this project should be documented in this file.
 * Change the OSSL bindings license to Apache 2.0
  - [Change ossl lisence to ASL 2.0](https://github.com/latchset/kryoptic/pull/322)
 
+* Added support for DSA signature algorithm and 3DES cipher for OSSL bindings
+ - [Add support for legacy algorithms (DSA, 3DES)](https://github.com/latchset/kryoptic/pull/321)
+
 # [1.2.0]
 ## 2025-06-09
 
