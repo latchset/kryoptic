@@ -31,6 +31,7 @@ pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
         CKM_CONCATENATE_BASE_AND_DATA,
         CKM_CONCATENATE_DATA_AND_BASE,
         CKM_XOR_BASE_AND_DATA,
+        CKM_EXTRACT_KEY_FROM_KEY,
     ] {
         mechs.add_mechanism(*ckm, &(*SIMPLE_KDF_MECH));
     }
@@ -58,7 +59,8 @@ impl Mechanism for SimpleKDFMechanism {
             CKM_CONCATENATE_BASE_AND_KEY
             | CKM_CONCATENATE_BASE_AND_DATA
             | CKM_CONCATENATE_DATA_AND_BASE
-            | CKM_XOR_BASE_AND_DATA => {
+            | CKM_XOR_BASE_AND_DATA
+            | CKM_EXTRACT_KEY_FROM_KEY => {
                 Ok(Box::new(SimpleKDFOperation::new(mech)?))
             }
             _ => Err(CKR_MECHANISM_INVALID)?,

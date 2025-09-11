@@ -163,6 +163,53 @@ fn test_concatenate_kdf() {
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
 
+    // Extract key from key
+    let base_key =
+        vec![0b0011_0010u8, 0b1001_1111u8, 0b1000_0100u8, 0b1010_1001u8];
+    let base_key_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, base_key.as_slice()),],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false)
+        ],
+    ));
+    let params: CK_EXTRACT_PARAMS = 21;
+    let paramslen = sizeof!(CK_EXTRACT_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_EXTRACT_KEY_FROM_KEY,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 2),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
+
+    let exp_value = vec![0b1001_0101u8, 0b0010_0110u8];
+    let value = ret_or_panic!(extract_key_value(session, dk_handle));
+    assert_eq!(value, exp_value);
+
     testtokn.finalize();
 }
 
