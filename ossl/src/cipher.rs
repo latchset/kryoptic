@@ -118,6 +118,13 @@ pub enum EncAlg {
     AesOfb(AesSize),
     AesWrap(AesSize),
     AesWrapPad(AesSize),
+    /* 3DES */
+    #[cfg(feature = "legacy")]
+    TripleDesCfb,
+    #[cfg(feature = "legacy")]
+    TripleDesCbc,
+    #[cfg(feature = "legacy")]
+    TripleDesEcb,
 }
 
 /// Returns the Ossl name for the requested cipher
@@ -188,6 +195,12 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
             AesSize::Aes192 => c"AES-192-WRAP-PAD",
             AesSize::Aes256 => c"AES-256-WRAP-PAD",
         },
+        #[cfg(feature = "legacy")]
+        EncAlg::TripleDesCfb => c"DES-EDE3-CFB",
+        #[cfg(feature = "legacy")]
+        EncAlg::TripleDesCbc => c"DES-EDE3-CBC",
+        #[cfg(feature = "legacy")]
+        EncAlg::TripleDesEcb => c"DES-EDE3-ECB",
     }
 }
 

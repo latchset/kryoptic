@@ -21,3 +21,6 @@ mod brainpool;
 
 #[cfg(feature = "legacy")]
 mod dsa;
+
+#[cfg(feature = "legacy")]
+mod tripledes;
