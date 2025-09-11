@@ -41,7 +41,6 @@ fn do_dsa_test(
             priv_key: Some(OsslSecret::from_slice(&x)),
             pub_key: y.clone(),
         }),
-        None,
     )
     .unwrap();
 
@@ -56,7 +55,6 @@ fn do_dsa_test(
             priv_key: None,
             pub_key: y,
         }),
-        None,
     )
     .unwrap();
 
@@ -213,8 +211,7 @@ fn test_dsa_1k() {
 fn test_dsa_generate() {
     // Generate a key pair
     let mut key =
-        EvpPkey::generate(test_ossl_context(), EvpPkeyType::Dsa(3072), None)
-            .unwrap();
+        EvpPkey::generate(test_ossl_context(), EvpPkeyType::Dsa(3072)).unwrap();
 
     // Sample data to sign.
     let data = b"some sample data to sign";

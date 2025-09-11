@@ -187,7 +187,7 @@ impl Derive for ECDHOperation {
 
         let mut secret = vec![0u8; raw_max];
         let outlen = ecdh.derive(
-            &mut pkey.make_peer(osslctx(), &ec_point, None)?,
+            &mut pkey.make_peer(osslctx(), &ec_point)?,
             secret.as_mut_slice(),
         )?;
         secret.resize(outlen, 0);

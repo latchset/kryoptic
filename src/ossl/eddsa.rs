@@ -86,7 +86,6 @@ pub fn eddsa_object_to_pkey(
                 pubkey: Some(get_ec_point_from_obj(key)?),
                 prikey: None,
             }),
-            None,
         )?),
         CKO_PRIVATE_KEY => Ok(EvpPkey::import(
             osslctx(),
@@ -97,7 +96,6 @@ pub fn eddsa_object_to_pkey(
                     key.get_attr_as_bytes(CKA_VALUE)?.to_vec(),
                 )),
             }),
-            None,
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
@@ -203,11 +201,8 @@ impl EddsaOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let pkey = EvpPkey::generate(
-            osslctx(),
-            get_evp_pkey_type_from_obj(pubkey)?,
-            None,
-        )?;
+        let pkey =
+            EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
         let mut ecc = match pkey.export()? {
             PkeyData::Ecc(e) => e,
             _ => return Err(CKR_GENERAL_ERROR)?,

@@ -126,7 +126,6 @@ pub fn slhdsa_object_to_pkey(
                 pubkey: Some(key.get_attr_as_bytes(CKA_VALUE)?.clone()),
                 prikey: None,
             }),
-            None,
         )?),
         CKO_PRIVATE_KEY => Ok(EvpPkey::import(
             osslctx(),
@@ -137,7 +136,6 @@ pub fn slhdsa_object_to_pkey(
                     key.get_attr_as_bytes(CKA_VALUE)?.clone(),
                 )),
             }),
-            None,
         )?),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
@@ -802,7 +800,6 @@ pub fn generate_keypair(
     let pkey = EvpPkey::generate(
         osslctx(),
         slhdsa_param_set_to_pkey_type(param_set)?,
-        None,
     )?;
     let mut mlk = match pkey.export()? {
         PkeyData::SlhDsaKey(m) => m,
