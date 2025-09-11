@@ -43,12 +43,11 @@ fn do_ecdh_test(
             pubkey: None,
             prikey: Some(OsslSecret::from_slice(&da)),
         }),
-        None,
     )
     .unwrap();
 
     let mut peer_b = key_a
-        .make_peer(test_ossl_context(), &pub_b_uncompressed, None)
+        .make_peer(test_ossl_context(), &pub_b_uncompressed)
         .unwrap();
     let mut ecdh_a = EcdhDerive::new(test_ossl_context(), &mut key_a).unwrap();
     let mut shared_secret_a = vec![0u8; expected_z.len()];
@@ -65,12 +64,11 @@ fn do_ecdh_test(
             pubkey: None,
             prikey: Some(OsslSecret::from_slice(&db)),
         }),
-        None,
     )
     .unwrap();
 
     let mut peer_a = key_b
-        .make_peer(test_ossl_context(), &pub_a_uncompressed, None)
+        .make_peer(test_ossl_context(), &pub_a_uncompressed)
         .unwrap();
     let mut ecdh_b = EcdhDerive::new(test_ossl_context(), &mut key_b).unwrap();
     let mut shared_secret_b = vec![0u8; expected_z.len()];
@@ -194,12 +192,9 @@ use crate::signature::{OsslSignature, SigAlg, SigOp};
 #[parallel]
 fn test_brainpool_p256r1_signature() {
     // Generate a key pair
-    let mut key = EvpPkey::generate(
-        test_ossl_context(),
-        EvpPkeyType::BrainpoolP256r1,
-        None,
-    )
-    .unwrap();
+    let mut key =
+        EvpPkey::generate(test_ossl_context(), EvpPkeyType::BrainpoolP256r1)
+            .unwrap();
 
     // Sample data to sign. Use ECDSA without a pre-computed digest.
     let data = b"some sample data to sign";
