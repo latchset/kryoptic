@@ -72,6 +72,8 @@ pub struct SimpleKDFOperation {
     key_info: Option<KeyInfo>,
     /// The additional data to concatenate
     data: Option<Vec<u8>>,
+    /// The bit offset for CKM_EXTRACT_KEY_FROM_KEY
+    bit_offset: Option<CK_ULONG>,
     #[cfg(feature = "fips")]
     fips_approval: FipsApproval,
 }
@@ -93,6 +95,7 @@ impl SimpleKDFOperation {
                     key_handle: Some([object_handle]),
                     key_info: None,
                     data: None,
+                    bit_offset: None,
                     #[cfg(feature = "fips")]
                     fips_approval: FipsApproval::init(),
                 })
@@ -112,6 +115,20 @@ impl SimpleKDFOperation {
                     key_handle: None,
                     key_info: None,
                     data: Some(data),
+                    bit_offset: None,
+                    #[cfg(feature = "fips")]
+                    fips_approval: FipsApproval::init(),
+                })
+            }
+            CKM_EXTRACT_KEY_FROM_KEY => {
+                let params = cast_params!(mech, CK_EXTRACT_PARAMS);
+                Ok(SimpleKDFOperation {
+                    finalized: false,
+                    mech: mech.mechanism,
+                    key_handle: None,
+                    key_info: None,
+                    data: None,
+                    bit_offset: Some(params),
                     #[cfg(feature = "fips")]
                     fips_approval: FipsApproval::init(),
                 })
@@ -222,13 +239,30 @@ impl Derive for SimpleKDFOperation {
                     None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 }
             }
+            CKM_EXTRACT_KEY_FROM_KEY => {
+                if base_key_info.sensitive {
+                    tmpl.add_bool(CKA_SENSITIVE, &CK_TRUE);
+                }
+                if !base_key_info.extractable {
+                    tmpl.add_bool(CKA_EXTRACTABLE, &CK_FALSE);
+                }
+                if base_key_info.always_sensitive {
+                    tmpl.add_bool(CKA_ALWAYS_SENSITIVE, &CK_TRUE);
+                }
+                if base_key_info.never_extractable {
+                    tmpl.add_bool(CKA_NEVER_EXTRACTABLE, &CK_TRUE);
+                }
+                0
+            }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
 
-        let outlen = if self.mech == CKM_XOR_BASE_AND_DATA {
-            std::cmp::min(base_key_info.value.len(), other_data_len)
-        } else {
-            base_key_info.value.len() + other_data_len
+        let outlen = match self.mech {
+            CKM_XOR_BASE_AND_DATA => {
+                std::cmp::min(base_key_info.value.len(), other_data_len)
+            }
+            CKM_EXTRACT_KEY_FROM_KEY => base_key_info.value.len(),
+            _ => base_key_info.value.len() + other_data_len,
         };
 
         let factory =
@@ -248,7 +282,17 @@ impl Derive for SimpleKDFOperation {
             }
         };
 
-        if keylen > outlen {
+        if self.mech == CKM_EXTRACT_KEY_FROM_KEY {
+            let bit_offset =
+                self.bit_offset.ok_or(CKR_MECHANISM_PARAM_INVALID)?;
+            let required_bits = keylen * 8;
+            let available_bits = base_key_info.value.len() * 8;
+            if (required_bits > available_bits)
+                || (bit_offset + 7) / 8 > available_bits as CK_ULONG
+            {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        } else if keylen > outlen {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
@@ -292,6 +336,26 @@ impl Derive for SimpleKDFOperation {
                     .zip(base_key_info.value.iter())
                     .for_each(|(k, b)| *k ^= *b);
                 secret.resize(keylen, 0);
+            }
+            CKM_EXTRACT_KEY_FROM_KEY => {
+                let bit_offset =
+                    self.bit_offset.ok_or(CKR_MECHANISM_PARAM_INVALID)?
+                        as usize;
+                secret.resize(keylen, 0);
+
+                /* TODO: optimize this using u128::rotate_left() */
+                let bit_shift = bit_offset % 8;
+                let base_byte = (bit_offset - bit_shift) / 8;
+
+                for i in 0..keylen {
+                    let first_half = base_key_info.value
+                        [(base_byte + i) % outlen]
+                        << bit_shift;
+                    let second_half = base_key_info.value
+                        [(base_byte + i + 1) % outlen]
+                        >> (8 - bit_shift);
+                    secret[i] = first_half | second_half;
+                }
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,
         }
