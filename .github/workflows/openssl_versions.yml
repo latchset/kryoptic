@@ -148,15 +148,15 @@ jobs:
 
       - name: Build & test
         run: |
-          FEATURES="none"
+          FEATURES="ossl/legacy"
           OPTS="--no-default-features"
 
           if [ "${{ matrix.version }}" = "3.0" ]; then
-            FEATURES="minimal"
+            FEATURES="$FEATURES,minimal"
           elif [ "${{ matrix.version }}" = "3.2" ]; then
-            FEATURES="minimal,eddsa"
+            FEATURES="$FEATURES,minimal,eddsa"
           elif [ "${{ matrix.version }}" = "3.5" ]; then
-            FEATURES="minimal,eddsa,mldsa,slhdsa,no_sha1"
+            FEATURES="$FEATURES,minimal,eddsa,mldsa,slhdsa,no_sha1"
           fi
 
           if [ "${{ matrix.build }}" = "false" ]; then
