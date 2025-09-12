@@ -19,6 +19,7 @@ pub mod bindings {
 
 use std::borrow::Cow;
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
+use std::path::Path;
 
 use crate::bindings::*;
 
@@ -217,6 +218,29 @@ impl OsslContext {
     #[allow(dead_code)]
     pub(crate) fn from_ctx(ctx: *mut OSSL_LIB_CTX) -> OsslContext {
         OsslContext { context: ctx }
+    }
+
+    pub fn load_configuration_file(
+        self,
+        fname: Option<&Path>,
+    ) -> Result<(), Error> {
+        let filename: *const c_char = match fname {
+            Some(f) => {
+                f.as_os_str().as_encoded_bytes().as_ptr() as *const c_char
+            }
+            None => std::ptr::null(),
+        };
+        let ret = unsafe { OSSL_LIB_CTX_load_config(self.ptr(), filename) };
+        if ret != 1 {
+            trace_ossl!("OSSL_LIB_CTX_load_config()");
+            Err(Error::new(ErrorKind::OsslError))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn load_default_configuration(self) -> Result<(), Error> {
+        self.load_configuration_file(None)
     }
 
     pub fn ptr(&self) -> *mut OSSL_LIB_CTX {
