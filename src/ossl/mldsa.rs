@@ -110,9 +110,10 @@ pub fn mldsa_object_to_pkey(
             mldsa_param_set_to_pkey_type(param_set)?,
             PkeyData::Mlkey(MlkeyData {
                 pubkey: None,
-                prikey: Some(OsslSecret::from_vec(
-                    key.get_attr_as_bytes(CKA_VALUE)?.clone(),
-                )),
+                prikey: match key.get_attr_as_bytes(CKA_VALUE) {
+                    Ok(s) => Some(OsslSecret::from_vec(s.clone())),
+                    Err(_) => None,
+                },
                 seed: match key.get_attr_as_bytes(CKA_SEED) {
                     Ok(s) => Some(OsslSecret::from_vec(s.clone())),
                     Err(_) => None,
