@@ -166,21 +166,21 @@ impl PubKeyFactory for MlKemPubFactory {}
 /// seed value (if provided) is of the correct size.
 ///
 /// Finally checks that at least one of CKA_VALUE and CKA_SEED are provided
-fn mlkem_priv_check_import(obj: &Object) -> Result<()> {
+fn mlkem_priv_check_import(obj: &mut Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
         Ok(p) => p,
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     };
-    let has_seed = match obj.get_attr_as_bytes(CKA_SEED) {
-        Ok(seed) => {
-            if seed.len() != 64 {
+    let seed = match obj.get_attr_as_bytes(CKA_SEED) {
+        Ok(s) => {
+            if s.len() != 64 {
                 return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
             }
-            true
+            Some(s)
         }
-        Err(_) => false,
+        Err(_) => None,
     };
-    let has_val = match obj.get_attr_as_bytes(CKA_VALUE) {
+    let key = match obj.get_attr_as_bytes(CKA_VALUE) {
         Ok(value) => {
             match paramset {
                 CKP_ML_KEM_512 => {
@@ -200,12 +200,17 @@ fn mlkem_priv_check_import(obj: &Object) -> Result<()> {
                 }
                 _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
             }
-            true
+            Some(value)
         }
-        Err(_) => false,
+        Err(_) => None,
     };
-    if !has_seed && !has_val {
+    if seed.is_none() && key.is_none() {
         return Err(CKR_TEMPLATE_INCOMPLETE)?;
+    }
+    if let Some(seedv) = seed {
+        if let Some(val) = mlkem::verify_private_key(paramset, seedv, key)? {
+            obj.set_attr(Attribute::from_bytes(CKA_VALUE, val))?;
+        }
     }
 
     Ok(())
