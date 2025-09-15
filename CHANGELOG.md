@@ -33,6 +33,11 @@ All notable changes to this project should be documented in this file.
 * Added support for DSA signature algorithm and 3DES cipher for OSSL bindings
  - [Add support for legacy algorithms (DSA, 3DES)](https://github.com/latchset/kryoptic/pull/321)
 
+* Added support for automatically deriving Private Key value from seed for
+  ML-DSA and ML-KEM
+  - [Handle imports where only the Seed is
+     provided](https://github.com/latchset/kryoptic/pull/330)
+
 # [1.2.0]
 ## 2025-06-09
 
