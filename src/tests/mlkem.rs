@@ -468,3 +468,66 @@ fn test_mlkem_decap_vector() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_mlkem_seedonly() {
+    let mut testtokn = TestToken::initialized("test_mlkem_seedonly", None);
+
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let (_, privkey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_KEM_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+        ],
+        &[],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM)],
+        &[(CKA_LABEL, format!("ML-KEM private key 1").as_bytes()),],
+        &[
+            (CKA_SIGN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true)
+        ],
+    ));
+
+    /* extract the private seed, and create a new private key with the seed only.
+     * Test that it has a private value and it matches the original key's one */
+    let seed = ret_or_panic!(extract_value(session, privkey, CKA_SEED));
+
+    let privkey2 = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+        ],
+        &[
+            (CKA_SEED, &seed),
+            (CKA_LABEL, format!("ML-KEM private key 2").as_bytes()),
+        ],
+        &[
+            (CKA_SIGN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true)
+        ],
+    ));
+
+    let value = ret_or_panic!(extract_key_value(session, privkey));
+    if let Some(err) = check_attributes(
+        session,
+        privkey2,
+        &[],
+        &[(CKA_VALUE, value.as_slice())],
+        &[],
+    ) {
+        panic!("{}", err);
+    }
+}
