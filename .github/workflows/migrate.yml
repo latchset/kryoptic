@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         name: [standard]
-    container: fedora:latest
+    container: quay.io/fedora/fedora:latest
     steps:
       - name: Get Date for DNF cache entry
         id: get-date
