@@ -21,19 +21,19 @@ jobs:
             version: "3.0"
             repotype: "dnf"
             repocachepath: "/var/cache/libdnf5"
-            container: fedora:latest
+            container: quay.io/fedora/fedora:latest
           - name: ossl32
             build: true
             version: "3.2"
             repotype: "dnf"
             repocachepath: "/var/cache/libdnf5"
-            container: fedora:latest
+            container: quay.io/fedora/fedora:latest
           - name: ossl35
             build: true
             version: "3.5"
             repotype: "dnf"
             repocachepath: "/var/cache/libdnf5"
-            container: fedora:latest
+            container: quay.io/fedora/fedora:latest
           - name: debian
             build: false
             version: "3.5"

@@ -34,7 +34,7 @@ jobs:
             linking: static
           - name: no_sha1
             linking: fips
-    container: fedora:latest
+    container: quay.io/fedora/fedora:latest
     steps:
       - name: Get Date for DNF cache entry
         id: get-date
