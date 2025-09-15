@@ -4250,7 +4250,7 @@ extern "C" fn fn_wrap_key_authenticated(
     _wrapping_key_handle: CK_OBJECT_HANDLE,
     _key_handle: CK_OBJECT_HANDLE,
     _auth_data: CK_BYTE_PTR,
-    _pul_auth_data_len: CK_ULONG_PTR,
+    _auth_data_len: CK_ULONG,
     _wrapped_key: CK_BYTE_PTR,
     _pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
