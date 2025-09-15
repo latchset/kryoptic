@@ -7,7 +7,7 @@
 // 2.0, and the BSD License. See the LICENSE file in the root of this repository
 // for complete details.
 
-use asn1::Asn1DefinedByWritable;
+use asn1::{Asn1DefinedByWritable, SimpleAsn1Writable};
 
 //use crate::oid;
 
@@ -54,6 +54,14 @@ pub enum AlgorithmParameters<'a> {
     Sha3_384(Option<asn1::Null>),
     #[defined_by(oid::SHA3_512_OID)]
     Sha3_512(Option<asn1::Null>),
+    #[defined_by(oid::SHA3_224_NIST_OID)]
+    Sha3_224Nist(Option<asn1::Null>),
+    #[defined_by(oid::SHA3_256_NIST_OID)]
+    Sha3_256Nist(Option<asn1::Null>),
+    #[defined_by(oid::SHA3_384_NIST_OID)]
+    Sha3_384Nist(Option<asn1::Null>),
+    #[defined_by(oid::SHA3_512_NIST_OID)]
+    Sha3_512Nist(Option<asn1::Null>),
 
     #[defined_by(oid::ED25519_OID)]
     Ed25519,
@@ -180,10 +188,14 @@ pub enum AlgorithmParameters<'a> {
     #[defined_by(oid::RC2_CBC)]
     Rc2Cbc(Rc2CbcParams),
 
-    #[defined_by(oid::PBES1_WITH_SHA_AND_3KEY_TRIPLEDES_CBC)]
-    Pbes1WithShaAnd3KeyTripleDesCbc(PBES1Params),
-    #[defined_by(oid::PBES1_WITH_SHA_AND_40_BIT_RC2_CBC)]
-    Pbe1WithShaAnd40BitRc2Cbc(PBES1Params),
+    #[defined_by(oid::PBE_WITH_MD5_AND_DES_CBC)]
+    PbeWithMd5AndDesCbc(PbeParams),
+    #[defined_by(oid::PBE_WITH_SHA_AND_128_BIT_RC4)]
+    PbeWithShaAnd128BitRc4(Pkcs12PbeParams<'a>),
+    #[defined_by(oid::PBE_WITH_SHA_AND_3KEY_TRIPLEDES_CBC)]
+    PbeWithShaAnd3KeyTripleDesCbc(Pkcs12PbeParams<'a>),
+    #[defined_by(oid::PBE_WITH_SHA_AND_40_BIT_RC2_CBC)]
+    PbeWithShaAnd40BitRc2Cbc(Pkcs12PbeParams<'a>),
 
     /* NOTE: Additional Identifiers not originally in pyca's file. */
     #[defined_by(oid::MLDSA44_OID)]
@@ -238,7 +250,28 @@ pub struct SubjectPublicKeyInfo<'a> {
 #[derive(asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone)]
 pub struct AttributeTypeValue<'a> {
     pub type_id: asn1::ObjectIdentifier,
-    pub value: RawTlv<'a>,
+    pub value: AttributeValue<'a>,
+}
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone)]
+pub enum AttributeValue<'a> {
+    UniversalString(asn1::UniversalString<'a>),
+    BmpString(asn1::BMPString<'a>),
+    PrintableString(asn1::PrintableString<'a>),
+
+    // Must be last, because enums parse things in order.
+    AnyString(RawTlv<'a>),
+}
+
+impl AttributeValue<'_> {
+    pub fn tag(&self) -> asn1::Tag {
+        match self {
+            AttributeValue::AnyString(tlv) => tlv.tag(),
+            AttributeValue::PrintableString(_) => asn1::PrintableString::TAG,
+            AttributeValue::UniversalString(_) => asn1::UniversalString::TAG,
+            AttributeValue::BmpString(_) => asn1::BMPString::TAG,
+        }
+    }
 }
 
 // Like `asn1::Tlv` but doesn't store `full_data` so it can be constructed from
@@ -273,7 +306,14 @@ impl<'a> asn1::Asn1Readable<'a> for RawTlv<'a> {
 }
 impl asn1::Asn1Writable for RawTlv<'_> {
     fn write(&self, w: &mut asn1::Writer<'_>) -> asn1::WriteResult {
-        w.write_tlv(self.tag, move |dest| dest.push_slice(self.value))
+        w.write_tlv(self.tag, Some(self.value.len()), move |dest| {
+            dest.push_slice(self.value)
+        })
+    }
+
+    fn encoded_length(&self) -> Option<usize> {
+        // TODO: we're missing an API to make this easy.
+        None
     }
 }
 
@@ -334,6 +374,13 @@ impl<T: asn1::SimpleAsn1Writable, U: asn1::SimpleAsn1Writable>
         match self {
             Asn1ReadableOrWritable::Read(v) => T::write_data(v, w),
             Asn1ReadableOrWritable::Write(v) => U::write_data(v, w),
+        }
+    }
+
+    fn data_length(&self) -> Option<usize> {
+        match self {
+            Asn1ReadableOrWritable::Read(v) => T::data_length(v),
+            Asn1ReadableOrWritable::Write(v) => U::data_length(v),
         }
     }
 }
@@ -583,11 +630,21 @@ pub struct ScryptParams<'a> {
     pub key_length: Option<u32>,
 }
 
+// RFC 8018 Appendix A.3
 #[derive(
     asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
 )]
-pub struct PBES1Params {
+pub struct PbeParams {
     pub salt: [u8; 8],
+    pub iterations: u64,
+}
+
+// From RFC 7202 Appendix C
+#[derive(
+    asn1::Asn1Read, asn1::Asn1Write, PartialEq, Eq, Hash, Clone, Debug,
+)]
+pub struct Pkcs12PbeParams<'a> {
+    pub salt: &'a [u8],
     pub iterations: u64,
 }
 
@@ -611,7 +668,8 @@ impl<'a> UnvalidatedVisibleString<'a> {
 }
 
 impl<'a> asn1::SimpleAsn1Readable<'a> for UnvalidatedVisibleString<'a> {
-    const TAG: asn1::Tag = asn1::VisibleString::TAG;
+    const TAG: asn1::Tag =
+        <asn1::VisibleString<'_> as asn1::SimpleAsn1Readable>::TAG;
     fn parse_data(data: &'a [u8]) -> asn1::ParseResult<Self> {
         Ok(UnvalidatedVisibleString(
             std::str::from_utf8(data).map_err(|_| {
@@ -625,6 +683,10 @@ impl asn1::SimpleAsn1Writable for UnvalidatedVisibleString<'_> {
     const TAG: asn1::Tag = asn1::VisibleString::TAG;
     fn write_data(&self, _: &mut asn1::WriteBuf) -> asn1::WriteResult {
         unimplemented!();
+    }
+
+    fn data_length(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -644,6 +706,10 @@ impl asn1::SimpleAsn1Writable for Utf8StoredBMPString<'_> {
             writer.push_slice(&ch.to_be_bytes())?;
         }
         Ok(())
+    }
+
+    fn data_length(&self) -> Option<usize> {
+        Some(self.0.encode_utf16().count() * 2)
     }
 }
 
@@ -684,6 +750,10 @@ impl<'a, T: asn1::Asn1Readable<'a>> asn1::Asn1Readable<'a> for WithTlv<'a, T> {
 impl<T: asn1::Asn1Writable> asn1::Asn1Writable for WithTlv<'_, T> {
     fn write(&self, w: &mut asn1::Writer<'_>) -> asn1::WriteResult<()> {
         self.value.write(w)
+    }
+
+    fn encoded_length(&self) -> Option<usize> {
+        self.value.encoded_length()
     }
 }
 

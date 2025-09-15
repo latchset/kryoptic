@@ -466,10 +466,10 @@ impl SlhDsaOperation {
             CKM_SHA256 => SHA256_OID,
             CKM_SHA384 => SHA384_OID,
             CKM_SHA512 => SHA512_OID,
-            CKM_SHA3_224 => SHA3_224_OID,
-            CKM_SHA3_256 => SHA3_256_OID,
-            CKM_SHA3_384 => SHA3_384_OID,
-            CKM_SHA3_512 => SHA3_512_OID,
+            CKM_SHA3_224 => SHA3_224_NIST_OID,
+            CKM_SHA3_256 => SHA3_256_NIST_OID,
+            CKM_SHA3_384 => SHA3_384_NIST_OID,
+            CKM_SHA3_512 => SHA3_512_NIST_OID,
             /* TODO SHAKE hashes? */
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
