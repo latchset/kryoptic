@@ -573,12 +573,13 @@ pub fn check_attributes(
     None
 }
 
-pub fn extract_key_value(
+pub fn extract_value(
     session: CK_SESSION_HANDLE,
     handle: CK_OBJECT_HANDLE,
+    attribute: CK_ATTRIBUTE_TYPE,
 ) -> Result<Vec<u8>> {
     let mut extract_template =
-        make_ptrs_template(&[(CKA_VALUE, std::ptr::null_mut(), 0)]);
+        make_ptrs_template(&[(attribute, std::ptr::null_mut(), 0)]);
     let ret = fn_get_attribute_value(
         session,
         handle,
@@ -605,6 +606,13 @@ pub fn extract_key_value(
         return Err(CKR_DATA_LEN_RANGE)?;
     }
     Ok(value)
+}
+
+pub fn extract_key_value(
+    session: CK_SESSION_HANDLE,
+    handle: CK_OBJECT_HANDLE,
+) -> Result<Vec<u8>> {
+    extract_value(session, handle, CKA_VALUE)
 }
 
 #[cfg(feature = "fips")]
