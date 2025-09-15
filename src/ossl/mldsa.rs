@@ -18,6 +18,7 @@ use crate::{bytes_to_vec, cast_params};
 
 use asn1;
 use bitflags::bitflags;
+use constant_time_eq::constant_time_eq;
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use ossl::signature::{mldsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::{OsslParam, OsslSecret};
@@ -802,4 +803,47 @@ pub fn generate_keypair(
     }
 
     Ok(())
+}
+
+/// Verifies that a given private key corresponds to a given seed for a
+/// specific ML-DSA parameter set.
+///
+/// If `privkey` is `Some`, it compares the provided key against the one
+/// derived from the seed in constant time.
+/// If `privkey` is `None`, it derives and returns the private key from
+/// the seed.
+///
+/// This is useful for `C_CreateObject` to either validate a provided
+/// private key or to derive it when only the seed is given.
+pub fn verify_private_key(
+    paramset: CK_ULONG,
+    seed: &Vec<u8>,
+    privkey: Option<&Vec<u8>>,
+) -> Result<Option<Vec<u8>>> {
+    let pkey = EvpPkey::import(
+        osslctx(),
+        mldsa_param_set_to_pkey_type(paramset)?,
+        PkeyData::Mlkey(MlkeyData {
+            pubkey: None,
+            prikey: None,
+            seed: Some(OsslSecret::from_vec(seed.clone())),
+        }),
+    )?;
+
+    if let Some(pkey_priv) = match pkey.export()? {
+        PkeyData::Mlkey(mut mldsa) => mldsa.prikey.take(),
+        _ => Err(CKR_KEY_INDIGESTIBLE)?,
+    } {
+        if let Some(in_priv) = privkey {
+            if constant_time_eq(&in_priv, &pkey_priv) {
+                Ok(None)
+            } else {
+                Err(CKR_KEY_INDIGESTIBLE)?
+            }
+        } else {
+            Ok(Some(pkey_priv.to_vec()))
+        }
+    } else {
+        Err(CKR_KEY_INDIGESTIBLE)?
+    }
 }
