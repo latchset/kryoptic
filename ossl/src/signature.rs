@@ -116,7 +116,7 @@ pub enum SigAlg {
     SlhdsaShake256s,
     SlhdsaSha2_256f,
     SlhdsaShake256f,
-    #[cfg(feature = "legacy")]
+    #[cfg(feature = "rfc9580")]
     Dsa,
 }
 
@@ -124,7 +124,7 @@ pub enum SigAlg {
 fn sigalg_is_oneshot(alg: SigAlg) -> bool {
     match alg {
         SigAlg::Ecdsa | SigAlg::Rsa | SigAlg::RsaPss | SigAlg::RsaNoPad => true,
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         SigAlg::Dsa => true,
         _ => false,
     }
@@ -180,7 +180,7 @@ fn sigalg_supports_updates(alg: SigAlg) -> Option<bool> {
         | SigAlg::Rsa
         | SigAlg::RsaPss
         | SigAlg::RsaNoPad => Some(false),
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         SigAlg::Dsa => Some(false),
         SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => None,
         SigAlg::SlhdsaSha2_128s
@@ -239,7 +239,7 @@ static SLHDSASHAKE192F_NAME: &CStr = c"SLH-DSA-SHAKE-192f";
 static SLHDSASHAKE192S_NAME: &CStr = c"SLH-DSA-SHAKE-192s";
 static SLHDSASHAKE256F_NAME: &CStr = c"SLH-DSA-SHAKE-256f";
 static SLHDSASHAKE256S_NAME: &CStr = c"SLH-DSA-SHAKE-256s";
-#[cfg(feature = "legacy")]
+#[cfg(feature = "rfc9580")]
 static DSA_NAME: &CStr = c"DSA";
 /* The following names are not actually recognized by
  * OpenSSL and will cause a fetch error if used, they
@@ -310,7 +310,7 @@ fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
         SigAlg::SlhdsaShake192s => SLHDSASHAKE192S_NAME,
         SigAlg::SlhdsaShake256f => SLHDSASHAKE256F_NAME,
         SigAlg::SlhdsaShake256s => SLHDSASHAKE256S_NAME,
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         SigAlg::Dsa => DSA_NAME,
     }
 }
@@ -371,7 +371,7 @@ fn sigalg_to_digest_ptr(alg: SigAlg) -> *const c_char {
         | SigAlg::SlhdsaShake192s
         | SigAlg::SlhdsaShake256f
         | SigAlg::SlhdsaShake256s => std::ptr::null(),
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         SigAlg::Dsa => std::ptr::null(),
     }
 }

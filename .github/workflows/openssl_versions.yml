@@ -148,7 +148,7 @@ jobs:
 
       - name: Build & test
         run: |
-          FEATURES="ossl/legacy"
+          FEATURES="ossl/rfc9580"
           OPTS="--no-default-features"
 
           if [ "${{ matrix.version }}" = "3.0" ]; then
