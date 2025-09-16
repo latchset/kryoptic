@@ -38,6 +38,10 @@ All notable changes to this project should be documented in this file.
   - [Handle imports where only the Seed is
      provided](https://github.com/latchset/kryoptic/pull/330)
 
+* Openssl context now loads the default openssl confgiuration file by default
+  - [Load default openssl config when
+     possible](https://github.com/latchset/kryoptic/pull/333)
+
 # [1.2.0]
 ## 2025-06-09
 

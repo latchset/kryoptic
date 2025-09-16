@@ -4,7 +4,17 @@
 /// The static instance of the library context lazily created on first use
 #[cfg(not(feature = "fips"))]
 static OSSL_CONTEXT: ::std::sync::LazyLock<::ossl::OsslContext> =
-    ::std::sync::LazyLock::new(|| ::ossl::OsslContext::new_lib_ctx());
+    ::std::sync::LazyLock::new(|| {
+        let mut ctx = ::ossl::OsslContext::new_lib_ctx();
+        /* Failing to load the default configuration file is not
+         * considered fatal as there are cases when the config
+         * file is not available in the location built into the
+         * openssl code. For example in CI static build the
+         * canonical location is set to /usr/local/ssl/openssl.cnf
+         * but there is no file at that path in the containers */
+        let _ = ctx.load_default_configuration();
+        ctx
+    });
 
 pub mod aes;
 pub mod common;
