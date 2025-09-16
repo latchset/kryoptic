@@ -206,22 +206,29 @@ pub(crate) use trace_ossl;
 /// A structure representing the main crypto library context
 pub struct OsslContext {
     context: *mut OSSL_LIB_CTX,
+    providers: Vec<*mut OSSL_PROVIDER>,
 }
+
+static LEGACY_PROVIDER_NAME: &CStr = c"legacy";
 
 impl OsslContext {
     pub fn new_lib_ctx() -> OsslContext {
         OsslContext {
             context: unsafe { OSSL_LIB_CTX_new() },
+            providers: Vec::new(),
         }
     }
 
     #[allow(dead_code)]
     pub(crate) fn from_ctx(ctx: *mut OSSL_LIB_CTX) -> OsslContext {
-        OsslContext { context: ctx }
+        OsslContext {
+            context: ctx,
+            providers: Vec::new(),
+        }
     }
 
     pub fn load_configuration_file(
-        &self,
+        &mut self,
         fname: Option<&Path>,
     ) -> Result<(), Error> {
         let filename: *const c_char = match fname {
@@ -239,8 +246,27 @@ impl OsslContext {
         }
     }
 
-    pub fn load_default_configuration(&self) -> Result<(), Error> {
+    pub fn load_default_configuration(&mut self) -> Result<(), Error> {
         self.load_configuration_file(None)
+    }
+
+    pub fn load_legacy_provider(&mut self) -> Result<(), Error> {
+        if unsafe {
+            OSSL_PROVIDER_available(self.ptr(), LEGACY_PROVIDER_NAME.as_ptr())
+        } == 1
+        {
+            return Ok(());
+        }
+
+        let provider = unsafe {
+            OSSL_PROVIDER_load(self.ptr(), LEGACY_PROVIDER_NAME.as_ptr())
+        };
+        if provider.is_null() {
+            Err(Error::new(ErrorKind::OsslError))
+        } else {
+            self.providers.push(provider);
+            Ok(())
+        }
     }
 
     pub fn ptr(&self) -> *mut OSSL_LIB_CTX {
@@ -251,6 +277,9 @@ impl OsslContext {
 impl Drop for OsslContext {
     fn drop(&mut self) {
         unsafe {
+            while let Some(provider) = self.providers.pop() {
+                OSSL_PROVIDER_unload(provider);
+            }
             OSSL_LIB_CTX_free(self.context);
         }
     }

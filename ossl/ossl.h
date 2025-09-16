@@ -12,6 +12,7 @@
 #include "openssl/obj_mac.h"
 #include "openssl/kdf.h"
 #include "openssl/err.h"
+#include "openssl/provider.h"
 
 #ifdef _KRYOPTIC_FIPS_
 #include "crypto/evp.h"
