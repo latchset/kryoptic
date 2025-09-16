@@ -221,7 +221,7 @@ impl OsslContext {
     }
 
     pub fn load_configuration_file(
-        self,
+        &self,
         fname: Option<&Path>,
     ) -> Result<(), Error> {
         let filename: *const c_char = match fname {
@@ -239,7 +239,7 @@ impl OsslContext {
         }
     }
 
-    pub fn load_default_configuration(self) -> Result<(), Error> {
+    pub fn load_default_configuration(&self) -> Result<(), Error> {
         self.load_configuration_file(None)
     }
 
