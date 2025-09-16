@@ -119,7 +119,7 @@ pub enum EvpPkeyType {
     /* RSA */
     Rsa(usize, Vec<u8>),
     /* DSA */
-    #[cfg(feature = "legacy")]
+    #[cfg(feature = "rfc9580")]
     Dsa(usize),
 }
 
@@ -271,7 +271,7 @@ fn pkey_type_to_params(
             )?;
             c"RSA"
         }
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         EvpPkeyType::Dsa(pbits) => {
             params.add_owned_uint(
                 cstr!(OSSL_PKEY_PARAM_FFC_PBITS),
@@ -358,7 +358,7 @@ fn pkey_to_type(
             let size = n.len() * 8;
             Ok(EvpPkeyType::Rsa(size, e))
         }
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         b"DSA" => {
             let p = params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P))?;
             let pbits = p.len() * 8;
@@ -653,7 +653,7 @@ impl RsaData {
 }
 
 /// Structure that holds DSA key data
-#[cfg(feature = "legacy")]
+#[cfg(feature = "rfc9580")]
 #[derive(Debug)]
 pub struct DsaData {
     pub p: Vec<u8>,
@@ -671,7 +671,7 @@ pub enum PkeyData {
     Mlkey(MlkeyData),
     SlhDsaKey(SlhDsaKeyData),
     Rsa(RsaData),
-    #[cfg(feature = "legacy")]
+    #[cfg(feature = "rfc9580")]
     Dsa(DsaData),
 }
 
@@ -831,7 +831,7 @@ fn params_to_rsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
     }))
 }
 
-#[cfg(feature = "legacy")]
+#[cfg(feature = "rfc9580")]
 fn params_to_dsa_data(params: &OsslParam) -> Result<PkeyData, Error> {
     Ok(PkeyData::Dsa(DsaData {
         p: match params.get_bn(cstr!(OSSL_PKEY_PARAM_FFC_P)) {
@@ -893,7 +893,7 @@ fn rsa_data_to_params(
     Ok(is_priv)
 }
 
-#[cfg(feature = "legacy")]
+#[cfg(feature = "rfc9580")]
 fn dsa_data_to_params(
     dsa: &DsaData,
     params: &mut OsslParamBuilder,
@@ -1050,7 +1050,7 @@ impl EvpPkey {
         let name = pkey_type_to_params(&pkey_type, &mut params_builder)?;
         let params = params_builder.finalize();
         let mut pctx = match pkey_type {
-            #[cfg(feature = "legacy")]
+            #[cfg(feature = "rfc9580")]
             EvpPkeyType::Dsa(_) => {
                 // The DSA first needs to generate domain parameters
                 // and only from them we can generate the key itself
@@ -1301,7 +1301,7 @@ impl EvpPkey {
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
             },
-            #[cfg(feature = "legacy")]
+            #[cfg(feature = "rfc9580")]
             EvpPkeyType::Dsa(_) => match &data {
                 PkeyData::Dsa(dsa) => {
                     if dsa_data_to_params(&dsa, &mut params_builder)? {
@@ -1428,7 +1428,7 @@ impl EvpPkey {
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             EvpPkeyType::Rsa(_, _) => return params_to_rsa_data(&params),
-            #[cfg(feature = "legacy")]
+            #[cfg(feature = "rfc9580")]
             EvpPkeyType::Dsa(_) => return params_to_dsa_data(&params),
         })
     }

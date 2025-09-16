@@ -19,8 +19,8 @@ pub fn test_ossl_context() -> &'static crate::OsslContext {
 #[cfg(not(feature = "fips"))]
 mod brainpool;
 
-#[cfg(feature = "legacy")]
+#[cfg(feature = "rfc9580")]
 mod dsa;
 
-#[cfg(feature = "legacy")]
+#[cfg(feature = "rfc9580")]
 mod tripledes;

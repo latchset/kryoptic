@@ -119,11 +119,11 @@ pub enum EncAlg {
     AesWrap(AesSize),
     AesWrapPad(AesSize),
     /* 3DES */
-    #[cfg(feature = "legacy")]
+    #[cfg(feature = "rfc9580")]
     TripleDesCfb,
-    #[cfg(feature = "legacy")]
+    #[cfg(feature = "rfc9580")]
     TripleDesCbc,
-    #[cfg(feature = "legacy")]
+    #[cfg(feature = "rfc9580")]
     TripleDesEcb,
 }
 
@@ -195,11 +195,11 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
             AesSize::Aes192 => c"AES-192-WRAP-PAD",
             AesSize::Aes256 => c"AES-256-WRAP-PAD",
         },
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         EncAlg::TripleDesCfb => c"DES-EDE3-CFB",
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         EncAlg::TripleDesCbc => c"DES-EDE3-CBC",
-        #[cfg(feature = "legacy")]
+        #[cfg(feature = "rfc9580")]
         EncAlg::TripleDesEcb => c"DES-EDE3-ECB",
     }
 }

@@ -34,4 +34,3 @@ fips = ["ossl350"] # Builds against sources and libfips.a instead of libcrypto
 log = ["dep:log", "dep:vsprintf"] # Error tracing using log crate
 dummy-integrity = [] # USE ONLY for testing as a dev-depenency
 rfc9580 = [] # Enables features required for OpenPGP implementations
-legacy = [] # Enables legacy algorithms
