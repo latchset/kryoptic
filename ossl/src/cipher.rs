@@ -145,6 +145,12 @@ pub enum EncAlg {
     BlowfishCbc,
     #[cfg(feature = "rfc9580")]
     BlowfishEcb,
+    #[cfg(feature = "rfc9580")]
+    Cast5Cfb,
+    #[cfg(feature = "rfc9580")]
+    Cast5Cbc,
+    #[cfg(feature = "rfc9580")]
+    Cast5Ecb,
 }
 
 /// Returns the Ossl name for the requested cipher
@@ -245,6 +251,12 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
         EncAlg::BlowfishCbc => c"BF-CBC",
         #[cfg(feature = "rfc9580")]
         EncAlg::BlowfishEcb => c"BF-ECB",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::Cast5Cfb => c"CAST5-CFB",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::Cast5Cbc => c"CAST5-CBC",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::Cast5Ecb => c"CAST5-ECB",
     }
 }
 
