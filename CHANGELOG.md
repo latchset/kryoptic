@@ -6,6 +6,23 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+# [1.3.0]
+## 2025-09-18
+
+This release splits the kryoptic crate in four separate crates:
+- ossl: the bindings to openssl libraries
+- kryoptic: the kryoptic pkcs11 token (the .so module)
+- kryoptic-lib: the builk fo the implementation of kryoptic functionality
+- kryoptic-tools: utility tools (like softhsm2 migration tools)
+
+The split between kryoptic and kryoptic-lib was necessary because of the way
+cargo handles libs and cdylibs, both can't be built from the same crate
+
+The PKCS#11 3.2 API is now the default API offered to applications.
+New mechanisms have been added, see the rest of the changelog for details.
+
+### What Changed
+
 * The project was reorganized in a workspace with several crates
  - [Switch cargo setup to a workspace with several
     packages](https://github.com/latchset/kryoptic/pull/263)
@@ -179,3 +196,4 @@ that includes non public interfaces.
 [1.0.0]: https://github.com/latchset/kryoptic/releases/tag/v1.0.0
 [1.1.0]: https://github.com/latchset/kryoptic/releases/tag/v1.1.0
 [1.2.0]: https://github.com/latchset/kryoptic/releases/tag/v1.2.0
+[1.3.0]: https://github.com/latchset/kryoptic/releases/tag/v1.3.0
