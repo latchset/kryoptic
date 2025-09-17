@@ -1,5 +1,5 @@
 [package]
-name = "kryoptic-dynlib"
+name = "kryoptic"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
@@ -12,8 +12,9 @@ name = "kryoptic_pkcs11"
 crate-type = ["cdylib"]
 
 [dependencies]
-kryoptic.workspace = true
+kryoptic-lib.workspace = true
 ossl.workspace = true
 
 [features]
-fips = []
+default = ["kryoptic-lib/default"]
+fips = ["kryoptic-lib/fips"]

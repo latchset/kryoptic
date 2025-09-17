@@ -105,7 +105,7 @@ export CONFDIR=%{_sysconfdir}
 # explicitly, and we care only for the tools, as install does not install
 # cdylib package outputs.
 pushd tools
-%cargo_install -f kryoptic/nssdb,kryoptic/pqc,kryoptic/standard,kryoptic/dynamic -- --bin softhsm_migrate
+%cargo_install -f kryoptic-lib/nssdb,kryoptic-lib/pqc,kryoptic-lib/standard,kryoptic-lib/dynamic -- --bin softhsm_migrate
 popd
 install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 
