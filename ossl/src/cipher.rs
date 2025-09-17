@@ -151,6 +151,12 @@ pub enum EncAlg {
     Cast5Cbc,
     #[cfg(feature = "rfc9580")]
     Cast5Ecb,
+    #[cfg(feature = "rfc9580")]
+    IdeaCfb,
+    #[cfg(feature = "rfc9580")]
+    IdeaCbc,
+    #[cfg(feature = "rfc9580")]
+    IdeaEcb,
 }
 
 /// Returns the Ossl name for the requested cipher
@@ -257,6 +263,12 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
         EncAlg::Cast5Cbc => c"CAST5-CBC",
         #[cfg(feature = "rfc9580")]
         EncAlg::Cast5Ecb => c"CAST5-ECB",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::IdeaCfb => c"IDEA-CFB",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::IdeaCbc => c"IDEA-CBC",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::IdeaEcb => c"IDEA-ECB",
     }
 }
 
