@@ -11,11 +11,11 @@ repository = "https://github.com/latchset/kryoptic"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
-kryoptic = { version = "1.2.0", path = ".", default-features = false }
+kryoptic-lib = { version = "1.2.0", path = ".", default-features = false }
 ossl = { version = "1.2.0", path = "ossl", default-features = false }
 
 [package]
-name = "kryoptic"
+name = "kryoptic-lib"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
@@ -35,7 +35,6 @@ test = true
 bindgen = "0.71"
 
 [dependencies]
-ossl.workspace = true
 asn1 = "0.21"
 bimap = "0.6.3"
 bitflags = "2.4.1"
@@ -55,6 +54,7 @@ serial_test = "3.1.1"
 simplelog = { version = "0.12.2", default-features = false, optional = true }
 toml = { version = "0.9", default-features = false, features = ["display", "parse", "serde"] }
 uuid = { version = "1.4.1", features = ["v4"] }
+ossl.workspace = true
 
 [dev-dependencies]
 ossl = { version = "1.2.0", path = "ossl", default-features = false, features = ["dummy-integrity"] }
