@@ -311,3 +311,44 @@ fn test_blowfish_ecb() {
         "079590e0010626685653b9b6c2a406e0",
     );
 }
+
+#[test]
+#[parallel]
+fn test_cast5_ecb() {
+    // from RFC 2144
+    // https://www.rfc-editor.org/rfc/rfc2144#page-15
+    do_cipher_test_legacy(
+        EncAlg::Cast5Ecb,
+        "0123456712345678234567893456789A",
+        None,
+        "0123456789ABCDEF",
+        "238B4FE5847E44B2",
+    );
+}
+
+// The chaining ones from OpenSSL:
+// https://github.com/openssl/openssl/blob/3a43b30ebb2bea7d3a45767751dd695bb9903630/test/recipes/30-test_evp_data/evpciph_cast5.txt
+
+#[test]
+#[parallel]
+fn test_cast5_cbc() {
+    do_cipher_test_legacy(
+        EncAlg::Cast5Cbc,
+        "3348aa51e9a45c2dbe33ccc47f96e8de",
+        Some("19153c673160df2b"),
+        "9b7cee827a26575afdbb7c7a329f887238052e3601a7917456ba61251c214763d5e1847a6ad5d54127a399ab07ee3599",
+        "3c033e10fad0c4ce1e62e2a91488090947c5e0ac0dd5f55c1b15b0b02fa7cfd20f61b02d67ea9f326c5475447dee69bf",
+    );
+}
+
+#[test]
+#[parallel]
+fn test_cast5_cfb() {
+    do_cipher_test_legacy(
+        EncAlg::Cast5Cfb,
+        "0a8e8876c96cddf3223069002002c99f",
+        Some("b125a20ecd79e8b5"),
+        "4fd0ecac65bfd321c88ebca0daea35d2b061205d696aab08bea68320db65451a6d6c3679fdf633f37cf8ebcf1fa94b91",
+        "8feace1e2d6aedf53e779ee3d62e3635a2d1234802665bc34c8be46f397e04aecaea6045f3d0194ea9002dfa358ed390",
+    );
+}
