@@ -38,6 +38,9 @@ All notable changes to this project should be documented in this file.
   - [Handle imports where only the Seed is
      provided](https://github.com/latchset/kryoptic/pull/330)
 
+* Added OpenPGP (RFC9580) relevant legacy algorithms in ossl bindings
+  - [Implement remaining legacy algorithms needed for OpenPGP](https://github.com/latchset/kryoptic/pull/334)
+
 # [1.2.0]
 ## 2025-06-09
 
