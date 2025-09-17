@@ -94,6 +94,14 @@ pub enum AesSize {
     Aes192,
     Aes256,
 }
+/// Camellia Key Sizes
+#[cfg(feature = "rfc9580")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CamelliaSize {
+    Camellia128,
+    Camellia192,
+    Camellia256,
+}
 /// Aes CTS comes in three modes
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AesCtsMode {
@@ -125,6 +133,12 @@ pub enum EncAlg {
     TripleDesCbc,
     #[cfg(feature = "rfc9580")]
     TripleDesEcb,
+    #[cfg(feature = "rfc9580")]
+    CamelliaCfb(CamelliaSize),
+    #[cfg(feature = "rfc9580")]
+    CamelliaCbc(CamelliaSize),
+    #[cfg(feature = "rfc9580")]
+    CamelliaEcb(CamelliaSize),
 }
 
 /// Returns the Ossl name for the requested cipher
@@ -201,6 +215,24 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
         EncAlg::TripleDesCbc => c"DES-EDE3-CBC",
         #[cfg(feature = "rfc9580")]
         EncAlg::TripleDesEcb => c"DES-EDE3-ECB",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::CamelliaCfb(size) => match size {
+            CamelliaSize::Camellia128 => c"CAMELLIA-128-CFB",
+            CamelliaSize::Camellia192 => c"CAMELLIA-192-CFB",
+            CamelliaSize::Camellia256 => c"CAMELLIA-256-CFB",
+        },
+        #[cfg(feature = "rfc9580")]
+        EncAlg::CamelliaCbc(size) => match size {
+            CamelliaSize::Camellia128 => c"CAMELLIA-128-CBC",
+            CamelliaSize::Camellia192 => c"CAMELLIA-192-CBC",
+            CamelliaSize::Camellia256 => c"CAMELLIA-256-CBC",
+        },
+        #[cfg(feature = "rfc9580")]
+        EncAlg::CamelliaEcb(size) => match size {
+            CamelliaSize::Camellia128 => c"CAMELLIA-128-ECB",
+            CamelliaSize::Camellia192 => c"CAMELLIA-192-ECB",
+            CamelliaSize::Camellia256 => c"CAMELLIA-256-ECB",
+        },
     }
 }
 

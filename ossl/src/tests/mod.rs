@@ -23,4 +23,4 @@ mod brainpool;
 mod dsa;
 
 #[cfg(feature = "rfc9580")]
-mod tripledes;
+mod cipher;
