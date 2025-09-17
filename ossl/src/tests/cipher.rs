@@ -352,3 +352,43 @@ fn test_cast5_cfb() {
         "8feace1e2d6aedf53e779ee3d62e3635a2d1234802665bc34c8be46f397e04aecaea6045f3d0194ea9002dfa358ed390",
     );
 }
+
+// IDEA tests from OpenSSL
+// https://github.com/openssl/openssl/blob/3a43b30ebb2bea7d3a45767751dd695bb9903630/test/recipes/30-test_evp_data/evpciph_idea.txt
+// no other better test vector found
+
+#[test]
+#[parallel]
+fn test_idea_cfb() {
+    do_cipher_test_legacy(
+        EncAlg::IdeaCfb,
+        "701ccc4c0e36e512ce077f5af6ccb957",
+        Some("5337ddeaf89a00dd"),
+        "cc1172f2f80866d0768b25f70fcf6361aab7c627c8488f97525d7d88949beeea",
+        "4ec6f34be3335024cbfbbf80f3e7501b8c9f7a6cbd630cf8debba4a4c3f1daa4",
+    );
+}
+
+#[test]
+#[parallel]
+fn test_idea_cbc() {
+    do_cipher_test_legacy(
+        EncAlg::IdeaCbc,
+        "3348aa51e9a45c2dbe33ccc47f96e8de",
+        Some("19153c673160df2b"),
+        "9b7cee827a26575afdbb7c7a329f887238052e3601a7917456ba61251c214763d5e1847a6ad5d54127a399ab07ee3599",
+        "09738cbc8c7764dd63206892eca29fbc3a67f7fe44ded6b128a0350426776ea71d0c9a1b6d627e1e3d014837dd82f11a",
+    );
+}
+
+#[test]
+#[parallel]
+fn test_idea_ecb() {
+    do_cipher_test_legacy(
+        EncAlg::IdeaEcb,
+        "80000000000000000000000000000000",
+        None,
+        "0000000000000000",
+        "B1F5F7F87901370F",
+    );
+}
