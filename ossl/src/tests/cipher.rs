@@ -5,8 +5,8 @@ use hex;
 use serial_test::parallel;
 
 use crate::cipher::{CamelliaSize, EncAlg, OsslCipher};
-use crate::tests::test_ossl_context;
-use crate::OsslSecret;
+use crate::tests::{test_ossl_context, test_ossl_legacy_context};
+use crate::{OsslContext, OsslSecret};
 
 fn do_cipher_test(
     cipher_type: EncAlg,
@@ -14,6 +14,41 @@ fn do_cipher_test(
     iv_hex: Option<&str>,
     plaintext_hex: &str,
     exp_ciphertext_hex: &str,
+) {
+    do_cipher_test_context(
+        cipher_type,
+        key_hex,
+        iv_hex,
+        plaintext_hex,
+        exp_ciphertext_hex,
+        test_ossl_context(),
+    )
+}
+
+fn do_cipher_test_legacy(
+    cipher_type: EncAlg,
+    key_hex: &str,
+    iv_hex: Option<&str>,
+    plaintext_hex: &str,
+    exp_ciphertext_hex: &str,
+) {
+    do_cipher_test_context(
+        cipher_type,
+        key_hex,
+        iv_hex,
+        plaintext_hex,
+        exp_ciphertext_hex,
+        test_ossl_legacy_context(),
+    )
+}
+
+fn do_cipher_test_context(
+    cipher_type: EncAlg,
+    key_hex: &str,
+    iv_hex: Option<&str>,
+    plaintext_hex: &str,
+    exp_ciphertext_hex: &str,
+    context: &OsslContext,
 ) {
     let key = hex::decode(key_hex).unwrap();
     let iv = match iv_hex {
@@ -25,7 +60,7 @@ fn do_cipher_test(
 
     // encryption context
     let mut ctx = OsslCipher::new(
-        test_ossl_context(),
+        context,
         cipher_type,
         true, // encryption mode
         OsslSecret::from_slice(&key),
@@ -45,7 +80,7 @@ fn do_cipher_test(
 
     // decrypt to the plaintext
     let mut ctx = OsslCipher::new(
-        test_ossl_context(),
+        context,
         cipher_type,
         false, // decryption mode
         OsslSecret::from_slice(&key),
@@ -231,5 +266,48 @@ fn test_camellia256_cfb() {
         Some("555FC3F34BDD2D54C62D9E3BF338C1C4"),
         "F69F2445DF4F9B17AD2B417BE66C3710",
         "5953ADCE14DB8C7F39F1BD39F359BFFA",
+    );
+}
+
+// Blowfish tests from
+// https://www.schneier.com/wp-content/uploads/2015/12/vectors-2.txt
+// chaining mode test data at the end
+
+#[test]
+#[parallel]
+fn test_blowfish_cbc() {
+    // added padding manually -- should work same with the set_padding(true)
+    do_cipher_test_legacy(
+        EncAlg::BlowfishCbc,
+        "0123456789ABCDEFF0E1D2C3B4A59687",
+        Some("FEDCBA9876543210"),
+        "37363534333231204E6F77206973207468652074696D6520666F722000000000",
+        "6B77B4D63006DEE605B156E27403979358DEB9E7154616D959F1652BD5FF92CC",
+    );
+}
+
+#[test]
+#[parallel]
+fn test_blowfish_cfb() {
+    do_cipher_test_legacy(
+        EncAlg::BlowfishCfb,
+        "0123456789ABCDEFF0E1D2C3B4A59687",
+        Some("FEDCBA9876543210"),
+        "37363534333231204E6F77206973207468652074696D6520666F722000",
+        "E73214A2822139CAF26ECF6D2EB9E76E3DA3DE04D1517200519D57A6C3",
+    );
+}
+
+#[test]
+#[parallel]
+fn test_blowfish_ecb() {
+    // from OpenSSL again as the short keys from the above do not work
+    // https://github.com/openssl/openssl/blob/aff636a4893e24bdc686a00a13ae6199dd38d6aa/test/recipes/30-test_evp_data/evpciph_bf.txt#L12
+    do_cipher_test_legacy(
+        EncAlg::BlowfishEcb,
+        "000102030405060708090a0b0c0d0e0f",
+        None,
+        "0f0e0c0d0b0a09080706050403020100",
+        "079590e0010626685653b9b6c2a406e0",
     );
 }

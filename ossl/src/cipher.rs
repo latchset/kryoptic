@@ -139,6 +139,12 @@ pub enum EncAlg {
     CamelliaCbc(CamelliaSize),
     #[cfg(feature = "rfc9580")]
     CamelliaEcb(CamelliaSize),
+    #[cfg(feature = "rfc9580")]
+    BlowfishCfb,
+    #[cfg(feature = "rfc9580")]
+    BlowfishCbc,
+    #[cfg(feature = "rfc9580")]
+    BlowfishEcb,
 }
 
 /// Returns the Ossl name for the requested cipher
@@ -233,6 +239,12 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
             CamelliaSize::Camellia192 => c"CAMELLIA-192-ECB",
             CamelliaSize::Camellia256 => c"CAMELLIA-256-ECB",
         },
+        #[cfg(feature = "rfc9580")]
+        EncAlg::BlowfishCfb => c"BF-CFB",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::BlowfishCbc => c"BF-CBC",
+        #[cfg(feature = "rfc9580")]
+        EncAlg::BlowfishEcb => c"BF-ECB",
     }
 }
 
