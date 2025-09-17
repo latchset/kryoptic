@@ -17,4 +17,15 @@ ossl.workspace = true
 
 [features]
 default = ["kryoptic-lib/default"]
+
+ecc_all = ["kryoptic-lib/ecc_all"]
+hash_all = ["kryoptic-lib/hash_all"]
+kdf_all = ["kryoptic-lib/kdf_all"]
+pqc = ["kryoptic-lib/pqc"]
+
+log = ["kryoptic-lib/log"]
+minimal = ["kryoptic-lib/minimal"]
+nssdb = ["kryoptic-lib/nssdb"]
+
+standard = ["kryoptic-lib/standard"]
 fips = ["kryoptic-lib/fips"]
