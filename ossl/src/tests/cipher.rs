@@ -50,6 +50,10 @@ fn do_cipher_test_context(
     exp_ciphertext_hex: &str,
     context: &OsslContext,
 ) {
+    if !OsslCipher::is_supported(context, cipher_type) {
+        print!("The cipher {:?} is not supported in current build: Skipping test ...", cipher_type);
+        return;
+    }
     let key = hex::decode(key_hex).unwrap();
     let iv = match iv_hex {
         Some(v) => Some(hex::decode(v).unwrap()),

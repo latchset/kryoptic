@@ -474,6 +474,17 @@ impl OsslCipher {
         Ok(ctx)
     }
 
+    /// Check if the cipher is supported in the given context
+    ///
+    /// Note, that some ciphers are not supported in default
+    /// provider and need a legacy provider loaded.
+    pub fn is_supported(libctx: &OsslContext, alg: EncAlg) -> bool {
+        match EvpCipher::new(libctx, cipher_to_name(alg)) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
     /// Helper to set context parameters for AEAD modes
     fn aead_setup(
         &mut self,
