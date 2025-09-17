@@ -125,6 +125,8 @@ pub enum DigestAlg {
     Sha3_256,
     Sha3_384,
     Sha3_512,
+    #[cfg(feature = "rfc9580")]
+    Md5,
 }
 
 pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
@@ -140,6 +142,8 @@ pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
         DigestAlg::Sha3_256 => cstr!(OSSL_DIGEST_NAME_SHA3_256),
         DigestAlg::Sha3_384 => cstr!(OSSL_DIGEST_NAME_SHA3_384),
         DigestAlg::Sha3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
+        #[cfg(feature = "rfc9580")]
+        DigestAlg::Md5 => cstr!(OSSL_DIGEST_NAME_MD5),
     }
 }
 

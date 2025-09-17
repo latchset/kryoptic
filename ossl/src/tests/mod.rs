@@ -44,3 +44,6 @@ mod dsa;
 
 #[cfg(feature = "rfc9580")]
 mod cipher;
+
+#[cfg(feature = "rfc9580")]
+mod digest;
