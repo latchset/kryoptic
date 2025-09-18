@@ -4333,8 +4333,21 @@ fn test_groups(session: CK_SESSION_HANDLE, data: Value) {
 #[parallel]
 #[cfg(feature = "slow")]
 fn test_slhdsa_vector() {
-    let file =
-        std::fs::File::open("testdata/slh_dsa_test_vectors.json").unwrap();
+    let filename = "testdata/slh_dsa_test_vectors.json";
+    let file = match open_test_vector_file(filename) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            eprintln!(
+                "Warning: Test vector file '{}' not found, skipping test.",
+                filename
+            );
+            return;
+        }
+        Err(e) => {
+            panic!("Failed to open test vector file '{}': {}", filename, e)
+        }
+    };
+
     let data = from_reader(file).unwrap();
 
     let mut testtokn = TestToken::initialized("test_slhdsa_test_vector", None);
