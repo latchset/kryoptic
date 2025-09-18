@@ -659,3 +659,13 @@ pub fn check_object_validation(
 ) -> bool {
     return true;
 }
+
+pub fn open_test_vector_file<P: AsRef<std::path::Path>>(
+    path: P,
+) -> std::io::Result<Option<std::fs::File>> {
+    match std::fs::File::open(path) {
+        Ok(file) => Ok(Some(file)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}

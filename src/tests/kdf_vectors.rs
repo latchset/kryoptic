@@ -42,9 +42,7 @@ struct KdfTestSection {
     units: Vec<KdfTestUnit>,
 }
 
-fn parse_kdf_vector(filename: &str) -> Vec<KdfTestSection> {
-    let file = ret_or_panic!(std::fs::File::open(filename));
-
+fn parse_kdf_vector(file: std::fs::File) -> Vec<KdfTestSection> {
     let mut kdf: CK_MECHANISM_TYPE = CK_UNAVAILABLE_INFORMATION;
     let mut data = Vec::<KdfTestSection>::new();
 
@@ -541,7 +539,21 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
 #[test]
 #[parallel]
 fn test_kdf_ctr_vector() {
-    let test_data = parse_kdf_vector("testdata/KDFCTR_gen.txt");
+    let filename = "testdata/KDFCTR_gen.txt";
+    let file = match open_test_vector_file(filename) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            eprintln!(
+                "Warning: Test vector file '{}' not found, skipping test.",
+                filename
+            );
+            return;
+        }
+        Err(e) => {
+            panic!("Failed to open test vector file '{}': {}", filename, e)
+        }
+    };
+    let test_data = parse_kdf_vector(file);
 
     let mut testtokn = TestToken::initialized("test_kdf_ctr_vector", None);
     let session = testtokn.get_session(false);
@@ -557,7 +569,21 @@ fn test_kdf_ctr_vector() {
 #[test]
 #[parallel]
 fn test_kdf_feedback_vector() {
-    let test_data = parse_kdf_vector("testdata/KDFFeedback_gen.txt");
+    let filename = "testdata/KDFFeedback_gen.txt";
+    let file = match open_test_vector_file(filename) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            eprintln!(
+                "Warning: Test vector file '{}' not found, skipping test.",
+                filename
+            );
+            return;
+        }
+        Err(e) => {
+            panic!("Failed to open test vector file '{}': {}", filename, e)
+        }
+    };
+    let test_data = parse_kdf_vector(file);
 
     let mut testtokn = TestToken::initialized("test_kdf_feedback_vector", None);
     let session = testtokn.get_session(false);

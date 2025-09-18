@@ -38,9 +38,7 @@ fn parse_buffer(s: &String, ln: usize, p: &str, len: isize) -> Option<Vec<u8>> {
     Some(v)
 }
 
-fn parse_kw_vector(filename: &str) -> Vec<TestUnit> {
-    let file = ret_or_panic!(std::fs::File::open(filename));
-
+fn parse_kw_vector(file: std::fs::File) -> Vec<TestUnit> {
     let mut mech = CK_UNAVAILABLE_INFORMATION;
     let mut enc = 0; /* 1 encrypt, 2 decrypt */
     let mut keylen: isize = 1;
@@ -200,8 +198,21 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
 
 fn test_kw_vector(mech: &str, op: &str, size: &str) {
     let name = format!("{}_{}_{}", mech, op, size);
-    let test_data =
-        parse_kw_vector(&format!("testdata/kwtestvectors/{}.txt", name));
+    let filename = format!("testdata/kwtestvectors/{}.txt", name);
+    let file = match open_test_vector_file(&filename) {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            eprintln!(
+                "Warning: Test vector file '{}' not found, skipping test.",
+                filename
+            );
+            return;
+        }
+        Err(e) => {
+            panic!("Failed to open test vector file '{}': {}", filename, e)
+        }
+    };
+    let test_data = parse_kw_vector(file);
 
     let db_name = format!("test_{}_vector", name);
     let mut testtokn = TestToken::initialized(&db_name, None);

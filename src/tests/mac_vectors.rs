@@ -1,6 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use std::fs::File;
 use std::io;
 use std::io::BufRead;
 
@@ -64,9 +65,7 @@ fn parse_buffer(s: &String, ln: usize, p: &str, len: isize) -> Option<Vec<u8>> {
     Some(v)
 }
 
-fn parse_mac_vector(filename: &str) -> Vec<TestUnit> {
-    let file = ret_or_panic!(std::fs::File::open(filename));
-
+fn parse_mac_vector(file: File) -> Vec<TestUnit> {
     /* 0 undetermined, 1 CMAC, 2 HMAC */
     let mut mac_type = 0;
     let mut mech = CK_UNAVAILABLE_INFORMATION;
@@ -221,7 +220,15 @@ fn test_units(session: CK_SESSION_HANDLE, test_data: Vec<TestUnit>) {
 #[test]
 #[parallel]
 fn test_cmac_aes_128_vector() {
-    let test_data = parse_mac_vector("testdata/CMACGenAES128.rsp");
+    let filename = "testdata/CMACGenAES128.rsp";
+    let Some(file) = ret_or_panic!(open_test_vector_file(filename)) else {
+        println!(
+            "WARN: test vector file '{}' not found, skipping test.",
+            filename
+        );
+        return;
+    };
+    let test_data = parse_mac_vector(file);
 
     let mut testtokn = TestToken::initialized("test_cmac_aes_128_vector", None);
     let session = testtokn.get_session(false);
@@ -237,7 +244,15 @@ fn test_cmac_aes_128_vector() {
 #[test]
 #[parallel]
 fn test_cmac_aes_192_vector() {
-    let test_data = parse_mac_vector("testdata/CMACGenAES192.rsp");
+    let filename = "testdata/CMACGenAES192.rsp";
+    let Some(file) = ret_or_panic!(open_test_vector_file(filename)) else {
+        println!(
+            "WARN: test vector file '{}' not found, skipping test.",
+            filename
+        );
+        return;
+    };
+    let test_data = parse_mac_vector(file);
 
     let mut testtokn = TestToken::initialized("test_cmac_aes_192_vector", None);
     let session = testtokn.get_session(false);
@@ -253,7 +268,15 @@ fn test_cmac_aes_192_vector() {
 #[test]
 #[parallel]
 fn test_cmac_aes_256_vector() {
-    let test_data = parse_mac_vector("testdata/CMACGenAES256.rsp");
+    let filename = "testdata/CMACGenAES256.rsp";
+    let Some(file) = ret_or_panic!(open_test_vector_file(filename)) else {
+        println!(
+            "WARN: test vector file '{}' not found, skipping test.",
+            filename
+        );
+        return;
+    };
+    let test_data = parse_mac_vector(file);
 
     let mut testtokn = TestToken::initialized("test_cmac_aes_256_vector", None);
     let session = testtokn.get_session(false);
@@ -269,7 +292,15 @@ fn test_cmac_aes_256_vector() {
 #[test]
 #[parallel]
 fn test_hmac_vector() {
-    let test_data = parse_mac_vector("testdata/HMAC.rsp");
+    let filename = "testdata/HMAC.rsp";
+    let Some(file) = ret_or_panic!(open_test_vector_file(filename)) else {
+        println!(
+            "WARN: test vector file '{}' not found, skipping test.",
+            filename
+        );
+        return;
+    };
+    let test_data = parse_mac_vector(file);
     let mut testtokn = TestToken::initialized("test_hmac_vector", None);
     let session = testtokn.get_session(false);
 
