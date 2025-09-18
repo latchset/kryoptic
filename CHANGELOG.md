@@ -6,6 +6,15 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+--
+
+## [1.3.1]
+## 2025-09-18
+
+This is a bugfix release that addresses an issue with publishing to crates.io.
+
+### What Changed
+
 * fix issus publishing to crates.io
   - [Remove large test vectors from release
      artifacts](https://github.com/latchset/kryoptic/pull/337)
@@ -201,3 +210,4 @@ that includes non public interfaces.
 [1.1.0]: https://github.com/latchset/kryoptic/releases/tag/v1.1.0
 [1.2.0]: https://github.com/latchset/kryoptic/releases/tag/v1.2.0
 [1.3.0]: https://github.com/latchset/kryoptic/releases/tag/v1.3.0
+[1.3.1]: https://github.com/latchset/kryoptic/releases/tag/v1.3.1
