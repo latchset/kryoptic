@@ -6,6 +6,10 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* fix issus publishing to crates.io
+  - [Remove large test vectors from release
+     artifacts](https://github.com/latchset/kryoptic/pull/337)
+
 # [1.3.0]
 ## 2025-09-18
 
