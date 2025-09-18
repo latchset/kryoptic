@@ -13,3 +13,4 @@ cscope.*
 tags
 .generated_files
 *.tar.gz
+*.tar.gz.asc
