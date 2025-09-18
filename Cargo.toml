@@ -26,6 +26,24 @@ license.workspace = true
 exclude = [
     ".github/*",
     "openssl/*",
+    "testdata/CMACGenAES128.rsp",
+    "testdata/CMACGenAES192.rsp",
+    "testdata/CMACGenAES256.rsp",
+    "testdata/KDFCTR_gen.txt",
+    "testdata/KDFFeedback_gen.txt",
+    "testdata/kwtestvectors/KWP_AD_128.txt",
+    "testdata/kwtestvectors/KWP_AD_192.txt",
+    "testdata/kwtestvectors/KWP_AD_256.txt",
+    "testdata/kwtestvectors/KWP_AE_128.txt",
+    "testdata/kwtestvectors/KWP_AE_192.txt",
+    "testdata/kwtestvectors/KWP_AE_256.txt",
+    "testdata/kwtestvectors/KW_AD_128.txt",
+    "testdata/kwtestvectors/KW_AD_192.txt",
+    "testdata/kwtestvectors/KW_AD_256.txt",
+    "testdata/kwtestvectors/KW_AE_128.txt",
+    "testdata/kwtestvectors/KW_AE_192.txt",
+    "testdata/kwtestvectors/KW_AE_256.txt",
+    "testdata/slh_dsa_test_vectors.json",
 ]
 
 [lib]
