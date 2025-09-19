@@ -514,8 +514,10 @@ impl NSSStorage {
             }
             /* In NSSDB sensitive attributes are encrypted, so we can check
              * if the template is searching for any of the encrypted
-             * attributes and if so just fail immediately */
-            if is_sensitive_attribute(attr.type_) {
+             * attributes and if so just fail immediately.
+             * Do this only for private objects otherwise we incorrectly
+             * match attributes like CKA_VALUE in public objects. */
+            if do_private && is_sensitive_attribute(attr.type_) {
                 return Err(CKR_ATTRIBUTE_SENSITIVE)?;
             }
         }
