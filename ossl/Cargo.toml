@@ -1,9 +1,8 @@
 [package]
 name = "ossl"
-
 version.workspace = true
 edition.workspace = true
-description.workspace = true
+description = "OpenSSL version 3+ bindings to modern EVP APIs"
 homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
