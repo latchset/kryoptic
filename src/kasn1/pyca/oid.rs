@@ -182,16 +182,24 @@ pub const SHA384_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 2);
 pub const SHA512_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 3);
-// The SHA3 OIDs are wrong in pyca -- redefined in ../oids.rs
-// https://github.com/pyca/cryptography/issues/13331
-//pub const SHA3_224_OID: asn1::ObjectIdentifier =
-//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 224);
-//pub const SHA3_256_OID: asn1::ObjectIdentifier =
-//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 256);
-//pub const SHA3_384_OID: asn1::ObjectIdentifier =
-//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 384);
-//pub const SHA3_512_OID: asn1::ObjectIdentifier =
-//    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 512);
+pub const SHA3_224_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 224);
+pub const SHA3_256_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 256);
+pub const SHA3_384_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 384);
+pub const SHA3_512_OID: asn1::ObjectIdentifier =
+    asn1::oid!(1, 3, 6, 1, 4, 1, 37476, 3, 2, 1, 99, 7, 512);
+
+// NIST SHA3 OIDs (standard values)
+pub const SHA3_224_NIST_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 7);
+pub const SHA3_256_NIST_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 8);
+pub const SHA3_384_NIST_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 9);
+pub const SHA3_512_NIST_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 10);
 
 pub const MGF1_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 1, 8);
@@ -220,12 +228,16 @@ pub const PBES2_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 5, 13);
 pub const PBKDF2_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 5, 12);
+pub const PBE_WITH_MD5_AND_DES_CBC: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 1, 5, 3);
 pub const SCRYPT_OID: asn1::ObjectIdentifier =
     asn1::oid!(1, 3, 6, 1, 4, 1, 11591, 4, 11);
 
-pub const PBES1_WITH_SHA_AND_3KEY_TRIPLEDES_CBC: asn1::ObjectIdentifier =
+pub const PBE_WITH_SHA_AND_128_BIT_RC4: asn1::ObjectIdentifier =
+    asn1::oid!(1, 2, 840, 113549, 1, 12, 1, 1);
+pub const PBE_WITH_SHA_AND_3KEY_TRIPLEDES_CBC: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 12, 1, 3);
-pub const PBES1_WITH_SHA_AND_40_BIT_RC2_CBC: asn1::ObjectIdentifier =
+pub const PBE_WITH_SHA_AND_40_BIT_RC2_CBC: asn1::ObjectIdentifier =
     asn1::oid!(1, 2, 840, 113549, 1, 12, 1, 6);
 
 pub const AES_128_CBC_OID: asn1::ObjectIdentifier =
