@@ -98,7 +98,7 @@ fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
                     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
-            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
         },
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     }
@@ -198,7 +198,7 @@ fn mlkem_priv_check_import(obj: &mut Object) -> Result<()> {
                         return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
-                _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
             }
             Some(value)
         }
@@ -401,7 +401,7 @@ impl Mechanism for MlKemMechanism {
         let param_set = match pubkey.get_attr_as_ulong(CKA_PARAMETER_SET) {
             Ok(p) => match p {
                 CKP_ML_KEM_512 | CKP_ML_KEM_768 | CKP_ML_KEM_1024 => p,
-                _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
             },
             Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };

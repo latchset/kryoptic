@@ -118,7 +118,7 @@ fn slhdsa_pub_check_import(obj: &Object) -> Result<()> {
                     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
-            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
         },
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     }
@@ -214,7 +214,7 @@ fn slhdsa_priv_check_import(obj: &Object) -> Result<()> {
                     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
-            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
         },
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     };
@@ -404,7 +404,7 @@ impl Mechanism for SlhDsaMechanism {
                 | CKP_SLH_DSA_SHAKE_256S
                 | CKP_SLH_DSA_SHA2_256F
                 | CKP_SLH_DSA_SHAKE_256F => p,
-                _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
             },
             Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };
