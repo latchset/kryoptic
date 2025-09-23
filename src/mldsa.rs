@@ -105,7 +105,7 @@ fn mldsa_pub_check_import(obj: &Object) -> Result<()> {
                     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                 }
             }
-            _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
         },
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     }
@@ -205,7 +205,7 @@ fn mldsa_priv_check_import(obj: &mut Object) -> Result<()> {
                         return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
                     }
                 }
-                _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
             }
             Some(value)
         }
@@ -397,7 +397,7 @@ impl Mechanism for MlDsaMechanism {
         let param_set = match pubkey.get_attr_as_ulong(CKA_PARAMETER_SET) {
             Ok(p) => match p {
                 CKP_ML_DSA_44 | CKP_ML_DSA_65 | CKP_ML_DSA_87 => p,
-                _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
             },
             Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };
