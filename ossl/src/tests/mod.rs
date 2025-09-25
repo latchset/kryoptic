@@ -16,7 +16,7 @@ pub fn test_ossl_context() -> &'static crate::OsslContext {
     }
 }
 
-#[cfg(not(feature = "fips"))]
+#[cfg(all(not(feature = "fips"), feature = "rfc9580"))]
 static TEST_LEGACY_CONTEXT: ::std::sync::LazyLock<crate::OsslContext> =
     ::std::sync::LazyLock::new(|| {
         let mut context = crate::OsslContext::new_lib_ctx();
@@ -25,6 +25,7 @@ static TEST_LEGACY_CONTEXT: ::std::sync::LazyLock<crate::OsslContext> =
         context
     });
 
+#[cfg(feature = "rfc9580")]
 pub fn test_ossl_legacy_context() -> &'static crate::OsslContext {
     #[cfg(feature = "fips")]
     {
