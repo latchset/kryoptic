@@ -7,10 +7,27 @@ use serial_test::parallel;
 
 #[test]
 #[parallel]
-fn test_concatenate_kdf() {
-    let mut testtokn = TestToken::initialized("concatente_kdf", None);
+fn test_concatenate_kdf_token() {
+    let mut testtokn = TestToken::initialized("concatente_kdf_token", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    test_concatenate_kdf(session, true);
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_concatenate_kdf_session() {
+    let mut testtokn = TestToken::initialized("concatente_kdf_session", None);
     let session = testtokn.get_session(false);
 
+    test_concatenate_kdf(session, false);
+    testtokn.finalize();
+}
+
+fn test_concatenate_kdf(session: CK_ULONG, token: bool) {
     // Import test keys from the specification
     // These keys are too small to match FIPS requirements
     let base_key = hex::decode("01234567").unwrap();
@@ -54,7 +71,11 @@ fn test_concatenate_kdf() {
             (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
         ],
         &[],
-        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        &[
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_TOKEN, token),
+        ],
     );
     let mut dk_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -70,8 +91,63 @@ fn test_concatenate_kdf() {
     assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
     let exp_value = hex::decode("0123456789abcdef").unwrap();
-    let value = ret_or_panic!(extract_key_value(session, dk_handle));
-    assert_eq!(value, exp_value);
+    if let Some(err) = check_attributes(
+        session,
+        dk_handle,
+        &[(CKA_VALUE_LEN, 8)],
+        &[(CKA_VALUE, &exp_value)],
+        &[
+            (CKA_TOKEN, token),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_NEVER_EXTRACTABLE, false),
+            (CKA_ALWAYS_SENSITIVE, false),
+        ],
+    ) {
+        panic!("{}", err);
+    }
+
+    // Concatenate base and key, override extractable + sensitive attributes
+    let sensitive_derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_TOKEN, token),
+        ],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        sensitive_derive_template.as_ptr() as *mut _,
+        sensitive_derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
+
+    if let Some(err) = check_attributes(
+        session,
+        dk_handle,
+        &[(CKA_VALUE_LEN, 8)],
+        &[], // can't check the value anymore
+        &[
+            (CKA_TOKEN, token),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, false),
+            (CKA_ALWAYS_SENSITIVE, false),
+        ],
+    ) {
+        panic!("{}", err);
+    }
 
     // Concatenate base and data
     let data = hex::decode("89abcdef").unwrap();
@@ -209,8 +285,6 @@ fn test_concatenate_kdf() {
     let exp_value = vec![0b1001_0101u8, 0b0010_0110u8];
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
-
-    testtokn.finalize();
 }
 
 #[test]
@@ -415,6 +489,126 @@ fn test_concatenate_kdf_fips() {
     let exp_value = hex::decode("000102030405060708090a0b0c0dff").unwrap();
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_concatenate_kdf_attributes() {
+    let mut testtokn =
+        TestToken::initialized("concatente_kdf_attributes", None);
+    let session = testtokn.get_session(false);
+
+    let base_key = hex::decode("01234567").unwrap();
+    let base_key_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, base_key.as_slice()),],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+        ],
+    ));
+    // sanity check the always/never attributes are stored properly
+    if let Some(err) = check_attributes(
+        session,
+        base_key_handle,
+        &[(CKA_VALUE_LEN, 4)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_NEVER_EXTRACTABLE, false),
+            (CKA_ALWAYS_SENSITIVE, false),
+        ],
+    ) {
+        panic!("{}", err);
+    }
+
+    /* generate the other key to get ALWAYS_SENSITIVE and NEVER_EXTRACTABLE attributes */
+    let another_key_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 4)],
+        &[],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+        ], // defaults
+    ));
+    // sanity check the always/never attributes are stored properly
+    if let Some(err) = check_attributes(
+        session,
+        another_key_handle,
+        &[(CKA_VALUE_LEN, 4)],
+        &[],
+        &[
+            (CKA_LOCAL, true),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, true),
+            (CKA_ALWAYS_SENSITIVE, true),
+        ],
+    ) {
+        panic!("{}", err);
+    }
+
+    // Concatenate base and key
+    let params = another_key_handle;
+    let paramslen = sizeof!(CK_OBJECT_HANDLE);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_CONCATENATE_BASE_AND_KEY,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        // ignored as one of the keys is sensitive + non-extractable
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    // make sure the non-extractable and sensitive attributes are propagated
+    // to derived key, regardless the derive template
+    // Do not check the value as it is not extractable
+    if let Some(err) = check_attributes(
+        session,
+        dk_handle,
+        &[(CKA_VALUE_LEN, 8)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, false),
+            (CKA_ALWAYS_SENSITIVE, false),
+        ],
+    ) {
+        panic!("{}", err);
+    }
+
     assert_eq!(check_validation(session, 0), true);
     assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
