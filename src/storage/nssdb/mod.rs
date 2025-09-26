@@ -5,6 +5,7 @@
 //! with the SQLite databases used by NSS for storing certificates, public
 //! keys, private keys, and trust settings.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -107,6 +108,13 @@ fn nss_id_parse(nssid: &str) -> Result<(String, u32)> {
 /// (`CK_ULONG`). The column name format is 'a' followed by the hex value of
 /// the attribute type.
 fn nss_col_to_type(col: &str) -> Result<CK_ULONG> {
+    if match col.chars().next() {
+        Some(c) => c,
+        None => '_',
+    } != 'a'
+    {
+        return Err(CKR_DEVICE_ERROR)?;
+    }
     Ok(CK_ULONG::from_str_radix(&col[1..], 16)?)
 }
 
@@ -153,6 +161,10 @@ pub struct NSSStorage {
     config: NSSConfig,
     /// Thread-safe connection to the underlying SQLite database(s).
     conn: Arc<Mutex<Connection>>,
+    /// Columns cache for the main tables (should have the same size as
+    /// known attributes, but could be more if we open a newer DB than we
+    /// know of).
+    cols: Vec<CK_ULONG>,
     /// Key cache and encryption/decryption context for authenticated
     /// attributes.
     keys: KeysWithCaching,
@@ -333,6 +345,88 @@ impl NSSStorage {
         }
 
         tx.commit()?;
+        /* Call check_columns for its side effect of initializing self.cols */
+        Self::check_columns(
+            &mut conn,
+            &mut self.cols,
+            NSS_PUBLIC_SCHEMA,
+            NSS_PUBLIC_TABLE,
+        )?;
+        Self::check_columns(
+            &mut conn,
+            &mut self.cols,
+            NSS_PRIVATE_SCHEMA,
+            NSS_PRIVATE_TABLE,
+        )?;
+        Ok(())
+    }
+
+    fn pragma_columns(
+        conn: &mut MutexGuard<'_, rusqlite::Connection>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<String>> {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT * FROM {}.pragma_table_info('{}')",
+            schema, table
+        ))?;
+        let mut cols = Vec::<String>::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            cols.push(row.get(1)?);
+        }
+        if cols.len() == 0 {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        return Ok(cols);
+    }
+
+    /* check that the database has all the expected columns, add missing ones
+     * as needed. This is to support transition of existing databases to be
+     * able to operate with the new PKCS#11 3.2 attributes */
+    fn check_columns(
+        conn: &mut MutexGuard<'_, rusqlite::Connection>,
+        cols_cache: &mut Vec<CK_ULONG>,
+        schema: &str,
+        table: &str,
+    ) -> Result<()> {
+        let cols = Self::pragma_columns(conn, schema, table)?;
+
+        if cols_cache.len() == 0 {
+            /* initialize with db order */
+            for val in &cols {
+                let attr = match nss_col_to_type(val) {
+                    Ok(a) => a,
+                    Err(_) => continue, /* ignore non attribute columns */
+                };
+                cols_cache.push(attr);
+            }
+        }
+
+        let mut not_found = NSS_KNOWN_ATTRIBUTES.to_vec();
+        for val in &cols {
+            let typ = match nss_col_to_type(val) {
+                Ok(t) => t,
+                Err(_) => continue, /* ignore non attribute columns */
+            };
+            /* For now we just ignore columns that are not known */
+            if let Some(idx) = not_found.iter().position(|i| *i == typ) {
+                not_found.swap_remove(idx);
+            }
+        }
+
+        /* Now check if any known attribute was not found and add the
+         * related column to the schema */
+        for typ in not_found {
+            let _ = conn.execute(
+                &format!(
+                    "ALTER TABLE {}.{} ADD COLUMN a{:x}",
+                    schema, table, typ
+                ),
+                params![],
+            )?;
+            cols_cache.push(typ);
+        }
         Ok(())
     }
 
@@ -341,31 +435,31 @@ impl NSSStorage {
     /// Maps NSS column names (e.g., "a81") to attribute types and converts
     /// stored BLOBs/numbers back into `Attribute` values. Handles the
     /// special NULL value.
-    fn rows_to_object(mut rows: Rows, all_cols: bool) -> Result<Object> {
+    fn rows_to_object(
+        &self,
+        mut rows: Rows,
+        attrs: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
         let mut obj = Object::new();
 
-        /* FIXME: move sourcing columns to db open */
-        let cols = match rows.as_ref() {
-            Some(s) => {
-                let cstr = s.column_names();
-                let mut ctypes = Vec::<CK_ULONG>::with_capacity(cstr.len());
-                for cs in &cstr {
-                    ctypes.push(nss_col_to_type(cs)?);
-                }
-                ctypes
+        let (cols, offset) = if attrs.len() == 0 {
+            (Cow::Borrowed(&self.cols), 1)
+        } else {
+            let mut c = Vec::<CK_ULONG>::with_capacity(attrs.len());
+            for a in attrs {
+                c.push(a.type_);
             }
-            None => return Err(CKR_GENERAL_ERROR)?,
+            (Cow::Owned(c), 0)
         };
 
-        let first = if all_cols { 1 } else { 0 };
-
         if let Some(row) = rows.next()? {
-            for i in first..cols.len() {
+            for i in 0..cols.len() {
                 /* skip NSS vendor attributes */
                 if ignore_attribute(cols[i]) {
                     continue;
                 }
-                let bn: Option<&[u8]> = row.get_ref(i)?.as_blob_or_null()?;
+                let bn: Option<&[u8]> =
+                    row.get_ref(i + offset)?.as_blob_or_null()?;
                 let blob: &[u8] = match bn {
                     Some(ref b) => b,
                     None => continue,
@@ -477,7 +571,7 @@ impl NSSStorage {
         let conn = self.conn.lock()?;
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query(rusqlite::params_from_iter(query.params))?;
-        Self::rows_to_object(rows, attrs.len() == 0)
+        self.rows_to_object(rows, attrs)
     }
 
     /* Searching for Objects:
@@ -879,7 +973,12 @@ impl Storage for NSSStorage {
                 self.config.read_only,
             )?;
             match check_table(&mut conn, NSS_PUBLIC_SCHEMA, NSS_PUBLIC_TABLE) {
-                Ok(_) => (),
+                Ok(_) => Self::check_columns(
+                    &mut conn,
+                    &mut self.cols,
+                    NSS_PUBLIC_SCHEMA,
+                    NSS_PUBLIC_TABLE,
+                )?,
                 Err(e) => ret = e.rv(),
             }
         }
@@ -892,7 +991,12 @@ impl Storage for NSSStorage {
             )?;
             match check_table(&mut conn, NSS_PRIVATE_SCHEMA, NSS_PRIVATE_TABLE)
             {
-                Ok(_) => (),
+                Ok(_) => Self::check_columns(
+                    &mut conn,
+                    &mut self.cols,
+                    NSS_PRIVATE_SCHEMA,
+                    NSS_PRIVATE_TABLE,
+                )?,
                 Err(e) => ret = e.rv(),
             }
         }
@@ -1420,6 +1524,7 @@ impl StorageDBInfo for NSSDBInfo {
         Ok(Box::new(NSSStorage {
             config: config,
             conn: conn,
+            cols: Vec::with_capacity(NSS_KNOWN_ATTRIBUTES.len()),
             keys: KeysWithCaching::default(),
         }))
     }
