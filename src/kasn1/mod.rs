@@ -111,6 +111,9 @@ impl<'a> asn1::SimpleAsn1Writable for DerEncBigUint<'a> {
     fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
         dest.push_slice(self.as_bytes())
     }
+    fn data_length(&self) -> Option<usize> {
+        Some(self.data.len())
+    }
 }
 
 /// Represents a ASN.1 OctetString wrapper
@@ -163,6 +166,9 @@ impl<'a> asn1::SimpleAsn1Writable for DerEncOctetString<'a> {
     /// Writes out a DerEncOctetString
     fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
         dest.push_slice(self.as_bytes())
+    }
+    fn data_length(&self) -> Option<usize> {
+        Some(self.data.len())
     }
 }
 
