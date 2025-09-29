@@ -510,11 +510,33 @@ pub trait ObjectFactory: Debug + Send + Sync {
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        self.internal_object_create(
+        let mut obj = self.internal_object_create(
             template,
             OAFlags::NeverSettable,
             OAFlags::RequiredOnCreate,
-        )
+        )?;
+
+        // default key attributes on CreateObject
+        obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
+
+        match obj.get_attr_as_ulong(CKA_CLASS) {
+            Ok(c) => match c {
+                CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+                    // default key attributes on CreateObject for PRIVATE/SECRET keys
+                    obj.set_attr(Attribute::from_bool(
+                        CKA_ALWAYS_SENSITIVE,
+                        false,
+                    ))?;
+                    obj.set_attr(Attribute::from_bool(
+                        CKA_NEVER_EXTRACTABLE,
+                        false,
+                    ))?;
+                }
+                _ => (),
+            },
+            Err(_) => (),
+        }
+        Ok(obj)
     }
 
     /// Default key object generation function

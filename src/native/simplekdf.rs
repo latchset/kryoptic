@@ -5,11 +5,11 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::CkAttrs;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::*;
 use crate::misc::{bytes_to_vec, cast_params};
-use crate::object::{default_key_attributes, Object, ObjectFactories};
+use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -193,6 +193,9 @@ impl Derive for SimpleKDFOperation {
         let mut tmpl = CkAttrs::from(template);
         tmpl.add_missing_ulong(CKA_CLASS, &CKO_SECRET_KEY);
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
+        let factory =
+            objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
+        let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
 
         let other_data_len = match self.mech {
             CKM_CONCATENATE_BASE_AND_KEY => {
@@ -201,59 +204,48 @@ impl Derive for SimpleKDFOperation {
                     None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 };
 
-                if base_key_info.sensitive || another_key_info.sensitive {
-                    tmpl.add_bool(CKA_SENSITIVE, &CK_TRUE);
+                let mut sensitive =
+                    base_key_info.sensitive || another_key_info.sensitive;
+                if !sensitive {
+                    match tmpl.find_attr(CKA_SENSITIVE) {
+                        Some(b) => sensitive = b.to_bool()?,
+                        None => (),
+                    };
                 }
-                if !base_key_info.extractable || !another_key_info.extractable {
-                    tmpl.add_bool(CKA_EXTRACTABLE, &CK_FALSE);
+                dkey.set_attr(Attribute::from_bool(CKA_SENSITIVE, sensitive))?;
+                let mut extractable =
+                    base_key_info.extractable && another_key_info.extractable;
+                if extractable {
+                    match tmpl.find_attr(CKA_EXTRACTABLE) {
+                        Some(b) => extractable = b.to_bool()?,
+                        None => (),
+                    };
                 }
-                if base_key_info.always_sensitive
-                    && another_key_info.always_sensitive
-                {
-                    tmpl.add_bool(CKA_ALWAYS_SENSITIVE, &CK_TRUE);
-                }
-                if base_key_info.never_extractable
-                    && another_key_info.never_extractable
-                {
-                    tmpl.add_bool(CKA_NEVER_EXTRACTABLE, &CK_TRUE);
-                }
+                dkey.set_attr(Attribute::from_bool(
+                    CKA_EXTRACTABLE,
+                    extractable,
+                ))?;
+                let always_sensitive = base_key_info.always_sensitive
+                    && another_key_info.always_sensitive;
+                dkey.set_attr(Attribute::from_bool(
+                    CKA_ALWAYS_SENSITIVE,
+                    always_sensitive,
+                ))?;
+                let never_extractable = base_key_info.never_extractable
+                    && another_key_info.never_extractable;
+                dkey.set_attr(Attribute::from_bool(
+                    CKA_NEVER_EXTRACTABLE,
+                    never_extractable,
+                ))?;
                 another_key_info.value.len()
             }
             CKM_CONCATENATE_BASE_AND_DATA
             | CKM_CONCATENATE_DATA_AND_BASE
-            | CKM_XOR_BASE_AND_DATA => {
-                if base_key_info.sensitive {
-                    tmpl.add_bool(CKA_SENSITIVE, &CK_TRUE);
-                }
-                if !base_key_info.extractable {
-                    tmpl.add_bool(CKA_EXTRACTABLE, &CK_FALSE);
-                }
-                if base_key_info.always_sensitive {
-                    tmpl.add_bool(CKA_ALWAYS_SENSITIVE, &CK_TRUE);
-                }
-                if base_key_info.never_extractable {
-                    tmpl.add_bool(CKA_NEVER_EXTRACTABLE, &CK_TRUE);
-                }
-                match &self.data {
-                    Some(d) => d.len(),
-                    None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-                }
-            }
-            CKM_EXTRACT_KEY_FROM_KEY => {
-                if base_key_info.sensitive {
-                    tmpl.add_bool(CKA_SENSITIVE, &CK_TRUE);
-                }
-                if !base_key_info.extractable {
-                    tmpl.add_bool(CKA_EXTRACTABLE, &CK_FALSE);
-                }
-                if base_key_info.always_sensitive {
-                    tmpl.add_bool(CKA_ALWAYS_SENSITIVE, &CK_TRUE);
-                }
-                if base_key_info.never_extractable {
-                    tmpl.add_bool(CKA_NEVER_EXTRACTABLE, &CK_TRUE);
-                }
-                0
-            }
+            | CKM_XOR_BASE_AND_DATA => match &self.data {
+                Some(d) => d.len(),
+                None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
+            },
+            CKM_EXTRACT_KEY_FROM_KEY => 0,
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
 
@@ -264,9 +256,6 @@ impl Derive for SimpleKDFOperation {
             CKM_EXTRACT_KEY_FROM_KEY => base_key_info.value.len(),
             _ => base_key_info.value.len() + other_data_len,
         };
-
-        let factory =
-            objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
 
         // check the length is compatible with the key type. Add default if missing
         let keylen = match tmpl.find_attr(CKA_VALUE_LEN) {
@@ -360,17 +349,13 @@ impl Derive for SimpleKDFOperation {
             _ => return Err(CKR_MECHANISM_INVALID)?,
         }
 
-        let mut tmpl = CkAttrs::from(template);
-        tmpl.zeroize = true;
-        // ownership of the secret is taken by the `tmpl` here.
-        tmpl.add_vec(CKA_VALUE, secret)?;
-        let mut obj = factory.create(tmpl.as_slice())?;
-
-        default_key_attributes(&mut obj, self.mech)?;
+        factory
+            .as_secret_key_factory()?
+            .set_key(&mut dkey, secret)?;
 
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
 
-        Ok(vec![obj])
+        Ok(vec![dkey])
     }
 }
