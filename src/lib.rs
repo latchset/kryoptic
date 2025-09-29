@@ -1026,6 +1026,9 @@ extern "C" fn fn_create_object(
                     CKK_RSA => CKM_RSA_PKCS_KEY_PAIR_GEN,
                     CKK_EC => CKM_EC_KEY_PAIR_GEN,
                     CKK_EC_EDWARDS => CKM_EC_EDWARDS_KEY_PAIR_GEN,
+                    CKK_ML_DSA => CKM_ML_DSA_KEY_PAIR_GEN,
+                    CKK_ML_KEM => CKM_ML_KEM_KEY_PAIR_GEN,
+                    CKK_SLH_DSA => CKM_SLH_DSA_KEY_PAIR_GEN,
                     _ => CK_UNAVAILABLE_INFORMATION,
                 };
                 session.set_fips_indicator(fips::indicators::is_approved(
