@@ -102,6 +102,142 @@ fn test_nssdb_token() {
     testtokn.finalize();
 }
 
+#[test]
+#[parallel]
+#[cfg(feature = "mldsa")]
+fn test_nssdb_token_mldsa() {
+    let name = String::from("test_nssdb_token_mldsa");
+    let datadir = "testdata/nssdbdir2";
+    let destdir = format!("{}/{}", TESTDIR, name);
+
+    let dbargs = format!("configDir={}", destdir);
+    let dbtype = "nssdb";
+
+    /* allocates a unique slotid to use in the tests */
+    let mut testtokn =
+        TestToken::new_type(String::from(dbtype), String::from(""), name);
+
+    /* Do this after TestToken::new() otherwise the data
+     * is wiped away by the initialization code */
+    std::fs::create_dir_all(destdir.clone()).unwrap();
+    assert!(std::fs::copy(
+        format!("{}/cert9.db", datadir),
+        format!("{}/cert9.db", destdir),
+    )
+    .is_ok());
+    assert!(std::fs::copy(
+        format!("{}/key4.db", datadir),
+        format!("{}/key4.db", destdir),
+    )
+    .is_ok());
+    assert!(std::fs::copy(
+        format!("{}/pkcs11.txt", datadir),
+        format!("{}/pkcs11.txt", destdir),
+    )
+    .is_ok());
+
+    /* pre-populate conf so we get the correct slot number assigned */
+    let mut slot = config::Slot::with_db(dbtype, Some(dbargs.clone()));
+    slot.slot = u32::try_from(testtokn.get_slot()).unwrap();
+    let ret = add_slot(slot);
+    assert_eq!(ret, CKR_OK);
+
+    let mut args = TestToken::make_init_args(Some(dbargs.clone()));
+    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
+    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
+    assert_eq!(ret, CKR_OK);
+
+    /* check slots and token */
+    let mut info = CK_SLOT_INFO::default();
+    let ret =
+        fn_get_slot_info(testtokn.get_slot(), &mut info as CK_SLOT_INFO_PTR);
+    assert_eq!(ret, CKR_OK);
+    let desc = std::str::from_utf8(&info.slotDescription).unwrap();
+    assert_eq!(desc.starts_with("Kryoptic Slot"), true);
+
+    let user_pin = "1234";
+    let session = testtokn.get_session(true);
+
+    /* try to login as user */
+    let ret = fn_login(
+        session,
+        CKU_USER,
+        CString::new(user_pin).unwrap().into_raw() as *mut u8,
+        user_pin.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* find the private key object */
+    let mut privkey: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = make_attr_template(
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_DSA)],
+        &[],
+        &[],
+    );
+    let ret = fn_find_objects_init(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    let ret = fn_find_objects(session, &mut privkey, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(privkey, CK_INVALID_HANDLE);
+    let ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* test that the key works */
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_DSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let msg = hex::decode(
+        "1E5A78AD64DF229AA22FD794EC0E82D0F69953118C09D134DFA20F1CC64A3671",
+    )
+    .expect("failed to decode test input");
+    let signature =
+        ret_or_panic!(sig_gen(session, privkey, msg.as_slice(), &mechanism));
+
+    /* find the public key object */
+    let mut pubkey: CK_ULONG = CK_INVALID_HANDLE;
+    let mut template = make_attr_template(
+        &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_ML_DSA)],
+        &[],
+        &[],
+    );
+    let ret = fn_find_objects_init(
+        session,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut count: CK_ULONG = 0;
+    let ret = fn_find_objects(session, &mut pubkey, 1, &mut count);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(count, 1);
+    assert_ne!(pubkey, CK_INVALID_HANDLE);
+    let ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    /* test that the key works */
+    let ret = sig_verify(
+        session,
+        pubkey,
+        msg.as_slice(),
+        signature.as_slice(),
+        &mechanism,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.logout();
+
+    testtokn.finalize();
+}
+
 // This test must be run serially as it changes global configuration
 #[test]
 #[serial]
