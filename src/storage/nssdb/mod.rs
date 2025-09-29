@@ -73,6 +73,16 @@ const NSS_PIN_MAX: usize = 500;
 /// Length of the salt used for NSS password hashing (from SHA1_LENGTH).
 const NSS_PIN_SALT_LEN: usize = 20;
 
+/// CKA_PARAMETER_SET bug fallback guard value:
+/// Generally numeric identifiers for parameters set are small,
+/// The largest so far is SLH-DSA with a value of 0x0C, but we'll give
+/// a little more space to avoid having to constantly tweak this in the
+/// future. It is unlikely any function will ever need more than 0x8F
+/// identifiers unless they decide to assign non consequent identifiers
+/// at some point in the future. By then we can probably drop this
+/// fallback code entriely
+const CKP_MAX_IDENTIFIER: u32 = 0x8F;
+
 /// Formats an internal UID string from the table name and numeric NSS object ID.
 fn nss_id_format(table: &str, id: u32) -> String {
     format!("{}-{}-{}", NSS_ID_PREFIX, table, id)
@@ -430,6 +440,55 @@ impl NSSStorage {
         Ok(())
     }
 
+    /// NSS broke the database format by not converting CKA_PARAMETER_SET to a
+    /// database ulong as it should have. We try to be compatible on reading
+    /// nss databases that were malformed this way (we do not bother trying
+    /// to write because there is no correct way to do it as what's written
+    /// is platform's CK_ULONG and endianness dependent, so there is no stable
+    /// "bad format". Luckily CKA_PARAMETER_SET has only a very small set of
+    /// valid values and does not store arbitrary integers so we can also
+    /// detect endianness violations on reading.
+    fn cka_parameter_set_fixup(&self, blob: &[u8]) -> Result<CK_ULONG> {
+        match blob.len() {
+            4 => {
+                let bytes: [u8; 4] = match blob.try_into() {
+                    Ok(b) => b,
+                    Err(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                };
+                /* assume correct format by default, try inverse endianness
+                 * later */
+                let number = u32::from_be_bytes(bytes);
+                if number < CKP_MAX_IDENTIFIER {
+                    return Ok(number as CK_ULONG);
+                }
+                /* try the other endianness */
+                let number = u32::from_le_bytes(bytes);
+                if number < CKP_MAX_IDENTIFIER {
+                    return Ok(number as CK_ULONG);
+                }
+            }
+            8 => {
+                let bytes: [u8; 8] = match blob.try_into() {
+                    Ok(b) => b,
+                    Err(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                };
+                /* assume little endianness by default case as LE are the
+                 * most common 64bit platforms */
+                let number = u64::from_le_bytes(bytes);
+                if number < CKP_MAX_IDENTIFIER as u64 {
+                    return Ok(number as CK_ULONG);
+                }
+                /* try the other endianness */
+                let number = u64::from_be_bytes(bytes);
+                if number < CKP_MAX_IDENTIFIER as u64 {
+                    return Ok(number as CK_ULONG);
+                }
+            }
+            _ => (),
+        }
+        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+    }
+
     /// Converts rows returned from an NSS DB query into a PKCS#11 `Object`.
     ///
     /// Maps NSS column names (e.g., "a81") to attribute types and converts
@@ -460,22 +519,29 @@ impl NSSStorage {
                 }
                 let bn: Option<&[u8]> =
                     row.get_ref(i + offset)?.as_blob_or_null()?;
-                let blob: &[u8] = match bn {
+                let mut blob: &[u8] = match bn {
                     Some(ref b) => b,
                     None => continue,
                 };
                 let atype = AttrType::attr_id_to_attrtype(cols[i])?;
                 let attr = match atype {
                     AttrType::NumType => {
-                        if blob.len() != 4 {
-                            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-                        }
-                        let bytes: [u8; 4] = match blob.try_into() {
-                            Ok(b) => b,
-                            Err(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                        /* Handle NSS bug with CKA_PARAMETER_SET storage */
+                        let ulong = if cols[i] == CKA_PARAMETER_SET {
+                            match self.cka_parameter_set_fixup(blob) {
+                                Ok(u) => u,
+                                Err(e) => return Err(e),
+                            }
+                        } else {
+                            let bytes: [u8; 4] = match blob.try_into() {
+                                Ok(b) => b,
+                                Err(_) => {
+                                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?
+                                }
+                            };
+                            let number = u32::from_be_bytes(bytes);
+                            number as CK_ULONG
                         };
-                        let number = u32::from_be_bytes(bytes);
-                        let ulong = number as CK_ULONG;
                         Attribute::from_attr_slice(
                             cols[i],
                             atype,
