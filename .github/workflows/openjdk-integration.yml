@@ -5,8 +5,11 @@ name: OpenJDK Integration Tests
 
 env:
   OPENSSL_BRANCH: kryoptic_ossl35
-  jtreg_version: 7.5.2+1
-  openjdk_feature: 21
+  # Keep jtreg_version, openjdk_feature, and openjdk_name in sync with
+  # testdata/openjdk/jtreg-kryoptic.sh.
+  jtreg_version: 8+2
+  openjdk_feature: 25
+  openjdk_name: jdk25u
 
 on:
   workflow_dispatch:
@@ -89,13 +92,13 @@ jobs:
           git clone --depth 10 \
             --branch \
             kryoptic-jdk-${{ env.openjdk_feature }} \
-            https://github.com/fitzsim/jdk${{ env.openjdk_feature }}u-dev
+            https://github.com/fitzsim/${{ env.openjdk_name }}
           cd ../../..
 
       - name: Compare container OpenJDK and test versions
         run: |
           CONTAINER_VERSION="${{ steps.get-openjdk-version.outputs.version }}"
-          cd testdata/openjdk/deps/jdk${{ env.openjdk_feature }}u-dev
+          cd testdata/openjdk/deps/${{ env.openjdk_name }}
           OPENJDK_SOURCE_VERSION=$(git tag --contains $(git describe --abbrev=0) \
             | head --lines 1 | sed 's/^jdk-//')
           echo OpenJDK test cases are based on "${OPENJDK_SOURCE_VERSION}"

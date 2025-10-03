@@ -14,12 +14,11 @@ export KRYOPTIC
 
 OPENJDK="${KRYOPTIC}"/testdata/openjdk
 
-get_variable_from_yaml() {
-    grep "  $1: " "${KRYOPTIC}"/.github/workflows/openjdk-integration.yml \
-        | sed "s/  $1: //"
-}
-jtreg_version=$(get_variable_from_yaml jtreg_version)
-openjdk_feature=$(get_variable_from_yaml openjdk_feature)
+# Keep jtreg_version, openjdk_feature, and openjdk_name in sync with
+# .github/workflows/openjdk-integration.yml.
+jtreg_version=8+2
+openjdk_feature=25
+openjdk_name=jdk25u
 
 # Download dependencies.
 if test -z "${PKCS11_PROVIDER}"
@@ -35,15 +34,15 @@ then
 fi
 if test -z "${JDK}"
 then
-    if ! test -d "${OPENJDK}"/deps/jdk"${openjdk_feature}"u-dev
+    if ! test -d "${OPENJDK}"/deps/"${openjdk_name}"
     then
         mkdir -p "${OPENJDK}"/deps
         pushd "${OPENJDK}"/deps
         git clone --depth 10 --branch kryoptic-jdk-"${openjdk_feature}" \
-            https://github.com/fitzsim/jdk"${openjdk_feature}"u-dev
+            https://github.com/fitzsim/"${openjdk_name}"
         popd
     fi
-    export JDK="${OPENJDK}"/deps/jdk"${openjdk_feature}"u-dev
+    export JDK="${OPENJDK}"/deps/"${openjdk_name}"
 fi
 if test -z "${JTREG}"
 then
@@ -64,7 +63,8 @@ fi
 export TESTSSRCDIR="${PKCS11_PROVIDER}"/tests
 # Note intentional extra "P" in "TMPPDIR".
 export TMPPDIR="${OPENJDK}"/conf
-export TOKDIR="${TMPPDIR}/db"
+NSSDIR="${TMPPDIR}/nss"
+export TOKDIR="${NSSDIR}/db"
 export PINVALUE="fo0m4nchU"
 mkdir --parents "${TOKDIR}"
 title() { echo "$@"; }
@@ -80,6 +80,8 @@ source "${TESTSSRCDIR}"/kryoptic.nss-init.sh
 # when it is called from kryoptic.nss-init.sh (which creates its own
 # configuration file, "${TMPPDIR}"/kryoptic.conf).
 rm --force "${TOKDIR}"/kryoptic.conf
+mv "${TMPPDIR}"/kryoptic.conf "${TOKDIR}"/kryoptic.conf
+cp "${OPENJDK}"/p11-nss.txt "${OPENJDK}"/p11-nss-sensitive.txt "${NSSDIR}"
 
 # PKCS11Test.java does a depth-first search for the first file with
 # this name under jdk.test.lib.artifacts.nsslib-linux_x64.  It finds
@@ -105,16 +107,19 @@ ${NATIVE_DEBUGGER} "${JAVA_HOME}"/bin/"${JAVA_RUNNER}" \
     -Dprogram=jtreg \
     -jar "${JTREG}"/lib/jtreg.jar \
     -verbose:fail,error \
-    -javaoption:-DCUSTOM_P11_CONFIG="${OPENJDK}"/p11-kryoptic.txt \
+    -javaoption:-DCUSTOM_P11_CONFIG_BASE_DIR="${TMPPDIR}" \
     -javaoption:-DCUSTOM_P11_LIBRARY_NAME=kryoptic_pkcs11 \
     -javaoption:-Djdk.test.lib.artifacts.nsslib-linux_x64="${TMPPDIR}" \
-    -javaoption:-DCUSTOM_DB_DIR="${TMPPDIR}" \
+    -javaoption:--enable-native-access=ALL-UNNAMED \
     -testjdk:"${JAVA_HOME}" \
     -javacoption:-g \
     @"${OPENJDK}"/openjdk-jtreg-tests.txt
 popd
 
 # Local Variables:
-# compile-command: "shellcheck --external-sources $(pwd)/jtreg-kryoptic.sh"
+# compile-command: "ln -s \
+# ../../testdata/openjdk/deps/pkcs11-provider/tests/kryoptic.nss-init.sh . \
+# && shellcheck --external-sources $(pwd)/jtreg-kryoptic.sh \
+# && rm kryoptic.nss-init.sh"
 # fill-column: 80
 # End:
