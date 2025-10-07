@@ -2,6 +2,8 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+
+#[cfg(feature = "slow")]
 use serde_json::{from_reader, Value};
 
 use serial_test::parallel;
@@ -3999,6 +4001,7 @@ fn test_slhdsa_operations() {
     assert_eq!(out, signature);
 }
 
+#[cfg(feature = "slow")]
 fn run_test(
     session: CK_SESSION_HANDLE,
     test: &Value,
@@ -4247,13 +4250,8 @@ fn run_test(
     assert_eq!(ret, CKR_OK);
 }
 
+#[cfg(feature = "slow")]
 fn test_groups(session: CK_SESSION_HANDLE, data: Value) {
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_SLH_DSA,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
     let test_groups: &Vec<Value> = match data["testGroups"].as_array() {
         Some(g) => g,
         None => panic!("No testGroups value"),

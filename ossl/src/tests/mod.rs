@@ -5,15 +5,9 @@
 static TEST_CONTEXT: ::std::sync::LazyLock<crate::OsslContext> =
     ::std::sync::LazyLock::new(|| crate::OsslContext::new_lib_ctx());
 
+#[cfg(not(feature = "fips"))]
 pub fn test_ossl_context() -> &'static crate::OsslContext {
-    #[cfg(feature = "fips")]
-    {
-        crate::fips::get_libctx()
-    }
-    #[cfg(not(feature = "fips"))]
-    {
-        &TEST_CONTEXT
-    }
+    &TEST_CONTEXT
 }
 
 #[cfg(all(not(feature = "fips"), feature = "rfc9580"))]
