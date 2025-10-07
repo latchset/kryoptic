@@ -7,12 +7,11 @@
 //! it through libcrypto.
 
 use std::cell::Cell;
-use std::env;
 use std::ffi::{c_char, c_int, c_uchar, c_void};
 use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::slice;
 use std::sync::LazyLock;
 
@@ -119,7 +118,7 @@ static FIPS_DUMMY_CONTENT: &[u8; 59] =
 static FIPS_MODULE_FILE_NAME: LazyLock<CString> = LazyLock::new(|| {
     #[cfg(feature = "dummy-integrity")]
     {
-        let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+        let out_path = std::path::PathBuf::from(std::env!("OUT_DIR"));
         let dummy_file = out_path.join("dummy.txt");
         std::fs::write(&dummy_file, FIPS_DUMMY_CONTENT).unwrap();
         CString::new(dummy_file.to_string_lossy().as_bytes()).unwrap()

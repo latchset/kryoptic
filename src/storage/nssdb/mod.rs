@@ -519,7 +519,7 @@ impl NSSStorage {
                 }
                 let bn: Option<&[u8]> =
                     row.get_ref(i + offset)?.as_blob_or_null()?;
-                let mut blob: &[u8] = match bn {
+                let blob: &[u8] = match bn {
                     Some(ref b) => b,
                     None => continue,
                 };
