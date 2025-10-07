@@ -189,23 +189,28 @@ impl TestToken<'_> {
 
     #[allow(unreachable_code)]
     fn get_default_db(name: &str) -> (&'static str, String) {
-        /* in order of preference, the first wins */
-        #[cfg(feature = "nssdb")]
-        {
-            let ret = format!("configDir={}/{}/", TESTDIR, name);
-            return (storage::nssdb::DBINFO.dbtype(), ret);
+        let default_db = match std::env::var("KRYOPTIC_TESTS_DEFAULT_DB") {
+            Ok(var) => var,
+            Err(_) => String::from("sqlitedb"),
+        };
+
+        match default_db.as_str() {
+            #[cfg(feature = "nssdb")]
+            "nssdb" => (
+                storage::nssdb::DBINFO.dbtype(),
+                format!("configDir={}/{}/", TESTDIR, name),
+            ),
+            #[cfg(feature = "sqlitedb")]
+            "sqlitedb" => (
+                storage::sqlite::DBINFO.dbtype(),
+                format!("{}/{}.sql", TESTDIR, name),
+            ),
+            #[cfg(feature = "memorydb")]
+            "memorydb" => {
+                (storage::memory::DBINFO.dbtype(), format!("flags=encrypt"))
+            }
+            x => panic!("Unknown database {}", x),
         }
-        #[cfg(feature = "sqlitedb")]
-        {
-            let ret = format!("{}/{}.sql", TESTDIR, name);
-            return (storage::sqlite::DBINFO.dbtype(), ret);
-        }
-        #[cfg(feature = "memorydb")]
-        {
-            let ret = format!("flags=encrypt");
-            return (storage::memory::DBINFO.dbtype(), ret);
-        }
-        panic!("At least one of the storage backends needs to be enabled")
     }
 
     fn initialized<'a>(
