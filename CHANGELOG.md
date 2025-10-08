@@ -6,6 +6,10 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* Added support to store Trust Objects
+    - [Add support for CKO_TRUST
+       objects](https://github.com/latchset/kryoptic/pull/348)
+
 --
 
 ## [1.3.1]
