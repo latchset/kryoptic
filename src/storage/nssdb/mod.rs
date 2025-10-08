@@ -672,7 +672,9 @@ impl NSSStorage {
                     let t = attr.to_ulong()?;
                     match t {
                         CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_public = false,
-                        CKO_PUBLIC_KEY | CKO_CERTIFICATE => do_private = false,
+                        CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST => {
+                            do_private = false
+                        }
                         _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     }
                 }
@@ -1214,7 +1216,9 @@ impl Storage for NSSStorage {
     ) -> Result<CK_OBJECT_HANDLE> {
         let (table, dbtype) = match obj.get_attr_as_ulong(CKA_CLASS)? {
             CKO_PRIVATE_KEY | CKO_SECRET_KEY => (NSS_PRIVATE_TABLE, "key"),
-            CKO_PUBLIC_KEY | CKO_CERTIFICATE => (NSS_PUBLIC_TABLE, "cert"),
+            CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST => {
+                (NSS_PUBLIC_TABLE, "cert")
+            }
             _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         };
 
