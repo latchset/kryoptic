@@ -264,3 +264,130 @@ fn test_create_objects() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_create_trust_object() {
+    let mut testtokn = TestToken::initialized("test_create_trust_object", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    // Test case 1: Successful creation of a trusted object
+    let trust_obj = ret_or_panic!(import_object(
+        session,
+        CKO_TRUST,
+        &[
+            (CKA_TRUST_SERVER_AUTH, CKT_TRUSTED),
+            (CKA_TRUST_CLIENT_AUTH, CKT_TRUST_ANCHOR),
+            (CKA_NAME_HASH_ALGORITHM, CKM_SHA256),
+        ],
+        &[
+            (CKA_ISSUER, "Test Issuer".as_bytes()),
+            (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+            (CKA_HASH_OF_CERTIFICATE, &[0; 32]), // dummy 256-bit hash
+        ],
+        &[(CKA_TOKEN, true)],
+    ));
+
+    // Test case 2: Successful creation of a non-trusted object without hash
+    let trust_obj2 = ret_or_panic!(import_object(
+        session,
+        CKO_TRUST,
+        &[(CKA_TRUST_SERVER_AUTH, CKT_NOT_TRUSTED)],
+        &[
+            (CKA_ISSUER, "Test Issuer 2".as_bytes()),
+            (CKA_SERIAL_NUMBER, &[0x04, 0x05, 0x06]),
+        ],
+        &[(CKA_TOKEN, true)],
+    ));
+
+    // check that CKA_NAME_HASH_ALGORITHM defaulted to SHA1
+    let mut hash_alg: CK_ULONG = 0;
+    let mut attr_template = make_ptrs_template(&[(
+        CKA_NAME_HASH_ALGORITHM,
+        void_ptr!(&mut hash_alg),
+        std::mem::size_of::<CK_ULONG>(),
+    )]);
+    let ret = fn_get_attribute_value(
+        session,
+        trust_obj2,
+        attr_template.as_mut_ptr(),
+        attr_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(hash_alg, CKM_SHA_1);
+
+    // Test case 3: Failure due to missing issuer
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_TRUST,
+            &[(CKA_TRUST_SERVER_AUTH, CKT_TRUSTED)],
+            &[
+                // CKA_ISSUER is missing
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                (CKA_HASH_OF_CERTIFICATE, &[0; 32]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // Test case 4: Failure due to missing serial number
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_TRUST,
+            &[(CKA_TRUST_SERVER_AUTH, CKT_TRUSTED)],
+            &[
+                (CKA_ISSUER, "Test Issuer".as_bytes()),
+                // CKA_SERIAL_NUMBER is missing
+                (CKA_HASH_OF_CERTIFICATE, &[0; 32]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // Test case 5: Failure due to missing hash when trust is asserted
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_TRUST,
+            &[(CKA_TRUST_SERVER_AUTH, CKT_TRUSTED)],
+            &[
+                (CKA_ISSUER, "Test Issuer".as_bytes()),
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                // CKA_HASH_OF_CERTIFICATE is missing
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // Test case 6: Failure due to empty hash when trust is asserted
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_TRUST,
+            &[(CKA_TRUST_SERVER_AUTH, CKT_TRUSTED)],
+            &[
+                (CKA_ISSUER, "Test Issuer".as_bytes()),
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                (CKA_HASH_OF_CERTIFICATE, &[]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_ATTRIBUTE_VALUE_INVALID
+    );
+
+    // cleanup
+    let ret = fn_destroy_object(session, trust_obj);
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_destroy_object(session, trust_obj2);
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
