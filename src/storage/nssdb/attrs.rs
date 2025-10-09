@@ -3,10 +3,9 @@
 
 //! This module defines PKCS#11 attribute type constants specific to or
 //! commonly used within NSS databases, including standard, vendor-defined
-//! (NSS), and trust object attributes. It also provides static lists grouping
-//! these attributes for different handling purposes (known, authenticated,
-//! sensitive, vendor, skippable) and helper functions to check attribute
-//! classifications.
+//! (NSS), and trust object attributes. It also provides a unified table of
+//! these attributes with their properties (authenticated, sensitive, vendor,
+//! skippable, etc.) and helper functions to check attribute classifications.
 
 use crate::pkcs11::*;
 
@@ -63,315 +62,340 @@ const CKA_NSS_TRUST_STEP_UP_APPROVED: CK_ATTRIBUTE_TYPE = NSS_VENDOR_TRUST + 16;
 const CKA_NSS_CERT_SHA1_HASH: CK_ATTRIBUTE_TYPE = NSS_VENDOR_TRUST + 100;
 const CKA_NSS_CERT_MD5_HASH: CK_ATTRIBUTE_TYPE = NSS_VENDOR_TRUST + 101;
 
-const NSS_KA_LEN: usize = 191;
+/// Holds all properties of an NSS attribute
+#[derive(Debug, Clone, Copy)]
+pub struct NssAttributeInfo {
+    /// The PKCS#11 attribute type value
+    pub attr_type: CK_ATTRIBUTE_TYPE,
+    /// Is an authenticated attribute
+    pub authenticated: bool,
+    /// Is a sensitive attribute
+    pub sensitive: bool,
+    /// Is an NSS vendor-specific attribute
+    pub vendor: bool,
+    /// Is an attribute to be skipped (not stored in DB)
+    pub skippable: bool,
+    /// Is a deprecated attribute
+    pub deprecated: bool,
+}
 
-/// Static array listing all standard and NSS vendor-specific attributes
-/// known and potentially stored by this NSS backend implementation.
-pub static NSS_KNOWN_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; NSS_KA_LEN] = [
-    CKA_CLASS,
-    CKA_TOKEN,
-    CKA_PRIVATE,
-    CKA_LABEL,
-    CKA_UNIQUE_ID,
-    CKA_APPLICATION,
-    CKA_VALUE,
-    CKA_OBJECT_ID,
-    CKA_CERTIFICATE_TYPE,
-    CKA_ISSUER,
-    CKA_SERIAL_NUMBER,
-    CKA_AC_ISSUER,
-    CKA_OWNER,
-    CKA_ATTR_TYPES,
-    CKA_TRUSTED,
-    CKA_CERTIFICATE_CATEGORY,
-    CKA_JAVA_MIDP_SECURITY_DOMAIN,
-    CKA_URL,
-    CKA_HASH_OF_SUBJECT_PUBLIC_KEY,
-    CKA_HASH_OF_ISSUER_PUBLIC_KEY,
-    CKA_NAME_HASH_ALGORITHM,
-    CKA_CHECK_VALUE,
-    CKA_KEY_TYPE,
-    CKA_SUBJECT,
-    CKA_ID,
-    CKA_SENSITIVE,
-    CKA_ENCRYPT,
-    CKA_DECRYPT,
-    CKA_WRAP,
-    CKA_UNWRAP,
-    CKA_SIGN,
-    CKA_SIGN_RECOVER,
-    CKA_VERIFY,
-    CKA_VERIFY_RECOVER,
-    CKA_DERIVE,
-    CKA_START_DATE,
-    CKA_END_DATE,
-    CKA_MODULUS,
-    CKA_MODULUS_BITS,
-    CKA_PUBLIC_EXPONENT,
-    CKA_PRIVATE_EXPONENT,
-    CKA_PRIME_1,
-    CKA_PRIME_2,
-    CKA_EXPONENT_1,
-    CKA_EXPONENT_2,
-    CKA_COEFFICIENT,
-    CKA_PUBLIC_KEY_INFO,
-    CKA_PRIME,
-    CKA_SUBPRIME,
-    CKA_BASE,
-    CKA_PRIME_BITS,
-    CKA_SUB_PRIME_BITS,
-    CKA_VALUE_BITS,
-    CKA_VALUE_LEN,
-    CKA_EXTRACTABLE,
-    CKA_LOCAL,
-    CKA_NEVER_EXTRACTABLE,
-    CKA_ALWAYS_SENSITIVE,
-    CKA_KEY_GEN_MECHANISM,
-    CKA_MODIFIABLE,
-    CKA_COPYABLE,
-    CKA_DESTROYABLE,
-    CKA_EC_PARAMS,
-    CKA_EC_POINT,
-    DEPRECATED_CKA_SECONDARY_AUTH,
-    DEPRECATED_CKA_AUTH_PIN_FLAGS,
-    CKA_ALWAYS_AUTHENTICATE,
-    CKA_WRAP_WITH_TRUSTED,
-    CKA_WRAP_TEMPLATE,
-    CKA_UNWRAP_TEMPLATE,
-    CKA_DERIVE_TEMPLATE,
-    CKA_OTP_FORMAT,
-    CKA_OTP_LENGTH,
-    CKA_OTP_TIME_INTERVAL,
-    CKA_OTP_USER_FRIENDLY_MODE,
-    CKA_OTP_CHALLENGE_REQUIREMENT,
-    CKA_OTP_TIME_REQUIREMENT,
-    CKA_OTP_COUNTER_REQUIREMENT,
-    CKA_OTP_PIN_REQUIREMENT,
-    CKA_OTP_COUNTER,
-    CKA_OTP_TIME,
-    CKA_OTP_USER_IDENTIFIER,
-    CKA_OTP_SERVICE_IDENTIFIER,
-    CKA_OTP_SERVICE_LOGO,
-    CKA_OTP_SERVICE_LOGO_TYPE,
-    CKA_GOSTR3410_PARAMS,
-    CKA_GOSTR3411_PARAMS,
-    CKA_GOST28147_PARAMS,
-    CKA_HW_FEATURE_TYPE,
-    CKA_RESET_ON_INIT,
-    CKA_HAS_RESET,
-    CKA_PIXEL_X,
-    CKA_PIXEL_Y,
-    CKA_RESOLUTION,
-    CKA_CHAR_ROWS,
-    CKA_CHAR_COLUMNS,
-    CKA_COLOR,
-    CKA_BITS_PER_PIXEL,
-    CKA_CHAR_SETS,
-    CKA_ENCODING_METHODS,
-    CKA_MIME_TYPES,
-    CKA_MECHANISM_TYPE,
-    CKA_REQUIRED_CMS_ATTRIBUTES,
-    CKA_DEFAULT_CMS_ATTRIBUTES,
-    CKA_SUPPORTED_CMS_ATTRIBUTES,
-    CKA_PROFILE_ID,
-    CKA_X2RATCHET_BAG,
-    CKA_X2RATCHET_BAGSIZE,
-    CKA_X2RATCHET_BOBS1STMSG,
-    CKA_X2RATCHET_CKR,
-    CKA_X2RATCHET_CKS,
-    CKA_X2RATCHET_DHP,
-    CKA_X2RATCHET_DHR,
-    CKA_X2RATCHET_DHS,
-    CKA_X2RATCHET_HKR,
-    CKA_X2RATCHET_HKS,
-    CKA_X2RATCHET_ISALICE,
-    CKA_X2RATCHET_NHKR,
-    CKA_X2RATCHET_NHKS,
-    CKA_X2RATCHET_NR,
-    CKA_X2RATCHET_NS,
-    CKA_X2RATCHET_PNS,
-    CKA_X2RATCHET_RK,
-    CKA_HSS_LEVELS,
-    CKA_HSS_LMS_TYPE,
-    CKA_HSS_LMOTS_TYPE,
-    CKA_HSS_LMS_TYPES,
-    CKA_HSS_LMOTS_TYPES,
-    CKA_HSS_KEYS_REMAINING,
-    CKA_OBJECT_VALIDATION_FLAGS,
-    CKA_VALIDATION_TYPE,
-    CKA_VALIDATION_VERSION,
-    CKA_VALIDATION_LEVEL,
-    CKA_VALIDATION_MODULE_ID,
-    CKA_VALIDATION_FLAG,
-    CKA_VALIDATION_AUTHORITY_TYPE,
-    CKA_VALIDATION_COUNTRY,
-    CKA_VALIDATION_CERTIFICATE_IDENTIFIER,
-    CKA_VALIDATION_CERTIFICATE_URI,
-    CKA_VALIDATION_PROFILE,
-    CKA_VALIDATION_VENDOR_URI,
-    CKA_ENCAPSULATE_TEMPLATE,
-    CKA_DECAPSULATE_TEMPLATE,
-    CKA_TRUST_SERVER_AUTH,
-    CKA_TRUST_CLIENT_AUTH,
-    CKA_TRUST_CODE_SIGNING,
-    CKA_TRUST_EMAIL_PROTECTION,
-    CKA_TRUST_IPSEC_IKE,
-    CKA_TRUST_TIME_STAMPING,
-    CKA_TRUST_OCSP_SIGNING,
-    CKA_ENCAPSULATE,
-    CKA_DECAPSULATE,
-    CKA_HASH_OF_CERTIFICATE,
-    CKA_PUBLIC_CRC64_VALUE,
-    CKA_SEED,
-    CKA_NSS_TRUST,
-    CKA_NSS_URL,
-    CKA_NSS_EMAIL,
-    CKA_NSS_SMIME_INFO,
-    CKA_NSS_SMIME_TIMESTAMP,
-    CKA_NSS_PKCS8_SALT,
-    CKA_NSS_PASSWORD_CHECK,
-    CKA_NSS_EXPIRES,
-    CKA_NSS_KRL,
-    CKA_NSS_PQG_COUNTER,
-    CKA_NSS_PQG_SEED,
-    CKA_NSS_PQG_H,
-    CKA_NSS_PQG_SEED_BITS,
-    CKA_NSS_MODULE_SPEC,
-    CKA_NSS_OVERRIDE_EXTENSIONS,
-    CKA_NSS_SERVER_DISTRUST_AFTER,
-    CKA_NSS_EMAIL_DISTRUST_AFTER,
-    CKA_NSS_TRUST_DIGITAL_SIGNATURE,
-    CKA_NSS_TRUST_NON_REPUDIATION,
-    CKA_NSS_TRUST_KEY_ENCIPHERMENT,
-    CKA_NSS_TRUST_DATA_ENCIPHERMENT,
-    CKA_NSS_TRUST_KEY_AGREEMENT,
-    CKA_NSS_TRUST_KEY_CERT_SIGN,
-    CKA_NSS_TRUST_CRL_SIGN,
-    CKA_NSS_TRUST_SERVER_AUTH,
-    CKA_NSS_TRUST_CLIENT_AUTH,
-    CKA_NSS_TRUST_CODE_SIGNING,
-    CKA_NSS_TRUST_EMAIL_PROTECTION,
-    CKA_NSS_TRUST_IPSEC_END_SYSTEM,
-    CKA_NSS_TRUST_IPSEC_TUNNEL,
-    CKA_NSS_TRUST_IPSEC_USER,
-    CKA_NSS_TRUST_TIME_STAMPING,
-    CKA_NSS_TRUST_STEP_UP_APPROVED,
-    CKA_NSS_CERT_SHA1_HASH,
-    CKA_NSS_CERT_MD5_HASH,
-    CKA_NSS_DB,
+macro_rules! nssattrinfo_regular {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: false,
+            sensitive: false,
+            vendor: false,
+            skippable: false,
+            deprecated: false,
+        }
+    };
+}
+
+macro_rules! nssattrinfo_authenticated {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: true,
+            sensitive: false,
+            vendor: false,
+            skippable: false,
+            deprecated: false,
+        }
+    };
+}
+
+macro_rules! nssattrinfo_sensitive {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: false,
+            sensitive: true,
+            vendor: false,
+            skippable: false,
+            deprecated: false,
+        }
+    };
+}
+
+macro_rules! nssattrinfo_vendor {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: false,
+            sensitive: false,
+            vendor: true,
+            skippable: false,
+            deprecated: false,
+        }
+    };
+}
+
+macro_rules! nssattrinfo_skippable {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: false,
+            sensitive: false,
+            vendor: false,
+            skippable: true,
+            deprecated: false,
+        }
+    };
+}
+
+macro_rules! nssattrinfo_deprecated {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: false,
+            sensitive: false,
+            vendor: false,
+            skippable: false,
+            deprecated: true,
+        }
+    };
+}
+
+macro_rules! nssattrinfo_auth_vendor {
+    ($attr:ident) => {
+        NssAttributeInfo {
+            attr_type: $attr,
+            authenticated: true,
+            sensitive: false,
+            vendor: true,
+            skippable: false,
+            deprecated: false,
+        }
+    };
+}
+
+/// Combined table of all attributes and their properties
+pub static ALL_ATTRIBUTES: &[NssAttributeInfo] = &[
+    nssattrinfo_regular!(CKA_CLASS),
+    nssattrinfo_regular!(CKA_TOKEN),
+    nssattrinfo_regular!(CKA_PRIVATE),
+    nssattrinfo_regular!(CKA_LABEL),
+    nssattrinfo_regular!(CKA_UNIQUE_ID),
+    nssattrinfo_regular!(CKA_APPLICATION),
+    nssattrinfo_sensitive!(CKA_VALUE),
+    nssattrinfo_regular!(CKA_OBJECT_ID),
+    nssattrinfo_regular!(CKA_CERTIFICATE_TYPE),
+    nssattrinfo_regular!(CKA_ISSUER),
+    nssattrinfo_regular!(CKA_SERIAL_NUMBER),
+    nssattrinfo_regular!(CKA_AC_ISSUER),
+    nssattrinfo_regular!(CKA_OWNER),
+    nssattrinfo_regular!(CKA_ATTR_TYPES),
+    nssattrinfo_regular!(CKA_TRUSTED),
+    nssattrinfo_regular!(CKA_CERTIFICATE_CATEGORY),
+    nssattrinfo_regular!(CKA_JAVA_MIDP_SECURITY_DOMAIN),
+    nssattrinfo_regular!(CKA_URL),
+    nssattrinfo_regular!(CKA_HASH_OF_SUBJECT_PUBLIC_KEY),
+    nssattrinfo_regular!(CKA_HASH_OF_ISSUER_PUBLIC_KEY),
+    nssattrinfo_authenticated!(CKA_NAME_HASH_ALGORITHM),
+    nssattrinfo_regular!(CKA_CHECK_VALUE),
+    nssattrinfo_regular!(CKA_KEY_TYPE),
+    nssattrinfo_regular!(CKA_SUBJECT),
+    nssattrinfo_regular!(CKA_ID),
+    nssattrinfo_regular!(CKA_SENSITIVE),
+    nssattrinfo_regular!(CKA_ENCRYPT),
+    nssattrinfo_regular!(CKA_DECRYPT),
+    nssattrinfo_regular!(CKA_WRAP),
+    nssattrinfo_regular!(CKA_UNWRAP),
+    nssattrinfo_regular!(CKA_SIGN),
+    nssattrinfo_regular!(CKA_SIGN_RECOVER),
+    nssattrinfo_regular!(CKA_VERIFY),
+    nssattrinfo_regular!(CKA_VERIFY_RECOVER),
+    nssattrinfo_regular!(CKA_DERIVE),
+    nssattrinfo_regular!(CKA_START_DATE),
+    nssattrinfo_regular!(CKA_END_DATE),
+    nssattrinfo_authenticated!(CKA_MODULUS),
+    nssattrinfo_regular!(CKA_MODULUS_BITS),
+    nssattrinfo_authenticated!(CKA_PUBLIC_EXPONENT),
+    nssattrinfo_sensitive!(CKA_PRIVATE_EXPONENT),
+    nssattrinfo_sensitive!(CKA_PRIME_1),
+    nssattrinfo_sensitive!(CKA_PRIME_2),
+    nssattrinfo_sensitive!(CKA_EXPONENT_1),
+    nssattrinfo_sensitive!(CKA_EXPONENT_2),
+    nssattrinfo_sensitive!(CKA_COEFFICIENT),
+    nssattrinfo_regular!(CKA_PUBLIC_KEY_INFO),
+    nssattrinfo_regular!(CKA_PRIME),
+    nssattrinfo_regular!(CKA_SUBPRIME),
+    nssattrinfo_regular!(CKA_BASE),
+    nssattrinfo_regular!(CKA_PRIME_BITS),
+    nssattrinfo_regular!(CKA_SUB_PRIME_BITS),
+    nssattrinfo_regular!(CKA_VALUE_BITS),
+    nssattrinfo_regular!(CKA_VALUE_LEN),
+    nssattrinfo_regular!(CKA_EXTRACTABLE),
+    nssattrinfo_regular!(CKA_LOCAL),
+    nssattrinfo_regular!(CKA_NEVER_EXTRACTABLE),
+    nssattrinfo_regular!(CKA_ALWAYS_SENSITIVE),
+    nssattrinfo_regular!(CKA_KEY_GEN_MECHANISM),
+    nssattrinfo_regular!(CKA_MODIFIABLE),
+    nssattrinfo_regular!(CKA_COPYABLE),
+    nssattrinfo_regular!(CKA_DESTROYABLE),
+    nssattrinfo_regular!(CKA_EC_PARAMS),
+    nssattrinfo_regular!(CKA_EC_POINT),
+    nssattrinfo_deprecated!(DEPRECATED_CKA_SECONDARY_AUTH),
+    nssattrinfo_deprecated!(DEPRECATED_CKA_AUTH_PIN_FLAGS),
+    nssattrinfo_regular!(CKA_ALWAYS_AUTHENTICATE),
+    nssattrinfo_regular!(CKA_WRAP_WITH_TRUSTED),
+    nssattrinfo_regular!(CKA_WRAP_TEMPLATE),
+    nssattrinfo_regular!(CKA_UNWRAP_TEMPLATE),
+    nssattrinfo_regular!(CKA_DERIVE_TEMPLATE),
+    nssattrinfo_regular!(CKA_OTP_FORMAT),
+    nssattrinfo_regular!(CKA_OTP_LENGTH),
+    nssattrinfo_regular!(CKA_OTP_TIME_INTERVAL),
+    nssattrinfo_regular!(CKA_OTP_USER_FRIENDLY_MODE),
+    nssattrinfo_regular!(CKA_OTP_CHALLENGE_REQUIREMENT),
+    nssattrinfo_regular!(CKA_OTP_TIME_REQUIREMENT),
+    nssattrinfo_regular!(CKA_OTP_COUNTER_REQUIREMENT),
+    nssattrinfo_regular!(CKA_OTP_PIN_REQUIREMENT),
+    nssattrinfo_regular!(CKA_OTP_COUNTER),
+    nssattrinfo_regular!(CKA_OTP_TIME),
+    nssattrinfo_regular!(CKA_OTP_USER_IDENTIFIER),
+    nssattrinfo_regular!(CKA_OTP_SERVICE_IDENTIFIER),
+    nssattrinfo_regular!(CKA_OTP_SERVICE_LOGO),
+    nssattrinfo_regular!(CKA_OTP_SERVICE_LOGO_TYPE),
+    nssattrinfo_regular!(CKA_GOSTR3410_PARAMS),
+    nssattrinfo_regular!(CKA_GOSTR3411_PARAMS),
+    nssattrinfo_regular!(CKA_GOST28147_PARAMS),
+    nssattrinfo_regular!(CKA_HW_FEATURE_TYPE),
+    nssattrinfo_regular!(CKA_RESET_ON_INIT),
+    nssattrinfo_regular!(CKA_HAS_RESET),
+    nssattrinfo_regular!(CKA_PIXEL_X),
+    nssattrinfo_regular!(CKA_PIXEL_Y),
+    nssattrinfo_regular!(CKA_RESOLUTION),
+    nssattrinfo_regular!(CKA_CHAR_ROWS),
+    nssattrinfo_regular!(CKA_CHAR_COLUMNS),
+    nssattrinfo_regular!(CKA_COLOR),
+    nssattrinfo_regular!(CKA_BITS_PER_PIXEL),
+    nssattrinfo_regular!(CKA_CHAR_SETS),
+    nssattrinfo_regular!(CKA_ENCODING_METHODS),
+    nssattrinfo_regular!(CKA_MIME_TYPES),
+    nssattrinfo_regular!(CKA_MECHANISM_TYPE),
+    nssattrinfo_regular!(CKA_REQUIRED_CMS_ATTRIBUTES),
+    nssattrinfo_regular!(CKA_DEFAULT_CMS_ATTRIBUTES),
+    nssattrinfo_regular!(CKA_SUPPORTED_CMS_ATTRIBUTES),
+    nssattrinfo_regular!(CKA_PROFILE_ID),
+    nssattrinfo_regular!(CKA_X2RATCHET_BAG),
+    nssattrinfo_regular!(CKA_X2RATCHET_BAGSIZE),
+    nssattrinfo_regular!(CKA_X2RATCHET_BOBS1STMSG),
+    nssattrinfo_regular!(CKA_X2RATCHET_CKR),
+    nssattrinfo_regular!(CKA_X2RATCHET_CKS),
+    nssattrinfo_regular!(CKA_X2RATCHET_DHP),
+    nssattrinfo_regular!(CKA_X2RATCHET_DHR),
+    nssattrinfo_regular!(CKA_X2RATCHET_DHS),
+    nssattrinfo_regular!(CKA_X2RATCHET_HKR),
+    nssattrinfo_regular!(CKA_X2RATCHET_HKS),
+    nssattrinfo_regular!(CKA_X2RATCHET_ISALICE),
+    nssattrinfo_regular!(CKA_X2RATCHET_NHKR),
+    nssattrinfo_regular!(CKA_X2RATCHET_NHKS),
+    nssattrinfo_regular!(CKA_X2RATCHET_NR),
+    nssattrinfo_regular!(CKA_X2RATCHET_NS),
+    nssattrinfo_regular!(CKA_X2RATCHET_PNS),
+    nssattrinfo_regular!(CKA_X2RATCHET_RK),
+    nssattrinfo_regular!(CKA_HSS_LEVELS),
+    nssattrinfo_regular!(CKA_HSS_LMS_TYPE),
+    nssattrinfo_regular!(CKA_HSS_LMOTS_TYPE),
+    nssattrinfo_regular!(CKA_HSS_LMS_TYPES),
+    nssattrinfo_regular!(CKA_HSS_LMOTS_TYPES),
+    nssattrinfo_regular!(CKA_HSS_KEYS_REMAINING),
+    nssattrinfo_regular!(CKA_OBJECT_VALIDATION_FLAGS),
+    nssattrinfo_regular!(CKA_VALIDATION_TYPE),
+    nssattrinfo_regular!(CKA_VALIDATION_VERSION),
+    nssattrinfo_regular!(CKA_VALIDATION_LEVEL),
+    nssattrinfo_regular!(CKA_VALIDATION_MODULE_ID),
+    nssattrinfo_regular!(CKA_VALIDATION_FLAG),
+    nssattrinfo_regular!(CKA_VALIDATION_AUTHORITY_TYPE),
+    nssattrinfo_regular!(CKA_VALIDATION_COUNTRY),
+    nssattrinfo_regular!(CKA_VALIDATION_CERTIFICATE_IDENTIFIER),
+    nssattrinfo_regular!(CKA_VALIDATION_CERTIFICATE_URI),
+    nssattrinfo_regular!(CKA_VALIDATION_PROFILE),
+    nssattrinfo_regular!(CKA_VALIDATION_VENDOR_URI),
+    nssattrinfo_regular!(CKA_ENCAPSULATE_TEMPLATE),
+    nssattrinfo_regular!(CKA_DECAPSULATE_TEMPLATE),
+    nssattrinfo_authenticated!(CKA_TRUST_SERVER_AUTH),
+    nssattrinfo_authenticated!(CKA_TRUST_CLIENT_AUTH),
+    nssattrinfo_authenticated!(CKA_TRUST_CODE_SIGNING),
+    nssattrinfo_authenticated!(CKA_TRUST_EMAIL_PROTECTION),
+    nssattrinfo_regular!(CKA_TRUST_IPSEC_IKE),
+    nssattrinfo_regular!(CKA_TRUST_TIME_STAMPING),
+    nssattrinfo_regular!(CKA_TRUST_OCSP_SIGNING),
+    nssattrinfo_regular!(CKA_ENCAPSULATE),
+    nssattrinfo_regular!(CKA_DECAPSULATE),
+    nssattrinfo_authenticated!(CKA_HASH_OF_CERTIFICATE),
+    nssattrinfo_regular!(CKA_PUBLIC_CRC64_VALUE),
+    nssattrinfo_sensitive!(CKA_SEED),
+    nssattrinfo_vendor!(CKA_NSS_TRUST),
+    nssattrinfo_vendor!(CKA_NSS_URL),
+    nssattrinfo_vendor!(CKA_NSS_EMAIL),
+    nssattrinfo_vendor!(CKA_NSS_SMIME_INFO),
+    nssattrinfo_vendor!(CKA_NSS_SMIME_TIMESTAMP),
+    nssattrinfo_vendor!(CKA_NSS_PKCS8_SALT),
+    nssattrinfo_vendor!(CKA_NSS_PASSWORD_CHECK),
+    nssattrinfo_vendor!(CKA_NSS_EXPIRES),
+    nssattrinfo_vendor!(CKA_NSS_KRL),
+    nssattrinfo_vendor!(CKA_NSS_PQG_COUNTER),
+    nssattrinfo_vendor!(CKA_NSS_PQG_SEED),
+    nssattrinfo_vendor!(CKA_NSS_PQG_H),
+    nssattrinfo_vendor!(CKA_NSS_PQG_SEED_BITS),
+    nssattrinfo_vendor!(CKA_NSS_MODULE_SPEC),
+    nssattrinfo_auth_vendor!(CKA_NSS_OVERRIDE_EXTENSIONS),
+    nssattrinfo_vendor!(CKA_NSS_SERVER_DISTRUST_AFTER),
+    nssattrinfo_vendor!(CKA_NSS_EMAIL_DISTRUST_AFTER),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_DIGITAL_SIGNATURE),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_NON_REPUDIATION),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_KEY_ENCIPHERMENT),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_DATA_ENCIPHERMENT),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_KEY_AGREEMENT),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_KEY_CERT_SIGN),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_CRL_SIGN),
+    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_SERVER_AUTH),
+    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_CLIENT_AUTH),
+    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_CODE_SIGNING),
+    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_EMAIL_PROTECTION),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_IPSEC_END_SYSTEM),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_IPSEC_TUNNEL),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_IPSEC_USER),
+    nssattrinfo_vendor!(CKA_NSS_TRUST_TIME_STAMPING),
+    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_STEP_UP_APPROVED),
+    nssattrinfo_auth_vendor!(CKA_NSS_CERT_SHA1_HASH),
+    nssattrinfo_auth_vendor!(CKA_NSS_CERT_MD5_HASH),
+    nssattrinfo_vendor!(CKA_NSS_DB),
+    // Skippable attributes
+    nssattrinfo_skippable!(CKA_ALLOWED_MECHANISMS),
 ];
 
-/// Static array listing attributes that NSS protects with an internal
-/// signature mechanism (see `storage/nssdb/ci.rs`) when stored in the
-/// key database (keyN.db).
-///
-/// NSS has a hardcoded list of attributes that are authenticated,
-/// some are vendor defined attributes */
-pub static AUTHENTICATED_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 16] = [
-    CKA_MODULUS,
-    CKA_PUBLIC_EXPONENT,
-    CKA_NSS_CERT_SHA1_HASH,
-    CKA_NSS_CERT_MD5_HASH,
-    CKA_NSS_TRUST_SERVER_AUTH,
-    CKA_NSS_TRUST_CLIENT_AUTH,
-    CKA_NSS_TRUST_EMAIL_PROTECTION,
-    CKA_NSS_TRUST_CODE_SIGNING,
-    CKA_NSS_TRUST_STEP_UP_APPROVED,
-    CKA_HASH_OF_CERTIFICATE,
-    CKA_NAME_HASH_ALGORITHM,
-    CKA_TRUST_SERVER_AUTH,
-    CKA_TRUST_CLIENT_AUTH,
-    CKA_TRUST_EMAIL_PROTECTION,
-    CKA_TRUST_CODE_SIGNING,
-    CKA_NSS_OVERRIDE_EXTENSIONS,
-];
-
-/// Static array listing only the NSS vendor-specific attribute types
-/// (excluding standard PKCS#11 attributes).
-static NSS_VENDOR_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 36] = [
-    CKA_NSS_TRUST,
-    CKA_NSS_URL,
-    CKA_NSS_EMAIL,
-    CKA_NSS_SMIME_INFO,
-    CKA_NSS_SMIME_TIMESTAMP,
-    CKA_NSS_PKCS8_SALT,
-    CKA_NSS_PASSWORD_CHECK,
-    CKA_NSS_EXPIRES,
-    CKA_NSS_KRL,
-    CKA_NSS_PQG_COUNTER,
-    CKA_NSS_PQG_SEED,
-    CKA_NSS_PQG_H,
-    CKA_NSS_PQG_SEED_BITS,
-    CKA_NSS_MODULE_SPEC,
-    CKA_NSS_OVERRIDE_EXTENSIONS,
-    CKA_NSS_SERVER_DISTRUST_AFTER,
-    CKA_NSS_EMAIL_DISTRUST_AFTER,
-    CKA_NSS_TRUST_DIGITAL_SIGNATURE,
-    CKA_NSS_TRUST_NON_REPUDIATION,
-    CKA_NSS_TRUST_KEY_ENCIPHERMENT,
-    CKA_NSS_TRUST_DATA_ENCIPHERMENT,
-    CKA_NSS_TRUST_KEY_AGREEMENT,
-    CKA_NSS_TRUST_KEY_CERT_SIGN,
-    CKA_NSS_TRUST_CRL_SIGN,
-    CKA_NSS_TRUST_SERVER_AUTH,
-    CKA_NSS_TRUST_CLIENT_AUTH,
-    CKA_NSS_TRUST_CODE_SIGNING,
-    CKA_NSS_TRUST_EMAIL_PROTECTION,
-    CKA_NSS_TRUST_IPSEC_END_SYSTEM,
-    CKA_NSS_TRUST_IPSEC_TUNNEL,
-    CKA_NSS_TRUST_IPSEC_USER,
-    CKA_NSS_TRUST_TIME_STAMPING,
-    CKA_NSS_TRUST_STEP_UP_APPROVED,
-    CKA_NSS_CERT_SHA1_HASH,
-    CKA_NSS_CERT_MD5_HASH,
-    CKA_NSS_DB,
-];
+fn get_attr_info(attr: CK_ATTRIBUTE_TYPE) -> Option<&'static NssAttributeInfo> {
+    ALL_ATTRIBUTES.iter().find(|&a| a.attr_type == attr)
+}
 
 /// Checks if an attribute type is an NSS vendor-defined attribute or
 /// deprecated and should generally be ignored.
 pub fn ignore_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
-    if NSS_VENDOR_ATTRIBUTES.contains(&attr) {
-        return true;
-    }
-    if attr == DEPRECATED_CKA_SECONDARY_AUTH
-        || attr == DEPRECATED_CKA_AUTH_PIN_FLAGS
-    {
-        return true;
-    }
-    return false;
+    get_attr_info(attr)
+        .map(|info| info.vendor || info.deprecated)
+        .unwrap_or(false)
 }
-
-/// Static array listing attributes that NSS considers sensitive and encrypts
-/// when storing private or secret key objects in the key database (keyN.db).
-pub static NSS_SENSITIVE_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 8] = [
-    CKA_VALUE,
-    CKA_PRIVATE_EXPONENT,
-    CKA_PRIME_1,
-    CKA_PRIME_2,
-    CKA_EXPONENT_1,
-    CKA_EXPONENT_2,
-    CKA_COEFFICIENT,
-    CKA_SEED,
-];
 
 /// Checks if an attribute type is considered sensitive by NSS (and should be
 /// encrypted).
 pub fn is_sensitive_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
-    NSS_SENSITIVE_ATTRIBUTES.contains(&attr)
+    get_attr_info(attr)
+        .map(|info| info.sensitive)
+        .unwrap_or(false)
 }
 
 /// Checks if an attribute type is known and potentially stored in the NSS DB.
 pub fn is_db_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
-    NSS_KNOWN_ATTRIBUTES.contains(&attr)
+    !get_attr_info(attr).is_none()
 }
-
-/// Static array listing attributes that are used by us but not supported by
-/// NSS for storage in the DB (like `CKA_ALLOWED_MECHANISMS`).
-pub static NSS_SKIP_ATTRIBUTES: [CK_ATTRIBUTE_TYPE; 1] =
-    [CKA_ALLOWED_MECHANISMS];
 
 /// Checks if an attribute type is one that should be skipped (not directly
 /// stored or retrieved as a column) when interacting with the NSS DB.
 pub fn is_skippable_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
-    NSS_SKIP_ATTRIBUTES.contains(&attr)
+    get_attr_info(attr)
+        .map(|info| info.skippable)
+        .unwrap_or(false)
 }
