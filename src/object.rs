@@ -23,6 +23,9 @@ use crate::CSPRNG;
 use bitflags::bitflags;
 use uuid::Uuid;
 
+#[cfg(feature = "nssdb")]
+use crate::pkcs11::vendor::nss::*;
+
 /// Helper macro that generates methods to check specific boolean
 /// attributes on objects
 macro_rules! create_bool_checker {
@@ -1181,6 +1184,252 @@ impl ObjectFactory for X509Factory {
 
 impl CertFactory for X509Factory {}
 
+/// This is a factory for objects of class CKO_TRUST
+///
+/// [Trust objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/pkcs11-spec-v3.2.html#_Toc195693091)
+/// (Version 3.2)
+#[derive(Debug, Default)]
+struct TrustObject {
+    data: ObjectFactoryData,
+}
+
+impl TrustObject {
+    /// Initializes a new TrustObject factory
+    fn new() -> TrustObject {
+        let mut factory: TrustObject = Default::default();
+
+        // CKO_TRUST is a storage object.
+        // Spec: if CKA_PRIVATE is not set, it defaults to CK_FALSE.
+        // Spec: if CKA_MODIFIABLE is not set, it defaults to CK_TRUE.
+        // add_common_storage_attrs handles both correctly.
+        factory.add_common_storage_attrs(false);
+        let attrs = factory.data.get_attributes_mut();
+
+        attrs.push(attr_element!(
+            CKA_ISSUER;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_SERIAL_NUMBER;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_HASH_OF_CERTIFICATE;
+            OAFlags::empty();
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_NAME_HASH_ALGORITHM;
+            OAFlags::empty();
+            Attribute::from_ulong;
+            val CKM_SHA_1
+        ));
+
+        let trust_attributes = [
+            CKA_TRUST_SERVER_AUTH,
+            CKA_TRUST_CLIENT_AUTH,
+            CKA_TRUST_CODE_SIGNING,
+            CKA_TRUST_EMAIL_PROTECTION,
+            CKA_TRUST_IPSEC_IKE,
+            CKA_TRUST_TIME_STAMPING,
+            CKA_TRUST_OCSP_SIGNING,
+        ];
+
+        for attr_type in trust_attributes {
+            attrs.push(attr_element!(
+                attr_type;
+                OAFlags::Defval;
+                Attribute::from_ulong;
+                val CKT_TRUST_UNKNOWN
+            ));
+        }
+
+        factory.data.finalize();
+        factory
+    }
+}
+
+impl ObjectFactory for TrustObject {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        let mut obj = self.default_object_create(template)?;
+
+        if !obj
+            .check_or_set_attr(Attribute::from_ulong(CKA_CLASS, CKO_TRUST))?
+        {
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        }
+
+        let trust_attributes = [
+            CKA_TRUST_SERVER_AUTH,
+            CKA_TRUST_CLIENT_AUTH,
+            CKA_TRUST_CODE_SIGNING,
+            CKA_TRUST_EMAIL_PROTECTION,
+            CKA_TRUST_IPSEC_IKE,
+            CKA_TRUST_TIME_STAMPING,
+            CKA_TRUST_OCSP_SIGNING,
+        ];
+
+        let mut some_trusted = false;
+        for attr_type in trust_attributes {
+            let trust_val = obj.get_attr_as_ulong(attr_type)?; // Will be present due to Defval
+            if trust_val != CKT_TRUST_UNKNOWN && trust_val != CKT_NOT_TRUSTED {
+                some_trusted = true;
+                break;
+            }
+        }
+
+        if some_trusted {
+            // CKA_HASH_OF_CERTIFICATE must be specified and not empty
+            let hash = obj
+                .get_attr_as_bytes(CKA_HASH_OF_CERTIFICATE)
+                .map_err(incomplete)?;
+            if hash.is_empty() {
+                return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+            }
+            // CKA_NAME_HASH_ALGORITHM must also be specified.
+            let _ = obj
+                .get_attr_as_ulong(CKA_NAME_HASH_ALGORITHM)
+                .map_err(incomplete)?;
+        } else if obj.get_attr(CKA_NAME_HASH_ALGORITHM).is_none() {
+            // "defaults to SHA-1 if not present"
+            obj.set_attr(Attribute::from_ulong(
+                CKA_NAME_HASH_ALGORITHM,
+                CKM_SHA_1,
+            ))?;
+        }
+
+        Ok(obj)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
+}
+
+/// This is a factory for objects of class CKO_NSS_TRUST
+///
+/// NSS Trust objects are vendor defined and are used in NSS DBs
+/// to store trust information about certificates.
+#[cfg(feature = "nssdb")]
+#[derive(Debug, Default)]
+struct NSSTrustObject {
+    data: ObjectFactoryData,
+}
+
+#[cfg(feature = "nssdb")]
+impl NSSTrustObject {
+    /// Initializes a new NSSTrustObject factory
+    fn new() -> NSSTrustObject {
+        let mut factory: NSSTrustObject = Default::default();
+
+        factory.add_common_storage_attrs(false);
+        let attrs = factory.data.get_attributes_mut();
+
+        attrs.push(attr_element!(
+            CKA_ISSUER;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_SERIAL_NUMBER;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_NSS_CERT_SHA1_HASH;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_NSS_CERT_MD5_HASH;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+
+        /* Some attributes are defined in NSS sources
+         * but never actually used, so we comment them
+         * out but keep here for completeness. We do not
+         * want to accidentailly create attributes in
+         * the NSS database that NSS would never create
+         * or use because these attributes would need to
+         * be authenticated but are currently not */
+        let trust_attributes = [
+            //CKA_NSS_TRUST_DIGITAL_SIGNATURE,
+            //CKA_NSS_TRUST_NON_REPUDIATION,
+            //CKA_NSS_TRUST_KEY_ENCIPHERMENT,
+            //CKA_NSS_TRUST_DATA_ENCIPHERMENT,
+            //CKA_NSS_TRUST_KEY_AGREEMENT,
+            //CKA_NSS_TRUST_KEY_CERT_SIGN,
+            //CKA_NSS_TRUST_CRL_SIGN,
+            CKA_NSS_TRUST_SERVER_AUTH,
+            CKA_NSS_TRUST_CLIENT_AUTH,
+            CKA_NSS_TRUST_CODE_SIGNING,
+            CKA_NSS_TRUST_EMAIL_PROTECTION,
+            //CKA_NSS_TRUST_IPSEC_END_SYSTEM,
+            //CKA_NSS_TRUST_IPSEC_TUNNEL,
+            //CKA_NSS_TRUST_IPSEC_USER,
+            //CKA_NSS_TRUST_TIME_STAMPING,
+            CKA_NSS_TRUST_STEP_UP_APPROVED,
+        ];
+
+        for attr_type in trust_attributes {
+            attrs.push(attr_element!(
+                attr_type;
+                OAFlags::empty();
+                Attribute::from_ulong;
+                val 0
+            ));
+        }
+
+        factory.data.finalize();
+        factory
+    }
+}
+
+#[cfg(feature = "nssdb")]
+impl ObjectFactory for NSSTrustObject {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        let mut obj = self.default_object_create(template)?;
+
+        if !obj.check_or_set_attr(Attribute::from_ulong(
+            CKA_CLASS,
+            CKO_NSS_TRUST,
+        ))? {
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        }
+        /* NSS does not allow private Trust objects */
+        match obj.get_attr_as_bool(CKA_PRIVATE) {
+            Ok(b) => match b {
+                false => (),
+                true => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            },
+            Err(_) => (),
+        };
+        Ok(obj)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
+}
+
 /// This is a common trait to define factories for objects that
 /// are keys, this trait defines attribute common to all key classes.
 ///
@@ -1787,7 +2036,9 @@ impl ObjectFactories {
             None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
         let type_ = match class {
-            CKO_DATA => 0,
+            CKO_DATA | CKO_TRUST => 0,
+            #[cfg(feature = "nssdb")]
+            CKO_NSS_TRUST => 0,
             CKO_CERTIFICATE => {
                 match template.iter().find(|a| a.type_ == CKA_CERTIFICATE_TYPE)
                 {
@@ -1984,6 +2235,15 @@ static X509_CERT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 static GENERIC_SECRET_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(GenericSecretKeyFactory::new()));
 
+/// The static Trust Object factory
+static TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(TrustObject::new()));
+
+/// The static NSS Trust Object factory
+#[cfg(feature = "nssdb")]
+static NSS_TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(NSSTrustObject::new()));
+
 /// Registers mechanisms and key factories for Data Objects, X509
 /// Certificates and Generic Secret Keys
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
@@ -1997,5 +2257,11 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     ot.add_factory(
         ObjectType::new(CKO_SECRET_KEY, CKK_GENERIC_SECRET),
         &(*GENERIC_SECRET_FACTORY),
+    );
+    ot.add_factory(ObjectType::new(CKO_TRUST, 0), &(*TRUST_OBJECT_FACTORY));
+    #[cfg(feature = "nssdb")]
+    ot.add_factory(
+        ObjectType::new(CKO_NSS_TRUST, 0),
+        &(*NSS_TRUST_OBJECT_FACTORY),
     );
 }

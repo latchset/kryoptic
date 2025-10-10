@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::fips::indicators::add_missing_validation_flag;
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
+use crate::pkcs11::vendor::nss::*;
 use crate::pkcs11::*;
 use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
@@ -259,9 +260,10 @@ impl NSSStorage {
             tx.execute(&format!("DROP TABLE {}.{}", schema, table), params![]);
 
         /* prep the monster tables NSSDB uses */
-        let formatter = NSS_KNOWN_ATTRIBUTES
+        let formatter = ALL_ATTRIBUTES
             .iter()
-            .format_with(", ", |a, f| f(&format_args!("a{:x}", a)));
+            .filter(|a| !a.skippable && !a.deprecated)
+            .format_with(", ", |a, f| f(&format_args!("a{:x}", a.attr_type)));
         let columns = format!(", {}", formatter);
 
         /* main tables */
@@ -413,7 +415,11 @@ impl NSSStorage {
             }
         }
 
-        let mut not_found = NSS_KNOWN_ATTRIBUTES.to_vec();
+        let mut not_found: Vec<CK_ULONG> = ALL_ATTRIBUTES
+            .iter()
+            .filter(|a| !a.skippable && !a.deprecated)
+            .map(|a| a.attr_type)
+            .collect();
         for val in &cols {
             let typ = match nss_col_to_type(val) {
                 Ok(t) => t,
@@ -667,7 +673,8 @@ impl NSSStorage {
                     let t = attr.to_ulong()?;
                     match t {
                         CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_public = false,
-                        CKO_PUBLIC_KEY | CKO_CERTIFICATE => do_private = false,
+                        CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST
+                        | CKO_NSS_TRUST => do_private = false,
                         _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     }
                 }
@@ -1122,8 +1129,8 @@ impl Storage for NSSStorage {
             attrs.add_missing_ulong(CKA_EXTRACTABLE, &dnm);
             attrs.add_missing_ulong(CKA_SENSITIVE, &dnm);
             /* we can not query a DB for these */
-            for a in NSS_SKIP_ATTRIBUTES {
-                let _ = attrs.remove_ulong(a);
+            for a_info in ALL_ATTRIBUTES.iter().filter(|a| a.skippable) {
+                let _ = attrs.remove_ulong(a_info.attr_type);
             }
             /* remove unknown attributes from query */
             for a in attributes {
@@ -1143,7 +1150,8 @@ impl Storage for NSSStorage {
             self.fetch_by_nssid(&table, nssobjid, attrs.as_slice())?;
         if self.keys.available() {
             if table == NSS_PRIVATE_TABLE {
-                for typ in NSS_SENSITIVE_ATTRIBUTES {
+                for attr_info in ALL_ATTRIBUTES.iter().filter(|a| a.sensitive) {
+                    let typ = attr_info.attr_type;
                     let encval = match obj.get_attr(typ) {
                         Some(attr) => attr.get_value(),
                         None => continue,
@@ -1153,7 +1161,8 @@ impl Storage for NSSStorage {
                 }
             }
 
-            for typ in AUTHENTICATED_ATTRIBUTES {
+            for attr_info in ALL_ATTRIBUTES.iter().filter(|a| a.authenticated) {
+                let typ = attr_info.attr_type;
                 let value = match obj.get_attr(typ) {
                     Some(attr) => attr.get_value(),
                     None => continue,
@@ -1176,7 +1185,8 @@ impl Storage for NSSStorage {
             }
         }
         /* add back the attributes that we requested, but that do not exist in DB */
-        for a in NSS_SKIP_ATTRIBUTES {
+        for a_info in ALL_ATTRIBUTES.iter().filter(|a| a.skippable) {
+            let a = a_info.attr_type;
             let factory = facilities.factories.get_object_factory(&obj)?;
             match attributes.iter().position(|r| r.type_ == a) {
                 Some(_) => {
@@ -1206,7 +1216,9 @@ impl Storage for NSSStorage {
     ) -> Result<CK_OBJECT_HANDLE> {
         let (table, dbtype) = match obj.get_attr_as_ulong(CKA_CLASS)? {
             CKO_PRIVATE_KEY | CKO_SECRET_KEY => (NSS_PRIVATE_TABLE, "key"),
-            CKO_PUBLIC_KEY | CKO_CERTIFICATE => (NSS_PUBLIC_TABLE, "cert"),
+            CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST | CKO_NSS_TRUST => {
+                (NSS_PUBLIC_TABLE, "cert")
+            }
             _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
         };
 
@@ -1221,7 +1233,8 @@ impl Storage for NSSStorage {
         }
 
         if table == NSS_PRIVATE_TABLE {
-            for typ in NSS_SENSITIVE_ATTRIBUTES {
+            for attr_info in ALL_ATTRIBUTES.iter().filter(|a| a.sensitive) {
+                let typ = attr_info.attr_type;
                 /* NOTE: this will not handle correctly empty attributes or
                  * num types, but there are no sensitive ones */
                 let plain = match obj.get_attr(typ) {
@@ -1250,7 +1263,8 @@ impl Storage for NSSStorage {
             }
         };
 
-        for typ in AUTHENTICATED_ATTRIBUTES {
+        for attr_info in ALL_ATTRIBUTES.iter().filter(|a| a.authenticated) {
+            let typ = attr_info.attr_type;
             /* NOTE: this will not handle correctly empty attributes or
              * num types, but there are no authenticated ones */
             let value = match obj.get_attr(typ) {
@@ -1308,7 +1322,8 @@ impl Storage for NSSStorage {
         let mut attrs = CkAttrs::from(template);
 
         if table == NSS_PRIVATE_TABLE {
-            for typ in NSS_SENSITIVE_ATTRIBUTES {
+            for attr_info in ALL_ATTRIBUTES.iter().filter(|a| a.sensitive) {
+                let typ = attr_info.attr_type;
                 /* NOTE: this will not handle correctly empty attributes or
                  * num types, but there are no sensitive ones */
                 match attrs.find_attr(typ) {
@@ -1332,7 +1347,8 @@ impl Storage for NSSStorage {
         tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
         Self::store_attributes(&mut tx, &table, nssobjid, &attrs)?;
 
-        for typ in AUTHENTICATED_ATTRIBUTES {
+        for attr_info in ALL_ATTRIBUTES.iter().filter(|a| a.authenticated) {
+            let typ = attr_info.attr_type;
             /* NOTE: this will not handle correctly empty attributes or
              * num types, but there are no authenticated ones */
             match attrs.find_attr(typ) {
@@ -1590,7 +1606,7 @@ impl StorageDBInfo for NSSDBInfo {
         Ok(Box::new(NSSStorage {
             config: config,
             conn: conn,
-            cols: Vec::with_capacity(NSS_KNOWN_ATTRIBUTES.len()),
+            cols: Vec::with_capacity(ALL_ATTRIBUTES.len()),
             keys: KeysWithCaching::default(),
         }))
     }
