@@ -14,6 +14,9 @@ use crate::misc::{sizeof, void_ptr, zeromem};
 use crate::pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
 use crate::pkcs11::*;
 
+#[cfg(feature = "nssdb")]
+use crate::pkcs11::vendor::nss::*;
+
 use ossl::BorrowedReference;
 
 /// List of attribute types we understand
@@ -89,7 +92,7 @@ impl Attrmap<'_> {
 
     /// Convenience function to search for a mapping by name
     pub fn search_by_name(s: &String) -> Option<&'static Attrmap<'static>> {
-        for a in &ATTRMAP {
+        for a in ATTRMAP {
             if a.name == s {
                 return Some(a);
             }
@@ -110,7 +113,7 @@ macro_rules! attrmap_element {
 }
 
 /// The main attributes map, list all known attributes
-static ATTRMAP: [Attrmap<'_>; 158] = [
+static ATTRMAP: &[Attrmap<'_>] = &[
     attrmap_element!(CKA_CLASS; as NumType),
     attrmap_element!(CKA_TOKEN; as BoolType),
     attrmap_element!(CKA_PRIVATE; as BoolType),
@@ -270,6 +273,20 @@ static ATTRMAP: [Attrmap<'_>; 158] = [
     /* Additional Vendor defined Attributes */
     attrmap_element!(KRA_MAX_LOGIN_ATTEMPTS; as NumType),
     attrmap_element!(KRA_LOGIN_ATTEMPTS; as NumType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_TRUST_SERVER_AUTH; as NumType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_TRUST_CLIENT_AUTH; as NumType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_TRUST_CODE_SIGNING; as NumType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_TRUST_EMAIL_PROTECTION; as NumType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_TRUST_STEP_UP_APPROVED; as NumType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_CERT_SHA1_HASH; as BytesType),
+    #[cfg(feature = "nssdb")]
+    attrmap_element!(CKA_NSS_CERT_MD5_HASH; as BytesType),
 ];
 
 #[cfg(test)]
@@ -278,9 +295,9 @@ mod tests {
 
     #[test]
     fn check_order_of_attrmap() {
-        let mut copy = ATTRMAP.clone();
+        let mut copy = (*ATTRMAP).to_vec();
         copy.sort();
-        assert_eq!(ATTRMAP, copy);
+        assert_eq!(ATTRMAP, copy.as_slice());
     }
 }
 

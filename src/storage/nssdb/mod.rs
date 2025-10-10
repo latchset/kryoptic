@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::fips::indicators::add_missing_validation_flag;
 use crate::misc::{copy_sized_string, zeromem};
 use crate::object::Object;
+use crate::pkcs11::vendor::nss::*;
 use crate::pkcs11::*;
 use crate::storage::sqlite_common::{check_table, set_secure_delete};
 use crate::storage::{Storage, StorageDBInfo, StorageTokenInfo};
@@ -672,9 +673,8 @@ impl NSSStorage {
                     let t = attr.to_ulong()?;
                     match t {
                         CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_public = false,
-                        CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST => {
-                            do_private = false
-                        }
+                        CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST
+                        | CKO_NSS_TRUST => do_private = false,
                         _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     }
                 }
@@ -1216,7 +1216,7 @@ impl Storage for NSSStorage {
     ) -> Result<CK_OBJECT_HANDLE> {
         let (table, dbtype) = match obj.get_attr_as_ulong(CKA_CLASS)? {
             CKO_PRIVATE_KEY | CKO_SECRET_KEY => (NSS_PRIVATE_TABLE, "key"),
-            CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST => {
+            CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST | CKO_NSS_TRUST => {
                 (NSS_PUBLIC_TABLE, "cert")
             }
             _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,

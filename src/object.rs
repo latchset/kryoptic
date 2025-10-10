@@ -23,6 +23,9 @@ use crate::CSPRNG;
 use bitflags::bitflags;
 use uuid::Uuid;
 
+#[cfg(feature = "nssdb")]
+use crate::pkcs11::vendor::nss::*;
+
 /// Helper macro that generates methods to check specific boolean
 /// attributes on objects
 macro_rules! create_bool_checker {
@@ -1312,6 +1315,121 @@ impl ObjectFactory for TrustObject {
     }
 }
 
+/// This is a factory for objects of class CKO_NSS_TRUST
+///
+/// NSS Trust objects are vendor defined and are used in NSS DBs
+/// to store trust information about certificates.
+#[cfg(feature = "nssdb")]
+#[derive(Debug, Default)]
+struct NSSTrustObject {
+    data: ObjectFactoryData,
+}
+
+#[cfg(feature = "nssdb")]
+impl NSSTrustObject {
+    /// Initializes a new NSSTrustObject factory
+    fn new() -> NSSTrustObject {
+        let mut factory: NSSTrustObject = Default::default();
+
+        factory.add_common_storage_attrs(false);
+        let attrs = factory.data.get_attributes_mut();
+
+        attrs.push(attr_element!(
+            CKA_ISSUER;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_SERIAL_NUMBER;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_NSS_CERT_SHA1_HASH;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+        attrs.push(attr_element!(
+            CKA_NSS_CERT_MD5_HASH;
+            OAFlags::RequiredOnCreate;
+            Attribute::from_bytes;
+            val Vec::new()
+        ));
+
+        /* Some attributes are defined in NSS sources
+         * but never actually used, so we comment them
+         * out but keep here for completeness. We do not
+         * want to accidentailly create attributes in
+         * the NSS database that NSS would never create
+         * or use because these attributes would need to
+         * be authenticated but are currently not */
+        let trust_attributes = [
+            //CKA_NSS_TRUST_DIGITAL_SIGNATURE,
+            //CKA_NSS_TRUST_NON_REPUDIATION,
+            //CKA_NSS_TRUST_KEY_ENCIPHERMENT,
+            //CKA_NSS_TRUST_DATA_ENCIPHERMENT,
+            //CKA_NSS_TRUST_KEY_AGREEMENT,
+            //CKA_NSS_TRUST_KEY_CERT_SIGN,
+            //CKA_NSS_TRUST_CRL_SIGN,
+            CKA_NSS_TRUST_SERVER_AUTH,
+            CKA_NSS_TRUST_CLIENT_AUTH,
+            CKA_NSS_TRUST_CODE_SIGNING,
+            CKA_NSS_TRUST_EMAIL_PROTECTION,
+            //CKA_NSS_TRUST_IPSEC_END_SYSTEM,
+            //CKA_NSS_TRUST_IPSEC_TUNNEL,
+            //CKA_NSS_TRUST_IPSEC_USER,
+            //CKA_NSS_TRUST_TIME_STAMPING,
+            CKA_NSS_TRUST_STEP_UP_APPROVED,
+        ];
+
+        for attr_type in trust_attributes {
+            attrs.push(attr_element!(
+                attr_type;
+                OAFlags::empty();
+                Attribute::from_ulong;
+                val 0
+            ));
+        }
+
+        factory.data.finalize();
+        factory
+    }
+}
+
+#[cfg(feature = "nssdb")]
+impl ObjectFactory for NSSTrustObject {
+    fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        let mut obj = self.default_object_create(template)?;
+
+        if !obj.check_or_set_attr(Attribute::from_ulong(
+            CKA_CLASS,
+            CKO_NSS_TRUST,
+        ))? {
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        }
+        /* NSS does not allow private Trust objects */
+        match obj.get_attr_as_bool(CKA_PRIVATE) {
+            Ok(b) => match b {
+                false => (),
+                true => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+            },
+            Err(_) => (),
+        };
+        Ok(obj)
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
+}
+
 /// This is a common trait to define factories for objects that
 /// are keys, this trait defines attribute common to all key classes.
 ///
@@ -1919,6 +2037,8 @@ impl ObjectFactories {
         };
         let type_ = match class {
             CKO_DATA | CKO_TRUST => 0,
+            #[cfg(feature = "nssdb")]
+            CKO_NSS_TRUST => 0,
             CKO_CERTIFICATE => {
                 match template.iter().find(|a| a.type_ == CKA_CERTIFICATE_TYPE)
                 {
@@ -2119,6 +2239,11 @@ static GENERIC_SECRET_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 static TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(TrustObject::new()));
 
+/// The static NSS Trust Object factory
+#[cfg(feature = "nssdb")]
+static NSS_TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(NSSTrustObject::new()));
+
 /// Registers mechanisms and key factories for Data Objects, X509
 /// Certificates and Generic Secret Keys
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
@@ -2134,4 +2259,9 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         &(*GENERIC_SECRET_FACTORY),
     );
     ot.add_factory(ObjectType::new(CKO_TRUST, 0), &(*TRUST_OBJECT_FACTORY));
+    #[cfg(feature = "nssdb")]
+    ot.add_factory(
+        ObjectType::new(CKO_NSS_TRUST, 0),
+        &(*NSS_TRUST_OBJECT_FACTORY),
+    );
 }
