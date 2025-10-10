@@ -391,3 +391,109 @@ fn test_create_trust_object() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+#[cfg(feature = "nssdb")]
+fn test_create_nss_trust_object() {
+    let mut testtokn =
+        TestToken::initialized("test_create_nss_trust_object", None);
+
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    use crate::pkcs11::vendor::nss::*;
+
+    // Test case 1: Successful creation of a trusted object
+    let trust_obj = ret_or_panic!(import_object(
+        session,
+        CKO_NSS_TRUST,
+        &[
+            (CKA_NSS_TRUST_SERVER_AUTH, CKT_NSS_TRUSTED_DELEGATOR),
+            (CKA_NSS_TRUST_CLIENT_AUTH, CKT_NSS_MUST_VERIFY_TRUST),
+        ],
+        &[
+            (CKA_ISSUER, "Test Issuer".as_bytes()),
+            (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+            (CKA_NSS_CERT_SHA1_HASH, &[0; 20]),
+            (CKA_NSS_CERT_MD5_HASH, &[0; 16]),
+        ],
+        &[(CKA_TOKEN, true)],
+    ));
+
+    // Test case 2: Failure due to missing issuer
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_NSS_TRUST,
+            &[],
+            &[
+                // CKA_ISSUER is missing
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                (CKA_NSS_CERT_SHA1_HASH, &[0; 20]),
+                (CKA_NSS_CERT_MD5_HASH, &[0; 16]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // Test case 3: Failure due to missing serial number
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_NSS_TRUST,
+            &[],
+            &[
+                (CKA_ISSUER, "Test Issuer".as_bytes()),
+                // CKA_SERIAL_NUMBER is missing
+                (CKA_NSS_CERT_SHA1_HASH, &[0; 20]),
+                (CKA_NSS_CERT_MD5_HASH, &[0; 16]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // Test case 4: Failure due to missing SHA1 hash
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_NSS_TRUST,
+            &[],
+            &[
+                (CKA_ISSUER, "Test Issuer".as_bytes()),
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                // CKA_NSS_CERT_SHA1_HASH is missing
+                (CKA_NSS_CERT_MD5_HASH, &[0; 16]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // Test case 5: Failure due to missing MD5 hash
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_NSS_TRUST,
+            &[],
+            &[
+                (CKA_ISSUER, "Test Issuer".as_bytes()),
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                (CKA_NSS_CERT_SHA1_HASH, &[0; 20]),
+                // CKA_NSS_CERT_MD5_HASH is missing
+            ],
+            &[(CKA_TOKEN, true)],
+        ),
+        CKR_TEMPLATE_INCOMPLETE
+    );
+
+    // cleanup
+    let ret = fn_destroy_object(session, trust_obj);
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
