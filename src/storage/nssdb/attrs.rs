@@ -302,6 +302,7 @@ pub static ALL_ATTRIBUTES: &[NssAttributeInfo] = &[
     nssattrinfo_regular!(CKA_HSS_LMOTS_TYPES),
     nssattrinfo_regular!(CKA_HSS_KEYS_REMAINING),
     nssattrinfo_regular!(CKA_OBJECT_VALIDATION_FLAGS),
+    nssattrinfo_regular!(CKA_PARAMETER_SET),
     nssattrinfo_regular!(CKA_VALIDATION_TYPE),
     nssattrinfo_regular!(CKA_VALIDATION_VERSION),
     nssattrinfo_regular!(CKA_VALIDATION_LEVEL),
