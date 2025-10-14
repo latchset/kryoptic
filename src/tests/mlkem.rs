@@ -488,13 +488,14 @@ fn test_mlkem_seedonly() {
             (CKA_KEY_TYPE, CKK_ML_KEM),
         ],
         &[],
-        &[(CKA_VERIFY, true)],
+        &[(CKA_VERIFY, true), (CKA_TOKEN, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM)],
         &[(CKA_LABEL, format!("ML-KEM private key 1").as_bytes()),],
         &[
             (CKA_SIGN, true),
             (CKA_SENSITIVE, false),
-            (CKA_EXTRACTABLE, true)
+            (CKA_EXTRACTABLE, true),
+            (CKA_TOKEN, true)
         ],
     ));
 

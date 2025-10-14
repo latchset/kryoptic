@@ -27,10 +27,10 @@ fn test_slhdsa_generate() {
             (CKA_KEY_TYPE, CKK_SLH_DSA),
         ],
         &[],
-        &[(CKA_VERIFY, true)],
+        &[(CKA_VERIFY, true), (CKA_TOKEN, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_SLH_DSA),],
         &[],
-        &[(CKA_SIGN, true)],
+        &[(CKA_SIGN, true), (CKA_TOKEN, true)],
     ));
 
     let mechanism: CK_MECHANISM = CK_MECHANISM {
