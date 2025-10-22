@@ -444,16 +444,23 @@ pub struct OsslParam<'a>(OsslParamBuilder<'a>);
 
 impl Drop for OsslParamBuilder<'_> {
     fn drop(&mut self) {
+        if self.freeptr {
+            #[cfg(param_clear_free)]
+            unsafe {
+                OSSL_PARAM_clear_free(
+                    self.p.as_ref().as_ptr() as *mut OSSL_PARAM
+                );
+            }
+            #[cfg(not(param_clear_free))]
+            unsafe {
+                OSSL_PARAM_free(self.p.as_ref().as_ptr() as *mut OSSL_PARAM);
+            }
+        }
         if self.zeroize {
             while let Some(mut v) = self.v.pop() {
                 unsafe {
                     OPENSSL_cleanse(void_ptr!(v.as_mut_ptr()), v.len());
                 }
-            }
-        }
-        if self.freeptr {
-            unsafe {
-                OSSL_PARAM_free(self.p.as_ref().as_ptr() as *mut OSSL_PARAM);
             }
         }
     }

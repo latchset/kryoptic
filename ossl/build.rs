@@ -58,6 +58,12 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
             println!("cargo::rustc-cfg=ossl_mlkem")
         }
     }
+
+    fn func_macro(&self, name: &str, _value: &[&[u8]]) {
+        if name == "OSSL_PARAM_clear_free" {
+            println!("cargo::rustc-cfg=param_clear_free")
+        }
+    }
 }
 
 fn ossl_bindings(args: &[&str], out_file: &Path) {
@@ -285,7 +291,7 @@ fn main() {
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* Always emit known configs */
-    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa,ossl_mlkem,ossl_slhdsa)");
+    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa,ossl_mlkem,ossl_slhdsa,param_clear_free)");
 
     /* OpenSSL Cryptography */
     if cfg!(feature = "dynamic") {
