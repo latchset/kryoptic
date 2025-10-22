@@ -919,6 +919,7 @@ fn dsa_data_to_params(
 ///
 /// Critically this function will zeroize allocated parameters after makig a
 /// full copy of them, before returning control to OpenSSL.
+#[cfg(not(param_clear_free))]
 unsafe extern "C" fn export_params_callback(
     params: *const OSSL_PARAM,
     arg: *mut c_void,
@@ -1013,21 +1014,41 @@ impl EvpPkey {
     /// The `selection` argument specifies which components to export
     /// (e.g., public, private, parameters).
     fn export_params(&self, selection: u32) -> Result<OsslParam<'_>, Error> {
-        let mut params_builder = OsslParamBuilder::new();
-        params_builder.zeroize = true;
-        let ret = unsafe {
-            EVP_PKEY_export(
-                self.ptr,
-                c_int::try_from(selection)?,
-                Some(export_params_callback),
-                &mut params_builder as *mut OsslParamBuilder as *mut c_void,
-            )
-        };
-        if ret != 1 {
-            trace_ossl!("EVP_PKEY_export()");
-            return Err(Error::new(ErrorKind::OsslError));
+        #[cfg(param_clear_free)]
+        {
+            let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
+            let ret = unsafe {
+                EVP_PKEY_todata(
+                    self.ptr,
+                    c_int::try_from(selection)?,
+                    Some(export_params_callback),
+                    &mut params,
+                )
+            };
+            if ret != 1 {
+                trace_ossl!("EVP_PKEY_todata()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            OsslParam::from_ptr(params)
         }
-        Ok(params_builder.finalize())
+        #[cfg(not(param_clear_free))]
+        {
+            let mut params_builder = OsslParamBuilder::new();
+            params_builder.zeroize = true;
+            let ret = unsafe {
+                EVP_PKEY_export(
+                    self.ptr,
+                    c_int::try_from(selection)?,
+                    Some(export_params_callback),
+                    &mut params_builder as *mut OsslParamBuilder as *mut c_void,
+                )
+            };
+            if ret != 1 {
+                trace_ossl!("EVP_PKEY_export()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            Ok(params_builder.finalize())
+        }
     }
 
     /// Allow to get parameters from a key.
