@@ -4,6 +4,9 @@
 use std::env;
 use std::path::PathBuf;
 
+#[cfg(all(feature = "fips", feature = "dynamic"))]
+compile_error!("FIPS builds are incompatible with dynamic linking to OpenSSL");
+
 #[derive(Debug)]
 pub struct Pkcs11Callbacks;
 
