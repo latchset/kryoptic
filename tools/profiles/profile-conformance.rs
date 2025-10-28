@@ -956,6 +956,29 @@ impl FuncList {
         }
     }
 
+    fn get_slot_info(
+        &self,
+        slot_id: pkcs11::CK_SLOT_ID,
+    ) -> Result<pkcs11::CK_SLOT_INFO, Error> {
+        unsafe {
+            match (*self.fntable).C_GetSlotInfo {
+                None => {
+                    Err("Broken pkcs11 module, no C_GetSlotInfo function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut info: pkcs11::CK_SLOT_INFO = std::mem::zeroed();
+                    let rv = func(slot_id, &mut info);
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_GetSlotInfo failed: {}", rv).into())
+                    } else {
+                        Ok(info)
+                    }
+                }
+            }
+        }
+    }
+
     fn open_session(
         &self,
         slot_id: pkcs11::CK_SLOT_ID,
@@ -1441,6 +1464,67 @@ fn execute_calls(
                     return Err(
                         "C_GetSlotList request is missing SlotList element"
                             .into(),
+                    );
+                }
+            }
+            Call::GetSlotInfo(c) => {
+                let slot_id_str = c
+                    .slot_id
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_GetSlotInfo requires a SlotID")?;
+                let resolved_slot_id_str =
+                    resolve_variable(&variables, slot_id_str)?;
+                let slot_id =
+                    resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
+
+                let info = pkcs11.get_slot_info(slot_id)?;
+                if args.debug {
+                    eprintln!("C_GetSlotInfo returned: {:?}", info);
+                }
+
+                // Now process response for checks
+                if let Call::GetSlotInfo(res_c) = response {
+                    if let Some(expected_info) = &res_c.p_info {
+                        // For now, only checking flags as requested.
+                        let expected_flags_str = &expected_info.flags.value;
+                        let mut expected_flags: pkcs11::CK_FLAGS = 0;
+                        for flag in expected_flags_str.split('|') {
+                            let trimmed_flag = flag.trim();
+                            if trimmed_flag.is_empty() {
+                                continue;
+                            }
+                            match trimmed_flag {
+                                "TOKEN_PRESENT" => {
+                                    expected_flags |= pkcs11::CKF_TOKEN_PRESENT
+                                }
+                                _ => {
+                                    return Err(format!(
+                                        "Unknown flag for C_GetSlotInfo: {}",
+                                        trimmed_flag
+                                    )
+                                    .into())
+                                }
+                            }
+                        }
+
+                        if expected_flags != 0
+                            && (info.flags & expected_flags) == 0
+                        {
+                            return Err(format!(
+                                "C_GetSlotInfo flags check failed. Returned: {:#x}, Expected to include any of: {:#x}",
+                                info.flags, expected_flags
+                            )
+                            .into());
+                        }
+
+                        if args.debug {
+                            eprintln!("C_GetSlotInfo flags check passed. Returned: {:#x}, Expected any of: {:#x}", info.flags, expected_flags);
+                        }
+                    }
+                } else {
+                    return Err(
+                        "Mismatched response type for C_GetSlotInfo".into()
                     );
                 }
             }
