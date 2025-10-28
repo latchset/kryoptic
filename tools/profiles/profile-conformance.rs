@@ -979,6 +979,29 @@ impl FuncList {
         }
     }
 
+    fn get_token_info(
+        &self,
+        slot_id: pkcs11::CK_SLOT_ID,
+    ) -> Result<pkcs11::CK_TOKEN_INFO, Error> {
+        unsafe {
+            match (*self.fntable).C_GetTokenInfo {
+                None => {
+                    Err("Broken pkcs11 module, no C_GetTokenInfo function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut info: pkcs11::CK_TOKEN_INFO = std::mem::zeroed();
+                    let rv = func(slot_id, &mut info);
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_GetTokenInfo failed: {}", rv).into())
+                    } else {
+                        Ok(info)
+                    }
+                }
+            }
+        }
+    }
+
     fn open_session(
         &self,
         slot_id: pkcs11::CK_SLOT_ID,
@@ -1526,6 +1549,21 @@ fn execute_calls(
                     return Err(
                         "Mismatched response type for C_GetSlotInfo".into()
                     );
+                }
+            }
+            Call::GetTokenInfo(c) => {
+                let slot_id_str = c
+                    .slot_id
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_GetTokenInfo requires a SlotID")?;
+                let resolved_slot_id_str =
+                    resolve_variable(&variables, slot_id_str)?;
+                let slot_id =
+                    resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
+                let info = pkcs11.get_token_info(slot_id)?;
+                if args.debug {
+                    eprintln!("C_GetTokenInfo returned: {:?}", info);
                 }
             }
             Call::OpenSession(c) => {
