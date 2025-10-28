@@ -6,8 +6,6 @@ status() {
     if [ $? -eq 0 ]; then
         echo "SUCCESS"
     else
-        cat < ${LOGFILE}
-        echo ""
         echo "FAILURE"
     fi
     exit 1
@@ -48,16 +46,26 @@ mkdir -p "${TOKDIR}"
 rm -f "${TOKDIR}"/token.sql
 
 export PINVALUE="${PINVALUE:-12345678}"
+export SOPINVALUE="${SOPINVALUE:-87654321}"
 export KRYOPTIC_CONF="${KRYOPTIC_CONF:-$TOKDIR/token.sql}"
 export TOKENLABEL="${TOKENLABEL:-Kryoptic Token}"
 export TOKENLABELURI="${TOKENLABELURI:-Kryoptic%20Token}"
-export LOGFILE="${LOGFILE:-$TOKDIR/comnformance.log}"
 
-echo "Commencing profile tests" > ${LOGFILE}
+echo "Commencing profile tests"
 
-for profile in ${XMLDIR}/*.xml; do
-    echo "Testing profile ${profile}"
-    $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${profile}" >>${LOGFILE} 2>&1
-done
+echo "Initializing Token"
+$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
+
+echo "Testing profile ${XMLDIR}/BL-M-1-32.xml"
+$TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/BL-M-1-32.xml"
+
+echo "Testing profile ${XMLDIR}/EXT-M-1-32.xml"
+$TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/EXT-M-1-32.xml"
+
+echo "Testing profile ${XMLDIR}/AUTH-M-1-32.xml"
+$TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/AUTH-M-1-32.xml"
+
+echo "Testing profile ${XMLDIR}/CERT-M-1-32.xml"
+$TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/CERT-M-1-32.xml"
 
 echo "all ok"
