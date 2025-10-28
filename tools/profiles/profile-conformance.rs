@@ -1033,6 +1033,86 @@ impl FuncList {
         }
     }
 
+    fn find_objects_init(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        template: &[pkcs11::CK_ATTRIBUTE],
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.fntable).C_FindObjectsInit {
+                None => {
+                    Err("Broken pkcs11 module, no C_FindObjectsInit function"
+                        .into())
+                }
+                Some(func) => {
+                    let rv = func(
+                        session,
+                        template.as_ptr() as *mut pkcs11::CK_ATTRIBUTE,
+                        template.len() as pkcs11::CK_ULONG,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_FindObjectsInit failed: {}", rv).into())
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
+    fn find_objects(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        max_count: pkcs11::CK_ULONG,
+    ) -> Result<Vec<pkcs11::CK_OBJECT_HANDLE>, Error> {
+        unsafe {
+            match (*self.fntable).C_FindObjects {
+                None => {
+                    Err("Broken pkcs11 module, no C_FindObjects function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut objects = vec![0; max_count as usize];
+                    let mut count = 0;
+                    let rv = func(
+                        session,
+                        objects.as_mut_ptr(),
+                        max_count,
+                        &mut count,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_FindObjects failed: {}", rv).into())
+                    } else {
+                        objects.truncate(count as usize);
+                        Ok(objects)
+                    }
+                }
+            }
+        }
+    }
+
+    fn find_objects_final(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.fntable).C_FindObjectsFinal {
+                None => {
+                    Err("Broken pkcs11 module, no C_FindObjectsFinal function"
+                        .into())
+                }
+                Some(func) => {
+                    let rv = func(session);
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_FindObjectsFinal failed: {}", rv).into())
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
     fn finalize(&self) -> Result<(), Error> {
         unsafe {
             match (*self.fntable).C_Finalize {
@@ -1295,6 +1375,64 @@ fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
         libc::dlclose(lib_handle);
     }
     res
+}
+
+fn get_attribute_type_from_str(
+    attr_name: &str,
+) -> Result<pkcs11::CK_ATTRIBUTE_TYPE, Error> {
+    match attr_name {
+        "CLASS" => Ok(pkcs11::CKA_CLASS),
+        "TOKEN" => Ok(pkcs11::CKA_TOKEN),
+        "PRIVATE" => Ok(pkcs11::CKA_PRIVATE),
+        "LABEL" => Ok(pkcs11::CKA_LABEL),
+        "ID" => Ok(pkcs11::CKA_ID),
+        _ => Err(format!("Unsupported attribute type: {}", attr_name).into()),
+    }
+}
+
+fn get_attribute_value_bytes(
+    attr_type: pkcs11::CK_ATTRIBUTE_TYPE,
+    value_str: &str,
+) -> Result<Vec<u8>, Error> {
+    match attr_type {
+        pkcs11::CKA_TOKEN | pkcs11::CKA_PRIVATE => {
+            let val = match value_str.to_uppercase().as_str() {
+                "TRUE" => pkcs11::CK_TRUE,
+                "FALSE" => pkcs11::CK_FALSE,
+                _ => {
+                    return Err(format!(
+                        "Invalid boolean value for attribute: {}",
+                        value_str
+                    )
+                    .into())
+                }
+            };
+            Ok(vec![val])
+        }
+        pkcs11::CKA_CLASS => {
+            let val = match value_str {
+                "DATA" => pkcs11::CKO_DATA,
+                "CERTIFICATE" => pkcs11::CKO_CERTIFICATE,
+                "PUBLIC_KEY" => pkcs11::CKO_PUBLIC_KEY,
+                "PRIVATE_KEY" => pkcs11::CKO_PRIVATE_KEY,
+                "SECRET_KEY" => pkcs11::CKO_SECRET_KEY,
+                _ => {
+                    return Err(format!(
+                        "Unsupported object class: {}",
+                        value_str
+                    )
+                    .into())
+                }
+            };
+            Ok(val.to_ne_bytes().to_vec())
+        }
+        pkcs11::CKA_LABEL | pkcs11::CKA_ID => Ok(value_str.as_bytes().to_vec()),
+        _ => Err(format!(
+            "Value conversion for attribute type {:#x} not implemented",
+            attr_type
+        )
+        .into()),
+    }
 }
 
 fn resolve_variable<'a>(
@@ -1621,9 +1759,139 @@ fn execute_calls(
                     );
                 }
             }
-            Call::FindObjectsFinal(_)
-            | Call::Logout(_)
-            | Call::CloseSession(_) => {
+            Call::FindObjectsInit(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_FindObjectsInit requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+
+                let mut ck_template = Vec::<pkcs11::CK_ATTRIBUTE>::new();
+                let mut value_storage = Vec::<Vec<u8>>::new(); // to keep values alive
+
+                if let Some(template) = &c.p_template {
+                    for attr in &template.attribute {
+                        if args.debug {
+                            eprintln!(
+                                "Processing attribute type: {}",
+                                attr.attr_type
+                            );
+                        }
+                        let attr_type =
+                            get_attribute_type_from_str(&attr.attr_type)?;
+
+                        let val_str = attr.p_value.as_ref().ok_or_else(|| {
+                            format!(
+                                "Attribute {} in FindObjectsInit template must have a value",
+                                attr.attr_type
+                            )
+                        })?;
+
+                        let bytes =
+                            get_attribute_value_bytes(attr_type, val_str)?;
+                        let len = bytes.len() as pkcs11::CK_ULONG;
+                        value_storage.push(bytes);
+                        let ptr = value_storage.last().unwrap().as_ptr()
+                            as pkcs11::CK_VOID_PTR;
+
+                        ck_template.push(pkcs11::CK_ATTRIBUTE {
+                            type_: attr_type,
+                            pValue: ptr,
+                            ulValueLen: len,
+                        });
+                    }
+                }
+                pkcs11.find_objects_init(session, &ck_template)?;
+            }
+            Call::FindObjects(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_FindObjects requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+
+                if c.ph_object.len() != 1 || c.ph_object[0].length.is_none() {
+                    return Err("C_FindObjects request requires exactly one Object element with a length attribute".into());
+                }
+                let max_count_str = c.ph_object[0].length.as_deref().unwrap();
+                let max_count = max_count_str.parse::<pkcs11::CK_ULONG>()?;
+
+                let objects = pkcs11.find_objects(session, max_count)?;
+
+                if args.debug {
+                    eprintln!(
+                        "C_FindObjects returned {} objects: {:?}",
+                        objects.len(),
+                        objects
+                    );
+                }
+
+                if let Call::FindObjects(res_c) = response {
+                    let empty_response = res_c.ph_object.is_empty()
+                        || (res_c.ph_object.len() == 1
+                            && res_c.ph_object[0].object.is_empty()
+                            && res_c.ph_object[0].value.is_none());
+
+                    if empty_response {
+                        if !objects.is_empty() {
+                            return Err(format!(
+                                "C_FindObjects expected to find 0 objects, but found {}",
+                                objects.len()
+                            )
+                            .into());
+                        }
+                    } else {
+                        // Not empty response, so we expect objects.
+                        // For now we just check if we have enough, and store handles.
+                        let expected_objects = &res_c.ph_object[0].object;
+                        if objects.len() < expected_objects.len() {
+                            return Err(format!(
+                                "C_FindObjects expected to find at least {} objects, but found {}",
+                                expected_objects.len(),
+                                objects.len()
+                            )
+                            .into());
+                        }
+                        for (i, expected_obj) in
+                            expected_objects.iter().enumerate()
+                        {
+                            if let Some(var_name) = &expected_obj.value {
+                                store_variable(
+                                    &mut variables,
+                                    var_name,
+                                    objects[i].to_string(),
+                                    args.debug,
+                                )?;
+                            }
+                        }
+                    }
+                } else {
+                    return Err(
+                        "Mismatched response type for C_FindObjects".into()
+                    );
+                }
+            }
+            Call::FindObjectsFinal(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_FindObjectsFinal requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+                pkcs11.find_objects_final(session)?;
+            }
+            Call::Logout(_) | Call::CloseSession(_) => {
                 // These calls only return a return value, but require a session handle
                 // that is not available yet as state management is not implemented.
                 return Err(format!(
