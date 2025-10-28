@@ -43,7 +43,6 @@ fi
 export XMLDIR="${XMLDIR:-tools/profiles}"
 export TOKDIR="${TOKDIR:-test/profiles}"
 mkdir -p "${TOKDIR}"
-rm -f "${TOKDIR}"/token.sql
 
 export PINVALUE="${PINVALUE:-12345678}"
 export SOPINVALUE="${SOPINVALUE:-87654321}"
@@ -53,19 +52,24 @@ export TOKENLABELURI="${TOKENLABELURI:-Kryoptic%20Token}"
 
 echo "Commencing profile tests"
 
-echo "Initializing Token"
-$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
-
 echo "Testing profile ${XMLDIR}/BL-M-1-32.xml"
+rm -f "${TOKDIR}"/token.sql
+$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
 $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/BL-M-1-32.xml"
 
 echo "Testing profile ${XMLDIR}/EXT-M-1-32.xml"
+rm -f "${TOKDIR}"/token.sql
+$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
 $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/EXT-M-1-32.xml"
 
 echo "Testing profile ${XMLDIR}/AUTH-M-1-32.xml"
+rm -f "${TOKDIR}"/token.sql
+$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}" --genkey RSA
 $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/AUTH-M-1-32.xml"
 
 echo "Testing profile ${XMLDIR}/CERT-M-1-32.xml"
+rm -f "${TOKDIR}"/token.sql
+$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
 $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/CERT-M-1-32.xml"
 
 echo "all ok"

@@ -521,4 +521,44 @@ impl FuncList {
             }
         }
     }
+
+    pub fn generate_key_pair(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        mechanism: &mut pkcs11::CK_MECHANISM,
+        public_key_template: &[pkcs11::CK_ATTRIBUTE],
+        private_key_template: &[pkcs11::CK_ATTRIBUTE],
+    ) -> Result<(pkcs11::CK_OBJECT_HANDLE, pkcs11::CK_OBJECT_HANDLE), Error>
+    {
+        unsafe {
+            match (*self.fntable).C_GenerateKeyPair {
+                None => {
+                    Err("Broken pkcs11 module, no C_GenerateKeyPair function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut ph_public_key = pkcs11::CK_INVALID_HANDLE;
+                    let mut ph_private_key = pkcs11::CK_INVALID_HANDLE;
+
+                    let rv = func(
+                        session,
+                        mechanism,
+                        public_key_template.as_ptr()
+                            as *mut pkcs11::CK_ATTRIBUTE,
+                        public_key_template.len() as pkcs11::CK_ULONG,
+                        private_key_template.as_ptr()
+                            as *mut pkcs11::CK_ATTRIBUTE,
+                        private_key_template.len() as pkcs11::CK_ULONG,
+                        &mut ph_public_key,
+                        &mut ph_private_key,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_GenerateKeyPair failed: {}", rv).into())
+                    } else {
+                        Ok((ph_public_key, ph_private_key))
+                    }
+                }
+            }
+        }
+    }
 }

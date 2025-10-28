@@ -7,6 +7,131 @@ use kryoptic_lib::pkcs11;
 use libc;
 use std::ffi::CString;
 
+fn generate_key(
+    pkcs11: &FuncList,
+    session: pkcs11::CK_SESSION_HANDLE,
+    key_type: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match key_type.to_uppercase().as_str() {
+        "RSA" => {
+            let mut mechanism = pkcs11::CK_MECHANISM {
+                mechanism: pkcs11::CKM_RSA_PKCS_KEY_PAIR_GEN,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            };
+
+            let ck_true = pkcs11::CK_TRUE;
+            let modulus_bits: pkcs11::CK_ULONG = 2048;
+            let public_exponent: [u8; 3] = [0x01, 0x00, 0x01]; // 65537
+            let pub_label = "testrsa-pub";
+            let pri_label = "testrsa-pri";
+
+            let public_key_template = [
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_ENCRYPT,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_VERIFY,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_WRAP,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_MODULUS_BITS,
+                    pValue: &modulus_bits as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&modulus_bits)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_PUBLIC_EXPONENT,
+                    pValue: public_exponent.as_ptr() as pkcs11::CK_VOID_PTR,
+                    ulValueLen: public_exponent.len() as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_TOKEN,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_LABEL,
+                    pValue: pub_label.as_ptr() as pkcs11::CK_VOID_PTR,
+                    ulValueLen: pub_label.len() as pkcs11::CK_ULONG,
+                },
+            ];
+
+            let private_key_template = [
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_TOKEN,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_PRIVATE,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_SENSITIVE,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_DECRYPT,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_SIGN,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_UNWRAP,
+                    pValue: &ck_true as *const _ as pkcs11::CK_VOID_PTR,
+                    ulValueLen: std::mem::size_of_val(&ck_true)
+                        as pkcs11::CK_ULONG,
+                },
+                pkcs11::CK_ATTRIBUTE {
+                    type_: pkcs11::CKA_LABEL,
+                    pValue: pri_label.as_ptr() as pkcs11::CK_VOID_PTR,
+                    ulValueLen: pri_label.len() as pkcs11::CK_ULONG,
+                },
+            ];
+
+            let (pub_key, priv_key) = pkcs11.generate_key_pair(
+                session,
+                &mut mechanism,
+                &public_key_template,
+                &private_key_template,
+            )?;
+            println!(
+                "Generated RSA key pair. Public key handle: {}, Private key handle: {}",
+                pub_key,
+                priv_key
+            );
+        }
+        _ => {
+            return Err(format!("Unsupported key type: {}", key_type).into());
+        }
+    }
+    Ok(())
+}
+
 pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
     let module_path = args
         .pkcs11_module
@@ -104,8 +229,23 @@ pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
                 pkcs11.init_pin(session, &pin)?;
                 println!("User PIN initialized.");
 
-                println!("Logging out.");
-                pkcs11.logout(session)?;
+                if let Some(key_type) = &args.genkey {
+                    println!("Logging out as SO.");
+                    pkcs11.logout(session)?;
+
+                    println!("Logging in as user for key generation.");
+                    pkcs11.login(session, pkcs11::CKU_USER, &pin)?;
+
+                    println!("Generating {} key...", key_type);
+                    generate_key(&pkcs11, session, key_type)?;
+
+                    println!("Logging out as user.");
+                    pkcs11.logout(session)?;
+                } else {
+                    println!("Logging out.");
+                    pkcs11.logout(session)?;
+                }
+
                 Ok(())
             })();
 
