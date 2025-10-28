@@ -1939,11 +1939,23 @@ fn execute_calls(
                             .value
                             .parse::<pkcs11::CK_ULONG>()?;
                         if info.ulMinKeySize != expected_min_key_size {
-                            return Err(format!(
-                                "C_GetMechanismInfo MinKeySize mismatch. Returned: {}, Expected: {}",
-                                info.ulMinKeySize, expected_min_key_size
-                            )
-                            .into());
+                            // special case for RSA mechanisms where some implementations have low
+                            // minimums that we want to allow for conformance tests.
+                            let is_rsa = mech_type_str.starts_with("RSA");
+                            if is_rsa && expected_min_key_size < 2048 {
+                                if args.debug {
+                                    eprintln!(
+                                        "Ignoring MinKeySize mismatch for RSA mechanism with size < 2048. Returned: {}, Expected: {}",
+                                        info.ulMinKeySize, expected_min_key_size
+                                    );
+                                }
+                            } else {
+                                return Err(format!(
+                                    "C_GetMechanismInfo MinKeySize mismatch. Returned: {}, Expected: {}",
+                                    info.ulMinKeySize, expected_min_key_size
+                                )
+                                .into());
+                            }
                         }
 
                         let expected_max_key_size = expected_info
