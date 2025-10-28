@@ -947,6 +947,37 @@ impl FuncList {
         }
     }
 
+    fn open_session(
+        &self,
+        slot_id: pkcs11::CK_SLOT_ID,
+        flags: pkcs11::CK_FLAGS,
+    ) -> Result<pkcs11::CK_SESSION_HANDLE, Error> {
+        unsafe {
+            match (*self.fntable).C_OpenSession {
+                None => {
+                    Err("Broken pkcs11 module, no C_OpenSession function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut session_handle: pkcs11::CK_SESSION_HANDLE =
+                        pkcs11::CK_INVALID_HANDLE;
+                    let rv = func(
+                        slot_id,
+                        flags,
+                        std::ptr::null_mut(), // pApplication
+                        None,                 // Notify
+                        &mut session_handle,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_OpenSession failed: {}", rv).into())
+                    } else {
+                        Ok(session_handle)
+                    }
+                }
+            }
+        }
+    }
+
     fn finalize(&self) -> Result<(), Error> {
         unsafe {
             match (*self.fntable).C_Finalize {
@@ -963,6 +994,41 @@ impl FuncList {
                 }
             }
         }
+    }
+}
+
+fn resolve_variable<'a>(
+    variables: &'a HashMap<String, String>,
+    value: &'a str,
+) -> Result<&'a str, Box<dyn std::error::Error>> {
+    if value.starts_with("${") && value.ends_with('}') {
+        variables
+            .get(value)
+            .map(|s| s.as_str())
+            .ok_or_else(|| format!("Variable '{}' not found", value).into())
+    } else {
+        Ok(value)
+    }
+}
+
+fn store_variable(
+    variables: &mut HashMap<String, String>,
+    var_name: &str,
+    value: String,
+    debug: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if var_name.starts_with("${") && var_name.ends_with('}') {
+        variables.insert(var_name.to_string(), value.clone());
+        if debug {
+            eprintln!("Stored variable: {} = {}", var_name, value);
+        }
+        Ok(())
+    } else {
+        Err(format!(
+            "Attempted to store variable with invalid name format: {}",
+            var_name
+        )
+        .into())
     }
 }
 
@@ -1034,12 +1100,10 @@ fn execute_calls(
                 };
 
                 if let Some(slot_list) = &c.slot_list {
-                    if let Some(var_name) = &slot_list.pul_count {
+                    if let Some(count_str) = &slot_list.pul_count {
                         // This is the second call, get list
                         let num_slots_str =
-                            variables.get(var_name).ok_or_else(|| {
-                                format!("Variable {} not found", var_name)
-                            })?;
+                            resolve_variable(&variables, count_str)?;
                         let num_slots = num_slots_str.parse::<usize>()?;
 
                         let mut slot_ids =
@@ -1073,17 +1137,12 @@ fn execute_calls(
                                 for (i, slot_id_val) in
                                     res_slot_list.p_slot_list.iter().enumerate()
                                 {
-                                    let var_name = &slot_id_val.value;
-                                    variables.insert(
-                                        var_name.to_string(),
+                                    store_variable(
+                                        &mut variables,
+                                        &slot_id_val.value,
                                         slot_ids[i].to_string(),
-                                    );
-                                    if args.debug {
-                                        eprintln!(
-                                            "Stored variable: {} = {}",
-                                            var_name, slot_ids[i]
-                                        );
-                                    }
+                                        args.debug,
+                                    )?;
                                 }
                             }
                         } else {
@@ -1106,18 +1165,15 @@ fn execute_calls(
                         // Now process response and store variables
                         if let Call::GetSlotList(res_c) = response {
                             if let Some(res_slot_list) = res_c.slot_list {
-                                if let Some(var_name) = res_slot_list.pul_count
+                                if let Some(var_placeholder) =
+                                    res_slot_list.pul_count
                                 {
-                                    variables.insert(
-                                        var_name.to_string(),
+                                    store_variable(
+                                        &mut variables,
+                                        &var_placeholder,
                                         count.to_string(),
-                                    );
-                                    if args.debug {
-                                        eprintln!(
-                                            "Stored variable: {} = {}",
-                                            var_name, count
-                                        );
-                                    }
+                                        args.debug,
+                                    )?;
                                 }
                             }
                         } else {
@@ -1131,6 +1187,61 @@ fn execute_calls(
                     return Err(
                         "C_GetSlotList request is missing SlotList element"
                             .into(),
+                    );
+                }
+            }
+            Call::OpenSession(c) => {
+                let slot_id_str = c
+                    .slot_id
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_OpenSession requires a SlotID")?;
+                let resolved_slot_id_str =
+                    resolve_variable(&variables, slot_id_str)?;
+                let slot_id =
+                    resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
+
+                let flags_str = c
+                    .flags
+                    .as_ref()
+                    .map(|f| f.value.as_str())
+                    .ok_or("C_OpenSession requires Flags")?;
+
+                let mut flags: pkcs11::CK_FLAGS = 0;
+                for flag in flags_str.split('|') {
+                    match flag.trim() {
+                        "RW_SESSION" => flags |= pkcs11::CKF_RW_SESSION,
+                        "SERIAL_SESSION" => flags |= pkcs11::CKF_SERIAL_SESSION,
+                        _ => {
+                            return Err(format!(
+                                "Unknown flag for C_OpenSession: {}",
+                                flag
+                            )
+                            .into())
+                        }
+                    }
+                }
+
+                let session_handle = pkcs11.open_session(slot_id, flags)?;
+                if args.debug {
+                    eprintln!(
+                        "C_OpenSession returned session handle: {}",
+                        session_handle
+                    );
+                }
+
+                if let Call::OpenSession(res_c) = response {
+                    if let Some(res_session) = res_c.ph_session {
+                        store_variable(
+                            &mut variables,
+                            &res_session.value,
+                            session_handle.to_string(),
+                            args.debug,
+                        )?;
+                    }
+                } else {
+                    return Err(
+                        "Mismatched response type for C_OpenSession".into()
                     );
                 }
             }
