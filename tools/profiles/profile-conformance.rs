@@ -1569,6 +1569,10 @@ fn execute_calls(
     let mut calls_iter = profile.calls.into_iter();
     let mut variables = HashMap::<String, String>::new();
 
+    if let Some(pin) = &args.pkcs11_pin {
+        store_variable(&mut variables, "${Pin}", pin.clone(), args.debug)?;
+    }
+
     let mut counter = 0;
     while let Some(request) = calls_iter.next() {
         if args.debug {
@@ -1939,13 +1943,13 @@ fn execute_calls(
                             .value
                             .parse::<pkcs11::CK_ULONG>()?;
                         if info.ulMinKeySize != expected_min_key_size {
-                            // special case for RSA mechanisms where some implementations have low
-                            // minimums that we want to allow for conformance tests.
+                            // special case for RSA mechanisms where some implementations have
+                            // different minimums than the conformance tests expect.
                             let is_rsa = mech_type_str.starts_with("RSA");
-                            if is_rsa && expected_min_key_size < 2048 {
+                            if is_rsa && expected_min_key_size < 1048 {
                                 if args.debug {
                                     eprintln!(
-                                        "Ignoring MinKeySize mismatch for RSA mechanism with size < 2048. Returned: {}, Expected: {}",
+                                        "Ignoring MinKeySize mismatch for RSA mechanism with size < 1048. Returned: {}, Expected: {}",
                                         info.ulMinKeySize, expected_min_key_size
                                     );
                                 }
@@ -2238,6 +2242,45 @@ fn execute_calls(
                 let slot_id =
                     resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
                 pkcs11.close_all_sessions(slot_id)?;
+            }
+            Call::Login(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_Login requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+
+                let user_type_str = c
+                    .user_type
+                    .as_ref()
+                    .map(|u| u.value.as_str())
+                    .ok_or("C_Login requires a UserType")?;
+                let user_type = match user_type_str {
+                    "USER" => pkcs11::CKU_USER,
+                    "SO" => pkcs11::CKU_SO,
+                    "CONTEXT_SPECIFIC" => pkcs11::CKU_CONTEXT_SPECIFIC,
+                    _ => {
+                        return Err(format!(
+                            "Unsupported user type: {}",
+                            user_type_str
+                        )
+                        .into())
+                    }
+                };
+
+                let pin_str = c
+                    .p_pin
+                    .as_ref()
+                    .map(|p| p.value.as_str())
+                    .ok_or("C_Login requires a Pin")?;
+                let resolved_pin_str = resolve_variable(&variables, pin_str)?;
+                let pin = CString::new(resolved_pin_str)?;
+
+                pkcs11.login(session, user_type, &pin)?;
             }
             Call::Logout(_) => {
                 // This call only returns a return value, but requires a session handle
