@@ -1032,6 +1032,31 @@ impl FuncList {
         }
     }
 
+    fn get_mechanism_info(
+        &self,
+        slot_id: pkcs11::CK_SLOT_ID,
+        mech_type: pkcs11::CK_MECHANISM_TYPE,
+    ) -> Result<pkcs11::CK_MECHANISM_INFO, Error> {
+        unsafe {
+            match (*self.fntable).C_GetMechanismInfo {
+                None => {
+                    Err("Broken pkcs11 module, no C_GetMechanismInfo function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut info: pkcs11::CK_MECHANISM_INFO =
+                        std::mem::zeroed();
+                    let rv = func(slot_id, mech_type, &mut info);
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_GetMechanismInfo failed: {}", rv).into())
+                    } else {
+                        Ok(info)
+                    }
+                }
+            }
+        }
+    }
+
     fn open_session(
         &self,
         slot_id: pkcs11::CK_SLOT_ID,
@@ -1880,6 +1905,113 @@ fn execute_calls(
                 } else {
                     return Err(
                         "C_GetMechanismList request is missing MechanismList element"
+                            .into(),
+                    );
+                }
+            }
+            Call::GetMechanismInfo(c) => {
+                let slot_id_str = c
+                    .slot_id
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_GetMechanismInfo requires a SlotID")?;
+                let resolved_slot_id_str =
+                    resolve_variable(&variables, slot_id_str)?;
+                let slot_id =
+                    resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
+
+                let mech_type_str =
+                    c.mechanism_type.as_ref().map(|m| m.value.as_str()).ok_or(
+                        "C_GetMechanismInfo requires a mechanism Type",
+                    )?;
+                let mech_type = get_mechanism_type_from_str(mech_type_str)?;
+
+                let info = pkcs11.get_mechanism_info(slot_id, mech_type)?;
+                if args.debug {
+                    eprintln!("C_GetMechanismInfo returned: {:?}", info);
+                }
+
+                // Now process response for checks
+                if let Call::GetMechanismInfo(res_c) = response {
+                    if let Some(expected_info) = &res_c.p_info {
+                        let expected_min_key_size = expected_info
+                            .min_key_size
+                            .value
+                            .parse::<pkcs11::CK_ULONG>()?;
+                        if info.ulMinKeySize != expected_min_key_size {
+                            return Err(format!(
+                                "C_GetMechanismInfo MinKeySize mismatch. Returned: {}, Expected: {}",
+                                info.ulMinKeySize, expected_min_key_size
+                            )
+                            .into());
+                        }
+
+                        let expected_max_key_size = expected_info
+                            .max_key_size
+                            .value
+                            .parse::<pkcs11::CK_ULONG>()?;
+                        if info.ulMaxKeySize != expected_max_key_size {
+                            return Err(format!(
+                                "C_GetMechanismInfo MaxKeySize mismatch. Returned: {}, Expected: {}",
+                                info.ulMaxKeySize, expected_max_key_size
+                            )
+                            .into());
+                        }
+
+                        let expected_flags_str = &expected_info.flags.value;
+                        let mut expected_flags: pkcs11::CK_FLAGS = 0;
+                        for flag in expected_flags_str.split('|') {
+                            let trimmed_flag = flag.trim();
+                            if trimmed_flag.is_empty() {
+                                continue;
+                            }
+                            match trimmed_flag {
+                                "ENCRYPT" => {
+                                    expected_flags |= pkcs11::CKF_ENCRYPT
+                                }
+                                "DECRYPT" => {
+                                    expected_flags |= pkcs11::CKF_DECRYPT
+                                }
+                                "DIGEST" => {
+                                    expected_flags |= pkcs11::CKF_DIGEST
+                                }
+                                "SIGN" => expected_flags |= pkcs11::CKF_SIGN,
+                                "VERIFY" => {
+                                    expected_flags |= pkcs11::CKF_VERIFY
+                                }
+                                "GENERATE_KEY_PAIR" => {
+                                    expected_flags |=
+                                        pkcs11::CKF_GENERATE_KEY_PAIR
+                                }
+                                "WRAP" => expected_flags |= pkcs11::CKF_WRAP,
+                                "UNWRAP" => {
+                                    expected_flags |= pkcs11::CKF_UNWRAP
+                                }
+                                _ => {
+                                    return Err(format!(
+                                    "Unknown flag for C_GetMechanismInfo: {}",
+                                    trimmed_flag
+                                )
+                                    .into())
+                                }
+                            }
+                        }
+
+                        if info.flags != expected_flags {
+                            return Err(format!(
+                                "C_GetMechanismInfo flags mismatch. Returned: {:#x}, Expected: {:#x}",
+                                info.flags, expected_flags
+                            )
+                            .into());
+                        }
+
+                        if args.debug {
+                            eprintln!("C_GetMechanismInfo checks passed.");
+                        }
+                    }
+                } else {
+                    return Err(
+                        "Mismatched response type for C_GetMechanismInfo"
                             .into(),
                     );
                 }
