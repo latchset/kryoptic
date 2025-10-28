@@ -1002,6 +1002,36 @@ impl FuncList {
         }
     }
 
+    fn get_mechanism_list(
+        &self,
+        slot_id: pkcs11::CK_SLOT_ID,
+        mechanisms: Option<&mut [pkcs11::CK_MECHANISM_TYPE]>,
+    ) -> Result<pkcs11::CK_ULONG, Error> {
+        unsafe {
+            match (*self.fntable).C_GetMechanismList {
+                None => {
+                    Err("Broken pkcs11 module, no C_GetMechanismList function"
+                        .into())
+                }
+                Some(func) => {
+                    let (ptr, mut count) = match mechanisms {
+                        Some(m) => {
+                            (m.as_mut_ptr(), m.len() as pkcs11::CK_ULONG)
+                        }
+                        None => (std::ptr::null_mut(), 0),
+                    };
+
+                    let rv = func(slot_id, ptr, &mut count);
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_GetMechanismList failed: {}", rv).into())
+                    } else {
+                        Ok(count)
+                    }
+                }
+            }
+        }
+    }
+
     fn open_session(
         &self,
         slot_id: pkcs11::CK_SLOT_ID,
@@ -1412,6 +1442,20 @@ fn get_attribute_type_from_str(
     }
 }
 
+fn get_mechanism_type_from_str(
+    mech_name: &str,
+) -> Result<pkcs11::CK_MECHANISM_TYPE, Error> {
+    match mech_name {
+        "RSA_PKCS_KEY_PAIR_GEN" => Ok(pkcs11::CKM_RSA_PKCS_KEY_PAIR_GEN),
+        "RSA_PKCS" => Ok(pkcs11::CKM_RSA_PKCS),
+        "SHA1" => Ok(pkcs11::CKM_SHA_1),
+        "SHA256" => Ok(pkcs11::CKM_SHA256),
+        "SHA384" => Ok(pkcs11::CKM_SHA384),
+        "SHA512" => Ok(pkcs11::CKM_SHA512),
+        _ => Err(format!("Unsupported mechanism type: {}", mech_name).into()),
+    }
+}
+
 fn get_attribute_value_bytes(
     attr_type: pkcs11::CK_ATTRIBUTE_TYPE,
     value_str: &str,
@@ -1724,6 +1768,120 @@ fn execute_calls(
                 let info = pkcs11.get_token_info(slot_id)?;
                 if args.debug {
                     eprintln!("C_GetTokenInfo returned: {:?}", info);
+                }
+            }
+            Call::GetMechanismList(c) => {
+                let slot_id_str = c
+                    .slot_id
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_GetMechanismList requires a SlotID")?;
+                let resolved_slot_id_str =
+                    resolve_variable(&variables, slot_id_str)?;
+                let slot_id =
+                    resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
+
+                if let Some(mech_list) = &c.p_mechanism_list {
+                    if let Some(count_str) = &mech_list.pul_count {
+                        // This is the second call, get list
+                        let num_mechs_str =
+                            resolve_variable(&variables, count_str)?;
+                        let num_mechs = num_mechs_str.parse::<usize>()?;
+
+                        let mut mech_types =
+                            vec![0 as pkcs11::CK_MECHANISM_TYPE; num_mechs];
+                        let returned_mechs_count = pkcs11.get_mechanism_list(
+                            slot_id,
+                            Some(&mut mech_types),
+                        )?;
+                        mech_types.truncate(returned_mechs_count as usize);
+
+                        if args.debug {
+                            eprintln!(
+                                "C_GetMechanismList returned {} mechanisms: {:?}",
+                                returned_mechs_count, mech_types
+                            );
+                        }
+
+                        // Now process response for checks
+                        if let Call::GetMechanismList(res_c) = response {
+                            if let Some(res_mech_list) = &res_c.p_mechanism_list
+                            {
+                                let mut expected_mechs = Vec::new();
+                                for mech_val in &res_mech_list.p_mechanism_list
+                                {
+                                    let mech_type =
+                                        get_mechanism_type_from_str(
+                                            &mech_val.value,
+                                        )?;
+                                    expected_mechs.push(mech_type);
+                                }
+
+                                if mech_types.len() < expected_mechs.len() {
+                                    return Err(format!(
+                                        "Expected at least {} mechanisms, but got {}",
+                                        expected_mechs.len(),
+                                        mech_types.len()
+                                    )
+                                    .into());
+                                }
+
+                                for expected_mech in expected_mechs {
+                                    if !mech_types.contains(&expected_mech) {
+                                        return Err(format!(
+                                            "Expected mechanism {:#x} was not found",
+                                            expected_mech
+                                        )
+                                        .into());
+                                    }
+                                }
+                                if args.debug {
+                                    eprintln!("All expected mechanisms found in list.");
+                                }
+                            }
+                        } else {
+                            return Err(
+                                "Mismatched response type for C_GetMechanismList"
+                                    .into(),
+                            );
+                        }
+                    } else {
+                        // This is the first call, get count
+                        let count = pkcs11.get_mechanism_list(slot_id, None)?;
+                        if args.debug {
+                            eprintln!(
+                                "C_GetMechanismList returned count: {}",
+                                count
+                            );
+                        }
+
+                        // Now process response and store variables
+                        if let Call::GetMechanismList(res_c) = response {
+                            if let Some(res_mech_list) = res_c.p_mechanism_list
+                            {
+                                if let Some(var_placeholder) =
+                                    res_mech_list.pul_count
+                                {
+                                    store_variable(
+                                        &mut variables,
+                                        &var_placeholder,
+                                        count.to_string(),
+                                        args.debug,
+                                    )?;
+                                }
+                            }
+                        } else {
+                            return Err(
+                                "Mismatched response type for C_GetMechanismList"
+                                    .into(),
+                            );
+                        }
+                    }
+                } else {
+                    return Err(
+                        "C_GetMechanismList request is missing MechanismList element"
+                            .into(),
+                    );
                 }
             }
             Call::OpenSession(c) => {
