@@ -2282,14 +2282,17 @@ fn execute_calls(
 
                 pkcs11.login(session, user_type, &pin)?;
             }
-            Call::Logout(_) => {
-                // This call only returns a return value, but requires a session handle
-                // that is not available yet as state management is not implemented.
-                return Err(format!(
-                    "Execution for {} requires state management which is not yet implemented",
-                    call_name
-                )
-                .into());
+            Call::Logout(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_Logout requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+                pkcs11.logout(session)?;
             }
             Call::Finalize(_) => {
                 pkcs11.finalize()?;
