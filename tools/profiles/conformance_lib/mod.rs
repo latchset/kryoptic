@@ -39,6 +39,9 @@ pub struct Arguments {
     #[arg(short = 's', long)]
     pub pkcs11_slot: Option<u64>,
 
+    #[arg(long)]
+    pub genkey: Option<String>,
+
     pub xml_profile: Option<String>,
 }
 
