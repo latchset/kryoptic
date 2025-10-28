@@ -1255,6 +1255,28 @@ impl FuncList {
             }
         }
     }
+
+    fn close_all_sessions(
+        &self,
+        slot_id: pkcs11::CK_SLOT_ID,
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.fntable).C_CloseAllSessions {
+                None => {
+                    Err("Broken pkcs11 module, no C_CloseAllSessions function"
+                        .into())
+                }
+                Some(func) => {
+                    let rv = func(slot_id);
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_CloseAllSessions failed: {}", rv).into())
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
@@ -1891,8 +1913,32 @@ fn execute_calls(
                     .parse::<pkcs11::CK_SESSION_HANDLE>()?;
                 pkcs11.find_objects_final(session)?;
             }
-            Call::Logout(_) | Call::CloseSession(_) => {
-                // These calls only return a return value, but require a session handle
+            Call::CloseSession(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_CloseSession requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+                pkcs11.close_session(session)?;
+            }
+            Call::CloseAllSessions(c) => {
+                let slot_id_str = c
+                    .slot_id
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_CloseAllSessions requires a SlotID")?;
+                let resolved_slot_id_str =
+                    resolve_variable(&variables, slot_id_str)?;
+                let slot_id =
+                    resolved_slot_id_str.parse::<pkcs11::CK_SLOT_ID>()?;
+                pkcs11.close_all_sessions(slot_id)?;
+            }
+            Call::Logout(_) => {
+                // This call only returns a return value, but requires a session handle
                 // that is not available yet as state management is not implemented.
                 return Err(format!(
                     "Execution for {} requires state management which is not yet implemented",
