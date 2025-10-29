@@ -18,6 +18,8 @@ fn get_attribute_type_from_str(
         "PRIVATE" => Ok(pkcs11::CKA_PRIVATE),
         "LABEL" => Ok(pkcs11::CKA_LABEL),
         "ID" => Ok(pkcs11::CKA_ID),
+        "MODULUS" => Ok(pkcs11::CKA_MODULUS),
+        "PUBLIC_EXPONENT" => Ok(pkcs11::CKA_PUBLIC_EXPONENT),
         _ => Err(format!("Unsupported attribute type: {}", attr_name).into()),
     }
 }
@@ -773,6 +775,93 @@ pub fn execute_calls(
                 let session = resolved_session_str
                     .parse::<pkcs11::CK_SESSION_HANDLE>()?;
                 pkcs11.find_objects_final(session)?;
+            }
+            Call::GetAttributeValue(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_GetAttributeValue requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+
+                let object_str = c
+                    .h_object
+                    .as_ref()
+                    .and_then(|o| o.value.as_deref())
+                    .ok_or("C_GetAttributeValue requires an Object with a value attribute")?;
+                let resolved_object_str =
+                    resolve_variable(&variables, object_str)?;
+                let object =
+                    resolved_object_str.parse::<pkcs11::CK_OBJECT_HANDLE>()?;
+
+                let mut ck_template = Vec::<pkcs11::CK_ATTRIBUTE>::new();
+                let mut value_storage = Vec::<Vec<u8>>::new();
+
+                if let Some(template) = &c.p_template {
+                    for attr in &template.attribute {
+                        if args.debug {
+                            eprintln!(
+                                "Preparing attribute type for GetValue: {}",
+                                attr.attr_type
+                            );
+                        }
+                        let attr_type =
+                            get_attribute_type_from_str(&attr.attr_type)?;
+
+                        let len_str = attr.ul_value_len.as_ref().ok_or_else(|| {
+                            format!(
+                                "Attribute {} in GetAttributeValue template must have a length",
+                                attr.attr_type
+                            )
+                        })?;
+                        let len = len_str.parse::<usize>()?;
+
+                        let mut buffer = vec![0u8; len];
+                        let ptr = buffer.as_mut_ptr() as pkcs11::CK_VOID_PTR;
+
+                        ck_template.push(pkcs11::CK_ATTRIBUTE {
+                            type_: attr_type,
+                            pValue: ptr,
+                            ulValueLen: len as pkcs11::CK_ULONG,
+                        });
+                        value_storage.push(buffer);
+                    }
+                }
+
+                pkcs11.get_attribute_value(
+                    session,
+                    object,
+                    &mut ck_template,
+                )?;
+
+                // Now check the results as per request
+                for (i, attr) in ck_template.iter().enumerate() {
+                    let attr_name =
+                        &c.p_template.as_ref().unwrap().attribute[i].attr_type;
+                    if attr.ulValueLen == 0 {
+                        return Err(format!(
+                            "C_GetAttributeValue for attribute '{}' returned length 0",
+                            attr_name
+                        )
+                        .into());
+                    }
+                    if attr.ulValueLen == pkcs11::CK_UNAVAILABLE_INFORMATION {
+                        return Err(format!(
+                            "C_GetAttributeValue for attribute '{}' returned CK_UNAVAILABLE_INFORMATION",
+                            attr_name
+                        )
+                        .into());
+                    }
+                    if args.debug {
+                        eprintln!(
+                            "Attribute '{}' got value of length {}",
+                            attr_name, attr.ulValueLen
+                        );
+                    }
+                }
             }
             Call::CloseSession(c) => {
                 let session_str = c
