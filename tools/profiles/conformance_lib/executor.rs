@@ -12,30 +12,24 @@ use std::ffi::CString;
 fn get_attribute_type_from_str(
     attr_name: &str,
 ) -> Result<pkcs11::CK_ATTRIBUTE_TYPE, Error> {
-    match attr_name {
-        "CLASS" => Ok(pkcs11::CKA_CLASS),
-        "TOKEN" => Ok(pkcs11::CKA_TOKEN),
-        "PRIVATE" => Ok(pkcs11::CKA_PRIVATE),
-        "LABEL" => Ok(pkcs11::CKA_LABEL),
-        "ID" => Ok(pkcs11::CKA_ID),
-        "MODULUS" => Ok(pkcs11::CKA_MODULUS),
-        "PUBLIC_EXPONENT" => Ok(pkcs11::CKA_PUBLIC_EXPONENT),
-        _ => Err(format!("Unsupported attribute type: {}", attr_name).into()),
-    }
+    let full_name = format!("CKA_{}", attr_name);
+    pkcs11::name_to_attr(&full_name).map_err(|_| {
+        format!("Unsupported attribute type: {}", attr_name).into()
+    })
 }
 
 fn get_mechanism_type_from_str(
     mech_name: &str,
 ) -> Result<pkcs11::CK_MECHANISM_TYPE, Error> {
-    match mech_name {
-        "RSA_PKCS_KEY_PAIR_GEN" => Ok(pkcs11::CKM_RSA_PKCS_KEY_PAIR_GEN),
-        "RSA_PKCS" => Ok(pkcs11::CKM_RSA_PKCS),
-        "SHA1" => Ok(pkcs11::CKM_SHA_1),
-        "SHA256" => Ok(pkcs11::CKM_SHA256),
-        "SHA384" => Ok(pkcs11::CKM_SHA384),
-        "SHA512" => Ok(pkcs11::CKM_SHA512),
-        _ => Err(format!("Unsupported mechanism type: {}", mech_name).into()),
-    }
+    let mech_name_for_lookup = if mech_name == "SHA1" {
+        "SHA_1"
+    } else {
+        mech_name
+    };
+    let full_name = format!("CKM_{}", mech_name_for_lookup);
+    pkcs11::name_to_mech(&full_name).map_err(|_| {
+        format!("Unsupported mechanism type: {}", mech_name).into()
+    })
 }
 
 fn get_attribute_value_bytes(
@@ -58,20 +52,10 @@ fn get_attribute_value_bytes(
             Ok(vec![val])
         }
         pkcs11::CKA_CLASS => {
-            let val = match value_str {
-                "DATA" => pkcs11::CKO_DATA,
-                "CERTIFICATE" => pkcs11::CKO_CERTIFICATE,
-                "PUBLIC_KEY" => pkcs11::CKO_PUBLIC_KEY,
-                "PRIVATE_KEY" => pkcs11::CKO_PRIVATE_KEY,
-                "SECRET_KEY" => pkcs11::CKO_SECRET_KEY,
-                _ => {
-                    return Err(format!(
-                        "Unsupported object class: {}",
-                        value_str
-                    )
-                    .into())
-                }
-            };
+            let full_name = format!("CKO_{}", value_str);
+            let val = pkcs11::name_to_obj(&full_name).map_err(|_| {
+                format!("Unsupported object class: {}", value_str)
+            })?;
             Ok(val.to_ne_bytes().to_vec())
         }
         pkcs11::CKA_LABEL | pkcs11::CKA_ID => Ok(value_str.as_bytes().to_vec()),
