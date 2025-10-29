@@ -50,6 +50,10 @@ pub enum Call {
     SignInit(CSignInit),
     #[serde(rename = "C_Sign")]
     Sign(CSign),
+    #[serde(rename = "C_VerifyInit")]
+    VerifyInit(CVerifyInit),
+    #[serde(rename = "C_Verify")]
+    Verify(CVerify),
     #[serde(rename = "C_Logout")]
     Logout(CLogout),
 }
@@ -75,6 +79,8 @@ impl Call {
             Call::GetAttributeValue(c) => c.rv.is_some(),
             Call::SignInit(c) => c.rv.is_some(),
             Call::Sign(c) => c.rv.is_some(),
+            Call::VerifyInit(c) => c.rv.is_some(),
+            Call::Verify(c) => c.rv.is_some(),
             Call::Logout(c) => c.rv.is_some(),
         }
     }
@@ -101,6 +107,8 @@ pub enum CallForSerialize<'a> {
     GetAttributeValue(&'a CGetAttributeValue),
     SignInit(&'a CSignInit),
     Sign(&'a CSign),
+    VerifyInit(&'a CVerifyInit),
+    Verify(&'a CVerify),
     Logout(&'a CLogout),
 }
 
@@ -127,6 +135,8 @@ impl<'a> From<&'a Call> for CallForSerialize<'a> {
             }
             Call::SignInit(c) => CallForSerialize::SignInit(c),
             Call::Sign(c) => CallForSerialize::Sign(c),
+            Call::VerifyInit(c) => CallForSerialize::VerifyInit(c),
+            Call::Verify(c) => CallForSerialize::Verify(c),
             Call::Logout(c) => CallForSerialize::Logout(c),
         }
     }
@@ -152,6 +162,8 @@ pub fn get_call_name(call: &Call) -> &str {
         Call::GetAttributeValue(_) => "C_GetAttributeValue",
         Call::SignInit(_) => "C_SignInit",
         Call::Sign(_) => "C_Sign",
+        Call::VerifyInit(_) => "C_VerifyInit",
+        Call::Verify(_) => "C_Verify",
         Call::Logout(_) => "C_Logout",
     }
 }
@@ -697,6 +709,30 @@ pub struct CSignInit {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct CVerifyInit {
+    #[serde(
+        rename(serialize = "rv", deserialize = "@rv"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rv: Option<String>,
+    #[serde(
+        rename(serialize = "hSession", deserialize = "Session"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub h_session: Option<Session>,
+    #[serde(
+        rename(serialize = "pMechanism", deserialize = "Mechanism"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub p_mechanism: Option<Mechanism>,
+    #[serde(
+        rename(serialize = "hKey", deserialize = "Key"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub h_key: Option<ValueAttr>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Mechanism {
     #[serde(rename(serialize = "mechanism", deserialize = "Type"))]
     pub mechanism: ValueAttr,
@@ -704,6 +740,30 @@ pub struct Mechanism {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CSign {
+    #[serde(
+        rename(serialize = "rv", deserialize = "@rv"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rv: Option<String>,
+    #[serde(
+        rename(serialize = "hSession", deserialize = "Session"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub h_session: Option<Session>,
+    #[serde(
+        rename(serialize = "pData", deserialize = "Data"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub p_data: Option<ValueAttr>,
+    #[serde(
+        rename(serialize = "pSignature", deserialize = "Signature"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub p_signature: Option<Signature>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CVerify {
     #[serde(
         rename(serialize = "rv", deserialize = "@rv"),
         skip_serializing_if = "Option::is_none"

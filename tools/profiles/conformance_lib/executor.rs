@@ -5,6 +5,7 @@ use super::pkcs11_wrapper::FuncList;
 use super::profile::{get_call_name, Call, Pkcs11Profile};
 use super::Arguments;
 use super::Error;
+use hex;
 use kryoptic_lib::pkcs11;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -884,6 +885,54 @@ pub fn execute_calls(
                     resolved_key_str.parse::<pkcs11::CK_OBJECT_HANDLE>()?;
 
                 pkcs11.sign_init(session, &mut mechanism, key)?;
+            }
+            Call::Sign(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_Sign requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+
+                let data_hex = c
+                    .p_data
+                    .as_ref()
+                    .map(|d| d.value.as_str())
+                    .ok_or("C_Sign requires Data")?;
+                let data = hex::decode(data_hex)
+                    .map_err(|e| format!("Failed to decode data hex: {}", e))?;
+
+                let sig_info = c
+                    .p_signature
+                    .as_ref()
+                    .ok_or("C_Sign requires a Signature element")?;
+                let sig_len_str = sig_info
+                    .pul_signature_len
+                    .as_ref()
+                    .ok_or("C_Sign Signature element requires a length")?;
+                let sig_len = sig_len_str.parse::<usize>()?;
+
+                let mut signature = vec![0u8; sig_len];
+                let returned_len =
+                    pkcs11.sign(session, &data, &mut signature)?;
+
+                if returned_len == 0 {
+                    return Err(
+                        "C_Sign returned a signature of length 0".into()
+                    );
+                }
+
+                if args.debug {
+                    eprintln!(
+                        "C_Sign returned a signature of length {}. Buffer size was {}.",
+                        returned_len, sig_len
+                    );
+                    signature.truncate(returned_len as usize);
+                    eprintln!("Signature (hex): {}", hex::encode(&signature));
+                }
             }
             Call::CloseSession(c) => {
                 let session_str = c

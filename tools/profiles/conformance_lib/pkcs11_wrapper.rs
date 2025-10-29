@@ -411,6 +411,35 @@ impl FuncList {
         }
     }
 
+    pub fn sign(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        data: &[u8],
+        signature_buf: &mut [u8],
+    ) -> Result<pkcs11::CK_ULONG, Error> {
+        unsafe {
+            match (*self.fntable).C_Sign {
+                None => Err("Broken pkcs11 module, no C_Sign function".into()),
+                Some(func) => {
+                    let mut signature_len =
+                        signature_buf.len() as pkcs11::CK_ULONG;
+                    let rv = func(
+                        session,
+                        data.as_ptr() as *mut u8,
+                        data.len() as pkcs11::CK_ULONG,
+                        signature_buf.as_mut_ptr(),
+                        &mut signature_len,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_Sign failed: {}", rv).into())
+                    } else {
+                        Ok(signature_len)
+                    }
+                }
+            }
+        }
+    }
+
     pub fn finalize(&self) -> Result<(), Error> {
         unsafe {
             match (*self.fntable).C_Finalize {
