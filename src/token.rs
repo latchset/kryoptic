@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use crate::attribute::CkAttrs;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::defaults;
 use crate::error::Result;
 #[cfg(feature = "fips")]
@@ -171,6 +171,10 @@ impl Token {
         #[cfg(feature = "fips")]
         fips::token_init(&mut token)?;
 
+        insert_profile_object(&mut token, CKP_BASELINE_PROVIDER)?;
+        insert_profile_object(&mut token, CKP_EXTENDED_PROVIDER)?;
+        insert_profile_object(&mut token, CKP_AUTHENTICATION_TOKEN)?;
+
         Ok(token)
     }
 
@@ -249,6 +253,10 @@ impl Token {
         if fips::token_init(self).is_err() {
             return Err(CKR_GENERAL_ERROR)?;
         }
+
+        insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
+        insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
+        insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
 
         Ok(())
     }
@@ -760,4 +768,24 @@ impl Token {
         handles.append(&mut storage_handles);
         Ok(handles)
     }
+}
+
+/// Synthesize a CKO_PROFILE object
+///
+/// This is done when the token is instantiated or initialized.
+fn insert_profile_object(
+    token: &mut Token,
+    profile_id: CK_PROFILE_ID,
+) -> Result<()> {
+    let mut obj = Object::new();
+    obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_PROFILE))?;
+    obj.set_attr(Attribute::from_ulong(CKA_PROFILE_ID, profile_id))?;
+
+    /* generate a unique id */
+    obj.generate_unique();
+
+    /* invalid session handle will prevent it from being removed when
+     * session objects are cleared on session closings */
+    let _ = token.insert_object(CK_INVALID_HANDLE, obj)?;
+    Ok(())
 }
