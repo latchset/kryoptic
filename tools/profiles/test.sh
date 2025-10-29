@@ -67,9 +67,10 @@ rm -f "${TOKDIR}"/token.sql
 $TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}" --genkey RSA
 $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/AUTH-M-1-32.xml"
 
-echo "Testing profile ${XMLDIR}/CERT-M-1-32.xml"
-rm -f "${TOKDIR}"/token.sql
-$TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
-$TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/CERT-M-1-32.xml"
+# TODO: We need a database with prepopulated certs for this
+# echo "Testing profile ${XMLDIR}/CERT-M-1-32.xml"
+# rm -f "${TOKDIR}"/token.sql
+# $TARGET_DIR/profile_conformance --init -m "${P11LIB}" -p "${PINVALUE}" --so-pin "${SOPINVALUE}" --token-label "${TOKENLABEL}"
+# $TARGET_DIR/profile_conformance $DEBUG_FLAG -m "${P11LIB}" -p "${PINVALUE}" "${XMLDIR}/CERT-M-1-32.xml"
 
 echo "all ok"
