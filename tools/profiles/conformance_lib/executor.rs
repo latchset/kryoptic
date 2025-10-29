@@ -114,6 +114,8 @@ pub fn execute_calls(
         store_variable(&mut variables, "${Pin}", pin.clone(), args.debug)?;
     }
 
+    let mut unimplemented_function_called = false;
+
     let mut counter = 0;
     while let Some(request) = calls_iter.next() {
         if args.debug {
@@ -932,6 +934,8 @@ pub fn execute_calls(
                     "Execution for {} is not implemented yet.",
                     call_name
                 );
+                unimplemented_function_called = true;
+                continue;
             }
         }
         println!("{} successful.", call_name);
@@ -941,6 +945,12 @@ pub fn execute_calls(
         return Err(
             "PKCS#11 was finalized, but there were more calls in the profile."
                 .into(),
+        );
+    }
+
+    if unimplemented_function_called {
+        return Err(
+            "Test failed due to calls to unimplemented functions.".into()
         );
     }
 
