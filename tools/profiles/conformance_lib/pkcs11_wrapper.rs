@@ -384,6 +384,33 @@ impl FuncList {
         }
     }
 
+    pub fn sign_init(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        mechanism: &mut pkcs11::CK_MECHANISM,
+        key: pkcs11::CK_OBJECT_HANDLE,
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.fntable).C_SignInit {
+                None => {
+                    Err("Broken pkcs11 module, no C_SignInit function".into())
+                }
+                Some(func) => {
+                    let rv = func(
+                        session,
+                        mechanism as *mut pkcs11::CK_MECHANISM,
+                        key,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_SignInit failed: {}", rv).into())
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
     pub fn finalize(&self) -> Result<(), Error> {
         unsafe {
             match (*self.fntable).C_Finalize {
