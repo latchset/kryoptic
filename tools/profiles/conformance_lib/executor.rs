@@ -849,6 +849,42 @@ pub fn execute_calls(
                     }
                 }
             }
+            Call::SignInit(c) => {
+                let session_str = c
+                    .h_session
+                    .as_ref()
+                    .map(|s| s.value.as_str())
+                    .ok_or("C_SignInit requires a Session")?;
+                let resolved_session_str =
+                    resolve_variable(&variables, session_str)?;
+                let session = resolved_session_str
+                    .parse::<pkcs11::CK_SESSION_HANDLE>()?;
+
+                let mech_str = c
+                    .p_mechanism
+                    .as_ref()
+                    .map(|m| m.mechanism.value.as_str())
+                    .ok_or("C_SignInit requires a Mechanism")?;
+                let mech_type = get_mechanism_type_from_str(mech_str)?;
+
+                // For now, assume no parameters for mechanism
+                let mut mechanism = pkcs11::CK_MECHANISM {
+                    mechanism: mech_type,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                };
+
+                let key_str = c
+                    .h_key
+                    .as_ref()
+                    .map(|k| k.value.as_str())
+                    .ok_or("C_SignInit requires a Key")?;
+                let resolved_key_str = resolve_variable(&variables, key_str)?;
+                let key =
+                    resolved_key_str.parse::<pkcs11::CK_OBJECT_HANDLE>()?;
+
+                pkcs11.sign_init(session, &mut mechanism, key)?;
+            }
             Call::CloseSession(c) => {
                 let session_str = c
                     .h_session
