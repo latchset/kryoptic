@@ -354,6 +354,36 @@ impl FuncList {
         }
     }
 
+    pub fn get_attribute_value(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        object: pkcs11::CK_OBJECT_HANDLE,
+        template: &mut [pkcs11::CK_ATTRIBUTE],
+    ) -> Result<(), Error> {
+        unsafe {
+            match (*self.fntable).C_GetAttributeValue {
+                None => {
+                    Err("Broken pkcs11 module, no C_GetAttributeValue function"
+                        .into())
+                }
+                Some(func) => {
+                    let rv = func(
+                        session,
+                        object,
+                        template.as_mut_ptr(),
+                        template.len() as pkcs11::CK_ULONG,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_GetAttributeValue failed: {}", rv)
+                            .into())
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+        }
+    }
+
     pub fn finalize(&self) -> Result<(), Error> {
         unsafe {
             match (*self.fntable).C_Finalize {
