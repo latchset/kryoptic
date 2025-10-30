@@ -24,6 +24,7 @@ test = false
 [[bin]]
 name = "profile_conformance"
 path = "profiles/profile-conformance.rs"
+required-features = ["profiles"]
 
 [dependencies]
 clap = { version = "4.5.26", default-features = false, features = ["cargo", "derive", "help", "std", "usage"] }
@@ -33,7 +34,8 @@ hex = "0.4.3"
 libc = "0.2.151"
 serde = { version = "1.0.180", features = ["derive"] }
 serde_json = "1.0.104"
-quick-xml = { version = "0.38", features = ["serialize"] }
+quick-xml = { version = "0.38", features = ["serialize"], optional = true }
 
 [features]
 default = ["kryoptic-lib/default"]
+profiles = ["dep:quick-xml"]
