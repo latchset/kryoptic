@@ -3,8 +3,7 @@
 
 use super::pkcs11_wrapper::FuncList;
 use super::profile::{get_call_name, Call, Pkcs11Profile};
-use super::Arguments;
-use super::Error;
+use super::{Arguments, Error};
 use hex;
 use kryoptic_lib::pkcs11;
 use std::collections::HashMap;

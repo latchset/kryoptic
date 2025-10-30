@@ -6,8 +6,24 @@ pub mod pkcs11_wrapper;
 pub mod profile;
 pub mod token_init;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::fmt;
+
+#[derive(Clone, Debug, ValueEnum)]
+pub enum Profile {
+    #[value(name = "baseline")]
+    Baseline,
+    #[value(name = "extended")]
+    Extended,
+    #[value(name = "authentication")]
+    Authentication,
+    #[value(name = "complete")]
+    Complete,
+    #[value(name = "public_certs")]
+    PublicCerts,
+    #[value(name = "hkdf_tls")]
+    HkdfTls,
+}
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -41,6 +57,9 @@ pub struct Arguments {
 
     #[arg(long)]
     pub genkey: Option<String>,
+
+    #[arg(long)]
+    pub profile: Option<Profile>,
 
     pub xml_profile: Option<String>,
 }

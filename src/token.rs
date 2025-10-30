@@ -410,6 +410,11 @@ impl Token {
     fn clear_private_session_objects(&mut self) {
         let mut priv_handles = Vec::<CK_OBJECT_HANDLE>::new();
         for (handle, obj) in self.session_objects.iter() {
+            if obj.get_session() == CK_INVALID_HANDLE {
+                /* skip builtin objects identified by an invalid
+                 * session handle */
+                continue;
+            }
             if obj.is_private() {
                 priv_handles.push(*handle);
             }
@@ -747,7 +752,8 @@ impl Token {
 
         /* First add internal session objects */
         for (_, o) in &self.session_objects {
-            if o.is_sensitive() {
+            let builtin = o.get_attr_as_ulong(CKA_CLASS)? == CKO_PROFILE;
+            if !builtin && o.is_sensitive() {
                 match self.facilities.factories.check_sensitive(o, template) {
                     Err(_) => continue,
                     Ok(()) => (),
