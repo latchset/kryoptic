@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::vec::Vec;
 
-use crate::attribute::{Attribute, CkAttrs};
+use crate::attribute::CkAttrs;
 use crate::defaults;
 use crate::error::Result;
 #[cfg(feature = "fips")]
@@ -171,9 +171,12 @@ impl Token {
         #[cfg(feature = "fips")]
         fips::token_init(&mut token)?;
 
-        insert_profile_object(&mut token, CKP_BASELINE_PROVIDER)?;
-        insert_profile_object(&mut token, CKP_EXTENDED_PROVIDER)?;
-        insert_profile_object(&mut token, CKP_AUTHENTICATION_TOKEN)?;
+        #[cfg(feature = "profiles")]
+        {
+            insert_profile_object(&mut token, CKP_BASELINE_PROVIDER)?;
+            insert_profile_object(&mut token, CKP_EXTENDED_PROVIDER)?;
+            insert_profile_object(&mut token, CKP_AUTHENTICATION_TOKEN)?;
+        }
 
         Ok(token)
     }
@@ -254,9 +257,12 @@ impl Token {
             return Err(CKR_GENERAL_ERROR)?;
         }
 
-        insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
-        insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
-        insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
+        #[cfg(feature = "profiles")]
+        {
+            insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
+            insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
+            insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
+        }
 
         Ok(())
     }
@@ -779,10 +785,13 @@ impl Token {
 /// Synthesize a CKO_PROFILE object
 ///
 /// This is done when the token is instantiated or initialized.
+#[cfg(feature = "profiles")]
 fn insert_profile_object(
     token: &mut Token,
     profile_id: CK_PROFILE_ID,
 ) -> Result<()> {
+    use crate::attribute::Attribute;
+
     let mut obj = Object::new();
     obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_PROFILE))?;
     obj.set_attr(Attribute::from_ulong(CKA_PROFILE_ID, profile_id))?;
