@@ -2,7 +2,7 @@
 // See LICENSE.txt file for terms
 
 use super::pkcs11_wrapper::{dl_error, FuncList};
-use super::Arguments;
+use super::{Arguments, Profile};
 use kryoptic_lib::pkcs11;
 use libc;
 use std::ffi::CString;
@@ -132,6 +132,83 @@ fn generate_key(
     Ok(())
 }
 
+pub fn check_profile(
+    pkcs11: &FuncList,
+    args: &Arguments,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let profile_to_check = match &args.profile {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    if args.debug {
+        eprintln!("Checking for profile: {:?}", profile_to_check);
+    }
+
+    let profile_id_val: pkcs11::CK_PROFILE_ID = match profile_to_check {
+        Profile::Baseline => pkcs11::CKP_BASELINE_PROVIDER,
+        Profile::Extended => pkcs11::CKP_EXTENDED_PROVIDER,
+        Profile::Authentication => pkcs11::CKP_AUTHENTICATION_TOKEN,
+        Profile::Complete => pkcs11::CKP_COMPLETE_PROVIDER,
+        Profile::PublicCerts => pkcs11::CKP_PUBLIC_CERTIFICATES_TOKEN,
+        Profile::HkdfTls => pkcs11::CKP_HKDF_TLS_TOKEN,
+    };
+
+    let slot_count = pkcs11.get_slot_list(pkcs11::CK_TRUE, None)?;
+    if slot_count == 0 {
+        eprintln!(
+            "Warning: No token present, cannot check for profile '{:?}'.",
+            profile_to_check
+        );
+        return Ok(());
+    }
+    let mut slot_ids = vec![0; slot_count as usize];
+    pkcs11.get_slot_list(pkcs11::CK_TRUE, Some(&mut slot_ids))?;
+
+    let slot_id = slot_ids[0];
+    if args.debug {
+        eprintln!("Using slot {} to check for profile.", slot_id);
+    }
+
+    let session = pkcs11.open_session(slot_id, pkcs11::CKF_SERIAL_SESSION)?;
+
+    let cko_profile_class: pkcs11::CK_OBJECT_CLASS = pkcs11::CKO_PROFILE;
+
+    let template = [
+        pkcs11::CK_ATTRIBUTE {
+            type_: pkcs11::CKA_CLASS,
+            pValue: &cko_profile_class as *const _ as pkcs11::CK_VOID_PTR,
+            ulValueLen: std::mem::size_of_val(&cko_profile_class)
+                as pkcs11::CK_ULONG,
+        },
+        pkcs11::CK_ATTRIBUTE {
+            type_: pkcs11::CKA_PROFILE_ID,
+            pValue: &profile_id_val as *const _ as pkcs11::CK_VOID_PTR,
+            ulValueLen: std::mem::size_of_val(&profile_id_val)
+                as pkcs11::CK_ULONG,
+        },
+    ];
+
+    pkcs11.find_objects_init(session, &template)?;
+    let objects = pkcs11.find_objects(session, 1)?;
+    pkcs11.find_objects_final(session)?;
+    pkcs11.close_session(session)?;
+
+    if objects.is_empty() {
+        eprintln!(
+            "Warning: Profile object for '{:?}' not found on token.",
+            profile_to_check
+        );
+    } else if args.debug {
+        eprintln!(
+            "Info: Found profile object for '{:?}' on token.",
+            profile_to_check
+        );
+    }
+
+    Ok(())
+}
+
 pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
     let module_path = args
         .pkcs11_module
@@ -253,6 +330,10 @@ pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
         let _ = pkcs11.close_session(session);
 
         session_ops_result?;
+
+        if let Err(e) = check_profile(&pkcs11, args) {
+            eprintln!("Warning: Failed to check for profile: {}", e);
+        }
 
         println!("Token initialization successful.");
         Ok(())
