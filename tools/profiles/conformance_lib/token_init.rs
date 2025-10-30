@@ -156,11 +156,11 @@ pub fn check_profile(
 
     let slot_count = pkcs11.get_slot_list(pkcs11::CK_TRUE, None)?;
     if slot_count == 0 {
-        eprintln!(
-            "Warning: No token present, cannot check for profile '{:?}'.",
+        return Err(format!(
+            "No token present, cannot check for profile '{:?}'",
             profile_to_check
-        );
-        return Ok(());
+        )
+        .into());
     }
     let mut slot_ids = vec![0; slot_count as usize];
     pkcs11.get_slot_list(pkcs11::CK_TRUE, Some(&mut slot_ids))?;
@@ -195,11 +195,13 @@ pub fn check_profile(
     pkcs11.close_session(session)?;
 
     if objects.is_empty() {
-        eprintln!(
-            "Warning: Profile object for '{:?}' not found on token.",
+        return Err(format!(
+            "Profile object for '{:?}' not found on token.",
             profile_to_check
-        );
-    } else if args.debug {
+        )
+        .into());
+    }
+    if args.debug {
         eprintln!(
             "Info: Found profile object for '{:?}' on token.",
             profile_to_check
@@ -331,9 +333,7 @@ pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
 
         session_ops_result?;
 
-        if let Err(e) = check_profile(&pkcs11, args) {
-            eprintln!("Warning: Failed to check for profile: {}", e);
-        }
+        check_profile(&pkcs11, args)?;
 
         println!("Token initialization successful.");
         Ok(())
