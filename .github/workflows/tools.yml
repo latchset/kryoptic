@@ -1,0 +1,109 @@
+---
+name: Tools
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  build-migrate:
+    name: Migrate Tool
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [standard]
+    container: quay.io/fedora/fedora:latest
+    steps:
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Restore DNF cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
+      - name: Install Dependencies
+        run: |
+          dnf -y install git cargo clang-devel openssl-devel sqlite-devel
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            dnf -y install rust-std-static.i686 openssl-devel.i686 \
+              sqlite-devel.i686
+          fi
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          git config --global --add safe.directory /__w/kryoptic/kryoptic
+
+      - name: Build & test
+        run: |
+          cargo build -vv --all
+          tools/softhsm/test.sh
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Build logs ${{ matrix.name }}
+          path: |
+            target/debug/build/*/output
+            target/i686-unknown-linux-gnu/debug/build/*/output
+
+  build-profiles:
+    name: Profiles Conformance Tool
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [standard]
+    container: quay.io/fedora/fedora:latest
+    steps:
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Restore DNF cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+          key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
+      - name: Install Dependencies
+        run: |
+          dnf -y install git cargo clang-devel openssl-devel sqlite-devel
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            dnf -y install rust-std-static.i686 openssl-devel.i686 \
+              sqlite-devel.i686
+          fi
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup
+        run: |
+          git config --global --add safe.directory /__w/kryoptic/kryoptic
+
+      - name: Build & test
+        run: |
+          cargo build -vv --features profiles --all
+          tools/profiles/test.sh --debug
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Build logs ${{ matrix.name }}
+          path: |
+            target/debug/build/*/output
+            target/i686-unknown-linux-gnu/debug/build/*/output
