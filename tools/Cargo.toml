@@ -38,4 +38,4 @@ quick-xml = { version = "0.38", features = ["serialize"], optional = true }
 
 [features]
 default = ["kryoptic-lib/default"]
-profiles = ["dep:quick-xml"]
+profiles = ["dep:quick-xml", "kryoptic-lib/profiles"]
