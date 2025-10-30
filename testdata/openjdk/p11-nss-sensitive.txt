@@ -1,6 +1,6 @@
 name = Kryoptic
 slot = 42
-showInfo = true
+# showInfo = true
 library = ${pkcs11test.nss.lib}
 nssArgs = "kryoptic_conf=${pkcs11test.nss.db}/kryoptic.conf"
 disabledMechanisms = {
