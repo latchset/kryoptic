@@ -261,10 +261,7 @@ impl PubKeyFactory for RSAPubFactory {
             return Err(CKR_KEY_UNEXTRACTABLE)?;
         }
 
-        let mut obj = self.default_object_create(template.as_slice())?;
-        rsa_check_import(&mut obj)?;
-
-        Ok(obj)
+        self.create(template.as_slice())
     }
 }
 
