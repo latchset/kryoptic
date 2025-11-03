@@ -684,8 +684,8 @@ pub fn vec_to_date_validate(val: Vec<u8>) -> Result<CK_DATE> {
     }
     Ok(CK_DATE {
         year: [val[0], val[1], val[2], val[3]],
-        month: [val[5], val[6]],
-        day: [val[8], val[9]],
+        month: [val[4], val[5]],
+        day: [val[6], val[7]],
     })
 }
 
