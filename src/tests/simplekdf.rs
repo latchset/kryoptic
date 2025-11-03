@@ -756,6 +756,29 @@ fn test_derive_pub_from_priv() {
         ],
     });
 
+    #[cfg(feature = "mldsa")]
+    test_cases.push(TestCase {
+        name: "MLDSA",
+        gen_mech: CKM_ML_DSA_KEY_PAIR_GEN,
+        pub_ulongs: &[(CKA_PARAMETER_SET, CKP_ML_DSA_44)],
+        pub_strings: &[],
+        pub_bools: &[(CKA_TOKEN, true), (CKA_VERIFY, true)],
+        pri_ulongs: &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_DSA)],
+        pri_strings: &[],
+        pri_bools: &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SIGN, true),
+        ],
+        check_attrs: &[CKA_VALUE, CKA_PARAMETER_SET],
+        derived_bools: &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, false),
+            (CKA_VERIFY, true),
+        ],
+    });
+
     if test_cases.is_empty() {
         // No features enabled for this test, so we can't run.
         testtokn.finalize();
