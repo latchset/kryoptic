@@ -726,6 +726,36 @@ fn test_derive_pub_from_priv() {
         ],
     });
 
+    #[cfg(feature = "ec_montgomery")]
+    let curve25519 = hex::decode("130a63757276653235353139").unwrap();
+    #[cfg(feature = "ec_montgomery")]
+    let montgomery_params = [(CKA_EC_PARAMS, curve25519.as_slice())];
+    #[cfg(feature = "ec_montgomery")]
+    test_cases.push(TestCase {
+        name: "EC_MONTGOMERY",
+        gen_mech: CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+        pub_ulongs: &[],
+        pub_strings: &montgomery_params,
+        pub_bools: &[(CKA_TOKEN, true), (CKA_DERIVE, true)],
+        pri_ulongs: &[
+            (CKA_CLASS, CKO_PRIVATE_KEY),
+            (CKA_KEY_TYPE, CKK_EC_MONTGOMERY),
+        ],
+        pri_strings: &[],
+        pri_bools: &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_DERIVE, true),
+        ],
+        check_attrs: &[CKA_EC_POINT, CKA_EC_PARAMS],
+        derived_bools: &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, false),
+            (CKA_DERIVE, true),
+        ],
+    });
+
     if test_cases.is_empty() {
         // No features enabled for this test, so we can't run.
         testtokn.finalize();
