@@ -361,3 +361,5 @@ mod mldsa;
 
 #[cfg(feature = "slhdsa")]
 mod slhdsa;
+
+mod pkcs11;
