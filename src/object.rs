@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::attribute::{AttrType, Attribute};
+use crate::attribute::{AttrType, Attribute, CkAttrs};
 use crate::error::{Error, Result};
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::zeromem;
@@ -826,6 +826,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Err(CKR_GENERAL_ERROR)?
     }
 
+    /// Helper to access traits that are only available for objects of
+    /// class CKO_PRIVATE_KEY. Other key type factories should not
+    /// implement this method.
+    fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
+        Err(CKR_GENERAL_ERROR)?
+    }
+
     /// Helper function to check if the attributes requested in the template
     /// are marked as sensitive or invalid. Only the first error is returned
     /// if multiple issues are found in the template.
@@ -1507,6 +1514,14 @@ pub trait PubKeyFactory: CommonKeyFactory {
         attrs.push(attr_element!(
             CKA_ENCAPSULATE; OAFlags::Defval; Attribute::from_bool;
             val false));
+    }
+
+    fn pub_from_private(
+        &self,
+        _obj: &Object,
+        _template: CkAttrs,
+    ) -> Result<Object> {
+        return Err(CKR_GENERAL_ERROR)?;
     }
 }
 

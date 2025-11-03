@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
-use crate::native::simplekdf::SimpleKDFOperation;
+use crate::native::simplekdf::{PubFromPrivOperation, SimpleKDFOperation};
 use crate::object::ObjectFactories;
 use crate::pkcs11::*;
 
@@ -19,6 +19,16 @@ static SIMPLE_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
         info: CK_MECHANISM_INFO {
             ulMinKeySize: 0,
             ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
+            flags: CKF_DERIVE,
+        },
+    })
+});
+
+static PUB_FROM_PRIV_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(SimpleKDFMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: 0,
+            ulMaxKeySize: 0,
             flags: CKF_DERIVE,
         },
     })
@@ -35,6 +45,7 @@ pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
     ] {
         mechs.add_mechanism(*ckm, &(*SIMPLE_KDF_MECH));
     }
+    mechs.add_mechanism(CKM_PUB_KEY_FROM_PRIV_KEY, &(*PUB_FROM_PRIV_MECH));
 }
 
 /// Object that represents the Simple KDF mechanism
@@ -62,6 +73,9 @@ impl Mechanism for SimpleKDFMechanism {
             | CKM_XOR_BASE_AND_DATA
             | CKM_EXTRACT_KEY_FROM_KEY => {
                 Ok(Box::new(SimpleKDFOperation::new(mech)?))
+            }
+            CKM_PUB_KEY_FROM_PRIV_KEY => {
+                Ok(Box::new(PubFromPrivOperation::new(mech)?))
             }
             _ => Err(CKR_MECHANISM_INVALID)?,
         }

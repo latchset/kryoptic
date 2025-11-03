@@ -8,7 +8,7 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::attribute::Attribute;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::kasn1::{pkcs, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
@@ -230,11 +230,43 @@ impl ObjectFactory for RSAPubFactory {
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
+
+    fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
+        Ok(self)
+    }
 }
 
 impl CommonKeyFactory for RSAPubFactory {}
 
-impl PubKeyFactory for RSAPubFactory {}
+impl PubKeyFactory for RSAPubFactory {
+    /// For RSA the private key object must carry the public exponent
+    /// as well so this is somewhat of a silly op
+    fn pub_from_private(
+        &self,
+        key: &Object,
+        template: CkAttrs,
+    ) -> Result<Object> {
+        let mut template: CkAttrs<'_> = template;
+        if let Some(modulus) = key.get_attr(CKA_MODULUS) {
+            template.add_slice(CKA_MODULUS, modulus.get_value().as_slice())?;
+        } else {
+            return Err(CKR_KEY_UNEXTRACTABLE)?;
+        }
+        if let Some(pubexp) = key.get_attr(CKA_PUBLIC_EXPONENT) {
+            template.add_slice(
+                CKA_PUBLIC_EXPONENT,
+                pubexp.get_value().as_slice(),
+            )?;
+        } else {
+            return Err(CKR_KEY_UNEXTRACTABLE)?;
+        }
+
+        let mut obj = self.default_object_create(template.as_slice())?;
+        rsa_check_import(&mut obj)?;
+
+        Ok(obj)
+    }
+}
 
 /// Represents the ASN.1 Version field (integer). Always 0 for standard RSA keys.
 type Version = u64;
