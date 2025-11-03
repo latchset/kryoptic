@@ -10,7 +10,7 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::attribute::Attribute;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
@@ -162,11 +162,29 @@ impl ObjectFactory for MlDsaPubFactory {
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
+
+    fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
+        Ok(self)
+    }
 }
 
 impl CommonKeyFactory for MlDsaPubFactory {}
 
-impl PubKeyFactory for MlDsaPubFactory {}
+impl PubKeyFactory for MlDsaPubFactory {
+    fn pub_from_private(
+        &self,
+        key: &Object,
+        template: CkAttrs,
+    ) -> Result<Object> {
+        let mut template: CkAttrs<'_> = template;
+        match key.get_attr_as_ulong(CKA_PARAMETER_SET) {
+            Ok(p) => template.add_owned_ulong(CKA_PARAMETER_SET, p)?,
+            Err(_) => return Err(CKR_KEY_UNEXTRACTABLE)?,
+        }
+        template.add_vec(CKA_VALUE, mldsa::extract_public_key(key)?)?;
+        self.create(template.as_slice())
+    }
+}
 
 /// Helper to check that the private key value size (if provided)
 /// matches the declared ML-DSA parameter set, and that the generation
