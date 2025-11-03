@@ -448,3 +448,31 @@ impl VerifySignature for EcdsaOperation {
         self.verify_int_final(None)
     }
 }
+
+/// Extracts the public key point from a private key object.
+///
+/// This is done by importing the private key into OpenSSL and then
+/// exporting the full keypair to get the public key.
+/// The public key is returned as a DER-encoded ECPoint.
+pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
+    // 1. Import private key into EvpPkey
+    let pkey = ecc_object_to_pkey(privkey, CKO_PRIVATE_KEY)?;
+
+    // 2. Export key data
+    let mut ecc = match pkey.export()? {
+        PkeyData::Ecc(e) => e,
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    // 3. Extract public key point
+    if let Some(key) = ecc.pubkey.take() {
+        // 4. DER-encode it
+        let point_encoded = match asn1::write_single(&key.as_slice()) {
+            Ok(b) => b,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        };
+        Ok(point_encoded)
+    } else {
+        Err(CKR_KEY_UNEXTRACTABLE)?
+    }
+}

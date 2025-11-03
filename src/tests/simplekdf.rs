@@ -616,95 +616,157 @@ fn test_concatenate_kdf_attributes() {
 }
 
 #[test]
-#[cfg(feature = "rsa")]
 #[parallel]
-fn test_derive_pub_from_priv_rsa() {
+fn test_derive_pub_from_priv() {
     let mut testtokn =
-        TestToken::initialized("test_derive_pub_from_priv_rsa", None);
+        TestToken::initialized("test_derive_pub_from_priv", None);
     let session = testtokn.get_session(true);
 
     testtokn.login();
 
-    // Generate RSA key pair.
-    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
-        session,
-        CKM_RSA_PKCS_KEY_PAIR_GEN,
-        &[(CKA_MODULUS_BITS, 2048)], // pub ulongs
-        &[],                         // pub strings
-        &[
-            // pub bools
+    struct TestCase<'a> {
+        name: &'a str,
+        gen_mech: CK_MECHANISM_TYPE,
+        pub_ulongs: &'a [(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+        pub_strings: &'a [(CK_ATTRIBUTE_TYPE, &'a [u8])],
+        pub_bools: &'a [(CK_ATTRIBUTE_TYPE, bool)],
+        pri_ulongs: &'a [(CK_ATTRIBUTE_TYPE, CK_ULONG)],
+        pri_strings: &'a [(CK_ATTRIBUTE_TYPE, &'a [u8])],
+        pri_bools: &'a [(CK_ATTRIBUTE_TYPE, bool)],
+        check_attrs: &'a [CK_ATTRIBUTE_TYPE],
+        derived_bools: &'a [(CK_ATTRIBUTE_TYPE, bool)],
+    }
+
+    let mut test_cases = Vec::new();
+
+    #[cfg(feature = "rsa")]
+    test_cases.push(TestCase {
+        name: "RSA",
+        gen_mech: CKM_RSA_PKCS_KEY_PAIR_GEN,
+        pub_ulongs: &[(CKA_MODULUS_BITS, 2048)],
+        pub_strings: &[],
+        pub_bools: &[
             (CKA_TOKEN, true),
             (CKA_VERIFY, true),
             (CKA_ENCRYPT, true),
         ],
-        &[
-            // pri ulongs
-            (CKA_CLASS, CKO_PRIVATE_KEY),
-            (CKA_KEY_TYPE, CKK_RSA),
-        ],
-        &[], // pri strings
-        &[
-            // pri bools
+        pri_ulongs: &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA)],
+        pri_strings: &[],
+        pri_bools: &[
             (CKA_TOKEN, true),
             (CKA_SENSITIVE, false),
             (CKA_EXTRACTABLE, true),
             (CKA_SIGN, true),
             (CKA_DECRYPT, true),
         ],
-    ));
-
-    // Derive public key from private key
-    let derive_mech = CK_MECHANISM {
-        mechanism: CKM_PUB_KEY_FROM_PRIV_KEY,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-
-    // Derive as a session object. Empty template should work as default for CKA_TOKEN is false.
-    let derive_template = Vec::<CK_ATTRIBUTE>::new();
-
-    let mut derived_pub_handle = CK_INVALID_HANDLE;
-    let ret = fn_derive_key(
-        session,
-        &derive_mech as *const _ as CK_MECHANISM_PTR,
-        hpri,
-        derive_template.as_ptr() as *mut _,
-        derive_template.len() as CK_ULONG,
-        &mut derived_pub_handle,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_ne!(derived_pub_handle, CK_INVALID_HANDLE);
-
-    // Compare public key components
-    let orig_modulus = ret_or_panic!(extract_value(session, hpub, CKA_MODULUS));
-    let derived_modulus =
-        ret_or_panic!(extract_value(session, derived_pub_handle, CKA_MODULUS));
-    assert_eq!(orig_modulus, derived_modulus);
-
-    let orig_exponent =
-        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_EXPONENT));
-    let derived_exponent = ret_or_panic!(extract_value(
-        session,
-        derived_pub_handle,
-        CKA_PUBLIC_EXPONENT
-    ));
-    assert_eq!(orig_exponent, derived_exponent);
-
-    // Check attributes of derived session public key.
-    // Default for CKA_TOKEN is false.
-    if let Some(err) = check_attributes(
-        session,
-        derived_pub_handle,
-        &[], // ulongs
-        &[], // strings
-        &[
+        check_attrs: &[CKA_MODULUS, CKA_PUBLIC_EXPONENT],
+        derived_bools: &[
             (CKA_TOKEN, false),
             (CKA_PRIVATE, false),
             (CKA_VERIFY, true),
             (CKA_ENCRYPT, true),
         ],
-    ) {
-        panic!("{}", err);
+    });
+
+    // EC params for secp256r1
+    #[cfg(feature = "ecc")]
+    let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
+    let ec_params = [(CKA_EC_PARAMS, secp256r1_oid.as_slice())];
+
+    #[cfg(feature = "ecc")]
+    test_cases.push(TestCase {
+        name: "EC",
+        gen_mech: CKM_EC_KEY_PAIR_GEN,
+        pub_ulongs: &[],
+        pub_strings: &ec_params,
+        pub_bools: &[(CKA_TOKEN, true), (CKA_VERIFY, true)],
+        pri_ulongs: &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
+        pri_strings: &[],
+        pri_bools: &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SIGN, true),
+        ],
+        check_attrs: &[CKA_EC_POINT, CKA_EC_PARAMS],
+        derived_bools: &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, false),
+            (CKA_VERIFY, true),
+        ],
+    });
+
+    if test_cases.is_empty() {
+        // No features enabled for this test, so we can't run.
+        testtokn.finalize();
+        return;
+    }
+
+    for tc in &test_cases {
+        // Generate key pair.
+        let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+            session,
+            tc.gen_mech,
+            tc.pub_ulongs,
+            tc.pub_strings,
+            tc.pub_bools,
+            tc.pri_ulongs,
+            tc.pri_strings,
+            tc.pri_bools,
+        ));
+
+        // Derive public key from private key
+        let derive_mech = CK_MECHANISM {
+            mechanism: CKM_PUB_KEY_FROM_PRIV_KEY,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        // Derive as a session object. Empty template should work as default for CKA_TOKEN is false.
+        let derive_template = Vec::<CK_ATTRIBUTE>::new();
+
+        let mut derived_pub_handle = CK_INVALID_HANDLE;
+        let ret = fn_derive_key(
+            session,
+            &derive_mech as *const _ as CK_MECHANISM_PTR,
+            hpri,
+            derive_template.as_ptr() as *mut _,
+            derive_template.len() as CK_ULONG,
+            &mut derived_pub_handle,
+        );
+        assert_eq!(ret, CKR_OK, "C_DeriveKey failed for {}", tc.name);
+        assert_ne!(
+            derived_pub_handle, CK_INVALID_HANDLE,
+            "Derived key handle is invalid for {}",
+            tc.name
+        );
+
+        // Compare public key components
+        for attr in tc.check_attrs {
+            let orig_val = ret_or_panic!(extract_value(session, hpub, *attr));
+            let derived_val = ret_or_panic!(extract_value(
+                session,
+                derived_pub_handle,
+                *attr
+            ));
+            assert_eq!(
+                orig_val, derived_val,
+                "Attribute {:#x} mismatch for {} key",
+                *attr, tc.name
+            );
+        }
+
+        // Check attributes of derived session public key.
+        // Default for CKA_TOKEN is false.
+        if let Some(err) = check_attributes(
+            session,
+            derived_pub_handle,
+            &[], // ulongs
+            &[], // strings
+            tc.derived_bools,
+        ) {
+            panic!("Attribute check failed for {}: {}", tc.name, err);
+        }
     }
 
     testtokn.finalize();

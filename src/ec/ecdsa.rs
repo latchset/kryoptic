@@ -8,13 +8,13 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::attribute::Attribute;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::ec::*;
 use crate::error::{general_error, Error, Result};
 use crate::kasn1::oid;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::ecdsa::EcdsaOperation;
+use crate::ossl::ecdsa::{extract_public_key, EcdsaOperation};
 
 /// Minimum ECDSA key size
 pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
@@ -156,11 +156,31 @@ impl ObjectFactory for ECDSAPubFactory {
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
+
+    fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
+        Ok(self)
+    }
 }
 
 impl CommonKeyFactory for ECDSAPubFactory {}
 
-impl PubKeyFactory for ECDSAPubFactory {}
+impl PubKeyFactory for ECDSAPubFactory {
+    fn pub_from_private<'a>(
+        &self,
+        key: &'a Object,
+        mut template: CkAttrs<'a>,
+    ) -> Result<Object> {
+        if let Some(params) = key.get_attr(CKA_EC_PARAMS) {
+            template.add_slice(CKA_EC_PARAMS, params.get_value().as_slice())?;
+        } else {
+            return Err(CKR_KEY_UNEXTRACTABLE)?;
+        }
+
+        template.add_vec(CKA_EC_POINT, extract_public_key(key)?)?;
+
+        self.create(template.as_slice())
+    }
+}
 
 /// The ECDSA Private-Key Factory
 #[derive(Debug, Default)]
