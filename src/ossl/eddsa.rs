@@ -413,3 +413,26 @@ impl VerifySignature for EddsaOperation {
         self.verify_int_final(None)
     }
 }
+
+/// Extracts the public key point from a private key object.
+///
+/// This is done by importing the private key into OpenSSL and then
+/// exporting the full keypair to get the public key.
+/// The public key is returned as raw bytes.
+pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
+    // 1. Import private key into EvpPkey
+    let pkey = eddsa_object_to_pkey(privkey, CKO_PRIVATE_KEY)?;
+
+    // 2. Export key data
+    let mut ecc = match pkey.export()? {
+        PkeyData::Ecc(e) => e,
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    // 3. Extract public key point
+    if let Some(key) = ecc.pubkey.take() {
+        Ok((&key).to_vec())
+    } else {
+        Err(CKR_KEY_UNEXTRACTABLE)?
+    }
+}
