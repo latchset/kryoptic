@@ -700,7 +700,7 @@ pub fn string_to_ck_date(date: &str) -> Result<CK_DATE> {
     if s[4] != ASCII_DASH || s[7] != ASCII_DASH {
         return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
     }
-    let mut buf = Vec::with_capacity(8);
+    let mut buf = vec![0; 8];
     buf[0] = s[0];
     buf[1] = s[1];
     buf[2] = s[2];
