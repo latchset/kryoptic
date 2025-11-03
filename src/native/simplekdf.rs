@@ -9,7 +9,7 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::*;
 use crate::misc::{bytes_to_vec, cast_params};
-use crate::object::{Object, ObjectFactories};
+use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::pkcs11::*;
 
 #[cfg(feature = "fips")]
@@ -357,5 +357,198 @@ impl Derive for SimpleKDFOperation {
         self.fips_approval.finalize();
 
         Ok(vec![dkey])
+    }
+}
+
+enum AttrSource {
+    DefaultBool(&'static CK_BBOOL),
+    CopyFrom(CK_ATTRIBUTE_TYPE),
+}
+
+struct PubkeyAttrRule {
+    pub_attr: CK_ATTRIBUTE_TYPE,
+    source: AttrSource,
+}
+
+macro_rules! attr_init {
+    ($attr:expr => false) => {
+        PubkeyAttrRule {
+            pub_attr: $attr,
+            source: AttrSource::DefaultBool(&CK_FALSE),
+        }
+    };
+    ($attr:expr => true) => {
+        PubkeyAttrRule {
+            pub_attr: $attr,
+            source: AttrSource::DefaultBool(&CK_TRUE),
+        }
+    };
+    ($attr:expr => $src:expr) => {
+        PubkeyAttrRule {
+            pub_attr: $attr,
+            source: AttrSource::CopyFrom($src),
+        }
+    };
+}
+
+const PUBKEY_ATTR_DEFAULTS: &[PubkeyAttrRule] = &[
+    attr_init!(CKA_TOKEN => false),
+    attr_init!(CKA_PRIVATE => false),
+    attr_init!(CKA_MODIFIABLE => true),
+    // The following are specified in 6.43.8 as defaults, but elsewhere it
+    // says they can never be set in a template, and they are fully handled
+    // internally by our object creation code. We leave them here commented
+    // to avoid later attempts at "fixing" this list. Some of these
+    // attributes, furthermore, exists only for private keys and not public
+    // keys in our implementation.
+    // attr_init!(CKA_LOCAL => false),
+    // attr_init!(CKA_SENSITIVE => false),
+    // attr_init!(CKA_ALWAYS_SENSITIVE => false),
+    // attr_init!(CKA_EXTRACTABLE => true),
+    // attr_init!(CKA_NEVER_EXTRACTABLE => false),
+    attr_init!(CKA_COPYABLE => true),
+    attr_init!(CKA_DESTROYABLE => false),
+    attr_init!(CKA_ENCRYPT => CKA_DECRYPT),
+    attr_init!(CKA_VERIFY => CKA_SIGN),
+    attr_init!(CKA_VERIFY_RECOVER => CKA_SIGN_RECOVER),
+    attr_init!(CKA_WRAP => CKA_UNWRAP),
+    attr_init!(CKA_DERIVE => CKA_DERIVE),
+    attr_init!(CKA_ID => CKA_ID),
+    attr_init!(CKA_START_DATE => CKA_START_DATE),
+    attr_init!(CKA_END_DATE => CKA_END_DATE),
+    attr_init!(CKA_SUBJECT => CKA_SUBJECT),
+    attr_init!(CKA_PUBLIC_KEY_INFO => CKA_PUBLIC_KEY_INFO),
+    // We need to handle this manually post-facto because the object
+    // creation rules prohibit adding this to the template
+    // attr_init!(CKA_KEY_GEN_MECHANISM => CKA_KEY_GEN_MECHANISM),
+
+    // This is not handled yet, setting it will always result in an error
+    // attr_init!(CKA_TRUSTED => CKA_TRUSTED),
+];
+
+/// Represents a public key from private key derivation operation
+#[derive(Debug)]
+pub struct PubFromPrivOperation {
+    finalized: bool,
+    #[cfg(feature = "fips")]
+    fips_approval: FipsApproval,
+}
+
+unsafe impl Send for PubFromPrivOperation {}
+unsafe impl Sync for PubFromPrivOperation {}
+
+impl PubFromPrivOperation {
+    /// Creates a new public key from private key derivation operation
+    pub fn new(mech: &CK_MECHANISM) -> Result<Self> {
+        if mech.mechanism != CKM_PUB_KEY_FROM_PRIV_KEY {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        // This mechanism has no parameters
+        if !mech.pParameter.is_null() || mech.ulParameterLen != 0 {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+
+        Ok(PubFromPrivOperation {
+            finalized: false,
+            #[cfg(feature = "fips")]
+            fips_approval: FipsApproval::init(),
+        })
+    }
+}
+
+impl MechOperation for PubFromPrivOperation {
+    fn mechanism(&self) -> Result<CK_MECHANISM_TYPE> {
+        Ok(CKM_PUB_KEY_FROM_PRIV_KEY)
+    }
+
+    fn finalized(&self) -> bool {
+        self.finalized
+    }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approval.approval()
+    }
+    fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
+        Err(CKR_OK)?
+    }
+    fn receives_objects(&mut self, objs: &[&Object]) -> Result<()> {
+        if !objs.is_empty() {
+            Err(CKR_GENERAL_ERROR)?
+        }
+        Ok(())
+    }
+}
+
+impl Derive for PubFromPrivOperation {
+    fn derive(
+        &mut self,
+        key: &Object,
+        template: &[CK_ATTRIBUTE],
+        _mechanisms: &Mechanisms,
+        objfactories: &ObjectFactories,
+    ) -> Result<Vec<Object>> {
+        if self.finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.finalized = true;
+
+        // key must be a private key
+        // It does not need to allow derivation, as this is a pseudo
+        // mechanism that is alaways usable for any private key
+        if !key.is_private() {
+            return Err(CKR_KEY_TYPE_INCONSISTENT)?;
+        }
+
+        let key_type = match key.get_attr_as_ulong(CKA_KEY_TYPE) {
+            Ok(k) => k,
+            Err(_) => return Err(CKR_KEY_HANDLE_INVALID)?,
+        };
+
+        let mut pub_tmpl = CkAttrs::from(template);
+
+        // Ensure class and key type are set correctly.
+        // If template has them, they must be correct. If not, we add them.
+        if let Some(attr) = pub_tmpl.get_ulong(CKA_CLASS)? {
+            if attr != CKO_PUBLIC_KEY {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        } else {
+            pub_tmpl.add_ulong(CKA_CLASS, &CKO_PUBLIC_KEY);
+        }
+        if let Some(val) = pub_tmpl.get_ulong(CKA_KEY_TYPE)? {
+            if val != key_type {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        } else {
+            pub_tmpl.add_ulong(CKA_KEY_TYPE, &key_type);
+        }
+
+        // Apply rules for default values or copying from private key
+        for rule in PUBKEY_ATTR_DEFAULTS {
+            match rule.source {
+                AttrSource::DefaultBool(val) => {
+                    pub_tmpl.add_missing_bool(rule.pub_attr, val);
+                }
+                AttrSource::CopyFrom(priv_attr) => {
+                    if let Some(attr) = key.get_attr(priv_attr) {
+                        pub_tmpl.add_missing_slice(
+                            rule.pub_attr,
+                            attr.get_value().as_slice(),
+                        )?;
+                    }
+                }
+            }
+        }
+
+        let pubtype = ObjectType::new(CKO_PUBLIC_KEY, key_type);
+        let key_factory =
+            objfactories.get_factory(pubtype)?.as_public_key_factory()?;
+        let mut pub_key = key_factory.pub_from_private(key, pub_tmpl)?;
+
+        if let Some(attr) = key.get_attr(CKA_KEY_GEN_MECHANISM) {
+            pub_key.set_attr(attr.clone())?;
+        }
+
+        Ok(vec![pub_key])
     }
 }

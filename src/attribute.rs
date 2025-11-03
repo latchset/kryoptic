@@ -924,4 +924,17 @@ impl<'a> CkAttrs<'a> {
         }
         Ok(())
     }
+
+    pub fn get_ulong(
+        &'a self,
+        typ: CK_ATTRIBUTE_TYPE,
+    ) -> Result<Option<CK_ULONG>> {
+        match self.p.as_ref().iter().find(|a| a.type_ == typ) {
+            Some(ref a) => match a.to_ulong() {
+                Ok(l) => Ok(Some(l)),
+                Err(_) => Err(CKR_TEMPLATE_INCONSISTENT)?,
+            },
+            None => Ok(None),
+        }
+    }
 }

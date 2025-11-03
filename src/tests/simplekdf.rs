@@ -614,3 +614,98 @@ fn test_concatenate_kdf_attributes() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[cfg(feature = "rsa")]
+#[parallel]
+fn test_derive_pub_from_priv_rsa() {
+    let mut testtokn =
+        TestToken::initialized("test_derive_pub_from_priv_rsa", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    // Generate RSA key pair.
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)], // pub ulongs
+        &[],                         // pub strings
+        &[
+            // pub bools
+            (CKA_TOKEN, true),
+            (CKA_VERIFY, true),
+            (CKA_ENCRYPT, true),
+        ],
+        &[
+            // pri ulongs
+            (CKA_CLASS, CKO_PRIVATE_KEY),
+            (CKA_KEY_TYPE, CKK_RSA),
+        ],
+        &[], // pri strings
+        &[
+            // pri bools
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SIGN, true),
+            (CKA_DECRYPT, true),
+        ],
+    ));
+
+    // Derive public key from private key
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_PUB_KEY_FROM_PRIV_KEY,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    // Derive as a session object. Empty template should work as default for CKA_TOKEN is false.
+    let derive_template = Vec::<CK_ATTRIBUTE>::new();
+
+    let mut derived_pub_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        hpri,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut derived_pub_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_ne!(derived_pub_handle, CK_INVALID_HANDLE);
+
+    // Compare public key components
+    let orig_modulus = ret_or_panic!(extract_value(session, hpub, CKA_MODULUS));
+    let derived_modulus =
+        ret_or_panic!(extract_value(session, derived_pub_handle, CKA_MODULUS));
+    assert_eq!(orig_modulus, derived_modulus);
+
+    let orig_exponent =
+        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_EXPONENT));
+    let derived_exponent = ret_or_panic!(extract_value(
+        session,
+        derived_pub_handle,
+        CKA_PUBLIC_EXPONENT
+    ));
+    assert_eq!(orig_exponent, derived_exponent);
+
+    // Check attributes of derived session public key.
+    // Default for CKA_TOKEN is false.
+    if let Some(err) = check_attributes(
+        session,
+        derived_pub_handle,
+        &[], // ulongs
+        &[], // strings
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, false),
+            (CKA_VERIFY, true),
+            (CKA_ENCRYPT, true),
+        ],
+    ) {
+        panic!("{}", err);
+    }
+
+    testtokn.finalize();
+}

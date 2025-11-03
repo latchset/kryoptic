@@ -2681,9 +2681,16 @@ extern "C" fn fn_derive_key(
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
     let key = res_or_ret!(token.get_object_by_handle(base_key_handle));
 
-    /* key checks */
-    if !res_or_ret!(key.get_attr_as_bool(CKA_DERIVE)) {
-        return CKR_KEY_FUNCTION_NOT_PERMITTED;
+    /* key checks
+     * NOTE: we avoid checking for CKA_DERIVE for CKM_PUB_KEY_FROM_PRIV_KEY
+     * because we think this operation should alays be possible regardless
+     * of whether private key should generally allow key derivation. This
+     * is our (Kryoptic team) interpretation and may change if/when the
+     * OASIS PKCS#11 TC clarifies the spec in this regard */
+    if mechanism.mechanism != CKM_PUB_KEY_FROM_PRIV_KEY {
+        if !res_or_ret!(key.get_attr_as_bool(CKA_DERIVE)) {
+            return CKR_KEY_FUNCTION_NOT_PERMITTED;
+        }
     }
     ok_or_ret!(check_allowed_mechs(mechanism, &key));
 
