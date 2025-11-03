@@ -696,6 +696,36 @@ fn test_derive_pub_from_priv() {
     //     ],
     // });
 
+    #[cfg(feature = "eddsa")]
+    let edwards25519 = hex::decode("130c656477617264733235353139").unwrap();
+    #[cfg(feature = "eddsa")]
+    let eddsa_params = [(CKA_EC_PARAMS, edwards25519.as_slice())];
+    #[cfg(feature = "eddsa")]
+    test_cases.push(TestCase {
+        name: "EDDSA",
+        gen_mech: CKM_EC_EDWARDS_KEY_PAIR_GEN,
+        pub_ulongs: &[],
+        pub_strings: &eddsa_params,
+        pub_bools: &[(CKA_TOKEN, true), (CKA_VERIFY, true)],
+        pri_ulongs: &[
+            (CKA_CLASS, CKO_PRIVATE_KEY),
+            (CKA_KEY_TYPE, CKK_EC_EDWARDS),
+        ],
+        pri_strings: &[],
+        pri_bools: &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SIGN, true),
+        ],
+        check_attrs: &[CKA_EC_POINT, CKA_EC_PARAMS],
+        derived_bools: &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, false),
+            (CKA_VERIFY, true),
+        ],
+    });
+
     if test_cases.is_empty() {
         // No features enabled for this test, so we can't run.
         testtokn.finalize();
