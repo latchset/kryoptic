@@ -191,6 +191,7 @@ pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
     let pubkey_value = match pkey.export()? {
         PkeyData::Ecc(mut e) => e.pubkey.take(),
         PkeyData::Mlkey(mut m) => m.pubkey.take(),
+        PkeyData::SlhDsaKey(mut s) => s.pubkey.take(),
         _ => return Err(CKR_GENERAL_ERROR)?,
     };
 
