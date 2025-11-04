@@ -18,6 +18,7 @@
 %global bundled_rust_deps 0
 %endif
 
+%global enabled_features nssdb,pqc,profiles
 
 Name:           kryoptic
 Version:        1.3.1
@@ -90,14 +91,14 @@ rm -f Cargo.lock
 %cargo_prep
 
 %generate_buildrequires
-%cargo_generate_buildrequires -f nssdb,pqc
+%cargo_generate_buildrequires -f %{enabled_features}
 %endif
 
 %build
 export CONFDIR=%{_sysconfdir}
-%cargo_build -f nssdb,pqc -- --all
-%{cargo_license_summary -f nssdb,pqc}
-%{cargo_license -f nssdb,pqc} > LICENSE.dependencies
+%cargo_build -f  %{enabled_features} -- --all
+%{cargo_license_summary -f %{enabled_features}}
+%{cargo_license -f %{enabled_features}} > LICENSE.dependencies
 
 %install
 # Have to cd because the macro already defines --path . and cargo install
@@ -115,9 +116,9 @@ echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryopti
 %if %{with check}
 %check
 %if 0%{?rhel}
-%cargo_test -f nssdb,pqc -- -- --exact --skip tests::signatures::test_rsa_signatures
+%cargo_test -f %{enabled_features} -- -- --exact --skip tests::signatures::test_rsa_signatures
 %else
-%cargo_test -f nssdb,pqc
+%cargo_test -f %{enabled_features}
 %endif
 %endif
 
