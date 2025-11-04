@@ -10,10 +10,11 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::attribute::Attribute;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
+use crate::ossl::common::extract_public_key;
 use crate::ossl::slhdsa;
 use crate::pkcs11::*;
 
@@ -175,11 +176,29 @@ impl ObjectFactory for SlhDsaPubFactory {
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
+
+    fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
+        Ok(self)
+    }
 }
 
 impl CommonKeyFactory for SlhDsaPubFactory {}
 
-impl PubKeyFactory for SlhDsaPubFactory {}
+impl PubKeyFactory for SlhDsaPubFactory {
+    fn pub_from_private(
+        &self,
+        key: &Object,
+        template: CkAttrs,
+    ) -> Result<Object> {
+        let mut template: CkAttrs<'_> = template;
+        match key.get_attr_as_ulong(CKA_PARAMETER_SET) {
+            Ok(p) => template.add_owned_ulong(CKA_PARAMETER_SET, p)?,
+            Err(_) => return Err(CKR_KEY_UNEXTRACTABLE)?,
+        }
+        template.add_vec(CKA_VALUE, extract_public_key(key)?)?;
+        self.create(template.as_slice())
+    }
+}
 
 /// Helper to check that the private key value size (if provided)
 /// matches the declared SLH-DSA parameter set.
