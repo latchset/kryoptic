@@ -145,29 +145,6 @@ pub fn generate_keypair(
     Ok(())
 }
 
-/// Extracts the public key value from a private key object.
-///
-/// This is done by importing the private key into OpenSSL and then
-/// exporting the full keypair to get the public key.
-/// The public key is returned as raw bytes.
-pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
-    // 1. Import private key into EvpPkey
-    let pkey = mlkem_object_to_pkey(privkey, CKO_PRIVATE_KEY)?;
-
-    // 2. Export key data
-    let mut mlk = match pkey.export()? {
-        PkeyData::Mlkey(m) => m,
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    };
-
-    // 3. Extract public key point
-    if let Some(key) = mlk.pubkey.take() {
-        Ok(key)
-    } else {
-        Err(CKR_KEY_UNEXTRACTABLE)?
-    }
-}
-
 /// Verifies that a given private key corresponds to a given seed for a
 /// specific ML-KEM parameter set.
 ///

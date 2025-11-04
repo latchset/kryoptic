@@ -14,6 +14,7 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
+use crate::ossl::common::extract_public_key;
 use crate::ossl::mldsa;
 use crate::pkcs11::*;
 
@@ -181,7 +182,7 @@ impl PubKeyFactory for MlDsaPubFactory {
             Ok(p) => template.add_owned_ulong(CKA_PARAMETER_SET, p)?,
             Err(_) => return Err(CKR_KEY_UNEXTRACTABLE)?,
         }
-        template.add_vec(CKA_VALUE, mldsa::extract_public_key(key)?)?;
+        template.add_vec(CKA_VALUE, extract_public_key(key)?)?;
         self.create(template.as_slice())
     }
 }

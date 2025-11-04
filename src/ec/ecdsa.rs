@@ -14,7 +14,8 @@ use crate::error::{general_error, Error, Result};
 use crate::kasn1::oid;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::ecdsa::{extract_public_key, EcdsaOperation};
+use crate::ossl::common::extract_public_key;
+use crate::ossl::ecdsa::EcdsaOperation;
 
 /// Minimum ECDSA key size
 pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
@@ -170,13 +171,18 @@ impl PubKeyFactory for ECDSAPubFactory {
         key: &'a Object,
         mut template: CkAttrs<'a>,
     ) -> Result<Object> {
-        if let Some(params) = key.get_attr(CKA_EC_PARAMS) {
-            template.add_slice(CKA_EC_PARAMS, params.get_value().as_slice())?;
-        } else {
-            return Err(CKR_KEY_UNEXTRACTABLE)?;
+        match key.get_attr(CKA_EC_PARAMS) {
+            Some(p) => {
+                template.add_slice(CKA_EC_PARAMS, p.get_value().as_slice())?
+            }
+            None => return Err(CKR_KEY_UNEXTRACTABLE)?,
         }
 
-        template.add_vec(CKA_EC_POINT, extract_public_key(key)?)?;
+        let point = extract_public_key(key)?;
+        match asn1::write_single(&point.as_slice()) {
+            Ok(e) => template.add_vec(CKA_EC_POINT, e)?,
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
+        }
 
         self.create(template.as_slice())
     }
