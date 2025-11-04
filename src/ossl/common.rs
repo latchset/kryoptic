@@ -12,7 +12,7 @@ use crate::object::Object;
 use crate::pkcs11::*;
 
 use ossl::digest::DigestAlg;
-use ossl::pkey::{EvpPkey, EvpPkeyType};
+use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData};
 use ossl::OsslContext;
 
 #[cfg(feature = "ecc")]
@@ -177,4 +177,27 @@ fn oid_to_evp_key_type(oid: &asn1::ObjectIdentifier) -> Result<EvpPkeyType> {
 #[cfg(feature = "ecc")]
 pub fn get_evp_pkey_type_from_obj(key: &Object) -> Result<EvpPkeyType> {
     oid_to_evp_key_type(&get_oid_from_obj(key)?)
+}
+
+/// Extracts the public key point from a private key object.
+///
+/// This is done by importing the private key into OpenSSL and then
+/// exporting the full keypair to get the public key.
+pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
+    // 1. Import private key into EvpPkey
+    let pkey = evp_pkey_from_object(privkey, CKO_PRIVATE_KEY)?;
+
+    // 2. Export key data
+    let pubkey_value = match pkey.export()? {
+        PkeyData::Ecc(mut e) => e.pubkey.take(),
+        PkeyData::Mlkey(mut m) => m.pubkey.take(),
+        _ => return Err(CKR_GENERAL_ERROR)?,
+    };
+
+    // 3. Extract public key
+    if let Some(val) = pubkey_value {
+        Ok(val)
+    } else {
+        Err(CKR_KEY_UNEXTRACTABLE)?
+    }
 }

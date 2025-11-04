@@ -15,7 +15,8 @@ use crate::error::{general_error, Error, Result};
 use crate::kasn1::oid;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::eddsa::*;
+use crate::ossl::common::extract_public_key;
+use crate::ossl::eddsa::EddsaOperation;
 
 pub const MIN_EDDSA_SIZE_BITS: usize = BITS_ED25519;
 pub const MAX_EDDSA_SIZE_BITS: usize = BITS_ED448;
@@ -155,10 +156,11 @@ impl PubKeyFactory for EDDSAPubFactory {
         key: &'a Object,
         mut template: CkAttrs<'a>,
     ) -> Result<Object> {
-        if let Some(params) = key.get_attr(CKA_EC_PARAMS) {
-            template.add_slice(CKA_EC_PARAMS, params.get_value().as_slice())?;
-        } else {
-            return Err(CKR_KEY_UNEXTRACTABLE)?;
+        match key.get_attr(CKA_EC_PARAMS) {
+            Some(p) => {
+                template.add_slice(CKA_EC_PARAMS, p.get_value().as_slice())?
+            }
+            None => return Err(CKR_KEY_UNEXTRACTABLE)?,
         }
 
         template.add_vec(CKA_EC_POINT, extract_public_key(key)?)?;

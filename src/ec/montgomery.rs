@@ -14,7 +14,8 @@ use crate::error::{general_error, Error, Result};
 use crate::kasn1::oid;
 use crate::mechanism::*;
 use crate::object::*;
-use crate::ossl::montgomery::{extract_public_key, ECMontgomeryOperation};
+use crate::ossl::common::extract_public_key;
+use crate::ossl::montgomery::ECMontgomeryOperation;
 
 /// Object that holds Mechanisms for Montgomery Ecc
 static MONTGOMERY_MECHS: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
@@ -146,10 +147,11 @@ impl PubKeyFactory for ECMontgomeryPubFactory {
         key: &'a Object,
         mut template: CkAttrs<'a>,
     ) -> Result<Object> {
-        if let Some(params) = key.get_attr(CKA_EC_PARAMS) {
-            template.add_slice(CKA_EC_PARAMS, params.get_value().as_slice())?;
-        } else {
-            return Err(CKR_KEY_UNEXTRACTABLE)?;
+        match key.get_attr(CKA_EC_PARAMS) {
+            Some(p) => {
+                template.add_slice(CKA_EC_PARAMS, p.get_value().as_slice())?
+            }
+            None => return Err(CKR_KEY_UNEXTRACTABLE)?,
         }
 
         template.add_vec(CKA_EC_POINT, extract_public_key(key)?)?;
