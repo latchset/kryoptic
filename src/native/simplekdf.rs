@@ -424,6 +424,9 @@ const PUBKEY_ATTR_DEFAULTS: &[PubkeyAttrRule] = &[
 
     // This is not handled yet, setting it will always result in an error
     // attr_init!(CKA_TRUSTED => CKA_TRUSTED),
+
+    // Not mentioned in 6.43.8 but necessary for ML-KEM
+    attr_init!(CKA_ENCAPSULATE => CKA_DECAPSULATE),
 ];
 
 /// Represents a public key from private key derivation operation
