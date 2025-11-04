@@ -779,6 +779,29 @@ fn test_derive_pub_from_priv() {
         ],
     });
 
+    #[cfg(feature = "mlkem")]
+    test_cases.push(TestCase {
+        name: "MLKEM",
+        gen_mech: CKM_ML_KEM_KEY_PAIR_GEN,
+        pub_ulongs: &[(CKA_PARAMETER_SET, CKP_ML_KEM_512)],
+        pub_strings: &[],
+        pub_bools: &[(CKA_TOKEN, true), (CKA_ENCAPSULATE, true)],
+        pri_ulongs: &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM)],
+        pri_strings: &[],
+        pri_bools: &[
+            (CKA_TOKEN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+            (CKA_DECAPSULATE, true),
+        ],
+        check_attrs: &[CKA_VALUE, CKA_PARAMETER_SET],
+        derived_bools: &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, false),
+            (CKA_ENCAPSULATE, true),
+        ],
+    });
+
     if test_cases.is_empty() {
         // No features enabled for this test, so we can't run.
         testtokn.finalize();
