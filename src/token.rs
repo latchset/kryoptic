@@ -176,6 +176,7 @@ impl Token {
             insert_profile_object(&mut token, CKP_BASELINE_PROVIDER)?;
             insert_profile_object(&mut token, CKP_EXTENDED_PROVIDER)?;
             insert_profile_object(&mut token, CKP_AUTHENTICATION_TOKEN)?;
+            insert_profile_object(&mut token, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
         }
 
         Ok(token)
@@ -262,6 +263,7 @@ impl Token {
             insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
             insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
             insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
+            insert_profile_object(self, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
         }
 
         Ok(())

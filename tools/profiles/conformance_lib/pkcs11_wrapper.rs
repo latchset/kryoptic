@@ -647,4 +647,33 @@ impl FuncList {
             }
         }
     }
+
+    pub fn create_object(
+        &self,
+        session: pkcs11::CK_SESSION_HANDLE,
+        template: &[pkcs11::CK_ATTRIBUTE],
+    ) -> Result<pkcs11::CK_OBJECT_HANDLE, Error> {
+        unsafe {
+            match (*self.fntable).C_CreateObject {
+                None => {
+                    Err("Broken pkcs11 module, no C_CreateObject function"
+                        .into())
+                }
+                Some(func) => {
+                    let mut object_handle = pkcs11::CK_INVALID_HANDLE;
+                    let rv = func(
+                        session,
+                        template.as_ptr() as *mut pkcs11::CK_ATTRIBUTE,
+                        template.len() as pkcs11::CK_ULONG,
+                        &mut object_handle,
+                    );
+                    if rv != pkcs11::CKR_OK {
+                        Err(format!("C_CreateObject failed: {}", rv).into())
+                    } else {
+                        Ok(object_handle)
+                    }
+                }
+            }
+        }
+    }
 }

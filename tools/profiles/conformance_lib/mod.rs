@@ -1,6 +1,7 @@
 // Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
 
+pub(crate) mod cert_data;
 pub mod executor;
 pub mod pkcs11_wrapper;
 pub mod profile;
@@ -19,7 +20,7 @@ pub enum Profile {
     Authentication,
     #[value(name = "complete")]
     Complete,
-    #[value(name = "public_certs")]
+    #[value(name = "public_certificates")]
     PublicCerts,
     #[value(name = "hkdf_tls")]
     HkdfTls,
@@ -57,6 +58,9 @@ pub struct Arguments {
 
     #[arg(long)]
     pub genkey: Option<String>,
+
+    #[arg(long)]
+    pub gencerts: bool,
 
     #[arg(long)]
     pub profile: Option<Profile>,

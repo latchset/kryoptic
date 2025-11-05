@@ -18,6 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return token_init::init_token(&args);
     }
 
+    if args.gencerts {
+        eprintln!("Error: --gencerts can only be used with --init");
+        std::process::exit(1);
+    }
+
     if args.profile.is_some() {
         eprintln!("Error: --profile can only be used with --init");
         std::process::exit(1);

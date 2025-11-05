@@ -785,36 +785,59 @@ pub fn execute_calls(
 
                 let mut ck_template = Vec::<pkcs11::CK_ATTRIBUTE>::new();
                 let mut value_storage = Vec::<Vec<u8>>::new();
+                let is_get_length_call;
 
                 if let Some(template) = &c.p_template {
-                    for attr in &template.attribute {
-                        if args.debug {
-                            eprintln!(
-                                "Preparing attribute type for GetValue: {}",
-                                attr.attr_type
-                            );
+                    if template.attribute.is_empty() {
+                        is_get_length_call = false; // Does not matter
+                    } else {
+                        is_get_length_call =
+                            template.attribute[0].ul_value_len.is_none();
+                        for attr in &template.attribute {
+                            if args.debug {
+                                eprintln!(
+                                    "Preparing attribute type for GetValue: {}",
+                                    attr.attr_type
+                                );
+                            }
+                            let attr_type =
+                                get_attribute_type_from_str(&attr.attr_type)?;
+
+                            if is_get_length_call {
+                                if attr.ul_value_len.is_some() {
+                                    return Err("Inconsistent attributes in C_GetAttributeValue template: mix of length-query and value-fetch.".into());
+                                }
+                                ck_template.push(pkcs11::CK_ATTRIBUTE {
+                                    type_: attr_type,
+                                    pValue: std::ptr::null_mut(),
+                                    ulValueLen: 0,
+                                });
+                            } else {
+                                let len_str = attr.ul_value_len.as_ref().ok_or_else(|| {
+                                    format!(
+                                        "Attribute {} in GetAttributeValue template must have a length for value-fetch call",
+                                        attr.attr_type
+                                    )
+                                })?;
+                                let len = len_str.parse::<usize>()?;
+
+                                let mut buffer = vec![0u8; len];
+                                let ptr =
+                                    buffer.as_mut_ptr() as pkcs11::CK_VOID_PTR;
+
+                                ck_template.push(pkcs11::CK_ATTRIBUTE {
+                                    type_: attr_type,
+                                    pValue: ptr,
+                                    ulValueLen: len as pkcs11::CK_ULONG,
+                                });
+                                value_storage.push(buffer);
+                            }
                         }
-                        let attr_type =
-                            get_attribute_type_from_str(&attr.attr_type)?;
-
-                        let len_str = attr.ul_value_len.as_ref().ok_or_else(|| {
-                            format!(
-                                "Attribute {} in GetAttributeValue template must have a length",
-                                attr.attr_type
-                            )
-                        })?;
-                        let len = len_str.parse::<usize>()?;
-
-                        let mut buffer = vec![0u8; len];
-                        let ptr = buffer.as_mut_ptr() as pkcs11::CK_VOID_PTR;
-
-                        ck_template.push(pkcs11::CK_ATTRIBUTE {
-                            type_: attr_type,
-                            pValue: ptr,
-                            ulValueLen: len as pkcs11::CK_ULONG,
-                        });
-                        value_storage.push(buffer);
                     }
+                } else {
+                    return Err(
+                        "C_GetAttributeValue requires a Template".into()
+                    );
                 }
 
                 pkcs11.get_attribute_value(
@@ -823,30 +846,98 @@ pub fn execute_calls(
                     &mut ck_template,
                 )?;
 
-                // Now check the results as per request
-                for (i, attr) in ck_template.iter().enumerate() {
-                    let attr_name =
-                        &c.p_template.as_ref().unwrap().attribute[i].attr_type;
-                    if attr.ulValueLen == 0 {
-                        return Err(format!(
-                            "C_GetAttributeValue for attribute '{}' returned length 0",
-                            attr_name
-                        )
-                        .into());
+                if let Call::GetAttributeValue(res_c) = response {
+                    if let Some(res_template) = &res_c.p_template {
+                        for (i, res_attr) in
+                            res_template.attribute.iter().enumerate()
+                        {
+                            let returned_attr = &ck_template[i];
+                            let req_attr =
+                                &c.p_template.as_ref().unwrap().attribute[i];
+
+                            if returned_attr.ulValueLen
+                                == pkcs11::CK_UNAVAILABLE_INFORMATION
+                            {
+                                return Err(format!(
+                                    "C_GetAttributeValue for attribute '{}' returned CK_UNAVAILABLE_INFORMATION",
+                                    req_attr.attr_type
+                                )
+                                .into());
+                            }
+
+                            if is_get_length_call {
+                                let expected_len_str = res_attr.ul_value_len.as_ref().ok_or_else(|| {
+                                    format!("Response for GetAttributeValue length query for '{}' must have a length", res_attr.attr_type)
+                                })?;
+                                let expected_len = expected_len_str
+                                    .parse::<pkcs11::CK_ULONG>(
+                                )?;
+
+                                if returned_attr.ulValueLen != expected_len {
+                                    return Err(format!("C_GetAttributeValue length mismatch for '{}'. Returned: {}, Expected: {}", res_attr.attr_type, returned_attr.ulValueLen, expected_len).into());
+                                }
+                                if args.debug {
+                                    eprintln!(
+                                        "Attribute '{}' length check passed. Got {}",
+                                        res_attr.attr_type,
+                                        returned_attr.ulValueLen
+                                    );
+                                }
+                            } else if let Some(expected_val_str) =
+                                &res_attr.p_value
+                            {
+                                let returned_bytes = &value_storage[i]
+                                    [..returned_attr.ulValueLen as usize];
+                                let req_attr_name = &req_attr.attr_type;
+
+                                if req_attr_name == "VALUE" {
+                                    let expected_bytes = hex::decode(expected_val_str)
+                                        .map_err(|e| format!("Failed to decode hex value for {}: {}", req_attr_name, e))?;
+                                    if returned_bytes
+                                        != expected_bytes.as_slice()
+                                    {
+                                        return Err(format!(
+                                            "C_GetAttributeValue value mismatch for '{}'.\nReturned: {}\nExpected: {}",
+                                            req_attr_name,
+                                            hex::encode(returned_bytes),
+                                            expected_val_str
+                                        )
+                                        .into());
+                                    }
+                                } else if req_attr_name == "LABEL"
+                                    || req_attr_name == "ID"
+                                {
+                                    let returned_str =
+                                        std::ffi::CStr::from_bytes_with_nul(
+                                            returned_bytes,
+                                        )?
+                                        .to_str()?;
+                                    if returned_str != expected_val_str {
+                                        return Err(format!(
+                                            "C_GetAttributeValue value mismatch for '{}'.\nReturned: '{}'\nExpected: '{}'",
+                                            req_attr_name,
+                                            returned_str,
+                                            expected_val_str
+                                        )
+                                        .into());
+                                    }
+                                } else if args.debug {
+                                    eprintln!("Value comparison for attribute type {} not implemented, skipping.", req_attr_name);
+                                }
+                                if args.debug {
+                                    eprintln!(
+                                        "Attribute '{}' value check passed.",
+                                        req_attr_name
+                                    );
+                                }
+                            }
+                        }
                     }
-                    if attr.ulValueLen == pkcs11::CK_UNAVAILABLE_INFORMATION {
-                        return Err(format!(
-                            "C_GetAttributeValue for attribute '{}' returned CK_UNAVAILABLE_INFORMATION",
-                            attr_name
-                        )
-                        .into());
-                    }
-                    if args.debug {
-                        eprintln!(
-                            "Attribute '{}' got value of length {}",
-                            attr_name, attr.ulValueLen
-                        );
-                    }
+                } else {
+                    return Err(
+                        "Mismatched response type for C_GetAttributeValue"
+                            .into(),
+                    );
                 }
             }
             Call::SignInit(c) => {
