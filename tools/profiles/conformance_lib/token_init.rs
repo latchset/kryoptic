@@ -1,6 +1,7 @@
 // Copyright 2025 Simo Sorce
 // See LICENSE.txt file for terms
 
+use super::cert_data::{CERT_DATA, ROOTS_DATA};
 use super::pkcs11_wrapper::{dl_error, FuncList};
 use super::{Arguments, Profile};
 use kryoptic_lib::pkcs11;
@@ -128,6 +129,40 @@ fn generate_key(
         _ => {
             return Err(format!("Unsupported key type: {}", key_type).into());
         }
+    }
+    Ok(())
+}
+
+fn generate_certs(
+    pkcs11: &FuncList,
+    session: pkcs11::CK_SESSION_HANDLE,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. CKO_DATA object
+    let mut root_template: Vec<pkcs11::CK_ATTRIBUTE> = Vec::new();
+    for attr in ROOTS_DATA.iter() {
+        root_template.push(pkcs11::CK_ATTRIBUTE {
+            type_: attr.atype,
+            pValue: attr.adata.as_ptr() as pkcs11::CK_VOID_PTR,
+            ulValueLen: attr.adata.len() as pkcs11::CK_ULONG,
+        });
+    }
+    let root_handle = pkcs11.create_object(session, &root_template)?;
+    println!("Created 'Root' object with handle {}", root_handle);
+
+    // 2. CKO_CERTIFICATE objects
+    for cert_data in CERT_DATA.iter() {
+        let mut cert_template: Vec<pkcs11::CK_ATTRIBUTE> = Vec::new();
+
+        for attr in cert_data.attrs.iter() {
+            cert_template.push(pkcs11::CK_ATTRIBUTE {
+                type_: attr.atype,
+                pValue: attr.adata.as_ptr() as pkcs11::CK_VOID_PTR,
+                ulValueLen: attr.adata.len() as pkcs11::CK_ULONG,
+            });
+        }
+
+        let cert_handle = pkcs11.create_object(session, &cert_template)?;
+        println!("Created CKO_CERTIFICATE object with handle {}", cert_handle);
     }
     Ok(())
 }
@@ -308,15 +343,22 @@ pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
                 pkcs11.init_pin(session, &pin)?;
                 println!("User PIN initialized.");
 
-                if let Some(key_type) = &args.genkey {
+                if args.genkey.is_some() || args.gencerts {
                     println!("Logging out as SO.");
                     pkcs11.logout(session)?;
 
-                    println!("Logging in as user for key generation.");
+                    println!("Logging in as user for key/object generation.");
                     pkcs11.login(session, pkcs11::CKU_USER, &pin)?;
 
-                    println!("Generating {} key...", key_type);
-                    generate_key(&pkcs11, session, key_type)?;
+                    if let Some(key_type) = &args.genkey {
+                        println!("Generating {} key...", key_type);
+                        generate_key(&pkcs11, session, key_type)?;
+                    }
+
+                    if args.gencerts {
+                        println!("Generating certificate objects...");
+                        generate_certs(&pkcs11, session)?;
+                    }
 
                     println!("Logging out as user.");
                     pkcs11.logout(session)?;
