@@ -168,18 +168,28 @@ impl Token {
             },
         }
 
+        token.token_internal_objects_init()?;
+
+        Ok(token)
+    }
+
+    /// Helper function to set up internal objects whenever the token is
+    /// initialized or re-initialized. This function is meant to provision
+    /// exclusively ephemeral data like internal session objects.
+    fn token_internal_objects_init(&mut self) -> Result<()> {
         #[cfg(feature = "fips")]
-        fips::token_init(&mut token)?;
+        if fips::token_init(self).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
 
         #[cfg(feature = "profiles")]
         {
-            insert_profile_object(&mut token, CKP_BASELINE_PROVIDER)?;
-            insert_profile_object(&mut token, CKP_EXTENDED_PROVIDER)?;
-            insert_profile_object(&mut token, CKP_AUTHENTICATION_TOKEN)?;
-            insert_profile_object(&mut token, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
+            insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
+            insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
+            insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
+            insert_profile_object(self, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
         }
-
-        Ok(token)
+        Ok(())
     }
 
     /// Updates the internal `CK_TOKEN_INFO` from the storage backend's
@@ -253,20 +263,7 @@ impl Token {
          * to be able to correctly access the database. */
         self.storage.unauth_user(CKU_SO)?;
 
-        #[cfg(feature = "fips")]
-        if fips::token_init(self).is_err() {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-
-        #[cfg(feature = "profiles")]
-        {
-            insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
-            insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
-            insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
-            insert_profile_object(self, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
-        }
-
-        Ok(())
+        self.token_internal_objects_init()
     }
 
     /// Sets or changes the PIN for a given user type (SO or User).
