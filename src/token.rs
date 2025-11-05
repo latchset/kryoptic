@@ -188,6 +188,10 @@ impl Token {
             insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
             insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
             insert_profile_object(self, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
+            // We do not support *all* mechanisms so keep this off for now
+            // insert_profile_object(self, CKP_COMPLETE_PROVIDER)?;
+            #[cfg(feature = "hkdf")]
+            insert_profile_object(self, CKP_HKDF_TLS_TOKEN)?;
         }
         Ok(())
     }
