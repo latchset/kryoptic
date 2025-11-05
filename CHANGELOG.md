@@ -10,6 +10,10 @@ All notable changes to this project should be documented in this file.
     - [Add support for CKO_TRUST
        objects](https://github.com/latchset/kryoptic/pull/348)
 
+* Added support for CKO_PROFILE objects
+  - [Support CKO_PROFILES objects in
+     Kryoptic](https://github.com/latchset/kryoptic/pull/353)
+
 --
 
 ## [1.3.1]
