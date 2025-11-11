@@ -12,13 +12,13 @@ use kryoptic_lib::{
     fn_get_function_list, fn_get_interface, fn_get_interface_list,
 };
 
-/// Public export symbol to access [kryoptic::fn_get_function_list]
+/// Public export symbol to access [kryoptic_lib::fn_get_function_list]
 #[unsafe(no_mangle)]
 pub extern "C" fn C_GetFunctionList(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> CK_RV {
     fn_get_function_list(fnlist)
 }
 
-/// Public export symbol to access [kryoptic::fn_get_interface]
+/// Public export symbol to access [kryoptic_lib::fn_get_interface]
 #[unsafe(no_mangle)]
 pub extern "C" fn C_GetInterface(
     interface_name: CK_UTF8CHAR_PTR,
@@ -29,7 +29,7 @@ pub extern "C" fn C_GetInterface(
     fn_get_interface(interface_name, version, interface, flags)
 }
 
-/// Public export symbol to access [kryoptic::fn_get_interface_list]
+/// Public export symbol to access [kryoptic_lib::fn_get_interface_list]
 #[unsafe(no_mangle)]
 pub extern "C" fn C_GetInterfaceList(
     interfaces_list: CK_INTERFACE_PTR,
