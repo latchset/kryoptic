@@ -755,7 +755,9 @@ impl OsslSignature {
                      * supported.
                      */
                     let ret = unsafe {
-                        match ctx.op {
+                        /* avoid errors from propagating unnecessarily */
+                        ERR_set_mark();
+                        let r = match ctx.op {
                             SigOp::Sign => EVP_PKEY_sign_message_update(
                                 ctx.pkey_ctx.as_mut_ptr(),
                                 std::ptr::null(),
@@ -766,7 +768,11 @@ impl OsslSignature {
                                 std::ptr::null(),
                                 0,
                             ),
-                        }
+                        };
+                        /* we unconditionally pop to the error mark so no
+                         * error are left on the stack as this is just a test */
+                        ERR_pop_to_mark();
+                        r
                     };
                     if ret == 1 {
                         true
