@@ -5,9 +5,7 @@
 //! defined by various [PKCS](https://en.wikipedia.org/wiki/PKCS) standards.
 
 use crate::error::Result;
-use crate::kasn1::oid;
-use crate::kasn1::DerEncOctetString;
-use crate::kasn1::Version;
+use crate::kasn1::{oid, DerEncBigUint, DerEncOctetString, Version};
 use crate::pkcs11;
 
 use asn1;
@@ -163,6 +161,33 @@ impl SubjectPublicKeyInfo<'_> {
             algorithm: alg,
             subject_public_key: asn1::BitString::new(pubkey, 0)
                 .ok_or(pkcs11::CKR_GENERAL_ERROR)?,
+        })
+    }
+
+    // DER-encode SubjectPublicKeyInfo.
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        match asn1::write_single(self) {
+            Ok(der) => Ok(der),
+            Err(_) => Err(pkcs11::CKR_GENERAL_ERROR)?,
+        }
+    }
+}
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+pub struct RsaPublicKey<'a> {
+    modulus: DerEncBigUint<'a>,
+    public_exponent: DerEncBigUint<'a>,
+}
+
+impl RsaPublicKey<'_> {
+    /// Constructs an `RsaPublicKey` ASN.1 structure from byte slices of its components.
+    pub fn new<'a>(
+        modulus: &'a Vec<u8>,
+        public_exponent: &'a Vec<u8>,
+    ) -> Result<RsaPublicKey<'a>> {
+        Ok(RsaPublicKey {
+            modulus: DerEncBigUint::new(modulus.as_slice())?,
+            public_exponent: DerEncBigUint::new(public_exponent.as_slice())?,
         })
     }
 

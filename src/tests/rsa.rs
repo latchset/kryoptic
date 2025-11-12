@@ -1,6 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use crate::kasn1::pkcs;
 use crate::tests::*;
 
 use serial_test::parallel;
@@ -695,4 +696,105 @@ fn test_rsa_mechs() {
         let result = ret_or_panic!(decrypt(session, prikey, &enc, &mechanism));
         assert_eq!(data.to_bytes(), result);
     }
+}
+
+#[test]
+#[parallel]
+fn test_rsa_public_key_info() {
+    let mut testtokn = TestToken::initialized("test_rsa_public_key_info", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* generate key pair and store it */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_TOKEN, false) /* CKA_VERIFY is a default */,],
+        &[],
+        &[],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, false), // Not sensitive to allow extracting components
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    // Check generated keys
+    let pub_key_info =
+        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_KEY_INFO));
+    assert!(!pub_key_info.is_empty());
+
+    let pri_key_info =
+        ret_or_panic!(extract_value(session, hpri, CKA_PUBLIC_KEY_INFO));
+    assert!(!pri_key_info.is_empty());
+    assert_eq!(pub_key_info, pri_key_info);
+
+    // Verify content of CKA_PUBLIC_KEY_INFO
+    let modulus = ret_or_panic!(extract_value(session, hpub, CKA_MODULUS));
+    let pub_exp =
+        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_EXPONENT));
+
+    let rsa_pub_key = pkcs::RsaPublicKey::new(&modulus, &pub_exp)
+        .unwrap()
+        .serialize()
+        .unwrap();
+    let spki_der = pkcs::SubjectPublicKeyInfo::new(pkcs::RSA_ALG, &rsa_pub_key)
+        .unwrap()
+        .serialize()
+        .unwrap();
+    assert_eq!(pub_key_info, spki_der);
+
+    // Check imported public key
+    let imported_hpub = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_RSA)],
+        &[(CKA_MODULUS, &modulus), (CKA_PUBLIC_EXPONENT, &pub_exp)],
+        &[],
+    ));
+    let imported_pub_key_info = ret_or_panic!(extract_value(
+        session,
+        imported_hpub,
+        CKA_PUBLIC_KEY_INFO
+    ));
+    assert_eq!(imported_pub_key_info, spki_der);
+
+    // Check imported private key
+    let priv_exp =
+        ret_or_panic!(extract_value(session, hpri, CKA_PRIVATE_EXPONENT));
+    let prime1 = ret_or_panic!(extract_value(session, hpri, CKA_PRIME_1));
+    let prime2 = ret_or_panic!(extract_value(session, hpri, CKA_PRIME_2));
+    let exp1 = ret_or_panic!(extract_value(session, hpri, CKA_EXPONENT_1));
+    let exp2 = ret_or_panic!(extract_value(session, hpri, CKA_EXPONENT_2));
+    let coeff = ret_or_panic!(extract_value(session, hpri, CKA_COEFFICIENT));
+
+    let imported_hpri = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_RSA)],
+        &[
+            (CKA_MODULUS, &modulus),
+            (CKA_PUBLIC_EXPONENT, &pub_exp),
+            (CKA_PRIVATE_EXPONENT, &priv_exp),
+            (CKA_PRIME_1, &prime1),
+            (CKA_PRIME_2, &prime2),
+            (CKA_EXPONENT_1, &exp1),
+            (CKA_EXPONENT_2, &exp2),
+            (CKA_COEFFICIENT, &coeff),
+        ],
+        &[],
+    ));
+    let imported_pri_key_info = ret_or_panic!(extract_value(
+        session,
+        imported_hpri,
+        CKA_PUBLIC_KEY_INFO
+    ));
+    assert_eq!(imported_pri_key_info, spki_der);
+
+    testtokn.finalize();
 }
