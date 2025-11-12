@@ -175,6 +175,27 @@ fn rsa_check_import(obj: &Object) -> Result<()> {
     Ok(())
 }
 
+fn rsa_check_public_key_info(obj: &mut Object) -> Result<()> {
+    // Get modulus and public exponent.
+    let modulus = obj.get_attr_as_bytes(CKA_MODULUS)?;
+    let pubexp = obj.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?;
+
+    // Create RsaPublicKey.
+    // Note: The RsaPublicKey struct is defined in `kasn1/pkcs.rs`.
+    let rsa_pub_key = pkcs::RsaPublicKey::new(modulus, pubexp)?.serialize()?;
+
+    // Check if CKA_PUBLIC_KEY_INFO is already there.
+    if !obj.check_or_set_attr(Attribute::from_bytes(
+        CKA_PUBLIC_KEY_INFO,
+        pkcs::SubjectPublicKeyInfo::new(pkcs::RSA_ALG, &rsa_pub_key)?
+            .serialize()?,
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    }
+
+    Ok(())
+}
+
 /// The RSA Public-Key Factory.
 #[derive(Debug, Default)]
 pub struct RSAPubFactory {
@@ -219,6 +240,8 @@ impl ObjectFactory for RSAPubFactory {
         let mut obj = self.default_object_create(template)?;
 
         rsa_check_import(&mut obj)?;
+
+        rsa_check_public_key_info(&mut obj)?;
 
         Ok(obj)
     }
@@ -384,6 +407,8 @@ impl ObjectFactory for RSAPrivFactory {
 
         rsa_check_import(&mut obj)?;
 
+        rsa_check_public_key_info(&mut obj)?;
+
         Ok(obj)
     }
 
@@ -538,6 +563,8 @@ impl PrivKeyFactory for RSAPrivFactory {
         ))? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
+
+        rsa_check_public_key_info(&mut key)?;
 
         Ok(key)
     }
@@ -725,6 +752,16 @@ impl Mechanism for RsaPKCSMechanism {
         )?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
+
+        rsa_check_public_key_info(&mut pubkey)?;
+        /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
+        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
+            Ok(info) => privkey.set_attr(Attribute::from_bytes(
+                CKA_PUBLIC_KEY_INFO,
+                info.clone(),
+            ))?,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
 
         Ok((pubkey, privkey))
     }
