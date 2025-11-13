@@ -1,6 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use crate::kasn1::{oid, pkcs};
 use crate::tests::*;
 
 use asn1;
@@ -239,6 +240,97 @@ fn test_ecc_operations() {
     let ret =
         sig_verifysig(session, handle, data.as_bytes(), &sign, &mechanism);
     assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_ecdsa_public_key_info() {
+    let mut testtokn =
+        TestToken::initialized("test_ecdsa_public_key_info", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* EC_PARAMS for P-256 */
+    let ec_params = asn1::write_single(&oid::EC_SECP256R1).unwrap();
+
+    /* generate key pair and store it */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_EC_KEY_PAIR_GEN,
+        &[],
+        &[(CKA_EC_PARAMS, &ec_params)],
+        &[(CKA_TOKEN, false)],
+        &[],
+        &[],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, false), // Not sensitive to allow extracting components
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    // Check generated keys
+    let pub_key_info =
+        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_KEY_INFO));
+    assert!(!pub_key_info.is_empty());
+
+    let pri_key_info =
+        ret_or_panic!(extract_value(session, hpri, CKA_PUBLIC_KEY_INFO));
+    assert!(!pri_key_info.is_empty());
+    assert_eq!(pub_key_info, pri_key_info);
+
+    // Verify content of CKA_PUBLIC_KEY_INFO
+    let ec_point_der =
+        ret_or_panic!(extract_value(session, hpub, CKA_EC_POINT));
+    let ec_point_raw = asn1::parse_single::<&[u8]>(&ec_point_der).unwrap();
+
+    let spki = pkcs::SubjectPublicKeyInfo {
+        algorithm: pkcs::EC_SECP256R1_ALG,
+        subject_public_key: asn1::BitString::new(ec_point_raw, 0).unwrap(),
+    };
+    let spki_der = asn1::write_single(&spki).unwrap();
+    assert_eq!(pub_key_info, spki_der);
+
+    // Check imported public key
+    let imported_hpub = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[(CKA_EC_PARAMS, &ec_params), (CKA_EC_POINT, &ec_point_der),],
+        &[],
+    ));
+    let imported_pub_key_info = ret_or_panic!(extract_value(
+        session,
+        imported_hpub,
+        CKA_PUBLIC_KEY_INFO
+    ));
+    assert_eq!(imported_pub_key_info, spki_der);
+
+    // Check imported private key
+    // FIXME: do this once https://github.com/openssl/openssl/pull/29054 is
+    // merged and we have a way to detect this.
+    // let priv_value = ret_or_panic!(extract_value(session, hpri, CKA_VALUE));
+    // let _imported_hpri = ret_or_panic!(import_object(
+    //     session,
+    //     CKO_PRIVATE_KEY,
+    //     &[(CKA_KEY_TYPE, CKK_EC)],
+    //     &[
+    //         (CKA_EC_PARAMS, &ec_params),
+    //         (CKA_VALUE, &priv_value)
+    //     ],
+    //     &[],
+    // ));
+    // let imported_pri_key_info = ret_or_panic!(extract_value(
+    //     session,
+    //     imported_hpri,
+    //     CKA_PUBLIC_KEY_INFO
+    // ));
+    // assert_eq!(imported_pri_key_info, spki_der);
 
     testtokn.finalize();
 }

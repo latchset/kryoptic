@@ -11,11 +11,13 @@ use std::sync::LazyLock;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::ec::*;
 use crate::error::{general_error, Error, Result};
-use crate::kasn1::oid;
+use crate::kasn1::{oid, pkcs};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::common::extract_public_key;
 use crate::ossl::ecdsa::EcdsaOperation;
+
+use asn1;
 
 /// Minimum ECDSA key size
 pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
@@ -41,6 +43,36 @@ static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
         }),
     ]
 });
+
+fn ecdsa_public_key_info(obj: &mut Object) -> Result<()> {
+    // Get raw public point from EC_POINT.
+    // For CKK_EC keys, CKA_EC_POINT is a DER-encoded OCTET STRING.
+    // SubjectPublicKeyInfo's bit string needs the raw point bytes.
+    let ec_point_der = obj.get_attr_as_bytes(CKA_EC_POINT)?;
+    let ec_point_raw = asn1::parse_single::<&[u8]>(ec_point_der)
+        .map_err(|_| CKR_ATTRIBUTE_VALUE_INVALID)?;
+
+    // Get curve OID from EC_PARAMS
+    let oid = get_oid_from_obj(obj)?;
+
+    // Get AlgorithmIdentifier
+    let alg = match oid {
+        oid::EC_SECP256R1 => pkcs::EC_SECP256R1_ALG,
+        oid::EC_SECP384R1 => pkcs::EC_SECP384R1_ALG,
+        oid::EC_SECP521R1 => pkcs::EC_SECP521R1_ALG,
+        _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
+    };
+
+    // Check if CKA_PUBLIC_KEY_INFO is already there.
+    if !obj.check_or_set_attr(Attribute::from_bytes(
+        CKA_PUBLIC_KEY_INFO,
+        pkcs::SubjectPublicKeyInfo::new(alg, ec_point_raw)?.serialize()?,
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    };
+
+    Ok(())
+}
 
 /// The static Public Key factory
 static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
@@ -146,6 +178,8 @@ impl ObjectFactory for ECDSAPubFactory {
                 e
             }
         })?;
+
+        ecdsa_public_key_info(&mut obj)?;
 
         Ok(obj)
     }
@@ -262,6 +296,23 @@ impl ObjectFactory for ECDSAPrivFactory {
                 }
             }
         }
+
+        // Extract public key and set CKA_PUBLIC_KEY_INFO
+        // FIXME: Commented until OpenSSL supports extracting for EC keys
+        //        see: https://github.com/openssl/openssl/pull/29054
+        // let ec_point_raw = extract_public_key(&obj)?;
+        // let alg = match oid {
+        //     oid::EC_SECP256R1 => pkcs::EC_SECP256R1_ALG,
+        //     oid::EC_SECP384R1 => pkcs::EC_SECP384R1_ALG,
+        //     oid::EC_SECP521R1 => pkcs::EC_SECP521R1_ALG,
+        //     _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
+        // };
+        // if !obj.check_or_set_attr(Attribute::from_bytes(
+        //     CKA_PUBLIC_KEY_INFO,
+        //     pkcs::SubjectPublicKeyInfo::new(alg, ec_point_raw)?.serialize()?,
+        // ))? {
+        //     return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        // }
 
         Ok(obj)
     }
@@ -417,6 +468,16 @@ impl Mechanism for EcdsaMechanism {
         EcdsaOperation::generate_keypair(&mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
+
+        ecdsa_public_key_info(&mut pubkey)?;
+        /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
+        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
+            Ok(info) => privkey.set_attr(Attribute::from_bytes(
+                CKA_PUBLIC_KEY_INFO,
+                info.clone(),
+            ))?,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
 
         Ok((pubkey, privkey))
     }

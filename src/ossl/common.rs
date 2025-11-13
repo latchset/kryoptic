@@ -8,8 +8,10 @@
 use crate::error::Result;
 #[cfg(feature = "ecc")]
 use crate::kasn1::oid;
+use crate::kasn1::pkcs;
 use crate::object::Object;
 use crate::pkcs11::*;
+use asn1;
 
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData};
@@ -184,6 +186,18 @@ pub fn get_evp_pkey_type_from_obj(key: &Object) -> Result<EvpPkeyType> {
 /// This is done by importing the private key into OpenSSL and then
 /// exporting the full keypair to get the public key.
 pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
+    // Optimize by trying to extract from CKA_PUBLIC_KEY_INFO first
+    if let Some(pki_attr) = privkey.get_attr(CKA_PUBLIC_KEY_INFO) {
+        let spki_der = pki_attr.get_value();
+        if !spki_der.is_empty() {
+            let spki =
+                asn1::parse_single::<pkcs::SubjectPublicKeyInfo>(spki_der)
+                    .map_err(|_| CKR_GENERAL_ERROR)?;
+            return Ok(spki.subject_public_key.as_bytes().to_vec());
+        }
+    }
+
+    // Fallback to OpenSSL import/export
     // 1. Import private key into EvpPkey
     let pkey = evp_pkey_from_object(privkey, CKO_PRIVATE_KEY)?;
 
