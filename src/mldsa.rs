@@ -12,6 +12,7 @@ use std::sync::LazyLock;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
+use crate::kasn1::pkcs;
 use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
 use crate::ossl::common::extract_public_key;
@@ -25,6 +26,40 @@ pub const ML_DSA_65_SK_SIZE: usize = 4032;
 pub const ML_DSA_65_PK_SIZE: usize = 1952;
 pub const ML_DSA_87_SK_SIZE: usize = 4896;
 pub const ML_DSA_87_PK_SIZE: usize = 2592;
+
+fn mldsa_public_key_info(
+    obj: &mut Object,
+    pubkey: Option<&[u8]>,
+) -> Result<()> {
+    let pubkey_raw = match pubkey {
+        Some(p) => p,
+        None => {
+            // Get raw public key from CKA_VALUE.
+            obj.get_attr_as_bytes(CKA_VALUE)?
+        }
+    };
+
+    // Get paramset from CKA_PARAMETER_SET
+    let paramset = obj.get_attr_as_ulong(CKA_PARAMETER_SET)?;
+
+    // Get AlgorithmIdentifier
+    let alg = match paramset {
+        CKP_ML_DSA_44 => pkcs::MLDSA44_ALG,
+        CKP_ML_DSA_65 => pkcs::MLDSA65_ALG,
+        CKP_ML_DSA_87 => pkcs::MLDSA87_ALG,
+        _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
+    };
+
+    // Check if CKA_PUBLIC_KEY_INFO is already there.
+    if !obj.check_or_set_attr(Attribute::from_bytes(
+        CKA_PUBLIC_KEY_INFO,
+        pkcs::SubjectPublicKeyInfo::new(alg, pubkey_raw)?.serialize()?,
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    };
+
+    Ok(())
+}
 
 /// Object that holds Mechanisms for MLDSA
 static MLDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
@@ -152,6 +187,8 @@ impl ObjectFactory for MlDsaPubFactory {
         let mut obj = self.default_object_create(template)?;
 
         mldsa_pub_check_import(&mut obj)?;
+
+        mldsa_public_key_info(&mut obj, None)?;
 
         Ok(obj)
     }
@@ -283,6 +320,9 @@ impl ObjectFactory for MlDsaPrivFactory {
         let mut obj = self.default_object_create(template)?;
 
         mldsa_priv_check_import(&mut obj)?;
+
+        let pubkey_raw = extract_public_key(&obj)?;
+        mldsa_public_key_info(&mut obj, Some(&pubkey_raw))?;
 
         Ok(obj)
     }
@@ -445,6 +485,16 @@ impl Mechanism for MlDsaMechanism {
         mldsa::generate_keypair(param_set, &mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
+
+        mldsa_public_key_info(&mut pubkey, None)?;
+        /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
+        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
+            Ok(info) => privkey.set_attr(Attribute::from_bytes(
+                CKA_PUBLIC_KEY_INFO,
+                info.clone(),
+            ))?,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
 
         Ok((pubkey, privkey))
     }

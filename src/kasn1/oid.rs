@@ -34,3 +34,19 @@ pub const SHA3_384_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 9);
 pub const SHA3_512_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 2, 10);
+
+// ML-DSA OIDs from https://csrc.nist.gov/projects/computer-security-objects-register/algorithm-registration#DSA
+pub const MLDSA44_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 17);
+pub const MLDSA65_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 18);
+pub const MLDSA87_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 19);
+
+// ML-KEM OIDs from https://csrc.nist.gov/projects/computer-security-objects-register/algorithm-registration#KEM
+pub const MLKEM512_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 4, 1);
+pub const MLKEM768_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 4, 2);
+pub const MLKEM1024_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 4, 3);

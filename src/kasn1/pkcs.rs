@@ -152,6 +152,48 @@ pub const X448_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
     params: AlgorithmParameters::X448,
 };
 
+/// MLDSA44 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const MLDSA44_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Mldsa44,
+};
+
+/// MLDSA65 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const MLDSA65_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Mldsa65,
+};
+
+/// MLDSA87 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const MLDSA87_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::Mldsa87,
+};
+
+/// MLKEM512 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const MLKEM512_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::MlKem512,
+};
+
+/// MLKEM768 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const MLKEM768_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::MlKem768,
+};
+
+/// MLKEM1024 Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const MLKEM1024_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::MlKem1024,
+};
+
 impl SubjectPublicKeyInfo<'_> {
     pub fn new<'a>(
         alg: AlgorithmIdentifier<'a>,
