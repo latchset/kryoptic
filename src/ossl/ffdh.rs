@@ -125,7 +125,7 @@ impl FFDHOperation {
         if let Some(key) = ffdh.pubkey.take() {
             pubkey.check_or_set_attr(Attribute::from_bytes(
                 CKA_PRIME,
-                group_prime(group)?,
+                group_prime(group)?.to_vec(),
             ))?;
 
             pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
@@ -137,7 +137,7 @@ impl FFDHOperation {
         if let Some(key) = ffdh.prikey.take() {
             privkey.check_or_set_attr(Attribute::from_bytes(
                 CKA_PRIME,
-                group_prime(group)?,
+                group_prime(group)?.to_vec(),
             ))?;
             privkey.set_attr(Attribute::from_ulong(
                 CKA_VALUE_BITS,
