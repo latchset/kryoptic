@@ -185,6 +185,21 @@ pub enum AlgorithmParameters<'a> {
     #[defined_by(oid::PBES1_WITH_SHA_AND_40_BIT_RC2_CBC)]
     Pbe1WithShaAnd40BitRc2Cbc(PBES1Params),
 
+    /* NOTE: Additional Identifiers not originally in pyca's file. */
+    #[defined_by(oid::MLDSA44_OID)]
+    Mldsa44,
+    #[defined_by(oid::MLDSA65_OID)]
+    Mldsa65,
+    #[defined_by(oid::MLDSA87_OID)]
+    Mldsa87,
+
+    #[defined_by(oid::MLKEM512_OID)]
+    MlKem512,
+    #[defined_by(oid::MLKEM768_OID)]
+    MlKem768,
+    #[defined_by(oid::MLKEM1024_OID)]
+    MlKem1024,
+
     #[default]
     Other(asn1::ObjectIdentifier, Option<asn1::Tlv<'a>>),
 }
