@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::ec::*;
 use crate::error::{general_error, Error, Result};
-use crate::kasn1::oid;
+use crate::kasn1::{oid, pkcs};
 use crate::mechanism::*;
 use crate::object::*;
 use crate::ossl::common::extract_public_key;
@@ -40,6 +40,37 @@ static EDDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
         }),
     ]
 });
+
+fn eddsa_public_key_info(obj: &mut Object, point: Option<&[u8]>) -> Result<()> {
+    let ec_point_raw = match point {
+        Some(p) => p,
+        None => {
+            // Get raw public point from EC_POINT.
+            // For CKK_EC_EDWARDS keys, CKA_EC_POINT is raw public key bytes.
+            obj.get_attr_as_bytes(CKA_EC_POINT)?
+        }
+    };
+
+    // Get curve OID from EC_PARAMS
+    let oid = get_oid_from_obj(obj)?;
+
+    // Get AlgorithmIdentifier
+    let alg = match oid {
+        oid::ED25519_OID => pkcs::ED25519_ALG,
+        oid::ED448_OID => pkcs::ED448_ALG,
+        _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
+    };
+
+    // Check if CKA_PUBLIC_KEY_INFO is already there.
+    if !obj.check_or_set_attr(Attribute::from_bytes(
+        CKA_PUBLIC_KEY_INFO,
+        pkcs::SubjectPublicKeyInfo::new(alg, ec_point_raw)?.serialize()?,
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    };
+
+    Ok(())
+}
 
 /// The static Public Key factory
 static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
@@ -132,6 +163,8 @@ impl ObjectFactory for EDDSAPubFactory {
             }
         })?;
 
+        eddsa_public_key_info(&mut obj, None)?;
+
         Ok(obj)
     }
 
@@ -216,7 +249,7 @@ impl ObjectFactory for EDDSAPrivFactory {
     /// Additionally validates that the private key size is consistent
     /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.default_object_create(template)?;
+        let mut obj = self.default_object_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.6:
          * CKA_EC_PARAMS, Byte array,
@@ -252,6 +285,9 @@ impl ObjectFactory for EDDSAPrivFactory {
                 }
             }
         }
+
+        let ec_point_raw = extract_public_key(&obj)?;
+        eddsa_public_key_info(&mut obj, Some(&ec_point_raw))?;
 
         Ok(obj)
     }
@@ -408,6 +444,16 @@ impl Mechanism for EddsaMechanism {
         EddsaOperation::generate_keypair(&mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
+
+        eddsa_public_key_info(&mut pubkey, None)?;
+        /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
+        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
+            Ok(info) => privkey.set_attr(Attribute::from_bytes(
+                CKA_PUBLIC_KEY_INFO,
+                info.clone(),
+            ))?,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
 
         Ok((pubkey, privkey))
     }
