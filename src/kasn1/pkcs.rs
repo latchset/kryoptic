@@ -194,6 +194,96 @@ pub const MLKEM1024_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
     params: AlgorithmParameters::MlKem1024,
 };
 
+/// SLH-DSA-SHA2-128s Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHA2_128S_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::SlhdsaSha2128s,
+};
+
+/// SLH-DSA-SHAKE-128s Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHAKE_128S_ALG: AlgorithmIdentifier<'_> =
+    AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: AlgorithmParameters::SlhdsaShake128s,
+    };
+
+/// SLH-DSA-SHA2-128f Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHA2_128F_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::SlhdsaSha2128f,
+};
+
+/// SLH-DSA-SHAKE-128f Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHAKE_128F_ALG: AlgorithmIdentifier<'_> =
+    AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: AlgorithmParameters::SlhdsaShake128f,
+    };
+
+/// SLH-DSA-SHA2-192s Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHA2_192S_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::SlhdsaSha2192s,
+};
+
+/// SLH-DSA-SHAKE-192s Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHAKE_192S_ALG: AlgorithmIdentifier<'_> =
+    AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: AlgorithmParameters::SlhdsaShake192s,
+    };
+
+/// SLH-DSA-SHA2-192f Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHA2_192F_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::SlhdsaSha2192f,
+};
+
+/// SLH-DSA-SHAKE-192f Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHAKE_192F_ALG: AlgorithmIdentifier<'_> =
+    AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: AlgorithmParameters::SlhdsaShake192f,
+    };
+
+/// SLH-DSA-SHA2-256s Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHA2_256S_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::SlhdsaSha2256s,
+};
+
+/// SLH-DSA-SHAKE-256s Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHAKE_256S_ALG: AlgorithmIdentifier<'_> =
+    AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: AlgorithmParameters::SlhdsaShake256s,
+    };
+
+/// SLH-DSA-SHA2-256f Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHA2_256F_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
+    oid: asn1::DefinedByMarker::marker(),
+    params: AlgorithmParameters::SlhdsaSha2256f,
+};
+
+/// SLH-DSA-SHAKE-256f Algorithm Identifier, typically used for Identifying a private or
+/// public key (for example in PrivateKeyInfo)
+pub const SLHDSA_SHAKE_256F_ALG: AlgorithmIdentifier<'_> =
+    AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: AlgorithmParameters::SlhdsaShake256f,
+    };
+
 impl SubjectPublicKeyInfo<'_> {
     pub fn new<'a>(
         alg: AlgorithmIdentifier<'a>,

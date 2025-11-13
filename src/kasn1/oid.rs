@@ -50,3 +50,29 @@ pub const MLKEM768_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 4, 2);
 pub const MLKEM1024_OID: asn1::ObjectIdentifier =
     asn1::oid!(2, 16, 840, 1, 101, 3, 4, 4, 3);
+
+// SLH-DSA OIDs from https://csrc.nist.gov/projects/computer-security-objects-register/algorithm-registration#DSA
+pub const SLHDSA_SHA2_128S_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 20);
+pub const SLHDSA_SHA2_128F_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 21);
+pub const SLHDSA_SHA2_192S_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 22);
+pub const SLHDSA_SHA2_192F_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 23);
+pub const SLHDSA_SHA2_256S_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 24);
+pub const SLHDSA_SHA2_256F_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 25);
+pub const SLHDSA_SHAKE_128S_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 26);
+pub const SLHDSA_SHAKE_128F_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 27);
+pub const SLHDSA_SHAKE_192S_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 28);
+pub const SLHDSA_SHAKE_192F_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 29);
+pub const SLHDSA_SHAKE_256S_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 30);
+pub const SLHDSA_SHAKE_256F_OID: asn1::ObjectIdentifier =
+    asn1::oid!(2, 16, 840, 1, 101, 3, 4, 3, 31);
