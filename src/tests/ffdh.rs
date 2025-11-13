@@ -2,7 +2,9 @@
 // See LICENSE.txt file for terms
 
 use crate::ffdh_groups::*;
+use crate::kasn1::{pkcs, DerEncBigUint};
 use crate::tests::*;
+use asn1;
 
 use serial_test::parallel;
 
@@ -20,7 +22,7 @@ fn test_ffdh_generate() {
         session,
         CKM_DH_PKCS_KEY_PAIR_GEN,
         &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_DH),],
-        &[(CKA_PRIME, &FFDHE2048), (CKA_BASE, &GENERATOR2),],
+        &[(CKA_PRIME, &FFDHE2048_P), (CKA_BASE, &GENERATOR2),],
         &[(CKA_DERIVE, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
         &[],
@@ -31,7 +33,7 @@ fn test_ffdh_generate() {
         session,
         CKM_DH_PKCS_KEY_PAIR_GEN,
         &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_DH),],
-        &[(CKA_PRIME, &FFDHE2048), (CKA_BASE, &GENERATOR2),],
+        &[(CKA_PRIME, &FFDHE2048_P), (CKA_BASE, &GENERATOR2),],
         &[(CKA_DERIVE, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
         &[],
@@ -53,7 +55,7 @@ fn test_ffdh_generate() {
     );
 
     /* Derive Side 1 */
-    let mut peerpub = vec![0u8; FFDHE2048.len()];
+    let mut peerpub = vec![0u8; FFDHE2048_P.len()];
     let mut extract_template = make_ptrs_template(&[(
         CKA_VALUE,
         void_ptr!(peerpub.as_mut_ptr()),
@@ -87,7 +89,7 @@ fn test_ffdh_generate() {
     assert_eq!(ret, CKR_OK);
 
     /* Derive Side 2 */
-    let mut peerpub = vec![0u8; FFDHE2048.len()];
+    let mut peerpub = vec![0u8; FFDHE2048_P.len()];
     let mut extract_template = make_ptrs_template(&[(
         CKA_VALUE,
         void_ptr!(peerpub.as_mut_ptr()),
@@ -121,7 +123,7 @@ fn test_ffdh_generate() {
     assert_eq!(ret, CKR_OK);
 
     /* Compare results */
-    let mut value1 = vec![0u8; FFDHE2048.len()];
+    let mut value1 = vec![0u8; FFDHE2048_P.len()];
     let mut extract_template = make_ptrs_template(&[(
         CKA_VALUE,
         void_ptr!(value1.as_mut_ptr()),
@@ -137,7 +139,7 @@ fn test_ffdh_generate() {
     assert_eq!(ret, CKR_OK);
     value1.resize(extract_template[0].ulValueLen as usize, 0);
 
-    let mut value2 = vec![0u8; FFDHE2048.len()];
+    let mut value2 = vec![0u8; FFDHE2048_P.len()];
     let mut extract_template = make_ptrs_template(&[(
         CKA_VALUE,
         void_ptr!(value2.as_mut_ptr()),
@@ -186,7 +188,7 @@ fn test_ffdh_derive() {
         CKO_PRIVATE_KEY,
         &[(CKA_KEY_TYPE, CKK_DH),],
         &[
-            (CKA_PRIME, &FFDHE2048),
+            (CKA_PRIME, &FFDHE2048_P),
             (CKA_BASE, &GENERATOR2),
             (CKA_VALUE, &privkey),
             (CKA_LABEL, format!("FFDHE2048 private key").as_bytes()),
@@ -264,4 +266,95 @@ fn test_ffdh_derive() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(value, shared_secret);
+}
+
+#[test]
+#[parallel]
+fn test_ffdh_public_key_info() {
+    let mut testtokn =
+        TestToken::initialized("test_ffdh_public_key_info", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* generate key pair and store it */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_DH_PKCS_KEY_PAIR_GEN,
+        &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_DH),],
+        &[(CKA_PRIME, &FFDHE2048_P), (CKA_BASE, &GENERATOR2),],
+        &[(CKA_TOKEN, false)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
+        &[],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, false), // Not sensitive to allow extracting components
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    // Check generated keys
+    let pub_key_info =
+        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_KEY_INFO));
+    assert!(!pub_key_info.is_empty());
+
+    let pri_key_info =
+        ret_or_panic!(extract_value(session, hpri, CKA_PUBLIC_KEY_INFO));
+    assert!(!pri_key_info.is_empty());
+    assert_eq!(pub_key_info, pri_key_info);
+
+    // Verify content of CKA_PUBLIC_KEY_INFO
+    let y = ret_or_panic!(extract_value(session, hpub, CKA_VALUE));
+
+    let (p, g, q) =
+        ffdh_groups::group_values(ffdh_groups::DHGroupName::FFDHE2048).unwrap();
+
+    let p_der = DerEncBigUint::new(p).unwrap();
+    let g_der = DerEncBigUint::new(g).unwrap();
+    let q_der = DerEncBigUint::new(q).unwrap();
+
+    let dhx_params = pkcs::DHXParams {
+        p: asn1::BigUint::new(p_der.as_bytes()).unwrap(),
+        g: asn1::BigUint::new(g_der.as_bytes()).unwrap(),
+        q: asn1::BigUint::new(q_der.as_bytes()).unwrap(),
+        j: None,
+        validation_params: None,
+    };
+
+    let alg = pkcs::AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: pkcs::AlgorithmParameters::Dh(dhx_params),
+    };
+
+    let y_der = asn1::write_single(&DerEncBigUint::new(&y).unwrap()).unwrap();
+
+    let spki = pkcs::SubjectPublicKeyInfo {
+        algorithm: alg,
+        subject_public_key: asn1::BitString::new(&y_der, 0).unwrap(),
+    };
+    let spki_der = asn1::write_single(&spki).unwrap();
+    assert_eq!(pub_key_info, spki_der);
+
+    // Check imported public key
+    let imported_hpub = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[(CKA_KEY_TYPE, CKK_DH)],
+        &[
+            (CKA_PRIME, &FFDHE2048_P),
+            (CKA_BASE, &GENERATOR2),
+            (CKA_VALUE, &y),
+        ],
+        &[],
+    ));
+    let imported_pub_key_info = ret_or_panic!(extract_value(
+        session,
+        imported_hpub,
+        CKA_PUBLIC_KEY_INFO
+    ));
+    assert_eq!(imported_pub_key_info, spki_der);
+
+    testtokn.finalize();
 }

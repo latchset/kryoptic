@@ -10,11 +10,13 @@ use std::sync::LazyLock;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::ffdh_groups;
+use crate::kasn1::{pkcs, DerEncBigUint};
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::bytes_to_vec;
 use crate::object::*;
 use crate::ossl::ffdh::FFDHOperation;
 use crate::pkcs11::*;
+use asn1;
 
 /// Minimum FFDH key size
 pub const MIN_DH_SIZE_BITS: CK_ULONG = 2048;
@@ -64,6 +66,45 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     );
 }
 
+fn ffdh_public_key_info(
+    group: ffdh_groups::DHGroupName,
+    obj: &mut Object,
+) -> Result<()> {
+    let (p, g, q) = ffdh_groups::group_values(group)?;
+
+    let p_der = DerEncBigUint::new(p)?;
+    let g_der = DerEncBigUint::new(g)?;
+    let q_der = DerEncBigUint::new(q)?;
+
+    let dhx_params = pkcs::DHXParams {
+        p: asn1::BigUint::new(p_der.as_bytes()).ok_or(CKR_GENERAL_ERROR)?,
+        g: asn1::BigUint::new(g_der.as_bytes()).ok_or(CKR_GENERAL_ERROR)?,
+        q: asn1::BigUint::new(q_der.as_bytes()).ok_or(CKR_GENERAL_ERROR)?,
+        j: None,
+        validation_params: None,
+    };
+
+    let alg = pkcs::AlgorithmIdentifier {
+        oid: asn1::DefinedByMarker::marker(),
+        params: pkcs::AlgorithmParameters::Dh(dhx_params),
+    };
+
+    let y = obj.get_attr_as_bytes(CKA_VALUE)?;
+    let y_der = match asn1::write_single(&DerEncBigUint::new(y)?) {
+        Ok(der) => der,
+        Err(_) => Err(CKR_GENERAL_ERROR)?,
+    };
+
+    if !obj.check_or_set_attr(Attribute::from_bytes(
+        CKA_PUBLIC_KEY_INFO,
+        pkcs::SubjectPublicKeyInfo::new(alg, &y_der)?.serialize()?,
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    };
+
+    Ok(())
+}
+
 /// The FFDH Public-Key Factory
 #[derive(Debug, Default)]
 pub struct FFDHPubFactory {
@@ -105,8 +146,9 @@ impl ObjectFactory for FFDHPubFactory {
     /// Additionally validates that the key is based on a well known
     /// group based on safe primes
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.default_object_create(template)?;
-        let _ = ffdh_groups::get_group_name(&obj)?;
+        let mut obj = self.default_object_create(template)?;
+        let group = ffdh_groups::get_group_name(&obj)?;
+        ffdh_public_key_info(group, &mut obj)?;
         Ok(obj)
     }
 
@@ -170,6 +212,7 @@ impl ObjectFactory for FFDHPrivFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let obj = self.default_object_create(template)?;
         let _ = ffdh_groups::get_group_name(&obj)?;
+
         Ok(obj)
     }
 
@@ -288,6 +331,16 @@ impl Mechanism for FFDHMechanism {
         FFDHOperation::generate_keypair(group, &mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
+
+        ffdh_public_key_info(group, &mut pubkey)?;
+        /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
+        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
+            Ok(info) => privkey.set_attr(Attribute::from_bytes(
+                CKA_PUBLIC_KEY_INFO,
+                info.to_vec(),
+            ))?,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
 
         Ok((pubkey, privkey))
     }
