@@ -12,6 +12,7 @@ use std::sync::LazyLock;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
+use crate::kasn1::pkcs;
 use crate::mechanism::{Mechanism, Mechanisms, Sign, Verify, VerifySignature};
 use crate::object::*;
 use crate::ossl::common::extract_public_key;
@@ -25,6 +26,49 @@ pub const SLH_DSA_192_PK_SIZE: usize = 48;
 pub const SLH_DSA_192_SK_SIZE: usize = 96;
 pub const SLH_DSA_256_PK_SIZE: usize = 64;
 pub const SLH_DSA_256_SK_SIZE: usize = 128;
+
+fn slhdsa_public_key_info(
+    obj: &mut Object,
+    pubkey: Option<&[u8]>,
+) -> Result<()> {
+    let pubkey_raw = match pubkey {
+        Some(p) => p,
+        None => {
+            // Get raw public key from CKA_VALUE.
+            obj.get_attr_as_bytes(CKA_VALUE)?
+        }
+    };
+
+    // Get paramset from CKA_PARAMETER_SET
+    let paramset = obj.get_attr_as_ulong(CKA_PARAMETER_SET)?;
+
+    // Get AlgorithmIdentifier
+    let alg = match paramset {
+        CKP_SLH_DSA_SHA2_128S => pkcs::SLHDSA_SHA2_128S_ALG,
+        CKP_SLH_DSA_SHAKE_128S => pkcs::SLHDSA_SHAKE_128S_ALG,
+        CKP_SLH_DSA_SHA2_128F => pkcs::SLHDSA_SHA2_128F_ALG,
+        CKP_SLH_DSA_SHAKE_128F => pkcs::SLHDSA_SHAKE_128F_ALG,
+        CKP_SLH_DSA_SHA2_192S => pkcs::SLHDSA_SHA2_192S_ALG,
+        CKP_SLH_DSA_SHAKE_192S => pkcs::SLHDSA_SHAKE_192S_ALG,
+        CKP_SLH_DSA_SHA2_192F => pkcs::SLHDSA_SHA2_192F_ALG,
+        CKP_SLH_DSA_SHAKE_192F => pkcs::SLHDSA_SHAKE_192F_ALG,
+        CKP_SLH_DSA_SHA2_256S => pkcs::SLHDSA_SHA2_256S_ALG,
+        CKP_SLH_DSA_SHAKE_256S => pkcs::SLHDSA_SHAKE_256S_ALG,
+        CKP_SLH_DSA_SHA2_256F => pkcs::SLHDSA_SHA2_256F_ALG,
+        CKP_SLH_DSA_SHAKE_256F => pkcs::SLHDSA_SHAKE_256F_ALG,
+        _ => return Err(CKR_PARAMETER_SET_NOT_SUPPORTED)?,
+    };
+
+    // Check if CKA_PUBLIC_KEY_INFO is already there.
+    if !obj.check_or_set_attr(Attribute::from_bytes(
+        CKA_PUBLIC_KEY_INFO,
+        pkcs::SubjectPublicKeyInfo::new(alg, pubkey_raw)?.serialize()?,
+    ))? {
+        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+    };
+
+    Ok(())
+}
 
 /// Object that holds Mechanisms for SLH-DSA
 static SLHDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
@@ -166,6 +210,8 @@ impl ObjectFactory for SlhDsaPubFactory {
 
         slhdsa_pub_check_import(&mut obj)?;
 
+        slhdsa_public_key_info(&mut obj, None)?;
+
         Ok(obj)
     }
 
@@ -279,6 +325,9 @@ impl ObjectFactory for SlhDsaPrivFactory {
         let mut obj = self.default_object_create(template)?;
 
         slhdsa_priv_check_import(&mut obj)?;
+
+        let pubkey_raw = extract_public_key(&obj)?;
+        slhdsa_public_key_info(&mut obj, Some(&pubkey_raw))?;
 
         Ok(obj)
     }
@@ -452,6 +501,16 @@ impl Mechanism for SlhDsaMechanism {
         slhdsa::generate_keypair(param_set, &mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
+
+        slhdsa_public_key_info(&mut pubkey, None)?;
+        /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
+        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
+            Ok(info) => privkey.set_attr(Attribute::from_bytes(
+                CKA_PUBLIC_KEY_INFO,
+                info.clone(),
+            ))?,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
 
         Ok((pubkey, privkey))
     }

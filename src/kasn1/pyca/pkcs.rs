@@ -200,6 +200,31 @@ pub enum AlgorithmParameters<'a> {
     #[defined_by(oid::MLKEM1024_OID)]
     MlKem1024,
 
+    #[defined_by(oid::SLHDSA_SHA2_128S_OID)]
+    SlhdsaSha2128s,
+    #[defined_by(oid::SLHDSA_SHA2_128F_OID)]
+    SlhdsaSha2128f,
+    #[defined_by(oid::SLHDSA_SHA2_192S_OID)]
+    SlhdsaSha2192s,
+    #[defined_by(oid::SLHDSA_SHA2_192F_OID)]
+    SlhdsaSha2192f,
+    #[defined_by(oid::SLHDSA_SHA2_256S_OID)]
+    SlhdsaSha2256s,
+    #[defined_by(oid::SLHDSA_SHA2_256F_OID)]
+    SlhdsaSha2256f,
+    #[defined_by(oid::SLHDSA_SHAKE_128S_OID)]
+    SlhdsaShake128s,
+    #[defined_by(oid::SLHDSA_SHAKE_128F_OID)]
+    SlhdsaShake128f,
+    #[defined_by(oid::SLHDSA_SHAKE_192S_OID)]
+    SlhdsaShake192s,
+    #[defined_by(oid::SLHDSA_SHAKE_192F_OID)]
+    SlhdsaShake192f,
+    #[defined_by(oid::SLHDSA_SHAKE_256S_OID)]
+    SlhdsaShake256s,
+    #[defined_by(oid::SLHDSA_SHAKE_256F_OID)]
+    SlhdsaShake256f,
+
     #[default]
     Other(asn1::ObjectIdentifier, Option<asn1::Tlv<'a>>),
 }

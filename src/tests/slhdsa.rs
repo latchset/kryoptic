@@ -1,6 +1,7 @@
 // Copyright 2025 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
 
+use crate::kasn1::pkcs;
 use crate::tests::*;
 
 #[cfg(feature = "slow")]
@@ -4355,6 +4356,103 @@ fn test_slhdsa_vector() {
     testtokn.login();
 
     test_groups(session, data);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_slhdsa_public_key_info() {
+    let mut testtokn =
+        TestToken::initialized("test_slhdsa_public_key_info", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* generate key pair and store it */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_SLH_DSA_KEY_PAIR_GEN,
+        &[(CKA_PARAMETER_SET, CKP_SLH_DSA_SHA2_128S)],
+        &[],
+        &[(CKA_TOKEN, false)],
+        &[],
+        &[],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, false), // Not sensitive to allow extracting components
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    // Check generated keys
+    let pub_key_info =
+        ret_or_panic!(extract_value(session, hpub, CKA_PUBLIC_KEY_INFO));
+    assert!(!pub_key_info.is_empty());
+
+    let pri_key_info =
+        ret_or_panic!(extract_value(session, hpri, CKA_PUBLIC_KEY_INFO));
+    assert!(!pri_key_info.is_empty());
+    assert_eq!(pub_key_info, pri_key_info);
+
+    // Verify content of CKA_PUBLIC_KEY_INFO
+    let pub_val = ret_or_panic!(extract_value(session, hpub, CKA_VALUE));
+    if let Some(err) = check_attributes(
+        session,
+        hpub,
+        &[(CKA_PARAMETER_SET, CKP_SLH_DSA_SHA2_128S)],
+        &[],
+        &[],
+    ) {
+        panic!("{}", err);
+    }
+
+    let spki = pkcs::SubjectPublicKeyInfo {
+        algorithm: pkcs::SLHDSA_SHA2_128S_ALG,
+        subject_public_key: asn1::BitString::new(&pub_val, 0).unwrap(),
+    };
+    let spki_der = asn1::write_single(&spki).unwrap();
+    assert_eq!(pub_key_info, spki_der);
+
+    // Check imported public key
+    let imported_hpub = ret_or_panic!(import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[
+            (CKA_KEY_TYPE, CKK_SLH_DSA),
+            (CKA_PARAMETER_SET, CKP_SLH_DSA_SHA2_128S)
+        ],
+        &[(CKA_VALUE, &pub_val)],
+        &[],
+    ));
+    let imported_pub_key_info = ret_or_panic!(extract_value(
+        session,
+        imported_hpub,
+        CKA_PUBLIC_KEY_INFO
+    ));
+    assert_eq!(imported_pub_key_info, spki_der);
+
+    // Check imported private key
+    let priv_val = ret_or_panic!(extract_value(session, hpri, CKA_VALUE));
+
+    let imported_hpri = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[
+            (CKA_KEY_TYPE, CKK_SLH_DSA),
+            (CKA_PARAMETER_SET, CKP_SLH_DSA_SHA2_128S)
+        ],
+        &[(CKA_VALUE, &priv_val)],
+        &[],
+    ));
+    let imported_pri_key_info = ret_or_panic!(extract_value(
+        session,
+        imported_hpri,
+        CKA_PUBLIC_KEY_INFO
+    ));
+    assert_eq!(imported_pri_key_info, spki_der);
 
     testtokn.finalize();
 }
