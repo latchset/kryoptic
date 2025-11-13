@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::kasn1::oid;
 use crate::kasn1::DerEncOctetString;
 use crate::kasn1::Version;
+use crate::pkcs11;
 
 use asn1;
 
@@ -152,3 +153,24 @@ pub const X448_ALG: AlgorithmIdentifier<'_> = AlgorithmIdentifier {
     oid: asn1::DefinedByMarker::marker(),
     params: AlgorithmParameters::X448,
 };
+
+impl SubjectPublicKeyInfo<'_> {
+    pub fn new<'a>(
+        alg: AlgorithmIdentifier<'a>,
+        pubkey: &'a [u8],
+    ) -> Result<SubjectPublicKeyInfo<'a>> {
+        Ok(SubjectPublicKeyInfo {
+            algorithm: alg,
+            subject_public_key: asn1::BitString::new(pubkey, 0)
+                .ok_or(pkcs11::CKR_GENERAL_ERROR)?,
+        })
+    }
+
+    // DER-encode SubjectPublicKeyInfo.
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        match asn1::write_single(self) {
+            Ok(der) => Ok(der),
+            Err(_) => Err(pkcs11::CKR_GENERAL_ERROR)?,
+        }
+    }
+}
