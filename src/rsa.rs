@@ -185,13 +185,11 @@ fn rsa_check_public_key_info(obj: &mut Object) -> Result<()> {
     let rsa_pub_key = pkcs::RsaPublicKey::new(modulus, pubexp)?.serialize()?;
 
     // Check if CKA_PUBLIC_KEY_INFO is already there.
-    if !obj.check_or_set_attr(Attribute::from_bytes(
+    obj.ensure_bytes(
         CKA_PUBLIC_KEY_INFO,
         pkcs::SubjectPublicKeyInfo::new(pkcs::RSA_ALG, &rsa_pub_key)?
             .serialize()?,
-    ))? {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    }
+    )?;
 
     Ok(())
 }
@@ -481,17 +479,9 @@ impl PrivKeyFactory for RSAPrivFactory {
     ) -> Result<Object> {
         let mut key = self.default_object_unwrap(template)?;
 
-        if !key.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PRIVATE_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        key.ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)?;
+        key.ensure_ulong(CKA_KEY_TYPE, CKK_RSA)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let (tlv, extra) = match asn1::strip_tlv(&data) {
             Ok(x) => x,
@@ -515,54 +505,38 @@ impl PrivKeyFactory for RSAPrivFactory {
             Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
         };
 
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        key.ensure_bytes(
             CKA_MODULUS,
             rsapkey.modulus.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_PUBLIC_EXPONENT,
             rsapkey.public_exponent.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_PRIVATE_EXPONENT,
             rsapkey.private_exponent.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_PRIME_1,
             rsapkey.prime1.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_PRIME_2,
             rsapkey.prime2.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_EXPONENT_1,
             rsapkey.exponent1.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_EXPONENT_2,
             rsapkey.exponent2.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_bytes(
+        )?;
+        key.ensure_bytes(
             CKA_COEFFICIENT,
             rsapkey.coefficient.as_nopad_bytes().to_vec(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        )?;
 
         rsa_check_public_key_info(&mut key)?;
 
@@ -705,17 +679,12 @@ impl Mechanism for RsaPKCSMechanism {
     ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
-        if !pubkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PUBLIC_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !pubkey
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        pubkey
+            .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        pubkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_RSA)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let bits =
             usize::try_from(pubkey.get_attr_as_ulong(CKA_MODULUS_BITS)?)?;
@@ -732,17 +701,12 @@ impl Mechanism for RsaPKCSMechanism {
 
         let mut privkey =
             PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PRIVATE_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !privkey
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_RSA))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        privkey
+            .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        privkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_RSA)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         RsaPKCSOperation::generate_keypair(
             exponent,
@@ -755,13 +719,10 @@ impl Mechanism for RsaPKCSMechanism {
 
         rsa_check_public_key_info(&mut pubkey)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
-        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
-            Ok(info) => privkey.set_attr(Attribute::from_bytes(
-                CKA_PUBLIC_KEY_INFO,
-                info.clone(),
-            ))?,
-            Err(_) => return Err(CKR_GENERAL_ERROR)?,
-        }
+        privkey.ensure_slice(
+            CKA_PUBLIC_KEY_INFO,
+            pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO)?,
+        )?;
 
         Ok((pubkey, privkey))
     }

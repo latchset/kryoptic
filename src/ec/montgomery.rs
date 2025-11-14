@@ -54,12 +54,10 @@ fn montgomery_public_key_info(
     };
 
     // Check if CKA_PUBLIC_KEY_INFO is already there.
-    if !obj.check_or_set_attr(Attribute::from_bytes(
+    obj.ensure_bytes(
         CKA_PUBLIC_KEY_INFO,
         pkcs::SubjectPublicKeyInfo::new(alg, ec_point_raw)?.serialize()?,
-    ))? {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    };
+    )?;
 
     Ok(())
 }
@@ -337,46 +335,26 @@ impl Mechanism for ECMontgomeryMechanism {
     ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
-        if !pubkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PUBLIC_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !pubkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_KEY_TYPE,
-            CKK_EC_MONTGOMERY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        pubkey
+            .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        pubkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_EC_MONTGOMERY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let mut privkey =
             PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PRIVATE_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_KEY_TYPE,
-            CKK_EC_MONTGOMERY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        privkey
+            .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        privkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_EC_MONTGOMERY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
-        let ec_params = match pubkey.get_attr_as_bytes(CKA_EC_PARAMS) {
-            Ok(a) => a.clone(),
-            Err(_) => {
-                return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-            }
-        };
-        if !privkey.check_or_set_attr(Attribute::from_bytes(
+        privkey.ensure_slice(
             CKA_EC_PARAMS,
-            ec_params,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+            pubkey.get_attr_as_bytes(CKA_EC_PARAMS)?,
+        )?;
 
         ECMontgomeryOperation::generate_keypair(&mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
@@ -384,13 +362,10 @@ impl Mechanism for ECMontgomeryMechanism {
 
         montgomery_public_key_info(&mut pubkey, None)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
-        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
-            Ok(info) => privkey.set_attr(Attribute::from_bytes(
-                CKA_PUBLIC_KEY_INFO,
-                info.clone(),
-            ))?,
-            Err(_) => return Err(CKR_GENERAL_ERROR)?,
-        }
+        privkey.ensure_slice(
+            CKA_PUBLIC_KEY_INFO,
+            pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO)?,
+        )?;
 
         Ok((pubkey, privkey))
     }
