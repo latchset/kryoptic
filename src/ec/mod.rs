@@ -287,14 +287,10 @@ pub fn import_from_wrapped(
     data: Vec<u8>,
     mut key: Object,
 ) -> Result<Object> {
-    if !key
-        .check_or_set_attr(Attribute::from_ulong(CKA_CLASS, CKO_PRIVATE_KEY))?
-    {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    }
-    if !key.check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, key_type))? {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    }
+    key.ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
+        .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+    key.ensure_ulong(CKA_KEY_TYPE, key_type)
+        .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
     let (tlv, extra) = match asn1::strip_tlv(&data) {
         Ok(x) => x,
@@ -319,17 +315,10 @@ pub fn import_from_wrapped(
         &X448_ALG => &X448_OID,
         _ => return Err(CKR_WRAPPED_KEY_INVALID)?,
     };
-    let oid_encoded = match asn1::write_single(oid) {
-        Ok(b) => b,
-        Err(_) => return Err(CKR_WRAPPED_KEY_INVALID)?,
-    };
-
-    if !key.check_or_set_attr(Attribute::from_bytes(
+    key.ensure_bytes(
         CKA_EC_PARAMS,
-        oid_encoded.to_vec(),
-    ))? {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    }
+        asn1::write_single(oid).map_err(|_| CKR_WRAPPED_KEY_INVALID)?,
+    )?;
 
     let ecpkey: ECPrivateKey;
     let pkeyval = pkeyinfo.get_private_key();
@@ -356,11 +345,7 @@ pub fn import_from_wrapped(
         _ => return Err(CKR_GENERAL_ERROR)?,
     };
 
-    if !key
-        .check_or_set_attr(Attribute::from_bytes(CKA_VALUE, value.to_vec()))?
-    {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    }
+    key.ensure_slice(CKA_VALUE, value)?;
 
     Ok(key)
 }

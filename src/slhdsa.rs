@@ -60,12 +60,10 @@ fn slhdsa_public_key_info(
     };
 
     // Check if CKA_PUBLIC_KEY_INFO is already there.
-    if !obj.check_or_set_attr(Attribute::from_bytes(
+    obj.ensure_bytes(
         CKA_PUBLIC_KEY_INFO,
         pkcs::SubjectPublicKeyInfo::new(alg, pubkey_raw)?.serialize()?,
-    ))? {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    };
+    )?;
 
     Ok(())
 }
@@ -445,18 +443,12 @@ impl Mechanism for SlhDsaMechanism {
     ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
-        if !pubkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PUBLIC_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !pubkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_KEY_TYPE,
-            CKK_SLH_DSA,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        pubkey
+            .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        pubkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_SLH_DSA)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let param_set = match pubkey.get_attr_as_ulong(CKA_PARAMETER_SET) {
             Ok(p) => match p {
@@ -479,24 +471,15 @@ impl Mechanism for SlhDsaMechanism {
 
         let mut privkey =
             PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PRIVATE_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_KEY_TYPE,
-            CKK_SLH_DSA,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_PARAMETER_SET,
-            param_set,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        privkey
+            .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        privkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_SLH_DSA)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        privkey
+            .ensure_ulong(CKA_PARAMETER_SET, param_set)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         slhdsa::generate_keypair(param_set, &mut pubkey, &mut privkey)?;
         default_key_attributes(&mut privkey, mech.mechanism)?;
@@ -504,13 +487,10 @@ impl Mechanism for SlhDsaMechanism {
 
         slhdsa_public_key_info(&mut pubkey, None)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
-        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
-            Ok(info) => privkey.set_attr(Attribute::from_bytes(
-                CKA_PUBLIC_KEY_INFO,
-                info.clone(),
-            ))?,
-            Err(_) => return Err(CKR_GENERAL_ERROR)?,
-        }
+        privkey.ensure_slice(
+            CKA_PUBLIC_KEY_INFO,
+            pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO)?,
+        )?;
 
         Ok((pubkey, privkey))
     }

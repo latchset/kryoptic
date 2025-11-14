@@ -172,12 +172,7 @@ impl ObjectFactory for AesKeyFactory {
         let mut obj = self.default_object_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
-        if !obj.check_or_set_attr(Attribute::from_ulong(
-            CKA_VALUE_LEN,
-            CK_ULONG::try_from(len)?,
-        ))? {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
+        obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)?;
 
         Ok(obj)
     }
@@ -339,17 +334,10 @@ impl Mechanism for AesMechanism {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         let mut key = AES_KEY_FACTORY.default_object_generate(template)?;
-        if !key.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_SECRET_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        key.ensure_ulong(CKA_KEY_TYPE, CKK_AES)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         default_secret_key_generate(&mut key)?;
         default_key_attributes(&mut key, mech.mechanism)?;

@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::{Error, Result};
-use crate::ffdh_groups::{get_group_name, group_prime, DHGroupName};
+use crate::ffdh_groups::{get_group_name, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
@@ -123,11 +123,6 @@ impl FFDHOperation {
 
         /* Set Public Key */
         if let Some(key) = ffdh.pubkey.take() {
-            pubkey.check_or_set_attr(Attribute::from_bytes(
-                CKA_PRIME,
-                group_prime(group)?.to_vec(),
-            ))?;
-
             pubkey.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
         } else {
             return Err(CKR_DEVICE_ERROR)?;
@@ -135,10 +130,6 @@ impl FFDHOperation {
 
         /* Set Private Key */
         if let Some(key) = ffdh.prikey.take() {
-            privkey.check_or_set_attr(Attribute::from_bytes(
-                CKA_PRIME,
-                group_prime(group)?.to_vec(),
-            ))?;
             privkey.set_attr(Attribute::from_ulong(
                 CKA_VALUE_BITS,
                 CK_ULONG::try_from(key.len() * 8)?,

@@ -95,12 +95,10 @@ fn ffdh_public_key_info(
         Err(_) => Err(CKR_GENERAL_ERROR)?,
     };
 
-    if !obj.check_or_set_attr(Attribute::from_bytes(
+    obj.ensure_bytes(
         CKA_PUBLIC_KEY_INFO,
         pkcs::SubjectPublicKeyInfo::new(alg, &y_der)?.serialize()?,
-    ))? {
-        return Err(CKR_TEMPLATE_INCONSISTENT)?;
-    };
+    )?;
 
     Ok(())
 }
@@ -278,49 +276,25 @@ impl Mechanism for FFDHMechanism {
     ) -> Result<(Object, Object)> {
         let mut pubkey =
             PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
-        if !pubkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PUBLIC_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !pubkey
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_DH))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        pubkey
+            .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        pubkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_DH)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let mut privkey =
             PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
-        if !privkey.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_PRIVATE_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !privkey
-            .check_or_set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_DH))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        privkey
+            .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        privkey
+            .ensure_ulong(CKA_KEY_TYPE, CKK_DH)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
-        let prime = match pubkey.get_attr_as_bytes(CKA_PRIME) {
-            Ok(p) => p.clone(),
-            Err(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-        };
-        if !privkey
-            .check_or_set_attr(Attribute::from_bytes(CKA_PRIME, prime))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-
-        let base = match pubkey.get_attr_as_bytes(CKA_BASE) {
-            Ok(b) => b.clone(),
-            Err(_) => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
-        };
-        if !privkey.check_or_set_attr(Attribute::from_bytes(CKA_BASE, base))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        privkey
+            .ensure_slice(CKA_PRIME, pubkey.get_attr_as_bytes(CKA_PRIME)?)?;
+        privkey.ensure_slice(CKA_BASE, pubkey.get_attr_as_bytes(CKA_BASE)?)?;
 
         /* We allow generation of keys only for Well-Known Groups.
          * We call this on privkey after we copied prime/base, as only
@@ -334,13 +308,10 @@ impl Mechanism for FFDHMechanism {
 
         ffdh_public_key_info(group, &mut pubkey)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
-        match pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO) {
-            Ok(info) => privkey.set_attr(Attribute::from_bytes(
-                CKA_PUBLIC_KEY_INFO,
-                info.to_vec(),
-            ))?,
-            Err(_) => return Err(CKR_GENERAL_ERROR)?,
-        }
+        privkey.ensure_slice(
+            CKA_PUBLIC_KEY_INFO,
+            pubkey.get_attr_as_bytes(CKA_PUBLIC_KEY_INFO)?,
+        )?;
 
         Ok((pubkey, privkey))
     }

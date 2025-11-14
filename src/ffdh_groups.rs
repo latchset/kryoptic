@@ -1196,16 +1196,6 @@ pub fn get_group_name(obj: &Object) -> Result<DHGroupName> {
     return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
 }
 
-pub fn group_prime(group: DHGroupName) -> Result<&'static [u8]> {
-    for grp in &FFDHE_NAMED_GROUPS {
-        if grp.id == group {
-            return Ok(grp.prime);
-        }
-    }
-
-    return Err(CKR_GENERAL_ERROR)?;
-}
-
 pub fn group_values(
     group: DHGroupName,
 ) -> Result<(&'static [u8], &'static [u8], &'static [u8])> {

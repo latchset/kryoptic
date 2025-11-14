@@ -196,23 +196,6 @@ impl Object {
         Ok(())
     }
 
-    /// Sets an attribute, but returns failure if a pre-existing value
-    /// is present and does not match the value being set.
-    pub fn check_or_set_attr(&mut self, a: Attribute) -> Result<bool> {
-        let atype = a.get_type();
-        match self.attributes.iter().find(|r| r.get_type() == atype) {
-            Some(attr) => {
-                if attr.get_value() != a.get_value() {
-                    return Ok(false);
-                }
-            }
-            None => {
-                self.attributes.push(a);
-            }
-        }
-        Ok(true)
-    }
-
     /// Deletes an attribute from the object by attribute id
     pub fn del_attr(&mut self, ck_type: CK_ULONG) {
         self.attributes.retain(|a| a.get_type() != ck_type);
@@ -274,6 +257,71 @@ impl Object {
             size += val.get_value().len();
         }
         Ok(size)
+    }
+
+    /// Ensures that a specific ulong attribute is present on the object with the given value.
+    ///
+    /// If the attribute already exists, its value is checked against the provided `value`.
+    /// If they don't match, `CKR_ATTRIBUTE_VALUE_INVALID` is returned.
+    /// If the attribute does not exist, it is added to the object with the given `name` and `value`.
+    pub fn ensure_ulong(
+        &mut self,
+        name: CK_ATTRIBUTE_TYPE,
+        value: CK_ULONG,
+    ) -> Result<()> {
+        match self.attributes.iter().find(|r| r.get_type() == name) {
+            Some(attr) => {
+                if attr.to_ulong()? != value {
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                }
+            }
+            None => self.attributes.push(Attribute::from_ulong(name, value)),
+        }
+        Ok(())
+    }
+
+    /// Ensures that a specific byte slice attribute is present on the object with the given value.
+    ///
+    /// If the attribute already exists, its value is checked against the provided `value`.
+    /// If they don't match, `CKR_ATTRIBUTE_VALUE_INVALID` is returned.
+    /// If the attribute does not exist, it is added to the object with the given `name` and `value`.
+    pub fn ensure_slice(
+        &mut self,
+        name: CK_ATTRIBUTE_TYPE,
+        value: &[u8],
+    ) -> Result<()> {
+        match self.attributes.iter().find(|r| r.get_type() == name) {
+            Some(attr) => {
+                if attr.get_value() != value {
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                }
+            }
+            None => self
+                .attributes
+                .push(Attribute::from_bytes(name, value.to_vec())),
+        }
+        Ok(())
+    }
+
+    /// Ensures that a specific byte vector attribute is present on the object with the given value.
+    ///
+    /// If the attribute already exists, its value is checked against the provided `value`.
+    /// If they don't match, `CKR_ATTRIBUTE_VALUE_INVALID` is returned.
+    /// If the attribute does not exist, it is added to the object with the given `name` and `value`.
+    pub fn ensure_bytes(
+        &mut self,
+        name: CK_ATTRIBUTE_TYPE,
+        value: Vec<u8>,
+    ) -> Result<()> {
+        match self.attributes.iter().find(|r| r.get_type() == name) {
+            Some(attr) => {
+                if attr.get_value() != &value {
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                }
+            }
+            None => self.attributes.push(Attribute::from_bytes(name, value)),
+        }
+        Ok(())
     }
 }
 
@@ -1265,11 +1313,8 @@ impl ObjectFactory for TrustObject {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
-        if !obj
-            .check_or_set_attr(Attribute::from_ulong(CKA_CLASS, CKO_TRUST))?
-        {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        obj.ensure_ulong(CKA_CLASS, CKO_TRUST)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let trust_attributes = [
             CKA_TRUST_SERVER_AUTH,
@@ -1411,12 +1456,9 @@ impl ObjectFactory for NSSTrustObject {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.default_object_create(template)?;
 
-        if !obj.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_NSS_TRUST,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        obj.ensure_ulong(CKA_CLASS, CKO_NSS_TRUST)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+
         /* NSS does not allow private Trust objects */
         match obj.get_attr_as_bool(CKA_PRIVATE) {
             Ok(b) => match b {
@@ -1719,17 +1761,7 @@ pub trait SecretKeyFactory: CommonKeyFactory {
             }
             Err(_) => (),
         }
-        if obj
-            .check_or_set_attr(Attribute::from_ulong(
-                CKA_VALUE_LEN,
-                CK_ULONG::try_from(len)?,
-            ))
-            .is_ok()
-        {
-            Ok(())
-        } else {
-            Err(CKR_GENERAL_ERROR)?
-        }
+        obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)
     }
 
     /// Helper to set a key on a key object, individual factories can override
@@ -1820,10 +1852,7 @@ impl ObjectFactory for GenericSecretKeyFactory {
         if self.keysize != 0 && len != self.keysize {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
-        let len = CK_ULONG::try_from(len)?;
-        if !obj.check_or_set_attr(Attribute::from_ulong(CKA_VALUE_LEN, len))? {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
+        obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)?;
 
         Ok(obj)
     }
@@ -1964,18 +1993,10 @@ impl Mechanism for GenericSecretKeyMechanism {
     ) -> Result<Object> {
         let mut key =
             GENERIC_SECRET_FACTORY.default_object_generate(template)?;
-        if !key.check_or_set_attr(Attribute::from_ulong(
-            CKA_CLASS,
-            CKO_SECRET_KEY,
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
-        if !key.check_or_set_attr(Attribute::from_ulong(
-            CKA_KEY_TYPE,
-            self.keytype(),
-        ))? {
-            return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        }
+        key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
+        key.ensure_ulong(CKA_KEY_TYPE, self.keytype())
+            .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         default_secret_key_generate(&mut key)?;
         default_key_attributes(&mut key, mech.mechanism)?;
