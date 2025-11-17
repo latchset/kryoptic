@@ -66,7 +66,7 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
     }
 }
 
-fn ossl_bindings(args: &[&str], out_file: &Path) {
+fn ossl_bindings<T: AsRef<str>>(args: &[T], out_file: &Path) {
     bindgen::Builder::default()
         .header("ossl.h")
         .clang_args(args)
@@ -256,8 +256,17 @@ fn build_ossl(out_file: &Path) {
 }
 
 fn use_system_ossl(out_file: &Path) {
-    println!("cargo:rustc-link-lib=crypto");
-    ossl_bindings(&["-std=c90"], out_file);
+    let library = pkg_config::Config::new()
+        .atleast_version("3.0.7")
+        .probe("openssl")
+        .unwrap();
+
+    let mut args: Vec<String> = vec!["-std=c90".to_owned()];
+    for include_path in library.include_paths {
+        args.push(["-I", include_path.to_str().unwrap()].concat());
+    }
+
+    ossl_bindings(&args, out_file);
 }
 
 fn set_pretty_panic() {
