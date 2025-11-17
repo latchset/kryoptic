@@ -82,7 +82,7 @@ jobs:
             fi
           elif [ "${{ matrix.repotype }}" = "apt" ]; then
             apt-get -q update
-            apt-get -yq install git clang rustc libsqlite3-dev libssl-dev
+            apt-get -yq install git clang rustc libsqlite3-dev libssl-dev pkg-config
           fi
 
       - name: DNF cache

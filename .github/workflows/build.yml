@@ -116,6 +116,10 @@ jobs:
           export CC=clang
 
           if [ "${{ matrix.name }}" = "i686" ]; then
+            # pkg-config expects a sysroot dir when cross-compiling; we have
+            # the i686 development files in the same paths because this is an
+            # x86_64 build machine
+            export PKG_CONFIG_SYSROOT_DIR=/
             OPTS="${OPTS} --target i686-unknown-linux-gnu"
           elif [ "${{ matrix.name }}" = "minimal" ]; then
             FEATURE_SET="minimal"
