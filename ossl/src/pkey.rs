@@ -942,7 +942,8 @@ unsafe extern "C" fn export_params_callback(
     }
     let pslice = unsafe { std::slice::from_raw_parts(params, nelem) };
 
-    let params_builder = &mut *(arg as *mut OsslParamBuilder);
+    let params_builder: &mut OsslParamBuilder =
+        unsafe { &mut *(arg as *mut OsslParamBuilder) };
     let ret = params_builder.copy_params(&pslice);
 
     /* Zeroize any allocated data wich may hold copies of secrets.
