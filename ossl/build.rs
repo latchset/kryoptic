@@ -247,7 +247,7 @@ fn build_ossl(out_file: &Path) {
             .unwrap()
     );
 
-    let mut args = vec![&include_path, "-std=c90"];
+    let mut args = vec![include_path.as_str()];
     if cfg!(feature = "fips") {
         args.push("-D_KRYOPTIC_FIPS_");
     }
@@ -261,20 +261,7 @@ fn use_system_ossl(out_file: &Path) {
         .probe("openssl")
         .unwrap();
 
-    let mut c_standard = "-std=c90".to_owned();
-    let version: Vec<u32> = library
-        .version
-        .split('.')
-        .take(2)
-        .map(|value| value.parse::<u32>().unwrap())
-        .collect();
-    if version[0] > 3 || (version[0] == 3 && version[1] >= 6) {
-        // "Starting with 3.6 OpenSSL project is going to gradually adopt C-99 features."
-        // https://github.com/openssl/openssl/blob/master/NOTES-C99.md
-        c_standard = "-std=c99".to_owned();
-    }
-
-    let mut args: Vec<String> = vec![c_standard];
+    let mut args: Vec<String> = Vec::new();
     for include_path in library.include_paths {
         args.push(["-I", include_path.to_str().unwrap()].concat());
     }
