@@ -1,6 +1,7 @@
 // Copyright 2024 Simo Sorce
 // See LICENSE.txt file for terms
 
+use crate::attribute::{AttrType, Attribute};
 use crate::tests::*;
 use std::fs;
 
@@ -797,4 +798,226 @@ fn test_rsa_key_unwrap_vector() {
         &mut prikey,
     );
     assert_eq!(ret, CKR_OK);
+}
+
+#[test]
+#[parallel]
+fn test_sensitive_attributes_matrix() {
+    let mut testtokn =
+        TestToken::initialized("test_sensitive_attributes_matrix", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    struct KeyAttributeTestDef {
+        name: &'static str,
+        key_type: CK_ULONG,
+        mechanism: CK_MECHANISM_TYPE,
+        generate_pair: bool,
+        generation_attribute: Attribute,
+        attributes_to_check: &'static [CK_ATTRIBUTE_TYPE],
+    }
+
+    fn gen_key(
+        session: CK_SESSION_HANDLE,
+        mechanism: CK_MECHANISM_TYPE,
+        key_type: CK_KEY_TYPE,
+        attribute: &Attribute,
+        sensitive: bool,
+        extractable: bool,
+    ) -> CK_OBJECT_HANDLE {
+        let value_len = attribute.to_ulong().unwrap();
+        ret_or_panic!(generate_key(
+            session,
+            mechanism,
+            std::ptr::null_mut(),
+            0,
+            &[(CKA_KEY_TYPE, key_type), (CKA_VALUE_LEN, value_len)],
+            &[],
+            &[
+                (CKA_TOKEN, true),
+                (CKA_SENSITIVE, sensitive),
+                (CKA_EXTRACTABLE, extractable),
+            ],
+        ))
+    }
+
+    #[cfg(any(feature = "rsa", feature = "ecdsa"))]
+    fn gen_pair(
+        session: CK_SESSION_HANDLE,
+        mechanism: CK_MECHANISM_TYPE,
+        key_type: CK_KEY_TYPE,
+        attribute: &Attribute,
+        sensitive: bool,
+        extractable: bool,
+    ) -> CK_OBJECT_HANDLE {
+        let mut pub_ulongs =
+            [(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, key_type)].to_vec();
+        let mut pub_bytes: Vec<(CK_ATTRIBUTE_TYPE, &[u8])> = Vec::new();
+        match attribute.get_attrtype() {
+            AttrType::NumType => pub_ulongs
+                .push((attribute.get_type(), attribute.to_ulong().unwrap())),
+            AttrType::BytesType => pub_bytes.push((
+                attribute.get_type(),
+                attribute.to_bytes().unwrap().as_slice(),
+            )),
+            _ => panic!("invalid attribute"),
+        }
+
+        let (_pubkey, prikey) = ret_or_panic!(generate_key_pair(
+            session,
+            mechanism,
+            pub_ulongs.as_slice(),
+            pub_bytes.as_slice(),
+            &[(CKA_TOKEN, true)],
+            &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, key_type)],
+            &[],
+            &[
+                (CKA_TOKEN, true),
+                (CKA_PRIVATE, true),
+                (CKA_SENSITIVE, sensitive),
+                (CKA_EXTRACTABLE, extractable),
+            ],
+        ));
+        prikey
+    }
+
+    let mut key_tests = Vec::new();
+    key_tests.push(KeyAttributeTestDef {
+        name: "generic secret",
+        key_type: CKK_GENERIC_SECRET,
+        mechanism: CKM_GENERIC_SECRET_KEY_GEN,
+        generate_pair: false,
+        generation_attribute: Attribute::from_ulong(CKA_VALUE_LEN, 32),
+        attributes_to_check: &[CKA_VALUE],
+    });
+    key_tests.push(KeyAttributeTestDef {
+        name: "aes secret",
+        key_type: CKK_AES,
+        mechanism: CKM_AES_KEY_GEN,
+        generate_pair: false,
+        generation_attribute: Attribute::from_ulong(CKA_VALUE_LEN, 32),
+        attributes_to_check: &[CKA_VALUE],
+    });
+    #[cfg(feature = "rsa")]
+    key_tests.push(KeyAttributeTestDef {
+        name: "rsa private",
+        key_type: CKK_RSA,
+        mechanism: CKM_RSA_PKCS_KEY_PAIR_GEN,
+        generate_pair: true,
+        generation_attribute: Attribute::from_ulong(CKA_MODULUS_BITS, 2048),
+        attributes_to_check: &[
+            CKA_PRIVATE_EXPONENT,
+            CKA_PRIME_1,
+            CKA_PRIME_2,
+            CKA_EXPONENT_1,
+            CKA_EXPONENT_2,
+            CKA_COEFFICIENT,
+        ],
+    });
+    #[cfg(feature = "ecdsa")]
+    key_tests.push(KeyAttributeTestDef {
+        name: "ec private",
+        key_type: CKK_EC,
+        mechanism: CKM_EC_KEY_PAIR_GEN,
+        generate_pair: true,
+        generation_attribute: Attribute::from_bytes(
+            CKA_EC_PARAMS,
+            hex::decode("06052B81040022").unwrap(),
+        ),
+        attributes_to_check: &[CKA_VALUE],
+    });
+
+    let matrix = [
+        // sensitive, extractable, expected_result_for_get_value
+        (true, true, CKR_ATTRIBUTE_SENSITIVE),
+        (true, false, CKR_ATTRIBUTE_SENSITIVE),
+        (false, false, CKR_ATTRIBUTE_SENSITIVE),
+        (false, true, CKR_OK),
+    ];
+
+    for test_def in key_tests.as_slice() {
+        for item in matrix.iter() {
+            let sensitive = item.0;
+            let extractable = item.1;
+            let expected = item.2;
+            let handle = match test_def.generate_pair {
+                false => gen_key(
+                    session,
+                    test_def.mechanism,
+                    test_def.key_type,
+                    &test_def.generation_attribute,
+                    sensitive,
+                    extractable,
+                ),
+                true => gen_pair(
+                    session,
+                    test_def.mechanism,
+                    test_def.key_type,
+                    &test_def.generation_attribute,
+                    sensitive,
+                    extractable,
+                ),
+            };
+
+            let mut tmpl: Vec<CK_ATTRIBUTE> = test_def
+                .attributes_to_check
+                .iter()
+                .map(|attr| CK_ATTRIBUTE {
+                    type_: *attr,
+                    pValue: std::ptr::null_mut(),
+                    ulValueLen: 0,
+                })
+                .collect();
+
+            let ret = fn_get_attribute_value(
+                session,
+                handle,
+                tmpl.as_mut_ptr(),
+                tmpl.len() as CK_ULONG,
+            );
+            assert_eq!(
+                ret,
+                expected,
+                "for {}, sensitive={}, extractable={}, attributes={:?}",
+                test_def.name,
+                sensitive,
+                extractable,
+                test_def.attributes_to_check
+            );
+
+            if expected == CKR_OK {
+                // tmpl has been updated with lengths
+                let mut values: Vec<Vec<u8>> = tmpl
+                    .iter()
+                    .map(|attr| vec![0u8; attr.ulValueLen as usize])
+                    .collect();
+
+                // update template with pointers to buffers
+                for (i, attr) in tmpl.iter_mut().enumerate() {
+                    attr.pValue = values[i].as_mut_ptr() as CK_VOID_PTR;
+                    // ulValueLen is already set from the previous call
+                }
+
+                let ret = fn_get_attribute_value(
+                    session,
+                    handle,
+                    tmpl.as_mut_ptr(),
+                    tmpl.len() as CK_ULONG,
+                );
+                assert_eq!(
+                    ret,
+                    CKR_OK,
+                    "for {}, sensitive={}, extractable={}, attributes={:?}",
+                    test_def.name,
+                    sensitive,
+                    extractable,
+                    test_def.attributes_to_check
+                );
+            }
+        }
+    }
+
+    testtokn.finalize();
 }
