@@ -1136,20 +1136,28 @@ extern "C" fn fn_get_attribute_value(
     /* must do this before we lock STATE or risk deadlocking in tests with
      * a parallel thread calling fn_initialize() */
     #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
-    let ec_point_len = match tmpl.iter().find(|a| a.type_ == CKA_EC_POINT) {
-        Some(a) => {
-            let gconf = global_rlock!(noinitcheck; (*CONFIG));
-            /* enable the whole thing only if we need to convert to backwards
-             * compatible DER encoding */
-            if gconf.conf.ec_point_encoding == config::EcPointEncoding::Der {
-                let buflen =
-                    cast_or_ret!(usize from a.ulValueLen => CKR_ARGUMENTS_BAD);
-                Some(buflen)
-            } else {
-                None
-            }
+    let der_encode_ec_point = {
+        let gconf = global_rlock!(noinitcheck; (*CONFIG));
+        /* enable the whole thing only if we need to convert to backwards
+         * compatible DER encoding */
+        match gconf.conf.ec_point_encoding {
+            config::EcPointEncoding::Der => true,
+            _ => false,
         }
-        None => None,
+    };
+
+    #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
+    let input_ec_point_len = {
+        if der_encode_ec_point {
+            match tmpl.iter().find(|a| a.type_ == CKA_EC_POINT) {
+                Some(a) => {
+                    cast_or_ret!(usize from a.ulValueLen => CKR_ARGUMENTS_BAD)
+                }
+                None => 0,
+            }
+        } else {
+            0
+        }
     };
 
     let rstate = global_rlock!((*STATE));
@@ -1157,7 +1165,7 @@ extern "C" fn fn_get_attribute_value(
     let result = ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl));
 
     #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
-    if let Some(bufsize) = ec_point_len {
+    if der_encode_ec_point {
         use ec::{point_buf_to_der, point_len_to_der};
 
         match tmpl.iter_mut().find(|a| a.type_ == CKA_EC_POINT) {
@@ -1180,9 +1188,10 @@ extern "C" fn fn_get_attribute_value(
                             buflen,
                         )
                     };
-                    let out = res_or_ret!(point_buf_to_der(buf, bufsize));
+                    let out =
+                        res_or_ret!(point_buf_to_der(buf, input_ec_point_len));
                     if let Some(v) = out {
-                        if v.len() > bufsize {
+                        if v.len() > input_ec_point_len {
                             return CKR_GENERAL_ERROR;
                         }
                         unsafe {
