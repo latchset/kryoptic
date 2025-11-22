@@ -4,10 +4,9 @@
 # Enable gpg signature verification by default
 %bcond gpgcheck 1
 
-# prevent library files from being installed
-%global cargo_install_lib 0
-
 %global soname libkryoptic_pkcs11
+
+%global features kryoptic-lib/nssdb,kryoptic-lib/pqc,kryoptic-lib/standard,kryoptic-lib/dynamic,profiles
 
 %if 0%{?rhel}
 # RHEL: Use bundled deps as it doesn't ship Rust libraries
@@ -18,8 +17,6 @@
 %global bundled_rust_deps 0
 %endif
 
-%global enabled_features nssdb,pqc,profiles
-
 Name:           kryoptic
 Version:        1.3.1
 Release:        %autorelease
@@ -29,14 +26,15 @@ SourceLicense:  GPL-3.0-or-later
 # Apache-2.0
 # Apache-2.0 OR BSL-1.0
 # Apache-2.0 OR MIT
-# BSD-2-Clause OR Apache-2.0 OR MIT
 # BSD-3-Clause
 # GPL-3.0-or-later
+# ISC
 # MIT
 # MIT OR Apache-2.0
 # MIT-0 OR Apache-2.0
 # Unlicense OR MIT
-License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD-2-Clause OR Apache-2.0 OR MIT) AND (BSD-3-Clause) AND (GPL-3.0-or-later) AND (MIT) AND (MIT OR Apache-2.0) AND (MIT-0 OR Apache-2.0) AND (Unlicense OR MIT)
+# Zlib
+License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD-3-Clause) AND (GPL-3.0-or-later) AND (ISC) AND (MIT) AND (MIT OR Apache-2.0) AND (MIT-0 OR Apache-2.0) AND (Unlicense OR MIT) AND (Zlib)
 # LICENSE.dependencies contains a full license breakdown
 
 URL:            https://github.com/latchset/kryoptic
@@ -91,23 +89,17 @@ rm -f Cargo.lock
 %cargo_prep
 
 %generate_buildrequires
-%cargo_generate_buildrequires -f %{enabled_features}
+%cargo_generate_buildrequires -f %{features}
 %endif
 
 %build
 export CONFDIR=%{_sysconfdir}
-%cargo_build -f  %{enabled_features} -- --all
-%{cargo_license_summary -f %{enabled_features}}
-%{cargo_license -f %{enabled_features}} > LICENSE.dependencies
+%cargo_build -f  %{features} -- --all
+%{cargo_license_summary -f %{features}}
+%{cargo_license -f %{features}} > LICENSE.dependencies
 
 %install
-# Have to cd because the macro already defines --path . and cargo install
-# in workspaces does not take a --all, requires to install each package
-# explicitly, and we care only for the tools, as install does not install
-# cdylib package outputs.
-pushd tools
-%cargo_install -f kryoptic-lib/nssdb,kryoptic-lib/pqc,kryoptic-lib/standard,kryoptic-lib/dynamic -- --bin softhsm_migrate
-popd
+install -Dp target/rpm/softhsm_migrate $RPM_BUILD_ROOT%{_bindir}/softhsm_migrate
 install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/
@@ -116,9 +108,9 @@ echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryopti
 %if %{with check}
 %check
 %if 0%{?rhel}
-%cargo_test -f %{enabled_features} -- -- --exact --skip tests::signatures::test_rsa_signatures
+%cargo_test -f %{features} -- -- --exact --skip tests::signatures::test_rsa_signatures
 %else
-%cargo_test -f %{enabled_features}
+%cargo_test -f %{features}
 %endif
 %endif
 
