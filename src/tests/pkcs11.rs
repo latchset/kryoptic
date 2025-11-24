@@ -1,8 +1,6 @@
 // Copyright 2025 Antonin Nepras
 // See LICENSE.txt file for terms
 
-use crate::tests::*;
-
 use serial_test::parallel;
 
 use crate::pkcs11::string_to_ck_date;
