@@ -16,7 +16,7 @@ fn test_init_token() {
     let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
     let mut session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let mut ro_session: CK_SESSION_HANDLE = CK_UNAVAILABLE_INFORMATION;
     let label = "Init Test";
@@ -269,7 +269,7 @@ fn test_re_init_token_common(dbtype: String, dbargs: String) {
     let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     /* init once */
     let pin_value = "SO Pin Value";

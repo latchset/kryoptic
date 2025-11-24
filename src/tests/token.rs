@@ -38,7 +38,7 @@ fn test_token_env(suffix: &str) {
                 assert_eq!(ret, CKR_OK);
                 let ret = init_fn(args_ptr as *mut std::ffi::c_void);
                 env::remove_var("KRYOPTIC_CONF");
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -67,7 +67,7 @@ fn test_token_null_args(suffix: &str) {
                 assert_eq!(ret, CKR_OK);
                 let ret = init_fn(std::ptr::null_mut());
                 env::remove_var("KRYOPTIC_CONF");
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -105,7 +105,7 @@ fn test_token_datadir() {
                 assert_eq!(ret, CKR_OK);
                 let ret = init_fn(args_ptr as *mut std::ffi::c_void);
                 env::remove_var("XDG_CONFIG_HOME");
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -150,7 +150,7 @@ fn test_interface_null() {
                 ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -187,7 +187,7 @@ fn test_interface_pkcs11() {
                 ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -225,7 +225,7 @@ fn test_interface_pkcs11_version3() {
                 ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -268,7 +268,7 @@ fn test_interface_pkcs11_version240() {
                 ));
                 let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
                 let ret = value(args_ptr as *mut std::ffi::c_void);
-                assert_eq!(ret, CKR_OK)
+                assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
             }
             None => todo!(),
         }
@@ -377,7 +377,7 @@ fn test_config_multiple_tokens() {
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
     // TODO: Audit that the environment access only happens in single-threaded code.
     unsafe { env::remove_var("KRYOPTIC_CONF") };
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     /* check slots and tokens */
     for tok in &tokens {

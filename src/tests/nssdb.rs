@@ -47,7 +47,7 @@ fn test_nssdb_token() {
     let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     /* check slots and token */
     let mut info = CK_SLOT_INFO::default();
@@ -145,7 +145,7 @@ fn test_nssdb_token_mldsa() {
     let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     /* check slots and token */
     let mut info = CK_SLOT_INFO::default();
@@ -260,7 +260,7 @@ fn test_nssdb_init_token() {
     let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     /* init once (NSSDB ignores SO pin) */
     let pin_value = "Unused";
@@ -462,7 +462,7 @@ fn test_nssdb_init_token_params() {
     let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     /* init once (NSSDB ignores SO pin) */
     let pin_value = "Unused";
@@ -519,7 +519,7 @@ fn test_nssdb_key_cache() {
     let mut args = TestToken::make_init_args(Some(dbargs.clone()));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     let _ = testtokn.get_session(false);
     for _ in 0..1000 {

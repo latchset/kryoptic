@@ -49,6 +49,14 @@ macro_rules! parse_or_panic {
     };
 }
 
+macro_rules! assert_in {
+    ($ret:expr, $exp:expr) => {
+        if !$exp.contains(&$ret) {
+            panic!("Return value {} not expected!", $ret);
+        }
+    };
+}
+
 pub fn decrypt(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,

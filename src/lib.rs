@@ -524,6 +524,7 @@ pub fn add_slot(slot: config::Slot) -> CK_RV {
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
+    let mut ret: CK_RV = CKR_OK;
 
     if !_init_args.is_null() {
         let args = unsafe { *(_init_args as *const CK_C_INITIALIZE_ARGS) };
@@ -540,7 +541,9 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     }
 
     let mut wstate = global_wlock!(noinitcheck; (*STATE));
-    if !wstate.is_initialized() {
+    if wstate.is_initialized() {
+        ret = CKR_CRYPTOKI_ALREADY_INITIALIZED;
+    } else {
         wstate.initialize();
     }
 
@@ -552,7 +555,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         match wstate.add_slot(slotnum, res_or_ret!(Slot::new(slot))) {
             Ok(_) => (),
             Err(e) => {
-                let ret = e.rv();
+                ret = e.rv();
                 if ret != CKR_CRYPTOKI_ALREADY_INITIALIZED {
                     return ret;
                 }
@@ -560,7 +563,7 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
         }
     }
 
-    CKR_OK
+    ret
 }
 
 #[cfg(test)]
