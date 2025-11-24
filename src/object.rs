@@ -881,45 +881,6 @@ pub trait ObjectFactory: Debug + Send + Sync {
         Err(CKR_GENERAL_ERROR)?
     }
 
-    /// Helper function to check if the attributes requested in the template
-    /// are marked as sensitive or invalid. Only the first error is returned
-    /// if multiple issues are found in the template.
-    /// However the ulValueLen parameter of each attribute in the template is
-    /// appropriately set based on the type of issue encountered as required
-    /// by the PKCS#11 specification.
-    fn check_get_attributes(
-        &self,
-        template: &mut [CK_ATTRIBUTE],
-        sensitive: bool,
-    ) -> Result<()> {
-        let mut result = CKR_OK;
-        let attrs = self.get_data().get_attributes();
-        for ck_attr in template.iter_mut() {
-            match attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
-                Some(attr) => {
-                    if sensitive && attr.is(OAFlags::Sensitive) {
-                        ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        if result == CKR_OK {
-                            result = CKR_ATTRIBUTE_SENSITIVE;
-                        }
-                    }
-                }
-                None => {
-                    /* This attribute is not valid for given object type */
-                    ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    if result == CKR_OK {
-                        result = CKR_ATTRIBUTE_TYPE_INVALID;
-                    }
-                }
-            }
-        }
-        if result == CKR_OK {
-            Ok(())
-        } else {
-            Err(result)?
-        }
-    }
-
     /// Helper function to check if the attributes specified in the template
     /// can be modified according to the PKCS#11 rules for the specific object.
     /// If an attribute provided in the template cannot be changed an
@@ -2163,27 +2124,56 @@ impl ObjectFactories {
         template: &mut [CK_ATTRIBUTE],
     ) -> Result<()> {
         let sensitive = obj.is_sensitive() || !obj.is_extractable();
-        let mut result = match self
-            .get_object_factory(obj)?
-            .check_get_attributes(template, sensitive)
-        {
-            Ok(()) => CKR_OK,
-            Err(e) => e.rv(),
-        };
+        let mut result = CKR_OK;
 
+        let factory_attrs =
+            self.get_object_factory(obj)?.get_data().get_attributes();
         let obj_attrs = obj.get_attributes();
+
         for ck_attr in template.iter_mut() {
-            match obj_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
-                None => {
-                    /* This attribute is not available on given object */
-                    ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    continue;
+            let valid: bool;
+
+            /* check if this attribute is valid/allowed */
+            match factory_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(fa) => {
+                    if sensitive && fa.is(OAFlags::Sensitive) {
+                        ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        if result == CKR_OK {
+                            result = CKR_ATTRIBUTE_SENSITIVE;
+                        }
+                        valid = false;
+                    } else {
+                        valid = true;
+                    }
                 }
-                Some(attr) => {
-                    let attr_val = attr.get_value();
+                None => {
+                    /* This attribute is not valid for given object type */
+                    ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    if result == CKR_OK {
+                        result = CKR_ATTRIBUTE_TYPE_INVALID;
+                    }
+                    valid = false;
+                }
+            }
+
+            if !valid {
+                /* The attribute value can't be returned, it is either sesntive
+                 * or the attribute type is invalid for this object class.
+                 * Continue to the next one skipping the code that copies the
+                 * values in the template */
+                continue;
+            }
+
+            match obj_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
+                Some(oa) => {
+                    let attr_val = oa.get_value();
                     let attr_len = CK_ULONG::try_from(attr_val.len())?;
                     if ck_attr.pValue.is_null() {
                         ck_attr.ulValueLen = attr_len;
+                    } else if ck_attr.ulValueLen == CK_UNAVAILABLE_INFORMATION {
+                        if result == CKR_OK {
+                            result = CKR_TEMPLATE_INCONSISTENT;
+                        }
                     } else {
                         if ck_attr.ulValueLen < attr_len {
                             ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
@@ -2201,6 +2191,10 @@ impl ObjectFactories {
                             }
                         }
                     }
+                }
+                None => {
+                    /* This attribute is not available on given object */
+                    ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 }
             }
         }
