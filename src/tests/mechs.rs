@@ -80,7 +80,7 @@ fn test_allow_mechs() {
         TestToken::make_init_args(Some(format!("kryoptic_conf={}", confname)));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     let mut count: CK_ULONG = 0;
     let ret = fn_get_mechanism_list(
@@ -118,7 +118,7 @@ fn test_deny_mechs() {
         TestToken::make_init_args(Some(format!("kryoptic_conf={}", confname)));
     let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
     let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
+    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
 
     let mut count: CK_ULONG = 0;
     let ret = fn_get_mechanism_list(

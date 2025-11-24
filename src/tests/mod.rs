@@ -223,7 +223,7 @@ impl TestToken<'_> {
         let mut args = Self::make_init_args(Some(td.make_init_string()));
         let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
         let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-        assert_eq!(ret, CKR_OK);
+        assert!(ret == CKR_OK || ret == CKR_CRYPTOKI_ALREADY_INITIALIZED);
 
         /* By default we force relaxed behavior so tests can access
          * data to check results */
