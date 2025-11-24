@@ -865,33 +865,37 @@ impl NSSStorage {
         let mut id: u32;
         let mut stmt = tx.prepare(&max_query)?;
         let mut rows = stmt.query([])?;
-        if let Some(row) = rows.next()? {
-            let maxid: i64 = match row.get_ref(0)?.as_i64_or_null()? {
-                Some(n) => n,
-                None => 0,
-            };
-            if maxid > 0 && maxid < 0x3fffffff {
-                id = u32::try_from(maxid + 1)?;
-            } else {
-                /* we are wrapping or starting anew, so we need to loop
-                 * until we find a free spot */
-                let next_query = format!("select id from {} where id=?", table);
-                let mut stmt = tx.prepare(&next_query)?;
-                id = 1;
-                while id < 0x40000000 {
-                    let mut rows = stmt.query([Value::from(id)])?;
-                    if rows.next()?.is_none() {
-                        /* free found */
-                        break;
+        match rows.next()? {
+            Some(row) => {
+                let maxid: i64 = match row.get_ref(0)?.as_i64_or_null()? {
+                    Some(n) => n,
+                    None => 0,
+                };
+                if maxid > 0 && maxid < 0x3fffffff {
+                    id = u32::try_from(maxid + 1)?;
+                } else {
+                    /* we are wrapping or starting anew, so we need to loop
+                     * until we find a free spot */
+                    let next_query =
+                        format!("select id from {} where id=?", table);
+                    let mut stmt = tx.prepare(&next_query)?;
+                    id = 1;
+                    while id < 0x40000000 {
+                        let mut rows = stmt.query([Value::from(id)])?;
+                        if rows.next()?.is_none() {
+                            /* free found */
+                            break;
+                        }
+                        id += 1;
                     }
-                    id += 1;
-                }
-                if id > 0x3fffffff {
-                    return Err(CKR_OBJECT_HANDLE_INVALID)?;
+                    if id > 0x3fffffff {
+                        return Err(CKR_OBJECT_HANDLE_INVALID)?;
+                    }
                 }
             }
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
+            _ => {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
         }
         Ok(id)
     }
