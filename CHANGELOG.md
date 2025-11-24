@@ -6,6 +6,23 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+--
+
+## [1.4.0]
+## 2025-11-24
+
+This release adds more PKCS#11 compatibility/completeness features as well
+as fixes various issues.
+
+One of the most notable additions is support for the a mechanism to derive
+public keys from private keys. This allows to better handle tokens where only
+the private key has been imported, but no corresponding public key object.
+To make this more effective and efficient the code now automatically
+generates and stores the `CKA_PUBLIC_KEY_INFO` attribute for all asymmetric
+key types.
+
+### What Changed
+
 * Added support to store Trust Objects
     - [Add support for CKO_TRUST
        objects](https://github.com/latchset/kryoptic/pull/348)
@@ -14,7 +31,18 @@ All notable changes to this project should be documented in this file.
   - [Support CKO_PROFILES objects in
      Kryoptic](https://github.com/latchset/kryoptic/pull/353)
 
---
+* Support for CKM_PUB_KEY_FROM_PRIV_KEY
+  - [Implement simple derivation function that extracts a public key from a
+     private key](https://github.com/latchset/kryoptic/pull/357)
+
+* Support for CKA_PUBLIC_KEY_INFO
+  - [Store computed CKA_PUBLIC_KEY_INFO on
+     keys]( https://github.com/latchset/kryoptic/pull/366)
+
+* Fixed an error that could return sensitive values to an
+  **authenticated** user when the CKA_SENSITIVE flag is set to true.
+  - [Add test for sensitive key attribute
+     extraction](https://github.com/latchset/kryoptic/pull/373)
 
 ## [1.3.1]
 ## 2025-09-18
@@ -219,3 +247,4 @@ that includes non public interfaces.
 [1.2.0]: https://github.com/latchset/kryoptic/releases/tag/v1.2.0
 [1.3.0]: https://github.com/latchset/kryoptic/releases/tag/v1.3.0
 [1.3.1]: https://github.com/latchset/kryoptic/releases/tag/v1.3.1
+[1.4.0]: https://github.com/latchset/kryoptic/releases/tag/v1.4.0
