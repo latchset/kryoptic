@@ -2894,7 +2894,7 @@ extern "C" fn fn_seed_random(
     seed_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    drop(global_rlock!((*STATE)).get_session(s_handle));
+    drop(res_or_ret!(global_rlock!((*STATE)).get_session(s_handle)));
     let len = cast_or_ret!(usize from seed_len);
     let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
     ret_to_rv!(random_add_seed(data))
@@ -2910,7 +2910,7 @@ extern "C" fn fn_generate_random(
     random_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    drop(global_rlock!((*STATE)).get_session(s_handle));
+    drop(res_or_ret!(global_rlock!((*STATE)).get_session(s_handle)));
     let rndlen = cast_or_ret!(usize from random_len);
     let data: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
