@@ -73,6 +73,19 @@ fn test_session_objects() {
     ret = fn_close_session(session);
     assert_eq!(ret, CKR_OK);
 
+    /* check that the session handle is invalid now */
+    ret = fn_close_session(session);
+    assert_eq!(ret, CKR_SESSION_HANDLE_INVALID);
+
+    /* also try with an operation that is not session-related */
+    let data: &[u8] = &mut [0, 0, 0, 0];
+    ret = fn_generate_random(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_SESSION_HANDLE_INVALID);
+
     ret = fn_open_session(
         testtokn.get_slot(),
         CKF_SERIAL_SESSION | CKF_RW_SESSION,
