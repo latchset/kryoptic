@@ -708,8 +708,26 @@ impl<'a> OsslParamBuilder<'a> {
         Ok(())
     }
 
+    /// Adds an `usize` parameter using an owned value.
+    pub fn add_owned_size_t(
+        &mut self,
+        key: &CStr,
+        val: usize,
+    ) -> Result<(), Error> {
+        let v = val.to_ne_bytes().to_vec();
+
+        let param = unsafe {
+            OSSL_PARAM_construct_size_t(
+                key.as_ptr(),
+                v.as_ptr() as *const _ as *mut usize,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
     /// Adds an `c_uint` parameter using an owned value.
-    #[allow(dead_code)]
     pub fn add_owned_uint(
         &mut self,
         key: &CStr,
@@ -728,8 +746,7 @@ impl<'a> OsslParamBuilder<'a> {
         Ok(())
     }
 
-    /// Adds an `c_uint` parameter using an owned value.
-    #[allow(dead_code)]
+    /// Adds an `c_int` parameter using an owned value.
     pub fn add_owned_int(
         &mut self,
         key: &CStr,
@@ -741,6 +758,34 @@ impl<'a> OsslParamBuilder<'a> {
             OSSL_PARAM_construct_int(
                 key.as_ptr(),
                 v.as_ptr() as *const _ as *mut c_int,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    /// Adds an `i64` parameter using an owned value.
+    pub fn add_owned_i64(&mut self, key: &CStr, val: i64) -> Result<(), Error> {
+        let v = val.to_ne_bytes().to_vec();
+        let param = unsafe {
+            OSSL_PARAM_construct_int64(
+                key.as_ptr(),
+                v.as_ptr() as *const _ as *mut i64,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    /// Adds a `u64` parameter using an owned value.
+    pub fn add_owned_u64(&mut self, key: &CStr, val: u64) -> Result<(), Error> {
+        let v = val.to_ne_bytes().to_vec();
+        let param = unsafe {
+            OSSL_PARAM_construct_uint64(
+                key.as_ptr(),
+                v.as_ptr() as *const _ as *mut u64,
             )
         };
         self.v.push(v);
@@ -882,6 +927,51 @@ impl<'a> OsslParam<'a> {
         let res = unsafe { OSSL_PARAM_get_uint(p, &mut val) };
         if res != 1 {
             trace_ossl!("OSSL_PARAM_get_uint()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(val)
+    }
+
+    /// Gets the value of a size_t parameter by its key name.
+    pub fn get_size_t(&self, key: &CStr) -> Result<usize, Error> {
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
+        if p.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let mut val: usize = 0;
+        let res = unsafe { OSSL_PARAM_get_size_t(p, &mut val) };
+        if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_size_t()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(val)
+    }
+
+    /// Gets the value of an i64 parameter by its key name.
+    pub fn get_i64(&self, key: &CStr) -> Result<i64, Error> {
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
+        if p.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let mut val: i64 = 0;
+        let res = unsafe { OSSL_PARAM_get_int64(p, &mut val) };
+        if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_int64()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(val)
+    }
+
+    /// Gets the value of a u64 parameter by its key name.
+    pub fn get_u64(&self, key: &CStr) -> Result<u64, Error> {
+        let p = unsafe { OSSL_PARAM_locate(self.int_mut_ptr(), key.as_ptr()) };
+        if p.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let mut val: u64 = 0;
+        let res = unsafe { OSSL_PARAM_get_uint64(p, &mut val) };
+        if res != 1 {
+            trace_ossl!("OSSL_PARAM_get_uint64()");
             return Err(Error::new(ErrorKind::OsslError));
         }
         Ok(val)

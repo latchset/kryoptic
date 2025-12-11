@@ -7,10 +7,10 @@
 use crate::error::Result;
 use crate::mechanism::DRBG;
 use crate::ossl::common::osslctx;
-use crate::pkcs11::CKR_RANDOM_NO_RNG;
+use crate::pkcs11::{CKR_ARGUMENTS_BAD, CKR_RANDOM_NO_RNG};
 
 use ossl::digest::DigestAlg;
-use ossl::rand::EvpRandCtx;
+use ossl::rand::{EvpRandCtx, EvpRandGetParam};
 
 /// Implements HMAC-DRBG using one of the supported SHA digests as the
 /// underlying hash function.
@@ -18,6 +18,9 @@ use ossl::rand::EvpRandCtx;
 pub struct HmacDrbg {
     /// The ossl EvpRandCtx
     ctx: EvpRandCtx,
+    min_entropy: usize,
+    max_entropy: usize,
+    max_addin: usize,
 }
 
 impl HmacDrbg {
@@ -29,8 +32,34 @@ impl HmacDrbg {
             _ => return Err(CKR_RANDOM_NO_RNG)?,
         };
 
+        let ctx =
+            EvpRandCtx::new_hmac_drbg(osslctx(), digest, hash.as_bytes())?;
+
+        let mut min_entropy = 0;
+        let mut max_entropy = 0;
+        let mut max_addin = 0;
+        let mut params = [
+            EvpRandGetParam::MinEntropyLen(0),
+            EvpRandGetParam::MaxEntropyLen(0),
+            EvpRandGetParam::MaxAdinLen(0),
+        ];
+        if ctx.get_ctx_params(&mut params).is_ok() {
+            if let EvpRandGetParam::MinEntropyLen(val) = &params[0] {
+                min_entropy = *val;
+            }
+            if let EvpRandGetParam::MaxEntropyLen(val) = &params[1] {
+                max_entropy = *val;
+            }
+            if let EvpRandGetParam::MaxAdinLen(val) = &params[2] {
+                max_addin = *val;
+            }
+        }
+
         Ok(HmacDrbg {
-            ctx: EvpRandCtx::new_hmac_drbg(osslctx(), digest, hash.as_bytes())?,
+            ctx,
+            min_entropy,
+            max_entropy,
+            max_addin,
         })
     }
 }
@@ -40,6 +69,15 @@ impl DRBG for HmacDrbg {
     ///
     /// Corresponds to the Reseed operation in NIST SP 800-90A.
     fn reseed(&mut self, entropy: &[u8], addtl: &[u8]) -> Result<()> {
+        if entropy.len() < self.min_entropy {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
+        if self.max_entropy > 0 && entropy.len() > self.max_entropy {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
+        if self.max_addin > 0 && addtl.len() > self.max_addin {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
         Ok(self.ctx.reseed(entropy, addtl)?)
     }
 

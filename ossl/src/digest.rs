@@ -147,6 +147,25 @@ pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
     }
 }
 
+pub(crate) fn string_to_digest(digest: &CStr) -> Result<DigestAlg, Error> {
+    match digest.to_bytes() {
+        b"SHA1" => Ok(DigestAlg::Sha1),
+        b"SHA2-224" => Ok(DigestAlg::Sha2_224),
+        b"SHA2-256" => Ok(DigestAlg::Sha2_256),
+        b"SHA2-384" => Ok(DigestAlg::Sha2_384),
+        b"SHA2-512" => Ok(DigestAlg::Sha2_512),
+        b"SHA2-512/224" => Ok(DigestAlg::Sha2_512_224),
+        b"SHA2-512/256" => Ok(DigestAlg::Sha2_512_256),
+        b"SHA3-224" => Ok(DigestAlg::Sha3_224),
+        b"SHA3-256" => Ok(DigestAlg::Sha3_256),
+        b"SHA3-384" => Ok(DigestAlg::Sha3_384),
+        b"SHA3-512" => Ok(DigestAlg::Sha3_512),
+        #[cfg(feature = "rfc9580")]
+        b"MD5" => Ok(DigestAlg::Md5),
+        _ => Err(Error::new(ErrorKind::WrapperError)),
+    }
+}
+
 /// Higher level wrapper for Digest operations
 #[derive(Debug)]
 pub struct OsslDigest {
