@@ -100,6 +100,55 @@ pub fn decrypt(
     Ok(dec)
 }
 
+pub fn decrypt_update(
+    session: CK_SESSION_HANDLE,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>> {
+    let mut dec_len: CK_ULONG = 0;
+    let ret = fn_decrypt_update(
+        session,
+        ciphertext.as_ptr() as *mut u8,
+        ciphertext.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut dec_len,
+    );
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut dec = vec![0u8; dec_len as usize];
+    let ret = fn_decrypt_update(
+        session,
+        ciphertext.as_ptr() as *mut u8,
+        ciphertext.len() as CK_ULONG,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+    dec.resize(dec_len as usize, 0);
+
+    Ok(dec)
+}
+
+pub fn decrypt_final(session: CK_SESSION_HANDLE) -> Result<Vec<u8>> {
+    let mut dec_len: CK_ULONG = 0;
+    let ret = fn_decrypt_final(session, std::ptr::null_mut(), &mut dec_len);
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut dec = vec![0u8; dec_len as usize];
+    let ret = fn_decrypt_final(session, dec.as_mut_ptr(), &mut dec_len);
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+    dec.resize(dec_len as usize, 0);
+
+    Ok(dec)
+}
+
 pub fn encrypt(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
@@ -135,6 +184,55 @@ pub fn encrypt(
         enc.as_mut_ptr(),
         &mut enc_len,
     );
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+    enc.resize(enc_len as usize, 0);
+
+    Ok(enc)
+}
+
+pub fn encrypt_update(
+    session: CK_SESSION_HANDLE,
+    plaintext: &[u8],
+) -> Result<Vec<u8>> {
+    let mut enc_len: CK_ULONG = 0;
+    let ret = fn_encrypt_update(
+        session,
+        plaintext.as_ptr() as *mut u8,
+        plaintext.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut enc_len,
+    );
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut enc = vec![0u8; enc_len as usize];
+    let ret = fn_encrypt_update(
+        session,
+        plaintext.as_ptr() as *mut u8,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+    enc.resize(enc_len as usize, 0);
+
+    Ok(enc)
+}
+
+pub fn encrypt_final(session: CK_SESSION_HANDLE) -> Result<Vec<u8>> {
+    let mut enc_len: CK_ULONG = 0;
+    let ret = fn_encrypt_final(session, std::ptr::null_mut(), &mut enc_len);
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut enc = vec![0u8; enc_len as usize];
+    let ret = fn_encrypt_final(session, enc.as_mut_ptr(), &mut enc_len);
     if ret != CKR_OK {
         return Err(ret)?;
     }

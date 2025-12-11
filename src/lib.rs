@@ -1492,17 +1492,17 @@ extern "C" fn fn_encrypt_final(
     }
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
-    let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
-    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
     if last_encrypted_part.is_null() {
         let encryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.encryption_len(enclen, true))
+            CK_ULONG from res_or_ret!(operation.encryption_len(0, true))
         );
         unsafe {
             *pul_last_encrypted_part_len = encryption_len;
         }
         return CKR_OK;
     }
+    let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
+    let enclen = cast_or_ret!(usize from penclen => CKR_ARGUMENTS_BAD);
     let enclast: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(last_encrypted_part, enclen) };
     let outlen = res_or_ret!(operation.encrypt_final(enclast));
@@ -1660,17 +1660,17 @@ extern "C" fn fn_decrypt_final(
     let rstate = global_rlock!((*STATE));
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
-    let pplen = unsafe { *pul_last_part_len as CK_ULONG };
-    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
     if last_part.is_null() {
         let decryption_len = cast_or_ret!(
-            CK_ULONG from res_or_ret!(operation.decryption_len(plen, true))
+            CK_ULONG from res_or_ret!(operation.decryption_len(0, true))
         );
         unsafe {
             *pul_last_part_len = decryption_len;
         }
         return CKR_OK;
     }
+    let pplen = unsafe { *pul_last_part_len as CK_ULONG };
+    let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
     let dlast: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(last_part, plen) };
     let outlen = res_or_ret!(operation.decrypt_final(dlast));
