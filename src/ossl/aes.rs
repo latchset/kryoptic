@@ -1916,23 +1916,23 @@ impl Decryption for AesOperation {
         let outlen = if fin {
             match self.mech {
                 CKM_AES_GCM => {
-                    if data_len < self.params.taglen {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    if self.buffer.len() + data_len < self.params.taglen {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
-                    data_len - self.params.taglen
+                    self.buffer.len() + data_len - self.params.taglen
                 }
                 CKM_AES_CCM => {
                     if self.buffer.len() + data_len
                         > self.params.datalen + self.params.taglen
                     {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.params.datalen + self.params.taglen
                 }
                 CKM_AES_CTR | CKM_AES_CTS => data_len,
                 CKM_AES_CBC | CKM_AES_ECB => {
                     if (self.buffer.len() + data_len) % AES_BLOCK_SIZE != 0 {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.buffer.len() + data_len
                 }
@@ -1942,13 +1942,13 @@ impl Decryption for AesOperation {
                 }
                 CKM_AES_CBC_PAD => {
                     if (self.buffer.len() + data_len) % AES_BLOCK_SIZE != 0 {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.buffer.len() + data_len
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
                     if data_len % AES_KWP_BLOCK != 0 {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.buffer.len() + data_len
                 }
@@ -1958,7 +1958,7 @@ impl Decryption for AesOperation {
             match self.mech {
                 CKM_AES_CCM => {
                     if self.buffer.len() + data_len < self.params.taglen {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.buffer.len() + data_len - self.params.taglen
                 }
@@ -1980,7 +1980,7 @@ impl Decryption for AesOperation {
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
                     if data_len % AES_KWP_BLOCK != 0 {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     } else {
                         /* Originally this was ((data_len / 8) * 8) - 8
                          * however this caused stack corruption on decryption

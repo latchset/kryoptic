@@ -98,44 +98,19 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
 
         let data = vec![0x01u8; 1];
-        let enc = vec![0u8; 80];
-        let mut enc_len = data.len() as CK_ULONG;
-        let ret = fn_encrypt_update(
-            session,
-            data.as_ptr() as *mut _,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, 0);
+        let enc = ret_or_panic!(encrypt_update(session, &data));
+        assert_eq!(enc.len(), 0);
 
         let data = vec![0x0Fu8; 15];
-        let mut offset = enc_len as isize;
-        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_encrypt_update(
-            session,
-            data.as_ptr() as *mut _,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        /* Skip enc_len assert, to demonstrate subsequent
+        let enc = ret_or_panic!(encrypt_update(session, &data));
+
+        /* Skip enc.len() assert, to demonstrate subsequent
          * CKR_DATA_LEN_RANGE error.  enc_len is 0 in the failure
          * case, 16 when the check is correct */
-        /* assert_eq!(enc_len as usize, 16); */
+        /* assert_eq!(enc.len(), 16); */
 
-        offset = enc_len as isize;
-        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_encrypt_final(
-            session,
-            unsafe { enc.as_ptr().offset(offset) } as *mut _,
-            &mut enc_len,
-        );
-        /* CKR_DATA_LEN_RANGE when the range check is '>' not '>=' */
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, 0);
+        let final_enc = ret_or_panic!(encrypt_final(session));
+        assert_eq!(final_enc.len(), 0);
 
         let ret = fn_decrypt_init(
             session,
@@ -149,41 +124,16 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
 
         let data = &enc[0..1];
-        let dec = vec![0u8; 80];
-        let mut dec_len = data.len() as CK_ULONG;
-        let ret = fn_decrypt_update(
-            session,
-            data.as_ptr() as *mut _,
-            data.len() as CK_ULONG,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, 0);
+        let dec = ret_or_panic!(decrypt_update(session, &data));
+        assert_eq!(dec.len() as usize, 0);
 
         let data = &enc[1..=15];
-        let mut offset = dec_len as isize;
-        dec_len = dec.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_decrypt_update(
-            session,
-            data.as_ptr() as *mut _,
-            data.len() as CK_ULONG,
-            dec.as_ptr() as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
+        let dec = ret_or_panic!(decrypt_update(session, &data));
 
-        offset = dec_len as isize;
-        dec_len = dec.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_decrypt_final(
-            session,
-            unsafe { dec.as_ptr().offset(offset) } as *mut _,
-            &mut dec_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(dec_len as usize, 0);
+        let final_dec = ret_or_panic!(decrypt_final(session));
+        assert_eq!(final_dec.len(), 0);
         assert_eq!(dec[0], 0x01u8);
-        assert_eq!(dec[1..offset as usize], vec![0x0Fu8; 15]);
+        assert_eq!(dec[1..], vec![0x0Fu8; 15]);
     }
 
     {
@@ -281,27 +231,11 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
 
         let data = vec![0x0Au8; 64];
-        let enc = vec![0u8; 80];
-        let mut enc_len = data.len() as CK_ULONG;
-        let ret = fn_encrypt_update(
-            session,
-            data.as_ptr() as *mut _,
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
+        let enc = ret_or_panic!(encrypt_update(session, &data));
+        assert_eq!(enc.len(), data.len());
 
-        let offset = enc_len as isize;
-        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_encrypt_final(
-            session,
-            unsafe { enc.as_ptr().offset(offset) } as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, enc.len() - data.len());
+        let enc_final = ret_or_panic!(encrypt_final(session));
+        assert_eq!(enc_final.len(), 16);
     }
 
     #[cfg(not(feature = "fips"))]
@@ -427,30 +361,15 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
 
         /* Stream mode, so arbitrary data size and matching output */
-        let mut data: [u8; 16] = [255u8; 16];
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len: CK_ULONG = 16;
+        let data: [u8; 16] = [255u8; 16];
 
         /* First block should succeed */
-        let ret = fn_encrypt_update(
-            session,
-            data.as_mut_ptr(),
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
+        let enc = ret_or_panic!(encrypt_update(session, &data,));
+        assert_eq!(enc.len(), data.len());
 
         /* Second should fail */
-        let ret = fn_encrypt_update(
-            session,
-            data.as_mut_ptr(),
-            data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_DATA_LEN_RANGE);
+        let ret = encrypt_update(session, &data).map_err(|err| err.rv());
+        assert_eq!(ret, Err(CKR_DATA_LEN_RANGE));
     }
 
     {
@@ -523,63 +442,47 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_OK);
 
         /* Stream mode, so arbitrary data size and matching output */
-        let data = "01234567";
-        /* enc needs enough space for the tag */
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len = enc.len() as CK_ULONG;
-        let ret = fn_encrypt_update(
-            session,
-            data.as_ptr() as *mut CK_BYTE,
-            (data.len() - 1) as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len() - 1);
+        let data = b"01234567";
+        let mut enc =
+            ret_or_panic!(encrypt_update(session, &data[..data.len() - 1]));
+        assert_eq!(enc.len(), data.len() - 1);
 
-        let mut offset = enc_len as isize;
-        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_encrypt_update(
-            session,
-            unsafe { data.as_ptr().offset(offset) } as *mut CK_BYTE,
-            1 as CK_ULONG,
-            unsafe { enc.as_ptr().offset(offset) } as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 1);
+        let mut enc_next =
+            ret_or_panic!(encrypt_update(session, &data[data.len() - 1..]));
+        assert_eq!(enc_next.len(), 1);
+        enc.append(&mut enc_next);
 
-        offset += enc_len as isize;
-        enc_len = enc.len() as CK_ULONG - offset as CK_ULONG;
-        let ret = fn_encrypt_final(
-            session,
-            unsafe { enc.as_ptr().offset(offset) } as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, tag_len as CK_ULONG);
+        let mut enc_final = ret_or_panic!(encrypt_final(session));
+        assert_eq!(enc_final.len(), tag_len);
+        enc.append(&mut enc_final);
 
         /* test that we can get correct indicators based on inputs */
         assert_eq!(check_validation(session, 1), true);
 
-        let dec = ret_or_panic!(decrypt(
-            session,
-            handle,
-            &enc[..(offset as usize + tag_len)],
-            &mechanism,
-        ));
-        assert_eq!(dec.len(), data.len());
-        assert_eq!(data.as_bytes(), dec.as_slice());
+        let ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        /* pass partial tag only */
+        let dec = ret_or_panic!(decrypt_update(session, &enc[..enc.len() - 1]));
+        assert_eq!(dec.len(), data.len() - 1);
+        assert_eq!(&data[..data.len() - 1], dec.as_slice());
+
+        let dec = ret_or_panic!(decrypt_update(session, &enc[enc.len() - 1..]));
+        assert_eq!(dec.len(), 1);
+        assert_eq!(&data[data.len() - 1..], dec.as_slice());
+
+        let dec_final = ret_or_panic!(decrypt_final(session));
+        assert_eq!(dec_final.len(), 0);
+
+        /* retry with one-shot decrypt operation */
+        let dec2 = ret_or_panic!(decrypt(session, handle, &enc, &mechanism));
+        assert_eq!(dec2.len(), data.len());
+        assert_eq!(data, dec2.as_slice());
 
         /* retry with one-shot encrypt operation */
-        let enc2 = ret_or_panic!(encrypt(
-            session,
-            handle,
-            data.as_bytes(),
-            &mechanism,
-        ));
+        let enc2 = ret_or_panic!(encrypt(session, handle, data, &mechanism));
         assert_eq!(enc2.len(), 12);
-        assert_eq!(&enc[..12], enc2.as_slice());
+        assert_eq!(enc, enc2);
 
         /* test that we can get correct indicators based on inputs */
         assert_eq!(check_validation(session, 1), true);
@@ -612,7 +515,7 @@ fn test_aes_operations() {
         /* AES-CCM */
 
         /* Data Len needs to be known in advance for CCM */
-        let data = "01234567";
+        let data = b"01234567";
         let tag_len = 4usize;
 
         let iv = "BA0987654321";
@@ -635,49 +538,21 @@ fn test_aes_operations() {
         let ret = fn_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
-        /* enc needs enough space for the tag */
-        let enc: [u8; 16] = [0; 16];
-        let mut enc_len = enc.len() as CK_ULONG;
+        let enc =
+            ret_or_panic!(encrypt_update(session, &data[..data.len() - 1]));
+        assert_eq!(enc.len(), 0);
 
-        let data_len = data.len() - 1;
-        let ret = fn_encrypt_update(
-            session,
-            data.as_ptr() as *mut CK_BYTE,
-            data_len as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, 0);
+        let mut enc =
+            ret_or_panic!(encrypt_update(session, &data[data.len() - 1..]));
+        assert_eq!(enc.len(), data.len());
 
-        enc_len = enc.len() as CK_ULONG;
-        let ret = fn_encrypt_update(
-            session,
-            unsafe { data.as_ptr().offset(data_len as isize) } as *mut CK_BYTE,
-            1 as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len());
+        let mut enc_final = ret_or_panic!(encrypt_final(session));
+        assert_eq!(enc_final.len(), tag_len);
+        enc.append(&mut enc_final);
 
-        enc_len = (enc.len() - data.len()) as CK_ULONG;
-        let ret = fn_encrypt_final(
-            session,
-            unsafe { enc.as_ptr().offset(data.len() as isize) } as *mut _,
-            &mut enc_len,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, tag_len as CK_ULONG);
-
-        let dec = ret_or_panic!(decrypt(
-            session,
-            handle,
-            &enc[..(data.len() + tag_len)],
-            &mechanism,
-        ));
+        let dec = ret_or_panic!(decrypt(session, handle, &enc, &mechanism,));
         assert_eq!(dec.len(), data.len());
-        assert_eq!(data.as_bytes(), dec.as_slice());
+        assert_eq!(data, dec.as_slice());
     }
 
     /* Some sample test vectors taken from:
