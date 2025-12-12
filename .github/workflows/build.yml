@@ -52,7 +52,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          dnf -y install git cargo clang-devel openssl-devel \
+          dnf -y install git cargo clang-devel openssl openssl-devel \
             'perl(FindBin)' 'perl(lib)' 'perl(File::Compare)' \
             'perl(File::Copy)' 'perl(bigint)' 'perl(Time::HiRes)' \
             'perl(IPC::Cmd)' 'perl(Pod::Html)' 'perl(Digest::SHA)' \
@@ -140,12 +140,15 @@ jobs:
           FEATURE_SET="standard"
           export CC=clang
 
+          TEST_PKCS11_MODULE="${PWD}/target"
+
           if [ "${{ matrix.name }}" = "i686" ]; then
             # pkg-config expects a sysroot dir when cross-compiling; we have
             # the i686 development files in the same paths because this is an
             # x86_64 build machine
             export PKG_CONFIG_SYSROOT_DIR=/
             OPTS="${OPTS} --target i686-unknown-linux-gnu"
+            TEST_PKCS11_MODULE="${TEST_PKCS11_MODULE}/i686-unknown-linux-gnu"
           elif [ "${{ matrix.name }}" = "minimal" ]; then
             FEATURE_SET="minimal"
           elif [ "${{ matrix.name }}" = "pqc" ]; then
@@ -164,13 +167,28 @@ jobs:
 
           if [ "${{ matrix.build }}" = "release" ]; then
             OPTS="${OPTS} --release"
+            TEST_PKCS11_MODULE="${TEST_PKCS11_MODULE}/release"
+          else
+            TEST_PKCS11_MODULE="${TEST_PKCS11_MODULE}/debug"
           fi
 
-          # create a bugus configuration file to make sure it is not used during tests
+          TEST_PKCS11_MODULE="${TEST_PKCS11_MODULE}/libkryoptic_pkcs11.so"
+
+          # create a bogus configuration file to make sure it is not used during tests
           mkdir -p ~/.config/kryoptic/
           cp testdata/test.conf ~/.config/kryoptic/token.conf
 
+          #BUILD
           cargo build -vv $OPTS --features "$FEATURES"
+
+          # cargo test does not build libkryoptic_pkcs11.so and we need to make
+          # it fips compatible in any case
+          if [ "${{ matrix.linking }}" = "fips" ]; then
+            ./misc/hmacify.sh "${TEST_PKCS11_MODULE}"
+          fi
+          export TEST_PKCS11_MODULE
+
+          #TEST
           cargo test -vv $OPTS --features "$FEATURES"
 
       - uses: actions/upload-artifact@v4
