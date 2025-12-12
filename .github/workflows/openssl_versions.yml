@@ -168,6 +168,8 @@ jobs:
           cp testdata/test.conf ~/.config/kryoptic/token.conf
 
           cargo build -vv $OPTS --features "$FEATURES"
+          TEST_PKCS11_MODULE="${PWD}/target/debug/libkryoptic_pkcs11.so"
+          export TEST_PKCS11_MODULE
           cargo test -vv $OPTS --features "$FEATURES"
 
       - uses: actions/upload-artifact@v4
