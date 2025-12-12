@@ -107,11 +107,8 @@ echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryopti
 
 %if %{with check}
 %check
-%if 0%{?rhel}
-%cargo_test -f %{features} -- -- --exact --skip tests::signatures::test_rsa_signatures
-%else
+export TEST_PKCS11_MODULE=$RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 %cargo_test -f %{features}
-%endif
 %endif
 
 %files

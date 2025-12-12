@@ -54,6 +54,8 @@ jobs:
       - name: Build & test
         run: |
           cargo build --no-default-features --features dynamic,standard,nssdb,pqc
+          TEST_PKCS11_MODULE="${PWD}/target/debug/libkryoptic_pkcs11.so"
+          export TEST_PKCS11_MODULE
           cargo test --no-default-features --features dynamic,standard,nssdb,pqc | tee testout.log 2>&1
           grep -q "0 failed" testout.log
 

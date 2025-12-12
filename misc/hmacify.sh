@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -ex
 
 if [[ $# -eq 0 ]]; then
     echo "Usage: $0 target/release/libkryoptic_pkcs11.so"
