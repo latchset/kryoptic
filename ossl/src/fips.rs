@@ -12,6 +12,7 @@ use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::ptr::{null, null_mut};
 use std::slice;
 use std::sync::LazyLock;
 
@@ -26,8 +27,8 @@ use libc;
 /* Entropy Stuff */
 unsafe extern "C" fn fips_get_entropy(
     _handle: *const OSSL_CORE_HANDLE,
-    pout: *mut *mut ::std::os::raw::c_uchar,
-    entropy: ::std::os::raw::c_int,
+    pout: *mut *mut c_uchar,
+    entropy: c_int,
     min_len: usize,
     max_len: usize,
 ) -> usize {
@@ -41,13 +42,13 @@ unsafe extern "C" fn fips_get_entropy(
         len = max_len;
     }
     /* FIXME: use secure alloc */
-    let out = unsafe { fips_malloc(len, std::ptr::null(), 0) };
-    if out == std::ptr::null_mut() {
+    let out = unsafe { fips_malloc(len, null(), 0) };
+    if out.is_null() {
         return 0;
     }
     let r = unsafe { slice::from_raw_parts_mut(out as *mut u8, len) };
     if getrandom::fill(r).is_err() {
-        unsafe { fips_clear_free(out, len, std::ptr::null(), 0) };
+        unsafe { fips_clear_free(out, len, null(), 0) };
         return 0;
     }
     unsafe { *pout = out as *mut u8 };
@@ -56,25 +57,18 @@ unsafe extern "C" fn fips_get_entropy(
 
 unsafe extern "C" fn fips_cleanup_entropy(
     _handle: *const OSSL_CORE_HANDLE,
-    buf: *mut ::std::os::raw::c_uchar,
+    buf: *mut c_uchar,
     len: usize,
 ) {
-    unsafe {
-        fips_clear_free(
-            buf as *mut ::std::os::raw::c_void,
-            len,
-            std::ptr::null(),
-            0,
-        )
-    }
+    unsafe { fips_clear_free(buf as *mut c_void, len, null(), 0) }
 }
 
 unsafe extern "C" fn fips_get_nonce(
     handle: *const OSSL_CORE_HANDLE,
-    pout: *mut *mut ::std::os::raw::c_uchar,
+    pout: *mut *mut c_uchar,
     min_len: usize,
     max_len: usize,
-    salt: *const ::std::os::raw::c_void,
+    salt: *const c_void,
     salt_len: usize,
 ) -> usize {
     /* FIXME: OpenSSL returns some timer + salt string,
@@ -93,7 +87,7 @@ unsafe extern "C" fn fips_get_nonce(
     if out < min_len {
         unsafe {
             fips_cleanup_entropy(handle, *pout, out);
-            *pout = std::ptr::null_mut();
+            *pout = null_mut();
         }
         return 0;
     }
@@ -132,10 +126,10 @@ static FIPS_MODULE_FILE_NAME: LazyLock<CString> = LazyLock::new(|| {
     {
         unsafe {
             let mut dlinfo = libc::Dl_info {
-                dli_fname: std::ptr::null(),
-                dli_fbase: std::ptr::null_mut(),
-                dli_sname: std::ptr::null(),
-                dli_saddr: std::ptr::null_mut(),
+                dli_fname: null(),
+                dli_fbase: null_mut(),
+                dli_sname: null(),
+                dli_saddr: null_mut(),
             };
             let res = libc::dladdr(
                 OSSL_provider_init_int as *const c_void,
@@ -178,7 +172,7 @@ macro_rules! set_config_string {
 unsafe extern "C" fn fips_get_params(
     _prov: *const OSSL_CORE_HANDLE,
     params: *mut OSSL_PARAM,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     /* config options */
     set_config_string!(
         params,
@@ -246,7 +240,7 @@ unsafe extern "C" fn fips_get_libctx(
     /* avoid looping during initialization, when FIPS_CANARY
      * is not yet set as the core handle */
     if prov.is_null() {
-        return std::ptr::null_mut();
+        return null_mut();
     }
     get_libctx().ptr() as *mut OPENSSL_CORE_CTX
 }
@@ -254,8 +248,8 @@ unsafe extern "C" fn fips_get_libctx(
 unsafe extern "C" fn fips_thread_start(
     _prov: *const OSSL_CORE_HANDLE,
     _handfn: OSSL_thread_stop_handler_fn,
-    _arg: *mut ::std::os::raw::c_void,
-) -> ::std::os::raw::c_int {
+    _arg: *mut c_void,
+) -> c_int {
     /* FIXME: we currently ignore this and never call the callback */
     return 1;
 }
@@ -266,16 +260,16 @@ unsafe extern "C" fn fips_thread_start(
 unsafe extern "C" fn fips_new_error(_prov: *const OSSL_CORE_HANDLE) {}
 unsafe extern "C" fn fips_set_error_debug(
     _prov: *const OSSL_CORE_HANDLE,
-    _file: *const ::std::os::raw::c_char,
-    _line: ::std::os::raw::c_int,
-    _func: *const ::std::os::raw::c_char,
+    _file: *const c_char,
+    _line: c_int,
+    _func: *const c_char,
 ) {
 }
 #[allow(unused_variables)]
 unsafe extern "C" fn fips_vset_error(
     _prov: *const OSSL_CORE_HANDLE,
     reason: u32,
-    fmt: *const ::std::os::raw::c_char,
+    fmt: *const c_char,
     args: *mut c_void,
 ) {
     #[cfg(feature = "log")]
@@ -295,17 +289,17 @@ unsafe extern "C" fn fips_vset_error(
 }
 unsafe extern "C" fn fips_set_error_mark(
     _prov: *const OSSL_CORE_HANDLE,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     return 1;
 }
 unsafe extern "C" fn fips_clear_last_error_mark(
     _prov: *const OSSL_CORE_HANDLE,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     return 1;
 }
 unsafe extern "C" fn fips_pop_error_to_mark(
     _prov: *const OSSL_CORE_HANDLE,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     return 1;
 }
 
@@ -377,20 +371,20 @@ struct FipsBio<'a> {
 
 /* FIXME: deal with mode, deal with errors */
 unsafe extern "C" fn fips_bio_new_file(
-    filename: *const ::std::os::raw::c_char,
-    _mode: *const ::std::os::raw::c_char,
+    filename: *const c_char,
+    _mode: *const c_char,
 ) -> *mut OSSL_CORE_BIO {
-    if filename == std::ptr::null_mut() {
-        return std::ptr::null_mut();
+    if filename.is_null() {
+        return null_mut();
     }
     let cstr_filename = unsafe { CStr::from_ptr(filename) };
     let name = match cstr_filename.to_str() {
         Ok(n) => n,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => return null_mut(),
     };
     let bio = match FileBio::new(name) {
         Ok(b) => b,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => return null_mut(),
     };
     Box::into_raw(Box::new(FipsBio {
         op: Bio::FileOp(bio),
@@ -398,15 +392,15 @@ unsafe extern "C" fn fips_bio_new_file(
 }
 
 unsafe extern "C" fn fips_bio_new_membuf(
-    buf: *const ::std::os::raw::c_void,
-    len: ::std::os::raw::c_int,
+    buf: *const c_void,
+    len: c_int,
 ) -> *mut OSSL_CORE_BIO {
     let size = if len > 0 {
         usize::try_from(len).unwrap()
     } else if len < 0 {
         unsafe { libc::strlen(buf as *const c_char) }
     } else {
-        return std::ptr::null_mut();
+        return null_mut();
     };
     let v = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size) };
     Box::into_raw(Box::new(FipsBio {
@@ -416,12 +410,12 @@ unsafe extern "C" fn fips_bio_new_membuf(
 
 unsafe extern "C" fn fips_bio_read_ex(
     bio: *mut OSSL_CORE_BIO,
-    data: *mut ::std::os::raw::c_void,
+    data: *mut c_void,
     data_len: usize,
     bytes_read: *mut usize,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     let mut ret: std::os::raw::c_int = 0;
-    if bio == std::ptr::null_mut() {
+    if bio.is_null() {
         return ret;
     }
     let mut readvec =
@@ -453,10 +447,8 @@ unsafe extern "C" fn fips_bio_read_ex(
     return ret;
 }
 
-unsafe extern "C" fn fips_bio_free(
-    bio: *mut OSSL_CORE_BIO,
-) -> ::std::os::raw::c_int {
-    if bio != std::ptr::null_mut() {
+unsafe extern "C" fn fips_bio_free(bio: *mut OSSL_CORE_BIO) -> c_int {
+    if !bio.is_null() {
         /* take control of the Bio again,
          * this will free it once it goes out of scope */
         let _: Box<FipsBio> = unsafe { Box::from_raw(bio as *mut FipsBio) };
@@ -464,21 +456,17 @@ unsafe extern "C" fn fips_bio_free(
     return 1;
 }
 unsafe extern "C" fn fips_bio_vsnprintf(
-    _buf: *mut ::std::os::raw::c_char,
+    _buf: *mut c_char,
     _n: usize,
-    _fmt: *const ::std::os::raw::c_char,
+    _fmt: *const c_char,
     _args: *mut c_void,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     return 0;
 }
 
 /* Allocation functions */
 
-unsafe fn fips_cleanse(
-    addr: *mut ::std::os::raw::c_void,
-    pos: usize,
-    len: usize,
-) {
+unsafe fn fips_cleanse(addr: *mut c_void, pos: usize, len: usize) {
     unsafe { OPENSSL_cleanse(addr.wrapping_add(pos), len) }
 }
 
@@ -499,20 +487,20 @@ unsafe extern "C" fn fips_zalloc(
 }
 
 unsafe extern "C" fn fips_free(
-    ptr: *mut ::std::os::raw::c_void,
-    _file: *const ::std::os::raw::c_char,
-    _line: ::std::os::raw::c_int,
+    ptr: *mut c_void,
+    _file: *const c_char,
+    _line: c_int,
 ) {
     unsafe { libc::free(ptr) };
 }
 
 unsafe extern "C" fn fips_clear_free(
-    ptr: *mut ::std::os::raw::c_void,
+    ptr: *mut c_void,
     num: usize,
-    file: *const ::std::os::raw::c_char,
-    line: ::std::os::raw::c_int,
+    file: *const c_char,
+    line: c_int,
 ) {
-    if ptr != std::ptr::null_mut() {
+    if !ptr.is_null() {
         if num != 0 {
             unsafe { fips_cleanse(ptr, 0, num) };
         }
@@ -521,34 +509,34 @@ unsafe extern "C" fn fips_clear_free(
 }
 
 unsafe extern "C" fn fips_realloc(
-    addr: *mut ::std::os::raw::c_void,
+    addr: *mut c_void,
     num: usize,
-    file: *const ::std::os::raw::c_char,
-    line: ::std::os::raw::c_int,
-) -> *mut ::std::os::raw::c_void {
-    if addr == std::ptr::null_mut() {
+    file: *const c_char,
+    line: c_int,
+) -> *mut c_void {
+    if addr.is_null() {
         return unsafe { fips_malloc(num, file, line) };
     }
     if num == 0 {
         unsafe { fips_free(addr, file, line) };
-        return std::ptr::null_mut();
+        return null_mut();
     }
     unsafe { libc::realloc(addr, num) }
 }
 
 unsafe extern "C" fn fips_clear_realloc(
-    addr: *mut ::std::os::raw::c_void,
+    addr: *mut c_void,
     old_num: usize,
     num: usize,
-    file: *const ::std::os::raw::c_char,
-    line: ::std::os::raw::c_int,
-) -> *mut ::std::os::raw::c_void {
-    if addr == std::ptr::null_mut() {
+    file: *const c_char,
+    line: c_int,
+) -> *mut c_void {
+    if addr.is_null() {
         return unsafe { fips_malloc(num, file, line) };
     }
     if num == 0 {
         unsafe { fips_clear_free(addr, old_num, file, line) };
-        return std::ptr::null_mut();
+        return null_mut();
     }
     if num < old_num {
         unsafe { fips_cleanse(addr, num, old_num - num) };
@@ -556,7 +544,7 @@ unsafe extern "C" fn fips_clear_realloc(
     }
 
     let ret = unsafe { fips_malloc(num, file, line) };
-    if ret != std::ptr::null_mut() {
+    if !ret.is_null() {
         unsafe {
             libc::memcpy(ret, addr, old_num);
             fips_clear_free(addr, old_num, file, line)
@@ -565,9 +553,7 @@ unsafe extern "C" fn fips_clear_realloc(
     ret
 }
 
-unsafe extern "C" fn fips_secure_allocated(
-    _ptr: *const ::std::os::raw::c_void,
-) -> ::std::os::raw::c_int {
+unsafe extern "C" fn fips_secure_allocated(_ptr: *const c_void) -> c_int {
     /* FIXME: once we have secure memory, return something sensible */
     return 0;
 }
@@ -713,13 +699,13 @@ static FIPS_PROVIDER: LazyLock<FipsProvider> = LazyLock::new(|| unsafe {
         },
     ];
 
-    let mut provider: *mut PROV_CTX = std::ptr::null_mut();
+    let mut provider: *mut PROV_CTX = null_mut();
     let provider_ptr: *mut *mut PROV_CTX = &mut provider;
 
-    let mut fips_dispatch: *const OSSL_DISPATCH = std::ptr::null_mut();
+    let mut fips_dispatch: *const OSSL_DISPATCH = null_mut();
 
     let ret = OSSL_provider_init_int(
-        std::ptr::null_mut(),
+        null_mut(),
         core_dispatch.as_ptr(),
         &mut fips_dispatch,
         provider_ptr as *mut *mut std::os::raw::c_void,
@@ -742,7 +728,7 @@ static FIPS_PROVIDER: LazyLock<FipsProvider> = LazyLock::new(|| unsafe {
 });
 
 pub fn init() {
-    assert!((*FIPS_PROVIDER).provider != std::ptr::null_mut());
+    assert!((*FIPS_PROVIDER).provider != null_mut());
 }
 
 pub fn get_libctx() -> &'static OsslContext {
@@ -760,10 +746,10 @@ thread_local! {
 }
 
 unsafe extern "C" fn fips_indicator_callback(
-    _type_: *const ::std::os::raw::c_char,
-    _desc: *const ::std::os::raw::c_char,
+    _type_: *const c_char,
+    _desc: *const c_char,
     _params: *const OSSL_PARAM,
-) -> ::std::os::raw::c_int {
+) -> c_int {
     /* We ignore type, desc, params, for now, and just register
      * if a change in state occurred.
      *
@@ -885,7 +871,7 @@ impl ProviderSignatureCtx {
             EVP_SIGNATURE_fetch(
                 get_libctx().ptr(),
                 sigalg_to_legacy_name(alg).as_ptr(),
-                std::ptr::null(),
+                null(),
             )
         };
         if sigtable.is_null() {
@@ -894,10 +880,7 @@ impl ProviderSignatureCtx {
 
         let ctx = unsafe {
             match (*sigtable).newctx {
-                Some(f) => f(
-                    (*FIPS_PROVIDER).provider as *mut c_void,
-                    std::ptr::null(),
-                ),
+                Some(f) => f((*FIPS_PROVIDER).provider as *mut c_void, null()),
                 None => return Err(Error::new(ErrorKind::NullPtr)),
             }
         };
@@ -993,7 +976,7 @@ impl ProviderSignatureCtx {
                             siglen = s.len();
                         }
                         None => {
-                            sigptr = std::ptr::null_mut() as *mut c_uchar;
+                            sigptr = null_mut() as *mut c_uchar;
                             siglen = 0usize;
                         }
                     }
@@ -1201,11 +1184,11 @@ impl FipsApproval {
 
 pub(crate) fn pkey_type_name(pkey: *const EVP_PKEY) -> *const c_char {
     if pkey.is_null() {
-        return std::ptr::null();
+        return null();
     }
     let keymgmt = unsafe { (*pkey).keymgmt };
     if keymgmt.is_null() {
-        return std::ptr::null();
+        return null();
     }
     return unsafe { (*keymgmt).type_name };
 }
