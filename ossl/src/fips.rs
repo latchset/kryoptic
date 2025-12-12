@@ -32,6 +32,9 @@ unsafe extern "C" fn fips_get_entropy(
     min_len: usize,
     max_len: usize,
 ) -> usize {
+    if pout.is_null() {
+        return 0;
+    }
     let Ok(mut len) = usize::try_from(entropy) else {
         return 0;
     };
@@ -75,6 +78,9 @@ unsafe extern "C" fn fips_get_nonce(
      * we return just getrandom data | salt string.
      * Need to check if this is ok */
 
+    if pout.is_null() {
+        return 0;
+    }
     let Ok(entropy) = c_int::try_from(min_len) else {
         return 0;
     };
@@ -92,16 +98,18 @@ unsafe extern "C" fn fips_get_nonce(
         return 0;
     }
 
-    let mut len = out;
-    if salt_len < len {
-        len = salt_len;
-    }
+    if !salt.is_null() && salt_len > 0 {
+        let mut len = out;
+        if salt_len < len {
+            len = salt_len;
+        }
 
-    let r = unsafe { slice::from_raw_parts_mut(*pout as *mut u8, len) };
-    let s = unsafe { slice::from_raw_parts(salt as *const u8, len) };
+        let r = unsafe { slice::from_raw_parts_mut(*pout, len) };
+        let s = unsafe { slice::from_raw_parts(salt as *const u8, len) };
 
-    for p in r.iter_mut().zip(s.iter()) {
-        *p.0 |= *p.1;
+        for p in r.iter_mut().zip(s.iter()) {
+            *p.0 |= *p.1;
+        }
     }
 
     return out;
@@ -395,12 +403,12 @@ unsafe extern "C" fn fips_bio_new_membuf(
     buf: *const c_void,
     len: c_int,
 ) -> *mut OSSL_CORE_BIO {
-    let size = if len > 0 {
-        usize::try_from(len).unwrap()
-    } else if len < 0 {
-        unsafe { libc::strlen(buf as *const c_char) }
-    } else {
+    if len == 0 {
         return null_mut();
+    }
+    let size = match usize::try_from(len) {
+        Ok(s) => s,
+        Err(_) => unsafe { libc::strlen(buf as *const c_char) },
     };
     let v = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size) };
     Box::into_raw(Box::new(FipsBio {
@@ -414,37 +422,30 @@ unsafe extern "C" fn fips_bio_read_ex(
     data_len: usize,
     bytes_read: *mut usize,
 ) -> c_int {
-    let mut ret: std::os::raw::c_int = 0;
     if bio.is_null() {
-        return ret;
+        return 0;
     }
+
     let mut readvec =
         unsafe { slice::from_raw_parts_mut(data as *mut u8, data_len) };
     let mut fbio: Box<FipsBio> = unsafe { Box::from_raw(bio as *mut FipsBio) };
-    match fbio.op {
-        Bio::FileOp(ref mut op) => match op.read(&mut readvec) {
-            Ok(b) => {
-                if b != 0 {
-                    ret = 1;
-                    unsafe { *bytes_read = b };
-                }
-            }
-            Err(_) => ret = 0,
-        },
-        Bio::MemOp(ref mut op) => match op.read(&mut readvec) {
-            Ok(b) => {
-                if b != 0 {
-                    ret = 1;
-                    unsafe { *bytes_read = b };
-                }
-            }
-            Err(_) => ret = 0,
-        },
-    }
+
+    let ret = match fbio.op {
+        Bio::FileOp(ref mut op) => op.read(&mut readvec),
+        Bio::MemOp(ref mut op) => op.read(&mut readvec),
+    };
 
     /* make sure we do not free the data yet */
     let _ = Box::leak(fbio);
-    return ret;
+
+    if let Ok(b) = ret {
+        if b != 0 {
+            unsafe { *bytes_read = b };
+            return 1;
+        }
+    }
+
+    0
 }
 
 unsafe extern "C" fn fips_bio_free(bio: *mut OSSL_CORE_BIO) -> c_int {
@@ -455,6 +456,7 @@ unsafe extern "C" fn fips_bio_free(bio: *mut OSSL_CORE_BIO) -> c_int {
     }
     return 1;
 }
+
 unsafe extern "C" fn fips_bio_vsnprintf(
     _buf: *mut c_char,
     _n: usize,
