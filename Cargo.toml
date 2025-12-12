@@ -4,7 +4,7 @@ default-members = [".", "ossl", "cdylib"]
 
 [workspace.package]
 version = "1.4.0"
-edition = "2021"
+edition = "2024"
 description = "A PKCS #11 software token written in Rust"
 homepage = "https://github.com/latchset/kryoptic"
 repository = "https://github.com/latchset/kryoptic"
@@ -50,7 +50,7 @@ exclude = [
 test = true
 
 [build-dependencies]
-bindgen = "0.71"
+bindgen = "0.72"
 
 [dependencies]
 asn1 = "0.21"
