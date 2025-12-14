@@ -74,7 +74,13 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
     }
 }
 
-fn ossl_bindings<T: AsRef<str>>(args: &[T], out_file: &Path) {
+fn ossl_bindings(args: &mut Vec<String>, out_file: &Path) {
+    if let Some(var) = env::var("OSSL_BINDGEN_CLANG_ARGS").ok() {
+        for arg in var.split_whitespace() {
+            args.push(arg.to_string());
+        }
+    }
+
     bindgen::Builder::default()
         .header("ossl.h")
         .clang_args(args)
@@ -258,12 +264,13 @@ fn build_ossl(out_file: &Path) {
             .unwrap()
     );
 
-    let mut args = vec![include_path.as_str()];
+    let mut args: Vec<String> = Vec::new();
+    args.push(include_path);
     if cfg!(feature = "fips") {
-        args.push("-D_KRYOPTIC_FIPS_");
+        args.push("-D_KRYOPTIC_FIPS_".to_string());
     }
 
-    ossl_bindings(&args, out_file);
+    ossl_bindings(&mut args, out_file);
 }
 
 fn use_system_ossl(out_file: &Path) {
@@ -277,7 +284,7 @@ fn use_system_ossl(out_file: &Path) {
         args.push(["-I", include_path.to_str().unwrap()].concat());
     }
 
-    ossl_bindings(&args, out_file);
+    ossl_bindings(&mut args, out_file);
 }
 
 fn set_pretty_panic() {
