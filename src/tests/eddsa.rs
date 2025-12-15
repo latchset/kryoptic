@@ -58,6 +58,10 @@ fn test_create_eddsa_objects() {
     ));
 
     let ctx = hex::decode("666f6f").expect("Failed to decode context");
+    let data = hex::decode("f726936d19c800494e3fdaff20b276a8")
+        .expect("Failed to decode data");
+    let sign: [u8; 64] = [0; 64];
+    let mut sign_len: CK_ULONG = 64;
 
     let params: CK_EDDSA_PARAMS = CK_EDDSA_PARAMS {
         phFlag: CK_FALSE,
@@ -69,40 +73,45 @@ fn test_create_eddsa_objects() {
         pParameter: void_ptr!(&params),
         ulParameterLen: sizeof!(CK_EDDSA_PARAMS),
     };
-    let ret = fn_sign_init(session, &mut mechanism, private_handle);
-    assert_eq!(ret, CKR_OK);
 
-    let data = hex::decode("f726936d19c800494e3fdaff20b276a8")
-        .expect("Failed to decode data");
-    let sign: [u8; 64] = [0; 64];
-    let mut sign_len: CK_ULONG = 64;
-    let ret = fn_sign(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 64);
-    let signature = hex::decode(
-        "55a4cc2f70a54e04288c5f4cd1e45a7bb520b36292911876cada7323198dd87a\
-         8b36950b95130022907a7fb7c4e9b2d5f6cca685a587b4b21f4b888e4e7edb0d",
-    )
-    .expect("failed to decode expected signature");
-    assert_eq!(signature, sign);
+    let ret = fn_sign_init(session, &mut mechanism, private_handle);
+    if cfg!(feature = "fips") {
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    } else {
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_sign(
+            session,
+            data.as_ptr() as *mut u8,
+            data.len() as CK_ULONG,
+            sign.as_ptr() as *mut _,
+            &mut sign_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(sign_len, 64);
+        let signature = hex::decode(
+            "55a4cc2f70a54e04288c5f4cd1e45a7bb520b36292911876cada7323198dd87a\
+            8b36950b95130022907a7fb7c4e9b2d5f6cca685a587b4b21f4b888e4e7edb0d",
+        )
+        .expect("failed to decode expected signature");
+        assert_eq!(signature, sign);
+    }
 
     let ret = fn_verify_init(session, &mut mechanism, public_handle);
-    assert_eq!(ret, CKR_OK);
+    if cfg!(feature = "fips") {
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    } else {
+        assert_eq!(ret, CKR_OK);
 
-    let ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
+        let ret = fn_verify(
+            session,
+            data.as_ptr() as *mut u8,
+            data.len() as CK_ULONG,
+            sign.as_ptr() as *mut u8,
+            sign_len,
+        );
+        assert_eq!(ret, CKR_OK);
+    }
 
     testtokn.finalize();
 }
@@ -530,6 +539,18 @@ fn test_eddsa_units(session: CK_SESSION_HANDLE, test_data: Vec<EddsaTestUnit>) {
         }
 
         let ret = fn_sign_init(session, &mut mechanism, priv_handle);
+        if cfg!(feature = "fips") {
+            if unit.algo.as_str() == "Ed25519ctx" {
+                /* expect failure for this in FIPS builds */
+                if ret != CKR_MECHANISM_PARAM_INVALID {
+                    panic!(
+                        "Expected {} but got {} for unit test at line {}",
+                        CKR_MECHANISM_PARAM_INVALID, ret, unit.line
+                    );
+                }
+                continue;
+            }
+        }
         if ret != CKR_OK {
             panic!("Failed ({}) unit test at line {}", ret, unit.line);
         }
