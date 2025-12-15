@@ -52,7 +52,11 @@ fn parse_params(
         if params.phFlag == CK_TRUE {
             return Ok((SigAlg::Ed25519ph, ctx));
         } else {
-            return Ok((SigAlg::Ed25519ctx, ctx));
+            if cfg!(feature = "fips") {
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+            } else {
+                return Ok((SigAlg::Ed25519ctx, ctx));
+            }
         }
     }
     if outlen == OUTLEN_ED448 {
