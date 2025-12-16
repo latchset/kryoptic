@@ -1,7 +1,6 @@
 /vendor
 /target
 /test
-/Cargo.lock
 *.o
 *.a
 *.d
