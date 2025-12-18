@@ -32,66 +32,22 @@ pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
 pub(crate) static AES_MECHS: LazyLock<[Box<dyn Mechanism>; 6]> =
     LazyLock::new(|| {
         [
-            Box::new(AesMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
-                        .unwrap(),
-                    flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-                },
-            }),
-            Box::new(AesMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
-                        .unwrap(),
-                    flags: CKF_ENCRYPT
-                        | CKF_DECRYPT
-                        | CKF_WRAP
-                        | CKF_UNWRAP
-                        | CKF_MESSAGE_ENCRYPT
-                        | CKF_MESSAGE_DECRYPT
-                        | CKF_MULTI_MESSAGE,
-                },
-            }),
-            Box::new(AesMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
-                        .unwrap(),
-                    flags: CKF_ENCRYPT | CKF_DECRYPT,
-                },
-            }),
-            Box::new(AesMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
-                        .unwrap(),
-                    flags: CKF_GENERATE,
-                },
-            }),
-            Box::new(AesMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
-                        .unwrap(),
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-            }),
-            Box::new(AesMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES)
-                        .unwrap(),
-                    ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES)
-                        .unwrap(),
-                    flags: CKF_DERIVE,
-                },
-            }),
+            Box::new(AesMechanism::new(
+                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            )),
+            Box::new(AesMechanism::new(
+                CKF_ENCRYPT
+                    | CKF_DECRYPT
+                    | CKF_WRAP
+                    | CKF_UNWRAP
+                    | CKF_MESSAGE_ENCRYPT
+                    | CKF_MESSAGE_DECRYPT
+                    | CKF_MULTI_MESSAGE,
+            )),
+            Box::new(AesMechanism::new(CKF_ENCRYPT | CKF_DECRYPT)),
+            Box::new(AesMechanism::new(CKF_GENERATE)),
+            Box::new(AesMechanism::new(CKF_SIGN | CKF_VERIFY)),
+            Box::new(AesMechanism::new(CKF_DERIVE)),
         ]
     });
 
@@ -281,6 +237,18 @@ impl SecretKeyFactory for AesKeyFactory {
 #[derive(Debug)]
 pub(crate) struct AesMechanism {
     info: CK_MECHANISM_INFO,
+}
+
+impl AesMechanism {
+    pub fn new(flags: CK_FLAGS) -> AesMechanism {
+        AesMechanism {
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
+                flags: flags,
+            },
+        }
+    }
 }
 
 impl Mechanism for AesMechanism {
