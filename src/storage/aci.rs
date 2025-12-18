@@ -164,7 +164,8 @@ fn encrypt_key(
         pin,
         key_template.as_slice(),
     )?;
-    let (gcm, data) = aes_gcm_encrypt(facilities, &kek, id.as_bytes(), key)?;
+    let (gcm, data) =
+        aes_gcm_encrypt(&facilities.mechanisms, &kek, id.as_bytes(), key)?;
 
     let enc_params = KAlgorithmIdentifier {
         oid: asn1::DefinedByMarker::marker(),
@@ -237,7 +238,13 @@ fn decrypt_key(
     };
     Ok((
         kkbps1.key_version_number,
-        aes_gcm_decrypt(facilities, &key, params, id.as_bytes(), pdata.data)?,
+        aes_gcm_decrypt(
+            &facilities.mechanisms,
+            &key,
+            params,
+            id.as_bytes(),
+            pdata.data,
+        )?,
     ))
 }
 
@@ -268,8 +275,12 @@ fn encrypt_data(
     let key_template = secret_key_template(&AES_KEYTYP, &AES_KEYLEN);
     let dek =
         hkdf_expand(facilities, &kdf_params, key, key_template.as_slice())?;
-    let (gcm, encrypted) =
-        aes_gcm_encrypt(facilities, &dek, data_id.as_bytes(), data)?;
+    let (gcm, encrypted) = aes_gcm_encrypt(
+        &facilities.mechanisms,
+        &dek,
+        data_id.as_bytes(),
+        data,
+    )?;
 
     /* We use a 256 bit key so Aes256Gcm is the correct algorithm */
     let enc_params = KAlgorithmIdentifier {
@@ -343,7 +354,13 @@ fn decrypt_data(
         KAlgorithmParameters::Aes256Gcm(gcm) => gcm,
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
-    aes_gcm_decrypt(facilities, &dek, params, data_id.as_bytes(), pdata.data)
+    aes_gcm_decrypt(
+        &facilities.mechanisms,
+        &dek,
+        params,
+        data_id.as_bytes(),
+        pdata.data,
+    )
 }
 
 /// Default maximum number of failed login attempts before locking.
