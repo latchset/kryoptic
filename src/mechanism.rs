@@ -44,6 +44,15 @@ pub trait Mechanism: Debug + Send + Sync {
         Err(CKR_MECHANISM_INVALID)?
     }
 
+    /// Restores a Digest Operation
+    fn digest_restore(
+        &self,
+        _: CK_MECHANISM_TYPE,
+        _: &[u8],
+    ) -> Result<Box<dyn Digest>> {
+        Err(CKR_SAVED_STATE_INVALID)?
+    }
+
     /// Initializes a raw Mac Operation
     ///
     /// This interface is made available for internal cross-module use
@@ -286,6 +295,16 @@ pub trait MechOperation: Debug + Send + Sync {
     /// Returns the mechanism associated with the operation
     #[allow(dead_code)]
     fn mechanism(&self) -> Result<CK_MECHANISM_TYPE>;
+
+    /// Functions to get size of buffer needed to save state
+    fn state_size(&self) -> Result<usize> {
+        Err(CKR_STATE_UNSAVEABLE)?
+    }
+
+    /// Functions to save state, restore is implemented per mechanism
+    fn state_save(&mut self, _state: &mut [u8]) -> Result<usize> {
+        Err(CKR_STATE_UNSAVEABLE)?
+    }
 }
 
 pub trait Encryption: MechOperation {
