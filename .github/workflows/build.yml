@@ -157,7 +157,7 @@ jobs:
           if [ "${{ matrix.linking }}" = "dynamic" ]; then
             FEATURES="${FEATURES},${FEATURE_SET},dynamic"
           elif [ "${{ matrix.linking }}" = "static" ]; then
-            FEATURES="${FEATURES},${FEATURE_SET}"
+            FEATURES="${FEATURES},${FEATURE_SET},ossl400"
           elif [ "${{ matrix.linking }}" = "fips" ]; then
             FEATURES="${FEATURES},fips"
           fi
