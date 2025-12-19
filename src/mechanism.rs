@@ -302,7 +302,7 @@ pub trait MechOperation: Debug + Send + Sync {
     }
 
     /// Functions to save state, restore is implemented per mechanism
-    fn state_save(&mut self, _state: &mut [u8]) -> Result<usize> {
+    fn state_save(&self, _state: &mut [u8]) -> Result<usize> {
         Err(CKR_STATE_UNSAVEABLE)?
     }
 }

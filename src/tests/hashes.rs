@@ -229,3 +229,120 @@ fn test_hashes_digest_key() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_hashes_digest_save_restore() {
+    let mut testtokn = TestToken::initialized("test_hashes_save_restore", None);
+    let session = testtokn.get_session(false);
+
+    let mut data1 = b"some initial data for hashing".to_vec();
+    let mut data2 = b"and some more data to hash".to_vec();
+
+    let mechs = vec![
+        ("SHA-256", CKM_SHA256),
+        ("SHA-512", CKM_SHA512),
+        ("SHA3-256", CKM_SHA3_256),
+    ];
+
+    for (mech_name, mech_type) in mechs {
+        // Init digest
+        let mut mechanism = CK_MECHANISM {
+            mechanism: mech_type,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let mut ret = fn_digest_init(session, &mut mechanism);
+        assert_eq!(ret, CKR_OK);
+
+        // Update with first part
+        ret = fn_digest_update(
+            session,
+            data1.as_mut_ptr(),
+            data1.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        // Save state
+        let mut state_len: CK_ULONG = 0;
+        ret = fn_get_operation_state(
+            session,
+            std::ptr::null_mut(),
+            &mut state_len,
+        );
+        #[cfg(not(feature = "ossl400"))]
+        if ret == CKR_STATE_UNSAVEABLE {
+            println!(
+                "Mechanism {} does not support save/restore, skipping",
+                mech_name
+            );
+            // Cancel operation
+            _ = fn_digest_init(session, std::ptr::null_mut());
+            continue;
+        }
+        assert_eq!(
+            ret, CKR_OK,
+            "C_GetOperationState(len) failed for {} with 0x{:08x}",
+            mech_name, ret
+        );
+
+        let mut state = vec![0u8; state_len as usize];
+        ret =
+            fn_get_operation_state(session, state.as_mut_ptr(), &mut state_len);
+        assert_eq!(
+            ret, CKR_OK,
+            "C_GetOperationState(save) failed for {} with 0x{:08x}",
+            mech_name, ret
+        );
+        state.resize(state_len as usize, 0);
+
+        // Continue original operation
+        ret = fn_digest_update(
+            session,
+            data2.as_mut_ptr(),
+            data2.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        // Finalize and get hash1
+        let mut hash = vec![0u8; 64];
+        let mut hash_len = hash.len() as CK_ULONG;
+        ret = fn_digest_final(session, hash.as_mut_ptr(), &mut hash_len);
+        assert_eq!(ret, CKR_OK);
+        hash.resize(hash_len as usize, 0);
+
+        // Restore state
+        ret = fn_set_operation_state(
+            session,
+            state.as_mut_ptr(),
+            state.len() as CK_ULONG,
+            CK_INVALID_HANDLE,
+            CK_INVALID_HANDLE,
+        );
+        assert_eq!(
+            ret, CKR_OK,
+            "C_SetOperationState failed for {} with 0x{:08x}",
+            mech_name, ret
+        );
+
+        // Continue restored operation
+        ret = fn_digest_update(
+            session,
+            data2.as_mut_ptr(),
+            data2.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        // Finalize and get hash2
+        let mut hash_check = vec![0u8; 64];
+        let mut hash_len = hash_check.len() as CK_ULONG;
+        ret = fn_digest_final(session, hash_check.as_mut_ptr(), &mut hash_len);
+        assert_eq!(ret, CKR_OK);
+        hash_check.resize(hash_len as usize, 0);
+
+        // Compare hashes
+        assert_eq!(hash, hash_check, "Hashes do not match for {}", mech_name);
+    }
+
+    testtokn.finalize();
+}

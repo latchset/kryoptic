@@ -248,6 +248,17 @@ impl Mechanism for HashMechanism {
         Ok(Box::new(HashOperation::new(mech.mechanism)?))
     }
 
+    fn digest_restore(
+        &self,
+        mechtype: CK_MECHANISM_TYPE,
+        state: &[u8],
+    ) -> Result<Box<dyn Digest>> {
+        if self.info.flags & CKF_DIGEST != CKF_DIGEST {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+        Ok(Box::new(HashOperation::restore(mechtype, state)?))
+    }
+
     /// Initializes a Hash based Key Derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
         if self.info.flags & CKF_DERIVE != CKF_DERIVE {
