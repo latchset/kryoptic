@@ -125,3 +125,5 @@ slhdsa = ["hash", "ossl/ossl350"]
 pqc = ["mlkem", "mldsa", "slhdsa"]
 
 minimal = ["sqlitedb", "aes", "ecc_min", "hash_all", "rsa"]
+
+ossl400 = ["ossl/ossl400"]
