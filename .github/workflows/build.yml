@@ -8,7 +8,8 @@ on:
     branches: ["main"]
 
 env:
-  OPENSSL_BRANCH: kryoptic_ossl35
+  OPENSSL_FIPS_BRANCH: kryoptic_ossl35
+  OPENSSL_STATIC_BRANCH: master
 
 jobs:
   build:
@@ -69,14 +70,14 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup OpenSSL
-        if: ${{ matrix.linking == 'fips' || matrix.linking == 'static' }}
-        id: ossl-setup
+      - name: Setup OpenSSL (fips)
+        if: ${{ matrix.linking == 'fips' }}
+        id: ossl-setup-fips
         run: |
           git config --global --add safe.directory /__w/kryoptic
           cd ..
           git clone https://github.com/simo5/openssl.git \
-                    --single-branch --branch $OPENSSL_BRANCH openssl
+                    --single-branch --branch $OPENSSL_FIPS_BRANCH openssl
           cd openssl
           echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
           OS=${{ runner.os }}
@@ -85,13 +86,37 @@ jobs:
           fi
           echo "cacheid=${OS}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore OpenSSL build
-        if: ${{ matrix.linking == 'fips' || matrix.linking == 'static' }}
+      - name: Setup OpenSSL (static)
+        if: ${{ matrix.linking == 'static' }}
+        id: ossl-setup-static
+        run: |
+          git config --global --add safe.directory /__w/kryoptic
+          cd ..
+          git clone https://github.com/openssl/openssl.git \
+                    --single-branch --branch $OPENSSL_STATIC_BRANCH openssl
+          cd openssl
+          echo "KRYOPTIC_OPENSSL_SOURCES=$PWD" >> "$GITHUB_ENV"
+          OS=${{ runner.os }}
+          if [ "${{ matrix.name }}" = "i686" ]; then
+              OS="${OS}-i686"
+          fi
+          echo "cacheid=${OS}-ossl-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore OpenSSL build (fips)
+        if: ${{ matrix.linking == 'fips' }}
         uses: actions/cache/restore@v4
-        id: cache
+        id: cache-fips
         with:
           path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
-          key: ${{ steps.ossl-setup.outputs.cacheid }}
+          key: ${{ steps.ossl-setup-fips.outputs.cacheid }}
+
+      - name: Restore OpenSSL build (static)
+        if: ${{ matrix.linking == 'static' }}
+        uses: actions/cache/restore@v4
+        id: cache-static
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup-static.outputs.cacheid }}
 
       - name: Generate lock file
         run: cargo generate-lockfile
@@ -161,14 +186,21 @@ jobs:
           cd ../openssl
           perl configdata.pm --dump
 
-      - if: ${{ matrix.linking == 'fips' && steps.cache.outputs.cache-hit != 'true' }}
-        name: Cache OpenSSL FIPS build (usable also for default, not vice versa)
+      - if: ${{ matrix.linking == 'fips' && steps.cache-fips.outputs.cache-hit != 'true' }}
+        name: Cache OpenSSL FIPS build
         uses: actions/cache/save@v4
         with:
           path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
-          key: ${{ steps.ossl-setup.outputs.cacheid }}
+          key: ${{ steps.ossl-setup-fips.outputs.cacheid }}
 
-      - if: ${{ matrix.name == 'i686' && steps.cache.outputs.cache-hit != 'true' }}
+      - if: ${{ matrix.linking == 'static' && steps.cache-static.outputs.cache-hit != 'true' }}
+        name: Cache OpenSSL STATIC build
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.KRYOPTIC_OPENSSL_SOURCES }}
+          key: ${{ steps.ossl-setup-static.outputs.cacheid }}
+
+      - if: ${{ matrix.name == 'i686' && steps.cache-static.outputs.cache-hit != 'true' }}
         name: Store DNF cache -- the i686 has the most dependencies
         uses: actions/cache/save@v4
         with:
