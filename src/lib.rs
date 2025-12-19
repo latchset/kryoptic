@@ -15,6 +15,7 @@ use std::sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 mod attribute;
 mod config;
 mod defaults;
+mod encryption;
 mod error;
 mod mechanism;
 mod object;
@@ -851,30 +852,67 @@ extern "C" fn fn_get_session_info(
     CKR_OK
 }
 
-/// Implementation of C_GetOperationState function (Not Implemented Yet)
+/// Implementation of C_GetOperationState function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203277](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203277)
 
 extern "C" fn fn_get_operation_state(
-    _session: CK_SESSION_HANDLE,
-    _operation_state: CK_BYTE_PTR,
-    _pul_operation_state_len: CK_ULONG_PTR,
+    s_handle: CK_SESSION_HANDLE,
+    operation_state: CK_BYTE_PTR,
+    pul_operation_state_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    let rstate = global_rlock!((*STATE));
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    if operation_state.is_null() {
+        if pul_operation_state_len.is_null() {
+            return CKR_ARGUMENTS_BAD;
+        }
+        let state_len = cast_or_ret!(
+            CK_ULONG from res_or_ret!(session.state_size())
+        );
+        unsafe {
+            *pul_operation_state_len = state_len;
+        }
+        return CKR_OK;
+    }
+    let state_len = cast_or_ret!(
+        usize from unsafe { *pul_operation_state_len } => CKR_ARGUMENTS_BAD
+    );
+    let state: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(operation_state, state_len) };
+    let slot_id = session.get_slot_id();
+    let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
+    let outlen = res_or_ret!(session.state_save(token.get_mechanisms(), state));
+    unsafe { *pul_operation_state_len = cast_or_ret!(CK_ULONG from outlen) };
+    CKR_OK
 }
 
-/// Implementation of C_SetOperationState function (Not Implemented Yet)
+/// Implementation of C_SetOperationState function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203278](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203278)
 
 extern "C" fn fn_set_operation_state(
-    _session: CK_SESSION_HANDLE,
-    _operation_state: CK_BYTE_PTR,
-    _operation_state_len: CK_ULONG,
-    _encryption_key: CK_OBJECT_HANDLE,
-    _authentication_key: CK_OBJECT_HANDLE,
+    s_handle: CK_SESSION_HANDLE,
+    operation_state: CK_BYTE_PTR,
+    operation_state_len: CK_ULONG,
+    encryption_key: CK_OBJECT_HANDLE,
+    authentication_key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
+    if encryption_key != CK_INVALID_HANDLE
+        || authentication_key != CK_INVALID_HANDLE
+    {
+        return CKR_KEY_NOT_NEEDED;
+    }
+    let rstate = global_rlock!((*STATE));
+    let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
+    let state_len = cast_or_ret!(
+        usize from operation_state_len => CKR_ARGUMENTS_BAD
+    );
+    let state: &[u8] =
+        unsafe { std::slice::from_raw_parts(operation_state, state_len) };
+    let slot_id = session.get_slot_id();
+    let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
+    ret_to_rv!(session.state_restore(token.get_mechanisms(), state))
 }
 
 /// Implementation of C_Login function

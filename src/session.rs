@@ -5,10 +5,13 @@
 //! session state (login status, active operations), and handles
 //! session-specific operations like object searching.
 
-use std::vec::Vec;
+use std::sync::LazyLock;
 
+use crate::encryption;
 use crate::error::Result;
+use crate::kasn1::*;
 use crate::mechanism::*;
+use crate::object::Object;
 use crate::pkcs11::*;
 use crate::token::Token;
 
@@ -138,6 +141,152 @@ impl_mop!(Digest, digest);
 impl_mop!(Sign, sign);
 impl_mop!(Verify, verify);
 impl_mop!(VerifySignature, verifysig);
+
+struct SaveStateData {
+    mech: CK_MECHANISM_TYPE,
+    data: Vec<u8>,
+}
+
+#[derive(Default)]
+struct SaveState {
+    msgenc: Option<SaveStateData>,
+    msgdec: Option<SaveStateData>,
+    enc: Option<SaveStateData>,
+    dec: Option<SaveStateData>,
+    dgst: Option<SaveStateData>,
+    sig: Option<SaveStateData>,
+    ver: Option<SaveStateData>,
+    versig: Option<SaveStateData>,
+}
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write, Clone)]
+struct OperationStateData<'a> {
+    mech: CK_MECHANISM_TYPE,
+    data: &'a [u8],
+}
+
+#[derive(asn1::Asn1Read, asn1::Asn1Write, Default)]
+struct OperationState<'a> {
+    version: u32,
+    #[implicit(0)]
+    msgenc: Option<OperationStateData<'a>>,
+    #[implicit(1)]
+    msgdec: Option<OperationStateData<'a>>,
+    #[implicit(2)]
+    enc: Option<OperationStateData<'a>>,
+    #[implicit(3)]
+    dec: Option<OperationStateData<'a>>,
+    #[implicit(4)]
+    dgst: Option<OperationStateData<'a>>,
+    #[implicit(5)]
+    sig: Option<OperationStateData<'a>>,
+    #[implicit(6)]
+    ver: Option<OperationStateData<'a>>,
+    #[implicit(7)]
+    versig: Option<OperationStateData<'a>>,
+}
+
+static OPSTATE_DATA_OVERHEAD: LazyLock<usize> = LazyLock::new(|| {
+    let empty_state = OperationStateData {
+        mech: CK_UNAVAILABLE_INFORMATION,
+        data: &[],
+    };
+    asn1::write_single(&empty_state).unwrap().len()
+});
+
+static OPSTATE_MAX_OVERHEAD: LazyLock<usize> = LazyLock::new(|| {
+    let empty_data = OperationStateData {
+        mech: CK_UNAVAILABLE_INFORMATION,
+        data: &[],
+    };
+    let empty_state = OperationState {
+        version: u32::MAX,
+        msgenc: Some(empty_data.clone()),
+        msgdec: Some(empty_data.clone()),
+        enc: Some(empty_data.clone()),
+        dec: Some(empty_data.clone()),
+        dgst: Some(empty_data.clone()),
+        sig: Some(empty_data.clone()),
+        ver: Some(empty_data.clone()),
+        versig: Some(empty_data.clone()),
+    };
+    asn1::write_single(&empty_state).unwrap().len()
+});
+
+static OPSTATE_ENC_OVERHEAD: LazyLock<usize> = LazyLock::new(|| {
+    let empty_data = KProtectedData {
+        algorithm: Box::new(KAlgorithmIdentifier {
+            oid: asn1::DefinedByMarker::marker(),
+            params: KAlgorithmParameters::Aes256Gcm(KGCMParams {
+                aes_iv: [0u8; encryption::AES_GCM_IV_LEN],
+                aes_tag: [0u8; encryption::AES_GCM_TAG_LEN],
+            }),
+        }),
+        data: &[],
+        signature: None,
+    };
+    asn1::write_single(&empty_data).unwrap().len()
+});
+
+static OPSTATE_AAD: &str = "Kryoptic_State";
+
+// This is an ephemeral key that changes every time the process is started
+static OPSTATE_AES_KEY: LazyLock<Object> =
+    LazyLock::new(|| encryption::ephemeral_key());
+
+trait ManageOperationState {
+    fn op_state_size(so: &mut SessionOperations) -> Result<usize>;
+    fn op_state_save(so: &mut SessionOperations) -> Result<SaveStateData>;
+}
+
+/// Macro to implement the `ManageOperationState` trait for a specific
+/// operation type.
+macro_rules! impl_mop_state {
+    ($optype:ident, $($opname:ident).+) => {
+        impl ManageOperationState for dyn $optype {
+            fn op_state_size(so: &mut SessionOperations) -> Result<usize> {
+                match so.$($opname).+ {
+                    Some(ref mut o) => {
+                        if o.finalized() {
+                            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                        }
+                        o.state_size()
+                    }
+                    None => Err(CKR_OPERATION_NOT_INITIALIZED)?,
+                }
+            }
+            fn op_state_save(
+                so: &mut SessionOperations
+            ) -> Result<SaveStateData> {
+                match so.$($opname).+ {
+                    Some(ref mut o) => {
+                        if o.finalized() {
+                            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                        }
+                        let mut data = vec![0u8; o.state_size()?];
+                        let dsize = o.state_save(data.as_mut_slice())?;
+                        data.resize(dsize, 0);
+                        Ok(SaveStateData {
+                            mech: o.mechanism()?,
+                            data: data,
+                        })
+                    }
+                    None => Err(CKR_OPERATION_NOT_INITIALIZED)?,
+                }
+            }
+        }
+    };
+}
+
+/* all but search could manage state */
+impl_mop_state!(MsgEncryption, msg_encryption);
+impl_mop_state!(MsgDecryption, msg_decryption);
+impl_mop_state!(Encryption, encryption);
+impl_mop_state!(Decryption, decryption);
+impl_mop_state!(Digest, digest);
+impl_mop_state!(Sign, sign);
+impl_mop_state!(Verify, verify);
+impl_mop_state!(VerifySignature, verifysig);
 
 impl SessionOperations {
     /// Creates a new, empty `SessionOperations` object.
@@ -419,5 +568,197 @@ impl Session {
     /// Marks the current operation's login requirement as satisfied.
     pub fn set_login_ok(&mut self) {
         self.login_status = OpLoginStatus::LoginOk;
+    }
+
+    pub fn state_size(&mut self) -> Result<usize> {
+        let mut ret = CKR_OPERATION_NOT_INITIALIZED;
+        let mut total_size = *OPSTATE_MAX_OVERHEAD + *OPSTATE_ENC_OVERHEAD;
+
+        macro_rules! op_size {
+            ($optype:ident) => {
+                match <dyn $optype>::op_state_size(&mut self.operations) {
+                    Ok(s) => {
+                        total_size += (*OPSTATE_DATA_OVERHEAD + s);
+                        ret = CKR_OK;
+                    }
+                    Err(e) => match e.rv() {
+                        CKR_STATE_UNSAVEABLE => {
+                            if ret != CKR_OK {
+                                ret = CKR_STATE_UNSAVEABLE;
+                            }
+                        }
+                        CKR_OPERATION_NOT_INITIALIZED => (),
+                        _ => return Err(e),
+                    },
+                }
+            };
+        }
+
+        /* check all states */
+        op_size!(MsgEncryption);
+        op_size!(MsgDecryption);
+        op_size!(Encryption);
+        op_size!(Decryption);
+        op_size!(Digest);
+        op_size!(Sign);
+        op_size!(Verify);
+        op_size!(VerifySignature);
+
+        if ret != CKR_OK {
+            return Err(ret)?;
+        }
+
+        Ok(total_size)
+    }
+
+    pub fn state_save(
+        &mut self,
+        mechanisms: &Mechanisms,
+        state: &mut [u8],
+    ) -> Result<usize> {
+        let mut savestate = SaveState::default();
+        let mut opstate = OperationState {
+            version: 1,
+            ..Default::default()
+        };
+        let mut ret = CKR_OPERATION_NOT_INITIALIZED;
+
+        macro_rules! op_save {
+            ($optype:ident, $member:ident) => {
+                match <dyn $optype>::op_state_save(&mut self.operations) {
+                    Ok(s) => {
+                        savestate.$member = Some(s);
+                        if let Some(ref m) = savestate.$member {
+                            opstate.$member = Some(OperationStateData {
+                                mech: m.mech,
+                                data: m.data.as_slice(),
+                            });
+                        }
+                        ret = CKR_OK;
+                    }
+                    Err(e) => match e.rv() {
+                        CKR_STATE_UNSAVEABLE => {
+                            if ret != CKR_OK {
+                                ret = CKR_STATE_UNSAVEABLE;
+                            }
+                        }
+                        CKR_OPERATION_NOT_INITIALIZED => (),
+                        _ => return Err(e),
+                    },
+                }
+            };
+        }
+
+        /* try to fetch any state */
+        op_save!(MsgEncryption, msgenc);
+        op_save!(MsgDecryption, msgdec);
+        op_save!(Encryption, enc);
+        op_save!(Decryption, dec);
+        op_save!(Digest, dgst);
+        op_save!(Sign, sig);
+        op_save!(Verify, ver);
+        op_save!(VerifySignature, versig);
+
+        if ret != CKR_OK {
+            return Err(ret)?;
+        }
+
+        let data = match asn1::write_single(&opstate) {
+            Ok(d) => d,
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        };
+
+        let (gcm, edata) = encryption::aes_gcm_encrypt(
+            mechanisms,
+            &(*OPSTATE_AES_KEY),
+            OPSTATE_AAD.as_bytes(),
+            data.as_slice(),
+        )?;
+
+        let pdata = KProtectedData {
+            algorithm: Box::new(KAlgorithmIdentifier {
+                oid: asn1::DefinedByMarker::marker(),
+                params: KAlgorithmParameters::Aes256Gcm(gcm),
+            }),
+            data: &edata,
+            signature: None,
+        };
+
+        match asn1::write_single(&pdata) {
+            Ok(der) => {
+                if der.len() > state.len() {
+                    Err(CKR_GENERAL_ERROR)?
+                } else {
+                    state[..der.len()].clone_from_slice(der.as_slice());
+                    Ok(der.len())
+                }
+            }
+            Err(_) => Err(CKR_GENERAL_ERROR)?,
+        }
+    }
+
+    pub fn state_restore(
+        &mut self,
+        mechanisms: &Mechanisms,
+        state: &[u8],
+    ) -> Result<()> {
+        let pdata = match asn1::parse_single::<KProtectedData>(state) {
+            Ok(p) => p,
+            Err(_) => return Err(CKR_SAVED_STATE_INVALID)?,
+        };
+
+        let gcm = match &pdata.algorithm.params {
+            KAlgorithmParameters::Aes256Gcm(gcm) => gcm,
+            _ => return Err(CKR_SAVED_STATE_INVALID)?,
+        };
+
+        let data = encryption::aes_gcm_decrypt(
+            mechanisms,
+            &(*OPSTATE_AES_KEY),
+            gcm,
+            OPSTATE_AAD.as_bytes(),
+            pdata.data,
+        )
+        .map_err(|_| CKR_SAVED_STATE_INVALID)?;
+
+        let opstate = match asn1::parse_single::<OperationState>(&data) {
+            Ok(s) => s,
+            Err(_) => return Err(CKR_SAVED_STATE_INVALID)?,
+        };
+
+        if opstate.version != 1 {
+            return Err(CKR_SAVED_STATE_INVALID)?;
+        }
+
+        // NOTE: Currently only Digest operations can be restored,
+        // If any other state is "saved" we return an error.
+        if let Some(_op) = opstate.msgenc {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        if let Some(_op) = opstate.msgdec {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        if let Some(_op) = opstate.enc {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        if let Some(_op) = opstate.dec {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        if let Some(op) = opstate.dgst {
+            let mech = mechanisms.get(op.mech)?;
+            let operation = mech.digest_restore(op.mech, op.data)?;
+            <dyn Digest>::set_op(&mut self.operations, operation);
+        };
+        if let Some(_op) = opstate.sig {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        if let Some(_op) = opstate.ver {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        if let Some(_op) = opstate.versig {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+
+        Ok(())
     }
 }

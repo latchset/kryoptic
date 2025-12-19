@@ -99,6 +99,58 @@ impl EvpMdCtx {
         }
         Ok(new)
     }
+
+    #[cfg(ossl_v400)]
+    pub fn serialize(&self, state: Option<&mut [u8]>) -> Result<usize, Error> {
+        let mut outlen: usize = 0;
+
+        let ret = unsafe {
+            EVP_MD_CTX_serialize(
+                self.as_ptr() as *mut EVP_MD_CTX,
+                std::ptr::null_mut(),
+                &mut outlen,
+            )
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_MD_CTX_serialize()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
+        if let Some(out) = state {
+            if outlen > out.len() {
+                return Err(Error::new(ErrorKind::BufferSize));
+            }
+            let ret = unsafe {
+                EVP_MD_CTX_serialize(
+                    self.as_ptr() as *mut EVP_MD_CTX,
+                    out.as_mut_ptr(),
+                    &mut outlen,
+                )
+            };
+            if ret != 1 {
+                trace_ossl!("EVP_MD_CTX_serialize()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+        }
+
+        Ok(outlen)
+    }
+
+    #[cfg(ossl_v400)]
+    pub fn deserialize(&mut self, state: &[u8]) -> Result<(), Error> {
+        let ret = unsafe {
+            EVP_MD_CTX_deserialize(
+                self.as_mut_ptr(),
+                state.as_ptr(),
+                state.len(),
+            )
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_MD_CTX_deserialize()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(())
+    }
 }
 
 impl Drop for EvpMdCtx {
@@ -264,6 +316,33 @@ impl OsslDigest {
             md: self.md.clone(),
             size: self.size,
         })
+    }
+
+    #[cfg(ossl_v400)]
+    pub fn get_state_size(&self) -> Result<usize, Error> {
+        self.ctx.serialize(None)
+    }
+    #[cfg(not(ossl_v400))]
+    pub fn get_state_size(&self) -> Result<usize, Error> {
+        Err(Error::new(ErrorKind::WrapperError))
+    }
+
+    #[cfg(ossl_v400)]
+    pub fn get_state(&self, state: &mut [u8]) -> Result<usize, Error> {
+        self.ctx.serialize(Some(state))
+    }
+    #[cfg(not(ossl_v400))]
+    pub fn get_state(&self, _state: &mut [u8]) -> Result<usize, Error> {
+        Err(Error::new(ErrorKind::WrapperError))
+    }
+
+    #[cfg(ossl_v400)]
+    pub fn set_state(&mut self, state: &[u8]) -> Result<(), Error> {
+        self.ctx.deserialize(state)
+    }
+    #[cfg(not(ossl_v400))]
+    pub fn set_state(&mut self, _state: &[u8]) -> Result<(), Error> {
+        Err(Error::new(ErrorKind::WrapperError))
     }
 }
 

@@ -39,6 +39,15 @@ impl HashOperation {
             in_use: false,
         })
     }
+
+    pub fn restore(
+        mech: CK_MECHANISM_TYPE,
+        state: &[u8],
+    ) -> Result<HashOperation> {
+        let mut op = Self::new(mech)?;
+        op.hasher.set_state(state)?;
+        Ok(op)
+    }
 }
 
 impl MechOperation for HashOperation {
@@ -54,6 +63,18 @@ impl MechOperation for HashOperation {
         self.finalized = false;
         self.in_use = false;
         Ok(())
+    }
+    fn state_size(&self) -> Result<usize> {
+        Ok(self
+            .hasher
+            .get_state_size()
+            .map_err(|_| CKR_STATE_UNSAVEABLE)?)
+    }
+    fn state_save(&self, state: &mut [u8]) -> Result<usize> {
+        Ok(self
+            .hasher
+            .get_state(state)
+            .map_err(|_| CKR_STATE_UNSAVEABLE)?)
     }
 }
 
