@@ -6,6 +6,10 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
+* Added support to save and restore operations state
+    - [Add support for C_[Get|Set]OperationState
+       functions](https://github.com/latchset/kryoptic/pull/389)
+
 --
 
 ## [1.4.0]
