@@ -28,6 +28,7 @@ serial_test = "3.1.1"
 [features]
 ossl320 = [] # Requires at a minimum OpenSSL 3.2.0
 ossl350 = [] # Requires at a minimum OpenSSL 3.5.0
+ossl400 = [] # Requires at minimum OpenSSL 4.0
 dynamic = [] # Builds against system libcrypto.so
 fips = ["ossl350"] # Builds against sources and libfips.a instead of libcrypto
 log = ["dep:log", "dep:vsprintf"] # Error tracing using log crate

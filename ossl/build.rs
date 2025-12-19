@@ -10,6 +10,7 @@ pub struct OsslCallbacks;
 const OPENSSL_3_0_7: i64 = 0x30000070;
 const OPENSSL_3_2_0: i64 = 0x30200000;
 const OPENSSL_3_5_0: i64 = 0x30500000;
+const OPENSSL_4_0_0: i64 = 0x40000000;
 
 impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
     fn int_macro(
@@ -18,6 +19,10 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
         value: i64,
     ) -> Option<bindgen::callbacks::IntKind> {
         if name == "OPENSSL_VERSION_NUMBER" {
+            if value < OPENSSL_4_0_0 {
+                #[cfg(feature = "ossl400")]
+                panic!("OpenSSL 4.0.0 or later is required");
+            }
             if value < OPENSSL_3_5_0 {
                 #[cfg(feature = "ossl350")]
                 panic!("OpenSSL 3.5.0 or later is required");
@@ -41,6 +46,9 @@ impl bindgen::callbacks::ParseCallbacks for OsslCallbacks {
             }
             if value >= OPENSSL_3_5_0 {
                 println!("cargo::rustc-cfg=ossl_v350");
+            }
+            if value >= OPENSSL_4_0_0 {
+                println!("cargo::rustc-cfg=ossl_v400");
             }
         }
 
@@ -303,7 +311,7 @@ fn main() {
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* Always emit known configs */
-    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_mldsa,ossl_mlkem,ossl_slhdsa,param_clear_free)");
+    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_v400,ossl_mldsa,ossl_mlkem,ossl_slhdsa,param_clear_free)");
 
     /* OpenSSL Cryptography */
     if cfg!(feature = "dynamic") {
