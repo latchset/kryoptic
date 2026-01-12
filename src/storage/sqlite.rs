@@ -177,7 +177,8 @@ impl SqliteStorage {
         let mut objects = Vec::<Object>::new();
         while let Some(row) = rows.next().map_err(bad_storage)? {
             let id: i32 = row.get(0).map_err(bad_storage)?;
-            let atype: CK_ATTRIBUTE_TYPE = row.get(1).map_err(bad_storage)?;
+            let atype: CK_ATTRIBUTE_TYPE =
+                row.get::<_, u32>(1).map_err(bad_storage)? as CK_ULONG;
             let val = row.get_ref(2).map_err(bad_storage)?;
             if objid != id {
                 objid = id;
@@ -313,7 +314,7 @@ impl SqliteStorage {
     fn delete_object(tx: &mut Transaction, uid: &String) -> Result<i32> {
         let mut stmt = tx.prepare(SEARCH_OBJ_ID).map_err(bad_storage)?;
         let objid = match stmt
-            .query_row(params![CKA_UNIQUE_ID, uid], |row| row.get(0))
+            .query_row(params![CKA_UNIQUE_ID as u32, uid], |row| row.get(0))
         {
             Ok(r) => r,
             Err(e) => match e {
@@ -424,7 +425,8 @@ impl StorageRaw for SqliteStorage {
         let mut stmt: Statement;
         let rows = if attrs.len() == 0 {
             stmt = conn.prepare(SEARCH_BY_SINGLE_ATTR).map_err(bad_code)?;
-            stmt.query(params![CKA_UNIQUE_ID, uid]).map_err(bad_code)?
+            stmt.query(params![CKA_UNIQUE_ID as u32, uid])
+                .map_err(bad_code)?
         } else {
             let mut params = Vec::<Value>::with_capacity(attrs.len() + 2);
             params.push(Value::from(u32::try_from(CKA_UNIQUE_ID)?));
