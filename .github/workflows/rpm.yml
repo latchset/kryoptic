@@ -53,7 +53,7 @@ jobs:
                 'crate(data-encoding/default)' 'crate(getrandom/default)' 'crate(hex/default)' \
                 'crate(itertools/default)' 'crate(libc/default)' 'crate(num-bigint/default)' \
                 'crate(num-integer/default)' 'crate(num-traits/default)' \
-                'crate(pkg-config/default)' 'crate(rusqlite/default)' \
+                'crate(pkg-config/default)' 'crate(rusqlite/default)' 'crate(rusqlite/fallible_uint)' \
                 'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
                 'crate(serial_test/default)' \
                 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' 'crate(toml/serde)' \
