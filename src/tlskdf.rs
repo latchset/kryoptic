@@ -50,6 +50,7 @@ pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
         CKM_TLS_KDF,
         CKM_TLS12_KDF,
         CKM_TLS12_MASTER_KEY_DERIVE,
+        CKM_TLS12_MASTER_KEY_DERIVE_DH,
         CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
         CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
     ] {
@@ -89,6 +90,7 @@ impl Mechanism for TLSPRFMechanism {
                 Ok(Box::new(TLSKDFOperation::new(mech)?))
             }
             CKM_TLS12_MASTER_KEY_DERIVE
+            | CKM_TLS12_MASTER_KEY_DERIVE_DH
             | CKM_TLS12_KEY_AND_MAC_DERIVE
             | CKM_TLS12_KEY_SAFE_DERIVE
             | CKM_TLS12_KDF
