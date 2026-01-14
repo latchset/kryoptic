@@ -557,7 +557,10 @@ impl TLSKDFOperation {
         match key.get_attr(CKA_VALUE_LEN) {
             Some(a) => match a.to_ulong() {
                 Ok(l) => {
-                    if l != TLS_MASTER_SECRET_SIZE {
+                    if (self.mech == CKM_TLS12_MASTER_KEY_DERIVE
+                        || self.mech == CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE)
+                        && l != TLS_MASTER_SECRET_SIZE
+                    {
                         return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
                     }
                     Ok(())
