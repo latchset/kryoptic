@@ -121,7 +121,7 @@ fn test_tlsprf_vectors() {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TlsKdfTestUnit {
     line: usize,
     count: usize,
@@ -255,6 +255,23 @@ fn parse_kdf_vector(filename: &str) -> Vec<TlsKdfTestSection> {
         }
     }
 
+    /* If there are test vectors for CKM_TLS12_MASTER_KEY_DERIVE, duplicate
+     * them in a new section for CKM_TLS12_MASTER_KEY_DERIVE_DH as well */
+    match data
+        .iter()
+        .find(|&sec| sec.kdf == CKM_TLS12_MASTER_KEY_DERIVE)
+    {
+        Some(section) => {
+            let newsection = TlsKdfTestSection {
+                kdf: CKM_TLS12_MASTER_KEY_DERIVE_DH,
+                prf: section.prf,
+                units: section.units.clone(),
+            };
+            data.push(newsection);
+        }
+        None => {}
+    };
+
     data
 }
 
@@ -264,7 +281,9 @@ fn test_tlskdf_units(
 ) {
     for section in test_data {
         /* until we support all the KDFs */
-        if section.kdf != CKM_TLS12_MASTER_KEY_DERIVE {
+        if section.kdf != CKM_TLS12_MASTER_KEY_DERIVE
+            && section.kdf != CKM_TLS12_MASTER_KEY_DERIVE_DH
+        {
             continue;
         }
 
@@ -302,7 +321,8 @@ fn test_tlskdf_units(
             );
 
             let (params, paramslen) = match section.kdf {
-                CKM_TLS12_MASTER_KEY_DERIVE => (
+                CKM_TLS12_MASTER_KEY_DERIVE
+                | CKM_TLS12_MASTER_KEY_DERIVE_DH => (
                     CK_TLS12_MASTER_KEY_DERIVE_PARAMS {
                         RandomInfo: CK_SSL3_RANDOM_DATA {
                             pClientRandom: byte_ptr!(unit.cli_hlo_rnd.as_ptr()),
@@ -375,7 +395,8 @@ fn test_tlskdf_units(
             };
 
             let (kdf, params, paramslen) = match section.kdf {
-                CKM_TLS12_MASTER_KEY_DERIVE => (
+                CKM_TLS12_MASTER_KEY_DERIVE
+                | CKM_TLS12_MASTER_KEY_DERIVE_DH => (
                     CKM_TLS12_KEY_AND_MAC_DERIVE,
                     CK_TLS12_KEY_MAT_PARAMS {
                         ulMacSizeInBits: 0,
@@ -458,7 +479,6 @@ fn test_tls_mechanisms() {
     /* login */
     testtokn.login();
 
-    /* test CKM_TLS_MAC */
     let handle = ret_or_panic!(generate_key(
         session,
         CKM_GENERIC_SECRET_KEY_GEN,
@@ -477,6 +497,81 @@ fn test_tls_mechanisms() {
     assert_eq!(check_validation(session, 1), true);
     assert_eq!(check_object_validation(session, handle, 1), true);
 
+    let clirnd = [0u8; 32];
+    let srvrnd = [0u8; 32];
+
+    /* test CKM_TLS12_MASTER_KEY_DERIVE */
+    let mut version: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
+    let params = CK_TLS12_MASTER_KEY_DERIVE_PARAMS {
+        prfHashMechanism: CKM_SHA256,
+        pVersion: &mut version,
+        RandomInfo: CK_SSL3_RANDOM_DATA {
+            pClientRandom: byte_ptr!(clirnd.as_ptr()),
+            ulClientRandomLen: clirnd.len() as CK_ULONG,
+            pServerRandom: byte_ptr!(srvrnd.as_ptr()),
+            ulServerRandomLen: srvrnd.len() as CK_ULONG,
+        },
+    };
+    let paramslen = sizeof!(CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
+
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_MASTER_KEY_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 48),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
+
+    /* test CKM_TLS12_MASTER_KEY_DERIVE_DH; this time, pVersion must be NULL */
+    let params = CK_TLS12_MASTER_KEY_DERIVE_PARAMS {
+        prfHashMechanism: CKM_SHA256,
+        pVersion: std::ptr::null_mut(),
+        RandomInfo: CK_SSL3_RANDOM_DATA {
+            pClientRandom: byte_ptr!(clirnd.as_ptr()),
+            ulClientRandomLen: clirnd.len() as CK_ULONG,
+            pServerRandom: byte_ptr!(srvrnd.as_ptr()),
+            ulServerRandomLen: srvrnd.len() as CK_ULONG,
+        },
+    };
+    let paramslen = sizeof!(CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_TLS12_MASTER_KEY_DERIVE,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: paramslen,
+    };
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, dk_handle, 0), true);
+
+    /* test CKM_TLS_MAC */
     let params = CK_TLS_MAC_PARAMS {
         prfHashMechanism: CKM_SHA256,
         ulMacLength: 64,
@@ -524,8 +619,6 @@ fn test_tls_mechanisms() {
         &[(CKA_EXTRACTABLE, false)],
     );
 
-    let clirnd = [0u8; 32];
-    let srvrnd = [0u8; 32];
     let mut cliiv = [0u8; 10];
     let mut srviv = [0u8; 10];
     let mut mat_out = CK_SSL3_KEY_MAT_OUT {
