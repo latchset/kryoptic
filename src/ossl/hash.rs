@@ -46,6 +46,7 @@ impl HashOperation {
     ) -> Result<HashOperation> {
         let mut op = Self::new(mech)?;
         op.hasher.set_state(state)?;
+        op.in_use = true;
         Ok(op)
     }
 }
