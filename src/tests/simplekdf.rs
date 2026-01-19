@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+use ::ossl::api_level;
 
 use serial_test::parallel;
 
@@ -668,33 +669,34 @@ fn test_derive_pub_from_priv() {
         ],
     });
 
-    // EC params for secp256r1
-    // #[cfg(feature = "ecdsa")]
-    // let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
-    // #[cfg(feature = "ecdsa")]
-    // let ecdsa_params = [(CKA_EC_PARAMS, secp256r1_oid.as_slice())];
-    // #[cfg(feature = "ecdsa")]
-    // test_cases.push(TestCase {
-    //     name: "ECDSA",
-    //     gen_mech: CKM_EC_KEY_PAIR_GEN,
-    //     pub_ulongs: &[],
-    //     pub_strings: &ecdsa_params,
-    //     pub_bools: &[(CKA_TOKEN, true), (CKA_VERIFY, true)],
-    //     pri_ulongs: &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
-    //     pri_strings: &[],
-    //     pri_bools: &[
-    //         (CKA_TOKEN, true),
-    //         (CKA_SENSITIVE, false),
-    //         (CKA_EXTRACTABLE, true),
-    //         (CKA_SIGN, true),
-    //     ],
-    //     check_attrs: &[CKA_EC_POINT, CKA_EC_PARAMS],
-    //     derived_bools: &[
-    //         (CKA_TOKEN, false),
-    //         (CKA_PRIVATE, false),
-    //         (CKA_VERIFY, true),
-    //     ],
-    // });
+    #[cfg(feature = "ecdsa")]
+    let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
+    #[cfg(feature = "ecdsa")]
+    let ecdsa_params = [(CKA_EC_PARAMS, secp256r1_oid.as_slice())];
+    #[cfg(feature = "ecdsa")]
+    if api_level() >= ossl::common::OPENSSL_4_0 {
+        test_cases.push(TestCase {
+            name: "ECDSA",
+            gen_mech: CKM_EC_KEY_PAIR_GEN,
+            pub_ulongs: &[],
+            pub_strings: &ecdsa_params,
+            pub_bools: &[(CKA_TOKEN, true), (CKA_VERIFY, true)],
+            pri_ulongs: &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_EC)],
+            pri_strings: &[],
+            pri_bools: &[
+                (CKA_TOKEN, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+                (CKA_SIGN, true),
+            ],
+            check_attrs: &[CKA_EC_POINT, CKA_EC_PARAMS],
+            derived_bools: &[
+                (CKA_TOKEN, false),
+                (CKA_PRIVATE, false),
+                (CKA_VERIFY, true),
+            ],
+        });
+    }
 
     #[cfg(feature = "eddsa")]
     let edwards25519 = hex::decode("130c656477617264733235353139").unwrap();

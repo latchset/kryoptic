@@ -15,7 +15,7 @@ use asn1;
 
 use ossl::digest::DigestAlg;
 use ossl::pkey::{EvpPkey, EvpPkeyType, PkeyData};
-use ossl::OsslContext;
+use ossl::{api_level, OsslContext};
 
 #[cfg(feature = "ecc")]
 use crate::ec::get_oid_from_obj;
@@ -38,6 +38,8 @@ use crate::ossl::rsa;
     any(not(feature = "fips"), feature = "ossl400")
 ))]
 use crate::ossl::slhdsa;
+
+pub(crate) const OPENSSL_4_0: (u8, u8, u8) = (4, 0, 0);
 
 pub fn osslctx() -> &'static OsslContext {
     #[cfg(feature = "fips")]
@@ -209,7 +211,20 @@ pub fn extract_public_key(privkey: &Object) -> Result<Vec<u8>> {
 
     // 2. Export key data
     let pubkey_value = match pkey.export()? {
-        PkeyData::Ecc(mut e) => e.pubkey.take(),
+        PkeyData::Ecc(mut e) => {
+            if e.pubkey.is_some() {
+                e.pubkey.take()
+            } else {
+                if api_level() >= OPENSSL_4_0 {
+                    return Err(CKR_GENERAL_ERROR)?;
+                } else {
+                    // Older versions of OpenSSL were not able to extract
+                    // a public EC key from a private one via export if the
+                    // public key was not explicitly set in the import data
+                    return Err(CKR_KEY_UNEXTRACTABLE)?;
+                }
+            }
+        }
         PkeyData::Mlkey(mut m) => m.pubkey.take(),
         PkeyData::SlhDsaKey(mut s) => s.pubkey.take(),
         _ => return Err(CKR_GENERAL_ERROR)?,
