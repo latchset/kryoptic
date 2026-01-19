@@ -32,3 +32,5 @@ nssdb = ["kryoptic-lib/nssdb"]
 
 standard = ["kryoptic-lib/standard"]
 fips = ["kryoptic-lib/fips"]
+
+integration_tests = []

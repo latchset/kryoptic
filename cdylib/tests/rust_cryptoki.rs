@@ -1,4 +1,5 @@
 #[test]
+#[cfg(feature = "integration_tests")]
 fn basic_example() -> Result<(), Box<dyn std::error::Error>> {
     use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
     use cryptoki::mechanism::Mechanism;

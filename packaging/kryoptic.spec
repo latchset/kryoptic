@@ -108,7 +108,7 @@ echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryopti
 %if %{with check}
 %check
 export TEST_PKCS11_MODULE=$RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
-%cargo_test -f %{features}
+%cargo_test -f %{features},integration_tests
 %endif
 
 %files
