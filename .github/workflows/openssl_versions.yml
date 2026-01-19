@@ -1,4 +1,3 @@
----
 name: OpenSSL Versions
 
 on:
@@ -94,7 +93,7 @@ jobs:
 
 
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup OpenSSL ${{ matrix.version }}
         if: ${{ matrix.build == true }}
@@ -178,4 +177,3 @@ jobs:
           name: Build logs OpenSSL version ${{ matrix.name }}
           path: |
             target/debug/build/*/output
-
