@@ -33,7 +33,10 @@ use crate::ossl::mlkem;
 use crate::ossl::montgomery as ecm;
 #[cfg(feature = "rsa")]
 use crate::ossl::rsa;
-#[cfg(feature = "slhdsa")]
+#[cfg(all(
+    feature = "slhdsa",
+    any(not(feature = "fips"), feature = "ossl400")
+))]
 use crate::ossl::slhdsa;
 
 pub fn osslctx() -> &'static OsslContext {
@@ -73,7 +76,10 @@ pub fn evp_pkey_from_object(
         CKK_ML_KEM => return mlkem::mlkem_object_to_pkey(obj, class),
         #[cfg(feature = "mldsa")]
         CKK_ML_DSA => return mldsa::mldsa_object_to_pkey(obj, class),
-        #[cfg(feature = "slhdsa")]
+        #[cfg(all(
+            feature = "slhdsa",
+            any(not(feature = "fips"), feature = "ossl400")
+        ))]
         CKK_SLH_DSA => return slhdsa::slhdsa_object_to_pkey(obj, class),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     }
