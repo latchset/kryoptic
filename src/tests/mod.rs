@@ -359,7 +359,10 @@ mod mlkem;
 #[cfg(feature = "mldsa")]
 mod mldsa;
 
-#[cfg(feature = "slhdsa")]
+#[cfg(all(
+    feature = "slhdsa",
+    any(not(feature = "fips"), feature = "ossl400")
+))]
 mod slhdsa;
 
 mod pkcs11;

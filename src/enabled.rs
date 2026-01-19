@@ -45,7 +45,12 @@ mod mlkem;
 #[cfg(feature = "mldsa")]
 mod mldsa;
 
-#[cfg(feature = "slhdsa")]
+// In fips builds enable slhdsa only if ossl400 was selected, which is required
+// for deferred self tests
+#[cfg(all(
+    feature = "slhdsa",
+    any(not(feature = "fips"), feature = "ossl400")
+))]
 mod slhdsa;
 
 use mechanism::Mechanisms;
@@ -107,7 +112,10 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     #[cfg(feature = "mldsa")]
     mldsa::register(mechs, ot);
 
-    #[cfg(feature = "slhdsa")]
+    #[cfg(all(
+        feature = "slhdsa",
+        any(not(feature = "fips"), feature = "ossl400")
+    ))]
     slhdsa::register(mechs, ot);
 
     #[cfg(feature = "fips")]

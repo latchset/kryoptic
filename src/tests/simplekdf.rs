@@ -802,7 +802,10 @@ fn test_derive_pub_from_priv() {
         ],
     });
 
-    #[cfg(feature = "slhdsa")]
+    #[cfg(all(
+        feature = "slhdsa",
+        any(not(feature = "fips"), feature = "ossl400")
+    ))]
     test_cases.push(TestCase {
         name: "SLHDSA",
         gen_mech: CKM_SLH_DSA_KEY_PAIR_GEN,
