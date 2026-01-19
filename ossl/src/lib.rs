@@ -35,6 +35,21 @@ pub mod signature;
 #[cfg(feature = "fips")]
 pub mod fips;
 
+/// Export the API level of the OpenSSL library these bindings
+/// were built against. This should be used only when probing
+/// for behavior is difficult as it is only a proxy for what was
+/// available at compile time, which may be different from what is
+/// available at runtime when dynamically linking to shared libraries.
+///
+/// This returns a triplet of u8 values representing Major, Minor, and
+/// Patch version.
+pub fn api_level() -> (u8, u8, u8) {
+    let patch: u8 = (OPENSSL_API_LEVEL & 0xff) as u8;
+    let minor: u8 = ((OPENSSL_API_LEVEL & 0xff00) >> 8) as u8;
+    let major: u8 = ((OPENSSL_API_LEVEL & 0xff0000) >> 16) as u8;
+    (major, minor, patch)
+}
+
 /// Securely zeroizes a memory slice using `OPENSSL_cleanse`.
 pub fn zeromem(mem: &mut [u8]) {
     unsafe {

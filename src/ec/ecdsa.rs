@@ -44,13 +44,18 @@ static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     ]
 });
 
-fn ecdsa_public_key_info(obj: &mut Object) -> Result<()> {
-    // Get raw public point from EC_POINT.
-    // For CKK_EC keys, CKA_EC_POINT is a DER-encoded OCTET STRING.
-    // SubjectPublicKeyInfo's bit string needs the raw point bytes.
-    let ec_point_der = obj.get_attr_as_bytes(CKA_EC_POINT)?;
-    let ec_point_raw = asn1::parse_single::<&[u8]>(ec_point_der)
-        .map_err(|_| CKR_ATTRIBUTE_VALUE_INVALID)?;
+fn ecdsa_public_key_info(obj: &mut Object, point: Option<&[u8]>) -> Result<()> {
+    let ec_point_raw = match point {
+        Some(p) => p,
+        None => {
+            // Get raw public point from EC_POINT.
+            // For CKK_EC keys, CKA_EC_POINT is a DER-encoded OCTET STRING.
+            // SubjectPublicKeyInfo's bit string needs the raw point bytes.
+            let ec_point_der = obj.get_attr_as_bytes(CKA_EC_POINT)?;
+            asn1::parse_single::<&[u8]>(ec_point_der)
+                .map_err(|_| CKR_ATTRIBUTE_VALUE_INVALID)?
+        }
+    };
 
     // Get curve OID from EC_PARAMS
     let oid = get_oid_from_obj(obj)?;
@@ -177,7 +182,7 @@ impl ObjectFactory for ECDSAPubFactory {
             }
         })?;
 
-        ecdsa_public_key_info(&mut obj)?;
+        ecdsa_public_key_info(&mut obj, None)?;
 
         Ok(obj)
     }
@@ -258,7 +263,7 @@ impl ObjectFactory for ECDSAPrivFactory {
     /// Additionally validates that the private key size is consistent
     /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.default_object_create(template)?;
+        let mut obj = self.default_object_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.4:
          * CKA_EC_PARAMS, Byte array,
@@ -296,21 +301,19 @@ impl ObjectFactory for ECDSAPrivFactory {
         }
 
         // Extract public key and set CKA_PUBLIC_KEY_INFO
-        // FIXME: Commented until OpenSSL supports extracting for EC keys
-        //        see: https://github.com/openssl/openssl/pull/29054
-        // let ec_point_raw = extract_public_key(&obj)?;
-        // let alg = match oid {
-        //     oid::EC_SECP256R1 => pkcs::EC_SECP256R1_ALG,
-        //     oid::EC_SECP384R1 => pkcs::EC_SECP384R1_ALG,
-        //     oid::EC_SECP521R1 => pkcs::EC_SECP521R1_ALG,
-        //     _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
-        // };
-        // if !obj.check_or_set_attr(Attribute::from_bytes(
-        //     CKA_PUBLIC_KEY_INFO,
-        //     pkcs::SubjectPublicKeyInfo::new(alg, ec_point_raw)?.serialize()?,
-        // ))? {
-        //     return Err(CKR_TEMPLATE_INCONSISTENT)?;
-        // }
+        match extract_public_key(&obj) {
+            Ok(ec_point_raw) => {
+                ecdsa_public_key_info(&mut obj, Some(&ec_point_raw))?;
+            }
+            Err(e) => {
+                // Key is unextractable on OpenSSL versions older than 4.0.0
+                // do not fail if key is missing in that case which is reported
+                // via CKR_KEY_UNEXTRACTABLE error.
+                if e.rv() != CKR_KEY_UNEXTRACTABLE {
+                    return Err(e);
+                }
+            }
+        }
 
         Ok(obj)
     }
@@ -449,7 +452,7 @@ impl Mechanism for EcdsaMechanism {
         default_key_attributes(&mut privkey, mech.mechanism)?;
         default_key_attributes(&mut pubkey, mech.mechanism)?;
 
-        ecdsa_public_key_info(&mut pubkey)?;
+        ecdsa_public_key_info(&mut pubkey, None)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */
         privkey.ensure_slice(
             CKA_PUBLIC_KEY_INFO,
