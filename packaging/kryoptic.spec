@@ -23,19 +23,20 @@ Release:        %autorelease
 Summary:        PKCS #11 software token written in Rust
 
 SourceLicense:  GPL-3.0-or-later
-# Apache-2.0
-# Apache-2.0 OR BSL-1.0
-# Apache-2.0 OR MIT
-# BSD-3-Clause
-# GPL-3.0-or-later
-# ISC
-# MIT
-# MIT OR Apache-2.0
-# MIT-0 OR Apache-2.0
-# Unlicense OR MIT
-# Zlib
-License: Apache-2.0 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (BSD-3-Clause) AND (GPL-3.0-or-later) AND (ISC) AND (MIT) AND (MIT OR Apache-2.0) AND (MIT-0 OR Apache-2.0) AND (Unlicense OR MIT) AND (Zlib)
 # LICENSE.dependencies contains a full license breakdown
+License: %{shrink:
+ Apache-2.0 AND
+ (Apache-2.0 OR BSL-1.0) AND
+ (Apache-2.0 OR MIT) AND
+ BSD-3-Clause AND
+ GPL-3.0-or-later AND
+ ISC AND
+ MIT AND
+ (MIT OR Apache-2.0) AND
+ (MIT-0 OR Apache-2.0) AND
+ (Unlicense OR MIT) AND
+ Zlib
+}
 
 URL:            https://github.com/latchset/kryoptic
 Source0:        https://github.com/latchset/kryoptic/releases/download/v%{version}/%{name}-%{version}.tar.gz
