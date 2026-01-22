@@ -2,24 +2,24 @@ Storage Encryption
 ------------------
 
 A PKCS#11 token uses a storage component to save keys.
-In the case of a software token, it is a good idea to encrypt sensible
+In the case of a software token, it is a good idea to encrypt sensitive
 information in the storage so that keys cannot be easily stolen or tampered
 with.
 
 Kryoptic adopts a flexible and agile encryption system that allows for future
-changes while maintaining reasonable comaptibility.
+changes while maintaining reasonable compatibility.
 
 The aim of the v1 scheme identified here is to provide reasonable security
 while allowing simplified operations.
 
 The token allows for two PINs to be used, the SO PIN and the USER PIN.
-The SO PIN is considered a recvoery PIN. Both PINs allow for access to the
+The SO PIN is considered a recovery PIN. Both PINs allow for access to the
 key material.
 
 The PINs are used in conjunction with PBKDF2 to derive a KEK that is used to
 decrypt the storage Encryption key. The Encryption key is versioned and is used
 to encrypt each secret attribute individually by using a key derivation step to
-obtain an object specific key. The Key Derivation algorithms and paramters are
+obtain an object specific key. The Key Derivation algorithms and parameters are
 flexibly defined by wrapping the keys and encrypted values using PKCS#5 like
 ASN.1 structures.
 
