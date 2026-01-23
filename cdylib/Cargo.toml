@@ -16,7 +16,7 @@ kryoptic-lib.workspace = true
 ossl.workspace = true
 
 [dev-dependencies]
-cryptoki = "0.11.0"
+cryptoki = "0.12.0"
 
 [features]
 default = ["kryoptic-lib/default"]
