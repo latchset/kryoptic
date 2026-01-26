@@ -56,6 +56,10 @@ specify the features you want to build with, eg:
 
     $ cargo build --no-default-features --features fips,sqlitedb,nssdb
 
+Note that you can set `OSSL_BINDGEN_CLANG_ARGS` (whitespace delimited)
+to pass additional arguments into bindgen, in case that is important
+for your build.
+
 # FIPS Builds
 
 The `--feature fips` builds create a token linking just to OpenSSL libfips.a
