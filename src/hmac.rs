@@ -254,7 +254,7 @@ impl HMACMechanism {
                 CKA_SIGN
             }
             CKF_VERIFY => {
-                if self.info.flags & CKF_SIGN != CKF_SIGN {
+                if self.info.flags & CKF_VERIFY != CKF_VERIFY {
                     return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_VERIFY
@@ -267,6 +267,38 @@ impl HMACMechanism {
             self.check_and_fetch_key(keyobj, op_attr)?,
             self.check_and_fetch_param(mech)?,
             signature,
+        )
+    }
+
+    fn restore_op(
+        &self,
+        mech_type: CK_MECHANISM_TYPE,
+        keyobj: &Object,
+        op_type: CK_FLAGS,
+        signature: Option<&[u8]>,
+        state: &[u8],
+    ) -> Result<HMACOperation> {
+        let op_attr = match op_type {
+            CKF_SIGN => {
+                if self.info.flags & CKF_SIGN != CKF_SIGN {
+                    return Err(CKR_MECHANISM_INVALID)?;
+                }
+                CKA_SIGN
+            }
+            CKF_VERIFY => {
+                if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+                    return Err(CKR_MECHANISM_INVALID)?;
+                }
+                CKA_VERIFY
+            }
+            CKF_DERIVE => CKA_DERIVE,
+            _ => return Err(CKR_MECHANISM_INVALID)?,
+        };
+        HMACOperation::restore(
+            mech_type,
+            self.check_and_fetch_key(keyobj, op_attr)?,
+            signature,
+            state,
         )
     }
 }
@@ -296,6 +328,17 @@ impl Mechanism for HMACMechanism {
         Ok(Box::new(self.new_op(mech, keyobj, CKF_SIGN, None)?))
     }
 
+    fn sign_restore(
+        &self,
+        mech_type: CK_MECHANISM_TYPE,
+        keyobj: &Object,
+        state: &[u8],
+    ) -> Result<Box<dyn Sign>> {
+        Ok(Box::new(
+            self.restore_op(mech_type, keyobj, CKF_SIGN, None, state)?,
+        ))
+    }
+
     /// Initializes an HMAC operation for the Verify operation
     fn verify_new(
         &self,
@@ -303,6 +346,17 @@ impl Mechanism for HMACMechanism {
         keyobj: &Object,
     ) -> Result<Box<dyn Verify>> {
         Ok(Box::new(self.new_op(mech, keyobj, CKF_VERIFY, None)?))
+    }
+
+    fn verify_restore(
+        &self,
+        mech_type: CK_MECHANISM_TYPE,
+        keyobj: &Object,
+        state: &[u8],
+    ) -> Result<Box<dyn Verify>> {
+        Ok(Box::new(
+            self.restore_op(mech_type, keyobj, CKF_VERIFY, None, state)?,
+        ))
     }
 
     /// Initializes an HMAC operation for the VerifySignature operation

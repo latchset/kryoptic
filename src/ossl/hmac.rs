@@ -87,6 +87,15 @@ impl HMACOperation {
         })
     }
 
+    pub fn restore(
+        _mech: CK_MECHANISM_TYPE,
+        _key: HmacKey,
+        _signature: Option<&[u8]>,
+        _state: &[u8],
+    ) -> Result<HMACOperation> {
+        Err(CKR_SAVED_STATE_INVALID)?
+    }
+
     fn begin(&mut self) -> Result<()> {
         if self.in_use {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
@@ -175,6 +184,12 @@ impl MechOperation for HMACOperation {
     }
     fn fips_approved(&self) -> Option<bool> {
         self.fips_approval.approval()
+    }
+    fn state_size(&self) -> Result<usize> {
+        Err(CKR_STATE_UNSAVEABLE)?
+    }
+    fn state_save(&self, _state: &mut [u8]) -> Result<usize> {
+        Err(CKR_STATE_UNSAVEABLE)?
     }
 }
 

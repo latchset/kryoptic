@@ -46,6 +46,12 @@ fn hmac_mech_to_hash_mech(
     })
 }
 
+#[derive(asn1::Asn1Read, asn1::Asn1Write)]
+struct HMACSaveState<'a> {
+    dgst_state: &'a [u8],
+    outputlen: u64,
+}
+
 /// Object that represents the HMAC operation
 #[derive(Debug)]
 pub struct HMACOperation {
@@ -123,6 +129,24 @@ impl HMACOperation {
         };
         hmac.init()?;
         Ok(hmac)
+    }
+
+    pub fn restore(
+        mech: CK_MECHANISM_TYPE,
+        key: HmacKey,
+        signature: Option<&[u8]>,
+        state: &[u8],
+    ) -> Result<HMACOperation> {
+        let save_state: HMACSaveState =
+            asn1::parse_single(state).map_err(|_| CKR_SAVED_STATE_INVALID)?;
+
+        let outputlen = save_state.outputlen as usize;
+
+        let mut op = Self::new(mech, key, outputlen, signature)?;
+        let hash = hmac_mech_to_hash_mech(mech)?;
+        op.inner = hash::internal_hash_restore_op(hash, save_state.dgst_state)?;
+        op.in_use = true;
+        Ok(op)
     }
 
     /// Internal initialization function
@@ -230,6 +254,37 @@ impl MechOperation for HMACOperation {
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
         self.fips_approved
+    }
+    fn state_size(&self) -> Result<usize> {
+        let dummy_dgst_state = vec![0u8; self.inner.state_size()?];
+
+        let save_state = HMACSaveState {
+            dgst_state: &dummy_dgst_state,
+            outputlen: self.outputlen as u64,
+        };
+
+        Ok(asn1::write_single(&save_state)
+            .map_err(|_| CKR_STATE_UNSAVEABLE)?
+            .len())
+    }
+    fn state_save(&self, state: &mut [u8]) -> Result<usize> {
+        let mut inner_state = vec![0u8; self.inner.state_size()?];
+        let inner_state_len = self.inner.state_save(&mut inner_state)?;
+        inner_state.truncate(inner_state_len);
+
+        let save_state = HMACSaveState {
+            dgst_state: &inner_state,
+            outputlen: self.outputlen as u64,
+        };
+
+        let encoded = asn1::write_single(&save_state)
+            .map_err(|_| CKR_STATE_UNSAVEABLE)?;
+
+        if encoded.len() > state.len() {
+            return Err(CKR_BUFFER_TOO_SMALL)?;
+        }
+        state[..encoded.len()].copy_from_slice(&encoded);
+        Ok(encoded.len())
     }
 }
 
