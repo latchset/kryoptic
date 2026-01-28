@@ -12,14 +12,9 @@ use crate::error::{Error, Result};
 use crate::hash;
 use crate::mechanism::*;
 use crate::misc::{sizeof, zeromem};
+use crate::native::hmac::HMACOperation;
 use crate::object::*;
 use crate::pkcs11::*;
-
-#[cfg(not(feature = "fips"))]
-use crate::native::hmac::HMACOperation;
-
-#[cfg(feature = "fips")]
-use crate::ossl::hmac::HMACOperation;
 
 /// Object that holds Mechanisms for HMAC
 static HMAC_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =

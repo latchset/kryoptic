@@ -218,7 +218,6 @@ pub fn hash_size(hash: CK_MECHANISM_TYPE) -> usize {
 }
 
 /// Returns the internal block size for the specified mechanism
-#[cfg(not(feature = "fips"))]
 pub fn block_size(hash: CK_MECHANISM_TYPE) -> usize {
     for hs in &HASH_MECH_SET {
         if hs.hash == hash {
