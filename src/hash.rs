@@ -388,3 +388,10 @@ impl Derive for HashKDFOperation {
 pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
 }
+
+pub fn internal_hash_restore_op(
+    hash: CK_MECHANISM_TYPE,
+    state: &[u8],
+) -> Result<Box<dyn Digest>> {
+    Ok(Box::new(HashOperation::restore(hash, state)?))
+}

@@ -71,6 +71,16 @@ pub trait Mechanism: Debug + Send + Sync {
         Err(CKR_MECHANISM_INVALID)?
     }
 
+    /// Restores a Sign Operation
+    fn sign_restore(
+        &self,
+        _: CK_MECHANISM_TYPE,
+        _: &Object,
+        _: &[u8],
+    ) -> Result<Box<dyn Sign>> {
+        Err(CKR_SAVED_STATE_INVALID)?
+    }
+
     /// Initializes a Verify Operation
     fn verify_new(
         &self,
@@ -78,6 +88,16 @@ pub trait Mechanism: Debug + Send + Sync {
         _: &Object,
     ) -> Result<Box<dyn Verify>> {
         Err(CKR_MECHANISM_INVALID)?
+    }
+
+    /// Restores a Verify Operation
+    fn verify_restore(
+        &self,
+        _: CK_MECHANISM_TYPE,
+        _: &Object,
+        _: &[u8],
+    ) -> Result<Box<dyn Verify>> {
+        Err(CKR_SAVED_STATE_INVALID)?
     }
 
     /// Executes a Symmetric Key Generation operation
