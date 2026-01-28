@@ -898,9 +898,7 @@ extern "C" fn fn_set_operation_state(
     encryption_key: CK_OBJECT_HANDLE,
     authentication_key: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    if encryption_key != CK_INVALID_HANDLE
-        || authentication_key != CK_INVALID_HANDLE
-    {
+    if encryption_key != CK_INVALID_HANDLE {
         return CKR_KEY_NOT_NEEDED;
     }
     let rstate = global_rlock!((*STATE));
@@ -911,8 +909,17 @@ extern "C" fn fn_set_operation_state(
     let state: &[u8] =
         unsafe { std::slice::from_raw_parts(operation_state, state_len) };
     let slot_id = session.get_slot_id();
-    let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
-    ret_to_rv!(session.state_restore(token.get_mechanisms(), state))
+    let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
+
+    let mut key: Option<object::Object> = None;
+    if authentication_key != CK_INVALID_HANDLE {
+        key = Some(res_or_ret!(token.get_object_by_handle(authentication_key)));
+    }
+    ret_to_rv!(session.state_restore(
+        token.get_mechanisms(),
+        state,
+        key.as_ref()
+    ))
 }
 
 /// Implementation of C_Login function

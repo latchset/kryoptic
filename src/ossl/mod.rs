@@ -31,9 +31,6 @@ pub mod hash;
 #[cfg(feature = "hkdf")]
 pub mod hkdf;
 
-#[cfg(all(feature = "hmac", feature = "fips"))]
-pub mod hmac;
-
 #[cfg(all(feature = "sp800_108", feature = "fips"))]
 pub mod kbkdf;
 

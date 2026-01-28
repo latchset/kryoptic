@@ -92,6 +92,12 @@ fn test_sp800_kdf() {
     ];
     params.ulAdditionalDerivedKeys = 2;
     params.pAdditionalDerivedKeys = addl_keys.as_mut_ptr();
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+
     let ret = fn_derive_key(
         session,
         &mut derive_mech,

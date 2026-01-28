@@ -452,3 +452,149 @@ fn test_hmac_signatures() {
 
     testtokn.finalize();
 }
+
+#[cfg(feature = "hmac")]
+#[test]
+#[parallel]
+fn test_hmac_save_restore() {
+    let mut testtokn = TestToken::initialized(
+        "test_hmac_save_restore",
+        Some("testdata/test_sign_verify.json"),
+    );
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    let mut data1 = b"some initial data for hmac".to_vec();
+    let mut data2 = b"and some more data for hmac".to_vec();
+
+    let mechs = vec![
+        ("SHA256-HMAC", CKM_SHA256_HMAC, "HMAC Test Key"),
+        ("SHA384-HMAC", CKM_SHA384_HMAC, "HMAC Test Key"),
+        ("SHA512-HMAC", CKM_SHA512_HMAC, "HMAC Test Key"),
+        (
+            "SHA3-256-HMAC",
+            CKM_SHA3_256_HMAC,
+            "HMAC SHA-3-256 Test Key",
+        ),
+    ];
+
+    for (mech_name, mech_type, key_name) in mechs {
+        // Get key handle
+        let key_handle =
+            match get_test_key_handle(session, key_name, CKO_SECRET_KEY) {
+                Ok(k) => k,
+                Err(e) => panic!("{}", e),
+            };
+
+        // Init signing
+        let mut mechanism = CK_MECHANISM {
+            mechanism: mech_type,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let mut ret = fn_sign_init(session, &mut mechanism, key_handle);
+        assert_eq!(ret, CKR_OK, "C_SignInit failed for {}", mech_name);
+
+        // Update with first part
+        ret = fn_sign_update(
+            session,
+            data1.as_mut_ptr(),
+            data1.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK, "C_SignUpdate(1) failed for {}", mech_name);
+
+        // Save state
+        let mut state_len: CK_ULONG = 0;
+        ret = fn_get_operation_state(
+            session,
+            std::ptr::null_mut(),
+            &mut state_len,
+        );
+        #[cfg(not(feature = "ossl400"))]
+        if ret == CKR_STATE_UNSAVEABLE {
+            println!(
+                "Mechanism {} does not support save/restore, skipping",
+                mech_name
+            );
+            // Cancel operation
+            _ = fn_sign_init(session, std::ptr::null_mut(), CK_INVALID_HANDLE);
+            continue;
+        }
+        assert_eq!(
+            ret, CKR_OK,
+            "C_GetOperationState(len) failed for {} with 0x{:08x}",
+            mech_name, ret
+        );
+
+        let mut state = vec![0u8; state_len as usize];
+        ret =
+            fn_get_operation_state(session, state.as_mut_ptr(), &mut state_len);
+        assert_eq!(
+            ret, CKR_OK,
+            "C_GetOperationState(save) failed for {} with 0x{:08x}",
+            mech_name, ret
+        );
+        state.resize(state_len as usize, 0);
+
+        // Continue original operation
+        ret = fn_sign_update(
+            session,
+            data2.as_mut_ptr(),
+            data2.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK, "C_SignUpdate(2) failed for {}", mech_name);
+
+        // Finalize and get signature1
+        let mut sig1_len: CK_ULONG = 0;
+        ret = fn_sign_final(session, std::ptr::null_mut(), &mut sig1_len);
+        assert_eq!(ret, CKR_OK, "C_SignFinal(len) failed for {}", mech_name);
+
+        let mut signature1 = vec![0u8; sig1_len as usize];
+        ret = fn_sign_final(session, signature1.as_mut_ptr(), &mut sig1_len);
+        assert_eq!(ret, CKR_OK, "C_SignFinal(get) failed for {}", mech_name);
+        signature1.resize(sig1_len as usize, 0);
+
+        // Restore state
+        ret = fn_set_operation_state(
+            session,
+            state.as_mut_ptr(),
+            state.len() as CK_ULONG,
+            CK_INVALID_HANDLE, // hEncryptionKey
+            key_handle,        // hAuthenticationKey
+        );
+        assert_eq!(
+            ret, CKR_OK,
+            "C_SetOperationState failed for {} with 0x{:08x}",
+            mech_name, ret
+        );
+
+        // Continue restored operation
+        ret = fn_sign_update(
+            session,
+            data2.as_mut_ptr(),
+            data2.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK, "C_SignUpdate(3) failed for {}", mech_name);
+
+        // Finalize and get signature2
+        let mut sig2_len: CK_ULONG = 0;
+        ret = fn_sign_final(session, std::ptr::null_mut(), &mut sig2_len);
+        assert_eq!(ret, CKR_OK, "C_SignFinal(len2) failed for {}", mech_name);
+
+        let mut signature2 = vec![0u8; sig2_len as usize];
+        ret = fn_sign_final(session, signature2.as_mut_ptr(), &mut sig2_len);
+        assert_eq!(ret, CKR_OK, "C_SignFinal(get2) failed for {}", mech_name);
+        signature2.resize(sig2_len as usize, 0);
+
+        // Compare signatures
+        assert_eq!(
+            signature1, signature2,
+            "Signatures do not match for {}",
+            mech_name
+        );
+    }
+
+    testtokn.finalize();
+}

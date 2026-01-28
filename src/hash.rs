@@ -218,7 +218,6 @@ pub fn hash_size(hash: CK_MECHANISM_TYPE) -> usize {
 }
 
 /// Returns the internal block size for the specified mechanism
-#[cfg(not(feature = "fips"))]
 pub fn block_size(hash: CK_MECHANISM_TYPE) -> usize {
     for hs in &HASH_MECH_SET {
         if hs.hash == hash {
@@ -387,4 +386,11 @@ impl Derive for HashKDFOperation {
 /// Public internal function to initialize a digest operation directly
 pub fn internal_hash_op(hash: CK_MECHANISM_TYPE) -> Result<Box<dyn Digest>> {
     Ok(Box::new(HashOperation::new(hash)?))
+}
+
+pub fn internal_hash_restore_op(
+    hash: CK_MECHANISM_TYPE,
+    state: &[u8],
+) -> Result<Box<dyn Digest>> {
+    Ok(Box::new(HashOperation::restore(hash, state)?))
 }

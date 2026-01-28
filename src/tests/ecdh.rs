@@ -142,6 +142,12 @@ fn test_ecc_derive_plain() {
     params.ulPublicDataLen = 0;
     params.pPublicData = std::ptr::null_mut();
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
@@ -160,6 +166,12 @@ fn test_ecc_derive_plain() {
     params.ulSharedDataLen = shared.len() as CK_ULONG;
     params.pSharedData = shared.as_ptr() as *mut u8;
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
@@ -176,6 +188,12 @@ fn test_ecc_derive_plain() {
     /* Invalid parameters: Blake kdf */
     params.kdf = CKD_BLAKE2B_160_KDF;
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
@@ -187,6 +205,12 @@ fn test_ecc_derive_plain() {
     );
     assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
     params.kdf = CKD_NULL;
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
 
     /* Without the explicit CKA_VALUE_LEN -- we should get "reasonable default" for AES */
     let derive_template = make_attr_template(
