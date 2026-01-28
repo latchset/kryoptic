@@ -223,6 +223,11 @@ fn test_ec_montgomery_derive(t: TestUnit) {
     /* Do the same on the Bob's side */
     params.pPublicData = alice_point.as_mut_ptr();
     // the size matches
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
 
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -283,6 +288,11 @@ fn test_ec_montgomery_derive(t: TestUnit) {
     /* Invalid parameters: Missing peer public key */
     params.ulPublicDataLen = 0;
     params.pPublicData = std::ptr::null_mut();
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
 
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
@@ -302,6 +312,12 @@ fn test_ec_montgomery_derive(t: TestUnit) {
     params.ulSharedDataLen = shared.len() as CK_ULONG;
     params.pSharedData = shared.as_ptr() as *mut u8;
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
@@ -318,6 +334,12 @@ fn test_ec_montgomery_derive(t: TestUnit) {
     /* Invalid parameters: Blake kdf */
     params.kdf = CKD_BLAKE2B_160_KDF;
 
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
@@ -329,6 +351,12 @@ fn test_ec_montgomery_derive(t: TestUnit) {
     );
     assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
     params.kdf = CKD_NULL;
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
 
     /* Without the explicit CKA_VALUE_LEN -- we should get "reasonable default" for AES */
     let derive_template = make_attr_template(
@@ -516,6 +544,11 @@ fn test_ec_motgomery_key() {
     let ref_value = value.clone();
 
     params.pPublicData = byte_ptr!(pubpoint1.as_ptr());
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
 
     let mut s_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
