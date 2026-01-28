@@ -15,6 +15,11 @@ use crate::pkcs11::*;
 
 use constant_time_eq::constant_time_eq;
 
+#[cfg(feature = "fips")]
+use crate::fips::set_fips_error_state;
+#[cfg(feature = "fips")]
+use std::sync::LazyLock;
+
 /// Maximum size for internal buffers
 ///
 /// Currently the algorithm with the largest block size is SHA3_224 with
@@ -45,6 +50,84 @@ fn hmac_mech_to_hash_mech(
         _ => return Err(CKR_MECHANISM_INVALID)?,
     })
 }
+
+/// Holds the result of the FIPS self-test
+#[cfg(feature = "fips")]
+struct FIPSSelftest {
+    result: CK_RV,
+}
+
+#[cfg(feature = "fips")]
+impl FIPSSelftest {
+    fn fail() -> FIPSSelftest {
+        set_fips_error_state();
+        FIPSSelftest {
+            result: CKR_FIPS_SELF_TEST_FAILED,
+        }
+    }
+    fn pass() -> FIPSSelftest {
+        FIPSSelftest { result: CKR_OK }
+    }
+}
+
+/// Lazy code to run FIPS Known Answer Tests (KATs) on initialization
+///
+/// Uses a test vector from OpenSSL.
+///
+/// If the calculated output does not match the expected output, it sets the
+/// FIPS error state and stores `CKR_FIPS_SELF_TEST_FAILED` in
+/// [FIPSSelfTest.result].
+#[cfg(feature = "fips")]
+static HMAC_SELFTEST: LazyLock<FIPSSelftest> = LazyLock::new(|| {
+    /* Test vector taken from OpenSSL selftest */
+    let mech: CK_MECHANISM_TYPE = CKM_SHA256_HMAC;
+    let plaintext: [u8; 16] = [
+        0xDD, 0x0C, 0x30, 0x33, 0x35, 0xF9, 0xE4, 0x2E, 0xC2, 0xEF, 0xCC, 0xBF,
+        0x07, 0x95, 0xEE, 0xA2,
+    ];
+    let secret: Vec<u8> = vec![
+        0xF4, 0x55, 0x66, 0x50, 0xAC, 0x31, 0xD3, 0x54, 0x61, 0x61, 0x0B, 0xAC,
+        0x4E, 0xD8, 0x1B, 0x1A, 0x18, 0x1B, 0x2D, 0x8A, 0x43, 0xEA, 0x28, 0x54,
+        0xCB, 0xAE, 0x22, 0xCA, 0x74, 0x56, 0x08, 0x13,
+    ];
+    let expect: [u8; 32] = [
+        0xF5, 0xF5, 0xE5, 0xF2, 0x66, 0x49, 0xE2, 0x40, 0xFC, 0x9E, 0x85, 0x7F,
+        0x2B, 0x9A, 0xBE, 0x28, 0x20, 0x12, 0x00, 0x92, 0x82, 0x21, 0x3E, 0x51,
+        0x44, 0x5D, 0xE3, 0x31, 0x04, 0x01, 0x72, 0x6B,
+    ];
+
+    let hash = match hmac_mech_to_hash_mech(mech) {
+        Ok(h) => h,
+        Err(_) => return FIPSSelftest::fail(),
+    };
+    let hashlen = hash::hash_size(hash);
+    let blocklen = hash::block_size(hash);
+    let op = match hash::internal_hash_op(hash) {
+        Ok(h) => h,
+        Err(_) => return FIPSSelftest::fail(),
+    };
+    let mut hmac = HMACOperation {
+        mech: CKM_SHA256_HMAC,
+        key: secret,
+        hashlen: hashlen,
+        blocklen: blocklen,
+        outputlen: 32,
+        state: [0u8; MAX_BSZ],
+        ipad: IPAD_INIT,
+        opad: OPAD_INIT,
+        inner: op,
+        finalized: false,
+        in_use: false,
+        signature: None,
+    };
+    if hmac.init().is_err() {
+        return FIPSSelftest::fail();
+    }
+    if Verify::verify(&mut hmac, &plaintext, &expect).is_err() {
+        return FIPSSelftest::fail();
+    }
+    FIPSSelftest::pass()
+});
 
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 struct HMACSaveState<'a> {
@@ -101,6 +184,10 @@ impl HMACOperation {
         outputlen: usize,
         signature: Option<&[u8]>,
     ) -> Result<HMACOperation> {
+        #[cfg(feature = "fips")]
+        if (*HMAC_SELFTEST).result != CKR_OK {
+            return Err((*HMAC_SELFTEST).result)?;
+        }
         let hash = hmac_mech_to_hash_mech(mech)?;
         let hashlen = hash::hash_size(hash);
         let blocklen = hash::block_size(hash);
@@ -137,15 +224,19 @@ impl HMACOperation {
         signature: Option<&[u8]>,
         state: &[u8],
     ) -> Result<HMACOperation> {
+        #[cfg(feature = "fips")]
+        if (*HMAC_SELFTEST).result != CKR_OK {
+            return Err((*HMAC_SELFTEST).result)?;
+        }
         let save_state: HMACSaveState =
             asn1::parse_single(state).map_err(|_| CKR_SAVED_STATE_INVALID)?;
 
         let outputlen = save_state.outputlen as usize;
 
         let mut op = Self::new(mech, key, outputlen, signature)?;
+
         let hash = hmac_mech_to_hash_mech(mech)?;
         op.inner = hash::internal_hash_restore_op(hash, save_state.dgst_state)?;
-        op.in_use = true;
         Ok(op)
     }
 
@@ -198,6 +289,7 @@ impl HMACOperation {
         if ret.is_err() {
             self.finalized = true;
         }
+
         ret
     }
 
@@ -225,6 +317,7 @@ impl HMACOperation {
 
         /* state -> output */
         output.copy_from_slice(&self.state[..output.len()]);
+
         Ok(())
     }
 
@@ -253,7 +346,10 @@ impl MechOperation for HMACOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        self.fips_approved
+        // There is no need to track fips approval for HMAC as all checks are
+        // performed ahead of time by the indicator machinery when the
+        // operation is initialized
+        None
     }
     fn state_size(&self) -> Result<usize> {
         let dummy_dgst_state = vec![0u8; self.inner.state_size()?];
