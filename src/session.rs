@@ -701,6 +701,7 @@ impl Session {
         &mut self,
         mechanisms: &Mechanisms,
         state: &[u8],
+        key: Option<&Object>,
     ) -> Result<()> {
         let pdata = match asn1::parse_single::<KProtectedData>(state) {
             Ok(p) => p,
@@ -730,7 +731,7 @@ impl Session {
             return Err(CKR_SAVED_STATE_INVALID)?;
         }
 
-        // NOTE: Currently only Digest operations can be restored,
+        // NOTE: Currently only Digest and HMAC operations (via Sign and Verify operations) can be restored.
         // If any other state is "saved" we return an error.
         if let Some(_op) = opstate.msgenc {
             return Err(CKR_GENERAL_ERROR)?;
@@ -745,18 +746,27 @@ impl Session {
             return Err(CKR_GENERAL_ERROR)?;
         }
         if let Some(op) = opstate.dgst {
+            if key.is_some() {
+                return Err(CKR_KEY_NOT_NEEDED)?;
+            }
             let mech = mechanisms.get(op.mech)?;
             let operation = mech.digest_restore(op.mech, op.data)?;
             <dyn Digest>::set_op(&mut self.operations, operation);
-        };
-        if let Some(_op) = opstate.sig {
-            return Err(CKR_GENERAL_ERROR)?;
         }
-        if let Some(_op) = opstate.ver {
-            return Err(CKR_GENERAL_ERROR)?;
+        if let Some(op) = opstate.sig {
+            let op_key = key.ok_or(CKR_KEY_NEEDED)?;
+            let mech_h = mechanisms.get(op.mech)?;
+            let operation = mech_h.sign_restore(op.mech, op_key, op.data)?;
+            <dyn Sign>::set_op(&mut self.operations, operation);
+        }
+        if let Some(op) = opstate.ver {
+            let op_key = key.ok_or(CKR_KEY_NEEDED)?;
+            let mech_h = mechanisms.get(op.mech)?;
+            let operation = mech_h.verify_restore(op.mech, op_key, op.data)?;
+            <dyn Verify>::set_op(&mut self.operations, operation);
         }
         if let Some(_op) = opstate.versig {
-            return Err(CKR_GENERAL_ERROR)?;
+            return Err(CKR_SAVED_STATE_INVALID)?;
         }
 
         Ok(())
