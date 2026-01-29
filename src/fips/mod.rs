@@ -11,6 +11,7 @@ use crate::token::Token;
 use ossl::fips;
 
 pub(crate) mod indicators;
+pub(crate) mod kats;
 
 /// Sets the FIPS module into the error state
 pub fn set_fips_error_state() {
