@@ -482,7 +482,6 @@ pub trait Digest: MechOperation {
     }
 }
 
-/* not used in FIPS builds */
 pub trait Mac: MechOperation {
     /// One-step MAC function
     ///
