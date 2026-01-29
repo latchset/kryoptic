@@ -9,8 +9,6 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-#[cfg(feature = "fips")]
-use crate::attribute::Attribute;
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
@@ -22,9 +20,7 @@ use crate::pkcs11::*;
 use constant_time_eq::constant_time_eq;
 
 #[cfg(feature = "fips")]
-use crate::fips::set_fips_error_state;
-#[cfg(feature = "fips")]
-use crate::hmac::test_get_hmac;
+use crate::fips::kats::TLS_PRF_SELFTEST;
 
 /// Macro to safely get a boolean attribute value or a default for a
 /// specific attribute of a key object.
@@ -72,13 +68,13 @@ const TLS_EXTENDED_MASTER_SECRET_LABEL: &[u8; 22] = b"extended master secret";
 /// Represents the TLS Pseudo-Random Function (PRF) based on HMAC
 /// (RFC 5246 Section 5)
 #[derive(Debug)]
-struct TLSPRF {
+pub(crate) struct TLSPRF {
     op: Box<dyn Mac>,
 }
 
 impl TLSPRF {
     /// Initializes a new TLS PRF instance using the specified HMAC mechanism
-    fn init(
+    pub(crate) fn init(
         key: &Object,
         mech: &Box<dyn Mechanism>,
         prf: CK_MECHANISM_TYPE,
@@ -103,7 +99,11 @@ impl TLSPRF {
     ///     P_hash(secret, seed) = HMAC_hash(secret, A(1) + seed) +
     ///                            HMAC_hash(secret, A(2) + seed) + ...
     ///     where A(0) = seed, A(i) = HMAC_hash(secret, A(i-1))
-    fn finish(&mut self, seed: &Vec<u8>, reqlen: usize) -> Result<Vec<u8>> {
+    pub(crate) fn finish(
+        &mut self,
+        seed: &Vec<u8>,
+        reqlen: usize,
+    ) -> Result<Vec<u8>> {
         let maclen = self.op.mac_len()?;
 
         let mut ax = vec![0u8; maclen];
@@ -156,86 +156,6 @@ pub fn test_tlsprf(
     let mut tlsprf = TLSPRF::init(key, mech, prf)?;
     tlsprf.finish(seed, reqlen)
 }
-
-/// Holds the result of the FIPS self-test for the TLS PRF.
-#[cfg(feature = "fips")]
-struct FIPSSelftest {
-    result: CK_RV,
-}
-
-/// Static Lazy variable to run FIPS Known Answer Tests (KATs) for the TLS PRF
-/// on initialization
-///
-/// Uses a test vector from OpenSSL.
-///
-/// If the calculated output does not match the expected output, it sets the
-/// FIPS error state and stores `CKR_FIPS_SELF_TEST_FAILED` in
-/// [FIPSSelfTest.result].
-#[cfg(feature = "fips")]
-static TLS_PRF_SELFTEST: LazyLock<FIPSSelftest> = LazyLock::new(|| {
-    let mut status = FIPSSelftest {
-        result: CKR_FIPS_SELF_TEST_FAILED,
-    };
-
-    /* Test vector taken from OpenSSL selftest */
-    let prf: CK_MECHANISM_TYPE = CKM_SHA256_HMAC;
-    let secret = hex::decode(
-        "202c88c00f84a17a20027079604787461176455539e705be\
-         730890602c289a5001e34eeb3a043e5d52a65e66125188bf",
-    )
-    .unwrap();
-    let label: &[u8] = b"key expansion";
-    let randoms = hex::decode(
-        "ae6c806f8ad4d80784549dff28a4b58fd837681a51d928c3e30ee5ff14f39868\
-         62e1fd91f23f558a605f28478c58cf72637b89784d959df7e946d3f07bd1b616",
-    )
-    .unwrap();
-    let mut seed = Vec::<u8>::with_capacity(label.len() + randoms.len());
-    seed.extend_from_slice(&label);
-    seed.extend_from_slice(&randoms);
-
-    let expect = hex::decode(
-        "d06139889fffac1e3a71865f504aa5d0d2a2e89506c6f2279b670c3e1b74f531\
-         016a2530c51a3a0f7e1d6590d0f0566b2f387f8d11fd4f731cdd572d2eae927f\
-         6f2f81410b25e6960be68985add6c38445ad9f8c64bf8068bf9a6679485d966f\
-         1ad6f68b43495b10a683755ea2b858d70ccac7ec8b053c6bd41ca299d4e51928",
-    )
-    .unwrap();
-
-    /* mock key */
-    let mut key = Object::new();
-    key.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))
-        .unwrap();
-    key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))
-        .unwrap();
-    key.set_attr(Attribute::from_bytes(CKA_VALUE, secret.clone()))
-        .unwrap();
-    key.set_attr(Attribute::from_ulong(
-        CKA_VALUE_LEN,
-        secret.len() as CK_ULONG,
-    ))
-    .unwrap();
-    key.set_attr(Attribute::from_bool(CKA_DERIVE, true))
-        .unwrap();
-
-    let mech = test_get_hmac(prf);
-
-    let mut tlsprf = match TLSPRF::init(&key, &mech, prf) {
-        Ok(a) => a,
-        Err(_) => return status,
-    };
-    let out = match tlsprf.finish(&seed, expect.len()) {
-        Ok(a) => a,
-        Err(_) => return status,
-    };
-    if out == expect {
-        status.result = CKR_OK;
-    }
-    if status.result == CKR_FIPS_SELF_TEST_FAILED {
-        set_fips_error_state();
-    }
-    status
-});
 
 /// Represents a TLS Key Derivation Function (KDF) operation
 ///
