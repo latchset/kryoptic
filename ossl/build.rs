@@ -133,6 +133,8 @@ fn build_ossl(out_file: &Path) {
         "no-sm2",
         "no-sm3",
         "no-sm4",
+        "no-docs",
+        "no-tests",
     ];
 
     match std::env::var("CARGO_CFG_TARGET_ARCH") {
@@ -239,8 +241,14 @@ fn build_ossl(out_file: &Path) {
                 panic!("could not configure OpenSSL");
             }
 
+            let jobs = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1);
+            let make_args = ["-j", &jobs.to_string()];
+
             if !std::process::Command::new("make")
                 .current_dir(&openssl_path)
+                .args(make_args)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
                 .output()
@@ -318,7 +326,9 @@ fn main() {
     let ossl_bindings = out_path.join("ossl_bindings.rs");
 
     /* Always emit known configs */
-    println!("cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_v400,ossl_mldsa,ossl_mlkem,ossl_slhdsa,param_clear_free)");
+    println!(
+        "cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_v400,ossl_mldsa,ossl_mlkem,ossl_slhdsa,param_clear_free)"
+    );
 
     /* OpenSSL Cryptography */
     if cfg!(feature = "dynamic") {
