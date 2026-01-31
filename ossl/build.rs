@@ -133,6 +133,8 @@ fn build_ossl(out_file: &Path) {
         "no-sm2",
         "no-sm3",
         "no-sm4",
+        "no-docs",
+        "no-tests"
     ];
 
     match std::env::var("CARGO_CFG_TARGET_ARCH") {
@@ -239,8 +241,14 @@ fn build_ossl(out_file: &Path) {
                 panic!("could not configure OpenSSL");
             }
 
+            let jobs = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+            let make_args = ["-j", &jobs.to_string()];
+
             if !std::process::Command::new("make")
                 .current_dir(&openssl_path)
+                .args(make_args)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
                 .output()
