@@ -11,7 +11,6 @@ use crate::config;
 use crate::defaults;
 use crate::error::Result;
 use crate::misc::copy_sized_string;
-use crate::pkcs11::vendor::KRR_TOKEN_NOT_INITIALIZED;
 use crate::pkcs11::*;
 use crate::session::Session;
 use crate::token::Token;
@@ -111,9 +110,7 @@ impl Slot {
                 if token.is_initialized() {
                     Ok(token)
                 } else {
-                    /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
-                     * available error, we should rreturn that instead */
-                    Err(KRR_TOKEN_NOT_INITIALIZED)?
+                    Err(CKR_TOKEN_NOT_INITIALIZED)?
                 }
             }
             Err(_) => Err(CKR_GENERAL_ERROR)?,
@@ -134,9 +131,7 @@ impl Slot {
                 } else if token.is_initialized() {
                     Ok(token)
                 } else {
-                    /* FIXME: once we have CKR_TOKEN_NOT_INITIALIZED as an
-                     * available error, we should rreturn that instead */
-                    Err(KRR_TOKEN_NOT_INITIALIZED)?
+                    Err(CKR_TOKEN_NOT_INITIALIZED)?
                 }
             }
             Err(_) => Err(CKR_GENERAL_ERROR)?,

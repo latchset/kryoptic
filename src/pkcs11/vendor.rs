@@ -17,7 +17,9 @@ pub const KRA_LOGIN_ATTEMPTS: CK_ATTRIBUTE_TYPE = KRY_VENDOR_OFFSET + 2;
 /* + 10 taken by pkcs11/validation_draft.rs */
 
 /* Errors */
-pub const KRR_TOKEN_NOT_INITIALIZED: CK_ULONG = KRY_VENDOR_OFFSET + 1;
+/* R.I.P. KRR_TOKEN_NOT_INITIALIZED (1),
+ * you served us well (replaced by CKR_TOKEN_NOT_INITIALIZED)
+ */
 pub const KRR_SLOT_CONFIG: CK_ULONG = KRY_VENDOR_OFFSET + 2;
 pub const KRR_CONFIG_ERROR: CK_ULONG = KRY_VENDOR_OFFSET + 3;
 
