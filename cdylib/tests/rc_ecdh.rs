@@ -1,38 +1,21 @@
+// Copyright 2026 Simo Sorce
+// See LICENSE.txt file for terms
+
+mod rc_common;
+
 #[test]
 #[cfg(feature = "integration_tests")]
 fn ecdh_reimport_loop_test() -> Result<(), Box<dyn std::error::Error>> {
-    use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
     use cryptoki::mechanism::{elliptic_curve, Mechanism};
     use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass};
     use cryptoki::session::UserType;
     use cryptoki::types::AuthPin;
     use std::env;
 
-    // Standard setup with a unique DB file for this test
-    let legacy_confname = format!("ecdh_reimport_loop_test.sql");
-    // ensure we have a clean state for this test
-    let _ = std::fs::remove_file(&legacy_confname);
-    unsafe {
-        env::set_var("KRYOPTIC_CONF", legacy_confname);
-    }
-
-    let module = env::var("TEST_PKCS11_MODULE").unwrap_or_else(|_| {
-        "../target/debug/libkryoptic_pkcs11.so".to_string()
-    });
-    eprintln!("Using module {}", module);
-
-    let pkcs11 = Pkcs11::new(module)?;
-    pkcs11.initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK))?;
-    let slot = pkcs11.get_slots_with_token()?[0];
-
-    let so_pin = AuthPin::new("87654321".into());
-    pkcs11.init_token(slot, &so_pin, "Test ECDH Re-import")?;
+    let (pkcs11, slot) = rc_common::setup_token("ecdh_reimport_loop_test");
 
     let user_pin = AuthPin::new("12345678".into());
     let session = pkcs11.open_rw_session(slot)?;
-    session.login(UserType::So, Some(&so_pin))?;
-    session.init_pin(&user_pin)?;
-    session.logout()?;
     session.login(UserType::User, Some(&user_pin))?;
 
     // Curve params: x25519
