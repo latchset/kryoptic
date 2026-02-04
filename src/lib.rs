@@ -493,20 +493,9 @@ struct GlobalConfig {
 
 /// Global, lazily initialized, read-write locked configuration instance.
 static CONFIG: LazyLock<RwLock<GlobalConfig>> = LazyLock::new(|| {
-    #[cfg(test)]
-    let conf = Config::new();
-
-    #[cfg(not(test))]
-    let conf = match Config::default_config() {
-        Ok(conf) => conf,
-        Err(_) => Config::new(),
-    };
-    /* if there is no config file or the configuration is malformed,
-     * set an empty config, an error will be returned later at
-     * fn_initialize() time */
-    let mut global_conf = GlobalConfig { conf: conf };
-    global_conf.conf.load_env_vars_overrides();
-    RwLock::new(global_conf)
+    RwLock::new(GlobalConfig {
+        conf: Config::new(),
+    })
 });
 
 /// tests helper
@@ -525,8 +514,11 @@ pub fn add_slot(slot: config::Slot) -> CK_RV {
 
 extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
+
     let mut ret: CK_RV = CKR_OK;
 
+    /* Before loading the default config see if there is a cutsom config
+     * provided via reserved arg pointer */
     if !_init_args.is_null() {
         let args = unsafe { *(_init_args as *const CK_C_INITIALIZE_ARGS) };
 
@@ -540,6 +532,15 @@ extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
             res_or_ret!(gconf.conf.from_init_args(init_arg));
         }
     }
+
+    if gconf.conf.slots.is_empty() {
+        match Config::default_config() {
+            Ok(conf) => gconf.conf = conf,
+            Err(_) => return CKR_TOKEN_NOT_PRESENT,
+        }
+    }
+
+    gconf.conf.load_env_vars_overrides();
 
     let mut wstate = global_wlock!(noinitcheck; (*STATE));
     if wstate.is_initialized() {
@@ -585,20 +586,6 @@ fn force_load_config() -> CK_RV {
     return CKR_OK;
 }
 
-#[cfg(all(test, feature = "eddsa"))]
-fn get_ec_point_encoding(save: &mut config::EcPointEncoding) -> CK_RV {
-    let gconf = global_rlock!(noinitcheck; (*CONFIG));
-    *save = gconf.conf.ec_point_encoding;
-    CKR_OK
-}
-
-#[cfg(all(test, feature = "eddsa"))]
-fn set_ec_point_encoding(val: config::EcPointEncoding) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
-    gconf.conf.ec_point_encoding = val;
-    CKR_OK
-}
-
 #[cfg(all(test, feature = "fips", feature = "nssdb"))]
 fn get_fips_behavior(
     slot_id: CK_SLOT_ID,
@@ -621,7 +608,10 @@ fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256)
 
 extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
-    global_wlock!((*STATE)).finalize()
+    let ret = global_wlock!((*STATE)).finalize();
+    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
+    gconf.conf = Config::new();
+    ret
 }
 
 /// Implementation of C_GetMechanismList function
