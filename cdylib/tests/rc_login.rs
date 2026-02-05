@@ -13,7 +13,7 @@ fn test_login() -> Result<(), Box<dyn std::error::Error>> {
     use cryptoki::error::{Error, RvError};
     use cryptoki::session::SessionState;
 
-    let (pkcs11, slot) = rc_common::setup_token("test_login");
+    let (pkcs11, slot) = rc_common::setup_token("test_login", &[]);
 
     let ro_session = pkcs11.open_ro_session(slot)?;
     let info = ro_session.get_session_info()?;

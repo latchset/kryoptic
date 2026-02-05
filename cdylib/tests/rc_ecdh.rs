@@ -12,7 +12,7 @@ fn ecdh_reimport_loop_test() -> Result<(), Box<dyn std::error::Error>> {
     use cryptoki::types::AuthPin;
     use std::env;
 
-    let (pkcs11, slot) = rc_common::setup_token("ecdh_reimport_loop_test");
+    let (pkcs11, slot) = rc_common::setup_token("ecdh_reimport_loop_test", &[]);
 
     let user_pin = AuthPin::new("12345678".into());
     let session = pkcs11.open_rw_session(slot)?;
