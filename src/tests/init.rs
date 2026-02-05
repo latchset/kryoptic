@@ -5,7 +5,7 @@
 use crate::fips::indicators::KRF_FIPS;
 use crate::tests::*;
 
-use serial_test::{parallel, serial};
+use serial_test::parallel;
 
 #[test]
 #[parallel]
@@ -260,56 +260,4 @@ fn test_init_token() {
     assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
-}
-
-fn test_re_init_token_common(dbtype: String, dbargs: String) {
-    let mut testtokn =
-        TestToken::new_type(dbtype, dbargs, String::from("test_reinit_token"));
-
-    let mut args = TestToken::make_init_args(Some(testtokn.make_init_string()));
-    let args_ptr = &mut args as *mut CK_C_INITIALIZE_ARGS;
-    let mut ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_in!(ret, [CKR_OK, CKR_CRYPTOKI_ALREADY_INITIALIZED]);
-
-    /* init once */
-    let pin_value = "SO Pin Value";
-    ret = fn_init_token(
-        testtokn.get_slot(),
-        CString::new(pin_value).unwrap().into_raw() as *mut u8,
-        pin_value.len() as CK_ULONG,
-        std::ptr::null_mut(),
-    );
-    assert_eq!(ret, CKR_OK);
-
-    let ret = fn_finalize(std::ptr::null_mut() as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    let ret = fn_initialize(args_ptr as *mut std::ffi::c_void);
-    assert_eq!(ret, CKR_OK);
-
-    testtokn.finalize();
-}
-
-#[cfg(feature = "sqlitedb")]
-#[test]
-#[serial]
-fn test_re_init_token_sql() {
-    let dbargs = format!("{}/{}", TESTDIR, "test_reinit_token.sql");
-    test_re_init_token_common(String::from("sqlite"), dbargs)
-}
-
-#[cfg(feature = "nssdb")]
-#[test]
-#[serial]
-fn test_re_init_token_nss() {
-    let dbargs = format!("configDir={}/{}", TESTDIR, "test_reinit_token");
-    test_re_init_token_common(String::from("nssdb"), dbargs)
-}
-
-#[cfg(feature = "memorydb")]
-#[test]
-#[serial]
-fn test_re_init_token_memory() {
-    let dbargs = "flags=encrypt".to_string();
-    test_re_init_token_common(String::from("memory"), dbargs)
 }

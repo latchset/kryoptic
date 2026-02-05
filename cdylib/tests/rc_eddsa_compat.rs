@@ -11,7 +11,7 @@ use cryptoki::types::AuthPin;
 #[cfg(feature = "integration_tests")]
 fn rc_eddsa_compat() -> Result<(), Box<dyn std::error::Error>> {
     // Setup with default configuration
-    let (pkcs11, slot) = rc_common::setup("rc_eddsa_compat", &[]);
+    let (pkcs11, slot) = rc_common::setup_token("rc_eddsa_compat", &[]);
 
     // Test Vectors for Ed25519ctx from C_CreateObject
     let point: Vec<u8> = vec![

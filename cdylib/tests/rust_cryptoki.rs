@@ -11,7 +11,7 @@ fn basic_example() -> Result<(), Box<dyn std::error::Error>> {
     use cryptoki::session::UserType;
     use cryptoki::types::AuthPin;
 
-    let (pkcs11, slot) = rc_common::setup_token("basic_example");
+    let (pkcs11, slot) = rc_common::setup_token("basic_example", &[]);
 
     let user_pin = AuthPin::new("12345678".into());
 

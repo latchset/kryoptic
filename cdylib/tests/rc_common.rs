@@ -72,42 +72,57 @@ fn setup_test_dir(name: &str) -> PathBuf {
     testdir
 }
 
-#[allow(dead_code)]
-pub fn setup_token(name: &str) -> (Pkcs11, Slot) {
-    let testdir = setup_test_dir(name);
-    let confname = testdir.join(format!("{}.sql", name));
-
-    // Set KRYOPTIC_CONF for the C library. Using `std::env::set_var` is not thread-safe.
-    unsafe {
-        env::set_var("KRYOPTIC_CONF", confname);
-    }
-
-    _setup_common()
-}
-
-#[allow(dead_code)]
-pub fn setup(name: &str, common_config_lines: &[&str]) -> (Pkcs11, Slot) {
+pub fn setup_token(name: &str, common_config_lines: &[&str]) -> (Pkcs11, Slot) {
     let testdir = setup_test_dir(name);
     let confname = testdir.join(format!("{}.conf", name));
-    let sql_path = testdir.join(format!("{}.sql", name));
 
     let mut config_content = String::new();
+    let mut dbtype = "sqlite".to_string();
+
+    let mut final_config_lines = Vec::new();
+    for line in common_config_lines {
+        let line_str = *line;
+        if line_str.starts_with("dbtype=") {
+            dbtype = line_str.splitn(2, '=').nth(1).unwrap().trim().to_string();
+        } else {
+            final_config_lines.push(line_str);
+        }
+    }
+
+    match dbtype.as_str() {
+        "sqlite" | "nssdb" | "memory" => {}
+        _ => panic!("Unsupported dbtype: {}", dbtype),
+    }
 
     // Add common section lines
-    for line in common_config_lines {
+    for line in final_config_lines {
         config_content.push_str(line);
         config_content.push('\n');
     }
 
-    // Add slot configuration pointing to the sqlite db
+    // Add slot configuration
+    let dbargs = match dbtype.as_str() {
+        "sqlite" => {
+            let sql_path = testdir.join(format!("{}.sql", name));
+            sql_path.to_str().unwrap().replace('\\', "\\\\")
+        }
+        "nssdb" => format!(
+            "configDir={}",
+            testdir.to_str().unwrap().replace('\\', "\\\\")
+        ),
+        "memory" => "flags=encrypt".to_string(),
+        _ => unreachable!(),
+    };
+
     let slot_config = format!(
         r#"
 [[slots]]
   slot = 0
-  dbtype = "sqlite"
+  dbtype = "{}"
   dbargs = "{}"
 "#,
-        sql_path.to_str().unwrap().replace('\\', "\\\\")
+        dbtype,
+        dbargs.replace('\\', "\\\\")
     );
     config_content.push_str(&slot_config);
 
@@ -133,25 +148,53 @@ pub fn modify_setup(
     )
     .join(name);
     let confname = testdir.join(format!("{}.conf", name));
-    let sql_path = testdir.join(format!("{}.sql", name));
 
     let mut config_content = String::new();
+    let mut dbtype = "sqlite".to_string();
+
+    let mut final_config_lines = Vec::new();
+    for line in common_config_lines {
+        let line_str = *line;
+        if line_str.starts_with("dbtype=") {
+            dbtype = line_str.splitn(2, '=').nth(1).unwrap().trim().to_string();
+        } else {
+            final_config_lines.push(line_str);
+        }
+    }
+
+    match dbtype.as_str() {
+        "sqlite" | "nssdb" | "memory" => {}
+        _ => panic!("Unsupported dbtype: {}", dbtype),
+    }
 
     // Add common section lines
-    for line in common_config_lines {
+    for line in final_config_lines {
         config_content.push_str(line);
         config_content.push('\n');
     }
 
-    // Add slot configuration pointing to the sqlite db
+    // Add slot configuration
+    let dbargs = match dbtype.as_str() {
+        "sqlite" => {
+            let sql_path = testdir.join(format!("{}.sql", name));
+            sql_path.to_str().unwrap().replace('\\', "\\\\")
+        }
+        "nssdb" => format!(
+            "configDir={}",
+            testdir.to_str().unwrap().replace('\\', "\\\\")
+        ),
+        "memory" => "flags=encrypt".to_string(),
+        _ => unreachable!(),
+    };
+
     let slot_config = format!(
         r#"
 [[slots]]
   slot = 0
-  dbtype = "sqlite"
+  dbtype = "{}"
   dbargs = "{}"
 "#,
-        sql_path.to_str().unwrap().replace('\\', "\\\\")
+        dbtype, dbargs
     );
     config_content.push_str(&slot_config);
 
