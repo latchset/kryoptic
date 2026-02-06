@@ -6,7 +6,6 @@ mod rc_common;
 use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
 use cryptoki::session::UserType;
 use cryptoki::types::AuthPin;
-use std::env;
 
 fn test_re_initialize_common(
     dbtype: &str,
@@ -23,9 +22,7 @@ fn test_re_initialize_common(
     pkcs11.finalize()?;
 
     // Re-initialize and check that we can still access data
-    let module = env::var("TEST_PKCS11_MODULE").unwrap_or_else(|_| {
-        "../target/debug/libkryoptic_pkcs11.so".to_string()
-    });
+    let module = rc_common::get_module();
     let pkcs11 = Pkcs11::new(&module).expect("Failed to load PKCS#11 module");
     pkcs11
         .initialize(CInitializeArgs::new(CInitializeFlags::OS_LOCKING_OK))

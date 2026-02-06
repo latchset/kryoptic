@@ -7,12 +7,22 @@ use cryptoki::slot::Slot;
 use cryptoki::types::AuthPin;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-fn _setup_common() -> (Pkcs11, Slot) {
-    let module = env::var("TEST_PKCS11_MODULE").unwrap_or_else(|_| {
-        "../target/debug/libkryoptic_pkcs11.so".to_string()
-    });
+pub fn get_module() -> String {
+    env::var("TEST_PKCS11_MODULE")
+        .unwrap_or_else(|_| "../target/debug/libkryoptic_pkcs11.so".to_string())
+}
+
+pub fn get_tmpdir() -> PathBuf {
+    PathBuf::from(
+        env::var("CARGO_TARGET_TMPDIR")
+            .unwrap_or_else(|_| "target/tmp".to_string()),
+    )
+}
+
+fn setup_common() -> (Pkcs11, Slot) {
+    let module = get_module();
 
     let pkcs11 = Pkcs11::new(&module).expect("Failed to load PKCS#11 module");
     pkcs11
@@ -41,13 +51,11 @@ fn _setup_common() -> (Pkcs11, Slot) {
     (pkcs11, slot)
 }
 
-fn _reload_common((pkcs11, _slot): (Pkcs11, Slot)) -> (Pkcs11, Slot) {
+fn reload_common((pkcs11, _slot): (Pkcs11, Slot)) -> (Pkcs11, Slot) {
     pkcs11
         .finalize()
         .expect("Failed to finalize previous Pkcs11 context");
-    let module = env::var("TEST_PKCS11_MODULE").unwrap_or_else(|_| {
-        "../target/debug/libkryoptic_pkcs11.so".to_string()
-    });
+    let module = get_module();
 
     let pkcs11 = Pkcs11::new(&module).expect("Failed to load PKCS#11 module");
     pkcs11
@@ -60,10 +68,7 @@ fn _reload_common((pkcs11, _slot): (Pkcs11, Slot)) -> (Pkcs11, Slot) {
 }
 
 fn setup_test_dir(name: &str) -> PathBuf {
-    let tmpdir = PathBuf::from(
-        env::var("CARGO_TARGET_TMPDIR")
-            .unwrap_or_else(|_| "target/tmp".to_string()),
-    );
+    let tmpdir = get_tmpdir();
     let testdir = tmpdir.join(name);
     if testdir.exists() {
         fs::remove_dir_all(&testdir).unwrap();
@@ -72,81 +77,11 @@ fn setup_test_dir(name: &str) -> PathBuf {
     testdir
 }
 
-pub fn setup_token(name: &str, common_config_lines: &[&str]) -> (Pkcs11, Slot) {
-    let testdir = setup_test_dir(name);
-    let confname = testdir.join(format!("{}.conf", name));
-
-    let mut config_content = String::new();
-    let mut dbtype = "sqlite".to_string();
-
-    let mut final_config_lines = Vec::new();
-    for line in common_config_lines {
-        let line_str = *line;
-        if line_str.starts_with("dbtype=") {
-            dbtype = line_str.splitn(2, '=').nth(1).unwrap().trim().to_string();
-        } else {
-            final_config_lines.push(line_str);
-        }
-    }
-
-    match dbtype.as_str() {
-        "sqlite" | "nssdb" | "memory" => {}
-        _ => panic!("Unsupported dbtype: {}", dbtype),
-    }
-
-    // Add common section lines
-    for line in final_config_lines {
-        config_content.push_str(line);
-        config_content.push('\n');
-    }
-
-    // Add slot configuration
-    let dbargs = match dbtype.as_str() {
-        "sqlite" => {
-            let sql_path = testdir.join(format!("{}.sql", name));
-            sql_path.to_str().unwrap().replace('\\', "\\\\")
-        }
-        "nssdb" => format!(
-            "configDir={}",
-            testdir.to_str().unwrap().replace('\\', "\\\\")
-        ),
-        "memory" => "flags=encrypt".to_string(),
-        _ => unreachable!(),
-    };
-
-    let slot_config = format!(
-        r#"
-[[slots]]
-  slot = 0
-  dbtype = "{}"
-  dbargs = "{}"
-"#,
-        dbtype,
-        dbargs.replace('\\', "\\\\")
-    );
-    config_content.push_str(&slot_config);
-
-    fs::write(&confname, config_content)
-        .expect("Failed to write kryoptic.conf");
-
-    // Set KRYOPTIC_CONF for the C library. Using `std::env::set_var` is not thread-safe.
-    unsafe {
-        env::set_var("KRYOPTIC_CONF", confname);
-    }
-    _setup_common()
-}
-
-#[allow(dead_code)]
-pub fn modify_setup(
+fn generate_config(
     name: &str,
+    testdir: &Path,
     common_config_lines: &[&str],
-    prev: (Pkcs11, Slot),
-) -> (Pkcs11, Slot) {
-    let testdir = PathBuf::from(
-        env::var("CARGO_TARGET_TMPDIR")
-            .unwrap_or_else(|_| "target/tmp".to_string()),
-    )
-    .join(name);
+) -> PathBuf {
     let confname = testdir.join(format!("{}.conf", name));
 
     let mut config_content = String::new();
@@ -201,9 +136,32 @@ pub fn modify_setup(
     fs::write(&confname, config_content)
         .expect("Failed to write kryoptic.conf");
 
+    confname
+}
+
+pub fn setup_token(name: &str, common_config_lines: &[&str]) -> (Pkcs11, Slot) {
+    let testdir = setup_test_dir(name);
+    let confname = generate_config(name, &testdir, common_config_lines);
+
     // Set KRYOPTIC_CONF for the C library. Using `std::env::set_var` is not thread-safe.
     unsafe {
         env::set_var("KRYOPTIC_CONF", confname);
     }
-    _reload_common(prev)
+    setup_common()
+}
+
+#[allow(dead_code)]
+pub fn modify_setup(
+    name: &str,
+    common_config_lines: &[&str],
+    prev: (Pkcs11, Slot),
+) -> (Pkcs11, Slot) {
+    let testdir = get_tmpdir().join(name);
+    let confname = generate_config(name, &testdir, common_config_lines);
+
+    // Set KRYOPTIC_CONF for the C library. Using `std::env::set_var` is not thread-safe.
+    unsafe {
+        env::set_var("KRYOPTIC_CONF", confname);
+    }
+    reload_common(prev)
 }
