@@ -319,12 +319,6 @@ fn test_config_multiple_tokens() {
     let name = String::from("test_config_multiple");
     let confname = format!("{}/{}.conf", TESTDIR, name);
     let dbs = [
-        #[cfg(feature = "memorydb")]
-        (
-            "memory",
-            String::from("flags=encrypt"), // TODO fix and test unencrypted memory!
-            "TOKEN MEMORYDB",
-        ),
         #[cfg(feature = "sqlitedb")]
         (
             "sqlite",

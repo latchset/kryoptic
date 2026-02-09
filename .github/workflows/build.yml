@@ -20,7 +20,7 @@ jobs:
         name: [standard, i686, minimal, pqc, no_sha1]
         linking: [dynamic, static, fips]
         build: [debug, release]
-        db: [sqlitedb, nssdb] # FIXME: Add "memorydb" when it will be persistent
+        db: [sqlitedb, nssdb]
         exclude:
           - name: no_sha1 # nssdb doesn't work with no_sha1
             db: nssdb

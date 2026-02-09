@@ -13,6 +13,9 @@ All notable changes to this project should be documented in this file.
 * Support for CKM_TLS12_MASTER_KEY_DERIVE_DH
     - [Minor TLS improvements](https://github.com/latchset/kryoptic/pull/399)
 
+* Removed memorydb backend
+    - [R.I.P Memory backend](https://github.com/latchset/kryoptic/pull/415)
+
 --
 
 ## [1.4.0]
