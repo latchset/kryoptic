@@ -11,8 +11,7 @@ want to know about when looking at the commit years later
 <!-- replace [ ] with [x] to select -->
 <!-- (strike not applicable items with ~~ around the text) -->
 
-- [ ] Test suite updated with functionality tests
-- [ ] Test suite updated with negative tests
+- [ ] Test suite updated
 - [ ] Rustdoc string were added or updated
 - [ ] CHANGELOG and/or other documentation added or updated
 - [ ] This is not a code change
