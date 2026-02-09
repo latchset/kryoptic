@@ -205,10 +205,6 @@ impl TestToken<'_> {
                 storage::sqlite::DBINFO.dbtype(),
                 format!("{}/{}.sql", TESTDIR, name),
             ),
-            #[cfg(feature = "memorydb")]
-            "memorydb" => {
-                (storage::memory::DBINFO.dbtype(), format!("flags=encrypt"))
-            }
             x => panic!("Unknown database {}", x),
         }
     }

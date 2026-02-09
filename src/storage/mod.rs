@@ -137,9 +137,6 @@ pub trait Storage: Debug + Send + Sync {
 pub mod aci;
 pub mod format;
 
-#[cfg(feature = "memorydb")]
-pub mod memory;
-
 #[cfg(any(feature = "nssdb", feature = "sqlitedb"))]
 mod sqlite_common;
 
@@ -154,9 +151,6 @@ pub mod nssdb;
 static STORAGE_DBS: LazyLock<Vec<&'static dyn StorageDBInfo>> =
     LazyLock::new(|| {
         let mut v = Vec::<&'static dyn StorageDBInfo>::with_capacity(4);
-
-        #[cfg(feature = "memorydb")]
-        v.push(&memory::DBINFO);
 
         #[cfg(feature = "sqlitedb")]
         v.push(&sqlite::DBINFO);

@@ -98,7 +98,6 @@ tlskdf = []
 simplekdf = []
 
 # Databases
-memorydb = ["aes", "hkdf", "pbkdf2"] # for encryption
 sqlitedb = ["dep:rusqlite", "aes", "hkdf", "pbkdf2"]
 nssdb = ["dep:rusqlite", "aes", "hmac", "pbkdf2"]
 
