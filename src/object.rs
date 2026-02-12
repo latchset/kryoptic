@@ -135,6 +135,29 @@ impl Object {
         }
     }
 
+    /// Generates the internal per object unique id using a stable input
+    pub fn generate_stable_unique(&mut self, stable_id: CK_ULONG) {
+        if !self
+            .attributes
+            .iter()
+            .any(|r| r.get_type() == CKA_UNIQUE_ID)
+        {
+            let class = match self.get_attr_as_ulong(CKA_CLASS) {
+                Ok(c) => c,
+                Err(_) => CK_UNAVAILABLE_INFORMATION,
+            };
+            let mut buf = [0u8; 16];
+            buf[..8].copy_from_slice(b"kryoptic");
+            let val = (class & 0xFFFFFFFF) as u32;
+            buf[8..12].copy_from_slice(&val.to_be_bytes());
+            let val = (stable_id & 0xFFFFFFFF) as u32;
+            buf[12..16].copy_from_slice(&val.to_be_bytes());
+            let uuid = Uuid::new_v8(buf).to_string();
+            self.attributes
+                .push(Attribute::from_string(CKA_UNIQUE_ID, uuid));
+        }
+    }
+
     /// Allow for a full copy of all attributes but regenerates the
     /// unique id
     pub fn blind_copy(&self) -> Result<Object> {

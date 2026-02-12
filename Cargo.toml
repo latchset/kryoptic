@@ -71,7 +71,7 @@ serde_json = "1.0.104"
 serial_test = "3.1.1"
 simplelog = { version = "0.12.2", default-features = false, optional = true }
 toml = { version = "0.9", default-features = false, features = ["display", "parse", "serde"] }
-uuid = { version = "1.4.1", features = ["v4"] }
+uuid = { version = "1.4.1", features = ["v4", "v8"] }
 ossl.workspace = true
 
 [dev-dependencies]
