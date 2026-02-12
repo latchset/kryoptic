@@ -161,8 +161,8 @@ pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
         String::from(""),
     ))?;
 
-    /* generate a unique id */
-    obj.generate_unique();
+    /* generate a unique but stable id */
+    obj.generate_stable_unique(1);
 
     /* invalid session handle will prevent it from being removed when
      * session objects are cleared on session closings */

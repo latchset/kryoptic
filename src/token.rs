@@ -800,7 +800,7 @@ fn insert_profile_object(
     obj.set_attr(Attribute::from_ulong(CKA_PROFILE_ID, profile_id))?;
 
     /* generate a unique id */
-    obj.generate_unique();
+    obj.generate_stable_unique(profile_id);
 
     /* invalid session handle will prevent it from being removed when
      * session objects are cleared on session closings */

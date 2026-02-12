@@ -56,7 +56,7 @@ jobs:
                 'crate(serde/default)' 'crate(serde/derive)' 'crate(serde_json/default)' \
                 'crate(serial_test/default)' \
                 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' 'crate(toml/serde)' \
-                'crate(uuid/default)' 'crate(uuid/v4)' 'crate(cryptoki/default)' \
+                'crate(uuid/default)' 'crate(uuid/v4)' 'crate(uuid/v8)' 'crate(cryptoki/default)' \
                 'crate(vsprintf/default)' 'crate(quick-xml/default)' 'crate(quick-xml/serialize)'
           fi
 
