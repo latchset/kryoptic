@@ -18,24 +18,21 @@ use crate::object::*;
 use crate::ossl::common::extract_public_key;
 use crate::ossl::eddsa::EddsaOperation;
 
-pub const MIN_EDDSA_SIZE_BITS: usize = BITS_ED25519;
-pub const MAX_EDDSA_SIZE_BITS: usize = BITS_ED448;
-
 /// Object that holds Mechanisms for EDDSA
 static EDDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     [
         Box::new(EddsaMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY,
+                ulMinKeySize: MIN_EC_EDWARDS_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_EDWARDS_SIZE_BITS as CK_ULONG,
+                flags: CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
             },
         }),
         Box::new(EddsaMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EDDSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EDDSA_SIZE_BITS).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
+                ulMinKeySize: MIN_EC_EDWARDS_SIZE_BITS as CK_ULONG,
+                ulMaxKeySize: MAX_EC_EDWARDS_SIZE_BITS as CK_ULONG,
+                flags: CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
             },
         }),
     ]

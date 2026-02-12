@@ -7,13 +7,12 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::ec::ecdsa::{MAX_EC_SIZE_BITS, MIN_EC_SIZE_BITS};
+use crate::ec::*;
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::cast_params;
 use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
-use crate::pkcs11::*;
 
 /// Object that holds Mechanisms for ECDH
 static ECDH_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
@@ -21,7 +20,7 @@ static ECDH_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
         info: CK_MECHANISM_INFO {
             ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
             ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-            flags: CKF_DERIVE,
+            flags: CKF_DERIVE | COMMON_CKF_EC_FLAGS,
         },
     })
 });

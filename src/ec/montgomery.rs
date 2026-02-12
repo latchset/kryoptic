@@ -25,7 +25,7 @@ static MONTGOMERY_MECHS: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
                 .unwrap(),
             ulMaxKeySize: CK_ULONG::try_from(MAX_EC_MONTGOMERY_SIZE_BITS)
                 .unwrap(),
-            flags: CKF_GENERATE_KEY_PAIR,
+            flags: CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
         },
     })
 });
@@ -83,9 +83,6 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         &(*PRIVATE_KEY_FACTORY),
     );
 }
-
-pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X25519;
-pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X448;
 
 /// The EC-Montgomery Public-Key Factory
 #[derive(Debug, Default)]
