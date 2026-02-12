@@ -177,11 +177,13 @@ impl Token {
     /// initialized or re-initialized. This function is meant to provision
     /// exclusively ephemeral data like internal session objects.
     fn token_internal_objects_init(&mut self) -> Result<()> {
+        // Add FIPS Validation objects
         #[cfg(feature = "fips")]
         if fips::token_init(self).is_err() {
             return Err(CKR_GENERAL_ERROR)?;
         }
 
+        // Add Profile Objects
         #[cfg(feature = "profiles")]
         {
             insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
@@ -193,6 +195,12 @@ impl Token {
             #[cfg(feature = "hkdf")]
             insert_profile_object(self, CKP_HKDF_TLS_TOKEN)?;
         }
+
+        // Generate Mechanism Objects for each known Mechanism
+        for mech in self.get_mechs_list() {
+            insert_mechanism_object(self, mech)?;
+        }
+
         Ok(())
     }
 
@@ -761,7 +769,10 @@ impl Token {
 
         /* First add internal session objects */
         for (_, o) in &self.session_objects {
-            let builtin = o.get_attr_as_ulong(CKA_CLASS)? == CKO_PROFILE;
+            let class = o.get_attr_as_ulong(CKA_CLASS)?;
+            let builtin = class == CKO_PROFILE
+                || class == CKO_VALIDATION
+                || class == CKO_MECHANISM;
             if !builtin && o.is_sensitive() {
                 match self.facilities.factories.check_sensitive(o, template) {
                     Err(_) => continue,
@@ -801,6 +812,28 @@ fn insert_profile_object(
 
     /* generate a unique id */
     obj.generate_stable_unique(profile_id);
+
+    /* invalid session handle will prevent it from being removed when
+     * session objects are cleared on session closings */
+    let _ = token.insert_object(CK_INVALID_HANDLE, obj)?;
+    Ok(())
+}
+
+/// Synthesize a CKO_MECHANISM object
+
+/// These objects only have an attribute named CKA_MECHANISM_TYPE
+pub fn insert_mechanism_object(
+    token: &mut Token,
+    mech_type: CK_MECHANISM_TYPE,
+) -> Result<()> {
+    use crate::attribute::Attribute;
+
+    let mut obj = Object::new();
+    obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_MECHANISM))?;
+    obj.set_attr(Attribute::from_ulong(CKA_MECHANISM_TYPE, mech_type))?;
+
+    /* generate a unique id */
+    obj.generate_stable_unique(mech_type);
 
     /* invalid session handle will prevent it from being removed when
      * session objects are cleared on session closings */
