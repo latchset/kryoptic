@@ -27,6 +27,26 @@ pub mod eddsa;
 #[cfg(feature = "ec_montgomery")]
 pub mod montgomery;
 
+/// Minimum EC key size
+pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
+/// Maximum EC key size
+pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
+/// Minimum Edwards key size
+pub const MIN_EC_EDWARDS_SIZE_BITS: usize = BITS_ED25519;
+/// Maximum Edwards key size
+pub const MAX_EC_EDWARDS_SIZE_BITS: usize = BITS_ED448;
+/// Minimum Montgomery key size
+pub const MIN_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X25519;
+/// Maximum Montgomery key size
+pub const MAX_EC_MONTGOMERY_SIZE_BITS: usize = BITS_X448;
+
+/// Common flags for supported features of EC curves to be exposed on mechanisms.
+pub const COMMON_CKF_EC_FLAGS: CK_FLAGS = CKF_EC_F_P
+    | CKF_EC_OID
+    | CKF_EC_UNCOMPRESS
+    | CKF_EC_COMPRESS
+    | CKF_EC_CURVENAME;
+
 /* Bit sizes for curves */
 pub const BITS_SECP256R1: usize = 256;
 #[allow(dead_code)]

@@ -19,11 +19,6 @@ use crate::ossl::ecdsa::EcdsaOperation;
 
 use asn1;
 
-/// Minimum ECDSA key size
-pub const MIN_EC_SIZE_BITS: usize = BITS_SECP256R1;
-/// Maximum ECDSA key size
-pub const MAX_EC_SIZE_BITS: usize = BITS_SECP521R1;
-
 /// Object that holds Mechanisms for ECDSA
 static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     [
@@ -31,14 +26,14 @@ static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
                 ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY,
+                flags: CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
             },
         }),
         Box::new(EcdsaMechanism {
             info: CK_MECHANISM_INFO {
                 ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
                 ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
+                flags: CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
             },
         }),
     ]
