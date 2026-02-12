@@ -138,3 +138,68 @@ fn test_deny_mechs() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_mechanism_objects() {
+    let mut testtokn = TestToken::initialized("test_mechanism_objects", None);
+    let session = testtokn.get_session(true);
+
+    let mut tmpl = make_attr_template(&[(CKA_CLASS, CKO_MECHANISM)], &[], &[]);
+
+    let ret = fn_find_objects_init(
+        session,
+        tmpl.as_mut_ptr(),
+        tmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut handles = Vec::<CK_OBJECT_HANDLE>::with_capacity(64);
+    let mut count = 64;
+    while count == 64 {
+        let mut ph = [CK_INVALID_HANDLE; 64];
+        let ret = fn_find_objects(session, ph.as_mut_ptr(), 64, &mut count);
+        assert_eq!(ret, CKR_OK);
+        if count > 0 {
+            handles.extend_from_slice(&ph[..count as usize]);
+        }
+    }
+
+    let ret = fn_find_objects_final(session);
+    assert_eq!(ret, CKR_OK);
+
+    assert!(handles.len() > 0, "No mechanism objects found");
+
+    for mech_type in [
+        #[cfg(feature = "rsa")]
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        #[cfg(feature = "hash")]
+        CKM_SHA256,
+        CKM_GENERIC_SECRET_KEY_GEN,
+    ] {
+        let mut search_tmpl = make_attr_template(
+            &[(CKA_CLASS, CKO_MECHANISM), (CKA_MECHANISM_TYPE, mech_type)],
+            &[],
+            &[],
+        );
+
+        let ret = fn_find_objects_init(
+            session,
+            search_tmpl.as_mut_ptr(),
+            search_tmpl.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let mut found_handle = CK_INVALID_HANDLE;
+        let mut found_count = 0;
+        let ret =
+            fn_find_objects(session, &mut found_handle, 1, &mut found_count);
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(found_count, 1);
+
+        let ret = fn_find_objects_final(session);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    testtokn.finalize();
+}
