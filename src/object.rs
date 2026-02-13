@@ -1,4 +1,3 @@
-// Copyright 2023 Simo Sorce
 // See LICENSE.txt file for terms
 
 //! This module defines the core representation of PKCS#11 objects (`Object`)
@@ -86,6 +85,9 @@ pub struct Object {
     /// Set to CK_INVALID_HANDLE when the object is not tied to
     /// a session or is new
     session: CK_SESSION_HANDLE,
+    /// All objects have a class so we keep it here in order to access it
+    /// directly in some internal functions
+    class: CK_OBJECT_CLASS,
     /// The object attributes as vector of [Attribute] values
     attributes: Vec<Attribute>,
     /// Flag to indicate if the object needs to be zeroized when it is
@@ -106,11 +108,12 @@ impl Drop for Object {
 
 impl Object {
     /// Creates a new empty Object
-    pub fn new() -> Object {
+    pub fn new(class: CK_OBJECT_CLASS) -> Object {
         Object {
             handle: CK_INVALID_HANDLE,
             session: CK_INVALID_HANDLE,
-            attributes: Vec::new(),
+            class: class,
+            attributes: vec![Attribute::from_ulong(CKA_CLASS, class)],
             zeroize: false,
         }
     }
@@ -161,7 +164,7 @@ impl Object {
     /// Allow for a full copy of all attributes but regenerates the
     /// unique id
     pub fn blind_copy(&self) -> Result<Object> {
-        let mut obj = Object::new();
+        let mut obj = Object::new(self.class);
         obj.generate_unique();
         for attr in &self.attributes {
             if attr.get_type() == CKA_UNIQUE_ID {
@@ -193,16 +196,49 @@ impl Object {
         self.session
     }
 
+    /// Gets the object's class
+    pub fn get_class(&self) -> CK_OBJECT_CLASS {
+        self.class
+    }
+
     create_bool_checker! {make is_token; from CKA_TOKEN; def false}
     create_bool_checker! {make is_private; from CKA_PRIVATE; def true}
-    create_bool_checker! {make is_sensitive; from CKA_SENSITIVE; def true}
     create_bool_checker! {make is_always_sensitive; from CKA_ALWAYS_SENSITIVE; def true}
     create_bool_checker! {make is_copyable; from CKA_COPYABLE; def true}
     create_bool_checker! {make is_modifiable; from CKA_MODIFIABLE; def true}
     create_bool_checker! {make is_destroyable; from CKA_DESTROYABLE; def false}
-    create_bool_checker! {make is_extractable; from CKA_EXTRACTABLE; def false}
     create_bool_checker! {make is_never_extractable; from CKA_NEVER_EXTRACTABLE; def false}
     create_bool_checker! {make always_auth; from CKA_ALWAYS_AUTHENTICATE; def false}
+
+    /// Report is the object is sensitive with a sensible default
+    pub fn is_sensitive(&self) -> bool {
+        match self.class {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+                for a in &self.attributes {
+                    if a.get_type() == CKA_SENSITIVE {
+                        return a.to_bool().unwrap_or(true);
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Report is the object is extractable with a sensible default
+    pub fn is_extractable(&self) -> bool {
+        match self.class {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+                for a in &self.attributes {
+                    if a.get_type() == CKA_EXTRACTABLE {
+                        return a.to_bool().unwrap_or(false);
+                    }
+                }
+                false
+            }
+            _ => true,
+        }
+    }
 
     /// Get an attribute from the object by attribute id
     pub fn get_attr(&self, ck_type: CK_ULONG) -> Option<&Attribute> {
@@ -212,6 +248,9 @@ impl Object {
     /// Sets or Replaces an attribute on the object
     pub fn set_attr(&mut self, a: Attribute) -> Result<()> {
         let atype = a.get_type();
+        if atype == CKA_CLASS {
+            self.class = a.to_ulong()?;
+        }
         match self.attributes.iter().position(|r| r.get_type() == atype) {
             Some(idx) => self.attributes[idx] = a,
             None => self.attributes.push(a),
@@ -458,8 +497,10 @@ pub(crate) use attr_element;
 /// specific object/key type, and any special behaviors for object
 /// creation/import or other manipulation.
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ObjectFactoryData {
+    /// Class of the object created by the factory
+    class: CK_OBJECT_CLASS,
     /// List of valid attributes and their properties for this factory
     attributes: Vec<ObjectAttr>,
     /// List of attributes considered sensitive
@@ -472,6 +513,21 @@ pub struct ObjectFactoryData {
 }
 
 impl ObjectFactoryData {
+    pub fn new(class: CK_OBJECT_CLASS) -> ObjectFactoryData {
+        ObjectFactoryData {
+            class: class,
+            attributes: Vec::new(),
+            sensitive: Vec::new(),
+            ephemeral: Vec::new(),
+            finalized: false,
+        }
+    }
+
+    /// Return the class of the object created by the factory
+    pub fn get_class(&self) -> CK_OBJECT_CLASS {
+        self.class
+    }
+
     /// Returns a reference to factory valid attributes and their properties
     pub fn get_attributes(&self) -> &Vec<ObjectAttr> {
         &self.attributes
@@ -593,22 +649,19 @@ pub trait ObjectFactory: Debug + Send + Sync {
         // default key attributes on CreateObject
         obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
 
-        match obj.get_attr_as_ulong(CKA_CLASS) {
-            Ok(c) => match c {
-                CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
-                    // default key attributes on CreateObject for PRIVATE/SECRET keys
-                    obj.set_attr(Attribute::from_bool(
-                        CKA_ALWAYS_SENSITIVE,
-                        false,
-                    ))?;
-                    obj.set_attr(Attribute::from_bool(
-                        CKA_NEVER_EXTRACTABLE,
-                        false,
-                    ))?;
-                }
-                _ => (),
-            },
-            Err(_) => (),
+        match obj.get_class() {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+                // default key attributes on CreateObject for PRIVATE/SECRET keys
+                obj.set_attr(Attribute::from_bool(
+                    CKA_ALWAYS_SENSITIVE,
+                    false,
+                ))?;
+                obj.set_attr(Attribute::from_bool(
+                    CKA_NEVER_EXTRACTABLE,
+                    false,
+                ))?;
+            }
+            _ => (),
         }
         Ok(obj)
     }
@@ -729,9 +782,10 @@ pub trait ObjectFactory: Debug + Send + Sync {
         unacceptable_flags: OAFlags,
         required_flags: OAFlags,
     ) -> Result<Object> {
-        let attributes = self.get_data().get_attributes();
-        let mut obj = Object::new();
+        let data = self.get_data();
+        let mut obj = Object::new(data.get_class());
 
+        let attributes = data.get_attributes();
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
@@ -742,7 +796,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
                     }
                     /* duplicate? */
                     match obj.get_attr(ck_attr.type_) {
-                        Some(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
+                        Some(a) => {
+                            if a.get_type() != CKA_CLASS {
+                                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                            }
+                        }
                         None => (),
                     }
                     if !attr.is(OAFlags::Ignored) {
@@ -976,7 +1034,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
 /// [Data Objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203218)
 /// (Version 3.1)
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct DataFactory {
     data: ObjectFactoryData,
 }
@@ -984,7 +1042,9 @@ struct DataFactory {
 impl DataFactory {
     /// Initializes a new DataFactory object
     fn new() -> DataFactory {
-        let mut factory: DataFactory = Default::default();
+        let mut factory: DataFactory = DataFactory {
+            data: ObjectFactoryData::new(CKO_DATA),
+        };
 
         factory.add_common_storage_attrs(false);
 
@@ -1105,7 +1165,7 @@ pub trait CertFactory: ObjectFactory {
 /// [X.509 public key certificate objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203224)
 /// (Version 3.1)
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct X509Factory {
     data: ObjectFactoryData,
 }
@@ -1113,7 +1173,9 @@ struct X509Factory {
 impl X509Factory {
     /// Initializes a new X509Factory object
     fn new() -> X509Factory {
-        let mut factory: X509Factory = Default::default();
+        let mut factory: X509Factory = X509Factory {
+            data: ObjectFactoryData::new(CKO_CERTIFICATE),
+        };
 
         factory.add_common_certificate_attrs();
 
@@ -1227,7 +1289,7 @@ impl CertFactory for X509Factory {}
 ///
 /// [Trust objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/pkcs11-spec-v3.2.html#_Toc195693091)
 /// (Version 3.2)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct TrustObject {
     data: ObjectFactoryData,
 }
@@ -1235,7 +1297,9 @@ struct TrustObject {
 impl TrustObject {
     /// Initializes a new TrustObject factory
     fn new() -> TrustObject {
-        let mut factory: TrustObject = Default::default();
+        let mut factory: TrustObject = TrustObject {
+            data: ObjectFactoryData::new(CKO_TRUST),
+        };
 
         // CKO_TRUST is a storage object.
         // Spec: if CKA_PRIVATE is not set, it defaults to CK_FALSE.
@@ -1356,7 +1420,7 @@ impl ObjectFactory for TrustObject {
 /// NSS Trust objects are vendor defined and are used in NSS DBs
 /// to store trust information about certificates.
 #[cfg(feature = "nssdb")]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct NSSTrustObject {
     data: ObjectFactoryData,
 }
@@ -1365,7 +1429,9 @@ struct NSSTrustObject {
 impl NSSTrustObject {
     /// Initializes a new NSSTrustObject factory
     fn new() -> NSSTrustObject {
-        let mut factory: NSSTrustObject = Default::default();
+        let mut factory: NSSTrustObject = NSSTrustObject {
+            data: ObjectFactoryData::new(CKO_NSS_TRUST),
+        };
 
         factory.add_common_storage_attrs(false);
         let attrs = factory.data.get_attributes_mut();
@@ -1775,16 +1841,19 @@ pub trait SecretKeyFactory: CommonKeyFactory {
 /// [Generic secret key](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203468)
 /// (Version 3.1)
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GenericSecretKeyFactory {
-    keysize: usize,
     data: ObjectFactoryData,
+    keysize: usize,
 }
 
 impl GenericSecretKeyFactory {
     /// Initializes a new GenericSecretKeyFactory object
     pub fn new() -> GenericSecretKeyFactory {
-        let mut factory: GenericSecretKeyFactory = Default::default();
+        let mut factory: GenericSecretKeyFactory = GenericSecretKeyFactory {
+            data: ObjectFactoryData::new(CKO_SECRET_KEY),
+            keysize: 0,
+        };
 
         factory.add_common_secret_key_attrs();
 

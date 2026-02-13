@@ -505,7 +505,7 @@ impl NSSStorage {
         mut rows: Rows,
         attrs: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut obj = Object::new();
+        let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
 
         let (cols, offset) = if attrs.len() == 0 {
             (Cow::Borrowed(&self.cols), 1)
@@ -576,6 +576,9 @@ impl NSSStorage {
                     }
                 };
                 obj.set_attr(attr)?;
+            }
+            if obj.get_class() == CK_UNAVAILABLE_INFORMATION {
+                return Err(CKR_GENERAL_ERROR)?;
             }
         }
 

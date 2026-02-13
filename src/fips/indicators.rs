@@ -24,7 +24,7 @@ use crate::Token;
 pub const KRF_FIPS: CK_ULONG = 1;
 
 /// The Validation Object factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ValidationFactory {
     data: ObjectFactoryData,
 }
@@ -32,7 +32,9 @@ pub struct ValidationFactory {
 impl ValidationFactory {
     /// Initializes the validation object factory
     fn new() -> ValidationFactory {
-        let mut factory: ValidationFactory = Default::default();
+        let mut factory: ValidationFactory = ValidationFactory {
+            data: ObjectFactoryData::new(CKO_VALIDATION),
+        };
 
         factory.add_common_storage_attrs(false);
 
@@ -112,13 +114,12 @@ pub(crate) static VALIDATION_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 ///
 /// This is generally done only once at token initialization
 pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
-    let mut obj = Object::new();
+    let mut obj = Object::new(CKO_VALIDATION);
     obj.set_attr(Attribute::from_bool(CKA_TOKEN, false))?;
     obj.set_attr(Attribute::from_bool(CKA_DESTROYABLE, false))?;
     obj.set_attr(Attribute::from_bool(CKA_MODIFIABLE, false))?;
     obj.set_attr(Attribute::from_bool(CKA_PRIVATE, false))?;
     obj.set_attr(Attribute::from_bool(CKA_SENSITIVE, false))?;
-    obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_VALIDATION))?;
     obj.set_attr(Attribute::from_ulong(
         CKA_VALIDATION_TYPE,
         CKV_TYPE_SOFTWARE,

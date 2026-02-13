@@ -769,11 +769,7 @@ impl Token {
 
         /* First add internal session objects */
         for (_, o) in &self.session_objects {
-            let class = o.get_attr_as_ulong(CKA_CLASS)?;
-            let builtin = class == CKO_PROFILE
-                || class == CKO_VALIDATION
-                || class == CKO_MECHANISM;
-            if !builtin && o.is_sensitive() {
+            if o.is_sensitive() {
                 match self.facilities.factories.check_sensitive(o, template) {
                     Err(_) => continue,
                     Ok(()) => (),
@@ -806,8 +802,7 @@ fn insert_profile_object(
 ) -> Result<()> {
     use crate::attribute::Attribute;
 
-    let mut obj = Object::new();
-    obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_PROFILE))?;
+    let mut obj = Object::new(CKO_PROFILE);
     obj.set_attr(Attribute::from_ulong(CKA_PROFILE_ID, profile_id))?;
 
     /* generate a unique id */
@@ -828,8 +823,7 @@ pub fn insert_mechanism_object(
 ) -> Result<()> {
     use crate::attribute::Attribute;
 
-    let mut obj = Object::new();
-    obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_MECHANISM))?;
+    let mut obj = Object::new(CKO_MECHANISM);
     obj.set_attr(Attribute::from_ulong(CKA_MECHANISM_TYPE, mech_type))?;
 
     /* generate a unique id */

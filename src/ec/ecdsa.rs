@@ -110,7 +110,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 }
 
 /// The ECDSA Public-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ECDSAPubFactory {
     data: ObjectFactoryData,
 }
@@ -118,7 +118,9 @@ pub struct ECDSAPubFactory {
 impl ECDSAPubFactory {
     /// Initializes a new ECDSA Public-Key factory
     pub fn new() -> ECDSAPubFactory {
-        let mut factory: ECDSAPubFactory = Default::default();
+        let mut factory: ECDSAPubFactory = ECDSAPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -221,7 +223,7 @@ impl PubKeyFactory for ECDSAPubFactory {
 }
 
 /// The ECDSA Private-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ECDSAPrivFactory {
     data: ObjectFactoryData,
 }
@@ -229,7 +231,9 @@ pub struct ECDSAPrivFactory {
 impl ECDSAPrivFactory {
     /// Initializes a new ECDSA Private-Key factory
     pub fn new() -> ECDSAPrivFactory {
-        let mut factory: ECDSAPrivFactory = Default::default();
+        let mut factory: ECDSAPrivFactory = ECDSAPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

@@ -181,8 +181,20 @@ impl SqliteStorage {
                 row.get::<_, u32>(1).map_err(bad_storage)? as CK_ULONG;
             let val = row.get_ref(2).map_err(bad_storage)?;
             if objid != id {
+                /* ensure current last object is valid before moving on */
+                match objects.last_mut() {
+                    Some(obj) => {
+                        if obj.get_class() == CK_UNAVAILABLE_INFORMATION {
+                            return Err(CKR_GENERAL_ERROR)?;
+                        }
+                    }
+                    _ => (),
+                }
+                /* init a new object to populate */
+                objects.push(Object::new(CK_UNAVAILABLE_INFORMATION));
+
+                /* mark the object id currently being processed */
                 objid = id;
-                objects.push(Object::new());
             }
             match objects.last_mut() {
                 Some(obj) => {

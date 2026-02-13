@@ -51,9 +51,8 @@ impl PBKDF2Mechanism {
     /// This is needed because the underlying PBKDF2 implementation (native or
     /// OpenSSL) expects a key object as input for the PRF (HMAC).
     fn mock_password_object(&self, key: Vec<u8>) -> Result<Object> {
-        let mut obj = Object::new();
+        let mut obj = Object::new(CKO_SECRET_KEY);
         obj.set_zeroize();
-        obj.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
         obj.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
         obj.set_attr(Attribute::from_ulong(
             CKA_VALUE_LEN,

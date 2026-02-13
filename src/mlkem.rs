@@ -141,7 +141,7 @@ fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
 }
 
 /// The ML-KEM Public Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MlKemPubFactory {
     data: ObjectFactoryData,
 }
@@ -149,7 +149,9 @@ pub struct MlKemPubFactory {
 impl MlKemPubFactory {
     /// Initializes a ML-KEM Public Key Factory
     pub fn new() -> MlKemPubFactory {
-        let mut factory: MlKemPubFactory = Default::default();
+        let mut factory: MlKemPubFactory = MlKemPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -271,7 +273,7 @@ fn mlkem_priv_check_import(obj: &mut Object) -> Result<()> {
 }
 
 /// The ML-KEM Private Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MlKemPrivFactory {
     data: ObjectFactoryData,
 }
@@ -279,7 +281,9 @@ pub struct MlKemPrivFactory {
 impl MlKemPrivFactory {
     /// Initializes a ML-KEM Private Key Factory
     pub fn new() -> MlKemPrivFactory {
-        let mut factory: MlKemPrivFactory = Default::default();
+        let mut factory: MlKemPrivFactory = MlKemPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 
