@@ -64,8 +64,7 @@ pub static HMAC_SELFTEST: LazyLock<FIPSSelftest> = LazyLock::new(|| {
 });
 
 fn secret_key_object(secret: Vec<u8>) -> Result<Object> {
-    let mut key = Object::new();
-    key.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))?;
+    let mut key = Object::new(CKO_SECRET_KEY);
     key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
     key.set_attr(Attribute::from_ulong(
         CKA_VALUE_LEN,

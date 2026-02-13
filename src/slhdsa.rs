@@ -170,7 +170,7 @@ fn slhdsa_pub_check_import(obj: &Object) -> Result<()> {
 }
 
 /// The SLH-DSA Public Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SlhDsaPubFactory {
     data: ObjectFactoryData,
 }
@@ -178,7 +178,9 @@ pub struct SlhDsaPubFactory {
 impl SlhDsaPubFactory {
     /// Initializes a SLH-DSA Public Key Factory
     pub fn new() -> SlhDsaPubFactory {
-        let mut factory: SlhDsaPubFactory = Default::default();
+        let mut factory: SlhDsaPubFactory = SlhDsaPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -286,7 +288,7 @@ fn slhdsa_priv_check_import(obj: &Object) -> Result<()> {
 }
 
 /// The SLH-DSA Private Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SlhDsaPrivFactory {
     data: ObjectFactoryData,
 }
@@ -294,7 +296,9 @@ pub struct SlhDsaPrivFactory {
 impl SlhDsaPrivFactory {
     /// Initializes a SLH-DSA Private Key Factory
     pub fn new() -> SlhDsaPrivFactory {
-        let mut factory: SlhDsaPrivFactory = Default::default();
+        let mut factory: SlhDsaPrivFactory = SlhDsaPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

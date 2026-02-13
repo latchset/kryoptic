@@ -93,14 +93,16 @@ pub(crate) fn check_key_len(len: usize) -> Result<()> {
 /// methods for generic manipulation of AES key objects (generation, derivation, wrapping ...)
 ///
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AesKeyFactory {
     data: ObjectFactoryData,
 }
 
 impl AesKeyFactory {
     fn new() -> AesKeyFactory {
-        let mut factory: AesKeyFactory = Default::default();
+        let mut factory: AesKeyFactory = AesKeyFactory {
+            data: ObjectFactoryData::new(CKO_SECRET_KEY),
+        };
 
         factory.add_common_secret_key_attrs();
 

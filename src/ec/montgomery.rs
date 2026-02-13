@@ -85,7 +85,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 }
 
 /// The EC-Montgomery Public-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ECMontgomeryPubFactory {
     data: ObjectFactoryData,
 }
@@ -93,7 +93,9 @@ pub struct ECMontgomeryPubFactory {
 impl ECMontgomeryPubFactory {
     /// Initializes a new EC-Montgomery Public-Key factory
     pub fn new() -> ECMontgomeryPubFactory {
-        let mut factory: ECMontgomeryPubFactory = Default::default();
+        let mut factory: ECMontgomeryPubFactory = ECMontgomeryPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -192,7 +194,7 @@ impl PubKeyFactory for ECMontgomeryPubFactory {
 }
 
 /// The EC-Montgomery Private-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ECMontgomeryPrivFactory {
     data: ObjectFactoryData,
 }
@@ -200,7 +202,9 @@ pub struct ECMontgomeryPrivFactory {
 impl ECMontgomeryPrivFactory {
     /// Initializes a new EC-Montgomery Private-Key factory
     pub fn new() -> ECMontgomeryPrivFactory {
-        let mut factory: ECMontgomeryPrivFactory = Default::default();
+        let mut factory: ECMontgomeryPrivFactory = ECMontgomeryPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

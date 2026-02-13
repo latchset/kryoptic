@@ -104,7 +104,7 @@ fn ffdh_public_key_info(
 }
 
 /// The FFDH Public-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FFDHPubFactory {
     data: ObjectFactoryData,
 }
@@ -112,7 +112,9 @@ pub struct FFDHPubFactory {
 impl FFDHPubFactory {
     /// Initializes a new FFDH Public-Key factory
     pub fn new() -> FFDHPubFactory {
-        let mut factory: FFDHPubFactory = Default::default();
+        let mut factory: FFDHPubFactory = FFDHPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -164,7 +166,7 @@ impl CommonKeyFactory for FFDHPubFactory {}
 impl PubKeyFactory for FFDHPubFactory {}
 
 /// The FFDH Private-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FFDHPrivFactory {
     data: ObjectFactoryData,
 }
@@ -172,7 +174,9 @@ pub struct FFDHPrivFactory {
 impl FFDHPrivFactory {
     /// Initializes a new FFDH Private-Key factory
     pub fn new() -> FFDHPrivFactory {
-        let mut factory: FFDHPrivFactory = Default::default();
+        let mut factory: FFDHPrivFactory = FFDHPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

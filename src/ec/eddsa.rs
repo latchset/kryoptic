@@ -91,7 +91,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 }
 
 /// The EdDSA-Edwards Public-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EDDSAPubFactory {
     data: ObjectFactoryData,
 }
@@ -99,7 +99,9 @@ pub struct EDDSAPubFactory {
 impl EDDSAPubFactory {
     /// Initializes a new EdDSA Public-Key factory
     pub fn new() -> EDDSAPubFactory {
-        let mut factory: EDDSAPubFactory = Default::default();
+        let mut factory: EDDSAPubFactory = EDDSAPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -198,7 +200,7 @@ impl PubKeyFactory for EDDSAPubFactory {
 }
 
 /// The EdDSA Private-Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EDDSAPrivFactory {
     data: ObjectFactoryData,
 }
@@ -206,7 +208,9 @@ pub struct EDDSAPrivFactory {
 impl EDDSAPrivFactory {
     /// Initializes a new EdDSA Private-Key factory
     pub fn new() -> EDDSAPrivFactory {
-        let mut factory: EDDSAPrivFactory = Default::default();
+        let mut factory: EDDSAPrivFactory = EDDSAPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

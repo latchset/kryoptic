@@ -140,7 +140,7 @@ impl JsonObjects {
             }
         }
         for jo in &self.objects {
-            let mut obj = Object::new();
+            let mut obj = Object::new(CK_UNAVAILABLE_INFORMATION);
             for (key, val) in &jo.attributes {
                 let (id, atype) = AttrType::attr_name_to_id_type(key)?;
                 let attr = match atype {
@@ -205,6 +205,9 @@ impl JsonObjects {
                 };
 
                 obj.set_attr(attr)?;
+            }
+            if obj.get_class() == CK_UNAVAILABLE_INFORMATION {
+                return Err(CKR_GENERAL_ERROR)?;
             }
             store.store_obj(obj)?;
         }

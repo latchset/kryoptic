@@ -195,7 +195,7 @@ fn rsa_check_public_key_info(obj: &mut Object) -> Result<()> {
 }
 
 /// The RSA Public-Key Factory.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RSAPubFactory {
     data: ObjectFactoryData,
 }
@@ -206,7 +206,9 @@ impl RSAPubFactory {
     /// Sets up common public key attributes and RSA-specific required attributes
     /// like CKA_MODULUS and CKA_PUBLIC_EXPONENT.
     pub fn new() -> RSAPubFactory {
-        let mut factory: RSAPubFactory = Default::default();
+        let mut factory: RSAPubFactory = RSAPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -344,7 +346,7 @@ impl RSAPrivateKey<'_> {
 }
 
 /// The RSA Private-Key Factory.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RSAPrivFactory {
     data: ObjectFactoryData,
 }
@@ -356,7 +358,9 @@ impl RSAPrivFactory {
     /// attributes (CKA_MODULUS, CKA_PUBLIC_EXPONENT, CKA_PRIVATE_EXPONENT, CKA_PRIME_1, etc.).
     /// Sets CKA_PRIVATE defaults appropriately.
     pub fn new() -> RSAPrivFactory {
-        let mut factory: RSAPrivFactory = Default::default();
+        let mut factory: RSAPrivFactory = RSAPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

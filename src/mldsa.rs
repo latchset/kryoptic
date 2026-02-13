@@ -148,7 +148,7 @@ fn mldsa_pub_check_import(obj: &Object) -> Result<()> {
 }
 
 /// The ML-DSA Public Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MlDsaPubFactory {
     data: ObjectFactoryData,
 }
@@ -156,7 +156,9 @@ pub struct MlDsaPubFactory {
 impl MlDsaPubFactory {
     /// Initializes a ML-DSA Public Key Factory
     pub fn new() -> MlDsaPubFactory {
-        let mut factory: MlDsaPubFactory = Default::default();
+        let mut factory: MlDsaPubFactory = MlDsaPubFactory {
+            data: ObjectFactoryData::new(CKO_PUBLIC_KEY),
+        };
 
         factory.add_common_public_key_attrs();
 
@@ -278,7 +280,7 @@ fn mldsa_priv_check_import(obj: &mut Object) -> Result<()> {
 }
 
 /// The ML-DSA Private Key Factory
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MlDsaPrivFactory {
     data: ObjectFactoryData,
 }
@@ -286,7 +288,9 @@ pub struct MlDsaPrivFactory {
 impl MlDsaPrivFactory {
     /// Initializes a ML-DSA Private Key Factory
     pub fn new() -> MlDsaPrivFactory {
-        let mut factory: MlDsaPrivFactory = Default::default();
+        let mut factory: MlDsaPrivFactory = MlDsaPrivFactory {
+            data: ObjectFactoryData::new(CKO_PRIVATE_KEY),
+        };
 
         factory.add_common_private_key_attrs();
 

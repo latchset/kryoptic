@@ -95,9 +95,7 @@ fn test_tlsprf_vectors() {
         let name = v.4;
 
         /* mock key */
-        let mut key = object::Object::new();
-        key.set_attr(Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY))
-            .unwrap();
+        let mut key = object::Object::new(CKO_SECRET_KEY);
         key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))
             .unwrap();
         key.set_attr(Attribute::from_bytes(CKA_VALUE, secret.clone()))
