@@ -6,12 +6,13 @@ use crate::error::Result;
 use crate::mechanism::Mechanisms;
 use crate::object::{ObjectFactories, ObjectType};
 use crate::pkcs11::*;
-use crate::token::Token;
 
 use ossl::fips;
 
 pub(crate) mod indicators;
 pub(crate) mod kats;
+
+pub const FIPS_VALIDATION_OBJ: CK_ULONG = 1;
 
 /// Sets the FIPS module into the error state
 pub fn set_fips_error_state() {
@@ -21,11 +22,6 @@ pub fn set_fips_error_state() {
 /// Checks if the FIPS module is in an error state
 pub fn check_fips_state_ok() -> bool {
     return fips::check_state_ok();
-}
-
-/// Helper function to set up validation objects at token initialization
-pub fn token_init(token: &mut Token) -> Result<()> {
-    indicators::insert_fips_validation(token)
 }
 
 /// Helper function to register the validation object factory

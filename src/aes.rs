@@ -176,7 +176,7 @@ impl ObjectFactory for AesKeyFactory {
         template: &[CK_ATTRIBUTE],
         origin: &Object,
     ) -> Result<Object> {
-        let obj = self.internal_object_derive(template, origin)?;
+        let obj = self.internal_key_derive(template, origin)?;
 
         let key_len = self.get_key_len(&obj);
         if key_len != 0 {
