@@ -202,11 +202,11 @@ impl SlhDsaPubFactory {
 impl ObjectFactory for SlhDsaPubFactory {
     /// Creates a SLH-DSA public key object
     ///
-    /// Uses [ObjectFactory::default_object_create()]
+    /// Uses [ObjectFactory::default_key_create()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         slhdsa_pub_check_import(&mut obj)?;
 
@@ -320,11 +320,11 @@ impl SlhDsaPrivFactory {
 impl ObjectFactory for SlhDsaPrivFactory {
     /// Creates a SLH-DSA private key object
     ///
-    /// Uses [ObjectFactory::default_object_create()]
+    /// Uses [ObjectFactory::default_key_create()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         slhdsa_priv_check_import(&mut obj)?;
 
@@ -446,7 +446,7 @@ impl Mechanism for SlhDsaMechanism {
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
         let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
+            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -474,7 +474,7 @@ impl Mechanism for SlhDsaMechanism {
         };
 
         let mut privkey =
-            PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
+            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;

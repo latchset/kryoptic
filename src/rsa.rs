@@ -229,15 +229,14 @@ impl RSAPubFactory {
         factory
     }
 }
-
 impl ObjectFactory for RSAPubFactory {
     /// Creates an RSA Public-Key Object from a template.
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_object_create] and performs
+    /// factory via [ObjectFactory::default_key_create] and performs
     /// RSA-specific checks using [rsa_check_import].
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         rsa_check_import(&mut obj)?;
 
@@ -397,15 +396,14 @@ impl RSAPrivFactory {
         factory
     }
 }
-
 impl ObjectFactory for RSAPrivFactory {
     /// Creates an RSA Private-Key Object from a template.
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_object_create] and performs
+    /// factory via [ObjectFactory::default_key_create] and performs
     /// RSA-specific checks using [rsa_check_import].
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         rsa_check_import(&mut obj)?;
 
@@ -481,7 +479,7 @@ impl PrivKeyFactory for RSAPrivFactory {
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut key = self.default_object_unwrap(template)?;
+        let mut key = self.default_key_unwrap(template)?;
 
         key.ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)?;
         key.ensure_ulong(CKA_KEY_TYPE, CKK_RSA)
@@ -682,7 +680,7 @@ impl Mechanism for RsaPKCSMechanism {
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
         let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
+            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -704,7 +702,7 @@ impl Mechanism for RsaPKCSMechanism {
         };
 
         let mut privkey =
-            PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
+            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;

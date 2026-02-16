@@ -127,7 +127,7 @@ impl ObjectFactory for AesKeyFactory {
     /// code and additionally ensures the key size is one of the AES allowed
     /// sizes (currently 128, 192 or 256 bits).
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
         obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)?;
@@ -171,7 +171,7 @@ impl ObjectFactory for AesKeyFactory {
 
     /// The AES derive adds key length checks on top of the generic secret
     /// derive helper
-    fn default_object_derive(
+    fn default_key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
@@ -303,7 +303,7 @@ impl Mechanism for AesMechanism {
         if mech.mechanism != CKM_AES_KEY_GEN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-        let mut key = AES_KEY_FACTORY.default_object_generate(template)?;
+        let mut key = AES_KEY_FACTORY.default_key_generate(template)?;
         key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         key.ensure_ulong(CKA_KEY_TYPE, CKK_AES)
@@ -621,12 +621,11 @@ impl Derive for AesKDFOperation<'_> {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
-
         key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DERIVE)?;
 
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
-        let mut obj = factory.default_object_derive(template, key)?;
+        let mut obj = factory.default_key_derive(template, key)?;
 
         let mechanism = CK_MECHANISM {
             mechanism: self.mech,

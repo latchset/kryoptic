@@ -611,7 +611,7 @@ impl TLSKDFOperation {
         let tmpl = self.verify_mk_template(template)?;
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
+        let mut dkey = factory.default_key_derive(tmpl.as_slice(), key)?;
 
         let mech = mechanisms.get(self.prf)?;
         let seed = match self.mech {
@@ -760,7 +760,7 @@ impl TLSKDFOperation {
             let factory = objfactories
                 .get_obj_factory_from_key_template(mac_tmpl.as_slice())?;
             let mut climac =
-                factory.default_object_derive(mac_tmpl.as_slice(), key)?;
+                factory.default_key_derive(mac_tmpl.as_slice(), key)?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut climac, dkm[i..(i + maclen)].to_vec())?;
@@ -768,7 +768,7 @@ impl TLSKDFOperation {
             i += maclen;
             keys.push(climac);
             let mut srvmac =
-                factory.default_object_derive(mac_tmpl.as_slice(), key)?;
+                factory.default_key_derive(mac_tmpl.as_slice(), key)?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut srvmac, dkm[i..(i + maclen)].to_vec())?;
@@ -781,7 +781,7 @@ impl TLSKDFOperation {
             let factory = objfactories
                 .get_obj_factory_from_key_template(key_tmpl.as_slice())?;
             let mut clikey =
-                factory.default_object_derive(key_tmpl.as_slice(), key)?;
+                factory.default_key_derive(key_tmpl.as_slice(), key)?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut clikey, dkm[i..(i + keylen)].to_vec())?;
@@ -789,7 +789,7 @@ impl TLSKDFOperation {
             i += keylen;
             keys.push(clikey);
             let mut srvkey =
-                factory.default_object_derive(key_tmpl.as_slice(), key)?;
+                factory.default_key_derive(key_tmpl.as_slice(), key)?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut srvkey, dkm[i..(i + keylen)].to_vec())?;
@@ -835,7 +835,7 @@ impl TLSKDFOperation {
 
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey = factory.default_object_derive(tmpl.as_slice(), key)?;
+        let mut dkey = factory.default_key_derive(tmpl.as_slice(), key)?;
         let dkmlen = match dkey.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
             Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,

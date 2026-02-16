@@ -114,17 +114,16 @@ impl ECMontgomeryPubFactory {
         factory
     }
 }
-
 impl ObjectFactory for ECMontgomeryPubFactory {
     /// Creates an EC-Montgomery Public-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_object_create()]
+    /// factory via [ObjectFactory::default_key_create()]
     ///
     /// Additionally validates the Public Point Format and that its size
     /// is consistent with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.7:
          * CKA_EC_PARAMS, Byte array,
@@ -223,17 +222,16 @@ impl ECMontgomeryPrivFactory {
         factory
     }
 }
-
 impl ObjectFactory for ECMontgomeryPrivFactory {
     /// Creates an EC-Montgomery Private-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_object_create()]
+    /// factory via [ObjectFactory::default_key_create()]
     ///
     /// Additionally validates that the private key size is consistent
     /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.8:
          * CKA_EC_PARAMS, Byte array,
@@ -312,12 +310,13 @@ impl PrivKeyFactory for ECMontgomeryPrivFactory {
         import_from_wrapped(
             CKK_EC_MONTGOMERY,
             data,
-            self.default_object_unwrap(template)?,
+            self.default_key_unwrap(template)?,
         )
     }
 }
 
 /// Object that represents CKK_EC_MONTGOMERY related mechanisms
+
 #[derive(Debug)]
 struct ECMontgomeryMechanism {
     info: CK_MECHANISM_INFO,
@@ -335,7 +334,7 @@ impl Mechanism for ECMontgomeryMechanism {
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
         let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
+            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -344,7 +343,7 @@ impl Mechanism for ECMontgomeryMechanism {
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let mut privkey =
-            PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
+            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
