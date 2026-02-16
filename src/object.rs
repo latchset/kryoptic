@@ -636,10 +636,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     /// Default object creation function
     ///
     /// Uses `internal_object_create()` with appropriate flags.
-    fn default_object_create(
-        &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
+    fn default_key_create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.internal_object_create(
             template,
             OAFlags::NeverSettable,
@@ -676,7 +673,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     /// Uses `internal_object_create()` with appropriate flags.
     ///
     /// Marks the object for zeroization.
-    fn default_object_generate(
+    fn default_key_generate(
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
@@ -692,10 +689,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     /// Default key object unwrapping function
     ///
     /// Uses `internal_object_create()` with appropriate flags.
-    fn default_object_unwrap(
-        &self,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
+    fn default_key_unwrap(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         self.internal_object_create(
             template,
             OAFlags::SettableOnlyOnCreate,
@@ -706,7 +700,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     /// Default key object derivation function
     ///
     /// Uses `internal_object_derive()`
-    fn default_object_derive(
+    fn default_key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
@@ -1077,9 +1071,9 @@ impl DataFactory {
 impl ObjectFactory for DataFactory {
     /// Creates a new Data Object from the template
     ///
-    /// Uses `default_object_create()`
+    /// Uses `default_key_create()`
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        self.default_object_create(template)
+        self.default_key_create(template)
     }
 
     fn copy(
@@ -1231,7 +1225,7 @@ impl ObjectFactory for X509Factory {
     /// Validates that the resulting object conforms to the spec
     /// requirements or returns an appropriate error.
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         let ret = self.basic_cert_object_create_checks(&mut obj);
         if ret != CKR_OK {
@@ -1367,7 +1361,7 @@ impl TrustObject {
 
 impl ObjectFactory for TrustObject {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         obj.ensure_ulong(CKA_CLASS, CKO_TRUST)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -1512,7 +1506,7 @@ impl NSSTrustObject {
 #[cfg(feature = "nssdb")]
 impl ObjectFactory for NSSTrustObject {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
 
         obj.ensure_ulong(CKA_CLASS, CKO_NSS_TRUST)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -1781,12 +1775,13 @@ pub trait SecretKeyFactory: CommonKeyFactory {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         let mut obj =
-            ok_or_clear!(&mut data; self.default_object_unwrap(template));
+            ok_or_clear!(&mut data; self.default_key_unwrap(template));
         self.set_key(&mut obj, data)?;
         Ok(obj)
     }
 
     /// Returns the actual secret value length in bytes
+
     fn get_key_buffer_len(&self, obj: &Object) -> Result<usize> {
         Ok(obj
             .get_attr_as_bytes(CKA_VALUE)
@@ -1905,7 +1900,7 @@ impl ObjectFactory for GenericSecretKeyFactory {
     ///
     /// Sets the CKA_VALUE_LEN attribute from the key length, if missing.
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
@@ -2052,8 +2047,7 @@ impl Mechanism for GenericSecretKeyMechanism {
         _: &Mechanisms,
         _: &ObjectFactories,
     ) -> Result<Object> {
-        let mut key =
-            GENERIC_SECRET_FACTORY.default_object_generate(template)?;
+        let mut key = GENERIC_SECRET_FACTORY.default_key_generate(template)?;
         key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         key.ensure_ulong(CKA_KEY_TYPE, self.keytype())
@@ -2445,7 +2439,7 @@ impl ObjectFactories {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         let factory = self.get_obj_factory_from_key_template(template)?;
-        factory.default_object_derive(template, key)
+        factory.default_key_derive(template, key)
     }
 }
 

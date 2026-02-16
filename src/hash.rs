@@ -362,12 +362,11 @@ impl Derive for HashKDFOperation {
                         .as_secret_key_factory()?
                         .recommend_key_size(hashsize)?,
                 )?;
-
                 tmpl.add_ulong(CKA_VALUE_LEN, &keysize);
             }
         }
 
-        let mut obj = factory.default_object_derive(tmpl.as_slice(), key)?;
+        let mut obj = factory.default_key_derive(tmpl.as_slice(), key)?;
 
         let mut dkm = vec![0u8; hashsize];
         op.digest(

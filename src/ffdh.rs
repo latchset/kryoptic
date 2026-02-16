@@ -136,17 +136,16 @@ impl FFDHPubFactory {
         factory
     }
 }
-
 impl ObjectFactory for FFDHPubFactory {
     /// Creates an FFDH Public-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_object_create()]
+    /// factory via [ObjectFactory::default_key_create()]
     ///
     /// Additionally validates that the key is based on a well known
     /// group based on safe primes
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_object_create(template)?;
+        let mut obj = self.default_key_create(template)?;
         let group = ffdh_groups::get_group_name(&obj)?;
         ffdh_public_key_info(group, &mut obj)?;
         Ok(obj)
@@ -202,17 +201,16 @@ impl FFDHPrivFactory {
         factory
     }
 }
-
 impl ObjectFactory for FFDHPrivFactory {
     /// Creates an FFDH Private-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_object_create()]
+    /// factory via [ObjectFactory::default_key_create()]
     ///
     /// Additionally validates that the key is based on a well known
     /// group based on safe primes
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.default_object_create(template)?;
+        let obj = self.default_key_create(template)?;
         let _ = ffdh_groups::get_group_name(&obj)?;
 
         Ok(obj)
@@ -279,7 +277,7 @@ impl Mechanism for FFDHMechanism {
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
         let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_object_generate(pubkey_template)?;
+            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -288,7 +286,7 @@ impl Mechanism for FFDHMechanism {
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         let mut privkey =
-            PRIVATE_KEY_FACTORY.default_object_generate(prikey_template)?;
+            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
