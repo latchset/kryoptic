@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::fips;
 use crate::mechanism::Mechanisms;
 use crate::misc::copy_sized_string;
-use crate::object::{Object, ObjectFactories};
+use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::pkcs11::vendor::KRY_UNSPEC;
 use crate::pkcs11::*;
 use crate::register_all;
@@ -179,26 +179,34 @@ impl Token {
     fn token_internal_objects_init(&mut self) -> Result<()> {
         // Add FIPS Validation objects
         #[cfg(feature = "fips")]
-        if fips::token_init(self).is_err() {
-            return Err(CKR_GENERAL_ERROR)?;
+        {
+            insert_builtin_object(
+                self,
+                CKO_VALIDATION,
+                fips::FIPS_VALIDATION_OBJ,
+            )?;
         }
 
         // Add Profile Objects
         #[cfg(feature = "profiles")]
         {
-            insert_profile_object(self, CKP_BASELINE_PROVIDER)?;
-            insert_profile_object(self, CKP_EXTENDED_PROVIDER)?;
-            insert_profile_object(self, CKP_AUTHENTICATION_TOKEN)?;
-            insert_profile_object(self, CKP_PUBLIC_CERTIFICATES_TOKEN)?;
+            insert_builtin_object(self, CKO_PROFILE, CKP_BASELINE_PROVIDER)?;
+            insert_builtin_object(self, CKO_PROFILE, CKP_EXTENDED_PROVIDER)?;
+            insert_builtin_object(self, CKO_PROFILE, CKP_AUTHENTICATION_TOKEN)?;
+            insert_builtin_object(
+                self,
+                CKO_PROFILE,
+                CKP_PUBLIC_CERTIFICATES_TOKEN,
+            )?;
             // We do not support *all* mechanisms so keep this off for now
-            // insert_profile_object(self, CKP_COMPLETE_PROVIDER)?;
+            // insert_builtin_object(self, CKO_PROFILE, CKP_COMPLETE_PROVIDER)?;
             #[cfg(feature = "hkdf")]
-            insert_profile_object(self, CKP_HKDF_TLS_TOKEN)?;
+            insert_builtin_object(self, CKO_PROFILE, CKP_HKDF_TLS_TOKEN)?;
         }
 
         // Generate Mechanism Objects for each known Mechanism
         for mech in self.get_mechs_list() {
-            insert_mechanism_object(self, mech)?;
+            insert_builtin_object(self, CKO_MECHANISM, mech)?;
         }
 
         Ok(())
@@ -792,42 +800,21 @@ impl Token {
     }
 }
 
-/// Synthesize a CKO_PROFILE object
+/// Helper function to add a built-in object like Profiles and Mechanisms
 ///
-/// This is done when the token is instantiated or initialized.
-#[cfg(feature = "profiles")]
-fn insert_profile_object(
+/// Note that the 'id' parameter here identifies the object and is also
+/// used to generate stable CKA_UNIQUE_IDs.
+/// For CKO_PROFILE objects the id is also the CKA_PROFILE_ID
+/// For CKO_MECHANISM objects the id is the mechanism id.
+fn insert_builtin_object(
     token: &mut Token,
-    profile_id: CK_PROFILE_ID,
+    class: CK_OBJECT_CLASS,
+    id: CK_ULONG,
 ) -> Result<()> {
-    use crate::attribute::Attribute;
-
-    let mut obj = Object::new(CKO_PROFILE);
-    obj.set_attr(Attribute::from_ulong(CKA_PROFILE_ID, profile_id))?;
-
-    /* generate a unique id */
-    obj.generate_stable_unique(profile_id);
-
-    /* invalid session handle will prevent it from being removed when
-     * session objects are cleared on session closings */
-    let _ = token.insert_object(CK_INVALID_HANDLE, obj)?;
-    Ok(())
-}
-
-/// Synthesize a CKO_MECHANISM object
-
-/// These objects only have an attribute named CKA_MECHANISM_TYPE
-pub fn insert_mechanism_object(
-    token: &mut Token,
-    mech_type: CK_MECHANISM_TYPE,
-) -> Result<()> {
-    use crate::attribute::Attribute;
-
-    let mut obj = Object::new(CKO_MECHANISM);
-    obj.set_attr(Attribute::from_ulong(CKA_MECHANISM_TYPE, mech_type))?;
-
-    /* generate a unique id */
-    obj.generate_stable_unique(mech_type);
+    let factory = token
+        .get_object_factories()
+        .get_factory(ObjectType::new(class, 0))?;
+    let obj = factory.builtin_create(id)?;
 
     /* invalid session handle will prevent it from being removed when
      * session objects are cleared on session closings */

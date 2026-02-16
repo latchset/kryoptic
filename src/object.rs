@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use crate::attribute::{AttrType, Attribute, CkAttrs};
 use crate::error::{Error, Result};
 use crate::mechanism::{Mechanism, Mechanisms};
-use crate::misc::zeromem;
+use crate::misc::{sizeof, void_ptr, zeromem};
 use crate::pkcs11::*;
 use crate::CSPRNG;
 
@@ -474,6 +474,9 @@ impl ObjectAttr {
 
     /// Check if a specific flag is present on the ObjectAttr
     pub fn is(&self, val: OAFlags) -> bool {
+        if val.is_empty() {
+            return false;
+        }
         self.flags.contains(val)
     }
 
@@ -591,6 +594,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
         return Err(CKR_GENERAL_ERROR)?;
     }
 
+    /// Creates a new Built-In object from the template
+    ///
+    /// Implemented only by mechanism that provide built-in objects
+    fn builtin_create(&self, _id: CK_ULONG) -> Result<Object> {
+        return Err(CKR_GENERAL_ERROR)?;
+    }
+
     /// Creates a copy of the object
     ///
     /// Uses the default_copy() internal method by default.
@@ -635,9 +645,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
 
     /// Default object creation function
     ///
-    /// Uses `internal_object_create()` with appropriate flags.
+    /// Uses `internal_key_create()` with appropriate flags.
     fn default_key_create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.internal_object_create(
+        let mut obj = self.internal_key_create(
             template,
             OAFlags::NeverSettable,
             OAFlags::RequiredOnCreate,
@@ -670,16 +680,16 @@ pub trait ObjectFactory: Debug + Send + Sync {
 
     /// Default key object generation function
     ///
-    /// Uses `internal_object_create()` with appropriate flags.
+    /// Uses `internal_key_create()` with appropriate flags.
     ///
     /// Marks the object for zeroization.
     fn default_key_generate(
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut key = self.internal_object_create(
+        let mut key = self.internal_key_create(
             template,
-            OAFlags::SettableOnlyOnCreate,
+            OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
             OAFlags::RequiredOnGenerate,
         )?;
         key.set_zeroize();
@@ -688,43 +698,43 @@ pub trait ObjectFactory: Debug + Send + Sync {
 
     /// Default key object unwrapping function
     ///
-    /// Uses `internal_object_create()` with appropriate flags.
+    /// Uses `internal_key_create()` with appropriate flags.
     fn default_key_unwrap(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        self.internal_object_create(
+        self.internal_key_create(
             template,
-            OAFlags::SettableOnlyOnCreate,
+            OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
             OAFlags::AlwaysRequired,
         )
     }
 
     /// Default key object derivation function
     ///
-    /// Uses `internal_object_derive()`
+    /// Uses `internal_key_derive()`
     fn default_key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
     ) -> Result<Object> {
-        self.internal_object_derive(template, origin)
+        self.internal_key_derive(template, origin)
     }
 
     /// The internal key object derivation function
     ///
-    /// Uses `internal_object_create()` with appropriate flags.
+    /// Uses `internal_key_create()` with appropriate flags.
     ///
     /// Sets appropate default values for [CKA_LOCAL],
     /// [CKA_ALWAYS_SENSITIVE], [CKA_NEVER_EXTRACTABLE] as
     /// required by spec.
-    fn internal_object_derive(
+    fn internal_key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
         origin: &Object,
     ) -> Result<Object> {
         /* FIXME: handle CKA_DERIVE_TEMPLATE */
 
-        let mut obj = self.internal_object_create(
+        let mut obj = self.internal_key_create(
             template,
-            OAFlags::SettableOnlyOnCreate,
+            OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
             OAFlags::AlwaysRequired,
         )?;
         /* overrides */
@@ -788,9 +798,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
-                    if attr.is(unacceptable_flags)
-                        || attr.is(OAFlags::NeverSettable)
-                    {
+                    if attr.is(unacceptable_flags) {
                         return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
                     /* duplicate? */
@@ -828,6 +836,20 @@ pub trait ObjectFactory: Debug + Send + Sync {
                 }
             }
         }
+        Ok(obj)
+    }
+
+    fn internal_key_create(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        unacceptable_flags: OAFlags,
+        required_flags: OAFlags,
+    ) -> Result<Object> {
+        let mut obj = self.internal_object_create(
+            template,
+            unacceptable_flags,
+            required_flags,
+        )?;
         obj.generate_unique();
         Ok(obj)
     }
@@ -2061,11 +2083,13 @@ impl Mechanism for GenericSecretKeyMechanism {
 
 /// This is a specialized factory for objects of class CKO_PROFILE
 
+#[cfg(feature = "profiles")]
 #[derive(Debug)]
-struct ProfileFactory {
+pub struct ProfileFactory {
     data: ObjectFactoryData,
 }
 
+#[cfg(feature = "profiles")]
 impl ProfileFactory {
     /// Initializes a new ProfileFactory object
     fn new() -> ProfileFactory {
@@ -2087,9 +2111,26 @@ impl ProfileFactory {
     }
 }
 
+#[cfg(feature = "profiles")]
 impl ObjectFactory for ProfileFactory {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
         Err(CKR_TEMPLATE_INCOMPLETE)?
+    }
+
+    fn builtin_create(&self, profile_id: CK_PROFILE_ID) -> Result<Object> {
+        let mut pid = profile_id;
+        let attr = CK_ATTRIBUTE {
+            type_: CKA_PROFILE_ID,
+            pValue: void_ptr!(&mut pid),
+            ulValueLen: sizeof!(CK_PROFILE_ID),
+        };
+        let mut obj = self.internal_object_create(
+            &[attr],
+            OAFlags::empty(),
+            OAFlags::RequiredOnCreate,
+        )?;
+        obj.generate_stable_unique(profile_id);
+        Ok(obj)
     }
 
     fn copy(
@@ -2112,7 +2153,7 @@ impl ObjectFactory for ProfileFactory {
 /// This is a specialized factory for objects of class CKO_MECHANISM
 
 #[derive(Debug)]
-struct MechanismFactory {
+pub struct MechanismFactory {
     data: ObjectFactoryData,
 }
 
@@ -2140,6 +2181,25 @@ impl MechanismFactory {
 impl ObjectFactory for MechanismFactory {
     fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
         Err(CKR_TEMPLATE_INCOMPLETE)?
+    }
+
+    fn builtin_create(
+        &self,
+        mechanism_type: CK_MECHANISM_TYPE,
+    ) -> Result<Object> {
+        let mut mt = mechanism_type;
+        let attr = CK_ATTRIBUTE {
+            type_: CKA_MECHANISM_TYPE,
+            pValue: void_ptr!(&mut mt),
+            ulValueLen: sizeof!(CK_MECHANISM_TYPE),
+        };
+        let mut obj = self.internal_object_create(
+            &[attr],
+            OAFlags::empty(),
+            OAFlags::RequiredOnCreate,
+        )?;
+        obj.generate_stable_unique(mechanism_type);
+        Ok(obj)
     }
 
     fn copy(
@@ -2470,6 +2530,7 @@ static NSS_TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(NSSTrustObject::new()));
 
 /// The static Profile Object factory
+#[cfg(feature = "profiles")]
 static PROFILE_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(ProfileFactory::new()));
 
@@ -2497,6 +2558,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         ObjectType::new(CKO_NSS_TRUST, 0),
         &(*NSS_TRUST_OBJECT_FACTORY),
     );
+    #[cfg(feature = "profiles")]
     ot.add_factory(ObjectType::new(CKO_PROFILE, 0), &(*PROFILE_FACTORY));
     ot.add_factory(ObjectType::new(CKO_MECHANISM, 0), &(*MECHANISM_FACTORY));
 }

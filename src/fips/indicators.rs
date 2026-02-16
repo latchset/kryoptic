@@ -3,13 +3,12 @@
 
 use std::sync::LazyLock;
 
-use crate::attribute::Attribute;
+use crate::attribute::{Attribute, CkAttrs};
 use crate::ec::{get_oid_from_obj, oid_to_bits};
 use crate::error::Result;
 use crate::object::*;
 use crate::pkcs11::vendor::KRY_UNSPEC;
 use crate::pkcs11::*;
-use crate::Token;
 
 /// The flag returned in the CKA_VALIDATION_FLAG attribute
 ///
@@ -22,6 +21,16 @@ use crate::Token;
 /// token initialization and use that value thereafter to check against
 /// objects and session CKA_VALIDATION_FLAGS attributes.
 pub const KRF_FIPS: CK_ULONG = 1;
+
+/* TODO: These should be generated at build time */
+const VALIDATION_VERSION: [u8; 2] = [3u8, 0u8];
+const VALIDATION_LEVEL: CK_ULONG = 1;
+const MODULE_ID: &str = "Kryoptic FIPS Module - v1";
+const COUNTRY: &str = "US";
+const CERTIFICATE: &str = "Pending";
+const CERTIFICATE_URI: &str = "";
+const VENDOR_URI: &str = "https://github.com/latchset/kryoptic";
+const PROFILE: &str = "";
 
 /// The Validation Object factory
 #[derive(Debug)]
@@ -36,7 +45,7 @@ impl ValidationFactory {
             data: ObjectFactoryData::new(CKO_VALIDATION),
         };
 
-        factory.add_common_storage_attrs(false);
+        factory.add_common_object_attrs();
 
         let attributes = factory.data.get_attributes_mut();
 
@@ -92,6 +101,57 @@ impl ValidationFactory {
 }
 
 impl ObjectFactory for ValidationFactory {
+    fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        Err(CKR_TEMPLATE_INCOMPLETE)?
+    }
+
+    fn builtin_create(&self, stable_id: CK_ULONG) -> Result<Object> {
+        let mut tmpl = CkAttrs::with_capacity(11);
+        match stable_id {
+            super::FIPS_VALIDATION_OBJ => {
+                tmpl.add_ulong(CKA_VALIDATION_TYPE, &CKV_TYPE_SOFTWARE);
+                tmpl.add_slice(CKA_VALIDATION_VERSION, &VALIDATION_VERSION)?;
+                tmpl.add_ulong(CKA_VALIDATION_LEVEL, &VALIDATION_LEVEL);
+                tmpl.add_slice(CKA_VALIDATION_MODULE_ID, MODULE_ID.as_bytes())?;
+                tmpl.add_ulong(CKA_VALIDATION_FLAG, &KRF_FIPS);
+                tmpl.add_ulong(
+                    CKA_VALIDATION_AUTHORITY_TYPE,
+                    &CKV_AUTHORITY_TYPE_NIST_CMVP,
+                );
+                tmpl.add_slice(CKA_VALIDATION_COUNTRY, COUNTRY.as_bytes())?;
+                tmpl.add_slice(
+                    CKA_VALIDATION_CERTIFICATE_IDENTIFIER,
+                    CERTIFICATE.as_bytes(),
+                )?;
+                tmpl.add_slice(
+                    CKA_VALIDATION_CERTIFICATE_URI,
+                    CERTIFICATE_URI.as_bytes(),
+                )?;
+                tmpl.add_slice(
+                    CKA_VALIDATION_VENDOR_URI,
+                    VENDOR_URI.as_bytes(),
+                )?;
+                tmpl.add_slice(CKA_VALIDATION_PROFILE, PROFILE.as_bytes())?;
+            }
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        }
+        let mut obj = self.internal_object_create(
+            tmpl.as_slice(),
+            OAFlags::empty(),
+            OAFlags::RequiredOnCreate,
+        )?;
+        obj.generate_stable_unique(stable_id);
+        Ok(obj)
+    }
+
+    fn copy(
+        &self,
+        _origin: &Object,
+        _template: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
+        Err(CKR_TEMPLATE_INCOMPLETE)?
+    }
+
     /// Helper method to get a reference to the ObjectFactoryData
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
@@ -109,67 +169,6 @@ impl ObjectFactory for ValidationFactory {
 /// after process startup
 pub(crate) static VALIDATION_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(ValidationFactory::new()));
-
-/// Synthesize a FIPS CKO_VALIDATION object
-///
-/// This is generally done only once at token initialization
-pub fn insert_fips_validation(token: &mut Token) -> Result<()> {
-    let mut obj = Object::new(CKO_VALIDATION);
-    obj.set_attr(Attribute::from_bool(CKA_TOKEN, false))?;
-    obj.set_attr(Attribute::from_bool(CKA_DESTROYABLE, false))?;
-    obj.set_attr(Attribute::from_bool(CKA_MODIFIABLE, false))?;
-    obj.set_attr(Attribute::from_bool(CKA_PRIVATE, false))?;
-    obj.set_attr(Attribute::from_bool(CKA_SENSITIVE, false))?;
-    obj.set_attr(Attribute::from_ulong(
-        CKA_VALIDATION_TYPE,
-        CKV_TYPE_SOFTWARE,
-    ))?;
-    obj.set_attr(Attribute::from_bytes(
-        CKA_VALIDATION_VERSION,
-        vec![3u8, 0u8],
-    ))?;
-    obj.set_attr(Attribute::from_ulong(CKA_VALIDATION_LEVEL, 1))?;
-    /* TODO: This should be generated at build time */
-    obj.set_attr(Attribute::from_string(
-        CKA_VALIDATION_MODULE_ID,
-        String::from("Kryoptic FIPS Module - v1"),
-    ))?;
-    obj.set_attr(Attribute::from_ulong(CKA_VALIDATION_FLAG, KRF_FIPS))?;
-    obj.set_attr(Attribute::from_ulong(
-        CKA_VALIDATION_AUTHORITY_TYPE,
-        CKV_AUTHORITY_TYPE_NIST_CMVP,
-    ))?;
-
-    /* TODO: The following attributes should all be determined at build time */
-    obj.set_attr(Attribute::from_string(
-        CKA_VALIDATION_COUNTRY,
-        String::from("US"),
-    ))?;
-    obj.set_attr(Attribute::from_string(
-        CKA_VALIDATION_CERTIFICATE_IDENTIFIER,
-        String::from("Pending"),
-    ))?;
-    obj.set_attr(Attribute::from_string(
-        CKA_VALIDATION_CERTIFICATE_URI,
-        String::from(""),
-    ))?;
-    obj.set_attr(Attribute::from_string(
-        CKA_VALIDATION_VENDOR_URI,
-        String::from("https://github.com/latchset/kryoptic"),
-    ))?;
-    obj.set_attr(Attribute::from_string(
-        CKA_VALIDATION_PROFILE,
-        String::from(""),
-    ))?;
-
-    /* generate a unique but stable id */
-    obj.generate_stable_unique(1);
-
-    /* invalid session handle will prevent it from being removed when
-     * session objects are cleared on session closings */
-    let _ = token.insert_object(CK_INVALID_HANDLE, obj)?;
-    Ok(())
-}
 
 /// Helper to convert bits to bytes
 macro_rules! btb {
