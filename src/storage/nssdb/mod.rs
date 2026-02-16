@@ -660,7 +660,9 @@ impl NSSStorage {
      * certs or keys databases or both need to be searched.
      */
     /// Prepares search statements
-    fn prepare_search(template: &[CK_ATTRIBUTE]) -> Result<NSSSearchQuery> {
+    fn prepare_search(
+        template: &[CK_ATTRIBUTE],
+    ) -> Result<Option<NSSSearchQuery>> {
         let mut do_private = true;
         let mut do_public = true;
         let mut query = NSSSearchQuery {
@@ -678,7 +680,7 @@ impl NSSStorage {
                         CKO_PRIVATE_KEY | CKO_SECRET_KEY => do_public = false,
                         CKO_PUBLIC_KEY | CKO_CERTIFICATE | CKO_TRUST
                         | CKO_NSS_TRUST => do_private = false,
-                        _ => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                        _ => return Ok(None),
                     }
                 }
             }
@@ -738,7 +740,7 @@ impl NSSStorage {
                 });
             }
         }
-        Ok(query)
+        Ok(Some(query))
     }
 
     /// Executes a prepared search query against a specific table (public or
@@ -767,7 +769,10 @@ impl NSSStorage {
         template: &[CK_ATTRIBUTE],
     ) -> Result<Vec<String>> {
         let mut result = Vec::<String>::new();
-        let query = Self::prepare_search(template)?;
+        let query = match Self::prepare_search(template)? {
+            Some(q) => q,
+            None => return Ok(result),
+        };
         let mut conn = self.conn.lock()?;
         if let Some(ref sql) = query.public {
             let mut public = Self::search_with_params(
