@@ -604,6 +604,9 @@ pub trait ObjectFactory: Debug + Send + Sync {
         attrs.push(attr_element!(
             CKA_CLASS; OAFlags::RequiredOnCreate;
             Attribute::from_ulong; val 0));
+        attrs.push(attr_element!(
+            CKA_UNIQUE_ID; OAFlags::NeverSettable | OAFlags::Unchangeable;
+            Attribute::from_string; val String::new()));
     }
 
     /// Adds the storage object attributes defined in the spec
@@ -628,9 +631,6 @@ pub trait ObjectFactory: Debug + Send + Sync {
         attrs.push(attr_element!(
             CKA_DESTROYABLE; OAFlags::Defval; Attribute::from_bool;
             val true));
-        attrs.push(attr_element!(
-            CKA_UNIQUE_ID; OAFlags::NeverSettable | OAFlags::Unchangeable;
-            Attribute::from_string; val String::new()));
     }
 
     /// Default object creation function
@@ -646,8 +646,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
             OAFlags::RequiredOnCreate,
         )?;
 
-        // default key attributes on CreateObject
-        obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
+        match obj.get_class() {
+            CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+                // default key attributes on CreateObject
+                obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
+            }
+            _ => (),
+        }
 
         match obj.get_class() {
             CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
@@ -796,8 +801,11 @@ pub trait ObjectFactory: Debug + Send + Sync {
                     }
                     /* duplicate? */
                     match obj.get_attr(ck_attr.type_) {
-                        Some(a) => {
-                            if a.get_type() != CKA_CLASS {
+                        Some(oa) => {
+                            if oa.get_type() != CKA_CLASS
+                                || (oa.get_type() == CKA_CLASS
+                                    && ck_attr.to_ulong()? != oa.to_ulong()?)
+                            {
                                 return Err(CKR_TEMPLATE_INCONSISTENT)?;
                             }
                         }
@@ -2057,6 +2065,106 @@ impl Mechanism for GenericSecretKeyMechanism {
     }
 }
 
+/// This is a specialized factory for objects of class CKO_PROFILE
+
+#[derive(Debug)]
+struct ProfileFactory {
+    data: ObjectFactoryData,
+}
+
+impl ProfileFactory {
+    /// Initializes a new ProfileFactory object
+    fn new() -> ProfileFactory {
+        let mut factory: ProfileFactory = ProfileFactory {
+            data: ObjectFactoryData::new(CKO_PROFILE),
+        };
+
+        factory.add_common_object_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
+            CKA_PROFILE_ID; OAFlags::RequiredOnCreate; Attribute::from_ulong;
+            val CK_UNAVAILABLE_INFORMATION));
+
+        factory.data.finalize();
+
+        factory
+    }
+}
+
+impl ObjectFactory for ProfileFactory {
+    fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        Err(CKR_TEMPLATE_INCOMPLETE)?
+    }
+
+    fn copy(
+        &self,
+        _origin: &Object,
+        _template: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
+        Err(CKR_ACTION_PROHIBITED)?
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
+}
+
+/// This is a specialized factory for objects of class CKO_MECHANISM
+
+#[derive(Debug)]
+struct MechanismFactory {
+    data: ObjectFactoryData,
+}
+
+impl MechanismFactory {
+    /// Initializes a new MechanismFactory object
+    fn new() -> MechanismFactory {
+        let mut factory: MechanismFactory = MechanismFactory {
+            data: ObjectFactoryData::new(CKO_MECHANISM),
+        };
+
+        factory.add_common_object_attrs();
+
+        let attributes = factory.data.get_attributes_mut();
+
+        attributes.push(attr_element!(
+            CKA_MECHANISM_TYPE; OAFlags::RequiredOnCreate; Attribute::from_ulong;
+            val CK_UNAVAILABLE_INFORMATION));
+
+        factory.data.finalize();
+
+        factory
+    }
+}
+
+impl ObjectFactory for MechanismFactory {
+    fn create(&self, _template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        Err(CKR_TEMPLATE_INCOMPLETE)?
+    }
+
+    fn copy(
+        &self,
+        _origin: &Object,
+        _template: &[CK_ATTRIBUTE],
+    ) -> Result<Object> {
+        Err(CKR_ACTION_PROHIBITED)?
+    }
+
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
+}
+
 /// Structure that defines an Object Type
 ///
 /// Holds a Class type and the underlying type.
@@ -2125,7 +2233,7 @@ impl ObjectFactories {
             None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
         let type_ = match class {
-            CKO_DATA | CKO_TRUST => 0,
+            CKO_DATA | CKO_TRUST | CKO_PROFILE | CKO_MECHANISM => 0,
             #[cfg(feature = "nssdb")]
             CKO_NSS_TRUST => 0,
             CKO_CERTIFICATE => {
@@ -2154,11 +2262,12 @@ impl ObjectFactories {
                 }
             }
             /* TODO:
-             *  CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
-             *  CKO_MECHANISM, CKO_OTP_KEY, CKO_PROFILE,
-             *  CKO_VENDOR_DEFINED
+             * CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS, CKO_OTP_KEY,
+             * CKO_VENDOR_DEFINED.
+             * Builtin objects cannot be created so they always return
+             * this error. Unsupported objects alaso return the same.
              */
-            _ => return Err(CKR_DEVICE_ERROR)?,
+            _ => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };
         self.get_factory(ObjectType::new(class, type_))?
             .create(template)
@@ -2366,6 +2475,14 @@ static TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 static NSS_TRUST_OBJECT_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(NSSTrustObject::new()));
 
+/// The static Profile Object factory
+static PROFILE_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(ProfileFactory::new()));
+
+/// The static Mechanism Object factory
+static MECHANISM_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(MechanismFactory::new()));
+
 /// Registers mechanisms and key factories for Data Objects, X509
 /// Certificates and Generic Secret Keys
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
@@ -2386,4 +2503,6 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
         ObjectType::new(CKO_NSS_TRUST, 0),
         &(*NSS_TRUST_OBJECT_FACTORY),
     );
+    ot.add_factory(ObjectType::new(CKO_PROFILE, 0), &(*PROFILE_FACTORY));
+    ot.add_factory(ObjectType::new(CKO_MECHANISM, 0), &(*MECHANISM_FACTORY));
 }
