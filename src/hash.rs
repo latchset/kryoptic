@@ -366,7 +366,8 @@ impl Derive for HashKDFOperation {
             }
         }
 
-        let mut obj = factory.default_key_derive(tmpl.as_slice(), key)?;
+        let mut obj =
+            factory.as_key_factory()?.key_derive(tmpl.as_slice(), key)?;
 
         let mut dkm = vec![0u8; hashsize];
         op.digest(

@@ -195,7 +195,8 @@ impl Derive for SimpleKDFOperation {
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey = factory.default_key_derive(tmpl.as_slice(), key)?;
+        let mut dkey =
+            factory.as_key_factory()?.key_derive(tmpl.as_slice(), key)?;
 
         let other_data_len = match self.mech {
             CKM_CONCATENATE_BASE_AND_KEY => {

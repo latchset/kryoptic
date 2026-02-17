@@ -143,12 +143,12 @@ impl ObjectFactory for ECDSAPubFactory {
     /// Creates an EC Public-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_key_create()]
+    /// factory via [KeyFactory::key_create()]
     ///
     /// Additionally validates the Public Point Format and that its size
     /// is consistent with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.3:
          * CKA_EC_PARAMS, Byte array,
@@ -186,9 +186,12 @@ impl ObjectFactory for ECDSAPubFactory {
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
+    }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
     }
 
     fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
@@ -196,7 +199,7 @@ impl ObjectFactory for ECDSAPubFactory {
     }
 }
 
-impl CommonKeyFactory for ECDSAPubFactory {}
+impl KeyFactory for ECDSAPubFactory {}
 
 impl PubKeyFactory for ECDSAPubFactory {
     fn pub_from_private<'a>(
@@ -255,12 +258,12 @@ impl ObjectFactory for ECDSAPrivFactory {
     /// Creates an ECDSA Private-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_key_create()]
+    /// factory via [KeyFactory::key_create()]
     ///
     /// Additionally validates that the private key size is consistent
     /// with the EC Parameters provided
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         /* According to PKCS#11 v3.1 6.3.4:
          * CKA_EC_PARAMS, Byte array,
@@ -315,30 +318,19 @@ impl ObjectFactory for ECDSAPrivFactory {
         Ok(obj)
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
-        PrivKeyFactory::export_for_wrapping(self, key)
-    }
-
-    fn import_from_wrapped(
-        &self,
-        data: Vec<u8>,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        PrivKeyFactory::import_from_wrapped(self, data, template)
-    }
-
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
+    }
 }
 
-impl CommonKeyFactory for ECDSAPrivFactory {}
-
-impl PrivKeyFactory for ECDSAPrivFactory {
+impl KeyFactory for ECDSAPrivFactory {
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         export_for_wrapping(key)
     }
@@ -348,9 +340,11 @@ impl PrivKeyFactory for ECDSAPrivFactory {
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        import_from_wrapped(CKK_EC, data, self.default_key_unwrap(template)?)
+        import_from_wrapped(CKK_EC, data, self.key_unwrap(template)?)
     }
 }
+
+impl PrivKeyFactory for ECDSAPrivFactory {}
 
 /// Object that represents CKK_EC related mechanisms
 #[derive(Debug)]
@@ -422,8 +416,9 @@ impl Mechanism for EcdsaMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
+        let mut pubkey = PUBLIC_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -431,8 +426,9 @@ impl Mechanism for EcdsaMechanism {
             .ensure_ulong(CKA_KEY_TYPE, CKK_EC)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
-        let mut privkey =
-            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
+        let mut privkey = PRIVATE_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;

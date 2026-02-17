@@ -233,10 +233,10 @@ impl ObjectFactory for RSAPubFactory {
     /// Creates an RSA Public-Key Object from a template.
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_key_create] and performs
+    /// factory via [KeyFactory::key_create()] and performs
     /// RSA-specific checks using [rsa_check_import].
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         rsa_check_import(&mut obj)?;
 
@@ -248,9 +248,12 @@ impl ObjectFactory for RSAPubFactory {
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
+    }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
     }
 
     fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
@@ -258,7 +261,7 @@ impl ObjectFactory for RSAPubFactory {
     }
 }
 
-impl CommonKeyFactory for RSAPubFactory {}
+impl KeyFactory for RSAPubFactory {}
 
 impl PubKeyFactory for RSAPubFactory {
     /// For RSA the private key object must carry the public exponent
@@ -400,10 +403,10 @@ impl ObjectFactory for RSAPrivFactory {
     /// Creates an RSA Private-Key Object from a template.
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [ObjectFactory::default_key_create] and performs
+    /// factory via [KeyFactory::key_create()] and performs
     /// RSA-specific checks using [rsa_check_import].
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         rsa_check_import(&mut obj)?;
 
@@ -412,35 +415,25 @@ impl ObjectFactory for RSAPrivFactory {
         Ok(obj)
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
-        PrivKeyFactory::export_for_wrapping(self, key)
-    }
-
-    fn import_from_wrapped(
-        &self,
-        data: Vec<u8>,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        PrivKeyFactory::import_from_wrapped(self, data, template)
-    }
-
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
+    }
 }
 
-impl CommonKeyFactory for RSAPrivFactory {}
-
-impl PrivKeyFactory for RSAPrivFactory {
+impl KeyFactory for RSAPrivFactory {
     /// Exports the RSA private key material in PKCS#8 format for wrapping.
     ///
     /// Checks if the key is extractable (CKA_EXTRACTABLE=true).
     /// Constructs an ASN.1 `RSAPrivateKey` structure from the key's attributes.
     /// Wraps the `RSAPrivateKey` bytes inside a PKCS#8 `PrivateKeyInfo` structure.
+    ///
     /// Returns the DER-encoded `PrivateKeyInfo`.
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_EXTRACTABLE)?;
@@ -479,7 +472,7 @@ impl PrivKeyFactory for RSAPrivFactory {
         data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut key = self.default_key_unwrap(template)?;
+        let mut key = self.key_unwrap(template)?;
 
         key.ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)?;
         key.ensure_ulong(CKA_KEY_TYPE, CKK_RSA)
@@ -545,6 +538,8 @@ impl PrivKeyFactory for RSAPrivFactory {
         Ok(key)
     }
 }
+
+impl PrivKeyFactory for RSAPrivFactory {}
 
 /// Object representing various RSA mechanisms (PKCS#1 v1.5, PSS, OAEP).
 #[derive(Debug)]
@@ -679,8 +674,9 @@ impl Mechanism for RsaPKCSMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
+        let mut pubkey = PUBLIC_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -701,8 +697,9 @@ impl Mechanism for RsaPKCSMechanism {
             }
         };
 
-        let mut privkey =
-            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
+        let mut privkey = PRIVATE_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -748,11 +745,10 @@ impl Mechanism for RsaPKCSMechanism {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-
         RsaPKCSOperation::wrap(
             mech,
             wrapping_key,
-            key_template.export_for_wrapping(key)?,
+            key_template.as_key_factory()?.export_for_wrapping(key)?,
             data,
             &self.info,
         )
@@ -780,6 +776,8 @@ impl Mechanism for RsaPKCSMechanism {
         }
         let keydata =
             RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info)?;
-        key_template.import_from_wrapped(keydata, template)
+        key_template
+            .as_key_factory()?
+            .import_from_wrapped(keydata, template)
     }
 }

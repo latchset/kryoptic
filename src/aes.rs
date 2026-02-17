@@ -86,7 +86,7 @@ pub(crate) fn check_key_len(len: usize) -> Result<()> {
 /// [AES secret key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203476)
 /// (Version 3.1)
 ///
-/// Derives from the generic ObjectFactory, CommonKeyFactory and
+/// Derives from the generic ObjectFactory, KeyFactory and
 /// SecretKeyFactory
 ///
 /// This is used to store the list of attributes allowed for an AES Key object, as well as provide
@@ -127,7 +127,7 @@ impl ObjectFactory for AesKeyFactory {
     /// code and additionally ensures the key size is one of the AES allowed
     /// sizes (currently 128, 192 or 256 bits).
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
         obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)?;
@@ -135,8 +135,43 @@ impl ObjectFactory for AesKeyFactory {
         Ok(obj)
     }
 
+    fn get_data(&self) -> &ObjectFactoryData {
+        &self.data
+    }
+    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
+        &mut self.data
+    }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
+    }
+
+    fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
+        Ok(self)
+    }
+}
+
+impl KeyFactory for AesKeyFactory {
+    /// The AES derive adds key length checks on top of the generic secret
+    /// derive helper
+    fn key_derive(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        origin: &Object,
+    ) -> Result<Object> {
+        let obj = self.internal_key_derive(template, origin)?;
+
+        let key_len = self.get_key_len(&obj);
+        if key_len != 0 {
+            if check_key_len(key_len).is_err() {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        }
+        Ok(obj)
+    }
+
     fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
-        SecretKeyFactory::export_for_wrapping(self, key)
+        SecretKeyFactory::default_export_for_wrapping(self, key)
     }
 
     fn import_from_wrapped(
@@ -166,41 +201,9 @@ impl ObjectFactory for AesKeyFactory {
                 return Err(e);
             }
         }
-        SecretKeyFactory::import_from_wrapped(self, data, template)
-    }
-
-    /// The AES derive adds key length checks on top of the generic secret
-    /// derive helper
-    fn default_key_derive(
-        &self,
-        template: &[CK_ATTRIBUTE],
-        origin: &Object,
-    ) -> Result<Object> {
-        let obj = self.internal_key_derive(template, origin)?;
-
-        let key_len = self.get_key_len(&obj);
-        if key_len != 0 {
-            if check_key_len(key_len).is_err() {
-                return Err(CKR_TEMPLATE_INCONSISTENT)?;
-            }
-        }
-        Ok(obj)
-    }
-
-    fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
-        Ok(self)
-    }
-
-    fn get_data(&self) -> &ObjectFactoryData {
-        &self.data
-    }
-
-    fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
-        &mut self.data
+        SecretKeyFactory::default_import_from_wrapped(self, data, template)
     }
 }
-
-impl CommonKeyFactory for AesKeyFactory {}
 
 impl SecretKeyFactory for AesKeyFactory {
     /// Helper to set key that check the key is correctly formed for an
@@ -303,7 +306,8 @@ impl Mechanism for AesMechanism {
         if mech.mechanism != CKM_AES_KEY_GEN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-        let mut key = AES_KEY_FACTORY.default_key_generate(template)?;
+        let mut key =
+            AES_KEY_FACTORY.as_key_factory()?.key_generate(template)?;
         key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         key.ensure_ulong(CKA_KEY_TYPE, CKK_AES)
@@ -330,11 +334,10 @@ impl Mechanism for AesMechanism {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-
         AesOperation::wrap(
             mech,
             wrapping_key,
-            key_template.export_for_wrapping(key)?,
+            key_template.as_key_factory()?.export_for_wrapping(key)?,
             data,
         )
     }
@@ -356,7 +359,9 @@ impl Mechanism for AesMechanism {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         let keydata = AesOperation::unwrap(mech, wrapping_key, data)?;
-        key_template.import_from_wrapped(keydata, template)
+        key_template
+            .as_key_factory()?
+            .import_from_wrapped(keydata, template)
     }
 
     /// Implements the AES derivation operation
@@ -622,10 +627,9 @@ impl Derive for AesKDFOperation<'_> {
         }
         self.finalized = true;
         key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DERIVE)?;
-
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
-        let mut obj = factory.default_key_derive(template, key)?;
+        let mut obj = factory.as_key_factory()?.key_derive(template, key)?;
 
         let mechanism = CK_MECHANISM {
             mechanism: self.mech,

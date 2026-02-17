@@ -173,11 +173,11 @@ impl MlKemPubFactory {
 impl ObjectFactory for MlKemPubFactory {
     /// Creates a ML-KEM public key object
     ///
-    /// Uses [ObjectFactory::default_key_create()]
+    /// Uses [KeyFactory::key_create()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         mlkem_pub_check_import(&mut obj)?;
 
@@ -189,9 +189,12 @@ impl ObjectFactory for MlKemPubFactory {
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
+    }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
     }
 
     fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
@@ -199,7 +202,7 @@ impl ObjectFactory for MlKemPubFactory {
     }
 }
 
-impl CommonKeyFactory for MlKemPubFactory {}
+impl KeyFactory for MlKemPubFactory {}
 
 impl PubKeyFactory for MlKemPubFactory {
     fn pub_from_private(
@@ -317,11 +320,11 @@ impl MlKemPrivFactory {
 impl ObjectFactory for MlKemPrivFactory {
     /// Creates a ML-KEM private key object
     ///
-    /// Uses [ObjectFactory::default_key_create()]
+    /// Uses [KeyFactory::key_create()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         mlkem_priv_check_import(&mut obj)?;
 
@@ -331,47 +334,25 @@ impl ObjectFactory for MlKemPrivFactory {
         Ok(obj)
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
-        PrivKeyFactory::export_for_wrapping(self, key)
-    }
-
-    fn import_from_wrapped(
-        &self,
-        data: Vec<u8>,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        PrivKeyFactory::import_from_wrapped(self, data, template)
-    }
-
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
-}
 
-impl CommonKeyFactory for MlKemPrivFactory {}
-
-impl PrivKeyFactory for MlKemPrivFactory {
-    fn export_for_wrapping(&self, _key: &Object) -> Result<Vec<u8>> {
-        /* TODO */
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
-    }
-
-    fn import_from_wrapped(
-        &self,
-        _data: Vec<u8>,
-        _template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        /* TODO */
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
     }
 }
+
+impl KeyFactory for MlKemPrivFactory {}
+
+impl PrivKeyFactory for MlKemPrivFactory {}
 
 /// Object that represents ML-KEM related mechanisms
 #[derive(Debug)]
+
 struct MlKemMechanism {
     info: CK_MECHANISM_INFO,
 }
@@ -416,7 +397,12 @@ impl Mechanism for MlKemMechanism {
             Err(e) => return Err(e),
         }
         let (keydata, ctlen) = mlkem::encapsulate(key, ciphertext)?;
-        Ok((key_factory.import_from_wrapped(keydata, template)?, ctlen))
+        Ok((
+            key_factory
+                .as_key_factory()?
+                .import_from_wrapped(keydata, template)?,
+            ctlen,
+        ))
     }
 
     fn decapsulate(
@@ -435,7 +421,9 @@ impl Mechanism for MlKemMechanism {
             Err(e) => return Err(e),
         }
         let keydata = mlkem::decapsulate(key, ciphertext)?;
-        key_factory.import_from_wrapped(keydata, template)
+        key_factory
+            .as_key_factory()?
+            .import_from_wrapped(keydata, template)
     }
 
     fn generate_keypair(
@@ -444,8 +432,9 @@ impl Mechanism for MlKemMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
+        let mut pubkey = PUBLIC_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -461,8 +450,9 @@ impl Mechanism for MlKemMechanism {
             Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
 
-        let mut privkey =
-            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
+        let mut privkey = PRIVATE_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
