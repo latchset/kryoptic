@@ -202,11 +202,11 @@ impl SlhDsaPubFactory {
 impl ObjectFactory for SlhDsaPubFactory {
     /// Creates a SLH-DSA public key object
     ///
-    /// Uses [ObjectFactory::default_key_create()]
+    /// Uses [KeyFactory::key_create()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         slhdsa_pub_check_import(&mut obj)?;
 
@@ -218,9 +218,12 @@ impl ObjectFactory for SlhDsaPubFactory {
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
+    }
+
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
     }
 
     fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
@@ -228,7 +231,7 @@ impl ObjectFactory for SlhDsaPubFactory {
     }
 }
 
-impl CommonKeyFactory for SlhDsaPubFactory {}
+impl KeyFactory for SlhDsaPubFactory {}
 
 impl PubKeyFactory for SlhDsaPubFactory {
     fn pub_from_private(
@@ -320,11 +323,11 @@ impl SlhDsaPrivFactory {
 impl ObjectFactory for SlhDsaPrivFactory {
     /// Creates a SLH-DSA private key object
     ///
-    /// Uses [ObjectFactory::default_key_create()]
+    /// Uses [KeyFactory::key_create()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.default_key_create(template)?;
+        let mut obj = self.key_create(template)?;
 
         slhdsa_priv_check_import(&mut obj)?;
 
@@ -334,44 +337,20 @@ impl ObjectFactory for SlhDsaPrivFactory {
         Ok(obj)
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
-        PrivKeyFactory::export_for_wrapping(self, key)
-    }
-
-    fn import_from_wrapped(
-        &self,
-        data: Vec<u8>,
-        template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        PrivKeyFactory::import_from_wrapped(self, data, template)
-    }
-
     fn get_data(&self) -> &ObjectFactoryData {
         &self.data
     }
-
     fn get_data_mut(&mut self) -> &mut ObjectFactoryData {
         &mut self.data
     }
-}
 
-impl CommonKeyFactory for SlhDsaPrivFactory {}
-
-impl PrivKeyFactory for SlhDsaPrivFactory {
-    fn export_for_wrapping(&self, _key: &Object) -> Result<Vec<u8>> {
-        /* TODO */
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
-    }
-
-    fn import_from_wrapped(
-        &self,
-        _data: Vec<u8>,
-        _template: &[CK_ATTRIBUTE],
-    ) -> Result<Object> {
-        /* TODO */
-        Err(CKR_FUNCTION_NOT_SUPPORTED)?
+    fn as_key_factory(&self) -> Result<&dyn KeyFactory> {
+        Ok(self)
     }
 }
+
+impl KeyFactory for SlhDsaPrivFactory {}
+impl PrivKeyFactory for SlhDsaPrivFactory {}
 
 /// Object that represents SLH-DSA related mechanisms
 #[derive(Debug)]
@@ -445,8 +424,9 @@ impl Mechanism for SlhDsaMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey =
-            PUBLIC_KEY_FACTORY.default_key_generate(pubkey_template)?;
+        let mut pubkey = PUBLIC_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(pubkey_template)?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -473,8 +453,9 @@ impl Mechanism for SlhDsaMechanism {
             Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };
 
-        let mut privkey =
-            PRIVATE_KEY_FACTORY.default_key_generate(prikey_template)?;
+        let mut privkey = PRIVATE_KEY_FACTORY
+            .as_key_factory()?
+            .key_generate(prikey_template)?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
