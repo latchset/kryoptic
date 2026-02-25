@@ -15,7 +15,7 @@ use crate::ossl::common::*;
 use crate::pkcs11::*;
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{eddsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::{ErrorKind, OsslSecret};

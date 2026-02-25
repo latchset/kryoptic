@@ -32,5 +32,6 @@ nssdb = ["kryoptic-lib/nssdb"]
 
 standard = ["kryoptic-lib/standard"]
 fips = ["kryoptic-lib/fips"]
+ossl400 = ["kryoptic-lib/ossl400"]
 
 integration_tests = []

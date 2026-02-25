@@ -23,7 +23,7 @@ use ossl::signature::{slhdsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::{OsslParam, OsslSecret};
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 
 const SLH_DSA_128S_SIG_SIZE: usize = 7_856;
 const SLH_DSA_128F_SIG_SIZE: usize = 17_088;

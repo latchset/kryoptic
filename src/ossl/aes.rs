@@ -21,7 +21,7 @@ use ossl::mac::{MacAlg, OsslMac};
 use ossl::OsslSecret;
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 
 /// Maximum buffer size for accumulating data in CCM mode (1 MiB).
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */

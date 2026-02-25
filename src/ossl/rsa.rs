@@ -29,7 +29,7 @@ use ossl::signature::{
 use ossl::OsslSecret;
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 
 pub const MIN_RSA_SIZE_BITS: usize =
     if cfg!(feature = "fips") { 2048 } else { 1024 };
@@ -349,6 +349,7 @@ impl RsaPKCSOperation {
         let (op, mut pkey) = match flag {
             CKF_SIGN => (SigOp::Sign, privkey_from_object(key)?),
             CKF_VERIFY => (SigOp::Verify, pubkey_from_object(key)?),
+
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let mut sigctx = OsslSignature::new(

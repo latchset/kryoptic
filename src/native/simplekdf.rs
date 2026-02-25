@@ -13,7 +13,7 @@ use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::pkcs11::*;
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 
 #[cfg(feature = "fips")]
 use crate::fips::indicators::is_key_approved;

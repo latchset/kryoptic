@@ -16,7 +16,8 @@ use crate::pkcs11::*;
 
 use ossl::derive::{SshKdfPurpose, SshkdfDerive};
 
-use ossl::fips::FipsApproval;
+#[cfg(feature = "fips")]
+use crate::fips::FipsApproval;
 
 #[derive(Debug)]
 pub struct SSHKDFOperation {
