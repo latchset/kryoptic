@@ -23,7 +23,7 @@ use crate::pkcs11::*;
 use ossl::derive::{HkdfDerive, HkdfMode};
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 
 /// Represents an active HKDF operation state.
 #[derive(Debug)]

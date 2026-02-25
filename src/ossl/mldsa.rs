@@ -24,7 +24,7 @@ use ossl::signature::{mldsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::{OsslParam, OsslSecret};
 
 #[cfg(feature = "fips")]
-use ossl::fips::FipsApproval;
+use crate::fips::FipsApproval;
 
 const ML_DSA_44_SIG_SIZE: usize = 2420;
 const ML_DSA_65_SIG_SIZE: usize = 3309;

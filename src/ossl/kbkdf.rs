@@ -13,7 +13,8 @@ use crate::sp800_108::{verify_prf_key, Sp800Params};
 use ossl::derive::{KbkdfCounterLen, KbkdfDerive, KbkdfMode};
 use ossl::mac::MacAlg;
 
-use ossl::fips::FipsApproval;
+#[cfg(feature = "fips")]
+use crate::fips::FipsApproval;
 
 fn prep_counter_kdf<'a>(
     sparams: &'a Vec<Sp800Params>,
