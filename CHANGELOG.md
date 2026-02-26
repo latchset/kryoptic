@@ -16,6 +16,9 @@ All notable changes to this project should be documented in this file.
 * Removed memorydb backend
     - [R.I.P Memory backend](https://github.com/latchset/kryoptic/pull/415)
 
+* Refactor code that exposes handles the fips provider and defer KAT self-tests
+    - [Fips defer tests](https://github.com/latchset/kryoptic/pull/423)
+
 --
 
 ## [1.4.0]
