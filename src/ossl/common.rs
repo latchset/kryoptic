@@ -41,14 +41,19 @@ use crate::ossl::slhdsa;
 
 pub(crate) const OPENSSL_4_0: (u8, u8, u8) = (4, 0, 0);
 
+/// The static instance of the library context lazily created on first use
+static OSSL_CONTEXT: ::std::sync::OnceLock<::ossl::OsslContext> =
+    ::std::sync::OnceLock::new();
+
 pub fn osslctx() -> &'static OsslContext {
     #[cfg(feature = "fips")]
     {
-        ossl::fips::get_libctx()
+        OSSL_CONTEXT.get_or_init(|| crate::fips::provider::get_libctx())
     }
+
     #[cfg(not(feature = "fips"))]
     {
-        &(*crate::ossl::OSSL_CONTEXT)
+        OSSL_CONTEXT.get_or_init(|| ossl::OsslContext::new_lib_ctx())
     }
 }
 

@@ -58,6 +58,7 @@ bimap = "0.6.3"
 bitflags = "2.4.1"
 constant_time_eq = "0.4.2"
 data-encoding = "2.4.0"
+getrandom = "0.4.1"
 hex = "0.4.3"
 itertools = "0.14.0"
 libc = "0.2.151"
@@ -72,10 +73,8 @@ serial_test = "3.1.1"
 simplelog = { version = "0.12.2", default-features = false, optional = true }
 toml = { version = "1.0.2", default-features = false, features = ["display", "parse", "serde"] }
 uuid = { version = "1.4.1", features = ["v4", "v8"] }
+vsprintf = { version = "2.0.0", optional = true }
 ossl.workspace = true
-
-[dev-dependencies]
-ossl = { version = "1.4.0", path = "ossl", default-features = false, features = ["dummy-integrity"] }
 
 [features]
 aes = []
@@ -110,7 +109,8 @@ kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf", "simplekdf"]
 
 standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa"]
 
-fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "pqc"]
+fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh",
+"hash_all", "kdf_all", "rsa", "pqc", "dep:vsprintf"]
 
 dynamic = ["ossl/dynamic"] # Builds against system libcrypto.so
 
@@ -126,3 +126,4 @@ pqc = ["mlkem", "mldsa", "slhdsa"]
 minimal = ["sqlitedb", "aes", "ecc_min", "hash_all", "rsa"]
 
 ossl400 = ["ossl/ossl400"]
+vsprintf = ["dep:vsprintf"]

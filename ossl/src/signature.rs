@@ -694,7 +694,7 @@ impl OsslSignature {
             }
             #[cfg(feature = "fips")]
             {
-                let mut lctx = ProviderSignatureCtx::new(alg)?;
+                let mut lctx = ProviderSignatureCtx::new(libctx, alg)?;
                 match ctx.op {
                     SigOp::Sign => {
                         lctx.digest_sign_init(digest_ptr, key, params_ptr)?

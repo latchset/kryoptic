@@ -143,7 +143,7 @@ impl State {
     /// Initializes the global state. Clears existing slots and sessions.
     fn initialize(&mut self) {
         #[cfg(feature = "fips")]
-        ::ossl::fips::init();
+        fips::provider::init();
 
         self.slots.clear();
         self.sessionmap.clear();

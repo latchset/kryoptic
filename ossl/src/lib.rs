@@ -19,7 +19,6 @@ pub mod bindings {
 
 use std::borrow::Cow;
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_ulong, c_void, CStr};
-use std::path::Path;
 
 use crate::bindings::*;
 
@@ -222,6 +221,8 @@ pub(crate) use trace_ossl;
 pub struct OsslContext {
     context: *mut OSSL_LIB_CTX,
     providers: Vec<*mut OSSL_PROVIDER>,
+    #[cfg(feature = "fips")]
+    is_fips: bool,
 }
 
 static LEGACY_PROVIDER_NAME: &CStr = c"legacy";
@@ -231,21 +232,46 @@ impl OsslContext {
         OsslContext {
             context: unsafe { OSSL_LIB_CTX_new() },
             providers: Vec::new(),
+            #[cfg(feature = "fips")]
+            is_fips: false,
         }
     }
 
     #[allow(dead_code)]
-    pub(crate) fn from_ctx(ctx: *mut OSSL_LIB_CTX) -> OsslContext {
+    pub fn from_ctx(ctx: *mut OSSL_LIB_CTX) -> OsslContext {
         OsslContext {
             context: ctx,
             providers: Vec::new(),
+            #[cfg(feature = "fips")]
+            is_fips: false,
         }
+    }
+
+    #[cfg(feature = "fips")]
+    pub fn from_fips(ctx: *mut OSSL_LIB_CTX, prov: *mut c_void) -> OsslContext {
+        OsslContext {
+            context: ctx,
+            providers: vec![prov as *mut OSSL_PROVIDER],
+            is_fips: true,
+        }
+    }
+
+    #[cfg(feature = "fips")]
+    pub(crate) fn fips_provider(&self) -> *const c_void {
+        if let Some(p) = self.providers.last() {
+            return *p as *const c_void;
+        }
+        return std::ptr::null();
     }
 
     pub fn load_configuration_file(
         &mut self,
-        fname: Option<&Path>,
+        fname: Option<&::std::path::Path>,
     ) -> Result<(), Error> {
+        if cfg!(feature = "fips") {
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
         let filename: *const c_char = match fname {
             Some(f) => {
                 f.as_os_str().as_encoded_bytes().as_ptr() as *const c_char
@@ -266,6 +292,10 @@ impl OsslContext {
     }
 
     pub fn load_legacy_provider(&mut self) -> Result<(), Error> {
+        if cfg!(feature = "fips") {
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+
         if unsafe {
             OSSL_PROVIDER_available(self.ptr(), LEGACY_PROVIDER_NAME.as_ptr())
         } == 1
@@ -291,6 +321,12 @@ impl OsslContext {
 
 impl Drop for OsslContext {
     fn drop(&mut self) {
+        #[cfg(feature = "fips")]
+        if self.is_fips {
+            /* When from_fips is used we get a context from the caller that we
+             * are not supposed to free directly */
+            return;
+        }
         unsafe {
             while let Some(provider) = self.providers.pop() {
                 OSSL_PROVIDER_unload(provider);

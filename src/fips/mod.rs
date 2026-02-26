@@ -15,6 +15,8 @@ use ossl::{bindings, fips};
 pub(crate) mod indicators;
 pub(crate) mod kats;
 
+pub(crate) mod provider;
+
 pub const FIPS_VALIDATION_OBJ: CK_ULONG = 1;
 
 /// Sets the FIPS module into the error state
@@ -64,7 +66,7 @@ pub static INITIALIZE_FIPS: extern "C" fn() = init_fips;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn init_fips() {
-    fips::set_fips_indicator_callback(Some(fips_indicator_callback));
+    provider::set_fips_indicator_callback(Some(fips_indicator_callback));
 }
 
 /* The Openssl FIPS indicator callback is inadequate for easily
@@ -177,6 +179,7 @@ impl FipsApproval {
     /// Check if operation is approved, returns true only
     /// if the operation has been positively marked as
     /// approved.
+    #[allow(dead_code)]
     pub fn is_approved(&self) -> bool {
         if self.approved.is_some_and(|b| b == true) {
             return true;
@@ -204,7 +207,7 @@ impl FipsApproval {
         self.approved = Some(b);
     }
 
-    /// Finalizes approval status, generaly used after the last operation
+    /// Finalizes approval status, generally used after the last operation
     /// for the service.
     pub fn finalize(&mut self) {
         self.update();

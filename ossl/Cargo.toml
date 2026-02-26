@@ -16,7 +16,6 @@ pkg-config = "0.3"
 
 [dependencies]
 cfg-if = "1.0.0"
-getrandom = "0.4.1"
 libc = "0.2.151"
 log = { version = "0.4.27", default-features = false, features = ["std"], optional = true }
 vsprintf = { version = "2.0.0", optional = true }
@@ -32,7 +31,6 @@ ossl400 = [] # Requires at minimum OpenSSL 4.0
 dynamic = [] # Builds against system libcrypto.so
 fips = ["ossl350"] # Builds against sources and libfips.a instead of libcrypto
 log = ["dep:log", "dep:vsprintf"] # Error tracing using log crate
-dummy-integrity = [] # USE ONLY for testing as a dev-depenency
 rfc9580 = [] # Enables features required for OpenPGP implementations
 
 [package.metadata.docs.rs]
