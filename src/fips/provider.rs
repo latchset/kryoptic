@@ -155,6 +155,7 @@ static FIPS_SECURITY_CHECKS: &CStr = c"0";
 static FIPS_PARAM_TLS1_PRF_EMS_CHECK: &CStr = c"1";
 static FIPS_PARAM_DRBG_TRUNC_DIGEST: &CStr = c"1";
 static FIPS_PARAM_RSA_PKCS15_PAD_DISABLED: &CStr = c"0";
+static FIPS_PARAM_DEFER_TESTS_ENABLED: &CStr = c"1";
 
 macro_rules! set_config_string {
     ($params:expr, $key:expr, $val:expr) => {
@@ -195,6 +196,11 @@ unsafe extern "C" fn fips_get_params(
         params,
         OSSL_PROV_FIPS_PARAM_CONDITIONAL_ERRORS,
         FIPS_CONDITIONAL_ERRORS
+    );
+    set_config_string!(
+        params,
+        OSSL_PROV_FIPS_PARAM_DEFER_TESTS,
+        FIPS_PARAM_DEFER_TESTS_ENABLED
     );
 
     /* features */
