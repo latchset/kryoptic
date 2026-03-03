@@ -7,6 +7,7 @@
 //! PKCS#11 functions exported via the Function List.
 
 pub mod general;
+pub mod objmgmt;
 pub mod sessmgmt;
 pub mod stmgmt;
 
