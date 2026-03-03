@@ -7,6 +7,7 @@
 //! PKCS#11 functions exported via the Function List.
 
 pub mod general;
+pub mod sessmgmt;
 pub mod stmgmt;
 
 /// Macro to convert a `Result<()>` into a `CK_RV`, returning `CKR_OK` on Ok.
