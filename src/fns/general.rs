@@ -9,9 +9,9 @@
 use std::ffi::{c_char, CStr};
 
 use crate::config::Config;
-use crate::global_wlock;
 use crate::pkcs11::*;
 use crate::slot::Slot;
+use crate::{cast_or_ret, global_wlock, res_or_ret};
 
 /// Implementation of C_Initialize function
 ///
