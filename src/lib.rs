@@ -9,7 +9,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{c_char, CStr};
 use std::sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 mod attribute;
@@ -100,6 +99,10 @@ macro_rules! cast_or_ret {
     }};
 }
 
+pub mod fns;
+use fns::general::*;
+use fns::{global_rlock, global_wlock};
+
 thread_local!(
     /// Thread-local instance of the Cryptographically Secure Pseudo-Random Number
     /// Generator (CSPRNG). This is used to avoid contention and locking between
@@ -127,7 +130,7 @@ fn random_add_seed(data: &[u8]) -> Result<()> {
 
 /// Global state for the PKCS#11 library.
 /// Manages slots, sessions, and handle generation.
-struct State {
+pub(crate) struct State {
     /// Hash map that stores actual slots, indexed by their Slot ID number.
     slots: HashMap<CK_SLOT_ID, Slot>,
     /// Map that holds mappings between session handles and slot ids.
@@ -141,7 +144,7 @@ struct State {
 
 impl State {
     /// Initializes the global state. Clears existing slots and sessions.
-    fn initialize(&mut self) {
+    pub(crate) fn initialize(&mut self) {
         #[cfg(feature = "fips")]
         fips::provider::init();
 
@@ -152,7 +155,7 @@ impl State {
 
     /// Finalizes the global state. Finalizes all slots and clears state.
     /// Returns the first error encountered during slot finalization, if any.
-    fn finalize(&mut self) -> CK_RV {
+    pub(crate) fn finalize(&mut self) -> CK_RV {
         if !self.is_initialized() {
             return CKR_CRYPTOKI_NOT_INITIALIZED;
         }
@@ -171,7 +174,7 @@ impl State {
     }
 
     /// Checks if the global state has been initialized.
-    fn is_initialized(&self) -> bool {
+    pub(crate) fn is_initialized(&self) -> bool {
         self.next_handle != 0
     }
 
@@ -198,7 +201,7 @@ impl State {
     }
 
     /// Returns a sorted vector of all configured slot IDs.
-    fn get_slots_ids(&self) -> Vec<CK_SLOT_ID> {
+    pub(crate) fn get_slots_ids(&self) -> Vec<CK_SLOT_ID> {
         let mut slotids = Vec::<CK_SLOT_ID>::with_capacity(self.slots.len());
         for k in self.slots.keys() {
             slotids.push(*k)
@@ -208,7 +211,11 @@ impl State {
     }
 
     /// Adds a new slot to the global state.
-    fn add_slot(&mut self, slot_id: CK_SLOT_ID, slot: Slot) -> Result<()> {
+    pub(crate) fn add_slot(
+        &mut self,
+        slot_id: CK_SLOT_ID,
+        slot: Slot,
+    ) -> Result<()> {
         if self.slots.contains_key(&slot_id) {
             return Err(CKR_CRYPTOKI_ALREADY_INITIALIZED)?;
         }
@@ -217,7 +224,7 @@ impl State {
     }
 
     /// Gets a read lock guard for a session by its handle.
-    fn get_session(
+    pub(crate) fn get_session(
         &self,
         handle: CK_SESSION_HANDLE,
     ) -> Result<RwLockReadGuard<'_, Session>> {
@@ -229,7 +236,7 @@ impl State {
     }
 
     /// Gets a write lock guard for a session by its handle.
-    fn get_session_mut(
+    pub(crate) fn get_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
     ) -> Result<RwLockWriteGuard<'_, Session>> {
@@ -310,7 +317,7 @@ impl State {
     }
 
     /// Gets a read lock guard for the token on a specified slot.
-    fn get_token_from_slot(
+    pub(crate) fn get_token_from_slot(
         &self,
         slot_id: CK_SLOT_ID,
     ) -> Result<RwLockReadGuard<'_, Token>> {
@@ -318,7 +325,7 @@ impl State {
     }
 
     /// Gets a write lock guard for the token on a specified slot.
-    fn get_token_from_slot_mut(
+    pub(crate) fn get_token_from_slot_mut(
         &self,
         slot_id: CK_SLOT_ID,
     ) -> Result<RwLockWriteGuard<'_, Token>> {
@@ -327,7 +334,7 @@ impl State {
 
     /// Gets a write lock guard for the token on a specified slot, bypassing
     /// initialization checks (used during initialization itself).
-    fn get_token_from_slot_mut_nochecks(
+    pub(crate) fn get_token_from_slot_mut_nochecks(
         &self,
         slot_id: CK_SLOT_ID,
     ) -> Result<RwLockWriteGuard<'_, Token>> {
@@ -335,7 +342,7 @@ impl State {
     }
 
     /// Gets a read lock guard for the token associated with a session handle.
-    fn get_token_from_session(
+    pub(crate) fn get_token_from_session(
         &self,
         handle: CK_SESSION_HANDLE,
     ) -> Result<RwLockReadGuard<'_, Token>> {
@@ -347,7 +354,7 @@ impl State {
     }
 
     /// Gets a write lock guard for the token associated with a session handle.
-    fn get_token_from_session_mut(
+    pub(crate) fn get_token_from_session_mut(
         &self,
         handle: CK_SESSION_HANDLE,
     ) -> Result<RwLockWriteGuard<'_, Token>> {
@@ -379,59 +386,13 @@ impl State {
 }
 
 /// Global, lazily initialized, read-write locked state for the PKCS#11 library.
-static STATE: LazyLock<RwLock<State>> = LazyLock::new(|| {
+pub(crate) static STATE: LazyLock<RwLock<State>> = LazyLock::new(|| {
     RwLock::new(State {
         slots: HashMap::new(),
         sessionmap: HashMap::new(),
         next_handle: 0,
     })
 });
-
-/// Macro to acquire a read lock on a global `RwLock<T>`. One variant checks
-/// the initialization status and the other explicitly does not (generally
-/// used during initialization).
-macro_rules! global_rlock {
-    ($GLOBAL:expr) => {
-        match $GLOBAL.read() {
-            Ok(r) => {
-                if (!r.is_initialized()) {
-                    return CKR_CRYPTOKI_NOT_INITIALIZED;
-                }
-                r
-            }
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    };
-    (noinitcheck; $GLOBAL:expr) => {{
-        match $GLOBAL.read() {
-            Ok(r) => r,
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-}
-
-/// Macro to acquire a write lock on a global `RwLock<T>`. One variant checks
-/// the initialization status and the other explicitly does not (generally
-/// used during initialization).
-macro_rules! global_wlock {
-    ($GLOBAL:expr) => {{
-        match $GLOBAL.write() {
-            Ok(w) => {
-                if (!w.is_initialized()) {
-                    return CKR_CRYPTOKI_NOT_INITIALIZED;
-                }
-                w
-            }
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-    (noinitcheck; $GLOBAL:expr) => {{
-        match $GLOBAL.write() {
-            Ok(w) => w,
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-}
 
 /// tests helper
 #[cfg(test)]
@@ -487,16 +448,17 @@ fn finalize_fips_approval(
 }
 
 /// Global configuration holder for the library.
-struct GlobalConfig {
-    conf: Config,
+pub(crate) struct GlobalConfig {
+    pub(crate) conf: Config,
 }
 
 /// Global, lazily initialized, read-write locked configuration instance.
-static CONFIG: LazyLock<RwLock<GlobalConfig>> = LazyLock::new(|| {
-    RwLock::new(GlobalConfig {
-        conf: Config::new(),
-    })
-});
+pub(crate) static CONFIG: LazyLock<RwLock<GlobalConfig>> =
+    LazyLock::new(|| {
+        RwLock::new(GlobalConfig {
+            conf: Config::new(),
+        })
+    });
 
 /// tests helper
 #[cfg(test)]
@@ -506,66 +468,6 @@ pub fn add_slot(slot: config::Slot) -> CK_RV {
         return CKR_GENERAL_ERROR;
     }
     CKR_OK
-}
-
-/// Implementation of C_Initialize function
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255)
-
-extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
-
-    let mut ret: CK_RV = CKR_OK;
-
-    /* Before loading the default config see if there is a cutsom config
-     * provided via reserved arg pointer */
-    if !_init_args.is_null() {
-        let args = unsafe { *(_init_args as *const CK_C_INITIALIZE_ARGS) };
-
-        if !args.pReserved.is_null() {
-            let reserved =
-                unsafe { CStr::from_ptr(args.pReserved as *const _) };
-            let init_arg = match reserved.to_str() {
-                Ok(s) => s,
-                Err(_) => return CKR_ARGUMENTS_BAD,
-            };
-            res_or_ret!(gconf.conf.from_init_args(init_arg));
-        }
-    }
-
-    if gconf.conf.slots.is_empty() {
-        match Config::default_config() {
-            Ok(conf) => gconf.conf = conf,
-            Err(_) => return CKR_TOKEN_NOT_PRESENT,
-        }
-    }
-
-    gconf.conf.load_env_vars_overrides();
-
-    let mut wstate = global_wlock!(noinitcheck; (*STATE));
-    if wstate.is_initialized() {
-        ret = CKR_CRYPTOKI_ALREADY_INITIALIZED;
-    } else {
-        wstate.initialize();
-    }
-
-    /* create slots for any new slot specified in the configuration
-     * that has not been created yet, new slots can be added via
-     * init args so we check this every time */
-    for slot in &gconf.conf.slots {
-        let slotnum = cast_or_ret!(CK_SLOT_ID from slot.slot);
-        match wstate.add_slot(slotnum, res_or_ret!(Slot::new(slot))) {
-            Ok(_) => (),
-            Err(e) => {
-                ret = e.rv();
-                if ret != CKR_CRYPTOKI_ALREADY_INITIALIZED {
-                    return ret;
-                }
-            }
-        }
-    }
-
-    ret
 }
 
 #[cfg(test)]
@@ -601,17 +503,6 @@ fn get_fips_behavior(
 fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
     let mut wstate = global_wlock!((*STATE));
     ret_to_rv!(wstate.set_fips_behavior(slot_id, val))
-}
-
-/// Implementation of C_Finalize function
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256)
-
-extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
-    let ret = global_wlock!((*STATE)).finalize();
-    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
-    gconf.conf = Config::new();
-    ret
 }
 
 /// Implementation of C_GetMechanismList function
@@ -2983,7 +2874,7 @@ extern "C" fn fn_wait_for_slot_event(
 }
 
 /// FFI Compatible structure that holds the PKCS#11 v2.40 functions table
-static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
+pub(crate) static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     version: CK_VERSION {
         major: 2,
         minor: 40,
@@ -3137,7 +3028,8 @@ extern "C" fn fn_get_token_info(
 }
 
 /// Holds the version of the implemented interface to return by default
-static IMPLEMENTED_VERSION: CK_VERSION = CK_VERSION { major: 3, minor: 2 };
+pub(crate) static IMPLEMENTED_VERSION: CK_VERSION =
+    CK_VERSION { major: 3, minor: 2 };
 
 static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
     *b"Kryoptic                        ";
@@ -3146,48 +3038,13 @@ static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] =
 static LIBRARY_VERSION: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
 
 /// The default module info data
-static MODULE_INFO: CK_INFO = CK_INFO {
+pub(crate) static MODULE_INFO: CK_INFO = CK_INFO {
     cryptokiVersion: IMPLEMENTED_VERSION,
     manufacturerID: MANUFACTURER_ID,
     flags: 0,
     libraryDescription: LIBRARY_DESCRIPTION,
     libraryVersion: LIBRARY_VERSION,
 };
-
-/// Implementation of C_GetInfo function
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203257](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203257)
-
-extern "C" fn fn_get_info(info: CK_INFO_PTR) -> CK_RV {
-    unsafe {
-        *info = MODULE_INFO;
-    }
-    CKR_OK
-}
-
-/// Provides access to the functions defined in the API specification
-///
-/// The vtable returned by this function includes a version specifier as
-/// the first element of this table. This version number determines the
-/// length and contents of the rest of the vtable.
-///
-/// Often for backwards compatibility reasons the table returned by this
-/// function is the table specified in PKCS#11 v2.40.
-///
-/// While access to later versions of the table is deferred to the
-/// `C_GeInterfaceList` function available starting with version 3.0 of the
-/// specification.
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203258)
-
-pub extern "C" fn fn_get_function_list(
-    fnlist: CK_FUNCTION_LIST_PTR_PTR,
-) -> CK_RV {
-    unsafe {
-        *fnlist = &FNLIST_240 as *const _ as *mut _;
-    };
-    CKR_OK
-}
 
 // Additional 3.0 functions
 
@@ -3883,7 +3740,7 @@ extern "C" fn fn_message_verify_final(_session: CK_SESSION_HANDLE) -> CK_RV {
 }
 
 /// FFI Compatible structure that holds the PKCS#11 v3.0 functions table
-static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
+pub(crate) static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     version: CK_VERSION { major: 3, minor: 0 },
     C_Initialize: Some(fn_initialize),
     C_Finalize: Some(fn_finalize),
@@ -4492,106 +4349,6 @@ static INTERFACE_SET: LazyLock<Vec<InterfaceData>> = LazyLock::new(|| {
     });
     v
 });
-
-/// Provides access to the list of interfaces defined by this implementation
-///
-/// Starting with PKCS#11 version 3.0 modules provide a list of interfaces
-/// that can be fetched. Each interface provides a name and a pointer to a
-/// vtable containing the functions defined for that interface.
-/// Additionally flags are returned as well.
-/// Custom interfaces can be defined by any vendor by specifying a custom
-/// interface name. The name "PKCS 11" is reserved for official standard
-/// interfaces.
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203259)
-
-pub extern "C" fn fn_get_interface_list(
-    interfaces_list: CK_INTERFACE_PTR,
-    count: CK_ULONG_PTR,
-) -> CK_RV {
-    if count.is_null() {
-        return CKR_ARGUMENTS_BAD;
-    }
-    let iflen = cast_or_ret!(CK_ULONG from (*INTERFACE_SET).len());
-    if interfaces_list.is_null() {
-        unsafe {
-            *count = iflen;
-        }
-        return CKR_OK;
-    }
-    unsafe {
-        if *count < iflen {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-    }
-    for i in 0..(*INTERFACE_SET).len() {
-        let offset = cast_or_ret!(isize from i);
-        unsafe {
-            core::ptr::write(
-                interfaces_list.offset(offset) as *mut CK_INTERFACE,
-                *((*INTERFACE_SET)[i].interface),
-            );
-        }
-    }
-    unsafe {
-        *count = iflen;
-    }
-    CKR_OK
-}
-
-/// Returns a specific interface identified by name and version
-///
-/// Applications that wants to immediately access a specific interface name,
-/// optionally a specific version too.
-/// The `interface` argument returns the pointer to the requested vtable
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203260)
-
-pub extern "C" fn fn_get_interface(
-    interface_name: CK_UTF8CHAR_PTR,
-    version: CK_VERSION_PTR,
-    interface: CK_INTERFACE_PTR_PTR,
-    flags: CK_FLAGS,
-) -> CK_RV {
-    if interface.is_null() {
-        return CKR_ARGUMENTS_BAD;
-    }
-    /* currently flags is always 0 */
-    if flags != 0 {
-        return CKR_ARGUMENTS_BAD;
-    }
-    let ver: CK_VERSION = if version.is_null() {
-        IMPLEMENTED_VERSION
-    } else {
-        unsafe { *version }
-    };
-
-    let request_name: *const CK_UTF8CHAR = if interface_name.is_null() {
-        INTERFACE_NAME_STD_NUL.as_ptr()
-    } else {
-        interface_name
-    };
-
-    for intf in (*INTERFACE_SET).iter() {
-        let found: bool = unsafe {
-            let name = (*intf.interface).pInterfaceName as *const c_char;
-            libc::strcmp(request_name as *const c_char, name) == 0
-        };
-
-        if found {
-            if ver.major != intf.version.major {
-                continue;
-            }
-            if ver.minor != intf.version.minor {
-                continue;
-            }
-            unsafe { *interface = intf.interface as *mut _ }
-            return CKR_OK;
-        }
-    }
-
-    CKR_ARGUMENTS_BAD
-}
 
 #[cfg(feature = "log")]
 mod log;
