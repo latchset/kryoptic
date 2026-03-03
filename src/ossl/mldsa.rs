@@ -11,10 +11,10 @@ use crate::error::Result;
 use crate::hash;
 use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
+use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 use crate::pkcs11::*;
-use crate::{bytes_to_vec, cast_params};
 
 use asn1;
 use bitflags::bitflags;
