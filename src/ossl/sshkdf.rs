@@ -6,8 +6,7 @@ use crate::error::Result;
 use crate::hash::is_valid_hash;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{
-    bytes_to_slice, cast_params, common_derive_data_object,
-    common_derive_key_object,
+    bytes_to_slice, common_derive_data_object, common_derive_key_object,
 };
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
@@ -33,7 +32,7 @@ pub struct SSHKDFOperation {
 
 impl SSHKDFOperation {
     pub fn new(mech: &CK_MECHANISM) -> Result<SSHKDFOperation> {
-        let params = cast_params!(mech, KR_SSHKDF_PARAMS);
+        let params = mech.get_parameters::<KR_SSHKDF_PARAMS>()?;
 
         if !is_valid_hash(params.prfHashMechanism) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;

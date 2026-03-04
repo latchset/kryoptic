@@ -47,47 +47,6 @@ macro_rules! byte_ptr {
 }
 pub(crate) use byte_ptr;
 
-/// Convenience macro to cast mechanism parameters passed as pointer
-/// into the structure they represent.
-///
-/// A length check on ulParameterLen is performed to validate that
-/// the correct parameter structure is being casted.
-///
-/// No other validation is performed, this is an UNSAFE operation
-/// that requires further content validation
-macro_rules! cast_params {
-    ($mech:expr, $params:ty) => {{
-        let Ok(len) = usize::try_from($mech.ulParameterLen) else {
-            return Err(CKR_ARGUMENTS_BAD)?;
-        };
-        if len != std::mem::size_of::<$params>() {
-            return Err(CKR_ARGUMENTS_BAD)?;
-        }
-        unsafe { *($mech.pParameter as *const $params) }
-    }};
-
-    (raw_err $mech:expr, $params:ty) => {{
-        let Ok(len) = usize::try_from($mech.ulParameterLen) else {
-            return CKR_ARGUMENTS_BAD;
-        };
-        if len != std::mem::size_of::<$params>() {
-            return CKR_ARGUMENTS_BAD;
-        }
-        unsafe { *($mech.pParameter as *const $params) }
-    }};
-
-    ($param:expr, $len:expr, $params:ty) => {{
-        let Ok(len) = usize::try_from($len) else {
-            return Err(CKR_ARGUMENTS_BAD)?;
-        };
-        if len != std::mem::size_of::<$params>() {
-            return Err(CKR_ARGUMENTS_BAD)?;
-        }
-        unsafe { *($param as *const $params) }
-    }};
-}
-pub(crate) use cast_params;
-
 /// Convenience function to obtain the size of a type as a [CK_ULONG]
 /// instead of a [usize]
 macro_rules! sizeof {

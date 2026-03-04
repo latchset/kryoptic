@@ -4,12 +4,11 @@
 //! This module implements the PKCS#11 mechanisms for the Password Based Key
 //! Derivation Function v2 as defined in [RFC 8018](https://www.rfc-editor.org/rfc/rfc8018)
 //! Section 5.2
-
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
-use crate::misc::{bytes_to_vec, cast_params};
+use crate::misc::bytes_to_vec;
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::pkcs11::*;
 use std::fmt::Debug;
@@ -89,7 +88,7 @@ impl Mechanism for PBKDF2Mechanism {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 
-        let params = cast_params!(mech, CK_PKCS5_PBKD2_PARAMS2);
+        let params = mech.get_parameters::<CK_PKCS5_PBKD2_PARAMS2>()?;
 
         /* all the mechanism we support require this,
          * if we ever add GOST support we'll have to add data */

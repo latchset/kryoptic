@@ -10,7 +10,6 @@ use std::sync::LazyLock;
 use crate::ec::*;
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
-use crate::misc::cast_params;
 use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
 
@@ -51,7 +50,7 @@ impl Mechanism for ECDHMechanism {
         }
         let kdf = match mech.mechanism {
             CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => {
-                let params = cast_params!(mech, CK_ECDH1_DERIVE_PARAMS);
+                let params = mech.get_parameters::<CK_ECDH1_DERIVE_PARAMS>()?;
                 ECDHOperation::derive_new(mech.mechanism, params)?
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,

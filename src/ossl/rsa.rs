@@ -11,7 +11,7 @@ use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::mechanism::{
     Decryption, Encryption, MechOperation, Sign, Verify, VerifySignature,
 };
-use crate::misc::{bytes_to_vec, cast_params, zeromem};
+use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::Object;
 use crate::ossl::common::{
     mech_type_to_digest_alg, osslctx, privkey_from_object, pubkey_from_object,
@@ -151,7 +151,7 @@ fn parse_sig_params(
         _ => return Err(CKR_MECHANISM_INVALID)?,
     };
     if pss {
-        let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
+        let params = mech.get_parameters::<CK_RSA_PKCS_PSS_PARAMS>()?;
         let mdname = mech_type_to_digest_alg(params.hashAlg)?;
         if mech.mechanism != CKM_RSA_PKCS_PSS {
             if mech_type_to_digest_alg(mech.mechanism)? != mdname {
@@ -182,7 +182,7 @@ fn parse_enc_params(
         CKM_RSA_X_509 => Ok((EncAlg::RsaNoPad, None)),
         CKM_RSA_PKCS => Ok((EncAlg::RsaPkcs1_5, None)),
         CKM_RSA_PKCS_OAEP => {
-            let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
+            let params = mech.get_parameters::<CK_RSA_PKCS_OAEP_PARAMS>()?;
             let label = match params.source {
                 0 => {
                     if params.ulSourceDataLen != 0 {
@@ -260,12 +260,14 @@ impl RsaPKCSOperation {
             CKM_RSA_X_509 => Ok(modulus),
             CKM_RSA_PKCS => Ok(modulus - 11),
             CKM_RSA_PKCS_PSS => {
-                let params = cast_params!(mech, CK_RSA_PKCS_PSS_PARAMS);
+                let params = mech.get_parameters::<CK_RSA_PKCS_PSS_PARAMS>()?;
                 Ok(Self::hash_len(params.hashAlg)?)
             }
             CKM_RSA_PKCS_OAEP => {
-                let params = cast_params!(mech, CK_RSA_PKCS_OAEP_PARAMS);
+                let params =
+                    mech.get_parameters::<CK_RSA_PKCS_OAEP_PARAMS>()?;
                 let hs = Self::hash_len(params.hashAlg)?;
+
                 Ok(modulus - 2 * hs - 2)
             }
             _ => Ok(0),

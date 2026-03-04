@@ -9,8 +9,7 @@ use crate::error::{map_err, Result};
 use crate::get_random_data;
 use crate::mechanism::*;
 use crate::misc::{
-    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, cast_params, void_ptr,
-    zeromem,
+    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, void_ptr, zeromem,
 };
 use crate::object::Object;
 use crate::ossl::common::osslctx;
@@ -30,6 +29,27 @@ const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 const MIN_RANDOM_IV_BITS: usize = 64;
 
 const AES_KWP_BLOCK: usize = AES_BLOCK_SIZE / 2;
+
+/// Convenience function to cast aead parameters passed as separate
+/// pointer/length variables into the structure they represent.
+///
+/// A length check on len is performed to validate that the correct
+/// parameter structure is being casted.
+///
+/// No other validation is performed, this is an UNSAFE operation
+/// that requires further content validation
+unsafe fn cast_params<T: Copy + Clone>(
+    ptr: CK_VOID_PTR,
+    len: CK_ULONG,
+) -> Result<T> {
+    let Ok(len) = usize::try_from(len) else {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    };
+    if len != std::mem::size_of::<T>() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    Ok(unsafe { std::ptr::read_unaligned(ptr as *const T) })
+}
 
 /// Extracts the raw key bytes from a PKCS#11 `Object` into an `AesKey`.
 /// Validates the key length.
@@ -190,7 +210,7 @@ impl AesOperation {
     fn init_params(mech: &CK_MECHANISM) -> Result<AesParams> {
         match mech.mechanism {
             CKM_AES_CCM => {
-                let params = cast_params!(mech, CK_CCM_PARAMS);
+                let params = mech.get_parameters::<CK_CCM_PARAMS>()?;
                 if params.ulNonceLen < 7 || params.ulNonceLen > 13 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
@@ -230,7 +250,7 @@ impl AesOperation {
                 })
             }
             CKM_AES_GCM => {
-                let params = cast_params!(mech, CK_GCM_PARAMS);
+                let params = mech.get_parameters::<CK_GCM_PARAMS>()?;
                 if params.ulIvLen == 0
                     || params.ulIvLen > CK_ULONG::try_from(u32::MAX)?
                 {
@@ -270,7 +290,7 @@ impl AesOperation {
                 })
             }
             CKM_AES_CTR => {
-                let params = cast_params!(mech, CK_AES_CTR_PARAMS);
+                let params = mech.get_parameters::<CK_AES_CTR_PARAMS>()?;
                 let iv = params.cb.to_vec();
                 let ctrbits = map_err!(
                     usize::try_from(params.ulCounterBits),
@@ -741,11 +761,12 @@ impl AesOperation {
         }
         match self.mech {
             CKM_AES_CCM => {
-                let params = cast_params!(
-                    parameter,
-                    parameter_len,
-                    CK_CCM_MESSAGE_PARAMS
-                );
+                let params = unsafe {
+                    cast_params::<CK_CCM_MESSAGE_PARAMS>(
+                        parameter,
+                        parameter_len,
+                    )
+                }?;
                 if params.ulNonceLen < 7 || params.ulNonceLen > 13 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
@@ -818,11 +839,12 @@ impl AesOperation {
                 Ok(params.pNonce)
             }
             CKM_AES_GCM => {
-                let params = cast_params!(
-                    parameter,
-                    parameter_len,
-                    CK_GCM_MESSAGE_PARAMS
-                );
+                let params = unsafe {
+                    cast_params::<CK_GCM_MESSAGE_PARAMS>(
+                        parameter,
+                        parameter_len,
+                    )
+                }?;
                 if params.ulIvLen == 0
                     || params.ulIvLen > CK_ULONG::try_from(u32::MAX)?
                 {
@@ -905,11 +927,12 @@ impl AesOperation {
     ) -> Result<CK_BYTE_PTR> {
         match self.mech {
             CKM_AES_CCM => {
-                let params = cast_params!(
-                    parameter,
-                    parameter_len,
-                    CK_CCM_MESSAGE_PARAMS
-                );
+                let params = unsafe {
+                    cast_params::<CK_CCM_MESSAGE_PARAMS>(
+                        parameter,
+                        parameter_len,
+                    )
+                }?;
                 if params.pNonce == std::ptr::null_mut() {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
@@ -943,11 +966,12 @@ impl AesOperation {
                 Ok(params.pMAC)
             }
             CKM_AES_GCM => {
-                let params = cast_params!(
-                    parameter,
-                    parameter_len,
-                    CK_GCM_MESSAGE_PARAMS
-                );
+                let params = unsafe {
+                    cast_params::<CK_GCM_MESSAGE_PARAMS>(
+                        parameter,
+                        parameter_len,
+                    )
+                }?;
                 if params.pIv == std::ptr::null_mut() {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
@@ -2459,7 +2483,7 @@ impl AesCmacOperation {
     ) -> Result<AesCmacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_CMAC_GENERAL => {
-                let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
+                let params = mech.get_parameters::<CK_MAC_GENERAL_PARAMS>()?;
                 let val = params as usize;
                 if val > AES_BLOCK_SIZE {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -2765,8 +2789,9 @@ impl AesMacOperation {
     ) -> Result<AesMacOperation> {
         let maclen = match mech.mechanism {
             CKM_AES_MAC_GENERAL => {
-                let params = cast_params!(mech, CK_MAC_GENERAL_PARAMS);
+                let params = mech.get_parameters::<CK_MAC_GENERAL_PARAMS>()?;
                 let val = params as usize;
+
                 if val > AES_BLOCK_SIZE {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }

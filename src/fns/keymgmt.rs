@@ -9,7 +9,7 @@
 use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
-use crate::misc::{bytes_to_slice, cast_params};
+use crate::misc::bytes_to_slice;
 use crate::object;
 use crate::pkcs11::*;
 use crate::{fail_if_cka_token_true, STATE};
@@ -621,8 +621,8 @@ fn derive_key(
             if result.len() > 0 {
                 let adk = match mechanism.mechanism {
                     CKM_SP800_108_COUNTER_KDF => {
-                        let params =
-                            cast_params!(mechanism, CK_SP800_108_KDF_PARAMS);
+                        let params = mechanism
+                            .get_parameters::<CK_SP800_108_KDF_PARAMS>()?;
                         unsafe {
                             bytes_to_slice(
                                 params.pAdditionalDerivedKeys
@@ -632,10 +632,9 @@ fn derive_key(
                         }
                     }
                     CKM_SP800_108_FEEDBACK_KDF => {
-                        let params = cast_params!(
-                            mechanism,
-                            CK_SP800_108_FEEDBACK_KDF_PARAMS
-                        );
+                        let params = mechanism
+                            .get_parameters::<CK_SP800_108_FEEDBACK_KDF_PARAMS>(
+                        )?;
                         unsafe {
                             bytes_to_slice(
                                 params.pAdditionalDerivedKeys
@@ -680,12 +679,15 @@ fn derive_key(
         }
         CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
             /* TODO: check that key_handle is NULL ? */
-            let params = cast_params!(mechanism, CK_TLS12_KEY_MAT_PARAMS);
+            let params =
+                mechanism.get_parameters::<CK_TLS12_KEY_MAT_PARAMS>()?;
             let mat_out = params.pReturnedKeyMaterial;
+
             match result.len() {
                 2 | 4 => (),
                 _ => return Err(CKR_GENERAL_ERROR)?,
             }
+
             let mut ah = Vec::<CK_OBJECT_HANDLE>::with_capacity(result.len());
             let mut iter_result = result.into_iter();
             while let Some(obj) = iter_result.next() {

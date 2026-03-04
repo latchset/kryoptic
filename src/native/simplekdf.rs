@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::{bytes_to_vec, cast_params};
+use crate::misc::bytes_to_vec;
 use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::pkcs11::*;
 
@@ -88,7 +88,8 @@ impl SimpleKDFOperation {
     pub fn new(mech: &CK_MECHANISM) -> Result<SimpleKDFOperation> {
         match mech.mechanism {
             CKM_CONCATENATE_BASE_AND_KEY => {
-                let object_handle = cast_params!(mech, CK_OBJECT_HANDLE);
+                let object_handle =
+                    mech.get_parameters::<CK_OBJECT_HANDLE>()?;
                 Ok(SimpleKDFOperation {
                     finalized: false,
                     mech: mech.mechanism,
@@ -103,7 +104,8 @@ impl SimpleKDFOperation {
             CKM_CONCATENATE_BASE_AND_DATA
             | CKM_CONCATENATE_DATA_AND_BASE
             | CKM_XOR_BASE_AND_DATA => {
-                let params = cast_params!(mech, CK_KEY_DERIVATION_STRING_DATA);
+                let params =
+                    mech.get_parameters::<CK_KEY_DERIVATION_STRING_DATA>()?;
 
                 let data = bytes_to_vec(params.pData, params.ulLen as usize);
                 if data.len() < 1 {
@@ -121,12 +123,13 @@ impl SimpleKDFOperation {
                 })
             }
             CKM_EXTRACT_KEY_FROM_KEY => {
-                let params = cast_params!(mech, CK_EXTRACT_PARAMS);
+                let params = mech.get_parameters::<CK_EXTRACT_PARAMS>()?;
                 Ok(SimpleKDFOperation {
                     finalized: false,
                     mech: mech.mechanism,
                     key_handle: None,
                     key_info: None,
+
                     data: None,
                     bit_offset: Some(params),
                     #[cfg(feature = "fips")]
