@@ -188,9 +188,9 @@ impl MlDsaParams {
                         if params.ulContextLen > MAX_CONTEXT_LEN as CK_ULONG {
                             return Err(CKR_MECHANISM_PARAM_INVALID)?;
                         }
-                        mldsa_params.context = Some(bytes_to_vec!(
+                        mldsa_params.context = Some(bytes_to_vec(
                             params.pContext,
-                            params.ulContextLen
+                            params.ulContextLen as usize,
                         ));
                     }
                 }
@@ -208,9 +208,9 @@ impl MlDsaParams {
                         if params.ulContextLen > MAX_CONTEXT_LEN as CK_ULONG {
                             return Err(CKR_MECHANISM_PARAM_INVALID)?;
                         }
-                        mldsa_params.context = Some(bytes_to_vec!(
+                        mldsa_params.context = Some(bytes_to_vec(
                             params.pContext,
-                            params.ulContextLen
+                            params.ulContextLen as usize,
                         ));
                     }
                     mldsa_params.hash = params.hash;

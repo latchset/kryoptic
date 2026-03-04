@@ -14,23 +14,22 @@ pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
 
 /// Convenience helper to copy a pointer+length obtained via FFI into a
 /// valid Vector of bytes.
-macro_rules! bytes_to_vec {
-    ($ptr:expr, $len:expr) => {{
-        let ptr = $ptr as *const u8;
-        let size = usize::try_from($len).unwrap();
-        if ptr == std::ptr::null_mut() || size == 0 {
-            Vec::new()
-        } else {
-            let mut v = Vec::<u8>::with_capacity(size);
-            unsafe {
-                std::ptr::copy_nonoverlapping(ptr, v.as_mut_ptr(), size);
-                v.set_len(size);
-            }
-            v
+pub fn bytes_to_vec<T>(ptr: *const T, len: usize) -> Vec<u8> {
+    if ptr.is_null() || len == 0 {
+        Vec::new()
+    } else {
+        let mut v = Vec::<u8>::with_capacity(len);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                ptr as *const u8,
+                v.as_mut_ptr(),
+                len,
+            );
+            v.set_len(len);
         }
-    }};
+        v
+    }
 }
-pub(crate) use bytes_to_vec;
 
 /// Convenience macro to type cast any pointer into a CK_VOID_PTR
 macro_rules! void_ptr {
@@ -98,42 +97,41 @@ macro_rules! sizeof {
 }
 pub(crate) use sizeof;
 
-/// Convenience macro to return a (mutable) reference to a slice from
+/// Convenience function to return a reference to a slice from
 /// a pointer+length obtained via FFI
 ///
 /// Uses unsafe functions:
 /// - std::slice::from_raw_parts()
-/// - std::slice::from_raw_parts_mut()
 ///
 /// If len is 0 and empty slice reference is returned
-macro_rules! bytes_to_slice {
-    ($ptr: expr, $len:expr, $typ:ty) => {
-        if $len > 0 {
-            unsafe {
-                std::slice::from_raw_parts(
-                    $ptr as *const $typ,
-                    usize::try_from($len).unwrap(),
-                )
-            }
-        } else {
-            &[]
-        }
-    };
-
-    (mut $ptr: expr, $len:expr, $typ:ty) => {
-        if $len > 0 {
-            unsafe {
-                std::slice::from_raw_parts_mut(
-                    $ptr as *mut $typ,
-                    usize::try_from($len).unwrap(),
-                )
-            }
-        } else {
-            return Err(CKR_GENERAL_ERROR)?;
-        }
-    };
+pub(crate) unsafe fn bytes_to_slice<'a, T>(
+    ptr: *const T,
+    len: usize,
+) -> &'a [T] {
+    if len > 0 {
+        unsafe { std::slice::from_raw_parts(ptr, len) }
+    } else {
+        &[]
+    }
 }
-pub(crate) use bytes_to_slice;
+
+/// Convenience function to return a mutable reference to a slice from
+/// a pointer+length obtained via FFI
+///
+/// Uses unsafe functions:
+/// - std::slice::from_raw_parts_mut()
+///
+/// If len is 0 an error is returned
+pub(crate) unsafe fn bytes_to_slice_mut<'a, T>(
+    ptr: *mut T,
+    len: usize,
+) -> Result<&'a mut [T]> {
+    if len > 0 {
+        Ok(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+    } else {
+        Err(CKR_GENERAL_ERROR)?
+    }
+}
 
 /// Helper function to prepare a Data Object as result of a derivation
 /// function

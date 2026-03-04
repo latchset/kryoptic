@@ -105,7 +105,7 @@ impl SimpleKDFOperation {
             | CKM_XOR_BASE_AND_DATA => {
                 let params = cast_params!(mech, CK_KEY_DERIVATION_STRING_DATA);
 
-                let data = bytes_to_vec!(params.pData, params.ulLen);
+                let data = bytes_to_vec(params.pData, params.ulLen as usize);
                 if data.len() < 1 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }

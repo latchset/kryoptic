@@ -46,7 +46,10 @@ fn parse_params(
     let params = cast_params!(mech, CK_EDDSA_PARAMS);
     let ctx = match params.ulContextDataLen {
         0 => None,
-        _ => Some(bytes_to_vec!(params.pContextData, params.ulContextDataLen)),
+        _ => Some(bytes_to_vec(
+            params.pContextData,
+            params.ulContextDataLen as usize,
+        )),
     };
     if outlen == OUTLEN_ED25519 {
         if params.phFlag == CK_TRUE {

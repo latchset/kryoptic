@@ -245,11 +245,11 @@ fn init_token(
     if rstate.has_sessions(slot_id)? {
         return Err(CKR_SESSION_EXISTS)?;
     }
-    let vpin = bytes_to_slice!(pin, pin_len, u8);
+    let vpin = unsafe { bytes_to_slice(pin as *const u8, pin_len as usize) };
     let vlabel: Vec<u8> = if label.is_null() {
         vec![0x20u8; 32]
     } else {
-        bytes_to_vec!(label, 32)
+        bytes_to_vec(label, 32)
     };
     let mut token = rstate.get_token_from_slot_mut_nochecks(slot_id)?;
     match token.initialize(&vpin, &vlabel) {
@@ -301,7 +301,7 @@ fn init_pin(
         return Err(CKR_USER_NOT_LOGGED_IN)?;
     }
 
-    let vpin = bytes_to_slice!(pin, pin_len, u8);
+    let vpin = unsafe { bytes_to_slice(pin as *const u8, pin_len as usize) };
 
     token.set_pin(CKU_USER, &vpin, &vec![0u8; 0])
 }
@@ -341,8 +341,10 @@ fn set_pin(
     if !session.is_writable() {
         return Err(CKR_SESSION_READ_ONLY)?;
     }
-    let vpin = bytes_to_slice!(new_pin, new_len, u8);
-    let vold = bytes_to_slice!(old_pin, old_len, u8);
+    let vpin =
+        unsafe { bytes_to_slice(new_pin as *const u8, new_len as usize) };
+    let vold =
+        unsafe { bytes_to_slice(old_pin as *const u8, old_len as usize) };
 
     if vpin.len() == 0 || vold.len() == 0 {
         return Err(CKR_PIN_INVALID)?;

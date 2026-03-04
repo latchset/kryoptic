@@ -9,7 +9,8 @@ use crate::error::{map_err, Result};
 use crate::get_random_data;
 use crate::mechanism::*;
 use crate::misc::{
-    bytes_to_slice, bytes_to_vec, cast_params, void_ptr, zeromem,
+    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, cast_params, void_ptr,
+    zeromem,
 };
 use crate::object::Object;
 use crate::ossl::common::osslctx;
@@ -208,9 +209,9 @@ impl AesOperation {
                     _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 }
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec!(
+                    iv: AesIvData::simple(bytes_to_vec(
                         params.pNonce,
-                        params.ulNonceLen
+                        usize::try_from(params.ulNonceLen)?,
                     ))?,
                     maxblocks: 0,
                     ctsmode: 0,
@@ -218,7 +219,10 @@ impl AesOperation {
                         usize::try_from(params.ulDataLen),
                         CKR_MECHANISM_PARAM_INVALID
                     )?,
-                    aad: bytes_to_vec!(params.pAAD, params.ulAADLen),
+                    aad: bytes_to_vec(
+                        params.pAAD,
+                        usize::try_from(params.ulAADLen)?,
+                    ),
                     taglen: map_err!(
                         usize::try_from(params.ulMACLen),
                         CKR_MECHANISM_PARAM_INVALID
@@ -251,14 +255,17 @@ impl AesOperation {
                     CKR_MECHANISM_PARAM_INVALID
                 )?;
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec!(
+                    iv: AesIvData::simple(bytes_to_vec(
                         params.pIv,
-                        params.ulIvLen
+                        usize::try_from(params.ulIvLen)?,
                     ))?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
-                    aad: bytes_to_vec!(params.pAAD, params.ulAADLen),
+                    aad: bytes_to_vec(
+                        params.pAAD,
+                        usize::try_from(params.ulAADLen)?,
+                    ),
                     taglen: (tagbits + 7) / 8,
                 })
             }
@@ -320,9 +327,9 @@ impl AesOperation {
                     ctsmode = 1u8;
                 }
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec!(
+                    iv: AesIvData::simple(bytes_to_vec(
                         mech.pParameter,
-                        mech.ulParameterLen
+                        usize::try_from(mech.ulParameterLen)?,
                     ))?,
                     maxblocks: 0,
                     ctsmode: ctsmode,
@@ -345,9 +352,9 @@ impl AesOperation {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec!(
+                    iv: AesIvData::simple(bytes_to_vec(
                         mech.pParameter,
-                        mech.ulParameterLen
+                        usize::try_from(mech.ulParameterLen)?,
                     ))?,
                     maxblocks: 0,
                     ctsmode: 0,
@@ -359,9 +366,9 @@ impl AesOperation {
             CKM_AES_KEY_WRAP => {
                 let iv = match mech.ulParameterLen {
                     0 => AesIvData::none()?,
-                    8 => AesIvData::simple(bytes_to_vec!(
+                    8 => AesIvData::simple(bytes_to_vec(
                         mech.pParameter,
-                        mech.ulParameterLen
+                        usize::try_from(mech.ulParameterLen)?,
                     ))?,
                     _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
@@ -377,9 +384,9 @@ impl AesOperation {
             CKM_AES_KEY_WRAP_KWP => {
                 let iv = match mech.ulParameterLen {
                     0 => AesIvData::none()?,
-                    4 => AesIvData::simple(bytes_to_vec!(
+                    4 => AesIvData::simple(bytes_to_vec(
                         mech.pParameter,
-                        mech.ulParameterLen
+                        usize::try_from(mech.ulParameterLen)?,
                     ))?,
                     _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
@@ -782,7 +789,7 @@ impl AesOperation {
                         }
                     }
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec!(params.pNonce, noncelen),
+                        buf: bytes_to_vec(params.pNonce, noncelen),
                         fixedbits: noncefixedbits,
                         generator: params.nonceGenerator,
                         counter: 0,
@@ -790,7 +797,7 @@ impl AesOperation {
                     };
                 } else {
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec!(params.pNonce, noncelen),
+                        buf: bytes_to_vec(params.pNonce, noncelen),
                         fixedbits: 0,
                         generator: CKG_NO_GENERATE,
                         counter: 0,
@@ -862,7 +869,7 @@ impl AesOperation {
                         }
                     }
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec!(params.pIv, ivlen),
+                        buf: bytes_to_vec(params.pIv, ivlen),
                         fixedbits: ivfixedbits,
                         generator: params.ivGenerator,
                         counter: 0,
@@ -870,7 +877,7 @@ impl AesOperation {
                     };
                 } else {
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec!(params.pIv, ivlen),
+                        buf: bytes_to_vec(params.pIv, ivlen),
                         fixedbits: 0,
                         generator: CKG_NO_GENERATE,
                         counter: 0,
@@ -1035,7 +1042,9 @@ impl AesOperation {
         )?);
 
         if self.params.iv.generator != CKG_NO_GENERATE {
-            let iv = bytes_to_slice!(mut iv_ptr, self.params.iv.buf.len(), u8);
+            let iv = unsafe {
+                bytes_to_slice_mut(iv_ptr as *mut u8, self.params.iv.buf.len())
+            }?;
             iv.copy_from_slice(&self.params.iv.buf);
         }
 
@@ -2170,7 +2179,9 @@ impl MsgEncryption for AesOperation {
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
-        let tagbuf = bytes_to_slice!(mut tagptr, self.params.taglen, u8);
+        let tagbuf = unsafe {
+            bytes_to_slice_mut(tagptr as *mut u8, self.params.taglen as usize)
+        }?;
 
         if !ctx.get_tag(tagbuf).is_ok() {
             zeromem(cipher);
@@ -2322,7 +2333,9 @@ impl MsgDecryption for AesOperation {
             }
         }
 
-        let tagbuf = bytes_to_slice!(tagptr, self.params.taglen, u8);
+        let tagbuf = unsafe {
+            bytes_to_slice(tagptr as *const u8, self.params.taglen as usize)
+        };
 
         /* The tag must be set first for CCM and does not hurt GCM */
         if let Some(ctx) = &mut self.ctx {

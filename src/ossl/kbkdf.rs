@@ -252,21 +252,22 @@ pub struct Sp800Operation {
 
 unsafe impl Send for Sp800Operation {}
 unsafe impl Sync for Sp800Operation {}
-
 impl Sp800Operation {
     pub fn counter_kdf_new(
         params: CK_SP800_108_KDF_PARAMS,
     ) -> Result<Sp800Operation> {
-        let data_params = bytes_to_slice!(
-            params.pDataParams,
-            params.ulNumberOfDataParams,
-            CK_PRF_DATA_PARAM
-        );
-        let addl_drv_keys = bytes_to_slice!(
-            params.pAdditionalDerivedKeys,
-            params.ulAdditionalDerivedKeys,
-            CK_DERIVED_KEY
-        );
+        let data_params = unsafe {
+            bytes_to_slice(
+                params.pDataParams as *const CK_PRF_DATA_PARAM,
+                params.ulNumberOfDataParams as usize,
+            )
+        };
+        let addl_drv_keys = unsafe {
+            bytes_to_slice(
+                params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
+                params.ulAdditionalDerivedKeys as usize,
+            )
+        };
         Ok(Sp800Operation {
             mech: CKM_SP800_108_COUNTER_KDF,
             prf: params.prfType,
@@ -282,18 +283,22 @@ impl Sp800Operation {
     pub fn feedback_kdf_new(
         params: CK_SP800_108_FEEDBACK_KDF_PARAMS,
     ) -> Result<Sp800Operation> {
-        let data_params = bytes_to_slice!(
-            params.pDataParams,
-            params.ulNumberOfDataParams,
-            CK_PRF_DATA_PARAM
-        );
-        let addl_drv_keys = bytes_to_slice!(
-            params.pAdditionalDerivedKeys,
-            params.ulAdditionalDerivedKeys,
-            CK_DERIVED_KEY
-        );
+        let data_params = unsafe {
+            bytes_to_slice(
+                params.pDataParams as *const CK_PRF_DATA_PARAM,
+                params.ulNumberOfDataParams as usize,
+            )
+        };
+        let addl_drv_keys = unsafe {
+            bytes_to_slice(
+                params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
+                params.ulAdditionalDerivedKeys as usize,
+            )
+        };
         let iv = if params.pIV != std::ptr::null_mut() && params.ulIVLen != 0 {
-            Some(bytes_to_slice!(params.pIV, params.ulIVLen, u8))
+            Some(unsafe {
+                bytes_to_slice(params.pIV as *const u8, params.ulIVLen as usize)
+            })
         } else if params.pIV == std::ptr::null_mut() && params.ulIVLen == 0 {
             None
         } else {

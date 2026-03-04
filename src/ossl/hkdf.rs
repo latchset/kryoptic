@@ -152,7 +152,7 @@ impl HKDFOperation {
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 } else {
-                    Some(bytes_to_vec!(params.pSalt, params.ulSaltLen))
+                    Some(bytes_to_vec(params.pSalt, params.ulSaltLen as usize))
                 }
             }
             CKF_HKDF_SALT_KEY => {
@@ -187,7 +187,12 @@ impl HKDFOperation {
             salt_key: [params.hSaltKey],
             salt: salt,
             info: if params.ulInfoLen > 0 {
-                Some(bytes_to_slice!(params.pInfo, params.ulInfoLen, u8))
+                Some(unsafe {
+                    bytes_to_slice(
+                        params.pInfo as *const u8,
+                        params.ulInfoLen as usize,
+                    )
+                })
             } else {
                 None
             },

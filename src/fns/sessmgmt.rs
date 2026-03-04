@@ -296,7 +296,7 @@ fn login(
             return Err(CKR_SESSION_READ_ONLY_EXISTS)?;
         }
     }
-    let vpin = bytes_to_slice!(pin, pin_len, u8);
+    let vpin = unsafe { bytes_to_slice(pin as *const u8, pin_len as usize) };
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     if user_type == CKU_CONTEXT_SPECIFIC {
         let session = rstate.get_session_mut(s_handle)?;
