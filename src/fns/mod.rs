@@ -6,6 +6,7 @@
 //! This module and its submodules contain the implementation of the various
 //! PKCS#11 functions exported via the Function List.
 
+pub mod encryption;
 pub mod general;
 pub mod objmgmt;
 pub mod sessmgmt;
@@ -111,3 +112,14 @@ macro_rules! global_wlock {
     }};
 }
 pub(crate) use global_wlock;
+
+macro_rules! check_op_empty_or_fail {
+    ($sess:expr; $op:ident; $ptr:expr) => {
+        if $ptr.is_null() {
+            res_or_ret!($sess.cancel_operation::<dyn $op>());
+            return CKR_OK;
+        }
+        res_or_ret!($sess.check_no_op::<dyn $op>());
+    };
+}
+pub(crate) use check_op_empty_or_fail;
