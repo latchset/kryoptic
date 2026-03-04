@@ -8,6 +8,7 @@
 
 pub mod encryption;
 pub mod general;
+pub mod keymgmt;
 pub mod objmgmt;
 pub mod sessmgmt;
 pub mod signing;
