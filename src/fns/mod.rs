@@ -10,6 +10,7 @@ pub mod encryption;
 pub mod general;
 pub mod objmgmt;
 pub mod sessmgmt;
+pub mod signing;
 pub mod stmgmt;
 
 /// Macro to convert a `Result<()>` into a `CK_RV`, returning `CKR_OK` on Ok.
