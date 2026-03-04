@@ -6,6 +6,7 @@
 //! This module and its submodules contain the implementation of the various
 //! PKCS#11 functions exported via the Function List.
 
+use crate::error::Result;
 use crate::pkcs11::*;
 use crate::{get_random_data, random_add_seed, STATE};
 
@@ -19,69 +20,37 @@ pub mod sessmgmt;
 pub mod signing;
 pub mod stmgmt;
 
-/// Macro to convert a `Result<()>` into a `CK_RV`, returning `CKR_OK` on Ok.
-macro_rules! ret_to_rv {
-    ($ret:expr) => {
-        match $ret {
-            Ok(()) => CKR_OK,
-            Err(e) => e.rv(),
-        }
-    };
+macro_rules! log_debug {
+    ($($arg:tt)+) => (
+        #[cfg(feature = "log")]
+        log::debug!($($arg)+);
+    )
 }
-pub(crate) use ret_to_rv;
+pub(crate) use log_debug;
 
-/// Macro to unwrap a `Result<T>` or cause the function to return its `CK_RV`
-/// error code.
-macro_rules! res_or_ret {
-    ($ret:expr) => {
-        match $ret {
-            Ok(x) => x,
-            Err(e) => return e.rv(),
+pub(crate) fn fail_if_cka_token_true(template: &[CK_ATTRIBUTE]) -> Result<()> {
+    for ck_attr in template.iter() {
+        if ck_attr.type_ == CKA_TOKEN {
+            if ck_attr.to_bool()? {
+                return Err(CKR_SESSION_READ_ONLY)?;
+            }
         }
-    };
+    }
+    Ok(())
 }
-pub(crate) use res_or_ret;
 
-/// Macro to check if a `CK_RV` is `CKR_OK`, otherwise cause the function to
-/// return the error code.
-macro_rules! ok_or_ret {
-    ($ret:expr) => {
-        match $ret {
-            CKR_OK => (),
-            err => return err,
-        }
-    };
+#[inline(always)]
+fn seed_random(
+    s_handle: CK_SESSION_HANDLE,
+    seed: CK_BYTE_PTR,
+    seed_len: CK_ULONG,
+) -> Result<()> {
+    /* check session is valid */
+    drop(STATE.rlock()?.get_session(s_handle)?);
+    let len = usize::try_from(seed_len).map_err(|_| CKR_GENERAL_ERROR)?;
+    let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
+    random_add_seed(data)
 }
-pub(crate) use ok_or_ret;
-
-/// Macro for `try_from` conversions, return the data in the proper format or
-/// causes the function to return a specified or general error on failure.
-macro_rules! cast_or_ret {
-    ($type:tt from $val:expr) => {{
-        match $type::try_from($val) {
-            Ok(cast) => cast,
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-    ($type:tt from $val:expr => $err:expr) => {{
-        match $type::try_from($val) {
-            Ok(cast) => cast,
-            Err(_) => return $err,
-        }
-    }};
-}
-pub(crate) use cast_or_ret;
-
-macro_rules! check_op_empty_or_fail {
-    ($sess:expr; $op:ident; $ptr:expr) => {
-        if $ptr.is_null() {
-            res_or_ret!($sess.cancel_operation::<dyn $op>());
-            return CKR_OK;
-        }
-        res_or_ret!($sess.check_no_op::<dyn $op>());
-    };
-}
-pub(crate) use check_op_empty_or_fail;
 
 /// Implementation of C_SeedRandom function
 ///
@@ -91,11 +60,32 @@ pub extern "C" fn fn_seed_random(
     seed: CK_BYTE_PTR,
     seed_len: CK_ULONG,
 ) -> CK_RV {
+    log_debug!(
+        "C_SeedRandom: s_handle={} seed={:?} seed_len={}",
+        s_handle,
+        seed,
+        seed_len
+    );
+    let rv = match seed_random(s_handle, seed, seed_len) {
+        Ok(()) => CKR_OK,
+        Err(e) => e.rv(),
+    };
+    log_debug!("C_SeedRandom: ret={}", rv);
+    rv
+}
+
+#[inline(always)]
+fn generate_random(
+    s_handle: CK_SESSION_HANDLE,
+    random_data: CK_BYTE_PTR,
+    random_len: CK_ULONG,
+) -> Result<()> {
     /* check session is valid */
-    drop(res_or_ret!(res_or_ret!(STATE.rlock()).get_session(s_handle)));
-    let len = cast_or_ret!(usize from seed_len);
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
-    ret_to_rv!(random_add_seed(data))
+    drop(STATE.rlock()?.get_session(s_handle)?);
+    let rndlen = usize::try_from(random_len).map_err(|_| CKR_GENERAL_ERROR)?;
+    let data: &mut [u8] =
+        unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
+    get_random_data(data)
 }
 
 /// Implementation of C_GeneateRandom function
@@ -106,12 +96,18 @@ pub extern "C" fn fn_generate_random(
     random_data: CK_BYTE_PTR,
     random_len: CK_ULONG,
 ) -> CK_RV {
-    /* check session is valid */
-    drop(res_or_ret!(res_or_ret!(STATE.rlock()).get_session(s_handle)));
-    let rndlen = cast_or_ret!(usize from random_len);
-    let data: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
-    ret_to_rv!(get_random_data(data))
+    log_debug!(
+        "C_GenerateRandom: s_handle={} random_data={:?} random_len={}",
+        s_handle,
+        random_data,
+        random_len
+    );
+    let rv = match generate_random(s_handle, random_data, random_len) {
+        Ok(()) => CKR_OK,
+        Err(e) => e.rv(),
+    };
+    log_debug!("C_GenerateRandom: ret={}", rv);
+    rv
 }
 
 /// Implementation of C_GetFunctionStatus function
