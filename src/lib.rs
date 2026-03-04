@@ -56,9 +56,7 @@ use fns::objmgmt::*;
 use fns::sessmgmt::*;
 use fns::signing::*;
 use fns::stmgmt::*;
-use fns::{
-    cast_or_ret, global_rlock, global_wlock, ok_or_ret, res_or_ret, ret_to_rv,
-};
+use fns::*;
 
 thread_local!(
     /// Thread-local instance of the Cryptographically Secure Pseudo-Random Number
@@ -72,7 +70,6 @@ thread_local!(
 /// Fill a buffer with random data
 ///
 /// Uses the instantaited CSPRNG to fill the buffer with random data
-
 fn get_random_data(data: &mut [u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().generate_random(data))
 }
@@ -80,7 +77,6 @@ fn get_random_data(data: &mut [u8]) -> Result<()> {
 /// Add seed data to the CSPRNG
 ///
 /// This is not counted as entropy but just as additional data
-
 fn random_add_seed(data: &[u8]) -> Result<()> {
     CSPRNG.with(|rng| rng.borrow_mut().add_seed(data))
 }
@@ -496,57 +492,6 @@ pub(crate) fn check_allowed_mechs(
     return CKR_MECHANISM_INVALID;
 }
 
-/// Implementation of C_SeedRandom function
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203358](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203358)
-
-extern "C" fn fn_seed_random(
-    s_handle: CK_SESSION_HANDLE,
-    seed: CK_BYTE_PTR,
-    seed_len: CK_ULONG,
-) -> CK_RV {
-    /* check session is valid */
-    drop(res_or_ret!(global_rlock!((*STATE)).get_session(s_handle)));
-    let len = cast_or_ret!(usize from seed_len);
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
-    ret_to_rv!(random_add_seed(data))
-}
-
-/// Implementation of C_GeneateRandom function
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203359](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203359)
-
-extern "C" fn fn_generate_random(
-    s_handle: CK_SESSION_HANDLE,
-    random_data: CK_BYTE_PTR,
-    random_len: CK_ULONG,
-) -> CK_RV {
-    /* check session is valid */
-    drop(res_or_ret!(global_rlock!((*STATE)).get_session(s_handle)));
-    let rndlen = cast_or_ret!(usize from random_len);
-    let data: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
-    ret_to_rv!(get_random_data(data))
-}
-
-/// Implementation of C_GetFunctionStatus function
-/// (Legacy function. Always returns `CKR_FUNCTION_NOT_PARALLEL`)
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203361](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203361)
-
-extern "C" fn fn_get_function_status(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_PARALLEL
-}
-
-/// Implementation of C_CancelFunction function
-/// (Legacy function. Always returns `CKR_FUNCTION_NOT_PARALLEL`)
-///
-/// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203362](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203362)
-
-extern "C" fn fn_cancel_function(_session: CK_SESSION_HANDLE) -> CK_RV {
-    CKR_FUNCTION_NOT_PARALLEL
-}
-
 /// FFI Compatible structure that holds the PKCS#11 v2.40 functions table
 pub(crate) static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     version: CK_VERSION {
@@ -740,32 +685,6 @@ pub(crate) static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
     C_VerifyMessageNext: Some(fn_verify_message_next),
     C_MessageVerifyFinal: Some(fn_message_verify_final),
 };
-
-extern "C" fn fn_async_complete(
-    _s_handle: CK_SESSION_HANDLE,
-    _function_name: *mut CK_UTF8CHAR,
-    _result: *mut CK_ASYNC_DATA,
-) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
-
-extern "C" fn fn_async_get_id(
-    _s_handle: CK_SESSION_HANDLE,
-    _function_name: *mut CK_UTF8CHAR,
-    _operation_id: *mut CK_ULONG,
-) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
-
-extern "C" fn fn_async_join(
-    _s_handle: CK_SESSION_HANDLE,
-    _function_name: *mut CK_UTF8CHAR,
-    _operation_id: CK_ULONG,
-    _data: *mut CK_BYTE,
-    _data_len: CK_ULONG,
-) -> CK_RV {
-    CKR_FUNCTION_NOT_SUPPORTED
-}
 
 /// FFI Compatible structure that holds the PKCS#11 v3.2 functions table
 static FNLIST_320: CK_FUNCTION_LIST_3_2 = CK_FUNCTION_LIST_3_2 {
