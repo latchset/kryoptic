@@ -8,7 +8,7 @@
 
 use std::sync::RwLockWriteGuard;
 
-use crate::error::{arg_bad, Result};
+use crate::error::Result;
 use crate::fns::log_debug;
 use crate::mechanism::Digest;
 use crate::pkcs11::*;
@@ -143,7 +143,7 @@ pub(crate) fn internal_digest_update(
     part_len: CK_ULONG,
 ) -> Result<()> {
     let operation = session.get_operation::<dyn Digest>()?;
-    let plen = usize::try_from(part_len).map_err(arg_bad)?;
+    let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
     operation.digest_update(data)
 }
