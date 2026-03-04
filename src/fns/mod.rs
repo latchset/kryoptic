@@ -7,7 +7,7 @@
 //! PKCS#11 functions exported via the Function List.
 
 use crate::pkcs11::*;
-use crate::{get_random_data, random_add_seed};
+use crate::{get_random_data, random_add_seed, STATE};
 
 pub mod digest;
 pub mod dualcrypto;
@@ -72,54 +72,6 @@ macro_rules! cast_or_ret {
 }
 pub(crate) use cast_or_ret;
 
-/// Macro to acquire a read lock on a global `RwLock<T>`. One variant checks
-/// the initialization status and the other explicitly does not (generally
-/// used during initialization).
-macro_rules! global_rlock {
-    ($GLOBAL:expr) => {
-        match $GLOBAL.read() {
-            Ok(r) => {
-                if (!r.is_initialized()) {
-                    return CKR_CRYPTOKI_NOT_INITIALIZED;
-                }
-                r
-            }
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    };
-    (noinitcheck; $GLOBAL:expr) => {{
-        match $GLOBAL.read() {
-            Ok(r) => r,
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-}
-pub(crate) use global_rlock;
-
-/// Macro to acquire a write lock on a global `RwLock<T>`. One variant checks
-/// the initialization status and the other explicitly does not (generally
-/// used during initialization).
-macro_rules! global_wlock {
-    ($GLOBAL:expr) => {{
-        match $GLOBAL.write() {
-            Ok(w) => {
-                if (!w.is_initialized()) {
-                    return CKR_CRYPTOKI_NOT_INITIALIZED;
-                }
-                w
-            }
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-    (noinitcheck; $GLOBAL:expr) => {{
-        match $GLOBAL.write() {
-            Ok(w) => w,
-            Err(_) => return CKR_GENERAL_ERROR,
-        }
-    }};
-}
-pub(crate) use global_wlock;
-
 macro_rules! check_op_empty_or_fail {
     ($sess:expr; $op:ident; $ptr:expr) => {
         if $ptr.is_null() {
@@ -140,9 +92,7 @@ pub extern "C" fn fn_seed_random(
     seed_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    drop(res_or_ret!(
-        global_rlock!((*crate::STATE)).get_session(s_handle)
-    ));
+    drop(res_or_ret!(res_or_ret!(STATE.rlock()).get_session(s_handle)));
     let len = cast_or_ret!(usize from seed_len);
     let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
     ret_to_rv!(random_add_seed(data))
@@ -157,9 +107,7 @@ pub extern "C" fn fn_generate_random(
     random_len: CK_ULONG,
 ) -> CK_RV {
     /* check session is valid */
-    drop(res_or_ret!(
-        global_rlock!((*crate::STATE)).get_session(s_handle)
-    ));
+    drop(res_or_ret!(res_or_ret!(STATE.rlock()).get_session(s_handle)));
     let rndlen = cast_or_ret!(usize from random_len);
     let data: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };

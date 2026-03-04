@@ -9,10 +9,10 @@
 use std::sync::RwLockWriteGuard;
 
 use crate::error::{arg_bad, Result};
-use crate::fns::{cast_or_ret, global_rlock, res_or_ret, ret_to_rv};
 use crate::mechanism::Digest;
 use crate::pkcs11::*;
 use crate::session::Session;
+use crate::{cast_or_ret, res_or_ret, ret_to_rv, STATE};
 
 #[cfg(feature = "fips")]
 use crate::{finalize_fips_approval, init_fips_approval};
@@ -35,7 +35,7 @@ pub extern "C" fn fn_digest_init(
     s_handle: CK_SESSION_HANDLE,
     mechptr: CK_MECHANISM_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Digest; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -65,7 +65,7 @@ pub extern "C" fn fn_digest(
     if pdata.is_null() || pul_digest_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let digest_len = res_or_ret!(operation.digest_len());
@@ -125,7 +125,7 @@ pub extern "C" fn fn_digest_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_digest_update(&mut session, part, part_len))
 }
@@ -138,7 +138,7 @@ pub extern "C" fn fn_digest_key(
     s_handle: CK_SESSION_HANDLE,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
     let operation = res_or_ret!(session.get_operation::<dyn Digest>());
@@ -178,7 +178,7 @@ pub extern "C" fn fn_digest_final(
     if pul_digest_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Digest>());
     let digest_len = res_or_ret!(operation.digest_len());

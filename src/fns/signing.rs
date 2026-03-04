@@ -10,13 +10,13 @@ use std::sync::RwLockWriteGuard;
 
 use crate::check_allowed_mechs;
 use crate::error::{arg_bad, Result};
-use crate::fns::{
-    cast_or_ret, check_op_empty_or_fail, global_rlock, ok_or_ret, res_or_ret,
-    ret_to_rv,
-};
 use crate::mechanism::{Sign, Verify, VerifySignature};
 use crate::pkcs11::*;
 use crate::session::Session;
+use crate::{
+    cast_or_ret, check_op_empty_or_fail, ok_or_ret, res_or_ret, ret_to_rv,
+    STATE,
+};
 
 #[cfg(feature = "fips")]
 use crate::{finalize_fips_approval, init_fips_approval};
@@ -30,7 +30,7 @@ pub extern "C" fn fn_sign_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Sign; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -66,7 +66,7 @@ pub extern "C" fn fn_sign(
     if pdata.is_null() || pul_signature_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -127,7 +127,7 @@ pub extern "C" fn fn_sign_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_sign_update(&mut session, part, part_len))
 }
@@ -144,7 +144,7 @@ pub extern "C" fn fn_sign_final(
     if pul_signature_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Sign>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -212,7 +212,7 @@ pub extern "C" fn fn_verify_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Verify; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -248,7 +248,7 @@ pub extern "C" fn fn_verify(
     if pdata.is_null() || psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -296,7 +296,7 @@ pub extern "C" fn fn_verify_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_verify_update(&mut session, part, part_len))
 }
@@ -313,7 +313,7 @@ pub extern "C" fn fn_verify_final(
     if psignature.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Verify>());
     let signature_len = res_or_ret!(operation.signature_len());
@@ -501,7 +501,7 @@ pub extern "C" fn fn_verify_signature_init(
     psignature: *mut CK_BYTE,
     psignature_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Verify; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -539,7 +539,7 @@ pub extern "C" fn fn_verify_signature(
     if pdata.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
     let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
@@ -567,7 +567,7 @@ pub extern "C" fn fn_verify_signature_update(
     if part.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
     let plen = cast_or_ret!(usize from part_len => CKR_ARGUMENTS_BAD);
@@ -582,7 +582,7 @@ pub extern "C" fn fn_verify_signature_update(
 pub extern "C" fn fn_verify_signature_final(
     s_handle: CK_SESSION_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn VerifySignature>());
     let ret = ret_to_rv!(operation.verify_final());

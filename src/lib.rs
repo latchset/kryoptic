@@ -339,14 +339,53 @@ impl State {
     }
 }
 
+/// Global state holder for the library.
+pub(crate) struct GlobalState {
+    pub(crate) state: RwLock<State>,
+}
+
+impl GlobalState {
+    pub fn rlock(&self) -> Result<RwLockReadGuard<'_, State>> {
+        match self.state.read() {
+            Ok(r) => {
+                if !r.is_initialized() {
+                    return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
+                }
+                Ok(r)
+            }
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
+    }
+
+    pub fn wlock(&self) -> Result<RwLockWriteGuard<'_, State>> {
+        match self.state.write() {
+            Ok(w) => {
+                if !w.is_initialized() {
+                    return Err(CKR_CRYPTOKI_NOT_INITIALIZED)?;
+                }
+                Ok(w)
+            }
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
+    }
+
+    pub fn wlock_noinitcheck(&self) -> Result<RwLockWriteGuard<'_, State>> {
+        match self.state.write() {
+            Ok(w) => Ok(w),
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
+    }
+}
+
 /// Global, lazily initialized, read-write locked state for the PKCS#11 library.
-pub(crate) static STATE: LazyLock<RwLock<State>> = LazyLock::new(|| {
-    RwLock::new(State {
-        slots: HashMap::new(),
-        sessionmap: HashMap::new(),
-        next_handle: 0,
-    })
-});
+pub(crate) static STATE: LazyLock<GlobalState> =
+    LazyLock::new(|| GlobalState {
+        state: RwLock::new(State {
+            slots: HashMap::new(),
+            sessionmap: HashMap::new(),
+            next_handle: 0,
+        }),
+    });
 
 /// Initializes the FIPS approval indicator on a session based on the key and
 /// operation. Used at the beginning of a cryptographic operation.
@@ -384,22 +423,36 @@ pub(crate) fn finalize_fips_approval(
 
 /// Global configuration holder for the library.
 pub(crate) struct GlobalConfig {
-    pub(crate) conf: Config,
+    pub(crate) conf: RwLock<Config>,
+}
+
+impl GlobalConfig {
+    pub fn rlock(&self) -> Result<RwLockReadGuard<'_, Config>> {
+        match self.conf.read() {
+            Ok(r) => Ok(r),
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
+    }
+
+    pub fn wlock(&self) -> Result<RwLockWriteGuard<'_, Config>> {
+        match self.conf.write() {
+            Ok(w) => Ok(w),
+            Err(_) => return Err(CKR_GENERAL_ERROR)?,
+        }
+    }
 }
 
 /// Global, lazily initialized, read-write locked configuration instance.
-pub(crate) static CONFIG: LazyLock<RwLock<GlobalConfig>> =
-    LazyLock::new(|| {
-        RwLock::new(GlobalConfig {
-            conf: Config::new(),
-        })
+pub(crate) static CONFIG: LazyLock<GlobalConfig> =
+    LazyLock::new(|| GlobalConfig {
+        conf: RwLock::new(Config::new()),
     });
 
 /// tests helper
 #[cfg(test)]
 pub fn add_slot(slot: config::Slot) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
-    if gconf.conf.add_slot(slot).is_err() {
+    let mut conf = res_or_ret!(CONFIG.wlock());
+    if conf.add_slot(slot).is_err() {
         return CKR_GENERAL_ERROR;
     }
     CKR_OK
@@ -407,18 +460,16 @@ pub fn add_slot(slot: config::Slot) -> CK_RV {
 
 #[cfg(test)]
 fn force_load_config() -> CK_RV {
-    let testconf = GlobalConfig {
-        conf: match Config::default_config() {
-            Ok(conf) => conf,
-            Err(e) => return e.rv(),
-        },
+    let testconf = match Config::default_config() {
+        Ok(conf) => conf,
+        Err(e) => return e.rv(),
     };
-    if testconf.conf.slots.len() == 0 {
+    if testconf.slots.len() == 0 {
         return CKR_GENERAL_ERROR;
     }
-    let mut gconf = global_wlock!(noinitcheck; (*CONFIG));
-    for slot in testconf.conf.slots {
-        res_or_ret!(gconf.conf.add_slot(slot));
+    let mut conf = res_or_ret!(CONFIG.wlock());
+    for slot in testconf.slots {
+        res_or_ret!(conf.add_slot(slot));
     }
     return CKR_OK;
 }
@@ -428,7 +479,7 @@ fn get_fips_behavior(
     slot_id: CK_SLOT_ID,
     save: &mut config::FipsBehavior,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let behavior = res_or_ret!(rstate.get_fips_behavior(slot_id));
     *save = behavior.clone();
     CKR_OK
@@ -436,7 +487,7 @@ fn get_fips_behavior(
 
 #[cfg(all(test, feature = "fips"))]
 fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
-    let mut wstate = global_wlock!((*STATE));
+    let mut wstate = res_or_ret!(STATE.wlock());
     ret_to_rv!(wstate.set_fips_behavior(slot_id, val))
 }
 

@@ -7,10 +7,10 @@
 //! as defined in the PKCS#11 specification.
 
 use crate::check_allowed_mechs;
-use crate::fns::{cast_or_ret, global_rlock, ok_or_ret, res_or_ret};
 use crate::misc::{bytes_to_slice, cast_params};
 use crate::object;
 use crate::pkcs11::*;
+use crate::{cast_or_ret, ok_or_ret, res_or_ret, STATE};
 
 #[cfg(feature = "fips")]
 use crate::fips;
@@ -38,7 +38,7 @@ pub extern "C" fn fn_generate_key(
     count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -111,7 +111,7 @@ pub extern "C" fn fn_generate_key_pair(
     public_key: CK_OBJECT_HANDLE_PTR,
     private_key: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -201,7 +201,7 @@ pub extern "C" fn fn_wrap_key(
     wrapped_key: CK_BYTE_PTR,
     pul_wrapped_key_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -277,7 +277,7 @@ pub extern "C" fn fn_unwrap_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -356,7 +356,7 @@ pub extern "C" fn fn_derive_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -583,7 +583,7 @@ pub extern "C" fn fn_encapsulate_key(
     encrypted_part_len: *mut CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -676,7 +676,7 @@ pub extern "C" fn fn_decapsulate_key(
     encrypted_part_len: CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
 
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };

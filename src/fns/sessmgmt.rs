@@ -12,10 +12,7 @@ use crate::mechanism::{
 };
 use crate::misc::bytes_to_slice;
 use crate::pkcs11::*;
-use crate::{
-    cast_or_ret, global_rlock, global_wlock, object, res_or_ret, ret_to_rv,
-    STATE,
-};
+use crate::{cast_or_ret, object, res_or_ret, ret_to_rv, STATE};
 
 /// Implementation of C_OpenSession function
 ///
@@ -27,7 +24,7 @@ pub extern "C" fn fn_open_session(
     _notify: CK_NOTIFY,
     ph_session: CK_SESSION_HANDLE_PTR,
 ) -> CK_RV {
-    let mut wstate = global_wlock!((*STATE));
+    let mut wstate = res_or_ret!(STATE.wlock());
     let token = res_or_ret!(wstate.get_token_from_slot(slot_id));
     let mut user_type = CK_UNAVAILABLE_INFORMATION;
     if token.is_logged_in(CKU_SO) {
@@ -50,7 +47,7 @@ pub extern "C" fn fn_open_session(
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203273](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203273)
 pub extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let mut wstate = global_wlock!((*STATE));
+    let mut wstate = res_or_ret!(STATE.wlock());
     let mut token = res_or_ret!(wstate.get_token_from_session_mut(s_handle));
     token.drop_session_objects(s_handle);
     drop(token);
@@ -62,7 +59,7 @@ pub extern "C" fn fn_close_session(s_handle: CK_SESSION_HANDLE) -> CK_RV {
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203274](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203274)
 pub extern "C" fn fn_close_all_sessions(slot_id: CK_SLOT_ID) -> CK_RV {
-    let mut wstate = global_wlock!((*STATE));
+    let mut wstate = res_or_ret!(STATE.wlock());
     let dropped_sessions = res_or_ret!(wstate.drop_all_sessions_slot(slot_id));
     let mut token = res_or_ret!(wstate.get_token_from_slot_mut(slot_id));
     for handle in dropped_sessions {
@@ -80,7 +77,7 @@ pub extern "C" fn fn_get_session_info(
     s_handle: CK_SESSION_HANDLE,
     info: CK_SESSION_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     unsafe {
         core::ptr::write(info as *mut _, *session.get_session_info());
@@ -96,7 +93,7 @@ pub extern "C" fn fn_get_operation_state(
     operation_state: CK_BYTE_PTR,
     pul_operation_state_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     if operation_state.is_null() {
         if pul_operation_state_len.is_null() {
@@ -135,7 +132,7 @@ pub extern "C" fn fn_set_operation_state(
     if encryption_key != CK_INVALID_HANDLE {
         return CKR_KEY_NOT_NEEDED;
     }
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let state_len = cast_or_ret!(
         usize from operation_state_len => CKR_ARGUMENTS_BAD
@@ -165,7 +162,7 @@ pub extern "C" fn fn_login(
     pin: CK_UTF8CHAR_PTR,
     pin_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     /* avoid deadlock later when we change all sessions */
@@ -222,7 +219,7 @@ pub extern "C" fn fn_login(
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203281](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203281)
 pub extern "C" fn fn_logout(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     /* avoid deadlock later when we change all sessions */
@@ -256,7 +253,7 @@ pub extern "C" fn fn_session_cancel(
     s_handle: CK_SESSION_HANDLE,
     flags: CK_FLAGS,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let mut res = CKR_OK;
 
@@ -322,7 +319,7 @@ pub extern "C" fn fn_get_session_validation_flags(
     let flags: CK_FLAGS = if flags_type != CKS_LAST_VALIDATION_OK {
         0
     } else {
-        let rstate = global_rlock!((*STATE));
+        let rstate = res_or_ret!(STATE.rlock());
         let session = res_or_ret!(rstate.get_session(s_handle));
 
         session.get_last_validation_flags()

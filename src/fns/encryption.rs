@@ -10,13 +10,13 @@ use std::sync::RwLockWriteGuard;
 
 use crate::check_allowed_mechs;
 use crate::error::{arg_bad, Result};
-use crate::fns::{
-    cast_or_ret, check_op_empty_or_fail, global_rlock, ok_or_ret, res_or_ret,
-    ret_to_rv,
-};
 use crate::mechanism::{Decryption, Encryption, MsgDecryption, MsgEncryption};
 use crate::pkcs11::*;
 use crate::session::Session;
+use crate::{
+    cast_or_ret, check_op_empty_or_fail, ok_or_ret, res_or_ret, ret_to_rv,
+    STATE,
+};
 
 #[cfg(feature = "fips")]
 use crate::{finalize_fips_approval, init_fips_approval};
@@ -30,7 +30,7 @@ pub extern "C" fn fn_encrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Encryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -66,7 +66,7 @@ pub extern "C" fn fn_encrypt(
     if pdata.is_null() || pul_encrypted_data_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Encryption>());
     let dlen = cast_or_ret!(usize from data_len => CKR_ARGUMENTS_BAD);
@@ -136,7 +136,7 @@ pub extern "C" fn fn_encrypt_update(
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_encrypt_update(
         &mut session,
@@ -156,7 +156,7 @@ pub extern "C" fn fn_encrypt_final(
     last_encrypted_part: CK_BYTE_PTR,
     pul_last_encrypted_part_len: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     if last_encrypted_part.is_null() && pul_last_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
@@ -196,7 +196,7 @@ pub extern "C" fn fn_decrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; Decryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -232,7 +232,7 @@ pub extern "C" fn fn_decrypt(
     if encrypted_data.is_null() || pul_data_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     let elen = cast_or_ret!(usize from encrypted_data_len => CKR_ARGUMENTS_BAD);
@@ -304,7 +304,7 @@ pub extern "C" fn fn_decrypt_update(
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     ret_to_rv!(internal_decrypt_update(
         &mut session,
@@ -327,7 +327,7 @@ pub extern "C" fn fn_decrypt_final(
     if last_part.is_null() && pul_last_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn Decryption>());
     if last_part.is_null() {
@@ -364,7 +364,7 @@ pub extern "C" fn fn_message_encrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; MsgEncryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -416,7 +416,7 @@ pub extern "C" fn fn_encrypt_message(
     let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
     let clen = cast_or_ret!(usize from pclen => CKR_ARGUMENTS_BAD);
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if operation.busy() {
@@ -479,7 +479,7 @@ pub extern "C" fn fn_encrypt_message_begin(
         usize from associated_data_len => CKR_ARGUMENTS_BAD
     );
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
 
@@ -539,7 +539,7 @@ pub extern "C" fn fn_encrypt_message_next(
         _ => return CKR_ARGUMENTS_BAD,
     };
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     if !operation.busy() {
@@ -593,7 +593,7 @@ pub extern "C" fn fn_encrypt_message_next(
 pub extern "C" fn fn_message_encrypt_final(
     s_handle: CK_SESSION_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgEncryption>());
     ret_to_rv!(operation.finalize())
@@ -608,7 +608,7 @@ pub extern "C" fn fn_message_decrypt_init(
     mechptr: CK_MECHANISM_PTR,
     key_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     check_op_empty_or_fail!(session; MsgDecryption; mechptr);
     let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
@@ -660,7 +660,7 @@ pub extern "C" fn fn_decrypt_message(
     let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
     let plen = cast_or_ret!(usize from pplen => CKR_ARGUMENTS_BAD);
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if operation.busy() {
@@ -723,7 +723,7 @@ pub extern "C" fn fn_decrypt_message_begin(
         usize from associated_data_len => CKR_ARGUMENTS_BAD
     );
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
 
@@ -784,7 +784,7 @@ pub extern "C" fn fn_decrypt_message_next(
         _ => return CKR_ARGUMENTS_BAD,
     };
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     if !operation.busy() {
@@ -838,7 +838,7 @@ pub extern "C" fn fn_decrypt_message_next(
 pub extern "C" fn fn_message_decrypt_final(
     s_handle: CK_SESSION_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn MsgDecryption>());
     ret_to_rv!(operation.finalize())
