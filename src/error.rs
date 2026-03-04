@@ -329,12 +329,3 @@ where
 {
     Error::ck_rv_from_error(CKR_ARGUMENTS_BAD, error)
 }
-
-/// Helper to map an Error to a PKCS#11 Error code error
-macro_rules! map_err {
-    ($map:expr, $err:tt) => {{
-        use crate::error::Error;
-        $map.map_err(|e| Error::ck_rv_from_error($err, e))
-    }};
-}
-pub(crate) use map_err;
