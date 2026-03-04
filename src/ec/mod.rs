@@ -1,11 +1,10 @@
 // Copyright 2023 - 2024 Simo Sorce, Jakub Jelen
 // See LICENSE.txt file for terms
-
 //! This module provides access to Eliipitic Curve Cryptography related
 //! operations
 
 use crate::attribute::Attribute;
-use crate::error::{device_error, general_error, Error, Result};
+use crate::error::{Error, Result};
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
 use crate::kasn1::PrivateKeyInfo;
@@ -157,7 +156,7 @@ pub fn get_ec_point_from_obj(key: &Object) -> Result<Vec<u8>> {
     let octet = match key.get_attr_as_ulong(CKA_KEY_TYPE)? {
         CKK_EC => {
             /* [u8] is an octet string for the asn1 library */
-            asn1::parse_single::<&[u8]>(point).map_err(device_error)?
+            asn1::parse_single::<&[u8]>(point).map_err(|_| CKR_DEVICE_ERROR)?
         }
         CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => point.as_slice(),
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
@@ -217,12 +216,12 @@ pub fn check_ec_point_from_obj(
 ) -> Result<()> {
     let point = key.get_attr_as_bytes(CKA_EC_POINT)?;
     let size = ec_point_size(&oid)?;
-
     let octet: &[u8];
     let compat: bool;
     match oid {
         &EC_SECP256R1 | &EC_SECP384R1 | &EC_SECP521R1 => {
-            octet = asn1::parse_single::<&[u8]>(point).map_err(device_error)?;
+            octet = asn1::parse_single::<&[u8]>(point)
+                .map_err(|_| CKR_DEVICE_ERROR)?;
             compat = false;
         }
         &ED25519_OID | &ED448_OID | &X25519_OID | &X448_OID => {
@@ -235,12 +234,12 @@ pub fn check_ec_point_from_obj(
     if octet.len() == size {
         return Ok(());
     }
-
     if compat && octet.len() == size + 2 {
         /* Compatibility with applications that use DER encoding */
-        let raw = asn1::parse_single::<&[u8]>(octet).map_err(device_error)?;
+        let raw =
+            asn1::parse_single::<&[u8]>(octet).map_err(|_| CKR_DEVICE_ERROR)?;
         key.set_attr(Attribute::from_bytes(CKA_EC_POINT, raw.to_vec()))
-            .map_err(general_error)?;
+            .map_err(|e| Error::ck_rv_from_error(CKR_GENERAL_ERROR, e))?;
         return Ok(());
     }
 

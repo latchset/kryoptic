@@ -9,7 +9,7 @@
 use std::sync::RwLockWriteGuard;
 
 use crate::check_allowed_mechs;
-use crate::error::{arg_bad, Result};
+use crate::error::Result;
 use crate::log_debug;
 use crate::mechanism::{Decryption, Encryption, MsgDecryption, MsgEncryption};
 use crate::pkcs11::*;
@@ -164,18 +164,18 @@ pub(crate) fn internal_encrypt_update(
     pul_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let operation = session.get_operation::<dyn Encryption>()?;
-    let plen = usize::try_from(part_len).map_err(arg_bad)?;
+    let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let len = if encrypted_part.is_null() {
         operation.encryption_len(plen, false)?
     } else {
         let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
         let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
-        let enclen = usize::try_from(penclen).map_err(arg_bad)?;
+        let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
         let encpart: &mut [u8] =
             unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
         operation.encrypt_update(data, encpart)?
     };
-    let cklen = CK_ULONG::try_from(len).map_err(arg_bad)?;
+    let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     unsafe { *pul_encrypted_part_len = cklen };
     Ok(())
 }
@@ -443,19 +443,20 @@ pub(crate) fn internal_decrypt_update(
     pul_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let operation = session.get_operation::<dyn Decryption>()?;
-    let elen = usize::try_from(encrypted_part_len).map_err(arg_bad)?;
+    let elen =
+        usize::try_from(encrypted_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let len = if part.is_null() {
         operation.decryption_len(elen, false)?
     } else {
         let enc: &[u8] =
             unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
         let pplen = unsafe { *pul_part_len as CK_ULONG };
-        let plen = usize::try_from(pplen).map_err(arg_bad)?;
+        let plen = usize::try_from(pplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
         let dpart: &mut [u8] =
             unsafe { std::slice::from_raw_parts_mut(part, plen) };
         operation.decrypt_update(enc, dpart)?
     };
-    let cklen = CK_ULONG::try_from(len).map_err(arg_bad)?;
+    let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     unsafe { *pul_part_len = cklen };
     Ok(())
 }

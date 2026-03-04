@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::ec::*;
-use crate::error::{general_error, Error, Result};
+use crate::error::{Error, Result};
 use crate::kasn1::{oid, pkcs};
 use crate::mechanism::*;
 use crate::object::*;
@@ -159,7 +159,7 @@ impl ObjectFactory for ECDSAPubFactory {
             } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
                 Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
             } else {
-                general_error(e)
+                Error::ck_rv_from_error(CKR_GENERAL_ERROR, e)
             }
         })?;
         match oid {
@@ -274,7 +274,7 @@ impl ObjectFactory for ECDSAPrivFactory {
             } else if e.rv() != CKR_ATTRIBUTE_VALUE_INVALID {
                 Error::ck_rv_from_error(CKR_ATTRIBUTE_VALUE_INVALID, e)
             } else {
-                general_error(e)
+                Error::ck_rv_from_error(CKR_GENERAL_ERROR, e)
             }
         })?;
         match oid {
