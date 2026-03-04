@@ -115,7 +115,10 @@ impl State {
         }
         let mut ret = CKR_OK;
         for (_key, slot) in self.slots.iter_mut() {
-            let err = ret_to_rv!(slot.finalize());
+            let err = match slot.finalize() {
+                Ok(()) => CKR_OK,
+                Err(e) => e.rv(),
+            };
             /* record the first error only */
             if ret == CKR_OK {
                 ret = err;
@@ -451,7 +454,10 @@ pub(crate) static CONFIG: LazyLock<GlobalConfig> =
 /// tests helper
 #[cfg(test)]
 pub fn add_slot(slot: config::Slot) -> CK_RV {
-    let mut conf = res_or_ret!(CONFIG.wlock());
+    let mut conf = match CONFIG.wlock() {
+        Ok(v) => v,
+        Err(e) => return e.rv(),
+    };
     if conf.add_slot(slot).is_err() {
         return CKR_GENERAL_ERROR;
     }
@@ -467,9 +473,15 @@ fn force_load_config() -> CK_RV {
     if testconf.slots.len() == 0 {
         return CKR_GENERAL_ERROR;
     }
-    let mut conf = res_or_ret!(CONFIG.wlock());
+    let mut conf = match CONFIG.wlock() {
+        Ok(v) => v,
+        Err(e) => return e.rv(),
+    };
     for slot in testconf.slots {
-        res_or_ret!(conf.add_slot(slot));
+        match conf.add_slot(slot) {
+            Ok(v) => v,
+            Err(e) => return e.rv(),
+        };
     }
     return CKR_OK;
 }
@@ -479,16 +491,28 @@ fn get_fips_behavior(
     slot_id: CK_SLOT_ID,
     save: &mut config::FipsBehavior,
 ) -> CK_RV {
-    let rstate = res_or_ret!(STATE.rlock());
-    let behavior = res_or_ret!(rstate.get_fips_behavior(slot_id));
+    let rstate = match STATE.rlock() {
+        Ok(v) => v,
+        Err(e) => return e.rv(),
+    };
+    let behavior = match rstate.get_fips_behavior(slot_id) {
+        Ok(v) => v,
+        Err(e) => return e.rv(),
+    };
     *save = behavior.clone();
     CKR_OK
 }
 
 #[cfg(all(test, feature = "fips"))]
 fn set_fips_behavior(slot_id: CK_SLOT_ID, val: config::FipsBehavior) -> CK_RV {
-    let mut wstate = res_or_ret!(STATE.wlock());
-    ret_to_rv!(wstate.set_fips_behavior(slot_id, val))
+    let mut wstate = match STATE.wlock() {
+        Ok(v) => v,
+        Err(e) => return e.rv(),
+    };
+    match wstate.set_fips_behavior(slot_id, val) {
+        Ok(()) => CKR_OK,
+        Err(e) => e.rv(),
+    }
 }
 
 /// Check that the mechanism is allowed by the Key object
