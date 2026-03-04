@@ -9,9 +9,7 @@
 use crate::misc::{bytes_to_slice, bytes_to_vec};
 use crate::pkcs11::vendor::KRY_UNSPEC;
 use crate::pkcs11::*;
-use crate::{
-    cast_or_ret, global_rlock, ok_or_ret, res_or_ret, ret_to_rv, STATE,
-};
+use crate::{cast_or_ret, ok_or_ret, res_or_ret, ret_to_rv, STATE};
 
 /// Implementation of C_GetSlotList function
 ///
@@ -24,7 +22,7 @@ pub extern "C" fn fn_get_slot_list(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let slotids = global_rlock!((*STATE)).get_slots_ids();
+    let slotids = res_or_ret!(STATE.rlock()).get_slots_ids();
     let silen = cast_or_ret!(CK_ULONG from slotids.len());
     if slot_list.is_null() {
         unsafe {
@@ -57,7 +55,7 @@ pub extern "C" fn fn_get_slot_info(
     slot_id: CK_SLOT_ID,
     info: CK_SLOT_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let slot = match rstate.get_slot(slot_id) {
         Ok(s) => s,
         Err(e) => return e.rv(),
@@ -76,7 +74,7 @@ pub extern "C" fn fn_get_token_info(
     slot_id: CK_SLOT_ID,
     info: CK_TOKEN_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let slot = match rstate.get_slot(slot_id) {
         Ok(s) => s,
         Err(e) => return e.rv(),
@@ -99,7 +97,7 @@ pub extern "C" fn fn_get_mechanism_list(
     if count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
     if mechanism_list.is_null() {
         let cnt = cast_or_ret!(CK_ULONG from token.get_mechs_num());
@@ -136,7 +134,7 @@ pub extern "C" fn fn_get_mechanism_info(
     typ: CK_MECHANISM_TYPE,
     info: CK_MECHANISM_INFO_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let token = res_or_ret!(rstate.get_token_from_slot(slot_id));
     let mech = res_or_ret!(token.get_mech_info(typ));
     unsafe {
@@ -154,7 +152,7 @@ pub extern "C" fn fn_init_token(
     pin_len: CK_ULONG,
     label: CK_UTF8CHAR_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     if res_or_ret!(rstate.has_sessions(slot_id)) {
         return CKR_SESSION_EXISTS;
     }
@@ -184,7 +182,7 @@ pub extern "C" fn fn_init_pin(
     pin: CK_UTF8CHAR_PTR,
     pin_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
     if !token.is_logged_in(CKU_SO) {
         return CKR_USER_NOT_LOGGED_IN;
@@ -205,7 +203,7 @@ pub extern "C" fn fn_set_pin(
     new_pin: CK_UTF8CHAR_PTR,
     new_len: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!((*STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     if !session.is_writable() {
         return CKR_SESSION_READ_ONLY;

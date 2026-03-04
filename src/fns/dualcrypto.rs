@@ -10,9 +10,9 @@ use crate::fns::encryption::{
     internal_decrypt_update, internal_encrypt_update,
 };
 use crate::fns::signing::{internal_sign_update, internal_verify_update};
-use crate::fns::{global_rlock, res_or_ret, ret_to_rv};
 use crate::mechanism::{Digest, Sign, Verify};
 use crate::pkcs11::*;
+use crate::{res_or_ret, ret_to_rv, STATE};
 
 /// Implementation of C_DigestEncryptUpdate function
 ///
@@ -28,7 +28,7 @@ pub extern "C" fn fn_digest_encrypt_update(
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Digest>());
@@ -61,7 +61,7 @@ pub extern "C" fn fn_decrypt_digest_update(
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Digest>());
@@ -95,7 +95,7 @@ pub extern "C" fn fn_sign_encrypt_update(
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Sign>());
@@ -128,7 +128,7 @@ pub extern "C" fn fn_decrypt_verify_update(
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
 
     res_or_ret!(session.check_op::<dyn Verify>());

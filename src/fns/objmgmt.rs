@@ -10,7 +10,7 @@ use crate::config;
 use crate::mechanism::SearchOperation;
 use crate::pkcs11::vendor::KRY_UNSPEC;
 use crate::pkcs11::*;
-use crate::{cast_or_ret, global_rlock, res_or_ret, ret_to_rv};
+use crate::{cast_or_ret, res_or_ret, ret_to_rv, STATE};
 
 #[cfg(feature = "fips")]
 use crate::fips;
@@ -37,7 +37,7 @@ pub extern "C" fn fn_create_object(
     count: CK_ULONG,
     object_handle: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     #[cfg(not(feature = "fips"))]
     let session = res_or_ret!(rstate.get_session(s_handle));
     #[cfg(feature = "fips")]
@@ -120,7 +120,7 @@ pub extern "C" fn fn_copy_object(
     count: CK_ULONG,
     ph_new_object: CK_OBJECT_HANDLE_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     let cnt = cast_or_ret!(usize from count => CKR_ARGUMENTS_BAD);
     let tmpl: &mut [CK_ATTRIBUTE] =
@@ -149,7 +149,7 @@ pub extern "C" fn fn_destroy_object(
     s_handle: CK_SESSION_HANDLE,
     o_handle: CK_OBJECT_HANDLE,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -170,7 +170,7 @@ pub extern "C" fn fn_get_object_size(
     o_handle: CK_OBJECT_HANDLE,
     size: CK_ULONG_PTR,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let token = res_or_ret!(rstate.get_token_from_session(s_handle));
     let len = cast_or_ret!(
         CK_ULONG from res_or_ret!(token.get_object_size(o_handle))
@@ -197,10 +197,10 @@ pub extern "C" fn fn_get_attribute_value(
      * a parallel thread calling fn_initialize() */
     #[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
     let der_encode_ec_point = {
-        let gconf = global_rlock!(noinitcheck; (*crate::CONFIG));
+        let conf = res_or_ret!(crate::CONFIG.rlock());
         /* enable the whole thing only if we need to convert to backwards
          * compatible DER encoding */
-        match gconf.conf.ec_point_encoding {
+        match conf.ec_point_encoding {
             config::EcPointEncoding::Der => true,
             _ => false,
         }
@@ -220,7 +220,7 @@ pub extern "C" fn fn_get_attribute_value(
         }
     };
 
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut token = res_or_ret!(rstate.get_token_from_session_mut(s_handle));
     let result = ret_to_rv!(token.get_object_attrs(o_handle, &mut tmpl));
 
@@ -282,7 +282,7 @@ pub extern "C" fn fn_set_attribute_value(
     template: CK_ATTRIBUTE_PTR,
     count: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let session = res_or_ret!(rstate.get_session(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -310,7 +310,7 @@ pub extern "C" fn fn_find_objects_init(
     template: CK_ATTRIBUTE_PTR,
     count: CK_ULONG,
 ) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let slot_id = session.get_slot_id();
     let mut token = res_or_ret!(rstate.get_token_from_slot_mut(slot_id));
@@ -333,7 +333,7 @@ pub extern "C" fn fn_find_objects(
     if ph_object.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     let operation = res_or_ret!(session.get_operation::<dyn SearchOperation>());
     let moc = cast_or_ret!(usize from max_object_count => CKR_ARGUMENTS_BAD);
@@ -361,7 +361,7 @@ pub extern "C" fn fn_find_objects(
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203291](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203291)
 
 pub extern "C" fn fn_find_objects_final(s_handle: CK_SESSION_HANDLE) -> CK_RV {
-    let rstate = global_rlock!((*crate::STATE));
+    let rstate = res_or_ret!(STATE.rlock());
     let mut session = res_or_ret!(rstate.get_session_mut(s_handle));
     res_or_ret!(session.cancel_operation::<dyn SearchOperation>());
     CKR_OK

@@ -11,14 +11,14 @@ use std::ffi::{c_char, CStr};
 use crate::config::Config;
 use crate::pkcs11::*;
 use crate::slot::Slot;
-use crate::{cast_or_ret, global_wlock, res_or_ret};
+use crate::{cast_or_ret, res_or_ret, STATE};
 
 /// Implementation of C_Initialize function
 ///
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203255)
 
 pub extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
-    let mut gconf = global_wlock!(noinitcheck; (*crate::CONFIG));
+    let mut conf = res_or_ret!(crate::CONFIG.wlock());
 
     let mut ret: CK_RV = CKR_OK;
 
@@ -34,20 +34,20 @@ pub extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
                 Ok(s) => s,
                 Err(_) => return CKR_ARGUMENTS_BAD,
             };
-            res_or_ret!(gconf.conf.from_init_args(init_arg));
+            res_or_ret!(conf.from_init_args(init_arg));
         }
     }
 
-    if gconf.conf.slots.is_empty() {
+    if conf.slots.is_empty() {
         match Config::default_config() {
-            Ok(conf) => gconf.conf = conf,
+            Ok(defconf) => *conf = defconf,
             Err(_) => return CKR_TOKEN_NOT_PRESENT,
         }
     }
 
-    gconf.conf.load_env_vars_overrides();
+    conf.load_env_vars_overrides();
 
-    let mut wstate = global_wlock!(noinitcheck; (*crate::STATE));
+    let mut wstate = res_or_ret!(STATE.wlock_noinitcheck());
     if wstate.is_initialized() {
         ret = CKR_CRYPTOKI_ALREADY_INITIALIZED;
     } else {
@@ -57,7 +57,7 @@ pub extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
     /* create slots for any new slot specified in the configuration
      * that has not been created yet, new slots can be added via
      * init args so we check this every time */
-    for slot in &gconf.conf.slots {
+    for slot in &conf.slots {
         let slotnum = cast_or_ret!(CK_SLOT_ID from slot.slot);
         match wstate.add_slot(slotnum, res_or_ret!(Slot::new(slot))) {
             Ok(_) => (),
@@ -78,9 +78,9 @@ pub extern "C" fn fn_initialize(_init_args: CK_VOID_PTR) -> CK_RV {
 /// Version 3.1 Specification: [https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203256)
 
 pub extern "C" fn fn_finalize(_reserved: CK_VOID_PTR) -> CK_RV {
-    let ret = global_wlock!((*crate::STATE)).finalize();
-    let mut gconf = global_wlock!(noinitcheck; (*crate::CONFIG));
-    gconf.conf = Config::new();
+    let ret = res_or_ret!(STATE.wlock()).finalize();
+    let mut conf = res_or_ret!(crate::CONFIG.wlock());
+    *conf = Config::new();
     ret
 }
 
