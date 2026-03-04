@@ -41,7 +41,7 @@ impl SSHKDFOperation {
     /// Parses the `KR_SSHKDF_PARAMS` and validates parameters like the PRF
     /// hash mechanism and the derived key type.
     pub fn new(mech: &CK_MECHANISM) -> Result<SSHKDFOperation> {
-        let params = misc::cast_params!(mech, KR_SSHKDF_PARAMS);
+        let params = mech.get_parameters::<KR_SSHKDF_PARAMS>()?;
 
         if !hash::is_valid_hash(params.prfHashMechanism) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;

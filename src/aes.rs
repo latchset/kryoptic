@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::{cast_params, zeromem};
+use crate::misc::zeromem;
 use crate::object::*;
 use crate::ossl::aes::*;
 use crate::pkcs11::*;
@@ -376,11 +376,13 @@ impl Mechanism for AesMechanism {
 
         let kdf = match mech.mechanism {
             CKM_AES_ECB_ENCRYPT_DATA => {
-                let params = cast_params!(mech, CK_KEY_DERIVATION_STRING_DATA);
+                let params =
+                    mech.get_parameters::<CK_KEY_DERIVATION_STRING_DATA>()?;
                 AesKDFOperation::aes_ecb_new(params)?
             }
             CKM_AES_CBC_ENCRYPT_DATA => {
-                let params = cast_params!(mech, CK_AES_CBC_ENCRYPT_DATA_PARAMS);
+                let params =
+                    mech.get_parameters::<CK_AES_CBC_ENCRYPT_DATA_PARAMS>()?;
                 AesKDFOperation::aes_cbc_new(params)?
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,

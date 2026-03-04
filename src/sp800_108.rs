@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use crate::error::{map_err, Result};
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
-use crate::misc::{bytes_to_vec, cast_params, sizeof};
+use crate::misc::{bytes_to_vec, sizeof};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 
@@ -55,17 +55,19 @@ impl Mechanism for Sp800KDFMechanism {
 
         let kdf = match mech.mechanism {
             CKM_SP800_108_COUNTER_KDF => {
-                let kdf_params = cast_params!(mech, CK_SP800_108_KDF_PARAMS);
+                let kdf_params =
+                    mech.get_parameters::<CK_SP800_108_KDF_PARAMS>()?;
                 Sp800Operation::counter_kdf_new(kdf_params)?
             }
             CKM_SP800_108_FEEDBACK_KDF => {
                 let kdf_params =
-                    cast_params!(mech, CK_SP800_108_FEEDBACK_KDF_PARAMS);
+                    mech.get_parameters::<CK_SP800_108_FEEDBACK_KDF_PARAMS>()?;
                 Sp800Operation::feedback_kdf_new(kdf_params)?
             }
             CKM_SP800_108_DOUBLE_PIPELINE_KDF => {
                 return Err(CKR_MECHANISM_INVALID)?;
             }
+
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
         Ok(Box::new(kdf))

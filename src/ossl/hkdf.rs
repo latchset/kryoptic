@@ -13,7 +13,7 @@ use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{
-    bytes_to_slice, bytes_to_vec, cast_params, common_derive_data_object,
+    bytes_to_slice, bytes_to_vec, common_derive_data_object,
     common_derive_key_object,
 };
 use crate::object::{Object, ObjectFactories};
@@ -118,7 +118,7 @@ impl HKDFOperation {
     /// Parses the `CK_HKDF_PARAMS` from the mechanism, validates them,
     /// determines the PRF length, and stores the initial state.
     pub fn new(mech: &CK_MECHANISM) -> Result<HKDFOperation> {
-        let params = cast_params!(mech, CK_HKDF_PARAMS);
+        let params = mech.get_parameters::<CK_HKDF_PARAMS>()?;
         if params.bExtract == CK_FALSE && params.bExpand == CK_FALSE {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }

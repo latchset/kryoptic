@@ -1003,3 +1003,23 @@ impl CK_ATTRIBUTE {
         vec_to_date_validate(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
 }
+
+impl CK_MECHANISM {
+    /// Convenience function to cast mechanism parameters passed as a
+    /// pointer/length into the structure they represent.
+    ///
+    /// A length check on `ulParameterLen` is performed to validate that
+    /// the correct parameter structure is being casted.
+    ///
+    /// No other validation is performed, this is an UNSAFE operation
+    /// that requires further content validation.
+    pub fn get_parameters<T: Copy + Clone>(&self) -> Result<T> {
+        let Ok(len) = usize::try_from(self.ulParameterLen) else {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        };
+        if len != std::mem::size_of::<T>() {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
+        Ok(unsafe { std::ptr::read_unaligned(self.pParameter as *const T) })
+    }
+}

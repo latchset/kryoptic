@@ -4,12 +4,11 @@
 //! This module implements EdDSA (Edwards-curve Digital Signature Algorithm)
 //! functionalities (Ed25519, Ed448) using the OpenSSL EVP interface,
 //! handling key generation, signing, verification, and parameter parsing.
-
 use crate::attribute::Attribute;
 use crate::ec::get_ec_point_from_obj;
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::{bytes_to_vec, cast_params};
+use crate::misc::bytes_to_vec;
 use crate::object::Object;
 use crate::ossl::common::*;
 use crate::pkcs11::*;
@@ -43,7 +42,7 @@ fn parse_params(
         }
     }
 
-    let params = cast_params!(mech, CK_EDDSA_PARAMS);
+    let params = mech.get_parameters::<CK_EDDSA_PARAMS>()?;
     let ctx = match params.ulContextDataLen {
         0 => None,
         _ => Some(bytes_to_vec(

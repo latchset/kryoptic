@@ -11,7 +11,7 @@ use crate::error::Result;
 use crate::hash;
 use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
-use crate::misc::{bytes_to_vec, cast_params};
+use crate::misc::bytes_to_vec;
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 use crate::pkcs11::*;
@@ -176,7 +176,8 @@ impl MlDsaParams {
                 | CKM_HASH_ML_DSA_SHA3_512
                 | CKM_HASH_ML_DSA_SHAKE128
                 | CKM_HASH_ML_DSA_SHAKE256 => {
-                    let params = cast_params!(mech, CK_SIGN_ADDITIONAL_CONTEXT);
+                    let params =
+                        mech.get_parameters::<CK_SIGN_ADDITIONAL_CONTEXT>()?;
                     match params.hedgeVariant {
                         CKH_HEDGE_PREFERRED
                         | CKH_HEDGE_REQUIRED
@@ -195,8 +196,8 @@ impl MlDsaParams {
                     }
                 }
                 CKM_HASH_ML_DSA => {
-                    let params =
-                        cast_params!(mech, CK_HASH_SIGN_ADDITIONAL_CONTEXT);
+                    let params = mech
+                        .get_parameters::<CK_HASH_SIGN_ADDITIONAL_CONTEXT>()?;
                     match params.hedgeVariant {
                         CKH_HEDGE_PREFERRED
                         | CKH_HEDGE_REQUIRED

@@ -9,7 +9,7 @@ use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
 use crate::mechanism::*;
-use crate::misc::{bytes_to_slice, bytes_to_vec, cast_params, CK_ULONG_SIZE};
+use crate::misc::{bytes_to_slice, bytes_to_vec, CK_ULONG_SIZE};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 use std::fmt::Debug;
@@ -237,8 +237,8 @@ impl TLSKDFOperation {
     /// Parses `CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS`, validates inputs and sets up the
     /// operation context for deriving the extended master secret
     fn new_tls12_ems_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
-        let params =
-            cast_params!(mech, CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS);
+        let params = mech
+            .get_parameters::<CK_TLS12_EXTENDED_MASTER_KEY_DERIVE_PARAMS>()?;
 
         let prf = match hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
@@ -286,7 +286,8 @@ impl TLSKDFOperation {
     /// Parses `CK_TLS12_MASTER_KEY_DERIVE_PARAMS`, validates inputs, and sets
     /// up the operation context for deriving the master secret.
     fn new_tls12_mk_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
-        let params = cast_params!(mech, CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
+        let params =
+            mech.get_parameters::<CK_TLS12_MASTER_KEY_DERIVE_PARAMS>()?;
 
         let clirand = bytes_to_vec(
             params.RandomInfo.pClientRandom,
@@ -349,7 +350,7 @@ impl TLSKDFOperation {
     /// pointer, and sets up the operation context for deriving MAC keys,
     /// write keys, and IVs.
     fn new_tls12_keymac_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
-        let params = cast_params!(mech, CK_TLS12_KEY_MAT_PARAMS);
+        let params = mech.get_parameters::<CK_TLS12_KEY_MAT_PARAMS>()?;
 
         let maclen = params.ulMacSizeInBits / 8;
         let keylen = params.ulKeySizeInBits / 8;
@@ -417,7 +418,7 @@ impl TLSKDFOperation {
     fn new_tls_generic_key_derive(
         mech: &CK_MECHANISM,
     ) -> Result<TLSKDFOperation> {
-        let params = cast_params!(mech, CK_TLS_KDF_PARAMS);
+        let params = mech.get_parameters::<CK_TLS_KDF_PARAMS>()?;
         if params.ulLabelLength == 0 {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
@@ -942,17 +943,17 @@ impl TLSMACOperation {
         if (*TLS_PRF_SELFTEST).result != CKR_OK {
             return Err((*TLS_PRF_SELFTEST).result)?;
         }
-
         match mech.mechanism {
             CKM_TLS_MAC | CKM_TLS12_MAC => (),
             _ => return Err(CKR_MECHANISM_INVALID)?,
         }
-        let params = cast_params!(mech, CK_TLS_MAC_PARAMS);
+        let params = mech.get_parameters::<CK_TLS_MAC_PARAMS>()?;
         let prf = match hash_to_hmac_mech(params.prfHashMechanism) {
             Ok(h) => h,
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
         let maclen = params.ulMacLength as usize;
+
         let label = match params.ulServerOrClient {
             1 => TLS_SERVER_FINISHED,
             2 => TLS_CLIENT_FINISHED,
