@@ -9,7 +9,7 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-use crate::error::{map_err, Result};
+use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, sizeof};
 use crate::object::{Object, ObjectFactories};
@@ -119,10 +119,8 @@ impl Sp800Params {
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             bits: match cf.ulWidthInBits {
-                8 | 16 | 24 | 32 => map_err!(
-                    usize::try_from(cf.ulWidthInBits),
-                    CKR_MECHANISM_PARAM_INVALID
-                )?,
+                8 | 16 | 24 | 32 => usize::try_from(cf.ulWidthInBits)
+                    .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
         })
@@ -154,10 +152,10 @@ impl Sp800Params {
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
             bits: match dkm.ulWidthInBits {
-                8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 => map_err!(
-                    usize::try_from(dkm.ulWidthInBits),
-                    CKR_MECHANISM_PARAM_INVALID
-                )?,
+                8 | 16 | 24 | 32 | 40 | 48 | 56 | 64 => {
+                    usize::try_from(dkm.ulWidthInBits)
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?
+                }
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
             },
         })

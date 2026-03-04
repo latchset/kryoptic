@@ -5,7 +5,7 @@
 
 use crate::aes::*;
 use crate::error;
-use crate::error::{map_err, Result};
+use crate::error::Result;
 use crate::get_random_data;
 use crate::mechanism::*;
 use crate::misc::{
@@ -235,18 +235,14 @@ impl AesOperation {
                     ))?,
                     maxblocks: 0,
                     ctsmode: 0,
-                    datalen: map_err!(
-                        usize::try_from(params.ulDataLen),
-                        CKR_MECHANISM_PARAM_INVALID
-                    )?,
+                    datalen: usize::try_from(params.ulDataLen)
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                     aad: bytes_to_vec(
                         params.pAAD,
                         usize::try_from(params.ulAADLen)?,
                     ),
-                    taglen: map_err!(
-                        usize::try_from(params.ulMACLen),
-                        CKR_MECHANISM_PARAM_INVALID
-                    )?,
+                    taglen: usize::try_from(params.ulMACLen)
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                 })
             }
             CKM_AES_GCM => {
@@ -270,10 +266,8 @@ impl AesOperation {
                 if params.ulIvLen < 1 || params.pIv == std::ptr::null_mut() {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                let tagbits = map_err!(
-                    usize::try_from(params.ulTagBits),
-                    CKR_MECHANISM_PARAM_INVALID
-                )?;
+                let tagbits = usize::try_from(params.ulTagBits)
+                    .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
                 Ok(AesParams {
                     iv: AesIvData::simple(bytes_to_vec(
                         params.pIv,
@@ -292,10 +286,8 @@ impl AesOperation {
             CKM_AES_CTR => {
                 let params = mech.get_parameters::<CK_AES_CTR_PARAMS>()?;
                 let iv = params.cb.to_vec();
-                let ctrbits = map_err!(
-                    usize::try_from(params.ulCounterBits),
-                    CKR_MECHANISM_PARAM_INVALID
-                )?;
+                let ctrbits = usize::try_from(params.ulCounterBits)
+                    .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
                 let mut maxblocks = 0u128;
                 if ctrbits < (AES_BLOCK_SIZE * 8) {
                     /* FIXME: support arbitrary counterbits wrapping.
@@ -787,18 +779,15 @@ impl AesOperation {
                 if params.pNonce == std::ptr::null_mut() {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
-                let noncelen = map_err!(
-                    usize::try_from(params.ulNonceLen),
-                    CKR_ARGUMENTS_BAD
-                )?;
+                let noncelen = usize::try_from(params.ulNonceLen)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
                 if self.op == CKF_MESSAGE_ENCRYPT {
                     if params.ulNonceFixedBits > params.ulNonceLen * 8 {
                         return Err(CKR_ARGUMENTS_BAD)?;
                     }
-                    let noncefixedbits = map_err!(
-                        usize::try_from(params.ulNonceFixedBits),
-                        CKR_ARGUMENTS_BAD
-                    )?;
+                    let noncefixedbits =
+                        usize::try_from(params.ulNonceFixedBits)
+                            .map_err(|_| CKR_ARGUMENTS_BAD)?;
                     if params.nonceGenerator == CKG_GENERATE_RANDOM {
                         if noncelen * 8 - noncefixedbits < MIN_RANDOM_IV_BITS {
                             return Err(CKR_ARGUMENTS_BAD)?;
@@ -827,15 +816,11 @@ impl AesOperation {
                 }
                 self.params.maxblocks = 0;
                 self.params.ctsmode = 0;
-                self.params.datalen = map_err!(
-                    usize::try_from(params.ulDataLen),
-                    CKR_ARGUMENTS_BAD
-                )?;
+                self.params.datalen = usize::try_from(params.ulDataLen)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
                 self.params.aad = aad.to_vec();
-                self.params.taglen = map_err!(
-                    usize::try_from(params.ulMACLen),
-                    CKR_ARGUMENTS_BAD
-                )?;
+                self.params.taglen = usize::try_from(params.ulMACLen)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
                 Ok(params.pNonce)
             }
             CKM_AES_GCM => {
@@ -861,14 +846,10 @@ impl AesOperation {
                 if params.ulTagBits < 8 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                let tagbits = map_err!(
-                    usize::try_from(params.ulTagBits),
-                    CKR_ARGUMENTS_BAD
-                )?;
-                let ivlen = map_err!(
-                    usize::try_from(params.ulIvLen),
-                    CKR_ARGUMENTS_BAD
-                )?;
+                let tagbits = usize::try_from(params.ulTagBits)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
+                let ivlen = usize::try_from(params.ulIvLen)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
                 if aad.len() > usize::try_from(u32::MAX)? {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
@@ -876,10 +857,8 @@ impl AesOperation {
                     if params.ulIvFixedBits > params.ulIvLen * 8 {
                         return Err(CKR_ARGUMENTS_BAD)?;
                     }
-                    let ivfixedbits = map_err!(
-                        usize::try_from(params.ulIvFixedBits),
-                        CKR_ARGUMENTS_BAD
-                    )?;
+                    let ivfixedbits = usize::try_from(params.ulIvFixedBits)
+                        .map_err(|_| CKR_ARGUMENTS_BAD)?;
                     if params.ivGenerator == CKG_GENERATE_RANDOM {
                         if ivlen * 8 - ivfixedbits < MIN_RANDOM_IV_BITS {
                             return Err(CKR_ARGUMENTS_BAD)?;
@@ -936,18 +915,15 @@ impl AesOperation {
                 if params.pNonce == std::ptr::null_mut() {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
-                let noncelen = map_err!(
-                    usize::try_from(params.ulNonceLen),
-                    CKR_ARGUMENTS_BAD
-                )?;
+                let noncelen = usize::try_from(params.ulNonceLen)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
                 if self.params.iv.buf.len() != noncelen {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
                 if self.op == CKF_MESSAGE_ENCRYPT {
-                    let noncefixedbits = map_err!(
-                        usize::try_from(params.ulNonceFixedBits),
-                        CKR_ARGUMENTS_BAD
-                    )?;
+                    let noncefixedbits =
+                        usize::try_from(params.ulNonceFixedBits)
+                            .map_err(|_| CKR_ARGUMENTS_BAD)?;
                     if self.params.iv.fixedbits != noncefixedbits {
                         return Err(self.op_err(CKR_ARGUMENTS_BAD));
                     }
@@ -956,10 +932,8 @@ impl AesOperation {
                     }
                 }
                 if self.params.taglen
-                    != map_err!(
-                        usize::try_from(params.ulMACLen),
-                        CKR_ARGUMENTS_BAD
-                    )?
+                    != usize::try_from(params.ulMACLen)
+                        .map_err(|_| CKR_ARGUMENTS_BAD)?
                 {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
@@ -975,22 +949,16 @@ impl AesOperation {
                 if params.pIv == std::ptr::null_mut() {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
-                let tagbits = map_err!(
-                    usize::try_from(params.ulTagBits),
-                    CKR_ARGUMENTS_BAD
-                )?;
-                let ivlen = map_err!(
-                    usize::try_from(params.ulIvLen),
-                    CKR_ARGUMENTS_BAD
-                )?;
+                let tagbits = usize::try_from(params.ulTagBits)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
+                let ivlen = usize::try_from(params.ulIvLen)
+                    .map_err(|_| CKR_ARGUMENTS_BAD)?;
                 if self.params.iv.buf.len() != ivlen {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
                 if self.op == CKF_MESSAGE_ENCRYPT {
-                    let ivfixedbits = map_err!(
-                        usize::try_from(params.ulIvFixedBits),
-                        CKR_ARGUMENTS_BAD
-                    )?;
+                    let ivfixedbits = usize::try_from(params.ulIvFixedBits)
+                        .map_err(|_| CKR_ARGUMENTS_BAD)?;
                     if self.params.iv.fixedbits != ivfixedbits {
                         return Err(self.op_err(CKR_ARGUMENTS_BAD));
                     }

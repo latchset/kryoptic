@@ -2,7 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::attribute::Attribute;
-use crate::error::{map_err, Result};
+use crate::error::Result;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::bytes_to_slice;
 use crate::object::{Object, ObjectFactories};
@@ -431,10 +431,8 @@ impl Derive for Sp800Operation {
             let tmpl: &[CK_ATTRIBUTE] = unsafe {
                 std::slice::from_raw_parts_mut(
                     ak.pTemplate,
-                    map_err!(
-                        usize::try_from(ak.ulAttributeCount),
-                        CKR_MECHANISM_PARAM_INVALID
-                    )?,
+                    usize::try_from(ak.ulAttributeCount)
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                 )
             };
             let obj = match objfactories.derive_key_from_template(key, tmpl) {
