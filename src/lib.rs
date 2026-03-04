@@ -16,14 +16,29 @@ mod config;
 mod defaults;
 mod encryption;
 mod error;
+mod kasn1;
 mod mechanism;
+mod misc;
+mod native;
 mod object;
-pub mod pkcs11;
+mod ossl;
 mod rng;
 mod session;
 mod slot;
 mod storage;
 mod token;
+
+/* Include algorithms based on selected features */
+include!("enabled.rs");
+
+#[cfg(feature = "fips")]
+mod fips;
+
+#[cfg(feature = "log")]
+mod log;
+
+pub mod fns;
+pub mod pkcs11;
 
 use config::Config;
 use error::Result;
@@ -33,20 +48,6 @@ use session::Session;
 use slot::Slot;
 use token::Token;
 
-mod native;
-mod ossl;
-
-#[cfg(feature = "fips")]
-mod fips;
-
-/* Include algorithms based on selected features */
-include!("enabled.rs");
-
-/* Helper code */
-mod kasn1;
-mod misc;
-
-pub mod fns;
 use fns::digest::*;
 use fns::dualcrypto::*;
 use fns::encryption::*;
@@ -347,25 +348,6 @@ pub(crate) static STATE: LazyLock<RwLock<State>> = LazyLock::new(|| {
     })
 });
 
-/// tests helper
-#[cfg(test)]
-pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
-    let state = match (*STATE).read() {
-        Ok(r) => {
-            if !r.is_initialized() {
-                return false;
-            }
-            r
-        }
-        Err(_) => return false,
-    };
-
-    match state.get_slot(slot) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
-}
-
 /// Initializes the FIPS approval indicator on a session based on the key and
 /// operation. Used at the beginning of a cryptographic operation.
 /// (useful when an input key needs to be checked at initialization) */
@@ -492,6 +474,25 @@ pub(crate) fn check_allowed_mechs(
     return CKR_MECHANISM_INVALID;
 }
 
+/// Holds the version of the implemented interface to return by default
+pub(crate) static IMPLEMENTED_VERSION: CK_VERSION =
+    CK_VERSION { major: 3, minor: 2 };
+
+static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic                        ";
+static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] =
+    *b"Kryoptic PKCS11 Module          ";
+static LIBRARY_VERSION: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
+
+/// The default module info data
+pub(crate) static MODULE_INFO: CK_INFO = CK_INFO {
+    cryptokiVersion: IMPLEMENTED_VERSION,
+    manufacturerID: MANUFACTURER_ID,
+    flags: 0,
+    libraryDescription: LIBRARY_DESCRIPTION,
+    libraryVersion: LIBRARY_VERSION,
+};
+
 /// FFI Compatible structure that holds the PKCS#11 v2.40 functions table
 pub(crate) static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     version: CK_VERSION {
@@ -567,27 +568,6 @@ pub(crate) static FNLIST_240: CK_FUNCTION_LIST = CK_FUNCTION_LIST {
     C_CancelFunction: Some(fn_cancel_function),
     C_WaitForSlotEvent: Some(fn_wait_for_slot_event),
 };
-
-/// Holds the version of the implemented interface to return by default
-pub(crate) static IMPLEMENTED_VERSION: CK_VERSION =
-    CK_VERSION { major: 3, minor: 2 };
-
-static MANUFACTURER_ID: [CK_UTF8CHAR; 32usize] =
-    *b"Kryoptic                        ";
-static LIBRARY_DESCRIPTION: [CK_UTF8CHAR; 32usize] =
-    *b"Kryoptic PKCS11 Module          ";
-static LIBRARY_VERSION: CK_VERSION = CK_VERSION { major: 0, minor: 0 };
-
-/// The default module info data
-pub(crate) static MODULE_INFO: CK_INFO = CK_INFO {
-    cryptokiVersion: IMPLEMENTED_VERSION,
-    manufacturerID: MANUFACTURER_ID,
-    flags: 0,
-    libraryDescription: LIBRARY_DESCRIPTION,
-    libraryVersion: LIBRARY_VERSION,
-};
-
-// Additional 3.0 functions
 
 /// FFI Compatible structure that holds the PKCS#11 v3.0 functions table
 pub(crate) static FNLIST_300: CK_FUNCTION_LIST_3_0 = CK_FUNCTION_LIST_3_0 {
@@ -849,9 +829,6 @@ static INTERFACE_SET: LazyLock<Vec<InterfaceData>> = LazyLock::new(|| {
     });
     v
 });
-
-#[cfg(feature = "log")]
-mod log;
 
 #[cfg(test)]
 mod tests;

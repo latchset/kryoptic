@@ -54,6 +54,23 @@ struct Slots {
 
 static SLOTS: RwLock<Slots> = RwLock::new(Slots { id: 0 });
 
+pub fn check_test_slot_busy(slot: CK_SLOT_ID) -> bool {
+    let state = match (*STATE).read() {
+        Ok(r) => {
+            if !r.is_initialized() {
+                return false;
+            }
+            r
+        }
+        Err(_) => return false,
+    };
+
+    match state.get_slot(slot) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
 struct TestToken<'a> {
     slot: CK_SLOT_ID,
     name: String,
