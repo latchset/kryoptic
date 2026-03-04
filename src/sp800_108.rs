@@ -125,12 +125,11 @@ impl Sp800Params {
             },
         })
     }
-
     fn parse_byte_array(p: &CK_PRF_DATA_PARAM) -> Result<Vec<u8>> {
         if p.ulValueLen == 0 || p.pValue == std::ptr::null_mut() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        Ok(bytes_to_vec!(p.pValue, p.ulValueLen))
+        Ok(bytes_to_vec(p.pValue, p.ulValueLen as usize))
     }
 
     fn parse_dkm_length(p: &CK_PRF_DATA_PARAM) -> Result<Sp800DKMLengthFormat> {

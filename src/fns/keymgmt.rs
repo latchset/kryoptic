@@ -623,23 +623,28 @@ fn derive_key(
                     CKM_SP800_108_COUNTER_KDF => {
                         let params =
                             cast_params!(mechanism, CK_SP800_108_KDF_PARAMS);
-                        bytes_to_slice!(
-                            params.pAdditionalDerivedKeys,
-                            params.ulAdditionalDerivedKeys,
-                            CK_DERIVED_KEY
-                        )
+                        unsafe {
+                            bytes_to_slice(
+                                params.pAdditionalDerivedKeys
+                                    as *const CK_DERIVED_KEY,
+                                params.ulAdditionalDerivedKeys as usize,
+                            )
+                        }
                     }
                     CKM_SP800_108_FEEDBACK_KDF => {
                         let params = cast_params!(
                             mechanism,
                             CK_SP800_108_FEEDBACK_KDF_PARAMS
                         );
-                        bytes_to_slice!(
-                            params.pAdditionalDerivedKeys,
-                            params.ulAdditionalDerivedKeys,
-                            CK_DERIVED_KEY
-                        )
+                        unsafe {
+                            bytes_to_slice(
+                                params.pAdditionalDerivedKeys
+                                    as *const CK_DERIVED_KEY,
+                                params.ulAdditionalDerivedKeys as usize,
+                            )
+                        }
                     }
+
                     _ => return Err(CKR_MECHANISM_INVALID)?,
                 };
                 if adk.len() != result.len() {

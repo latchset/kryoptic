@@ -62,13 +62,13 @@ impl SSHKDFOperation {
             finalized: false,
             prf: params.prfHashMechanism,
             key_type: params.derivedKeyType,
-            exchange_hash: misc::bytes_to_vec!(
+            exchange_hash: misc::bytes_to_vec(
                 params.pExchangeHash,
-                params.ulExchangeHashLen
+                params.ulExchangeHashLen as usize,
             ),
-            session_id: misc::bytes_to_vec!(
+            session_id: misc::bytes_to_vec(
                 params.pSessionId,
-                params.ulSessionIdLen
+                params.ulSessionIdLen as usize,
             ),
             is_data: is_data,
         })

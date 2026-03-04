@@ -92,7 +92,10 @@ impl ECDHOperation {
         }
         let shared =
             if !params.pSharedData.is_null() || params.ulSharedDataLen > 0 {
-                Some(bytes_to_vec!(params.pSharedData, params.ulSharedDataLen))
+                Some(bytes_to_vec(
+                    params.pSharedData,
+                    params.ulSharedDataLen as usize,
+                ))
             } else {
                 None
             };
@@ -102,7 +105,10 @@ impl ECDHOperation {
             mech: mechanism,
             kdf: params.kdf,
             shared: shared,
-            public: bytes_to_vec!(params.pPublicData, params.ulPublicDataLen),
+            public: bytes_to_vec(
+                params.pPublicData,
+                params.ulPublicDataLen as usize,
+            ),
         })
     }
 }

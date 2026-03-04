@@ -192,9 +192,9 @@ fn parse_enc_params(
                 }
                 CKZ_DATA_SPECIFIED => match params.ulSourceDataLen {
                     0 => None,
-                    _ => Some(bytes_to_vec!(
+                    _ => Some(bytes_to_vec(
                         params.pSourceData,
-                        params.ulSourceDataLen
+                        params.ulSourceDataLen as usize,
                     )),
                 },
                 _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,

@@ -5,10 +5,6 @@
 //! operations, primarily focusing on the TLS 1.2 PRF (Pseudo-Random
 //! Function) based on HMAC, as defined in
 //! [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246).
-
-use std::fmt::Debug;
-use std::sync::LazyLock;
-
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
@@ -16,6 +12,8 @@ use crate::mechanism::*;
 use crate::misc::{bytes_to_slice, bytes_to_vec, cast_params, CK_ULONG_SIZE};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
+use std::fmt::Debug;
+use std::sync::LazyLock;
 
 use constant_time_eq::constant_time_eq;
 
@@ -248,7 +246,7 @@ impl TLSKDFOperation {
         };
 
         let session_hash =
-            bytes_to_vec!(params.pSessionHash, params.ulSessionHashLen);
+            bytes_to_vec(params.pSessionHash, params.ulSessionHashLen as usize);
 
         // The pVersion field of the structure must be set to NULL_PTR since the version
         // number is not embedded in the "pre_master" key as it is for RSA-like cipher suites.
@@ -290,13 +288,13 @@ impl TLSKDFOperation {
     fn new_tls12_mk_derive(mech: &CK_MECHANISM) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS12_MASTER_KEY_DERIVE_PARAMS);
 
-        let clirand = bytes_to_vec!(
+        let clirand = bytes_to_vec(
             params.RandomInfo.pClientRandom,
-            params.RandomInfo.ulClientRandomLen
+            params.RandomInfo.ulClientRandomLen as usize,
         );
-        let srvrand = bytes_to_vec!(
+        let srvrand = bytes_to_vec(
             params.RandomInfo.pServerRandom,
-            params.RandomInfo.ulServerRandomLen
+            params.RandomInfo.ulServerRandomLen as usize,
         );
 
         if clirand.len() != TLS_RANDOM_SEED_SIZE
@@ -365,13 +363,13 @@ impl TLSKDFOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let clirand = bytes_to_vec!(
+        let clirand = bytes_to_vec(
             params.RandomInfo.pClientRandom,
-            params.RandomInfo.ulClientRandomLen
+            params.RandomInfo.ulClientRandomLen as usize,
         );
-        let srvrand = bytes_to_vec!(
+        let srvrand = bytes_to_vec(
             params.RandomInfo.pServerRandom,
-            params.RandomInfo.ulServerRandomLen
+            params.RandomInfo.ulServerRandomLen as usize,
         );
 
         if clirand.len() != TLS_RANDOM_SEED_SIZE
@@ -420,18 +418,17 @@ impl TLSKDFOperation {
         mech: &CK_MECHANISM,
     ) -> Result<TLSKDFOperation> {
         let params = cast_params!(mech, CK_TLS_KDF_PARAMS);
-
         if params.ulLabelLength == 0 {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let clirand = bytes_to_vec!(
+        let clirand = bytes_to_vec(
             params.RandomInfo.pClientRandom,
-            params.RandomInfo.ulClientRandomLen
+            params.RandomInfo.ulClientRandomLen as usize,
         );
-        let srvrand = bytes_to_vec!(
+        let srvrand = bytes_to_vec(
             params.RandomInfo.pServerRandom,
-            params.RandomInfo.ulServerRandomLen
+            params.RandomInfo.ulServerRandomLen as usize,
         );
 
         if clirand.len() != TLS_RANDOM_SEED_SIZE
@@ -453,12 +450,18 @@ impl TLSKDFOperation {
             session_hash: Vec::new(),
             version: None,
             prf: prf,
-            label: bytes_to_slice!(params.pLabel, params.ulLabelLength, u8),
-            context: bytes_to_slice!(
-                params.pContextData,
-                params.ulContextDataLength,
-                u8
-            ),
+            label: unsafe {
+                bytes_to_slice(
+                    params.pLabel as *const u8,
+                    params.ulLabelLength as usize,
+                )
+            },
+            context: unsafe {
+                bytes_to_slice(
+                    params.pContextData as *const u8,
+                    params.ulContextDataLength as usize,
+                )
+            },
             maclen: 0,
             keylen: 0,
             ivlen: 0,

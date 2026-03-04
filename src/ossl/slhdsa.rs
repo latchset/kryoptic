@@ -11,10 +11,10 @@ use crate::error::Result;
 use crate::hash;
 use crate::kasn1::oid::*;
 use crate::mechanism::{Digest, MechOperation, Sign, Verify, VerifySignature};
+use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 use crate::pkcs11::*;
-use crate::{bytes_to_vec, cast_params};
 
 use asn1;
 use bitflags::bitflags;
@@ -205,9 +205,9 @@ impl SlhDsaParams {
                         if params.ulContextLen > MAX_CONTEXT_LEN as CK_ULONG {
                             return Err(CKR_MECHANISM_PARAM_INVALID)?;
                         }
-                        slhdsa_params.context = Some(bytes_to_vec!(
+                        slhdsa_params.context = Some(bytes_to_vec(
                             params.pContext,
-                            params.ulContextLen
+                            params.ulContextLen as usize,
                         ));
                     }
                 }
@@ -225,9 +225,9 @@ impl SlhDsaParams {
                         if params.ulContextLen > MAX_CONTEXT_LEN as CK_ULONG {
                             return Err(CKR_MECHANISM_PARAM_INVALID)?;
                         }
-                        slhdsa_params.context = Some(bytes_to_vec!(
+                        slhdsa_params.context = Some(bytes_to_vec(
                             params.pContext,
-                            params.ulContextLen
+                            params.ulContextLen as usize,
                         ));
                     }
                     slhdsa_params.hash = params.hash;

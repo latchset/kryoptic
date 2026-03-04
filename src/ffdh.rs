@@ -255,8 +255,10 @@ impl Mechanism for FFDHMechanism {
         }
         let kdf = match mech.mechanism {
             CKM_DH_PKCS_DERIVE => {
-                let peerpub =
-                    bytes_to_vec!(mech.pParameter, mech.ulParameterLen);
+                let peerpub = bytes_to_vec(
+                    mech.pParameter as *const u8,
+                    mech.ulParameterLen as usize,
+                );
                 FFDHOperation::derive_new(mech.mechanism, peerpub)?
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,

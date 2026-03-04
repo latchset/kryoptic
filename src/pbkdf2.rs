@@ -5,9 +5,6 @@
 //! Derivation Function v2 as defined in [RFC 8018](https://www.rfc-editor.org/rfc/rfc8018)
 //! Section 5.2
 
-use std::fmt::Debug;
-use std::sync::LazyLock;
-
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::hmac;
@@ -15,6 +12,8 @@ use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, cast_params};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::pkcs11::*;
+use std::fmt::Debug;
+use std::sync::LazyLock;
 
 #[cfg(not(feature = "fips"))]
 use crate::native::pbkdf2::pbkdf2_derive;
@@ -109,9 +108,9 @@ impl Mechanism for PBKDF2Mechanism {
             CKP_PKCS5_PBKD2_HMAC_SHA512_256 => CKM_SHA512_256_HMAC,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
-        let pass = self.mock_password_object(bytes_to_vec!(
+        let pass = self.mock_password_object(bytes_to_vec(
             params.pPassword,
-            params.ulPasswordLen
+            params.ulPasswordLen as usize,
         ))?;
         let salt = match params.saltSource {
             CKZ_SALT_SPECIFIED => {
@@ -120,9 +119,9 @@ impl Mechanism for PBKDF2Mechanism {
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                bytes_to_vec!(
+                bytes_to_vec(
                     params.pSaltSourceData,
-                    params.ulSaltSourceDataLen
+                    params.ulSaltSourceDataLen as usize,
                 )
             }
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
