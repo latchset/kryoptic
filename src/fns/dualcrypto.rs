@@ -5,12 +5,12 @@
 //!
 //! This module contains the implementation of dual-function operations
 
+use crate::fns::digest::internal_digest_update;
 use crate::fns::encryption::{
     internal_decrypt_update, internal_encrypt_update,
 };
 use crate::fns::signing::{internal_sign_update, internal_verify_update};
 use crate::fns::{global_rlock, res_or_ret, ret_to_rv};
-use crate::internal_digest_update;
 use crate::mechanism::{Digest, Sign, Verify};
 use crate::pkcs11::*;
 

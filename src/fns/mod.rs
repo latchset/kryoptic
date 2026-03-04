@@ -6,6 +6,7 @@
 //! This module and its submodules contain the implementation of the various
 //! PKCS#11 functions exported via the Function List.
 
+pub mod digest;
 pub mod dualcrypto;
 pub mod encryption;
 pub mod general;
