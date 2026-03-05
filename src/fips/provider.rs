@@ -151,7 +151,7 @@ static FIPS_MODULE_FILE_NAME: LazyLock<CString> = LazyLock::new(|| {
 
 static FIPS_INSTALL_VERSION: &CStr = c"1";
 static FIPS_CONDITIONAL_ERRORS: &CStr = c"1";
-static FIPS_SECURITY_CHECKS: &CStr = c"0";
+static FIPS_SECURITY_CHECKS: &CStr = c"1";
 static FIPS_PARAM_TLS1_PRF_EMS_CHECK: &CStr = c"1";
 static FIPS_PARAM_DRBG_TRUNC_DIGEST: &CStr = c"1";
 static FIPS_PARAM_RSA_PKCS15_PAD_DISABLED: &CStr = c"0";
