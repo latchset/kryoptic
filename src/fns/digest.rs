@@ -32,12 +32,13 @@ fn digest_init(
     }
     session.check_no_op::<dyn Digest>()?;
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let token = rstate.get_token_from_slot(session.get_slot_id())?;
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
-        let operation = mech.digest_new(mechanism)?;
+        let operation = mech.digest_new(&mechanism)?;
         session.set_operation::<dyn Digest>(operation, false);
+
         Ok(())
     } else {
         Err(CKR_MECHANISM_INVALID)?

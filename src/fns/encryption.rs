@@ -33,19 +33,19 @@ fn encrypt_init(
     }
     session.check_no_op::<dyn Encryption>()?;
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
 
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
 
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
-        let operation = mech.encryption_new(mechanism, &key)?;
+        let operation = mech.encryption_new(&mechanism, &key)?;
         session.set_operation::<dyn Encryption>(operation, false);
 
         #[cfg(feature = "fips")]
@@ -312,17 +312,17 @@ fn decrypt_init(
         return Ok(());
     }
     session.check_no_op::<dyn Decryption>()?;
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
-        let operation = mech.decryption_new(mechanism, &key)?;
+        let operation = mech.decryption_new(&mechanism, &key)?;
         session.set_operation::<dyn Decryption>(operation, key.always_auth());
 
         #[cfg(feature = "fips")]
@@ -589,17 +589,17 @@ fn message_encrypt_init(
         return Ok(());
     }
     session.check_no_op::<dyn MsgEncryption>()?;
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => {}
         err => return Err(err)?,
     }
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_MESSAGE_ENCRYPT != 0 {
-        let operation = mech.msg_encryption_op(mechanism, &key)?;
+        let operation = mech.msg_encryption_op(&mechanism, &key)?;
         session.set_operation::<dyn MsgEncryption>(operation, false);
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
@@ -981,17 +981,18 @@ fn message_decrypt_init(
         return Ok(());
     }
     session.check_no_op::<dyn MsgDecryption>()?;
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
+
         err => return Err(err)?,
     }
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_MESSAGE_DECRYPT != 0 {
-        let operation = mech.msg_decryption_op(mechanism, &key)?;
+        let operation = mech.msg_decryption_op(&mechanism, &key)?;
         session.set_operation::<dyn MsgDecryption>(operation, false);
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);

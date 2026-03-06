@@ -33,17 +33,17 @@ fn sign_init(
     }
     session.check_no_op::<dyn Sign>()?;
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
-        let operation = mech.sign_new(mechanism, &key)?;
+        let operation = mech.sign_new(&mechanism, &key)?;
         session.set_operation::<dyn Sign>(operation, key.always_auth());
 
         #[cfg(feature = "fips")]
@@ -305,17 +305,17 @@ fn verify_init(
         return Ok(());
     }
     session.check_no_op::<dyn Verify>()?;
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
-        let operation = mech.verify_new(mechanism, &key)?;
+        let operation = mech.verify_new(&mechanism, &key)?;
         session.set_operation::<dyn Verify>(operation, false);
 
         #[cfg(feature = "fips")]
@@ -686,12 +686,13 @@ fn verify_signature_init(
         return Ok(());
     }
     session.check_no_op::<dyn VerifySignature>()?;
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
+
         err => return Err(err)?,
     }
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
@@ -703,7 +704,7 @@ fn verify_signature_init(
         usize::try_from(psignature_len).map_err(|_| CKR_GENERAL_ERROR)?;
     let signature: &[u8] =
         unsafe { std::slice::from_raw_parts(psignature, sig_len) };
-    let operation = mech.verify_signature_new(mechanism, &key, signature)?;
+    let operation = mech.verify_signature_new(&mechanism, &key, signature)?;
     session.set_operation::<dyn VerifySignature>(operation, false);
 
     #[cfg(feature = "fips")]
