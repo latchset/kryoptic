@@ -41,7 +41,7 @@ fn generate_key(
         s
     };
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt = usize::try_from(count).map_err(|_| CKR_GENERAL_ERROR)?;
     let tmpl: &mut [CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts_mut(template, cnt) };
@@ -63,7 +63,7 @@ fn generate_key(
         return Err(CKR_MECHANISM_INVALID)?;
     }
 
-    let key = match mech.generate_key(mechanism, tmpl, mechanisms, factories) {
+    let key = match mech.generate_key(&mechanism, tmpl, mechanisms, factories) {
         #[allow(unused_mut)]
         Ok(mut k) => {
             #[cfg(feature = "fips")]
@@ -144,7 +144,7 @@ fn generate_key_pair(
         s
     };
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let pubcnt = usize::try_from(public_key_attribute_count)
         .map_err(|_| CKR_GENERAL_ERROR)?;
     let pubtmpl: &mut [CK_ATTRIBUTE] =
@@ -170,7 +170,7 @@ fn generate_key_pair(
         return Err(CKR_MECHANISM_INVALID)?;
     }
 
-    let result = mech.generate_keypair(mechanism, pubtmpl, pritmpl);
+    let result = mech.generate_keypair(&mechanism, pubtmpl, pritmpl);
     match result {
         #[allow(unused_mut)]
         Ok((mut pubkey, mut privkey)) => {
@@ -275,13 +275,13 @@ fn wrap_key(
         s
     };
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
     let wkey = token.get_object_by_handle(wrapping_key_handle)?;
 
-    match check_allowed_mechs(mechanism, &wkey) {
+    match check_allowed_mechs(&mechanism, &wkey) {
         CKR_OK => (),
         err => return Err(err)?,
     }
@@ -312,7 +312,8 @@ fn wrap_key(
             usize::try_from(pwraplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
         unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) }
     };
-    let outlen = match mech.wrap_key(mechanism, &wkey, &key, wrapped, factory) {
+    let outlen = match mech.wrap_key(&mechanism, &wkey, &key, wrapped, factory)
+    {
         Ok(len) => {
             #[cfg(feature = "fips")]
             session.set_fips_indicator(fips::indicators::is_approved(
@@ -396,7 +397,7 @@ fn unwrap_key(
         s
     };
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
     let tmpl: &mut [CK_ATTRIBUTE] =
@@ -413,7 +414,7 @@ fn unwrap_key(
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(unwrapping_key_handle)?;
 
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
@@ -433,7 +434,7 @@ fn unwrap_key(
         return Err(CKR_WRAPPING_KEY_HANDLE_INVALID)?;
     }
 
-    let result = mech.unwrap_key(mechanism, &key, data, tmpl, factory);
+    let result = mech.unwrap_key(&mechanism, &key, data, tmpl, factory);
     match result {
         #[allow(unused_mut)]
         Ok(mut obj) => {
@@ -511,7 +512,7 @@ fn derive_key(
     let rstate = STATE.rlock()?;
     let session = rstate.get_session(s_handle)?;
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
     let tmpl: &mut [CK_ATTRIBUTE] =
@@ -540,7 +541,7 @@ fn derive_key(
         }
     }
 
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
@@ -550,7 +551,7 @@ fn derive_key(
         return Err(CKR_MECHANISM_INVALID)?;
     }
 
-    let mut operation = mech.derive_operation(mechanism)?;
+    let mut operation = mech.derive_operation(&mechanism)?;
 
     /* some derive operation requires additional keys */
     match operation.requires_objects() {
@@ -785,7 +786,7 @@ fn encapsulate_key(
     let rstate = STATE.rlock()?;
     let session = rstate.get_session(s_handle)?;
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
     let tmpl: &[CK_ATTRIBUTE] =
@@ -804,7 +805,7 @@ fn encapsulate_key(
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(pubkey_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
@@ -833,7 +834,7 @@ fn encapsulate_key(
 
     #[allow(unused_mut)]
     let (mut obj, outlen) =
-        mech.encapsulate(mechanism, &key, factory, tmpl, encpart)?;
+        mech.encapsulate(&mechanism, &key, factory, tmpl, encpart)?;
 
     #[cfg(feature = "fips")]
     {
@@ -925,7 +926,7 @@ fn decapsulate_key(
     let rstate = STATE.rlock()?;
     let session = rstate.get_session(s_handle)?;
 
-    let mechanism: &CK_MECHANISM = unsafe { &*mechptr };
+    let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
     let tmpl: &[CK_ATTRIBUTE] =
@@ -946,7 +947,7 @@ fn decapsulate_key(
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(privkey_handle)?;
-    match check_allowed_mechs(mechanism, &key) {
+    match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
@@ -958,7 +959,7 @@ fn decapsulate_key(
     }
 
     #[allow(unused_mut)]
-    let mut obj = mech.decapsulate(mechanism, &key, factory, tmpl, encpart)?;
+    let mut obj = mech.decapsulate(&mechanism, &key, factory, tmpl, encpart)?;
 
     #[cfg(feature = "fips")]
     {

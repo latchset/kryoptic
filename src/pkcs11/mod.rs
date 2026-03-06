@@ -1022,4 +1022,8 @@ impl CK_MECHANISM {
         }
         Ok(unsafe { std::ptr::read_unaligned(self.pParameter as *const T) })
     }
+
+    pub fn from_ptr(mechptr: CK_MECHANISM_PTR) -> CK_MECHANISM {
+        unsafe { std::ptr::read_unaligned(mechptr as *const CK_MECHANISM) }
+    }
 }
