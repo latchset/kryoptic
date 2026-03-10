@@ -9,7 +9,7 @@ use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
 use crate::mechanism::*;
-use crate::misc::{bytes_to_slice, bytes_to_vec, CK_ULONG_SIZE};
+use crate::misc::{bytes_to_slice, bytes_to_vec, zeromem, CK_ULONG_SIZE};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 use std::fmt::Debug;
@@ -195,6 +195,14 @@ pub struct TLSKDFOperation {
     /// - None = undetermined
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
+}
+
+impl Drop for TLSKDFOperation {
+    fn drop(&mut self) {
+        zeromem(self.client_random.as_mut_slice());
+        zeromem(self.server_random.as_mut_slice());
+        zeromem(self.session_hash.as_mut_slice());
+    }
 }
 
 unsafe impl Send for TLSKDFOperation {}
@@ -744,7 +752,7 @@ impl TLSKDFOperation {
         let seed = self.tls_prf_seed(false);
         let dkmlen = (2 * (self.maclen + self.keylen + self.ivlen)) as usize;
         let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
-        let dkm = tlsprf.finish(&seed, dkmlen)?;
+        let mut dkm = tlsprf.finish(&seed, dkmlen)?;
 
         let mut keys = Vec::<Object>::with_capacity(4);
         let mut i = 0;
@@ -822,6 +830,7 @@ impl TLSKDFOperation {
             srviv.copy_from_slice(&dkm[i..(i + ivlen)]);
         }
 
+        zeromem(&mut dkm);
         Ok(keys)
     }
 
