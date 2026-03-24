@@ -534,10 +534,38 @@ fn derive_key(
      * because we think this operation should alays be possible regardless
      * of whether private key should generally allow key derivation. This
      * is our (Kryoptic team) interpretation and may change if/when the
-     * OASIS PKCS#11 TC clarifies the spec in this regard */
-    if mechanism.mechanism != CKM_PUB_KEY_FROM_PRIV_KEY {
-        if !key.get_attr_as_bool(CKA_DERIVE)? {
-            return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
+     * OASIS PKCS#11 TC clarifies the spec in this regard.
+     * We also allow HKDF derivation from a DATA object if specific
+     * conditions are met. */
+    match mechanism.mechanism {
+        CKM_PUB_KEY_FROM_PRIV_KEY => (),
+        CKM_HKDF_DERIVE | CKM_HKDF_DATA => {
+            if key.get_class() == CKO_DATA {
+                let params = mechanism.get_parameters::<CK_HKDF_PARAMS>()?;
+                /* 1. Must be used for the extract phase */
+                if params.bExtract == CK_FALSE {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
+                /* 2. CKA_VALUE length must be the same size as the underlying hash */
+                let hlen = crate::hash::hash_size(params.prfHashMechanism);
+                let klen = key.get_attr_as_bytes(CKA_VALUE)?.len();
+                if hlen == crate::hash::INVALID_HASH_SIZE || hlen != klen {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
+                /* 3. A non-null salt must be provided */
+                if params.ulSaltType == CKF_HKDF_SALT_NULL
+                    || params.pSalt.is_null()
+                {
+                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                }
+            } else if !key.get_attr_as_bool(CKA_DERIVE)? {
+                return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
+            }
+        }
+        _ => {
+            if !key.get_attr_as_bool(CKA_DERIVE)? {
+                return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
+            }
         }
     }
 
