@@ -21,7 +21,6 @@ use crate::ossl::common::osslctx;
 use ossl::bindings::*;
 use ossl::OsslContext;
 
-use getrandom;
 use libc;
 
 /* Entropy Stuff */
@@ -44,16 +43,35 @@ unsafe extern "C" fn fips_get_entropy(
     if len > max_len {
         len = max_len;
     }
-    /* FIXME: use secure alloc */
+
     let out = unsafe { fips_malloc(len, null(), 0) };
     if out.is_null() {
         return 0;
     }
-    let r = unsafe { slice::from_raw_parts_mut(out as *mut u8, len) };
-    if getrandom::fill(r).is_err() {
-        unsafe { fips_clear_free(out, len, null(), 0) };
-        return 0;
+
+    /* On RHEL we really want to use GRND_RANDOM as that guarantees the
+     * validated entropy source is used when the kernel is booted in fips
+     * mode */
+    let mut res: isize = 0;
+    let mut l = len;
+    while (res as usize) < len {
+        let r = unsafe {
+            libc::getrandom(out.byte_offset(res), l, libc::GRND_RANDOM)
+        };
+        if r == -1 {
+            unsafe { fips_clear_free(out, len, null(), 0) };
+            return 0;
+        }
+        res += r;
+        match usize::try_from(r) {
+            Err(_) => {
+                unsafe { fips_clear_free(out, len, null(), 0) };
+                return 0;
+            }
+            Ok(ur) => l -= ur,
+        };
     }
+
     unsafe { *pout = out as *mut u8 };
     len
 }

@@ -49,7 +49,7 @@ jobs:
                 'crate(bitflags/default)' 'crate(cfg-if/default)' \
                 'crate(clap)' 'crate(clap/cargo)' 'crate(clap/derive)' 'crate(clap/help)' \
                 'crate(clap/std)' 'crate(clap/usage)' 'crate(constant_time_eq/default)' \
-                'crate(data-encoding/default)' 'crate(getrandom/default)' 'crate(hex/default)' \
+                'crate(data-encoding/default)' 'crate(hex/default)' \
                 'crate(itertools/default)' 'crate(libc/default)' 'crate(num-bigint/default)' \
                 'crate(num-integer/default)' 'crate(num-traits/default)' \
                 'crate(pkg-config/default)' 'crate(rusqlite/default)' \
