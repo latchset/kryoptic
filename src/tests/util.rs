@@ -762,10 +762,11 @@ pub fn check_object_validation(
         std::mem::size_of::<CK_ULONG>(),
     )]);
     let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
-    if ret != CKR_OK {
-        return false;
+    match ret {
+        CKR_OK => expect == flag, /* attribute present, flag populated */
+        CKR_ATTRIBUTE_TYPE_INVALID => expect == 0, /* absent or wrong type */
+        _ => false,               /* attribute fetching failed */
     }
-    return flag == expect;
 }
 
 #[cfg(not(feature = "fips"))]
