@@ -995,6 +995,9 @@ impl ObjectFactories {
                 None => {
                     /* This attribute is not available on given object */
                     ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    if result == CKR_OK {
+                        result = CKR_ATTRIBUTE_TYPE_INVALID;
+                    }
                 }
             }
         }

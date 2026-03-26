@@ -37,11 +37,26 @@ fn test_secret_key() {
         session,
         handle,
         &[(CKA_KEY_GEN_MECHANISM, CKM_GENERIC_SECRET_KEY_GEN)],
-        &[(CKA_ALLOWED_MECHANISMS, &[])],
+        &[],
         &[(CKA_LOCAL, true)],
     ) {
         panic!("{}", err);
     }
+
+    /* Test CKA_ALLOWED_MECHANISMS absent -> CKR_ATTRIBUTE_TYPE_INVALID */
+    let mut tmpl = make_ptrs_template(&[(
+        CKA_ALLOWED_MECHANISMS,
+        std::ptr::null_mut(),
+        0,
+    )]);
+    let ret = fn_get_attribute_value(
+        session,
+        handle,
+        tmpl.as_mut_ptr(),
+        tmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_ATTRIBUTE_TYPE_INVALID);
+    assert_eq!(tmpl[0].ulValueLen, CK_UNAVAILABLE_INFORMATION);
 
     /* Test CKA_ALLOWED_MECHANISMS */
 
