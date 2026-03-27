@@ -10,7 +10,10 @@ use std::sync::LazyLock;
 
 use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
-use crate::object::{GenericSecretKeyMechanism, ObjectFactories};
+use crate::object::{
+    GenericSecretKeyFactory, GenericSecretKeyMechanism, ObjectFactories,
+    ObjectFactory, ObjectType,
+};
 use crate::ossl::hkdf::HKDFOperation;
 use crate::pkcs11::*;
 
@@ -28,12 +31,19 @@ static HKDF_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     ]
 });
 
+static HKDF_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
+    LazyLock::new(|| Box::new(GenericSecretKeyFactory::new()));
+
 /// Registers all HKDF related mechanisms
-pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
+pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     for ckm in &[CKM_HKDF_DERIVE, CKM_HKDF_DATA] {
         mechs.add_mechanism(*ckm, &(*HKDF_MECHS)[0]);
     }
     mechs.add_mechanism(CKM_HKDF_KEY_GEN, &(*HKDF_MECHS)[1]);
+    ot.add_factory(
+        ObjectType::new(CKO_SECRET_KEY, CKK_HKDF),
+        &(*HKDF_KEY_FACTORY),
+    );
 }
 
 /// Object that represents the HKDF mechanism

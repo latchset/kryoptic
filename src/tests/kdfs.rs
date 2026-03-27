@@ -1189,3 +1189,124 @@ fn test_sshkdf() {
 
     testtokn.finalize();
 }
+
+#[cfg(feature = "hkdf")]
+#[test]
+#[parallel]
+fn test_hkdf_from_data_object() {
+    let mut testtokn =
+        TestToken::initialized("test_hkdf_from_data_object", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* 1. Create a CKO_DATA object (32 bytes) */
+    let data_ikm = [0xabu8; 32];
+    let data_handle = ret_or_panic!(import_object(
+        session,
+        CKO_DATA,
+        &[],
+        &[(CKA_VALUE, data_ikm.as_slice())],
+        &[],
+    ));
+
+    let salt_data = "SALT";
+    let mut hkdf_params = CK_HKDF_PARAMS {
+        bExtract: CK_TRUE,
+        bExpand: CK_TRUE,
+        prfHashMechanism: CKM_SHA256,
+        ulSaltType: CKF_HKDF_SALT_DATA,
+        pSalt: byte_ptr!(salt_data.as_ptr()),
+        ulSaltLen: salt_data.len() as CK_ULONG,
+        hSaltKey: CK_INVALID_HANDLE,
+        pInfo: std::ptr::null_mut(),
+        ulInfoLen: 0,
+    };
+
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_HKDF_DERIVE,
+        pParameter: void_ptr!(&hkdf_params),
+        ulParameterLen: sizeof!(CK_HKDF_PARAMS),
+    };
+
+    let mut derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+
+    let mut drv_handle = CK_INVALID_HANDLE;
+
+    /* Valid case: should work */
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        data_handle,
+        derive_template.as_mut_ptr(),
+        derive_template.len() as CK_ULONG,
+        &mut drv_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* 2. Invalid case: bExtract = false */
+    {
+        let mut params = hkdf_params;
+        params.bExtract = CK_FALSE;
+        let mut mech = derive_mech;
+        mech.pParameter = void_ptr!(&params);
+        let ret = fn_derive_key(
+            session,
+            &mut mech,
+            data_handle,
+            derive_template.as_mut_ptr(),
+            derive_template.len() as CK_ULONG,
+            &mut drv_handle,
+        );
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    }
+
+    /* 3. Invalid case: Wrong size (data object is 32, hash is SHA256 (32), but let's change data size) */
+    let small_data_ikm = [0xabu8; 16];
+    let small_data_handle = ret_or_panic!(import_object(
+        session,
+        CKO_DATA,
+        &[],
+        &[(CKA_VALUE, small_data_ikm.as_slice())],
+        &[],
+    ));
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        small_data_handle,
+        derive_template.as_mut_ptr(),
+        derive_template.len() as CK_ULONG,
+        &mut drv_handle,
+    );
+    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+
+    /* 4. Invalid case: Null salt */
+    {
+        let mut params = hkdf_params;
+        params.ulSaltType = CKF_HKDF_SALT_NULL;
+        params.pSalt = std::ptr::null_mut();
+        params.ulSaltLen = 0;
+        let mut mech = derive_mech;
+        mech.pParameter = void_ptr!(&params);
+        let ret = fn_derive_key(
+            session,
+            &mut mech,
+            data_handle,
+            derive_template.as_mut_ptr(),
+            derive_template.len() as CK_ULONG,
+            &mut drv_handle,
+        );
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    }
+
+    testtokn.finalize();
+}

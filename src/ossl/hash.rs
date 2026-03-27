@@ -111,9 +111,6 @@ impl Digest for HashOperation {
     }
 
     fn digest_final(&mut self, digest: &mut [u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
