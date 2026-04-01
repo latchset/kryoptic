@@ -383,6 +383,70 @@ fn test_create_trust_object() {
         CKR_ATTRIBUTE_VALUE_INVALID
     );
 
+    // Test case 7: Setting and verifying all trust attributes and values
+    let trust_attributes = [
+        CKA_TRUST_SERVER_AUTH,
+        CKA_TRUST_CLIENT_AUTH,
+        CKA_TRUST_CODE_SIGNING,
+        CKA_TRUST_EMAIL_PROTECTION,
+        CKA_TRUST_IPSEC_IKE,
+        CKA_TRUST_TIME_STAMPING,
+        CKA_TRUST_OCSP_SIGNING,
+    ];
+
+    let trust_values = [
+        CKT_TRUST_UNKNOWN,
+        CKT_TRUSTED,
+        CKT_TRUST_ANCHOR,
+        CKT_NOT_TRUSTED,
+        CKT_TRUST_MUST_VERIFY_TRUST,
+    ];
+
+    for &attr in &trust_attributes {
+        for &val in &trust_values {
+            let trust_obj = ret_or_panic!(import_object(
+                session,
+                CKO_TRUST,
+                &[(attr, val), (CKA_NAME_HASH_ALGORITHM, CKM_SHA256),],
+                &[
+                    (CKA_ISSUER, "Test Issuer".as_bytes()),
+                    (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                    (CKA_HASH_OF_CERTIFICATE, &[0; 32]), // dummy 256-bit hash
+                ],
+                &[(CKA_TOKEN, true)],
+            ));
+
+            let mut fetched_vals = vec![0 as CK_ULONG; trust_attributes.len()];
+            let mut ptrs = Vec::new();
+            for (i, &chk_attr) in trust_attributes.iter().enumerate() {
+                ptrs.push((
+                    chk_attr,
+                    void_ptr!(&mut fetched_vals[i]),
+                    std::mem::size_of::<CK_ULONG>(),
+                ));
+            }
+            let mut attr_template = make_ptrs_template(&ptrs);
+            let ret = fn_get_attribute_value(
+                session,
+                trust_obj,
+                attr_template.as_mut_ptr(),
+                attr_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            for (i, &chk_attr) in trust_attributes.iter().enumerate() {
+                if chk_attr == attr {
+                    assert_eq!(fetched_vals[i], val);
+                } else {
+                    assert_eq!(fetched_vals[i], CKT_TRUST_UNKNOWN);
+                }
+            }
+
+            let ret = fn_destroy_object(session, trust_obj);
+            assert_eq!(ret, CKR_OK);
+        }
+    }
+
     // cleanup
     let ret = fn_destroy_object(session, trust_obj);
     assert_eq!(ret, CKR_OK);
