@@ -106,7 +106,10 @@ impl<'a> asn1::SimpleAsn1Readable<'a> for DerEncBigUint<'a> {
     }
 }
 impl<'a> asn1::SimpleAsn1Writable for DerEncBigUint<'a> {
+    type Error = asn1::WriteError;
+
     const TAG: asn1::Tag = asn1::BigUint::TAG;
+
     /// Writes out a DerEncBigUint
     fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
         dest.push_slice(self.as_bytes())
@@ -162,7 +165,10 @@ impl<'a> asn1::SimpleAsn1Readable<'a> for DerEncOctetString<'a> {
     }
 }
 impl<'a> asn1::SimpleAsn1Writable for DerEncOctetString<'a> {
+    type Error = asn1::WriteError;
+
     const TAG: asn1::Tag = asn1::Tag::primitive(0x04);
+
     /// Writes out a DerEncOctetString
     fn write_data(&self, dest: &mut asn1::WriteBuf) -> asn1::WriteResult {
         dest.push_slice(self.as_bytes())
