@@ -115,6 +115,7 @@ pub enum AesCtsMode {
 pub enum EncAlg {
     AesCcm(AesSize),
     AesGcm(AesSize),
+    AesGcmSiv(AesSize),
     AesCts(AesSize, AesCtsMode),
     AesCtr(AesSize),
     AesCbc(AesSize),
@@ -171,6 +172,11 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
             AesSize::Aes128 => cstr!(LN_aes_128_gcm),
             AesSize::Aes192 => cstr!(LN_aes_192_gcm),
             AesSize::Aes256 => cstr!(LN_aes_256_gcm),
+        },
+        EncAlg::AesGcmSiv(size) => match size {
+            AesSize::Aes128 => c"AES-128-GCM-SIV",
+            AesSize::Aes192 => c"AES-192-GCM-SIV",
+            AesSize::Aes256 => c"AES-256-GCM-SIV",
         },
         EncAlg::AesCtr(size) => match size {
             AesSize::Aes128 => cstr!(LN_aes_128_ctr),
@@ -361,9 +367,10 @@ impl OsslCipher {
         /* For some modes there is setup that needs to be done
          * early, before the cipher ctx is fully initialized */
         match alg {
-            EncAlg::AesCcm(_) | EncAlg::AesGcm(_) | EncAlg::AesOcb(_) => {
-                ctx.aead_setup(alg, &aead)?
-            }
+            EncAlg::AesCcm(_)
+            | EncAlg::AesGcm(_)
+            | EncAlg::AesGcmSiv(_)
+            | EncAlg::AesOcb(_) => ctx.aead_setup(alg, &aead)?,
             EncAlg::AesCts(_, mode) => {
                 let mut params_builder = OsslParamBuilder::with_capacity(1);
                 params_builder.add_const_c_string(
