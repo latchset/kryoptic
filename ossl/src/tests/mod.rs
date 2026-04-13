@@ -32,6 +32,9 @@ pub fn test_ossl_legacy_context() -> &'static crate::OsslContext {
 }
 
 #[cfg(not(feature = "fips"))]
+mod aes;
+
+#[cfg(not(feature = "fips"))]
 mod brainpool;
 
 #[cfg(feature = "rfc9580")]
