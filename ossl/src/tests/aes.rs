@@ -193,3 +193,34 @@ fn test_aes_128_ocb() {
         "5725BDA0D3B4EB3A257C9AF1F8F03009",
     );
 }
+
+#[test]
+#[parallel]
+fn test_aes_128_gcm_siv() {
+    /* test vectors from https://www.rfc-editor.org/rfc/rfc8452#appendix-C.1 */
+    do_aead_test(
+        EncAlg::AesGcmSiv(AesSize::Aes128),
+        "36864200e0eaf5284d884a0e77d31646",
+        "bae8e37fc83441b16034566b",
+        "46bb91c3c5",
+        "7a806c",
+        "af60eb",
+        "711bd85bc1e4d3e0a462e074eea428a8",
+    );
+}
+
+#[test]
+#[parallel]
+fn test_aes_256_gcm_siv() {
+    /* test vectors from https://www.rfc-editor.org/rfc/rfc8452#appendix-C.2 */
+    do_aead_test(
+        EncAlg::AesGcmSiv(AesSize::Aes256),
+        "bae8e37fc83441b16034566b7a806c46\
+         bb91c3c5aedb64a6c590bc84d1a5e269",
+        "e4b47801afc0577e34699b9e",
+        "4fbdc66f14",
+        "671fdd",
+        "0eaccb",
+        "93da9bb81333aee0c785b240d319719d",
+    );
+}
