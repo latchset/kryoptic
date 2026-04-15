@@ -510,6 +510,64 @@ impl RsaData {
             }
         }
 
+        /// Computes the GCD of the given numbers storing the result
+        /// in `res`.
+        fn checked_gcd(
+            res: &mut BigNum,
+            a: &BigNum,
+            b: &BigNum,
+        ) -> Result<(), Error> {
+            unsafe {
+                let ctx = BN_CTX_secure_new();
+                if ctx.is_null() {
+                    return Err(Error::new(ErrorKind::NullPtr));
+                }
+
+                let ret = BN_gcd(res.as_mut_ptr(), a.as_ptr(), b.as_ptr(), ctx);
+
+                BN_CTX_free(ctx);
+
+                if ret == 1 {
+                    Ok(())
+                } else {
+                    trace_ossl!("BN_gcd()");
+                    Err(Error::new(ErrorKind::OsslError))
+                }
+            }
+        }
+
+        /// Computes the quotient of the given numbers storing the result
+        /// in `res`.
+        fn checked_div(
+            res: &mut BigNum,
+            a: &BigNum,
+            b: &BigNum,
+        ) -> Result<(), Error> {
+            unsafe {
+                let ctx = BN_CTX_secure_new();
+                if ctx.is_null() {
+                    return Err(Error::new(ErrorKind::NullPtr));
+                }
+
+                let ret = BN_div(
+                    res.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    a.as_ptr(),
+                    b.as_ptr(),
+                    ctx,
+                );
+
+                BN_CTX_free(ctx);
+
+                if ret == 1 {
+                    Ok(())
+                } else {
+                    trace_ossl!("BN_div()");
+                    Err(Error::new(ErrorKind::OsslError))
+                }
+            }
+        }
+
         /// Computes the inverse of `a` modulo `n` storing the result in
         /// `res`.
         fn checked_mod_inverse(
@@ -573,10 +631,19 @@ impl RsaData {
             use_constant_time_ops(&mut phi);
             checked_mul(&mut phi, &p_dec, &q_dec)?;
 
-            // Compute e ≡ d⁻¹ (mod 𝜙).
+            // Compute λ = lcm(p - 1, q - 1) = 𝜙 / gcd(p - 1, q - 1).
+            let mut gcd = BigNum::new()?;
+            use_constant_time_ops(&mut gcd);
+            checked_gcd(&mut gcd, &p_dec, &q_dec)?;
+
+            let mut lambda = BigNum::new()?;
+            use_constant_time_ops(&mut lambda);
+            checked_div(&mut lambda, &phi, &gcd)?;
+
+            // Compute e ≡ d⁻¹ (mod λ).
             let d = BigNum::from_bigendian_slice(d)?;
             let mut e = BigNum::new()?;
-            checked_mod_inverse(&mut e, &d, &phi)?;
+            checked_mod_inverse(&mut e, &d, &lambda)?;
 
             (e, n)
         };
@@ -1579,6 +1646,29 @@ mod tests {
         assert_eq!(e, expect_e);
         assert_eq!(&data.n, expect_n);
         assert_eq!(&data.inverse_p_mod_q()?, expect_u);
+        Ok(())
+    }
+
+    /// Verifies that deriving e from d, p, and q uses
+    /// `e*d = 1 mod lcm(p-1, q-1)` (Carmichael function) rather than
+    /// `e*d = 1 mod (p-1)*(q-1)` (Euler totient).  The former is
+    /// required for keys generated per FIPS 186-5 (e.g. by Botan);
+    /// for other keys the two formulas yield the same result.
+    ///
+    /// See https://github.com/randombit/botan/issues/5524
+    #[cfg(feature = "rfc9580")]
+    #[test]
+    fn import_rsa_dpq_lcm() -> Result<(), crate::Error> {
+        // The inputs.
+        let d = &b"\x1e\x3e\x60\x70\xbc\x57\x8c\x08\xc7\x11\x3f\xf8\x36\xc2\xee\x26\x65\x70\x5c\x68\xf5\xcf\xdc\x7b\x97\x39\x2a\x89\xe9\x99\x81\xd8\x75\x60\xbf\x25\x1a\xf2\xd6\xbd\x64\xae\x2f\x6a\x71\xa9\x56\xe4\x58\x3d\xf2\x3d\xd8\x03\x57\xd0\xb9\x45\x3c\x7d\x2d\x66\xf2\x9f\x01\x44\xad\x09\xcf\xbb\x0e\x81\xb7\x30\xc3\x1a\xa0\xc8\xbf\x9c\xf4\x8e\x94\x15\x4b\xb0\xcc\x68\xbe\x0c\x49\x82\xc5\x33\x50\xaa\xfe\xe0\xb6\x13\xc5\xee\x24\x7a\x56\xdd\x6a\x9f\x33\xc5\x29\xd4\x66\x6f\x89\x47\x45\xf9\x42\x18\x9c\x72\xac\xb9\x4d\x8a\xd8\x6b"[..];
+        let p = &b"\xd9\x00\xa2\x5b\xb8\xce\xe8\x86\xce\xf6\xe8\x0d\x5e\x42\x59\x12\xf5\xa6\x3b\x19\x56\xf5\xa2\x99\xa0\x57\x5a\x98\x05\x03\xba\xbb\xc6\xac\x89\x7c\x40\xd7\x40\x85\xed\x24\x8f\xae\xf4\x8d\x8f\x32\x79\xe3\x36\x93\x01\x04\x7b\xb5\xa9\x67\x3c\x14\xf6\xd9\xe0\x8b"[..];
+        let q = &b"\xd7\xf8\x7b\xc9\xed\xb5\x3b\x76\xfe\xd8\xce\xda\x7b\xd1\x2d\x8d\x6c\x44\x26\xb6\xd4\xe3\x2f\x75\x62\x37\x61\xee\x0a\x28\x58\xd5\x05\x81\x92\xa6\x5f\xc6\xcb\xb1\x6a\x21\x51\xf4\xa6\xe9\xae\x23\xab\xdd\x72\x76\x89\x9e\x49\x61\x9c\x7b\xa9\xba\xf2\x07\x48\xa7"[..];
+
+        // The expected output.
+        let expect_e = &b"\x01\x00\x01"[..];
+
+        let (e, _data) = crate::pkey::RsaData::from_dpq(d, p, q)?;
+        assert_eq!(e, expect_e);
         Ok(())
     }
 }
