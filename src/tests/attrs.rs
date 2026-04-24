@@ -113,14 +113,15 @@ fn test_get_attr() {
     assert_eq!(ret, CKR_ATTRIBUTE_TYPE_INVALID);
     assert_eq!(template[0].ulValueLen, CK_UNAVAILABLE_INFORMATION);
 
-    /* Valid attributes that are not present should report this only in length */
+    /* Absent attributes are CKR_ATTRIBUTE_TYPE_INVALID,
+     * even if valid for the object type in general (PKCS#11 5.7.5 case 2) */
     let mut template = make_ptrs_template(&[(
         CKA_ALLOWED_MECHANISMS,
         std::ptr::null_mut(),
         0,
     )]);
     let ret = fn_get_attribute_value(session, handle, template.as_mut_ptr(), 1);
-    assert_eq!(ret, CKR_OK);
+    assert_eq!(ret, CKR_ATTRIBUTE_TYPE_INVALID);
     assert_eq!(template[0].ulValueLen, CK_UNAVAILABLE_INFORMATION);
 
     testtokn.finalize();
