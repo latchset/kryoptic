@@ -57,6 +57,17 @@ macro_rules! assert_in {
     };
 }
 
+macro_rules! assert_eq_with {
+    ($context:expr, $ret:expr, $val:expr) => {
+        if ($ret != $val) {
+            panic!(
+                "values do not match for test ({}): {} != {}",
+                $context, $ret, $val
+            );
+        }
+    };
+}
+
 pub fn decrypt(
     session: CK_SESSION_HANDLE,
     key: CK_OBJECT_HANDLE,
