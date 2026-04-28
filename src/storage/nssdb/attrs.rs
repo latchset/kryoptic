@@ -4,7 +4,7 @@
 //! This module defines PKCS#11 attribute type constants specific to or
 //! commonly used within NSS databases, including standard, vendor-defined
 //! (NSS), and trust object attributes. It also provides a unified table of
-//! these attributes with their properties (authenticated, sensitive, vendor,
+//! these attributes with their properties (authenticated, sensitive, masked,
 //! skippable, etc.) and helper functions to check attribute classifications.
 
 use crate::pkcs11::*;
@@ -71,8 +71,8 @@ pub struct NssAttributeInfo {
     pub authenticated: bool,
     /// Is a sensitive attribute
     pub sensitive: bool,
-    /// Is an NSS vendor-specific attribute
-    pub vendor: bool,
+    /// Is an NSS vendor-specific attribute that we mask on reads
+    pub masked: bool,
     /// Is an attribute to be skipped (not stored in DB)
     pub skippable: bool,
     /// Is a deprecated attribute
@@ -85,7 +85,7 @@ macro_rules! nssattrinfo_regular {
             attr_type: $attr,
             authenticated: false,
             sensitive: false,
-            vendor: false,
+            masked: false,
             skippable: false,
             deprecated: false,
         }
@@ -98,7 +98,7 @@ macro_rules! nssattrinfo_authenticated {
             attr_type: $attr,
             authenticated: true,
             sensitive: false,
-            vendor: false,
+            masked: false,
             skippable: false,
             deprecated: false,
         }
@@ -111,20 +111,20 @@ macro_rules! nssattrinfo_sensitive {
             attr_type: $attr,
             authenticated: false,
             sensitive: true,
-            vendor: false,
+            masked: false,
             skippable: false,
             deprecated: false,
         }
     };
 }
 
-macro_rules! nssattrinfo_vendor {
+macro_rules! nssattrinfo_masked {
     ($attr:ident) => {
         NssAttributeInfo {
             attr_type: $attr,
             authenticated: false,
             sensitive: false,
-            vendor: true,
+            masked: true,
             skippable: false,
             deprecated: false,
         }
@@ -137,7 +137,7 @@ macro_rules! nssattrinfo_skippable {
             attr_type: $attr,
             authenticated: false,
             sensitive: false,
-            vendor: false,
+            masked: false,
             skippable: true,
             deprecated: false,
         }
@@ -150,20 +150,20 @@ macro_rules! nssattrinfo_deprecated {
             attr_type: $attr,
             authenticated: false,
             sensitive: false,
-            vendor: false,
+            masked: false,
             skippable: false,
             deprecated: true,
         }
     };
 }
 
-macro_rules! nssattrinfo_auth_vendor {
+macro_rules! nssattrinfo_auth_masked {
     ($attr:ident) => {
         NssAttributeInfo {
             attr_type: $attr,
             authenticated: true,
             sensitive: false,
-            vendor: true,
+            masked: true,
             skippable: false,
             deprecated: false,
         }
@@ -328,42 +328,42 @@ pub static ALL_ATTRIBUTES: &[NssAttributeInfo] = &[
     nssattrinfo_authenticated!(CKA_HASH_OF_CERTIFICATE),
     nssattrinfo_regular!(CKA_PUBLIC_CRC64_VALUE),
     nssattrinfo_sensitive!(CKA_SEED),
-    nssattrinfo_vendor!(CKA_NSS_TRUST),
-    nssattrinfo_vendor!(CKA_NSS_URL),
-    nssattrinfo_vendor!(CKA_NSS_EMAIL),
-    nssattrinfo_vendor!(CKA_NSS_SMIME_INFO),
-    nssattrinfo_vendor!(CKA_NSS_SMIME_TIMESTAMP),
-    nssattrinfo_vendor!(CKA_NSS_PKCS8_SALT),
-    nssattrinfo_vendor!(CKA_NSS_PASSWORD_CHECK),
-    nssattrinfo_vendor!(CKA_NSS_EXPIRES),
-    nssattrinfo_vendor!(CKA_NSS_KRL),
-    nssattrinfo_vendor!(CKA_NSS_PQG_COUNTER),
-    nssattrinfo_vendor!(CKA_NSS_PQG_SEED),
-    nssattrinfo_vendor!(CKA_NSS_PQG_H),
-    nssattrinfo_vendor!(CKA_NSS_PQG_SEED_BITS),
-    nssattrinfo_vendor!(CKA_NSS_MODULE_SPEC),
-    nssattrinfo_auth_vendor!(CKA_NSS_OVERRIDE_EXTENSIONS),
-    nssattrinfo_vendor!(CKA_NSS_SERVER_DISTRUST_AFTER),
-    nssattrinfo_vendor!(CKA_NSS_EMAIL_DISTRUST_AFTER),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_DIGITAL_SIGNATURE),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_NON_REPUDIATION),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_KEY_ENCIPHERMENT),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_DATA_ENCIPHERMENT),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_KEY_AGREEMENT),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_KEY_CERT_SIGN),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_CRL_SIGN),
-    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_SERVER_AUTH),
-    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_CLIENT_AUTH),
-    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_CODE_SIGNING),
-    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_EMAIL_PROTECTION),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_IPSEC_END_SYSTEM),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_IPSEC_TUNNEL),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_IPSEC_USER),
-    nssattrinfo_vendor!(CKA_NSS_TRUST_TIME_STAMPING),
-    nssattrinfo_auth_vendor!(CKA_NSS_TRUST_STEP_UP_APPROVED),
-    nssattrinfo_auth_vendor!(CKA_NSS_CERT_SHA1_HASH),
-    nssattrinfo_auth_vendor!(CKA_NSS_CERT_MD5_HASH),
-    nssattrinfo_vendor!(CKA_NSS_DB),
+    nssattrinfo_masked!(CKA_NSS_TRUST),
+    nssattrinfo_masked!(CKA_NSS_URL),
+    nssattrinfo_masked!(CKA_NSS_EMAIL),
+    nssattrinfo_masked!(CKA_NSS_SMIME_INFO),
+    nssattrinfo_masked!(CKA_NSS_SMIME_TIMESTAMP),
+    nssattrinfo_masked!(CKA_NSS_PKCS8_SALT),
+    nssattrinfo_masked!(CKA_NSS_PASSWORD_CHECK),
+    nssattrinfo_masked!(CKA_NSS_EXPIRES),
+    nssattrinfo_masked!(CKA_NSS_KRL),
+    nssattrinfo_masked!(CKA_NSS_PQG_COUNTER),
+    nssattrinfo_masked!(CKA_NSS_PQG_SEED),
+    nssattrinfo_masked!(CKA_NSS_PQG_H),
+    nssattrinfo_masked!(CKA_NSS_PQG_SEED_BITS),
+    nssattrinfo_masked!(CKA_NSS_MODULE_SPEC),
+    nssattrinfo_auth_masked!(CKA_NSS_OVERRIDE_EXTENSIONS),
+    nssattrinfo_masked!(CKA_NSS_SERVER_DISTRUST_AFTER),
+    nssattrinfo_masked!(CKA_NSS_EMAIL_DISTRUST_AFTER),
+    nssattrinfo_masked!(CKA_NSS_TRUST_DIGITAL_SIGNATURE),
+    nssattrinfo_masked!(CKA_NSS_TRUST_NON_REPUDIATION),
+    nssattrinfo_masked!(CKA_NSS_TRUST_KEY_ENCIPHERMENT),
+    nssattrinfo_masked!(CKA_NSS_TRUST_DATA_ENCIPHERMENT),
+    nssattrinfo_masked!(CKA_NSS_TRUST_KEY_AGREEMENT),
+    nssattrinfo_masked!(CKA_NSS_TRUST_KEY_CERT_SIGN),
+    nssattrinfo_masked!(CKA_NSS_TRUST_CRL_SIGN),
+    nssattrinfo_authenticated!(CKA_NSS_TRUST_SERVER_AUTH),
+    nssattrinfo_authenticated!(CKA_NSS_TRUST_CLIENT_AUTH),
+    nssattrinfo_authenticated!(CKA_NSS_TRUST_CODE_SIGNING),
+    nssattrinfo_authenticated!(CKA_NSS_TRUST_EMAIL_PROTECTION),
+    nssattrinfo_masked!(CKA_NSS_TRUST_IPSEC_END_SYSTEM),
+    nssattrinfo_masked!(CKA_NSS_TRUST_IPSEC_TUNNEL),
+    nssattrinfo_masked!(CKA_NSS_TRUST_IPSEC_USER),
+    nssattrinfo_masked!(CKA_NSS_TRUST_TIME_STAMPING),
+    nssattrinfo_authenticated!(CKA_NSS_TRUST_STEP_UP_APPROVED),
+    nssattrinfo_authenticated!(CKA_NSS_CERT_SHA1_HASH),
+    nssattrinfo_authenticated!(CKA_NSS_CERT_MD5_HASH),
+    nssattrinfo_masked!(CKA_NSS_DB),
     // Skippable attributes
     nssattrinfo_skippable!(CKA_ALLOWED_MECHANISMS),
 ];
@@ -376,7 +376,7 @@ fn get_attr_info(attr: CK_ATTRIBUTE_TYPE) -> Option<&'static NssAttributeInfo> {
 /// deprecated and should generally be ignored.
 pub fn ignore_attribute(attr: CK_ATTRIBUTE_TYPE) -> bool {
     get_attr_info(attr)
-        .map(|info| info.vendor || info.deprecated)
+        .map(|info| info.masked || info.deprecated)
         .unwrap_or(false)
 }
 
