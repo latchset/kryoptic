@@ -59,6 +59,14 @@ then
     export JTREG="${OPENJDK}"/deps/jtreg
 fi
 
+ptool() {
+    # NSS uses the second slot for certificates, so we need to provide the token
+    # label in the args to allow pkcs11-tool to find the right slot
+    CMDOPTS=(--module="${P11LIB}")
+    CMDOPTS+=("$@")
+    pkcs11-tool "${CMDOPTS[@]}"
+}
+
 # Initialize Kryoptic token.
 export TESTSSRCDIR="${PKCS11_PROVIDER}"/tests
 # Note intentional extra "P" in "TMPPDIR".
