@@ -458,6 +458,88 @@ fn test_create_trust_object() {
 
 #[test]
 #[parallel]
+fn test_modify_trust_object() {
+    let mut testtokn = TestToken::initialized("test_modify_trust_object", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let trust_attributes = [
+        CKA_TRUST_SERVER_AUTH,
+        CKA_TRUST_CLIENT_AUTH,
+        CKA_TRUST_CODE_SIGNING,
+        CKA_TRUST_EMAIL_PROTECTION,
+        CKA_TRUST_IPSEC_IKE,
+        CKA_TRUST_TIME_STAMPING,
+        CKA_TRUST_OCSP_SIGNING,
+    ];
+
+    let trust_values = [
+        CKT_TRUST_UNKNOWN,
+        CKT_TRUSTED,
+        CKT_TRUST_ANCHOR,
+        CKT_NOT_TRUSTED,
+        CKT_TRUST_MUST_VERIFY_TRUST,
+    ];
+
+    // Create a trust object
+    let trust_obj = ret_or_panic!(import_object(
+        session,
+        CKO_TRUST,
+        &[(CKA_NAME_HASH_ALGORITHM, CKM_SHA256),],
+        &[
+            (CKA_ISSUER, "Test Issuer".as_bytes()),
+            (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+            (CKA_HASH_OF_CERTIFICATE, &[0; 32]), // dummy 256-bit hash
+        ],
+        &[(CKA_TOKEN, true)],
+    ));
+
+    for &attr in &trust_attributes {
+        for &val in &trust_values {
+            // Modify the trust attribute
+            let mut new_val: CK_ULONG = val;
+            let mut set_template = make_ptrs_template(&[(
+                attr,
+                void_ptr!(&mut new_val),
+                std::mem::size_of::<CK_ULONG>(),
+            )]);
+            let ret = fn_set_attribute_value(
+                session,
+                trust_obj,
+                set_template.as_mut_ptr(),
+                set_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            // Verify it changed
+            let mut fetched_val: CK_ULONG = 0;
+            let mut attr_template = make_ptrs_template(&[(
+                attr,
+                void_ptr!(&mut fetched_val),
+                std::mem::size_of::<CK_ULONG>(),
+            )]);
+            let ret = fn_get_attribute_value(
+                session,
+                trust_obj,
+                attr_template.as_mut_ptr(),
+                attr_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(fetched_val, val);
+        }
+    }
+
+    // cleanup
+    let ret = fn_destroy_object(session, trust_obj);
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
 #[cfg(feature = "nssdb")]
 fn test_create_nss_trust_object() {
     let mut testtokn =
@@ -554,6 +636,90 @@ fn test_create_nss_trust_object() {
         ),
         CKR_TEMPLATE_INCOMPLETE
     );
+
+    // cleanup
+    let ret = fn_destroy_object(session, trust_obj);
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+#[cfg(feature = "nssdb")]
+fn test_modify_nss_trust_object() {
+    let mut testtokn =
+        TestToken::initialized("test_modify_nss_trust_object", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    use crate::pkcs11::vendor::nss::*;
+
+    let trust_attributes = [
+        CKA_NSS_TRUST_SERVER_AUTH,
+        CKA_NSS_TRUST_CLIENT_AUTH,
+        CKA_NSS_TRUST_CODE_SIGNING,
+        CKA_NSS_TRUST_EMAIL_PROTECTION,
+    ];
+
+    let trust_values = [
+        CKT_NSS_TRUST_UNKNOWN,
+        CKT_NSS_TRUSTED,
+        CKT_NSS_TRUSTED_DELEGATOR,
+        CKT_NSS_NOT_TRUSTED,
+        CKT_NSS_MUST_VERIFY_TRUST,
+    ];
+
+    // Create a trust object
+    let trust_obj = ret_or_panic!(import_object(
+        session,
+        CKO_NSS_TRUST,
+        &[],
+        &[
+            (CKA_ISSUER, "Test Modify Issuer".as_bytes()),
+            (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03, 0x04]),
+            (CKA_NSS_CERT_SHA1_HASH, &[0; 20]),
+            (CKA_NSS_CERT_MD5_HASH, &[0; 16]),
+        ],
+        &[(CKA_TOKEN, true)],
+    ));
+
+    for &attr in &trust_attributes {
+        for &val in &trust_values {
+            // Modify the trust attribute
+            let mut new_val: CK_ULONG = val;
+            let mut set_template = make_ptrs_template(&[(
+                attr,
+                void_ptr!(&mut new_val),
+                std::mem::size_of::<CK_ULONG>(),
+            )]);
+            let ret = fn_set_attribute_value(
+                session,
+                trust_obj,
+                set_template.as_mut_ptr(),
+                set_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            // Verify it changed
+            let mut fetched_val: CK_ULONG = 0;
+            let mut attr_template = make_ptrs_template(&[(
+                attr,
+                void_ptr!(&mut fetched_val),
+                std::mem::size_of::<CK_ULONG>(),
+            )]);
+            let ret = fn_get_attribute_value(
+                session,
+                trust_obj,
+                attr_template.as_mut_ptr(),
+                attr_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq_with!(format!("{:#x}", attr), fetched_val, val);
+        }
+    }
 
     // cleanup
     let ret = fn_destroy_object(session, trust_obj);
