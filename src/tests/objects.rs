@@ -291,6 +291,37 @@ fn test_create_trust_object() {
         &[(CKA_TOKEN, true)],
     ));
 
+    let mut server_auth: CK_ULONG = 0;
+    let mut client_auth: CK_ULONG = 0;
+    let mut hash_alg: CK_ULONG = 0;
+    let mut attr_template = make_ptrs_template(&[
+        (
+            CKA_TRUST_SERVER_AUTH,
+            void_ptr!(&mut server_auth),
+            std::mem::size_of::<CK_ULONG>(),
+        ),
+        (
+            CKA_TRUST_CLIENT_AUTH,
+            void_ptr!(&mut client_auth),
+            std::mem::size_of::<CK_ULONG>(),
+        ),
+        (
+            CKA_NAME_HASH_ALGORITHM,
+            void_ptr!(&mut hash_alg),
+            std::mem::size_of::<CK_ULONG>(),
+        ),
+    ]);
+    let ret = fn_get_attribute_value(
+        session,
+        trust_obj,
+        attr_template.as_mut_ptr(),
+        attr_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(server_auth, CKT_TRUSTED);
+    assert_eq!(client_auth, CKT_TRUST_ANCHOR);
+    assert_eq!(hash_alg, CKM_SHA256);
+
     // Test case 2: Successful creation of a non-trusted object without hash
     let trust_obj2 = ret_or_panic!(import_object(
         session,
@@ -303,13 +334,22 @@ fn test_create_trust_object() {
         &[(CKA_TOKEN, true)],
     ));
 
-    // check that CKA_NAME_HASH_ALGORITHM defaulted to SHA1
+    // check that CKA_NAME_HASH_ALGORITHM defaulted to SHA1 and trust
+    // attribute is set to CKA_NOT_TRUSTED
     let mut hash_alg: CK_ULONG = 0;
-    let mut attr_template = make_ptrs_template(&[(
-        CKA_NAME_HASH_ALGORITHM,
-        void_ptr!(&mut hash_alg),
-        std::mem::size_of::<CK_ULONG>(),
-    )]);
+    let mut server_auth: CK_ULONG = 0;
+    let mut attr_template = make_ptrs_template(&[
+        (
+            CKA_NAME_HASH_ALGORITHM,
+            void_ptr!(&mut hash_alg),
+            std::mem::size_of::<CK_ULONG>(),
+        ),
+        (
+            CKA_TRUST_SERVER_AUTH,
+            void_ptr!(&mut server_auth),
+            std::mem::size_of::<CK_ULONG>(),
+        ),
+    ]);
     let ret = fn_get_attribute_value(
         session,
         trust_obj2,
@@ -318,6 +358,7 @@ fn test_create_trust_object() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash_alg, CKM_SHA_1);
+    assert_eq!(server_auth, CKT_NOT_TRUSTED);
 
     // Test case 3: Failure due to missing issuer
     err_or_panic!(
