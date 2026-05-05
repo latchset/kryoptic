@@ -711,7 +711,7 @@ fn test_aes_operations() {
         assert_eq!(&enc, &ciphertext);
     }
 
-    for mech in [CKM_AES_KEY_WRAP, CKM_AES_KEY_WRAP_KWP] {
+    for mech in [CKM_AES_KEY_WRAP, CKM_AES_KEY_WRAP_PAD, CKM_AES_KEY_WRAP_KWP] {
         /* AES KEY WRAP */
 
         /* encryption and key wrapping operations should give the same
@@ -720,7 +720,7 @@ fn test_aes_operations() {
         let data = [0x55u8; AES_BLOCK_SIZE];
         let iv = [0xCCu8; 8];
         let iv_len = match mech {
-            CKM_AES_KEY_WRAP => 8,
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PAD => 8,
             CKM_AES_KEY_WRAP_KWP => 4,
             _ => panic!("uh?"),
         };
@@ -812,6 +812,102 @@ fn test_aes_operations() {
         );
         assert_eq!(ret, CKR_OK);
         assert_eq!(value, data);
+    }
+
+    {
+        /* CKM_AES_KEY_WRAP_PAD with non-aligned input sizes.
+         * AES Key Wrap (RFC 3394) requires at least 2 semiblocks
+         * (16 bytes) of input, so minimum pre-pad input is 8 bytes. */
+        for data_len in [8usize, 9, 13, 15] {
+            let data: Vec<u8> = (0..data_len).map(|i| (i + 1) as u8).collect();
+            let mut mechanism = CK_MECHANISM {
+                mechanism: CKM_AES_KEY_WRAP_PAD,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            };
+
+            let enc = ret_or_panic!(encrypt(
+                session,
+                handle,
+                data.as_slice(),
+                &mechanism,
+            ));
+            let dec = ret_or_panic!(decrypt(
+                session,
+                handle,
+                enc.as_slice(),
+                &mechanism,
+            ));
+            assert_eq!(data, dec);
+
+            /* Also test via wrap/unwrap API using CKK_GENERIC_SECRET */
+            let wp_handle = ret_or_panic!(import_object(
+                session,
+                CKO_SECRET_KEY,
+                &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+                &[(CKA_VALUE, data.as_slice())],
+                &[(CKA_EXTRACTABLE, true)],
+            ));
+
+            let mut wraplen = 0;
+            let ret = fn_wrap_key(
+                session,
+                &mut mechanism,
+                handle,
+                wp_handle,
+                std::ptr::null_mut(),
+                &mut wraplen,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut wrapped = vec![0u8; wraplen as usize];
+            let ret = fn_wrap_key(
+                session,
+                &mut mechanism,
+                handle,
+                wp_handle,
+                wrapped.as_mut_ptr(),
+                &mut wraplen,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                    (CKA_VALUE_LEN, data_len as CK_ULONG),
+                ],
+                &[],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+            );
+            let mut wp_handle2 = CK_INVALID_HANDLE;
+            let ret = fn_unwrap_key(
+                session,
+                &mut mechanism,
+                handle,
+                wrapped.as_mut_ptr(),
+                wraplen,
+                template.as_mut_ptr(),
+                template.len() as CK_ULONG,
+                &mut wp_handle2,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut recovered = vec![0u8; data_len];
+            let mut extract_template = make_ptrs_template(&[(
+                CKA_VALUE,
+                void_ptr!(recovered.as_mut_ptr()),
+                data_len,
+            )]);
+            let ret = fn_get_attribute_value(
+                session,
+                wp_handle2,
+                extract_template.as_mut_ptr(),
+                extract_template.len() as CK_ULONG,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(data, recovered);
+        }
     }
 
     {
