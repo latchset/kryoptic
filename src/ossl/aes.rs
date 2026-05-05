@@ -182,6 +182,7 @@ impl AesOperation {
             CKM_AES_CTR,
             CKM_AES_CTS,
             CKM_AES_KEY_WRAP,
+            CKM_AES_KEY_WRAP_PAD,
             CKM_AES_KEY_WRAP_KWP,
         ] {
             mechs.add_mechanism(*ckm, &(*AES_MECHS)[0]);
@@ -375,7 +376,7 @@ impl AesOperation {
                     taglen: 0,
                 })
             }
-            CKM_AES_KEY_WRAP => {
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PAD => {
                 let iv = match mech.ulParameterLen {
                     0 => AesIvData::none()?,
                     8 => AesIvData::simple(bytes_to_vec(
@@ -464,7 +465,7 @@ impl AesOperation {
             CKM_AES_CFB128 => EncAlg::AesCfb128(size),
             #[cfg(not(feature = "fips"))]
             CKM_AES_OFB => EncAlg::AesOfb(size),
-            CKM_AES_KEY_WRAP => EncAlg::AesWrap(size),
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PAD => EncAlg::AesWrap(size),
             CKM_AES_KEY_WRAP_KWP => EncAlg::AesWrapPad(size),
             _ => return Err(CKR_MECHANISM_INVALID)?,
         })
@@ -670,6 +671,10 @@ impl AesOperation {
     }
 
     /// Instantiates a new AES Key-Wrap Operation
+    ///
+    /// Supports CKM_AES_KEY_WRAP, CKM_AES_KEY_WRAP_PAD, and
+    /// CKM_AES_KEY_WRAP_KWP. For CKM_AES_KEY_WRAP_PAD, PKCS#7
+    /// padding is applied during encryption via [AesOperation::encrypt].
     pub fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
@@ -719,6 +724,10 @@ impl AesOperation {
     }
 
     /// Instantiates a new AES Key-Unwrap Operation
+    ///
+    /// Supports CKM_AES_KEY_WRAP, CKM_AES_KEY_WRAP_PAD, and
+    /// CKM_AES_KEY_WRAP_KWP. For CKM_AES_KEY_WRAP_PAD, PKCS#7
+    /// padding is stripped during decryption via [AesOperation::decrypt].
     pub fn unwrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
@@ -1196,7 +1205,10 @@ impl Encryption for AesOperation {
     }
 
     /// Calls the underlying OpenSSL function to encrypt the plaintext buffer
-    /// provided, according to the configured mode
+    /// provided, according to the configured mode.
+    ///
+    /// For CKM_AES_KEY_WRAP_PAD, input is buffered and the actual PKCS#7
+    /// padding and encryption is deferred to [AesOperation::encrypt_final].
     fn encrypt_update(
         &mut self,
         plain: &[u8],
@@ -1254,6 +1266,9 @@ impl Encryption for AesOperation {
                 if plain.len() % AES_KWP_BLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
+            }
+            CKM_AES_KEY_WRAP_PAD => {
+                outlen = 0;
             }
             _ => (),
         }
@@ -1343,6 +1358,10 @@ impl Encryption for AesOperation {
                     /* input fully consumed */
                     plain_offset = plain_end;
                 }
+            }
+            CKM_AES_KEY_WRAP_PAD => {
+                self.buffer.extend_from_slice(plain);
+                plain_offset = plain_end;
             }
             _ => (),
         }
@@ -1453,6 +1472,19 @@ impl Encryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
+            CKM_AES_KEY_WRAP_PAD => {
+                let buf_len = self.buffer.len();
+                let pad_len = AES_KWP_BLOCK - (buf_len % AES_KWP_BLOCK);
+                self.buffer.resize(buf_len + pad_len, pad_len as u8);
+                outlen = ctx.update(self.buffer.as_slice(), cipher).or_else(
+                    |_| {
+                        self.finalized = true;
+                        Err(CKR_DEVICE_ERROR)
+                    },
+                )?;
+                zeromem(self.buffer.as_mut_slice());
+                self.buffer.clear();
+            }
             _ => {
                 self.finalized = true;
                 return Err(CKR_GENERAL_ERROR)?;
@@ -1505,6 +1537,9 @@ impl Encryption for AesOperation {
                         data_len + AES_KWP_BLOCK
                     }
                 }
+                CKM_AES_KEY_WRAP_PAD => {
+                    ((data_len / AES_KWP_BLOCK) + 2) * AES_KWP_BLOCK
+                }
                 CKM_AES_KEY_WRAP_KWP => {
                     ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
                         * AES_KWP_BLOCK
@@ -1535,6 +1570,7 @@ impl Encryption for AesOperation {
                         data_len + AES_KWP_BLOCK
                     }
                 }
+                CKM_AES_KEY_WRAP_PAD => 0,
                 CKM_AES_KEY_WRAP_KWP => {
                     ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
                         * AES_KWP_BLOCK
@@ -1563,7 +1599,11 @@ impl Decryption for AesOperation {
     }
 
     /// Calls the underlying OpenSSL function to decrypt the ciphertext buffer
-    /// provided, according to the configured mode
+    /// provided, according to the configured mode.
+    ///
+    /// For CKM_AES_KEY_WRAP_PAD, ciphertext is buffered and the actual
+    /// unwrapping and PKCS#7 padding removal is deferred to
+    /// [AesOperation::decrypt_final].
     fn decrypt_update(
         &mut self,
         cipher: &[u8],
@@ -1593,7 +1633,7 @@ impl Decryption for AesOperation {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
             }
-            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PAD | CKM_AES_KEY_WRAP_KWP => {
                 if cipher.len() % AES_KWP_BLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
@@ -1647,6 +1687,7 @@ impl Decryption for AesOperation {
                     * AES_BLOCK_SIZE
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => cipher.len(),
+            CKM_AES_KEY_WRAP_PAD => 0,
             _ => cipher.len(),
         };
         if plain.len() < outlen {
@@ -1798,6 +1839,10 @@ impl Decryption for AesOperation {
                     cipher_offset = cipher_end;
                 }
             }
+            CKM_AES_KEY_WRAP_PAD => {
+                self.buffer.extend_from_slice(cipher);
+                cipher_offset = cipher_end;
+            }
             _ => (),
         }
 
@@ -1899,6 +1944,44 @@ impl Decryption for AesOperation {
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => (),
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
+            CKM_AES_KEY_WRAP_PAD => {
+                if self.buffer.len() == 0 {
+                    return Err(CKR_ENCRYPTED_DATA_LEN_RANGE)?;
+                }
+                outlen = ctx.update(self.buffer.as_slice(), plain).or_else(
+                    |_| {
+                        self.finalized = true;
+                        Err(CKR_DEVICE_ERROR)
+                    },
+                )?;
+                zeromem(self.buffer.as_mut_slice());
+                self.buffer.clear();
+
+                if outlen < AES_KWP_BLOCK {
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+                let pad_byte = plain[outlen - 1];
+                let pad_len = pad_byte as usize;
+                if pad_len == 0 || pad_len > AES_KWP_BLOCK {
+                    zeromem(&mut plain[..outlen]);
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+                if pad_len > outlen {
+                    zeromem(&mut plain[..outlen]);
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+                let pad_start = outlen - pad_len;
+                let mut bad = 0u8;
+                for b in &plain[pad_start..outlen] {
+                    bad |= b ^ pad_byte;
+                }
+                if bad != 0 {
+                    zeromem(&mut plain[..outlen]);
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+                zeromem(&mut plain[pad_start..outlen]);
+                outlen = pad_start;
+            }
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
 
@@ -1947,7 +2030,8 @@ impl Decryption for AesOperation {
                     }
                     self.buffer.len() + data_len
                 }
-                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
+                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PAD
+                | CKM_AES_KEY_WRAP_KWP => {
                     if data_len % AES_KWP_BLOCK != 0 {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
@@ -1995,6 +2079,7 @@ impl Decryption for AesOperation {
                         (data_len / AES_KWP_BLOCK) * AES_KWP_BLOCK
                     }
                 }
+                CKM_AES_KEY_WRAP_PAD => 0,
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };

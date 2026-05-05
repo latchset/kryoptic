@@ -8,7 +8,9 @@
 //! _Recommendation for Block Cipher Modes of Operation: Methods and
 //! Techniques_, [SP 800-38D](https://doi.org/10.6028/NIST.SP.800-38D):
 //! _Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode
-//! (GCM) and GMAC_).
+//! (GCM) and GMAC_, [SP 800-38F](https://doi.org/10.6028/NIST.SP.800-38F):
+//! _Recommendation for Block Cipher Modes of Operation: Methods for
+//! Key Wrapping_).
 
 use std::fmt::Debug;
 use std::sync::LazyLock;
@@ -320,6 +322,9 @@ impl Mechanism for AesMechanism {
 
     /// Implements the AES Key wrap operation (Wrap)
     ///
+    /// Supports CKM_AES_KEY_WRAP (RFC 3394), CKM_AES_KEY_WRAP_PAD
+    /// (PKCS#7 padding + RFC 3394), and CKM_AES_KEY_WRAP_KWP (RFC 5649).
+    ///
     /// [AES Key Wrap](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203510)
     /// (Version 3.1)
 
@@ -343,6 +348,9 @@ impl Mechanism for AesMechanism {
     }
 
     /// Implements the AES Key wrap operation (Unwrap)
+    ///
+    /// Supports CKM_AES_KEY_WRAP (RFC 3394), CKM_AES_KEY_WRAP_PAD
+    /// (PKCS#7 padding + RFC 3394), and CKM_AES_KEY_WRAP_KWP (RFC 5649).
     ///
     /// [AES Key Wrap](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203510)
     /// (Version 3.1)
