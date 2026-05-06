@@ -6,7 +6,8 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
---
+* Added support for CKM_AES_KEY_WRAP_PAD mechanism (PKCS#7 padding + AES Key
+  Wrap per PKCS#11 v3.0 section 2.16)
 
 ## [1.5.0]
 ## 2026-03-04
