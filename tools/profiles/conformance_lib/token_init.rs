@@ -300,7 +300,7 @@ pub fn init_token(args: &Arguments) -> Result<(), Box<dyn std::error::Error>> {
         println!("PKCS#11 library initialized.");
 
         let slot_id = if let Some(sid) = args.pkcs11_slot {
-            sid
+            sid as pkcs11::CK_ULONG
         } else {
             println!("No slot specified, finding first slot with a token...");
             let num_slots = pkcs11.get_slot_list(pkcs11::CK_TRUE, None)?;
