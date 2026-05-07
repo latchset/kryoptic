@@ -96,7 +96,7 @@ rm -f Cargo.lock
 
 %build
 export CONFDIR=%{_sysconfdir}
-%cargo_build -f  %{features} -- --all
+%cargo_build -f %{features} -- --all
 %{cargo_license_summary -f %{features}}
 %{cargo_license -f %{features}} > LICENSE.dependencies
 
