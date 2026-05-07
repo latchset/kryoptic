@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::vec::Vec;
 
 use crate::attribute::CkAttrs;
+use crate::config::ObjectsDedup;
 use crate::defaults;
 use crate::error::Result;
 #[cfg(feature = "fips")]
@@ -111,6 +112,7 @@ pub struct Token {
     logged: CK_USER_TYPE,
     /// Filtered list of mechanisms, if any
     filtermechs: Option<Mechanisms>,
+    dedup: Option<ObjectsDedup>,
 }
 
 impl Token {
@@ -150,6 +152,7 @@ impl Token {
             session_objects: HashMap::new(),
             logged: KRY_UNSPEC,
             filtermechs: None,
+            dedup: None,
         };
 
         /* register mechanisms and factories */
@@ -553,6 +556,11 @@ impl Token {
         Ok(obj)
     }
 
+    /// Sets dedup option
+    pub fn set_dedup(&mut self, dedup: Option<ObjectsDedup>) {
+        self.dedup = dedup;
+    }
+
     /// Inserts a new object into the token.
     ///
     /// If the object has `CKA_TOKEN=true`, it is stored persistently via the
@@ -583,6 +591,125 @@ impl Token {
         Ok(handle)
     }
 
+    /// Internal function to check for cert/trust object duplicates
+    fn _is_duplicate(
+        &mut self,
+        template: &[CK_ATTRIBUTE],
+    ) -> Result<Option<CK_OBJECT_HANDLE>> {
+        let r = self.storage.search(&mut self.facilities, template)?;
+        return match r.len() {
+            0 => Ok(None),
+            1 => Ok(Some(r[0])),
+            _ => Err(CKR_GENERAL_ERROR)?,
+        };
+    }
+
+    fn _is_cert_obj_duplicate(
+        &mut self,
+        obj: &Object,
+    ) -> Result<Option<CK_OBJECT_HANDLE>> {
+        if let (Some(issuer), Some(serial)) =
+            (obj.get_attr(CKA_ISSUER), obj.get_attr(CKA_SERIAL_NUMBER))
+        {
+            let class = obj.get_class();
+            let mut tmpl = CkAttrs::with_capacity(3);
+            tmpl.add_ulong(CKA_CLASS, &class);
+            tmpl.add_slice(CKA_ISSUER, issuer.get_value())?;
+            tmpl.add_slice(CKA_SERIAL_NUMBER, serial.get_value())?;
+
+            return self._is_duplicate(tmpl.as_slice());
+        }
+        return Ok(None);
+    }
+
+    /// Internal function to check for key object duplicates
+    fn _is_key_obj_duplicate(
+        &mut self,
+        obj: &Object,
+    ) -> Result<Option<CK_OBJECT_HANDLE>> {
+        if let (Some(id), Some(key_type)) =
+            (obj.get_attr(CKA_ID), obj.get_attr(CKA_KEY_TYPE))
+        {
+            let class = obj.get_class();
+            let mut tmpl = CkAttrs::with_capacity(3);
+            tmpl.add_ulong(CKA_CLASS, &class);
+            tmpl.add_slice(CKA_ID, id.get_value())?;
+            tmpl.add_slice(CKA_KEY_TYPE, key_type.get_value())?;
+
+            return self._is_duplicate(tmpl.as_slice());
+        }
+        return Ok(None);
+    }
+
+    /// The dedup option is set generally for softokn compatibility,
+    /// in which case if a "duplicate object" is added to the db,
+    /// the original object data is wiped and replaced with the
+    /// new object data.
+    /// if empty, only check that no duplicate trust object is
+    /// being created as the spec says tokens should not allow to
+    /// create multiple trust objects for the same certificate.
+    fn check_dedup(
+        &mut self,
+        obj: &Object,
+    ) -> Result<Option<CK_OBJECT_HANDLE>> {
+        let class = obj.get_class();
+        let is_cert = class == CKO_CERTIFICATE;
+        let is_key =
+            matches!(class, CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY);
+        #[cfg(not(feature = "nssdb"))]
+        let is_trust = class == CKO_TRUST;
+        #[cfg(feature = "nssdb")]
+        let is_trust = matches!(
+            class,
+            CKO_TRUST | crate::pkcs11::vendor::nss::CKO_NSS_TRUST
+        );
+
+        if let Some(dedup) = self.dedup {
+            if let Some(handle) = match dedup {
+                ObjectsDedup::TrustOnly => {
+                    if is_trust {
+                        self._is_cert_obj_duplicate(obj)?
+                    } else {
+                        None
+                    }
+                }
+                ObjectsDedup::TrustAndCertificates => {
+                    if is_cert || is_trust {
+                        self._is_cert_obj_duplicate(obj)?
+                    } else {
+                        None
+                    }
+                }
+                ObjectsDedup::All => {
+                    if is_cert || is_trust {
+                        self._is_cert_obj_duplicate(obj)?
+                    } else if is_key {
+                        self._is_key_obj_duplicate(obj)?
+                    } else {
+                        None
+                    }
+                }
+            } {
+                let mut updt = CkAttrs::from_attributes(obj.get_attributes())?;
+                let _ = updt.remove_attr(CKA_UNIQUE_ID);
+                self.storage.update(
+                    &self.facilities,
+                    handle,
+                    updt.as_slice(),
+                )?;
+                return Ok(Some(handle));
+            }
+        } else {
+            if is_trust {
+                let found = self._is_cert_obj_duplicate(obj)?;
+                if found.is_some() {
+                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Creates a new object based on a template.
     ///
     /// Dispatches to the appropriate object factory via
@@ -596,6 +723,17 @@ impl Token {
         template: &[CK_ATTRIBUTE],
     ) -> Result<CK_OBJECT_HANDLE> {
         let object = self.facilities.factories.create(template)?;
+
+        if object.is_token() {
+            if !self.is_logged_in(KRY_UNSPEC) {
+                return Err(CKR_USER_NOT_LOGGED_IN)?;
+            }
+
+            if let Some(handle) = self.check_dedup(&object)? {
+                return Ok(handle);
+            }
+        }
+
         self.insert_object(s_handle, object)
     }
 

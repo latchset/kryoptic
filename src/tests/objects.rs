@@ -445,12 +445,13 @@ fn test_create_trust_object() {
 
     for &attr in &trust_attributes {
         for &val in &trust_values {
+            let issuer = format!("Test Issuer {} {}", attr, val);
             let trust_obj = ret_or_panic!(import_object(
                 session,
                 CKO_TRUST,
                 &[(attr, val), (CKA_NAME_HASH_ALGORITHM, CKM_SHA256),],
                 &[
-                    (CKA_ISSUER, "Test Issuer".as_bytes()),
+                    (CKA_ISSUER, issuer.as_bytes()),
                     (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
                     (CKA_HASH_OF_CERTIFICATE, &[0; 32]), // dummy 256-bit hash
                 ],
@@ -767,4 +768,169 @@ fn test_modify_nss_trust_object() {
     assert_eq!(ret, CKR_OK);
 
     testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_object_dedup() {
+    let dedup_options = [
+        (format!("test_object_dedup_none"), None),
+        (
+            format!("test_object_dedup_trust_only"),
+            Some(crate::config::ObjectsDedup::TrustOnly),
+        ),
+        (
+            format!("test_object_dedup_trust_and_certs"),
+            Some(crate::config::ObjectsDedup::TrustAndCertificates),
+        ),
+        (
+            format!("test_object_dedup_all"),
+            Some(crate::config::ObjectsDedup::All),
+        ),
+    ];
+
+    let mut tokens = Vec::new();
+
+    for dedup in dedup_options.iter() {
+        let td = TestToken::initialized_with_dedup(&dedup.0, None, dedup.1);
+        tokens.push(td);
+    }
+
+    for td in tokens.iter_mut() {
+        let session = td.get_session(true);
+        td.login();
+
+        let dedup = td.dedup;
+
+        // 1. Create a trust object
+        let trust_handle1 = ret_or_panic!(import_object(
+            session,
+            CKO_TRUST,
+            &[
+                (CKA_TRUST_SERVER_AUTH, CKT_TRUSTED),
+                (CKA_NAME_HASH_ALGORITHM, CKM_SHA256),
+            ],
+            &[
+                (CKA_ISSUER, b"Test Issuer"),
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                (CKA_HASH_OF_CERTIFICATE, &[0; 32]),
+            ],
+            &[(CKA_TOKEN, true)],
+        ));
+
+        let trust_res2 = import_object(
+            session,
+            CKO_TRUST,
+            &[
+                (CKA_TRUST_SERVER_AUTH, CKT_NOT_TRUSTED),
+                (CKA_NAME_HASH_ALGORITHM, CKM_SHA256),
+            ],
+            &[
+                (CKA_ISSUER, b"Test Issuer"),
+                (CKA_SERIAL_NUMBER, &[0x01, 0x02, 0x03]),
+                (CKA_HASH_OF_CERTIFICATE, &[0; 32]),
+            ],
+            &[(CKA_TOKEN, true)],
+        );
+
+        match dedup {
+            None => {
+                assert_eq!(
+                    trust_res2.err().unwrap().rv(),
+                    CKR_ATTRIBUTE_VALUE_INVALID
+                );
+            }
+            _ => {
+                // TrustOnly, TrustAndCertificates, All
+                let trust_handle2 = trust_res2.unwrap();
+                assert_eq!(trust_handle1, trust_handle2);
+            }
+        }
+
+        // 2. Create a certificate object
+        let cert_handle1 = ret_or_panic!(import_object(
+            session,
+            CKO_CERTIFICATE,
+            &[(CKA_CERTIFICATE_TYPE, CKC_X_509)],
+            &[
+                (CKA_ISSUER, b"Test Issuer Cert"),
+                (CKA_SERIAL_NUMBER, &[0x04, 0x05, 0x06]),
+                (CKA_SUBJECT, b"Test Subject"),
+                (CKA_VALUE, b"cert_data"),
+            ],
+            &[(CKA_TOKEN, true), (CKA_TRUSTED, false)],
+        ));
+
+        let cert_res2 = import_object(
+            session,
+            CKO_CERTIFICATE,
+            &[(CKA_CERTIFICATE_TYPE, CKC_X_509)],
+            &[
+                (CKA_ISSUER, b"Test Issuer Cert"),
+                (CKA_SERIAL_NUMBER, &[0x04, 0x05, 0x06]),
+                (CKA_SUBJECT, b"Test Subject 2"),
+                (CKA_VALUE, b"cert_data2"),
+            ],
+            &[(CKA_TOKEN, true), (CKA_TRUSTED, false)],
+        );
+
+        match dedup {
+            Some(crate::config::ObjectsDedup::TrustAndCertificates)
+            | Some(crate::config::ObjectsDedup::All) => {
+                let cert_handle2 = cert_res2.unwrap();
+                assert_eq!(cert_handle1, cert_handle2);
+            }
+            _ => {
+                // None, TrustOnly
+                let cert_handle2 = cert_res2.unwrap();
+                assert_ne!(cert_handle1, cert_handle2);
+            }
+        }
+
+        // 3. Create a key object
+        let key_handle1 = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[
+                (CKA_ID, b"key_id"),
+                (CKA_VALUE, b"secret_value"),
+                (CKA_LABEL, b"Test Key"),
+            ],
+            &[(CKA_TOKEN, true)],
+        ));
+
+        let key_res2 = import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[
+                (CKA_ID, b"key_id"),
+                (CKA_VALUE, b"secret_value2"),
+                (CKA_LABEL, b"Test Key 2"),
+            ],
+            &[(CKA_TOKEN, true)],
+        );
+
+        match dedup {
+            Some(crate::config::ObjectsDedup::All) => {
+                let key_handle2 = key_res2.unwrap();
+                assert_eq!(key_handle1, key_handle2);
+            }
+            _ => {
+                // None, TrustOnly, TrustAndCertificates
+                let key_handle2 = key_res2.unwrap();
+                assert_ne!(key_handle1, key_handle2);
+            }
+        }
+
+        td.close_session();
+    }
+
+    for td in tokens.iter_mut() {
+        td.sync = None;
+    }
+    for mut td in tokens {
+        td.finalize();
+    }
 }

@@ -251,7 +251,12 @@ impl Object {
             self.class = a.to_ulong()?;
         }
         match self.attributes.iter().position(|r| r.get_type() == atype) {
-            Some(idx) => self.attributes[idx] = a,
+            Some(idx) => {
+                if self.zeroize {
+                    self.attributes[idx].zeroize();
+                }
+                self.attributes[idx] = a;
+            }
             None => self.attributes.push(a),
         }
         Ok(())

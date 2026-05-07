@@ -46,6 +46,29 @@ const DEFAULT_CONF_DIR: &str = "test";
 /// The default token name (token.conf)
 pub const DEFAULT_CONF_NAME: &str = "token.conf";
 
+/// For compatibility with NSS softokn some or all objects can be
+/// deduplicated on insertion, upon match the original object is
+/// overridden with the attributes of the new object being created
+/// instead of creating a separate object.
+/// WARNING: this can lead to permanently losing private/secret keys
+/// if the "All" option is used
+///
+/// Defaults to None for configured database, defaults to "All" for
+/// NSS databases loaded via initialization string options
+///
+/// Example:
+/// \[\[slots\]\]
+/// ...
+/// objects_dedup = "TrustOnly"
+
+/// Types of objects to deduplicate
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ObjectsDedup {
+    TrustOnly,
+    TrustAndCertificates,
+    All,
+}
+
 /// Configuration for a slot
 ///
 /// The basic facility of a PKCS#11 is the slot. The slot represents an
@@ -94,6 +117,11 @@ pub struct Slot {
     /// Using "DENY" in any position but the first is not supported and
     /// will cause an error.
     pub mechanisms: Option<Vec<String>>,
+    /// Specifies which Objects to deduplicate on create
+    /// It is recommended to leave this empty, side effects may include
+    /// destroying key material irrecoverably
+    #[serde(default)]
+    pub objects_dedup: Option<ObjectsDedup>,
     /// The FIPS Behavior for the token
     #[cfg(feature = "fips")]
     #[serde(default)]
@@ -112,6 +140,7 @@ impl Slot {
             dbtype: None,
             dbargs: None,
             mechanisms: None,
+            objects_dedup: None,
             #[cfg(feature = "fips")]
             fips_behavior: FipsBehavior::default(),
         }
@@ -129,6 +158,7 @@ impl Slot {
             dbtype: Some(dbtype.to_string()),
             dbargs: dbargs,
             mechanisms: None,
+            objects_dedup: None,
             #[cfg(feature = "fips")]
             fips_behavior: FipsBehavior {
                 keys_always_sensitive: if dbtype == "nssdb" {
@@ -430,6 +460,7 @@ impl Config {
 
         slot.dbtype = Some(storage::nssdb::DBINFO.dbtype().to_string());
         slot.dbargs = Some(args.to_string());
+        slot.objects_dedup = Some(ObjectsDedup::All);
         #[cfg(feature = "fips")]
         {
             /* NSS generally marks all keys as sensitive and forbids

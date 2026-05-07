@@ -75,6 +75,7 @@ struct TestToken<'a> {
     sync: Option<RwLockReadGuard<'a, u64>>,
     session: CK_SESSION_HANDLE,
     session_rw: bool,
+    dedup: Option<crate::config::ObjectsDedup>,
 }
 
 impl TestToken<'_> {
@@ -106,6 +107,7 @@ impl TestToken<'_> {
             sync: Some(SYNC.read().unwrap()),
             session: CK_INVALID_HANDLE,
             session_rw: false,
+            dedup: None,
         }
     }
 
@@ -144,12 +146,18 @@ impl TestToken<'_> {
         self.slot
     }
 
-    fn make_config_file(&self, confname: &str, mechs: Option<Vec<String>>) {
+    fn make_config_file(
+        &self,
+        confname: &str,
+        mechs: Option<Vec<String>>,
+        dedup: Option<crate::config::ObjectsDedup>,
+    ) {
         let mut conf = config::Config::new();
         let mut slot =
             config::Slot::with_db(&self.dbtype, Some(self.dbargs.clone()));
         slot.slot = u32::try_from(self.get_slot()).unwrap();
         slot.mechanisms = mechs;
+        slot.objects_dedup = dedup;
         conf.add_slot(slot).unwrap();
         let data = toml::to_string(&conf).unwrap();
         let mut file = OpenOptions::new()
@@ -158,12 +166,12 @@ impl TestToken<'_> {
             .truncate(true)
             .open(confname)
             .unwrap();
-        file.write(data.as_bytes()).unwrap();
+        file.write_all(data.as_bytes()).unwrap();
     }
 
     fn make_init_string(&self) -> String {
         let confname = format!("{}/{}.conf", TESTDIR, self.name);
-        self.make_config_file(&confname, None);
+        self.make_config_file(&confname, None, self.dedup);
         format!("kryoptic_conf={}", confname)
     }
 
@@ -221,11 +229,13 @@ impl TestToken<'_> {
         }
     }
 
-    fn initialized<'a>(
+    fn initialized_with_dedup<'a>(
         name: &'a str,
         import: Option<&'a str>,
+        dedup: Option<crate::config::ObjectsDedup>,
     ) -> TestToken<'a> {
         let mut td = Self::new(String::from(name));
+        td.dedup = dedup;
         td.setup_db(import);
 
         let mut args = Self::make_init_args(Some(td.make_init_string()));
@@ -244,6 +254,13 @@ impl TestToken<'_> {
         );
 
         td
+    }
+
+    fn initialized<'a>(
+        name: &'a str,
+        import: Option<&'a str>,
+    ) -> TestToken<'a> {
+        Self::initialized_with_dedup(name, import, None)
     }
 
     fn get_session(&mut self, rw: bool) -> CK_SESSION_HANDLE {
