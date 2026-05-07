@@ -62,6 +62,11 @@ Tokens are configured by defining one or more `[[slots]]` sections. In Kryoptic,
     
     To configure a *deny list*, the first element must be the exact string `"DENY"`, followed by the mechanisms to be removed (e.g., `["DENY", "CKM_SHA256"]`). Using `"DENY"` in any position other than the first is not supported and will cause an error.
 
+**objects_dedup** = *string*
+:   *(Optional)* Specifies which objects to deduplicate on creation. For compatibility with NSS softokn, some or all objects can be deduplicated on insertion; upon match, the original object is overridden with the attributes of the new object being created instead of creating a separate object.
+    Valid values are **"TrustOnly"**, **"TrustAndCertificates"**, or **"All"**. Defaults to not set for configured databases, but defaults to **"All"** for NSS databases loaded via initialization string options.
+    **WARNING:** It is recommended to leave this empty. Side effects may include destroying key material irrecoverably if the **"All"** option is used.
+
 **[slots.fips_behavior]**
 :   *(Optional)* Add tweaks for behavior in FIPS mode.
 
@@ -91,6 +96,7 @@ manufacturer = "Kryoptic"
 dbtype = "sqlite"
 dbargs = "/var/lib/kryoptic/token.sql"
 mechanisms = ["DENY", "CKM_MD5"]
+objects_dedup = "TrustOnly"
 
 [[slots]]
 slot = 2

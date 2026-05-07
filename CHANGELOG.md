@@ -6,7 +6,8 @@ All notable changes to this project should be documented in this file.
 
 ### What Changed
 
---
+* Added support for deduplicating objects on insertion
+    - [Add support for object dedup](https://github.com/latchset/kryoptic/pull/453)
 
 ## [1.5.0]
 ## 2026-03-04

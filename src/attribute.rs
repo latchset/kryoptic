@@ -628,6 +628,17 @@ impl Attribute {
     }
 }
 
+/// Wrapper to tie the lifetime of a removed CK_ATTRIBUTE to the CkAttrs it came from
+#[derive(Debug)]
+pub struct RemovedAttr<'a>(CK_ATTRIBUTE, std::marker::PhantomData<&'a ()>);
+
+impl<'a> std::ops::Deref for RemovedAttr<'a> {
+    type Target = CK_ATTRIBUTE;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Helper object to represent managed arrays of CK_ATTRIBUTEs
 ///
 /// This object uses Cow memory to optimize keeping around arrays passed
@@ -701,6 +712,15 @@ impl<'a> CkAttrs<'a> {
             zeroize: false,
             br: Vec::new(),
         }
+    }
+
+    /// Creates a new static CkAttrs from a Vector of Attributes
+    pub fn from_attributes(attributes: &'a [Attribute]) -> Result<CkAttrs<'a>> {
+        let mut ck_attrs = CkAttrs::with_capacity(attributes.len());
+        for attr in attributes {
+            ck_attrs.add_slice(attr.ck_type, &attr.value)?;
+        }
+        Ok(ck_attrs)
     }
 
     fn attr_from_last(&self, typ: CK_ATTRIBUTE_TYPE) -> Result<CK_ATTRIBUTE> {
@@ -872,6 +892,20 @@ impl<'a> CkAttrs<'a> {
         match self.p.as_ref().iter().position(|a| a.type_ == typ) {
             Some(idx) => Ok(Some(self.p.to_mut().swap_remove(idx).to_ulong()?)),
             None => return Ok(None),
+        }
+    }
+
+    /// Removes an arbitrary attribute from the array and returns it if present
+    pub fn remove_attr(
+        &mut self,
+        typ: CK_ATTRIBUTE_TYPE,
+    ) -> Option<RemovedAttr<'a>> {
+        match self.p.as_ref().iter().position(|a| a.type_ == typ) {
+            Some(idx) => Some(RemovedAttr(
+                self.p.to_mut().swap_remove(idx),
+                std::marker::PhantomData,
+            )),
+            None => None,
         }
     }
 

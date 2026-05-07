@@ -74,6 +74,7 @@ fn test_allow_mechs() {
     testtokn.make_config_file(
         &confname,
         Some(vec![String::from("CKM_AES_KEY_GEN")]),
+        None,
     );
 
     let mut args =
@@ -112,6 +113,7 @@ fn test_deny_mechs() {
     testtokn.make_config_file(
         &confname,
         Some(vec![String::from("DENY"), String::from("CKM_AES_KEY_GEN")]),
+        None,
     );
 
     let mut args =

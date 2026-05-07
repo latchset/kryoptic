@@ -56,6 +56,7 @@ impl Slot {
                 token.set_mech_allow_list(mechs);
             }
         }
+        token.set_dedup(config.objects_dedup);
 
         let mut slot = Slot {
             slot_info: CK_SLOT_INFO {
