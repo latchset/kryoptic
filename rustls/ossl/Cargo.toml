@@ -1,0 +1,12 @@
+[package]
+name = "rustls-ossl"
+version = "0.0.1"
+description = "A Rustls crypt provider that uses ossl bindings"
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+
+[dependencies]
+rustls = { version = "0.23.40", default-features = false }
+ossl.workspace = true
