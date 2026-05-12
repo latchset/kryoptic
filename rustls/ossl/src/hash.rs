@@ -33,6 +33,10 @@ impl Hash for OsslHash {
             _ => panic!("Unexpected Digest Algorithm"),
         }
     }
+
+    fn fips(&self) -> bool {
+        OsslDigest::available(osslctx(), self.0)
+    }
 }
 
 pub struct OsslHashContext {

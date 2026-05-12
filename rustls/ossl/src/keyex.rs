@@ -48,6 +48,21 @@ impl SupportedKxGroup for OsslEcKxGroup {
     fn name(&self) -> NamedGroup {
         self.0
     }
+
+    fn fips(&self) -> bool {
+        match self.0 {
+            NamedGroup::X25519 => {
+                EvpPkey::available(osslctx(), EvpPkeyType::X25519)
+            }
+            NamedGroup::secp256r1 => {
+                EvpPkey::available(osslctx(), EvpPkeyType::P256)
+            }
+            NamedGroup::secp384r1 => {
+                EvpPkey::available(osslctx(), EvpPkeyType::P384)
+            }
+            _ => false,
+        }
+    }
 }
 
 pub struct OsslEcdh {

@@ -570,9 +570,13 @@ impl<'a> OneStepKdfDerive<'a> {
             if digest.is_some() {
                 return Err(Error::new(ErrorKind::WrapperError));
             }
-            let (a, t) = mac_to_digest_and_type(m)?;
-            mac_type = Some(t);
-            a
+            match mac_to_digest_and_type(m) {
+                (Some(a), t) => {
+                    mac_type = Some(t);
+                    a
+                }
+                (None, _) => return Err(Error::new(ErrorKind::WrapperError)),
+            }
         } else if let Some(a) = digest {
             if mac.is_some() {
                 return Err(Error::new(ErrorKind::WrapperError));
