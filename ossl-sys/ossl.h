@@ -16,6 +16,7 @@
 
 #ifndef _KRYOPTIC_FIPS_
 #include "openssl/rand.h"
+#include "openssl/x509.h"
 #endif
 
 #ifdef _KRYOPTIC_FIPS_

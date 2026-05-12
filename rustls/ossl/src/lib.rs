@@ -1,9 +1,21 @@
 pub mod pkey;
 
 use ossl::rand::get_random;
+use ossl::OsslContext;
 use rustls::crypto::{
     CryptoProvider, GetRandomFailed, SecureRandom, WebPkiSupportedAlgorithms,
 };
+
+static OSSL_CONTEXT: std::sync::OnceLock<OsslContext> =
+    std::sync::OnceLock::new();
+
+pub fn osslctx() -> &'static OsslContext {
+    OSSL_CONTEXT.get_or_init(|| {
+        let mut ctx = OsslContext::new_lib_ctx();
+        let _ = ctx.load_default_configuration();
+        ctx
+    })
+}
 
 #[derive(Debug)]
 pub struct OsslSecureRandom;
