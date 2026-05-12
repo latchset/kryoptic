@@ -25,6 +25,10 @@ impl KeyProvider for OsslKeyProvider {
             .map_err(|e| Error::General(format!("OpenSSL error: {e}")))?;
         Ok(Arc::new(OsslSigningKey::new(priv_key, key_type)))
     }
+
+    fn fips(&self) -> bool {
+        crate::fips()
+    }
 }
 
 #[derive(Debug)]

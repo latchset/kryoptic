@@ -69,6 +69,10 @@ impl Tls12AeadAlgorithm for AeadAlgorithm {
             _ => return Err(UnsupportedOperationError),
         }
     }
+
+    fn fips(&self) -> bool {
+        crate::fips()
+    }
 }
 
 struct Tls12Message {

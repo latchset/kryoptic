@@ -284,6 +284,52 @@ fn pkey_type_to_params(
     Ok(name)
 }
 
+fn pkey_type_to_name(pkey_type: EvpPkeyType) -> &'static CStr {
+    match pkey_type {
+        EvpPkeyType::Ffdhe2048
+        | EvpPkeyType::Ffdhe3072
+        | EvpPkeyType::Ffdhe4096
+        | EvpPkeyType::Ffdhe6144
+        | EvpPkeyType::Ffdhe8192
+        | EvpPkeyType::Modp2048
+        | EvpPkeyType::Modp3072
+        | EvpPkeyType::Modp4096
+        | EvpPkeyType::Modp6144
+        | EvpPkeyType::Modp8192 => c"DH",
+        EvpPkeyType::P256
+        | EvpPkeyType::P384
+        | EvpPkeyType::P521
+        | EvpPkeyType::BrainpoolP256r1
+        | EvpPkeyType::BrainpoolP384r1
+        | EvpPkeyType::BrainpoolP512r1 => c"EC",
+        EvpPkeyType::Ed25519 => c"ED25519",
+        EvpPkeyType::Ed448 => c"ED448",
+        EvpPkeyType::X25519 => c"X25519",
+        EvpPkeyType::X448 => c"X448",
+        EvpPkeyType::Mldsa44 => c"ML-DSA-44",
+        EvpPkeyType::Mldsa65 => c"ML-DSA-65",
+        EvpPkeyType::Mldsa87 => c"ML-DSA-87",
+        EvpPkeyType::MlKem512 => c"ML-KEM-512",
+        EvpPkeyType::MlKem768 => c"ML-KEM-768",
+        EvpPkeyType::MlKem1024 => c"ML-KEM-1024",
+        EvpPkeyType::SlhdsaSha2_128f => c"SLH-DSA-SHA2-128f",
+        EvpPkeyType::SlhdsaSha2_128s => c"SLH-DSA-SHA2-128s",
+        EvpPkeyType::SlhdsaSha2_192f => c"SLH-DSA-SHA2-192f",
+        EvpPkeyType::SlhdsaSha2_192s => c"SLH-DSA-SHA2-192s",
+        EvpPkeyType::SlhdsaSha2_256f => c"SLH-DSA-SHA2-256f",
+        EvpPkeyType::SlhdsaSha2_256s => c"SLH-DSA-SHA2-256s",
+        EvpPkeyType::SlhdsaShake128f => c"SLH-DSA-SHAKE-128f",
+        EvpPkeyType::SlhdsaShake128s => c"SLH-DSA-SHAKE-128s",
+        EvpPkeyType::SlhdsaShake192f => c"SLH-DSA-SHAKE-192f",
+        EvpPkeyType::SlhdsaShake192s => c"SLH-DSA-SHAKE-192s",
+        EvpPkeyType::SlhdsaShake256f => c"SLH-DSA-SHAKE-256f",
+        EvpPkeyType::SlhdsaShake256s => c"SLH-DSA-SHAKE-256s",
+        EvpPkeyType::Rsa(_, _) => c"RSA",
+        #[cfg(feature = "rfc9580")]
+        EvpPkeyType::Dsa(_) => c"DSA",
+    }
+}
+
 /* Allocate enough space for a large name */
 const MAX_GROUP_NAME_LEN: usize = 128;
 
@@ -1365,26 +1411,22 @@ impl EvpPkey {
 
     /// Checks if the specific key type is available in the current context.
     pub fn available(ctx: &OsslContext, pkey_type: EvpPkeyType) -> bool {
-        let mut params_builder = OsslParamBuilder::new();
-        if let Ok(name) = pkey_type_to_params(&pkey_type, &mut params_builder) {
-            let ptr = unsafe {
-                EVP_PKEY_CTX_new_from_name(
-                    ctx.ptr(),
-                    name.as_ptr(),
-                    std::ptr::null(),
-                )
-            };
-            if !ptr.is_null() {
-                unsafe {
-                    EVP_PKEY_CTX_free(ptr);
-                }
-                return true;
-            }
+        let name = pkey_type_to_name(pkey_type);
+        let ptr = unsafe {
+            EVP_PKEY_CTX_new_from_name(
+                ctx.ptr(),
+                name.as_ptr(),
+                std::ptr::null(),
+            )
+        };
+        if !ptr.is_null() {
             unsafe {
-                ERR_clear_error();
+                EVP_PKEY_CTX_free(ptr);
             }
+            true
+        } else {
+            false
         }
-        false
     }
 
     /// Generates a new key pair based on provided algorithm name and
@@ -1841,6 +1883,7 @@ impl EvpPkey {
     }
 
     /// Returns a u8 slice with the DER encoding of the public key.
+    #[cfg(not(feature = "fips"))]
     pub fn spki_der(&self) -> Result<Vec<u8>, Error> {
         let len = unsafe { i2d_PUBKEY(self.ptr, std::ptr::null_mut()) };
         if len <= 0 {

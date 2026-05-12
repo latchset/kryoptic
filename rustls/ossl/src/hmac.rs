@@ -28,6 +28,10 @@ impl Hmac for OsslHmac {
     fn hash_output_len(&self) -> usize {
         self.outlen
     }
+
+    fn fips(&self) -> bool {
+        OsslMac::available(osslctx(), self.alg)
+    }
 }
 
 pub(crate) struct OsslHmacKey {

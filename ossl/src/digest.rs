@@ -258,6 +258,22 @@ impl OsslDigest {
         Ok(dctx)
     }
 
+    pub fn available(ctx: &OsslContext, digest: DigestAlg) -> bool {
+        let name = digest_to_string(digest);
+        let arg = unsafe {
+            ERR_set_mark();
+            let m =
+                EVP_MD_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut());
+            ERR_pop_to_mark();
+            m
+        };
+        if !arg.is_null() {
+            unsafe { EVP_MD_free(arg) };
+            return true;
+        }
+        return false;
+    }
+
     /// Re-initializes an existing context discarding any existing state
     pub fn reset(&mut self, params: Option<&OsslParam>) -> Result<(), Error> {
         let ret = unsafe {
