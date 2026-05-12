@@ -1077,6 +1077,26 @@ impl EvpPkey {
         Ok(EvpPkey { ptr: pkey })
     }
 
+    /// Creates an `EvpPkey` from a DER-encoded private key.
+    pub fn from_der(ctx: &OsslContext, der: &[u8]) -> Result<EvpPkey, Error> {
+        let mut ptr = std::ptr::null_mut();
+        let mut pp = der.as_ptr();
+        let pkey = unsafe {
+            d2i_AutoPrivateKey_ex(
+                &mut ptr,
+                &mut pp,
+                der.len().try_into()?,
+                ctx.ptr(),
+                std::ptr::null(),
+            )
+        };
+        if pkey.is_null() {
+            trace_ossl!("d2i_AutoPrivateKey_ex()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(EvpPkey { ptr: pkey })
+    }
+
     /// Exports key material components into an `OsslParam` structure.
     ///
     /// The `selection` argument specifies which components to export
@@ -1579,6 +1599,12 @@ impl EvpPkey {
         self.ptr
     }
 
+    /// Returns the type of this key
+    pub fn get_type(&self) -> Result<EvpPkeyType, Error> {
+        let params = self.export_params(EVP_PKEY_PUBLIC_KEY)?;
+        pkey_to_type(self, &params)
+    }
+
     /// Gets the key size in bits. Handles FIPS provider differences.
     #[cfg(not(feature = "fips"))]
     pub fn get_bits(&self) -> Result<usize, Error> {
@@ -1609,6 +1635,23 @@ impl EvpPkey {
         Ok(usize::try_from(unsafe {
             EVP_PKEY_get_size(self.as_ptr())
         })?)
+    }
+
+    /// Returns a u8 slice with the DER encoding of the public key.
+    pub fn spki_der(&self) -> Result<Vec<u8>, Error> {
+        let len = unsafe { i2d_PUBKEY(self.ptr, std::ptr::null_mut()) };
+        if len <= 0 {
+            trace_ossl!("i2d_PUBKEY()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        let mut buf = vec![0u8; len as usize];
+        let mut ptr = buf.as_mut_ptr();
+        let ret = unsafe { i2d_PUBKEY(self.ptr, &mut ptr) };
+        if ret <= 0 {
+            trace_ossl!("i2d_PUBKEY()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(buf)
     }
 }
 
