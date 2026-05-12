@@ -286,3 +286,25 @@ impl Drop for EvpRandCtx {
         }
     }
 }
+
+/// Generates random bytes using the default OpenSSL random number generator.
+/// The `r#priv` boolean flag selects whether to use the private generator
+/// (intended for long term secrets like private keys) or the regular one.
+#[cfg(not(feature = "fips"))]
+pub fn get_random(buf: &mut [u8], r#priv: bool) -> Result<(), Error> {
+    let len = c_int::try_from(buf.len())?;
+    let ret = if r#priv {
+        unsafe { RAND_priv_bytes(buf.as_mut_ptr(), len) }
+    } else {
+        unsafe { RAND_bytes(buf.as_mut_ptr(), len) }
+    };
+    if ret != 1 {
+        if r#priv {
+            trace_ossl!("RAND_priv_bytes()");
+        } else {
+            trace_ossl!("RAND_bytes()");
+        }
+        return Err(Error::new(ErrorKind::OsslError));
+    }
+    Ok(())
+}
