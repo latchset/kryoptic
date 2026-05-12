@@ -35,6 +35,10 @@ impl SecureRandom for OsslSecureRandom {
     fn fill(&self, buf: &mut [u8]) -> Result<(), GetRandomFailed> {
         get_random(buf, true).map_err(|_| GetRandomFailed)
     }
+
+    fn fips(&self) -> bool {
+        fips()
+    }
 }
 
 pub fn default_provider() -> CryptoProvider {
@@ -172,4 +176,8 @@ fn supported_cipher_suites() -> Vec<SupportedCipherSuite> {
     }
 
     suites
+}
+
+pub(crate) fn fips() -> bool {
+    osslctx().fips_is_enabled()
 }
