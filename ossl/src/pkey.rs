@@ -7,6 +7,7 @@
 use std::ffi::{c_int, c_uint, c_void, CStr};
 
 use crate::bindings::*;
+use crate::signature::{sigalg_to_evp_type, SigAlg};
 use crate::{
     cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
     OsslParamBuilder, OsslSecret,
@@ -1092,6 +1093,29 @@ impl EvpPkey {
         };
         if pkey.is_null() {
             trace_ossl!("d2i_AutoPrivateKey_ex()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(EvpPkey { ptr: pkey })
+    }
+
+    /// Creates an `EvpPkey` from a DER-encoded public key.
+    pub fn from_pubkey_der(
+        _ctx: &OsslContext,
+        alg: SigAlg,
+        der: &[u8],
+    ) -> Result<EvpPkey, Error> {
+        let mut ptr = std::ptr::null_mut();
+        let mut pp = der.as_ptr();
+        let pkey = unsafe {
+            d2i_PublicKey(
+                sigalg_to_evp_type(alg)?,
+                &mut ptr,
+                &mut pp,
+                der.len().try_into()?,
+            )
+        };
+        if pkey.is_null() {
+            trace_ossl!("d2i_PublicKey()");
             return Err(Error::new(ErrorKind::OsslError));
         }
         Ok(EvpPkey { ptr: pkey })

@@ -1,11 +1,10 @@
 pub mod pkey;
 pub mod signer;
+pub mod verify;
 
 use ossl::rand::get_random;
 use ossl::OsslContext;
-use rustls::crypto::{
-    CryptoProvider, GetRandomFailed, SecureRandom, WebPkiSupportedAlgorithms,
-};
+use rustls::crypto::{CryptoProvider, GetRandomFailed, SecureRandom};
 
 static OSSL_CONTEXT: std::sync::OnceLock<OsslContext> =
     std::sync::OnceLock::new();
@@ -31,10 +30,7 @@ pub fn default_provider() -> CryptoProvider {
     CryptoProvider {
         cipher_suites: vec![],
         kx_groups: vec![],
-        signature_verification_algorithms: WebPkiSupportedAlgorithms {
-            all: &[],
-            mapping: &[],
-        },
+        signature_verification_algorithms: verify::supported_algorithms(),
         secure_random: &OsslSecureRandom,
         key_provider: &pkey::OsslKeyProvider,
     }
