@@ -153,6 +153,17 @@ impl EvpMdCtx {
     }
 }
 
+#[cfg(ossl_v320)]
+impl Clone for EvpMdCtx {
+    fn clone(&self) -> Self {
+        let ptr = unsafe { EVP_MD_CTX_dup(self.ptr) };
+        if ptr.is_null() {
+            panic!("EVP_MD_CTX_dup failed");
+        }
+        EvpMdCtx { ptr }
+    }
+}
+
 impl Drop for EvpMdCtx {
     fn drop(&mut self) {
         unsafe {
@@ -349,6 +360,17 @@ impl OsslDigest {
     #[cfg(not(ossl_v400))]
     pub fn set_state(&mut self, _state: &[u8]) -> Result<(), Error> {
         Err(Error::new(ErrorKind::WrapperError))
+    }
+}
+
+#[cfg(ossl_v320)]
+impl Clone for OsslDigest {
+    fn clone(&self) -> Self {
+        OsslDigest {
+            ctx: self.ctx.clone(),
+            md: self.md.clone(),
+            size: self.size,
+        }
     }
 }
 

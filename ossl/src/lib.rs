@@ -1131,6 +1131,9 @@ impl<'a> OsslParam<'a> {
 /// Once created, the capacity of an `OsslSecret` cannot be changed, preventing
 /// accidental reallocations that might leave copies of the secret data in
 /// unmanaged memory.
+///
+/// Clone is intentionally not derived, to prevent accidental copies and the
+/// secret content to be leaked
 #[derive(Debug)]
 pub struct OsslSecret {
     data: Vec<u8>,
@@ -1234,6 +1237,16 @@ impl OsslSecret {
         std::mem::swap(&mut self.data, &mut new_data);
 
         Ok(())
+    }
+
+    /// Make an explicit copy of the key
+    ///
+    /// Callers should use this function only if absolutely necessary and avoid
+    /// proliferation of copies of keys in memory
+    pub fn make_copy(&self) -> OsslSecret {
+        OsslSecret {
+            data: self.data.clone(),
+        }
     }
 }
 

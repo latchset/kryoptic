@@ -1,3 +1,5 @@
+pub mod hash;
+pub mod hmac;
 pub mod pkey;
 pub mod signer;
 pub mod verify;
