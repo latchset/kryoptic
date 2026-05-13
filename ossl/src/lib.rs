@@ -1117,7 +1117,7 @@ impl<'a> OsslParam<'a> {
 /// Once created, the capacity of an `OsslSecret` cannot be changed, preventing
 /// accidental reallocations that might leave copies of the secret data in
 /// unmanaged memory.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OsslSecret {
     data: Vec<u8>,
 }

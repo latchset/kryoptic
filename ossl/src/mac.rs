@@ -53,6 +53,16 @@ impl Drop for EvpMacCtx {
     }
 }
 
+impl Clone for EvpMacCtx {
+    fn clone(&self) -> Self {
+        let ptr = unsafe { EVP_MAC_CTX_dup(self.ptr) };
+        if ptr.is_null() {
+            panic!("EVP_MAC_CTX_dup failed");
+        }
+        EvpMacCtx { ptr }
+    }
+}
+
 unsafe impl Send for EvpMacCtx {}
 unsafe impl Sync for EvpMacCtx {}
 
@@ -214,7 +224,7 @@ pub(crate) fn add_mac_alg_to_params(
 }
 
 /// Higher level wrapper for Mac operations
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OsslMac {
     /// The OpenSSL message mac context (`EVP_MAC_CTX`).
     ctx: EvpMacCtx,
