@@ -1183,7 +1183,7 @@ impl EvpPkey {
                     trace_ossl!("EVP_PKEY_generate()");
                     return Err(Error::new(ErrorKind::OsslError));
                 }
-                let mut paramkey = EvpPkey { ptr: pkey };
+                let paramkey = EvpPkey { ptr: pkey };
                 paramkey.new_ctx(ctx)?
             }
             _ => EvpPkeyCtx::new(ctx, name)?,
@@ -1212,7 +1212,7 @@ impl EvpPkey {
     /// Creates a new `EvpPkeyCtx` associated with this `EvpPkey`.
     ///
     /// Used to prepare for operations using this specific key.
-    pub fn new_ctx(&mut self, ctx: &OsslContext) -> Result<EvpPkeyCtx, Error> {
+    pub fn new_ctx(&self, ctx: &OsslContext) -> Result<EvpPkeyCtx, Error> {
         /* this function takes care of checking for NULL */
         unsafe {
             EvpPkeyCtx::from_ptr(
@@ -1221,7 +1221,7 @@ impl EvpPkey {
                  * to not use rust lifetimes here */
                 EVP_PKEY_CTX_new_from_pkey(
                     ctx.ptr(),
-                    self.as_mut_ptr(),
+                    self.ptr,
                     std::ptr::null_mut(),
                 ),
             )
@@ -1652,6 +1652,17 @@ impl EvpPkey {
             return Err(Error::new(ErrorKind::OsslError));
         }
         Ok(buf)
+    }
+}
+
+impl Clone for EvpPkey {
+    fn clone(&self) -> Self {
+        let res = unsafe { EVP_PKEY_up_ref(self.ptr) };
+        if res != 1 {
+            trace_ossl!("EVP_PKEY_up_ref()");
+            panic!("EVP_PKEY_up_ref failed");
+        }
+        EvpPkey { ptr: self.ptr }
     }
 }
 

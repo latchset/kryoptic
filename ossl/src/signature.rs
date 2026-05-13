@@ -598,7 +598,7 @@ impl OsslSignature {
         libctx: &OsslContext,
         op: SigOp,
         alg: SigAlg,
-        key: &mut EvpPkey,
+        key: &EvpPkey,
         params: Option<&OsslParam>,
     ) -> Result<OsslSignature, Error> {
         let mut ctx = OsslSignature {
@@ -665,7 +665,7 @@ impl OsslSignature {
                             digest_ptr,
                             libctx.ptr(),
                             std::ptr::null(),
-                            key.as_mut_ptr(),
+                            key.as_ptr() as *mut EVP_PKEY,
                             params_ptr,
                         ),
                         SigOp::Verify => EVP_DigestVerifyInit_ex(
@@ -674,7 +674,7 @@ impl OsslSignature {
                             digest_ptr,
                             libctx.ptr(),
                             std::ptr::null(),
-                            key.as_mut_ptr(),
+                            key.as_ptr() as *mut EVP_PKEY,
                             params_ptr,
                         ),
                     }

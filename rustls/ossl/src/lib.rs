@@ -1,4 +1,5 @@
 pub mod pkey;
+pub mod signer;
 
 use ossl::rand::get_random;
 use ossl::OsslContext;
