@@ -2,6 +2,7 @@
 // See LICENSE.txt file for terms
 
 use crate::osslctx;
+use ossl::digest::DigestAlg;
 use ossl::mac::{MacAlg, OsslMac};
 use ossl::OsslSecret;
 use rustls::crypto::hmac::{Hmac, Key, Tag};
@@ -41,7 +42,7 @@ impl Hmac for OsslHmac {
     }
 }
 
-struct OsslHmacKey {
+pub(crate) struct OsslHmacKey {
     alg: MacAlg,
     key: OsslSecret,
 }
@@ -75,6 +76,14 @@ impl Key for OsslHmacKey {
 
     fn tag_len(&self) -> usize {
         hmac_to_size(self.alg)
+    }
+}
+
+pub(crate) fn from_digest_key(alg: DigestAlg, key: &[u8]) -> OsslHmacKey {
+    match alg {
+        DigestAlg::Sha2_384 => OsslHmacKey::new(MacAlg::HmacSha2_384, key),
+        DigestAlg::Sha2_256 => OsslHmacKey::new(MacAlg::HmacSha2_256, key),
+        _ => panic!("Unexpected Digest Algorithm"),
     }
 }
 

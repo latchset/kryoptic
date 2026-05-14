@@ -613,6 +613,32 @@ impl OsslCipher {
         Ok(usize::try_from(outlen)?)
     }
 
+    /// Ingests plain text data and possibly outputs encrypted data in-place.
+    ///
+    /// This api is equivalent to `update` but uses the same buffer for
+    /// input and output.
+    pub fn update_in_place(&mut self, data: &mut [u8]) -> Result<usize, Error> {
+        if data.len() < self.buffer_size(data.len()) {
+            return Err(Error::new(ErrorKind::BufferSize));
+        }
+
+        let mut outlen = c_int::try_from(data.len())?;
+        let ret = unsafe {
+            EVP_CipherUpdate(
+                self.ctx.as_mut_ptr(),
+                data.as_mut_ptr(),
+                &mut outlen,
+                data.as_ptr(),
+                c_int::try_from(data.len())?,
+            )
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_CipherUpdate()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(usize::try_from(outlen)?)
+    }
+
     /// Finalizes this encryption operation.
     /// May return a final block of output.
     pub fn finalize(&mut self, output: &mut [u8]) -> Result<usize, Error> {

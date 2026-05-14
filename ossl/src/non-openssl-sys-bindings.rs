@@ -103,6 +103,7 @@ pub const OSSL_KDF_PARAM_KBKDF_R: &[u8; 2] = b"r\0";
 pub const OSSL_KDF_PARAM_SSHKDF_SESSION_ID: &[u8; 11] = b"session_id\0";
 pub const OSSL_KDF_PARAM_SSHKDF_TYPE: &[u8; 5] = b"type\0";
 pub const OSSL_KDF_PARAM_SSHKDF_XCGHASH: &[u8; 8] = b"xcghash\0";
+pub const OSSL_KDF_PARAM_SECRET: &[u8; 7] = b"secret\0";
 
 pub const OSSL_KDF_NAME_HKDF: &[u8; 5] = b"HKDF\0";
 pub const OSSL_KDF_NAME_PBKDF2: &[u8; 7] = b"PBKDF2\0";
@@ -110,6 +111,7 @@ pub const OSSL_KDF_NAME_KBKDF: &[u8; 6] = b"KBKDF\0";
 pub const OSSL_KDF_NAME_X963KDF: &[u8; 8] = b"X963KDF\0";
 pub const OSSL_KDF_NAME_SSHKDF: &[u8; 7] = b"SSHKDF\0";
 pub const OSSL_KDF_NAME_SSKDF: &[u8; 6] = b"SSKDF\0";
+pub const OSSL_KDF_NAME_TLS1_PRF: &[u8; 9] = b"TLS1-PRF\0";
 
 pub const EVP_KDF_HKDF_MODE_EXTRACT_AND_EXPAND: c_int = 0;
 pub const EVP_KDF_HKDF_MODE_EXTRACT_ONLY: c_int = 1;

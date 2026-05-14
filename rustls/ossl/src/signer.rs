@@ -1,8 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use ossl::digest::DigestAlg;
 use ossl::pkey::EvpPkey;
-use ossl::signature::{OsslSignature, RsaPssParams, SigAlg, SigOp};
+use ossl::signature::{available, OsslSignature, RsaPssParams, SigAlg, SigOp};
 use rustls::sign::Signer;
 use rustls::{Error, SignatureScheme};
 
@@ -101,4 +101,55 @@ impl Signer for OsslSigner {
     fn scheme(&self) -> SignatureScheme {
         self.scheme
     }
+}
+
+static RSA_SIG_SCHEMES: OnceLock<Vec<SignatureScheme>> = OnceLock::new();
+
+pub fn supported_rsa_sig_schemes() -> &'static [SignatureScheme] {
+    let schemes = RSA_SIG_SCHEMES.get_or_init(|| {
+        let mut v = Vec::with_capacity(6);
+        for s in [
+            (SigAlg::RsaPssSha2_512, SignatureScheme::RSA_PSS_SHA512),
+            (SigAlg::RsaPssSha2_384, SignatureScheme::RSA_PSS_SHA384),
+            (SigAlg::RsaPssSha2_256, SignatureScheme::RSA_PSS_SHA256),
+            (SigAlg::RsaSha2_512, SignatureScheme::RSA_PKCS1_SHA512),
+            (SigAlg::RsaSha2_384, SignatureScheme::RSA_PKCS1_SHA384),
+            (SigAlg::RsaSha2_256, SignatureScheme::RSA_PKCS1_SHA256),
+        ] {
+            if available(osslctx(), s.0) {
+                v.push(s.1);
+            }
+        }
+        v
+    });
+    &schemes
+}
+
+static ECC_SIG_SCHEMES: OnceLock<Vec<SignatureScheme>> = OnceLock::new();
+
+pub fn supported_ecc_sig_schemes() -> &'static [SignatureScheme] {
+    let schemes = ECC_SIG_SCHEMES.get_or_init(|| {
+        let mut v = Vec::with_capacity(6);
+        for s in [
+            (SigAlg::Ed25519, SignatureScheme::ED25519),
+            (
+                SigAlg::EcdsaSha2_512,
+                SignatureScheme::ECDSA_NISTP521_SHA512,
+            ),
+            (
+                SigAlg::EcdsaSha2_384,
+                SignatureScheme::ECDSA_NISTP384_SHA384,
+            ),
+            (
+                SigAlg::EcdsaSha2_256,
+                SignatureScheme::ECDSA_NISTP256_SHA256,
+            ),
+        ] {
+            if available(osslctx(), s.0) {
+                v.push(s.1);
+            }
+        }
+        v
+    });
+    &schemes
 }
