@@ -3,25 +3,23 @@ use rustls::crypto::hash::{Context, Hash, HashAlgorithm, Output};
 
 use crate::osslctx;
 
-const MAX_DIGEST_SIZE: usize = 64;
+pub(crate) const MAX_DIGEST_SIZE: usize = 48;
 
-pub struct OsslHash {
-    alg: DigestAlg,
-}
+pub struct OsslHash(pub DigestAlg);
 
 impl Hash for OsslHash {
     fn start(&self) -> Box<dyn Context> {
-        Box::new(OsslHashContext::new(self.alg))
+        Box::new(OsslHashContext::new(self.0))
     }
 
     fn hash(&self, data: &[u8]) -> Output {
-        let mut ctx = OsslHashContext::new(self.alg);
+        let mut ctx = OsslHashContext::new(self.0);
         ctx.update(data);
         ctx.finalize()
     }
 
     fn output_len(&self) -> usize {
-        match self.alg {
+        match self.0 {
             DigestAlg::Sha2_256 => 32,
             DigestAlg::Sha2_384 => 48,
             _ => panic!("Unexpected Digest Algorithm"),
@@ -29,7 +27,7 @@ impl Hash for OsslHash {
     }
 
     fn algorithm(&self) -> HashAlgorithm {
-        match self.alg {
+        match self.0 {
             DigestAlg::Sha2_256 => HashAlgorithm::SHA256,
             DigestAlg::Sha2_384 => HashAlgorithm::SHA384,
             _ => panic!("Unexpected Digest Algorithm"),
@@ -79,9 +77,5 @@ impl Context for OsslHashContext {
     }
 }
 
-pub(crate) static SHA256: OsslHash = OsslHash {
-    alg: DigestAlg::Sha2_256,
-};
-pub(crate) static SHA384: OsslHash = OsslHash {
-    alg: DigestAlg::Sha2_384,
-};
+pub(crate) static SHA256: OsslHash = OsslHash(DigestAlg::Sha2_256);
+pub(crate) static SHA384: OsslHash = OsslHash(DigestAlg::Sha2_384);
