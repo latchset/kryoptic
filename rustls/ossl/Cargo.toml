@@ -7,6 +7,10 @@ homepage.workspace = true
 repository.workspace = true
 license = "Apache-2.0"
 
+[features]
+default = ["tls12"]
+tls12 = ["rustls/tls12"]
+
 [dependencies]
 rustls = { version = "0.23.40", default-features = false }
 ossl.workspace = true

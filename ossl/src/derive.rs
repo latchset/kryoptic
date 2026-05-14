@@ -955,3 +955,65 @@ impl FfdhDerive {
         Ok(len)
     }
 }
+
+const TLSPRF_MAX_SEEDS: usize = 6;
+
+/// Higher level wrapper for TLS1 PRF Derive operation
+#[derive(Debug)]
+pub struct Tls1PrfDerive<'a> {
+    /// The OpenSSL KDF context (`EVP_KDF_CTX`).
+    ctx: EvpKdfCtx,
+    /// The digest function
+    digest: DigestAlg,
+    /// The derivation key (secret)
+    key: Option<&'a [u8]>,
+    /// Seeds
+    seeds: Vec<&'a [u8]>,
+}
+
+impl<'a> Tls1PrfDerive<'a> {
+    /// Instantiates a new Tls1PrfDerive context
+    pub fn new(
+        ctx: &OsslContext,
+        digest: DigestAlg,
+    ) -> Result<Tls1PrfDerive<'a>, Error> {
+        Ok(Tls1PrfDerive {
+            ctx: EvpKdfCtx::new(ctx, cstr!(OSSL_KDF_NAME_TLS1_PRF))?,
+            digest: digest,
+            key: None,
+            seeds: Vec::with_capacity(TLSPRF_MAX_SEEDS),
+        })
+    }
+
+    /// Set the derivation key (secret)
+    pub fn set_key(&mut self, key: &'a [u8]) {
+        self.key = Some(key);
+    }
+
+    /// Add a seed
+    pub fn add_seed(&mut self, seed: &'a [u8]) {
+        self.seeds.push(seed);
+    }
+
+    /// Perform the derive operation based on the parameters set on the context
+    /// Returns the output in the provided output buffer
+    pub fn derive(&mut self, output: &mut [u8]) -> Result<(), Error> {
+        let mut params_builder =
+            OsslParamBuilder::with_capacity(2 + self.seeds.len());
+        params_builder.add_const_c_string(
+            cstr!(OSSL_KDF_PARAM_DIGEST),
+            digest_to_string(self.digest),
+        )?;
+        match &self.key {
+            Some(k) => params_builder
+                .add_octet_slice(cstr!(OSSL_KDF_PARAM_SECRET), k)?,
+            None => return Err(Error::new(ErrorKind::KeyError)),
+        }
+        for s in &self.seeds {
+            params_builder.add_octet_slice(cstr!(OSSL_KDF_PARAM_SEED), s)?
+        }
+        let params = params_builder.finalize();
+
+        self.ctx.derive(&params, output)
+    }
+}
