@@ -2,6 +2,7 @@ pub mod cipher;
 pub mod hash;
 pub mod hmac;
 pub mod kdf;
+pub mod keyex;
 pub mod pkey;
 pub mod signer;
 #[cfg(feature = "tls12")]
@@ -39,7 +40,7 @@ impl SecureRandom for OsslSecureRandom {
 pub fn default_provider() -> CryptoProvider {
     CryptoProvider {
         cipher_suites: supported_cipher_suites(),
-        kx_groups: vec![],
+        kx_groups: keyex::supported_kx_groups(),
         signature_verification_algorithms: verify::supported_algorithms(),
         secure_random: &OsslSecureRandom,
         key_provider: &pkey::OsslKeyProvider,
