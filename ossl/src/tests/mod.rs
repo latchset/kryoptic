@@ -37,6 +37,9 @@ mod aes;
 #[cfg(not(feature = "fips"))]
 mod brainpool;
 
+#[cfg(not(feature = "fips"))]
+mod chacha20;
+
 #[cfg(feature = "rfc9580")]
 mod dsa;
 
