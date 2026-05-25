@@ -4,7 +4,7 @@
 use hex;
 use serial_test::parallel;
 
-use crate::cipher::{CamelliaSize, EncAlg, OsslCipher};
+use crate::cipher::{AeadParams, CamelliaSize, EncAlg, OsslCipher};
 use crate::tests::{test_ossl_context, test_ossl_legacy_context};
 use crate::{OsslContext, OsslSecret};
 
