@@ -59,7 +59,9 @@ jobs:
                 'crate(serial_test/default)' 'crate(openssl-sys/default)' 'crate(openssl-sys/bindgen)' \
                 'crate(toml)' 'crate(toml/display)' 'crate(toml/parse)' 'crate(toml/serde)' \
                 'crate(uuid/default)' 'crate(uuid/v4)' 'crate(uuid/v8)' 'crate(cryptoki/default)' \
-                'crate(vsprintf/default)' 'crate(quick-xml/default)' 'crate(quick-xml/serialize)'
+                'crate(vsprintf/default)' 'crate(quick-xml/default)' 'crate(quick-xml/serialize)' \
+                'crate(rustls/custom-provider) >= 0.23.37' 'crate(rustls-pemfile/default) >= 2.2.0' \
+                'crate(rustls/std) >= 0.23.37' 'crate(rustls/tls12) >= 0.23.37'
           fi
 
       - name: Checkout Repository
