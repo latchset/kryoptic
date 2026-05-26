@@ -20,6 +20,7 @@ impl SupportedKxGroup for OsslEcKxGroup {
             NamedGroup::X25519 => EvpPkeyType::X25519,
             NamedGroup::secp256r1 => EvpPkeyType::P256,
             NamedGroup::secp384r1 => EvpPkeyType::P384,
+            NamedGroup::secp521r1 => EvpPkeyType::P521,
             _ => return Err(Error::General("Unsupported KX group".into())),
         };
 
@@ -60,6 +61,9 @@ impl SupportedKxGroup for OsslEcKxGroup {
             NamedGroup::secp384r1 => {
                 EvpPkey::available(osslctx(), EvpPkeyType::P384)
             }
+            NamedGroup::secp521r1 => {
+                EvpPkey::available(osslctx(), EvpPkeyType::P521)
+            }
             _ => false,
         }
     }
@@ -84,7 +88,9 @@ impl ActiveKeyExchange for OsslEcdh {
                     ));
                 }
             }
-            NamedGroup::secp256r1 | NamedGroup::secp384r1 => {
+            NamedGroup::secp256r1
+            | NamedGroup::secp384r1
+            | NamedGroup::secp521r1 => {
                 if peer.first() != Some(&0x04) {
                     return Err(Error::PeerMisbehaved(
                         PeerMisbehaved::InvalidKeyShare,
@@ -203,6 +209,8 @@ pub static SECP256R1: OsslEcKxGroup = OsslEcKxGroup(NamedGroup::secp256r1);
 
 pub static SECP384R1: OsslEcKxGroup = OsslEcKxGroup(NamedGroup::secp384r1);
 
+pub static SECP521R1: OsslEcKxGroup = OsslEcKxGroup(NamedGroup::secp521r1);
+
 pub static MLKEM768: OsslKemKxGroup = OsslKemKxGroup(NamedGroup::MLKEM768);
 
 pub static MLKEM1024: OsslKemKxGroup = OsslKemKxGroup(NamedGroup::MLKEM1024);
@@ -223,6 +231,9 @@ pub fn supported_kx_groups() -> Vec<&'static dyn SupportedKxGroup> {
         }
         if EvpPkey::available(osslctx(), EvpPkeyType::X25519) {
             v.push(&X25519);
+        }
+        if EvpPkey::available(osslctx(), EvpPkeyType::P521) {
+            v.push(&SECP521R1);
         }
         if EvpPkey::available(osslctx(), EvpPkeyType::P384) {
             v.push(&SECP384R1);

@@ -8,7 +8,11 @@ use std::time::{Duration, SystemTime};
 
 mod common;
 
-fn run_openssl_server_basic(key_args: &[&str]) {
+fn run_openssl_server_basic(
+    key_args: &[&str],
+    version: &'static rustls::SupportedProtocolVersion,
+    cipher_filter: &str,
+) {
     let dir = std::env::temp_dir().join(format!(
         "rustls_ossl_test_{}_{}",
         std::process::id(),
@@ -21,6 +25,11 @@ fn run_openssl_server_basic(key_args: &[&str]) {
 
     let key_path = dir.join("key.pem");
     let cert_path = dir.join("cert.pem");
+
+    // Generate a file to be served to the client
+    let test_file_path = dir.join("test.txt");
+    let test_content = b"OpenSSL -WWW test file content";
+    std::fs::write(&test_file_path, test_content).unwrap();
 
     // Generate self-signed certificate
     let mut args = vec!["req", "-x509"];
@@ -50,6 +59,7 @@ fn run_openssl_server_basic(key_args: &[&str]) {
 
     // Start OpenSSL server
     let mut server = Command::new("openssl")
+        .current_dir(&dir)
         .args(&[
             "s_server",
             "-key",
@@ -58,7 +68,7 @@ fn run_openssl_server_basic(key_args: &[&str]) {
             cert_path.to_str().unwrap(),
             "-accept",
             &port.to_string(),
-            "-www",
+            "-WWW",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -82,11 +92,19 @@ fn run_openssl_server_basic(key_args: &[&str]) {
     let cert = rustls_pemfile::certs(&mut reader).next().unwrap().unwrap();
 
     // Use the rustls ossl module as CryptoProvider
-    let provider = Arc::new(rustls_ossl::default_provider());
+    let mut provider = rustls_ossl::default_provider();
+    provider
+        .cipher_suites
+        .retain(|cs| format!("{:?}", cs.suite()).contains(cipher_filter));
+    assert!(
+        !provider.cipher_suites.is_empty(),
+        "No cipher suites matched filter"
+    );
+    let provider = Arc::new(provider);
     let verifier = common::PinnedSelfSignedVerifier::new(cert.into_owned());
 
     let config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
+        .with_protocol_versions(&[version])
         .unwrap()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(verifier))
@@ -99,10 +117,20 @@ fn run_openssl_server_basic(key_args: &[&str]) {
     let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
     let mut stream = rustls::Stream::new(&mut client, &mut socket);
 
-    stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+    stream.write_all(b"GET /test.txt HTTP/1.0\r\n\r\n").unwrap();
     let mut plaintext = Vec::new();
     stream.read_to_end(&mut plaintext).unwrap();
-    std::io::stdout().write_all(&plaintext).unwrap();
+
+    let header_end = plaintext
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("Response does not contain HTTP headers");
+
+    let body = &plaintext[header_end + 4..];
+    assert_eq!(
+        body, test_content,
+        "Downloaded content does not match original"
+    );
 
     // Ensure we can properly kill the process and clean up
     server.kill().unwrap();
@@ -111,9 +139,65 @@ fn run_openssl_server_basic(key_args: &[&str]) {
 
 macro_rules! test_openssl_server_basic {
     ($name:ident, $args:expr) => {
-        #[test]
-        fn $name() {
-            run_openssl_server_basic($args);
+        mod $name {
+            use super::*;
+
+            #[cfg(feature = "tls12")]
+            #[test]
+            fn tls12_aes128() {
+                run_openssl_server_basic(
+                    $args,
+                    &rustls::version::TLS12,
+                    "AES_128",
+                );
+            }
+
+            #[cfg(feature = "tls12")]
+            #[test]
+            fn tls12_aes256() {
+                run_openssl_server_basic(
+                    $args,
+                    &rustls::version::TLS12,
+                    "AES_256",
+                );
+            }
+
+            #[cfg(feature = "tls12")]
+            #[test]
+            fn tls12_chacha20() {
+                run_openssl_server_basic(
+                    $args,
+                    &rustls::version::TLS12,
+                    "CHACHA20",
+                );
+            }
+
+            #[test]
+            fn tls13_aes128() {
+                run_openssl_server_basic(
+                    $args,
+                    &rustls::version::TLS13,
+                    "AES_128",
+                );
+            }
+
+            #[test]
+            fn tls13_aes256() {
+                run_openssl_server_basic(
+                    $args,
+                    &rustls::version::TLS13,
+                    "AES_256",
+                );
+            }
+
+            #[test]
+            fn tls13_chacha20() {
+                run_openssl_server_basic(
+                    $args,
+                    &rustls::version::TLS13,
+                    "CHACHA20",
+                );
+            }
         }
     };
 }
