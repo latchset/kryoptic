@@ -14,7 +14,7 @@ dynamic = ["ossl/dynamic"]
 
 [dependencies]
 rustls = { version = ">=0.23.37, <0.24", default-features = false }
-ossl.workspace = true
+ossl = { workspace = true, features = ["ossl320"] }
 
 [dev-dependencies]
 rustls = { version = ">=0.23.37, <0.24", default-features = false, features = ["std"] }
