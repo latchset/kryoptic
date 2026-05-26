@@ -42,6 +42,9 @@ impl Tls13AeadAlgorithm for AeadAlgorithm {
             EncAlg::AesGcm(AesSize::Aes256) => {
                 Ok(ConnectionTrafficSecrets::Aes256Gcm { key, iv })
             }
+            EncAlg::ChaCha20Poly1305 => {
+                Ok(ConnectionTrafficSecrets::Chacha20Poly1305 { key, iv })
+            }
             _ => Err(UnsupportedOperationError),
         }
     }

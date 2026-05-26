@@ -87,3 +87,8 @@ pub(crate) static AES_256_GCM: AeadAlgorithm = AeadAlgorithm {
     alg: EncAlg::AesGcm(AesSize::Aes256),
     key_size: 32,
 };
+
+pub(crate) static CHACHA20_POLY1305: AeadAlgorithm = AeadAlgorithm {
+    alg: EncAlg::ChaCha20Poly1305,
+    key_size: 32,
+};
