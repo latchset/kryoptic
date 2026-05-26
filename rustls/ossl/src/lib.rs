@@ -59,7 +59,7 @@ static SUPPORTED_TLS12_CIPHER_SUITE: std::sync::OnceLock<
 #[cfg(feature = "tls12")]
 fn tls12_cipher_suites() -> &'static [rustls::Tls12CipherSuite] {
     let suites = SUPPORTED_TLS12_CIPHER_SUITE.get_or_init(|| {
-        let mut v = Vec::with_capacity(4);
+        let mut v = Vec::with_capacity(6);
 
         let rsa_schemes = signer::supported_rsa_sig_schemes();
         if !rsa_schemes.is_empty() {
@@ -87,6 +87,19 @@ fn tls12_cipher_suites() -> &'static [rustls::Tls12CipherSuite] {
                 sign: rsa_schemes,
                 aead_alg: &cipher::AES_256_GCM,
                 prf_provider: &kdf::PRF_SHA384,
+            });
+
+            /* TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 */
+            v.push(rustls::Tls12CipherSuite {
+                common: CipherSuiteCommon {
+                    suite: CipherSuite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+                    hash_provider: &hash::SHA256,
+                    confidentiality_limit: u64::MAX,
+                },
+                kx: KeyExchangeAlgorithm::ECDHE,
+                sign: rsa_schemes,
+                aead_alg: &cipher::CHACHA20_POLY1305,
+                prf_provider: &kdf::PRF_SHA256,
             });
         }
 
@@ -117,6 +130,19 @@ fn tls12_cipher_suites() -> &'static [rustls::Tls12CipherSuite] {
                 aead_alg: &cipher::AES_256_GCM,
                 prf_provider: &kdf::PRF_SHA384,
             });
+
+            /* TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 */
+            v.push(rustls::Tls12CipherSuite {
+                common: CipherSuiteCommon {
+                    suite: CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+                    hash_provider: &hash::SHA256,
+                    confidentiality_limit: u64::MAX,
+                },
+                kx: KeyExchangeAlgorithm::ECDHE,
+                sign: ecc_schemes,
+                aead_alg: &cipher::CHACHA20_POLY1305,
+                prf_provider: &kdf::PRF_SHA256,
+            });
         }
 
         v
@@ -130,7 +156,7 @@ static SUPPORTED_TLS13_CIPHER_SUITE: std::sync::OnceLock<
 
 fn tls13_cipher_suites() -> &'static [rustls::Tls13CipherSuite] {
     let suites = SUPPORTED_TLS13_CIPHER_SUITE.get_or_init(|| {
-        let mut v = Vec::with_capacity(2);
+        let mut v = Vec::with_capacity(3);
 
         /* TLS_AES_256_GCM_SHA384 */
         v.push(rustls::Tls13CipherSuite {
@@ -156,13 +182,25 @@ fn tls13_cipher_suites() -> &'static [rustls::Tls13CipherSuite] {
             quic: None, /* TODO */
         });
 
+        /* TLS13_CHACHA20_POLY1305_SHA256 */
+        v.push(rustls::Tls13CipherSuite {
+            common: CipherSuiteCommon {
+                suite: CipherSuite::TLS13_CHACHA20_POLY1305_SHA256,
+                hash_provider: &hash::SHA256,
+                confidentiality_limit: u64::MAX,
+            },
+            hkdf_provider: &kdf::HKDF_SHA256,
+            aead_alg: &cipher::CHACHA20_POLY1305,
+            quic: None, /* TODO */
+        });
+
         v
     });
     &suites
 }
 
 fn supported_cipher_suites() -> Vec<SupportedCipherSuite> {
-    let mut suites = Vec::with_capacity(6);
+    let mut suites = Vec::with_capacity(9);
 
     for suite in tls13_cipher_suites() {
         suites.push(SupportedCipherSuite::Tls13(&suite));
