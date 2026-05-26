@@ -129,9 +129,10 @@ static ECC_SIG_SCHEMES: OnceLock<Vec<SignatureScheme>> = OnceLock::new();
 
 pub fn supported_ecc_sig_schemes() -> &'static [SignatureScheme] {
     let schemes = ECC_SIG_SCHEMES.get_or_init(|| {
-        let mut v = Vec::with_capacity(6);
+        let mut v = Vec::with_capacity(5);
         for s in [
             (SigAlg::Ed25519, SignatureScheme::ED25519),
+            (SigAlg::Ed448, SignatureScheme::ED448),
             (
                 SigAlg::EcdsaSha2_512,
                 SignatureScheme::ECDSA_NISTP521_SHA512,
