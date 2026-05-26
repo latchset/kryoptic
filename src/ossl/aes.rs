@@ -129,10 +129,8 @@ struct AesParams {
     taglen: usize,
 }
 
-#[cfg(feature = "fips")]
-impl AesParams {
-    fn zeroize(&mut self) {
-        zeromem(self.iv.buf.as_mut_slice());
+impl Drop for AesParams {
+    fn drop(&mut self) {
         zeromem(self.aad.as_mut_slice());
     }
 }
@@ -802,8 +800,8 @@ impl AesOperation {
                         buf: bytes_to_vec(params.pNonce, noncelen),
                         fixedbits: noncefixedbits,
                         generator: params.nonceGenerator,
-                        counter: 0,
-                        maxcount: 0,
+                        counter: self.params.iv.counter,
+                        maxcount: self.params.iv.maxcount,
                     };
                 } else {
                     self.params.iv = AesIvData {
@@ -873,8 +871,8 @@ impl AesOperation {
                         buf: bytes_to_vec(params.pIv, ivlen),
                         fixedbits: ivfixedbits,
                         generator: params.ivGenerator,
-                        counter: 0,
-                        maxcount: 0,
+                        counter: self.params.iv.counter,
+                        maxcount: self.params.iv.maxcount,
                     };
                 } else {
                     self.params.iv = AesIvData {
@@ -1016,7 +1014,6 @@ impl AesOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.params.zeroize();
             zeromem(self.buffer.as_mut_slice());
             self.fips_approval.reset();
         }
@@ -1087,7 +1084,6 @@ impl AesOperation {
 
         #[cfg(feature = "fips")]
         {
-            self.params.zeroize();
             zeromem(self.buffer.as_mut_slice());
             self.fips_approval.reset();
         }
