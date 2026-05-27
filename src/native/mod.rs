@@ -6,7 +6,7 @@
 
 #[cfg(feature = "hmac")]
 pub mod hmac;
-#[cfg(all(feature = "pbkdf2", not(feature = "fips")))]
+#[cfg(all(feature = "pbkdf2", not(feature = "fips"), not(feature = "leancrypto")))]
 pub mod pbkdf2;
 #[cfg(feature = "simplekdf")]
 pub mod simplekdf;
