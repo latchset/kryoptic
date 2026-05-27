@@ -913,6 +913,80 @@ fn test_pbkdf2() {
 
     testtokn.finalize();
 }
+#[cfg(feature = "pbkdf2")]
+#[test]
+#[parallel]
+fn test_pbkdf2_sha2() {
+    let mut testtokn = TestToken::initialized("test_pbkdf2", None);
+    let session = testtokn.get_session(false);
+
+    testtokn.login();
+
+    for test in [
+        (
+            "password",
+            "salt",
+            4096,
+            hex::decode("c5e478d59288c841aa530db6845c4c8d962893a0").unwrap(),
+            CKP_PKCS5_PBKD2_HMAC_SHA256,
+        ),
+        (
+            "password",
+            "salt",
+            4096,
+            hex::decode("d197b1b33db0143e018b12f3d1d1479e6cdebdcc").unwrap(),
+            CKP_PKCS5_PBKD2_HMAC_SHA512,
+        ),
+    ] {
+        let params = CK_PKCS5_PBKD2_PARAMS2 {
+            saltSource: CKZ_DATA_SPECIFIED,
+            pSaltSourceData: void_ptr!(test.1.as_ptr()),
+            ulSaltSourceDataLen: test.1.len() as CK_ULONG,
+            iterations: test.2,
+            prf: test.4,
+            pPrfData: std::ptr::null_mut(),
+            ulPrfDataLen: 0,
+            pPassword: test.0.as_ptr() as *const _ as *mut _,
+            ulPasswordLen: test.0.len() as CK_ULONG,
+        };
+
+        let handle = ret_or_panic!(generate_key(
+            session,
+            CKM_PKCS5_PBKD2,
+            void_ptr!(&params),
+            sizeof!(CK_PKCS5_PBKD2_PARAMS2),
+            &[
+                (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                (CKA_VALUE_LEN, test.3.len() as CK_ULONG),
+            ],
+            &[],
+            &[
+                (CKA_WRAP, true),
+                (CKA_UNWRAP, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
+        ));
+
+        let mut result = vec![0u8; test.3.len()];
+        let mut extract_template = make_ptrs_template(&[(
+            CKA_VALUE,
+            void_ptr!(result.as_mut_ptr()),
+            result.len(),
+        )]);
+
+        let ret = fn_get_attribute_value(
+            session,
+            handle,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(result, test.3);
+    }
+
+    testtokn.finalize();
+}
 
 #[cfg(feature = "sshkdf")]
 #[test]

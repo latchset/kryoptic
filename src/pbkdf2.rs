@@ -9,12 +9,15 @@ use crate::error::Result;
 use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::bytes_to_vec;
-use crate::object::{default_key_attributes, Object, ObjectFactories};
+use crate::object::{Object, ObjectFactories, default_key_attributes};
 use crate::pkcs11::*;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
-#[cfg(not(feature = "fips"))]
+#[cfg(all(not(feature = "fips"), feature = "leancrypto"))]
+use crate::leancrypto::pbkdf2::pbkdf2_derive;
+
+#[cfg(all(not(feature = "fips"), not(feature = "leancrypto")))]
 use crate::native::pbkdf2::pbkdf2_derive;
 
 #[cfg(feature = "fips")]
