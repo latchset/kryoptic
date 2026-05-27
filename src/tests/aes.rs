@@ -1389,3 +1389,697 @@ fn test_aes_macs() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_aes_iv_generators() {
+    let mut testtokn = TestToken::initialized("test_aes_iv_generators", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let src_iv = hex::decode("a1b2c3d4e5f67890abcdef12").unwrap();
+    let src_aad = b"associated-data".to_vec();
+    let src_plaintext = b"Hello world!".to_vec();
+
+    {
+        /* AES GCM IV counter generator */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut iv1 = [0u8; 12];
+        iv1.copy_from_slice(&src_iv);
+        let mut tag1 = [0u8; 12];
+        let mut param1 = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv1.as_mut_ptr(),
+            ulIvLen: iv1.len() as CK_ULONG,
+            ulIvFixedBits: 64, // 8 bytes fixed, 4 bytes counter
+            ivGenerator: CKG_GENERATE_COUNTER,
+            pTag: tag1.as_mut_ptr(),
+            ulTagBits: (tag1.len() * 8) as CK_ULONG,
+        };
+
+        let data = &src_plaintext;
+        let mut enc1 = [0u8; 12];
+        let mut enc1_len = enc1.len() as CK_ULONG;
+
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param1),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc1.as_mut_ptr(),
+            &mut enc1_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec = vec![0u8; data.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param1),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc1.as_ptr() as *mut CK_BYTE,
+            enc1_len,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // Verify IV has been updated (first 8 bytes preserved, last 4 cleared to 0)
+        assert_eq!(iv1[0..8], src_iv[0..8]);
+        assert_eq!(iv1[8..12], [0, 0, 0, 0]);
+
+        // Second call: counter is 1
+        let mut iv2 = [0u8; 12];
+        iv2.copy_from_slice(&src_iv);
+        let mut tag2 = [0u8; 12];
+        let mut param2 = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv2.as_mut_ptr(),
+            ulIvLen: iv2.len() as CK_ULONG,
+            ulIvFixedBits: 64,
+            ivGenerator: CKG_GENERATE_COUNTER,
+            pTag: tag2.as_mut_ptr(),
+            ulTagBits: (tag2.len() * 8) as CK_ULONG,
+        };
+
+        let mut enc2 = [0u8; 12];
+        let mut enc2_len = enc2.len() as CK_ULONG;
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param2),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc2.as_mut_ptr(),
+            &mut enc2_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec = vec![0u8; data.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param2),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc2.as_ptr() as *mut CK_BYTE,
+            enc2_len,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // Verify IV has changed and is different from first one
+        assert_eq!(iv2[0..8], src_iv[0..8]);
+        assert_eq!(iv2[8..12], [0, 0, 0, 1]);
+
+        let ret = fn_message_encrypt_init(session, std::ptr::null_mut(), 0);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    {
+        /* AES GCM IV XOR counter generator */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut iv1 = [0u8; 12];
+        iv1.copy_from_slice(&src_iv);
+
+        let mut tag1 = [0u8; 16];
+        let mut param1 = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv1.as_mut_ptr(),
+            ulIvLen: iv1.len() as CK_ULONG,
+            ulIvFixedBits: 64, // 8 bytes fixed, 4 bytes counter
+            ivGenerator: CKG_GENERATE_COUNTER_XOR,
+            pTag: tag1.as_mut_ptr(),
+            ulTagBits: (tag1.len() * 8) as CK_ULONG,
+        };
+
+        let data = &src_plaintext;
+        let mut enc1 = [0u8; 12];
+        let mut enc1_len = enc1.len() as CK_ULONG;
+
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param1),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc1.as_mut_ptr(),
+            &mut enc1_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec1 = vec![0u8; data.len()];
+        let mut dec1_len = dec1.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param1),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc1.as_ptr() as *mut CK_BYTE,
+            enc1_len,
+            dec1.as_mut_ptr(),
+            &mut dec1_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec1, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // First call: counter is 0, so XOR should leave IV untouched
+        assert_eq!(iv1, src_iv.as_slice());
+
+        // Second call: counter is 1
+        let mut iv2 = [0u8; 12];
+        iv2.copy_from_slice(&src_iv);
+        let mut tag2 = [0u8; 16];
+        let mut param2 = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv2.as_mut_ptr(),
+            ulIvLen: iv2.len() as CK_ULONG,
+            ulIvFixedBits: 64,
+            ivGenerator: CKG_GENERATE_COUNTER_XOR,
+            pTag: tag2.as_mut_ptr(),
+            ulTagBits: (tag2.len() * 8) as CK_ULONG,
+        };
+
+        let mut enc2 = [0u8; 12];
+        let mut enc2_len = enc2.len() as CK_ULONG;
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param2),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc2.as_mut_ptr(),
+            &mut enc2_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec2 = vec![0u8; data.len()];
+        let mut dec2_len = dec2.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param2),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc2.as_ptr() as *mut CK_BYTE,
+            enc2_len,
+            dec2.as_mut_ptr(),
+            &mut dec2_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec2, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // Verify IV has been XORed with 1
+        let mut expected_iv = src_iv.clone();
+        expected_iv[11] ^= 1;
+        assert_eq!(iv2, expected_iv.as_slice());
+
+        let ret = fn_message_encrypt_init(session, std::ptr::null_mut(), 0);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    {
+        /* AES CCM Nonce counter generator */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_CCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let data = &src_plaintext;
+        let mut nonce1 = [0u8; 12];
+        nonce1.copy_from_slice(&src_iv);
+        let mut tag1 = [0u8; 16];
+        let mut param1 = CK_CCM_MESSAGE_PARAMS {
+            ulDataLen: data.len() as CK_ULONG,
+            pNonce: nonce1.as_mut_ptr(),
+            ulNonceLen: nonce1.len() as CK_ULONG,
+            ulNonceFixedBits: 64, // 8 bytes fixed, 4 bytes counter
+            nonceGenerator: CKG_GENERATE_COUNTER,
+            pMAC: tag1.as_mut_ptr(),
+            ulMACLen: tag1.len() as CK_ULONG,
+        };
+
+        let mut enc1 = [0u8; 12];
+        let mut enc1_len = enc1.len() as CK_ULONG;
+
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param1),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc1.as_mut_ptr(),
+            &mut enc1_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec1 = vec![0u8; data.len()];
+        let mut dec1_len = dec1.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param1),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc1.as_ptr() as *mut CK_BYTE,
+            enc1_len,
+            dec1.as_mut_ptr(),
+            &mut dec1_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec1, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // IV should have the non-fixed bits set to zero
+        assert_eq!(nonce1[0..8], src_iv[0..8]);
+        assert_eq!(nonce1[8..12], [0, 0, 0, 0]);
+
+        // Second call: counter is 1.
+        let mut nonce2 = [0u8; 12];
+        nonce2.copy_from_slice(&src_iv);
+        let mut tag2 = [0u8; 16];
+        let mut param2 = CK_CCM_MESSAGE_PARAMS {
+            ulDataLen: data.len() as CK_ULONG,
+            pNonce: nonce2.as_mut_ptr(),
+            ulNonceLen: nonce2.len() as CK_ULONG,
+            ulNonceFixedBits: 64,
+            nonceGenerator: CKG_GENERATE_COUNTER,
+            pMAC: tag2.as_ptr() as *mut CK_BYTE,
+            ulMACLen: tag2.len() as CK_ULONG,
+        };
+
+        let mut enc2 = [0u8; 12];
+        let mut enc2_len = enc2.len() as CK_ULONG;
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param2),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc2.as_mut_ptr(),
+            &mut enc2_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec2 = vec![0u8; data.len()];
+        let mut dec2_len = dec2.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param2),
+            sizeof!(CK_CCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc2.as_ptr() as *mut CK_BYTE,
+            enc2_len,
+            dec2.as_mut_ptr(),
+            &mut dec2_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec2, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // Check the increment
+        assert_eq!(nonce2[0..8], src_iv[0..8]);
+        assert_eq!(nonce2[8..12], [0, 0, 0, 1]);
+
+        let ret = fn_message_encrypt_init(session, std::ptr::null_mut(), 0);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    {
+        /* Unaligned boundary: 67 fixed bits, 29 counter bits (12 bytes IV) */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut iv1 = [0u8; 12];
+        iv1.copy_from_slice(&src_iv);
+
+        // XXX0 0000 (3bits fixed, 5 bits counter)
+        let expected_split = iv1[8] & (((1u8 << 3) - 1) << 5);
+
+        let mut tag1 = [0u8; 12];
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv1.as_mut_ptr(),
+            ulIvLen: iv1.len() as CK_ULONG,
+            ulIvFixedBits: 67,
+            ivGenerator: CKG_GENERATE_COUNTER,
+            pTag: tag1.as_mut_ptr(),
+            ulTagBits: (tag1.len() * 8) as CK_ULONG,
+        };
+
+        let data = &src_plaintext;
+        let mut enc = [0u8; 12];
+        let mut enc_len = enc.len() as CK_ULONG;
+
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(iv1[8], expected_split);
+        assert_eq!(iv1[9..12], [0, 0, 0]);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec = vec![0u8; data.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc.as_ptr() as *mut CK_BYTE,
+            enc_len,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        assert_eq!(iv1[8], expected_split);
+        assert_eq!(iv1[9..12], [0, 0, 0]);
+
+        let mut iv2 = [0u8; 12];
+        iv2.copy_from_slice(&src_iv);
+
+        // Second call: counter is 1.
+        let mut tag2 = [0u8; 16];
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv2.as_mut_ptr(),
+            ulIvLen: iv2.len() as CK_ULONG,
+            ulIvFixedBits: 67,
+            ivGenerator: CKG_GENERATE_COUNTER,
+            pTag: tag2.as_mut_ptr(),
+            ulTagBits: (tag2.len() * 8) as CK_ULONG,
+        };
+
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(iv2[8], expected_split);
+        assert_eq!(iv2[9..12], [0, 0, 1]);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec = vec![0u8; data.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc.as_ptr() as *mut CK_BYTE,
+            enc_len,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        assert_eq!(iv2[8], expected_split);
+        assert_eq!(iv2[9..12], [0, 0, 1]);
+
+        let ret = fn_message_encrypt_init(session, std::ptr::null_mut(), 0);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    {
+        /* Aligned boundary: 88 fixed bits, 8 counter bits (12 bytes IV) */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut iv = [0x55u8; 12];
+        let mut tag1 = [0u8; 16];
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv.as_mut_ptr(),
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvFixedBits: 88,
+            ivGenerator: CKG_GENERATE_COUNTER,
+            pTag: tag1.as_mut_ptr(),
+            ulTagBits: (tag1.len() * 8) as CK_ULONG,
+        };
+
+        let data = &src_plaintext;
+        let mut enc = [0u8; 12];
+        let mut enc_len = enc.len() as CK_ULONG;
+
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(iv[0..11], [0x55; 11]);
+        assert_eq!(iv[11], 0);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec = vec![0u8; data.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc.as_ptr() as *mut CK_BYTE,
+            enc_len,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        // Byte 11 should be 0 (counter 0). Bytes 0-10 should be 0x55.
+        assert_eq!(iv[0..11], [0x55; 11]);
+        assert_eq!(iv[11], 0);
+
+        // Second call: counter is 1.
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+        let mut dec = vec![0u8; data.len()];
+        let mut dec_len = dec.len() as CK_ULONG;
+        let ret = fn_decrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            enc.as_ptr() as *mut CK_BYTE,
+            enc_len,
+            dec.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(dec, *data);
+        assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+        assert_eq!(iv[0..11], [0x55; 11]);
+        assert_eq!(iv[11], 1);
+
+        let ret = fn_message_encrypt_init(session, std::ptr::null_mut(), 0);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    {
+        /* Counter Limit: 3 bits counter (93 fixed bits, 12 bytes IV) */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut iv = [0u8; 12];
+        let mut tag1 = [0u8; 16];
+        let mut param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv.as_mut_ptr(),
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvFixedBits: 93,
+            ivGenerator: CKG_GENERATE_COUNTER,
+            pTag: tag1.as_mut_ptr(),
+            ulTagBits: (tag1.len() * 8) as CK_ULONG,
+        };
+
+        let data = &src_plaintext;
+        let mut enc = [0u8; 12];
+        let mut enc_len = enc.len() as CK_ULONG;
+
+        // Run 8 times (0 to 7)
+        let mut next_iv_tail = iv[11];
+        for _ in 0..8 {
+            let ret = fn_encrypt_message(
+                session,
+                void_ptr!(&mut param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+                src_aad.as_ptr() as *mut CK_BYTE,
+                src_aad.len() as CK_ULONG,
+                data.as_ptr() as *mut CK_BYTE,
+                data.len() as CK_ULONG,
+                enc.as_mut_ptr(),
+                &mut enc_len,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(iv[11], next_iv_tail);
+
+            let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+            assert_eq!(ret, CKR_OK);
+            let mut dec = vec![0u8; data.len()];
+            let mut dec_len = dec.len() as CK_ULONG;
+            let ret = fn_decrypt_message(
+                session,
+                void_ptr!(&mut param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+                src_aad.as_ptr() as *mut CK_BYTE,
+                src_aad.len() as CK_ULONG,
+                enc.as_ptr() as *mut CK_BYTE,
+                enc_len,
+                dec.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(dec, *data);
+            assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+            assert_eq!(iv[11], next_iv_tail);
+            next_iv_tail += 1;
+        }
+
+        // 9th time should fail with CKR_DATA_LEN_RANGE
+        let ret = fn_encrypt_message(
+            session,
+            void_ptr!(&mut param),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            src_aad.as_ptr() as *mut CK_BYTE,
+            src_aad.len() as CK_ULONG,
+            data.as_ptr() as *mut CK_BYTE,
+            data.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_DATA_LEN_RANGE);
+
+        let ret = fn_message_encrypt_init(session, std::ptr::null_mut(), 0);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    testtokn.finalize();
+}
