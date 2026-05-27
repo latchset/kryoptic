@@ -488,7 +488,8 @@ impl AesOperation {
         }
 
         let mut genidx = params.iv.fixedbits / 8;
-        let mask = u8::try_from(genbits % 8)?;
+        let bits = genbits % 8;
+        let mask = if bits == 0 { 0xff } else { (1u8 << bits) - 1 };
         let genbytes = (genbits + 7) / 8;
 
         match params.iv.generator {
