@@ -17,6 +17,7 @@ mod defaults;
 mod encryption;
 mod error;
 mod kasn1;
+#[cfg(all(feature = "leancrypto"))]
 mod leancrypto;
 mod mechanism;
 mod misc;
