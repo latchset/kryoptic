@@ -5,6 +5,7 @@
 //! of cryptographic mechanisms
 
 pub mod common;
+pub mod drbg;
 
 //#[cfg(feature = "hmac")]
 //pub mod hmac;

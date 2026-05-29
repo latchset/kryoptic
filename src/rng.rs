@@ -5,7 +5,10 @@
 //! Generator
 
 use crate::error::Result;
+#[cfg(feature = "leancrypto")]
+use crate::leancrypto::drbg;
 use crate::mechanism;
+#[cfg(not(feature = "leancrypto"))]
 use crate::ossl::drbg;
 
 #[derive(Debug)]
