@@ -13,8 +13,8 @@ pub mod drbg;
 pub mod pbkdf2;
 //#[cfg(feature = "simplekdf")]
 //pub mod simplekdf;
-//#[cfg(all(feature = "sp800_108", not(feature = "fips")))]
-//pub mod sp800_108;
+#[cfg(all(feature = "sp800_108", not(feature = "fips")))]
+pub mod kbkdf;
 //#[cfg(all(feature = "sshkdf", not(feature = "fips")))]
 //pub mod sshkdf;
 //#[cfg(feature = "tlskdf")]

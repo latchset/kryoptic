@@ -15,7 +15,10 @@ use crate::misc::{bytes_to_vec, sizeof};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 
-#[cfg(not(feature = "fips"))]
+#[cfg(all(not(feature = "fips"), feature = "leancrypto"))]
+use crate::leancrypto::kbkdf::*;
+
+#[cfg(all(not(feature = "fips"), not(feature = "leancrypto")))]
 use crate::native::sp800_108::*;
 
 #[cfg(feature = "fips")]

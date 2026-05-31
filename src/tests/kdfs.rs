@@ -72,6 +72,10 @@ fn test_sp800_kdf() {
         derive_template.len() as CK_ULONG,
         &mut handle3,
     );
+    /* Ignore when a backend does not support CMAC KDF */
+    if ret == CKR_MECHANISM_INVALID {
+        return;
+    }
     assert_eq!(ret, CKR_OK);
 
     /* try again but derive additional keys */

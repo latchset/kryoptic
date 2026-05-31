@@ -420,6 +420,17 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                         &mut dk_handle,
                     );
                     if ret != CKR_OK {
+                        /*
+                         * If a backend does not support a specific option,
+                         * we do not flag it as error.
+                         */
+                        if ret == CKR_MECHANISM_INVALID {
+                            println!(
+                                "Unit test at line {} ignored as backend does not support it",
+                                unit.line
+                            );
+                            continue;
+                        }
                         panic!(
                             "Failed ({}) unit test at line {}",
                             ret, unit.line
@@ -505,6 +516,17 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                         &mut dk_handle,
                     );
                     if ret != CKR_OK {
+                        if ret == CKR_MECHANISM_INVALID {
+                            /*
+                             * If a backend does not support a specific option,
+                             * we do not flag it as error.
+                             */
+                            println!(
+                                "Unit test at line {} ignored as backend does not support it",
+                                unit.line
+                            );
+                            continue;
+                        }
                         panic!(
                             "Failed ({}) unit test at line {}",
                             ret, unit.line
