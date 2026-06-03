@@ -4,10 +4,28 @@ All notable changes to this project should be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.1]
+## 2026-06-04
+
+This release adds important bug fixes and minor additional features on top of
+the 1.5.0 release.
+
 ### What Changed
 
 * Added support for deduplicating objects on insertion
-    - [Add support for object dedup](https://github.com/latchset/kryoptic/pull/453)
+    - [Add support for object
+       dedup](https://github.com/latchset/kryoptic/pull/453)
+
+* Added a user guide and manpages
+    - [Add Kryoptic user guide](https://github.com/latchset/kryoptic/pull/443)
+
+* Added openssl bindings for GCM-SIV
+    - [ossl: Add support for
+       GCM-SIV](https://github.com/latchset/kryoptic/pull/440)
+
+* Added debug logging for PKCS#11 entry-points
+    - [Refactor lib.rs and add PKCS#11 API-level
+       logging](https://github.com/latchset/kryoptic/pull/427)
 
 ## [1.5.0]
 ## 2026-03-04
@@ -268,3 +286,4 @@ that includes non public interfaces.
 [1.3.1]: https://github.com/latchset/kryoptic/releases/tag/v1.3.1
 [1.4.0]: https://github.com/latchset/kryoptic/releases/tag/v1.4.0
 [1.5.0]: https://github.com/latchset/kryoptic/releases/tag/v1.5.0
+[1.5.1]: https://github.com/latchset/kryoptic/releases/tag/v1.5.1
