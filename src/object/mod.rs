@@ -20,6 +20,7 @@ use uuid::Uuid;
 pub mod certs;
 pub mod factory;
 pub mod key;
+pub mod otp;
 
 pub use factory::{
     attr_element, OAFlags, ObjectFactories, ObjectFactory, ObjectFactoryData,
@@ -212,7 +213,7 @@ impl Object {
     /// Report if the object is sensitive with a sensible default
     pub fn is_sensitive(&self) -> bool {
         match self.class {
-            CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
                 for a in &self.attributes {
                     if a.get_type() == CKA_SENSITIVE {
                         return a.to_bool().unwrap_or(true);
@@ -227,7 +228,7 @@ impl Object {
     /// Report is the object is extractable with a sensible default
     pub fn is_extractable(&self) -> bool {
         match self.class {
-            CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
                 for a in &self.attributes {
                     if a.get_type() == CKA_EXTRACTABLE {
                         return a.to_bool().unwrap_or(false);

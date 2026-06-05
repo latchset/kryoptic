@@ -79,7 +79,7 @@ pub trait KeyFactory: ObjectFactory {
         )?;
 
         match obj.get_class() {
-            CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+            CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
                 // default key attributes on CreateObject
                 obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
             }
@@ -87,8 +87,8 @@ pub trait KeyFactory: ObjectFactory {
         }
 
         match obj.get_class() {
-            CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
-                // default key attributes on CreateObject for PRIVATE/SECRET keys
+            CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
+                // default key attributes on CreateObject for PRIVATE/SECRET/OTP keys
                 obj.set_attr(Attribute::from_bool(
                     CKA_ALWAYS_SENSITIVE,
                     false,
