@@ -19,6 +19,7 @@ use super::key::{
     GenericSecretKeyFactory, GenericSecretKeyMechanism, KeyFactory,
     PubKeyFactory, SecretKeyFactory,
 };
+use super::otp::OTPKeyFactory;
 use super::Object;
 
 #[cfg(feature = "nssdb")]
@@ -562,6 +563,13 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Err(CKR_GENERAL_ERROR)?
     }
+
+    /// Helper to access traits that are only available for objects of
+    /// class CKO_OTP_KEY. Other key type factories should not
+    /// implement this method.
+    fn as_otp_key_factory(&self) -> Result<&dyn OTPKeyFactory> {
+        Err(CKR_GENERAL_ERROR)?
+    }
 }
 
 /// This is a specialized factory for objects of class CKO_DATA
@@ -854,14 +862,14 @@ impl ObjectFactories {
                     None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
                 }
             }
-            CKO_SECRET_KEY => {
+            CKO_SECRET_KEY | CKO_OTP_KEY => {
                 match template.iter().find(|a| a.type_ == CKA_KEY_TYPE) {
                     Some(k) => k.to_ulong()?,
                     None => return Err(CKR_TEMPLATE_INCOMPLETE)?,
                 }
             }
             /* TODO:
-             * CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS, CKO_OTP_KEY,
+             * CKO_HW_FEATURE, CKO_DOMAIN_PARAMETERS,
              * CKO_VENDOR_DEFINED.
              * Builtin objects cannot be created so they always return
              * this error. Unsupported objects alaso return the same.
@@ -880,7 +888,7 @@ impl ObjectFactories {
         let class = obj.get_attr_as_ulong(CKA_CLASS)?;
         let type_ = match class {
             CKO_CERTIFICATE => obj.get_attr_as_ulong(CKA_CERTIFICATE_TYPE)?,
-            CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY => {
+            CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
                 obj.get_attr_as_ulong(CKA_KEY_TYPE)?
             }
             _ => 0,
