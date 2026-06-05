@@ -97,9 +97,9 @@ pub extern "C" fn fn_initialize(init_args: CK_VOID_PTR) -> CK_RV {
 
 #[inline(always)]
 fn finalize(_reserved: CK_VOID_PTR) -> Result<()> {
-    let ret = STATE.wlock()?.finalize();
     let mut conf = crate::CONFIG.wlock()?;
     *conf = Config::new();
+    let ret = STATE.wlock()?.finalize();
     if ret != CKR_OK {
         return Err(ret)?;
     }
