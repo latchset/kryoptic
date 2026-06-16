@@ -3,6 +3,8 @@
 
 pub mod aes;
 pub mod common;
+
+#[cfg(not(feature = "leancrypto"))]
 pub mod drbg;
 
 // the derive code for both ECDSA and Montgomery curves
