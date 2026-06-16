@@ -91,6 +91,7 @@ fn sign(
     }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+    let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn Sign>()?;
     let signature_len = operation.signature_len()?;
     let sig_len =
@@ -112,6 +113,14 @@ fn sign(
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
 
     operation.sign(data, signature)?;
+
+    if let Some((handle, attrs)) = operation.updates_object() {
+        let mut token = rstate.get_token_from_slot_mut(slot_id)?;
+        if token.set_object_attrs(handle, attrs.as_slice()).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+    }
+
     unsafe {
         *pul_signature_len = sig_len;
     }
@@ -213,6 +222,7 @@ fn sign_final(
     }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+    let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn Sign>()?;
     let signature_len = operation.signature_len()?;
     let sig_len =
@@ -231,6 +241,14 @@ fn sign_final(
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
     operation.sign_final(signature)?;
+
+    if let Some((handle, attrs)) = operation.updates_object() {
+        let mut token = rstate.get_token_from_slot_mut(slot_id)?;
+        if token.set_object_attrs(handle, attrs.as_slice()).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+    }
+
     unsafe {
         *pul_signature_len = sig_len;
     }
@@ -363,6 +381,7 @@ fn verify(
     }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+    let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn Verify>()?;
     let signature_len = operation.signature_len()?;
     let sig_len =
@@ -375,6 +394,13 @@ fn verify(
     let signature: &[u8] =
         unsafe { std::slice::from_raw_parts(psignature, signature_len) };
     operation.verify(data, signature)?;
+
+    if let Some((handle, attrs)) = operation.updates_object() {
+        let mut token = rstate.get_token_from_slot_mut(slot_id)?;
+        if token.set_object_attrs(handle, attrs.as_slice()).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+    }
 
     #[cfg(feature = "fips")]
     {
@@ -473,6 +499,7 @@ fn verify_final(
     }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+    let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn Verify>()?;
     let signature_len = operation.signature_len()?;
     let sig_len =
@@ -483,6 +510,13 @@ fn verify_final(
     let signature: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
     operation.verify_final(signature)?;
+
+    if let Some((handle, attrs)) = operation.updates_object() {
+        let mut token = rstate.get_token_from_slot_mut(slot_id)?;
+        if token.set_object_attrs(handle, attrs.as_slice()).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+    }
 
     #[cfg(feature = "fips")]
     {
@@ -757,10 +791,18 @@ fn verify_signature(
     }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+    let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn VerifySignature>()?;
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     operation.verify(data)?;
+
+    if let Some((handle, attrs)) = operation.updates_object() {
+        let mut token = rstate.get_token_from_slot_mut(slot_id)?;
+        if token.set_object_attrs(handle, attrs.as_slice()).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+    }
 
     #[cfg(feature = "fips")]
     {
@@ -837,8 +879,16 @@ pub extern "C" fn fn_verify_signature_update(
 fn verify_signature_final(s_handle: CK_SESSION_HANDLE) -> Result<()> {
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+    let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn VerifySignature>()?;
     operation.verify_final()?;
+
+    if let Some((handle, attrs)) = operation.updates_object() {
+        let mut token = rstate.get_token_from_slot_mut(slot_id)?;
+        if token.set_object_attrs(handle, attrs.as_slice()).is_err() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+    }
 
     #[cfg(feature = "fips")]
     {

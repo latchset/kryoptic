@@ -563,13 +563,6 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn as_secret_key_factory(&self) -> Result<&dyn SecretKeyFactory> {
         Err(CKR_GENERAL_ERROR)?
     }
-
-    /// Helper to access traits that are only available for objects of
-    /// class CKO_OTP_KEY. Other key type factories should not
-    /// implement this method.
-    fn as_otp_key_factory(&self) -> Result<&dyn OTPKeyFactory> {
-        Err(CKR_GENERAL_ERROR)?
-    }
 }
 
 /// This is a specialized factory for objects of class CKO_DATA

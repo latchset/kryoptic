@@ -820,7 +820,7 @@ impl Token {
     pub fn set_object_attrs(
         &mut self,
         o_handle: CK_OBJECT_HANDLE,
-        template: &mut [CK_ATTRIBUTE],
+        template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
         match self.session_objects.get_mut(&o_handle) {
             Some(mut obj) => self

@@ -391,3 +391,6 @@ mod mldsa;
 mod slhdsa;
 
 mod pkcs11;
+
+#[cfg(feature = "hotp")]
+mod hotp;

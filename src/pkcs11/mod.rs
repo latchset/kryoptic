@@ -1027,3 +1027,75 @@ impl CK_MECHANISM {
         unsafe { std::ptr::read_unaligned(mechptr as *const CK_MECHANISM) }
     }
 }
+
+impl CK_OTP_PARAM {
+    /// Returns the internal data memory buffer as a CK_ULONG
+    ///
+    /// Errors out if the data size does not match the size of a CK_ULONG
+    pub fn to_ulong(&self) -> Result<CK_ULONG> {
+        if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
+    }
+
+    /// Returns the internal data memory buffer as a bool
+    ///
+    /// Errors out if the data size does not match the size of a CK_BBOOL
+    pub fn to_bool(self) -> Result<bool> {
+        if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
+        if val == 0 {
+            Ok(false)
+        } else {
+            Ok(true)
+        }
+    }
+
+    /// Returns the internal data memory buffer as a slice
+    ///
+    /// Errors out if the internal data pointer is null
+    pub fn to_slice(&self) -> Result<&[u8]> {
+        if self.ulValueLen == 0 {
+            return Ok(&[]);
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        Ok(unsafe {
+            std::slice::from_raw_parts(
+                self.pValue as *const u8,
+                usize::try_from(self.ulValueLen)?,
+            )
+        })
+    }
+
+    /// Returns a copy of the internal buffer as an vector
+    ///
+    /// Returns an empty vector if the internal buffer pointer is null
+    pub fn to_buf(&self) -> Result<Vec<u8>> {
+        Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
+    }
+}
+
+impl CK_OTP_PARAMS {
+    /// Returns the internal data memory buffer as a slice
+    ///
+    /// Errors out if the internal data pointer is null
+    pub fn to_slice(&self) -> Result<&[CK_OTP_PARAM]> {
+        if self.ulCount == 0 {
+            return Ok(&[]);
+        }
+        if self.pParams.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        Ok(unsafe {
+            std::slice::from_raw_parts(
+                self.pParams,
+                usize::try_from(self.ulCount)?,
+            )
+        })
+    }
+}
