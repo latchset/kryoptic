@@ -522,11 +522,13 @@ pub fn generate_key(
 ) -> Result<CK_OBJECT_HANDLE> {
     let class = CKO_SECRET_KEY;
     let mut template = make_attr_template(ulongs, bytes, bools);
-    template.push(make_attribute!(
-        CKA_CLASS,
-        &class as *const _,
-        CK_ULONG_SIZE
-    ));
+    if !ulongs.iter().any(|&(t, _)| t == CKA_CLASS) {
+        template.push(make_attribute!(
+            CKA_CLASS,
+            &class as *const _,
+            CK_ULONG_SIZE
+        ));
+    }
 
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: mech,

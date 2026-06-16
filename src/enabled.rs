@@ -21,6 +21,9 @@ mod hkdf;
 #[cfg(feature = "hmac")]
 mod hmac;
 
+#[cfg(feature = "hotp")]
+mod hotp;
+
 #[cfg(feature = "pbkdf2")]
 mod pbkdf2;
 
@@ -87,6 +90,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "hmac")]
     hmac::register(mechs, ot);
+
+    #[cfg(feature = "hotp")]
+    hotp::register(mechs, ot);
 
     #[cfg(feature = "pbkdf2")]
     pbkdf2::register(mechs, ot);

@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::object::{Object, ObjectFactories, ObjectFactory};
 use crate::pkcs11::*;
@@ -562,6 +563,14 @@ pub trait Sign: MechOperation {
     fn signature_len(&self) -> Result<usize> {
         Err(CKR_GENERAL_ERROR)?
     }
+
+    /// Returns updated attributes for an object if the operation modifies its state.
+    ///
+    /// This can be used by mechanisms to request the update of object
+    /// attributes, such as an OTP counter, after an operation completes.
+    fn updates_object(&self) -> Option<(CK_OBJECT_HANDLE, CkAttrs<'_>)> {
+        None
+    }
 }
 
 pub trait Verify: MechOperation {
@@ -599,6 +608,14 @@ pub trait Verify: MechOperation {
     /// correct size before calling the verification functions
     fn signature_len(&self) -> Result<usize> {
         Err(CKR_GENERAL_ERROR)?
+    }
+
+    /// Returns updated attributes for an object if the operation modifies its state.
+    ///
+    /// This can be used by mechanisms to request the update of object
+    /// attributes, such as an OTP counter, after an operation completes.
+    fn updates_object(&self) -> Option<(CK_OBJECT_HANDLE, CkAttrs<'_>)> {
+        None
     }
 }
 
@@ -824,5 +841,13 @@ pub trait VerifySignature: MechOperation {
     /// called successfully afterwards.
     fn verify_final(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?
+    }
+
+    /// Returns updated attributes for an object if the operation modifies its state.
+    ///
+    /// This can be used by mechanisms to request the update of object
+    /// attributes, such as an OTP counter, after an operation completes.
+    fn updates_object(&self) -> Option<(CK_OBJECT_HANDLE, CkAttrs<'_>)> {
+        None
     }
 }
