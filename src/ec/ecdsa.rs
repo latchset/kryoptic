@@ -287,8 +287,14 @@ impl ObjectFactory for ECDSAPrivFactory {
          * ANSI X9.62 private value d */
         match obj.get_attr_as_bytes(CKA_VALUE) {
             Ok(v) => {
-                if v.len() != ec_key_size(&oid)? {
-                    return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                let expected = ec_key_size(&oid)?;
+                if v.len() != expected {
+                    /* P521 keys can legitimately be 65 bytes long
+                     * because Big Integer representations are minimal
+                     * so a leading zero byte might be dropped */
+                    if !(oid == oid::EC_SECP521R1 && v.len() == 65) {
+                        return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+                    }
                 }
             }
             Err(e) => {

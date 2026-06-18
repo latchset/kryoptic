@@ -59,6 +59,27 @@ fn test_create_ec_objects() {
         &[(CKA_SIGN, true)]
     ));
 
+    /* P-521 Private EC key with 65 bytes */
+    let value_p521 = hex::decode(
+        "EDA2EE113C1325AB0CF0B6376D0626CFFC3CAEBBD54430420A218CCA7E217D9E\
+         9A622DA48A18E150584F4ABD830FCA5A48B5294162EF2493B5E4CEBF7DD41B9E\
+         B5",
+    )
+    .expect("Failed to decode value");
+    let params_p521 =
+        hex::decode("06052B81040023").expect("Failed to decode hex params");
+    let _ = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[
+            (CKA_LABEL, "EC Private Signature Key P521".as_bytes()),
+            (CKA_VALUE, value_p521.as_slice()),
+            (CKA_EC_PARAMS, params_p521.as_slice()),
+        ],
+        &[(CKA_SIGN, true)]
+    ));
+
     testtokn.finalize();
 }
 
