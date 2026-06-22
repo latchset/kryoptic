@@ -15,6 +15,28 @@ use crate::ossl::hash::HashOperation;
 use crate::pkcs11::*;
 
 pub const INVALID_HASH_SIZE: usize = CK_UNAVAILABLE_INFORMATION as usize;
+pub const HASH_LEN_SHA1: usize = 20;
+pub const HASH_BLOCK_SHA1: usize = 64;
+pub const HASH_LEN_SHA224: usize = 28;
+pub const HASH_BLOCK_SHA224: usize = 64;
+pub const HASH_LEN_SHA256: usize = 32;
+pub const HASH_BLOCK_SHA256: usize = 64;
+pub const HASH_LEN_SHA384: usize = 48;
+pub const HASH_BLOCK_SHA384: usize = 128;
+pub const HASH_LEN_SHA512: usize = 64;
+pub const HASH_BLOCK_SHA512: usize = 128;
+pub const HASH_LEN_SHA3_224: usize = 28;
+pub const HASH_BLOCK_SHA3_224: usize = 144;
+pub const HASH_LEN_SHA3_256: usize = 32;
+pub const HASH_BLOCK_SHA3_256: usize = 136;
+pub const HASH_LEN_SHA3_384: usize = 48;
+pub const HASH_BLOCK_SHA3_384: usize = 104;
+pub const HASH_LEN_SHA3_512: usize = 64;
+pub const HASH_BLOCK_SHA3_512: usize = 72;
+pub const HASH_LEN_SHA512_224: usize = 28;
+pub const HASH_BLOCK_SHA512_224: usize = 128;
+pub const HASH_LEN_SHA512_256: usize = 32;
+pub const HASH_BLOCK_SHA512_256: usize = 128;
 
 /// The Hash Based Operation object
 ///
@@ -58,8 +80,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA1_KEY_DERIVATION,
         mac: CKM_SHA_1_HMAC,
         mac_general: CKM_SHA_1_HMAC_GENERAL,
-        hash_size: 20,
-        block_size: 64,
+        hash_size: HASH_LEN_SHA1,
+        block_size: HASH_BLOCK_SHA1,
     },
     HashBasedOp {
         hash: CKM_SHA224,
@@ -68,8 +90,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA224_KEY_DERIVATION,
         mac: CKM_SHA224_HMAC,
         mac_general: CKM_SHA224_HMAC_GENERAL,
-        hash_size: 28,
-        block_size: 64,
+        hash_size: HASH_LEN_SHA224,
+        block_size: HASH_BLOCK_SHA224,
     },
     HashBasedOp {
         hash: CKM_SHA256,
@@ -78,8 +100,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA256_KEY_DERIVATION,
         mac: CKM_SHA256_HMAC,
         mac_general: CKM_SHA256_HMAC_GENERAL,
-        hash_size: 32,
-        block_size: 64,
+        hash_size: HASH_LEN_SHA256,
+        block_size: HASH_BLOCK_SHA256,
     },
     HashBasedOp {
         hash: CKM_SHA384,
@@ -88,8 +110,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA384_KEY_DERIVATION,
         mac: CKM_SHA384_HMAC,
         mac_general: CKM_SHA384_HMAC_GENERAL,
-        hash_size: 48,
-        block_size: 128,
+        hash_size: HASH_LEN_SHA384,
+        block_size: HASH_BLOCK_SHA384,
     },
     HashBasedOp {
         hash: CKM_SHA512,
@@ -98,8 +120,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA512_KEY_DERIVATION,
         mac: CKM_SHA512_HMAC,
         mac_general: CKM_SHA512_HMAC_GENERAL,
-        hash_size: 64,
-        block_size: 128,
+        hash_size: HASH_LEN_SHA512,
+        block_size: HASH_BLOCK_SHA512,
     },
     HashBasedOp {
         hash: CKM_SHA3_224,
@@ -108,8 +130,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA3_224_KEY_DERIVATION,
         mac: CKM_SHA3_224_HMAC,
         mac_general: CKM_SHA3_224_HMAC_GENERAL,
-        hash_size: 28,
-        block_size: 144,
+        hash_size: HASH_LEN_SHA3_224,
+        block_size: HASH_BLOCK_SHA3_224,
     },
     HashBasedOp {
         hash: CKM_SHA3_256,
@@ -118,8 +140,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA3_256_KEY_DERIVATION,
         mac: CKM_SHA3_256_HMAC,
         mac_general: CKM_SHA3_256_HMAC_GENERAL,
-        hash_size: 32,
-        block_size: 136,
+        hash_size: HASH_LEN_SHA3_256,
+        block_size: HASH_BLOCK_SHA3_256,
     },
     HashBasedOp {
         hash: CKM_SHA3_384,
@@ -128,8 +150,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA3_384_KEY_DERIVATION,
         mac: CKM_SHA3_384_HMAC,
         mac_general: CKM_SHA3_384_HMAC_GENERAL,
-        hash_size: 48,
-        block_size: 104,
+        hash_size: HASH_LEN_SHA3_384,
+        block_size: HASH_BLOCK_SHA3_384,
     },
     HashBasedOp {
         hash: CKM_SHA3_512,
@@ -138,8 +160,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA3_512_KEY_DERIVATION,
         mac: CKM_SHA3_512_HMAC,
         mac_general: CKM_SHA3_512_HMAC_GENERAL,
-        hash_size: 64,
-        block_size: 72,
+        hash_size: HASH_LEN_SHA3_512,
+        block_size: HASH_BLOCK_SHA3_512,
     },
     HashBasedOp {
         hash: CKM_SHA512_224,
@@ -148,8 +170,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA512_224_KEY_DERIVATION,
         mac: CKM_SHA512_224_HMAC,
         mac_general: CKM_SHA512_224_HMAC_GENERAL,
-        hash_size: 28,
-        block_size: 128,
+        hash_size: HASH_LEN_SHA512_224,
+        block_size: HASH_BLOCK_SHA512_224,
     },
     HashBasedOp {
         hash: CKM_SHA512_256,
@@ -158,8 +180,8 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
         key_derive: CKM_SHA512_256_KEY_DERIVATION,
         mac: CKM_SHA512_256_HMAC,
         mac_general: CKM_SHA512_256_HMAC_GENERAL,
-        hash_size: 32,
-        block_size: 128,
+        hash_size: HASH_LEN_SHA512_256,
+        block_size: HASH_BLOCK_SHA512_256,
     },
 ];
 

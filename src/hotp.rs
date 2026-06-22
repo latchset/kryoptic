@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
+use crate::hash::{HASH_LEN_SHA1, HASH_LEN_SHA256, HASH_LEN_SHA512};
 use crate::mechanism::{
     Mac, MechOperation, Mechanism, Mechanisms, Sign, Verify,
 };
@@ -265,14 +266,14 @@ impl KeyFactory for HOTPKeyFactory {
 
 impl SecretKeyFactory for HOTPKeyFactory {
     fn recommend_key_size(&self, _default: usize) -> Result<usize> {
-        Ok(32)
+        Ok(HASH_LEN_SHA256)
     }
 }
 
 impl OTPKeyFactory for HOTPKeyFactory {}
 
-const HOTP_MIN_KEY_SIZE: CK_ULONG = 20;
-const HOTP_MAX_KEY_SIZE: CK_ULONG = 64;
+const HOTP_MIN_KEY_SIZE: CK_ULONG = HASH_LEN_SHA1 as CK_ULONG;
+const HOTP_MAX_KEY_SIZE: CK_ULONG = HASH_LEN_SHA512 as CK_ULONG;
 
 /// Generic reusable object to represent mechanisms associated
 /// with HOTP key objects
@@ -466,9 +467,9 @@ impl HOTPOperation {
 
         let key_val = key.get_attr_as_bytes(CKA_VALUE)?.clone();
         let (hmac_mech, mac_len) = match key_val.len() {
-            20 => (CKM_SHA_1_HMAC, 20),
-            32 => (CKM_SHA256_HMAC, 32),
-            64 => (CKM_SHA512_HMAC, 64),
+            HASH_LEN_SHA1 => (CKM_SHA_1_HMAC, HASH_LEN_SHA1),
+            HASH_LEN_SHA256 => (CKM_SHA256_HMAC, HASH_LEN_SHA256),
+            HASH_LEN_SHA512 => (CKM_SHA512_HMAC, HASH_LEN_SHA512),
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
         let hmac = HMACOperation::internal(hmac_mech, key_val, mac_len)?;
