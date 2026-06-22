@@ -4,6 +4,12 @@ All notable changes to this project should be documented in this file.
 
 ## [Unreleased]
 
+* Added support for HOTP mechanism and OTP tokens
+  - [Add support fot CKM_HOTP and OTP key
+    factory](https://github.com/latchset/kryoptic/pull/461)
+  - [Add HOTP feature to standard
+    build](https://github.com/latchset/kryoptic/pull/465)
+
 ## [1.5.1]
 ## 2026-06-04
 
