@@ -1,5 +1,6 @@
 [package]
 name = "ossl"
+links = "openssl"
 version.workspace = true
 edition.workspace = true
 description = "OpenSSL version 3+ bindings to modern EVP APIs"
