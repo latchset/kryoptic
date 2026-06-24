@@ -115,6 +115,7 @@ fn test_hotp() {
     testtokn.finalize();
 }
 
+#[cfg(not(feature = "no_sha1"))]
 #[test]
 #[parallel]
 fn test_hotp_vectors() {
