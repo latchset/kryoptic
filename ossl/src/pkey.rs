@@ -742,7 +742,7 @@ pub enum PkeyData {
     Dsa(DsaData),
 }
 
-#[cfg(ossl_mldsa)]
+#[cfg(ossl_v350)]
 fn params_to_mldsa_data(
     pkey: &EvpPkey,
     params: &OsslParam,
@@ -786,7 +786,7 @@ fn params_to_mldsa_data(
     }))
 }
 
-#[cfg(ossl_mldsa)]
+#[cfg(ossl_v350)]
 fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
     Ok(PkeyData::Mlkey(MlkeyData {
         pubkey: match params.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
@@ -814,7 +814,7 @@ fn params_to_mlkem_data(params: &OsslParam) -> Result<PkeyData, Error> {
     }))
 }
 
-#[cfg(ossl_slhdsa)]
+#[cfg(ossl_v350)]
 fn params_to_slhdsa_data(
     pkey: &EvpPkey,
     params: &OsslParam,
@@ -984,9 +984,9 @@ fn dsa_data_to_params(
 /// from OpenSSL and an argument pointer, which is a mutable pointer to an
 /// `OsslParamBuilder`.
 ///
-/// Critically this function will zeroize allocated parameters after makig a
+/// Critically this function will zeroize allocated parameters after making a
 /// full copy of them, before returning control to OpenSSL.
-#[cfg(not(param_clear_free))]
+#[cfg(not(ossl_v400))]
 unsafe extern "C" fn export_params_callback(
     params: *const OSSL_PARAM,
     arg: *mut c_void,
@@ -1037,6 +1037,12 @@ unsafe extern "C" fn export_params_callback(
     return 0;
 }
 
+#[cfg(not(feature = "openssl-sys"))]
+pub type FfiPkeyClassType = u32;
+
+#[cfg(feature = "openssl-sys")]
+pub type FfiPkeyClassType = c_int;
+
 /// Wrapper around OpenSSL's `EVP_PKEY`, representing a generic public or
 /// private key. Manages the key's lifecycle.
 #[derive(Debug)]
@@ -1052,7 +1058,7 @@ impl EvpPkey {
     pub fn fromdata(
         ctx: &OsslContext,
         pkey_name: &CStr,
-        pkey_type: u32,
+        pkey_type: FfiPkeyClassType,
         params: &OsslParam,
     ) -> Result<EvpPkey, Error> {
         let mut pctx = EvpPkeyCtx::new(ctx, pkey_name)?;
@@ -1066,7 +1072,7 @@ impl EvpPkey {
             EVP_PKEY_fromdata(
                 pctx.as_mut_ptr(),
                 &mut pkey,
-                pkey_type as i32,
+                pkey_type as c_int,
                 params.as_ptr() as *mut OSSL_PARAM,
             )
         };
@@ -1081,17 +1087,15 @@ impl EvpPkey {
     ///
     /// The `selection` argument specifies which components to export
     /// (e.g., public, private, parameters).
-    fn export_params(&self, selection: u32) -> Result<OsslParam<'_>, Error> {
-        #[cfg(param_clear_free)]
+    fn export_params(
+        &self,
+        selection: FfiPkeyClassType,
+    ) -> Result<OsslParam<'_>, Error> {
+        #[cfg(ossl_v400)]
         {
             let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
             let ret = unsafe {
-                EVP_PKEY_todata(
-                    self.ptr,
-                    c_int::try_from(selection)?,
-                    Some(export_params_callback),
-                    &mut params,
-                )
+                EVP_PKEY_todata(self.ptr, selection as c_int, &mut params)
             };
             if ret != 1 {
                 trace_ossl!("EVP_PKEY_todata()");
@@ -1099,14 +1103,14 @@ impl EvpPkey {
             }
             OsslParam::from_ptr(params)
         }
-        #[cfg(not(param_clear_free))]
+        #[cfg(not(ossl_v400))]
         {
             let mut params_builder = OsslParamBuilder::new();
             params_builder.zeroize = true;
             let ret = unsafe {
                 EVP_PKEY_export(
                     self.ptr,
-                    c_int::try_from(selection)?,
+                    selection as c_int,
                     Some(export_params_callback),
                     &mut params_builder as *mut OsslParamBuilder as *mut c_void,
                 )
@@ -1214,7 +1218,7 @@ impl EvpPkey {
         pkey_type: EvpPkeyType,
         data: PkeyData,
     ) -> Result<EvpPkey, Error> {
-        let mut pkey_class: u32 = 0;
+        let mut pkey_class: FfiPkeyClassType = 0;
         let mut params_builder = OsslParamBuilder::with_capacity(2);
         params_builder.zeroize = true;
 
@@ -1294,7 +1298,7 @@ impl EvpPkey {
             EvpPkeyType::Mldsa44
             | EvpPkeyType::Mldsa65
             | EvpPkeyType::Mldsa87 => match &data {
-                #[cfg(ossl_mldsa)]
+                #[cfg(ossl_v350)]
                 PkeyData::Mlkey(mlk) => {
                     if let Some(p) = &mlk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
@@ -1323,7 +1327,7 @@ impl EvpPkey {
             EvpPkeyType::MlKem512
             | EvpPkeyType::MlKem768
             | EvpPkeyType::MlKem1024 => match &data {
-                #[cfg(ossl_mlkem)]
+                #[cfg(ossl_v350)]
                 PkeyData::Mlkey(mlk) => {
                     if let Some(p) = &mlk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
@@ -1361,7 +1365,7 @@ impl EvpPkey {
             | EvpPkeyType::SlhdsaShake256s
             | EvpPkeyType::SlhdsaSha2_256f
             | EvpPkeyType::SlhdsaShake256f => match &data {
-                #[cfg(ossl_slhdsa)]
+                #[cfg(ossl_v350)]
                 PkeyData::SlhDsaKey(sdk) => {
                     if let Some(p) = &sdk.pubkey {
                         pkey_class |= EVP_PKEY_PUBLIC_KEY;
@@ -1486,17 +1490,17 @@ impl EvpPkey {
             EvpPkeyType::Mldsa44
             | EvpPkeyType::Mldsa65
             | EvpPkeyType::Mldsa87 => {
-                #[cfg(ossl_mldsa)]
+                #[cfg(ossl_v350)]
                 return params_to_mldsa_data(&self, &params);
-                #[cfg(not(ossl_mldsa))]
+                #[cfg(not(ossl_v350))]
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             EvpPkeyType::MlKem512
             | EvpPkeyType::MlKem768
             | EvpPkeyType::MlKem1024 => {
-                #[cfg(ossl_mlkem)]
+                #[cfg(ossl_v350)]
                 return params_to_mlkem_data(&params);
-                #[cfg(not(ossl_mlkem))]
+                #[cfg(not(ossl_v350))]
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             EvpPkeyType::SlhdsaSha2_128s
@@ -1511,9 +1515,9 @@ impl EvpPkey {
             | EvpPkeyType::SlhdsaShake256s
             | EvpPkeyType::SlhdsaSha2_256f
             | EvpPkeyType::SlhdsaShake256f => {
-                #[cfg(ossl_slhdsa)]
+                #[cfg(ossl_v350)]
                 return params_to_slhdsa_data(&self, &params);
-                #[cfg(not(ossl_slhdsa))]
+                #[cfg(not(ossl_v350))]
                 return Err(Error::new(ErrorKind::WrapperError));
             }
             EvpPkeyType::Rsa(_, _) => return params_to_rsa_data(&params),
