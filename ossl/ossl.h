@@ -14,6 +14,11 @@
 #include "openssl/err.h"
 #include "openssl/provider.h"
 
+#ifndef _KRYOPTIC_FIPS_
+#include "openssl/rand.h"
+#include "openssl/x509.h"
+#endif
+
 #ifdef _KRYOPTIC_FIPS_
 #include "crypto/evp.h"
 #include "openssl/fips_names.h"

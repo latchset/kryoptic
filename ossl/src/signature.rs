@@ -315,6 +315,124 @@ fn sigalg_to_ossl_name(alg: SigAlg) -> &'static CStr {
     }
 }
 
+#[cfg(not(ossl_v350))]
+fn mldsa_to_evp_type(_alg: SigAlg) -> Result<c_int, Error> {
+    Err(Error::new(ErrorKind::BadArg))
+}
+
+#[cfg(ossl_v350)]
+fn mldsa_to_evp_type(alg: SigAlg) -> Result<c_int, Error> {
+    match alg {
+        SigAlg::Mldsa44 => Ok(EVP_PKEY_ML_DSA_44 as c_int),
+        SigAlg::Mldsa65 => Ok(EVP_PKEY_ML_DSA_65 as c_int),
+        SigAlg::Mldsa87 => Ok(EVP_PKEY_ML_DSA_87 as c_int),
+        _ => Err(Error::new(ErrorKind::BadArg)),
+    }
+}
+
+#[cfg(not(ossl_v350))]
+fn slhdsa_to_evp_type(_alg: SigAlg) -> Result<c_int, Error> {
+    Err(Error::new(ErrorKind::BadArg))
+}
+
+#[cfg(ossl_v350)]
+fn slhdsa_to_evp_type(alg: SigAlg) -> Result<c_int, Error> {
+    match alg {
+        SigAlg::SlhdsaSha2_128s => Ok(EVP_PKEY_SLH_DSA_SHA2_128S as c_int),
+        SigAlg::SlhdsaShake128s => Ok(EVP_PKEY_SLH_DSA_SHAKE_128S as c_int),
+        SigAlg::SlhdsaSha2_128f => Ok(EVP_PKEY_SLH_DSA_SHA2_128F as c_int),
+        SigAlg::SlhdsaShake128f => Ok(EVP_PKEY_SLH_DSA_SHAKE_128F as c_int),
+        SigAlg::SlhdsaSha2_192s => Ok(EVP_PKEY_SLH_DSA_SHA2_192S as c_int),
+        SigAlg::SlhdsaShake192s => Ok(EVP_PKEY_SLH_DSA_SHAKE_192S as c_int),
+        SigAlg::SlhdsaSha2_192f => Ok(EVP_PKEY_SLH_DSA_SHA2_192F as c_int),
+        SigAlg::SlhdsaShake192f => Ok(EVP_PKEY_SLH_DSA_SHAKE_192F as c_int),
+        SigAlg::SlhdsaSha2_256s => Ok(EVP_PKEY_SLH_DSA_SHA2_256S as c_int),
+        SigAlg::SlhdsaShake256s => Ok(EVP_PKEY_SLH_DSA_SHAKE_256S as c_int),
+        SigAlg::SlhdsaSha2_256f => Ok(EVP_PKEY_SLH_DSA_SHA2_256F as c_int),
+        SigAlg::SlhdsaShake256f => Ok(EVP_PKEY_SLH_DSA_SHAKE_256F as c_int),
+        _ => Err(Error::new(ErrorKind::BadArg)),
+    }
+}
+
+/// Helper to map SigAlg to OpenSSL EVP_PKEY type
+/// For RsaPss we still return EVP_PKEY_RSA even though EVP_PKEY_RSA_PSS exists
+/// because the functions we use this for don't understand the latter and just
+/// through an error.
+pub fn sigalg_to_evp_type(alg: SigAlg) -> Result<c_int, Error> {
+    match alg {
+        SigAlg::Ecdsa
+        | SigAlg::EcdsaSha1
+        | SigAlg::EcdsaSha2_224
+        | SigAlg::EcdsaSha2_256
+        | SigAlg::EcdsaSha2_384
+        | SigAlg::EcdsaSha2_512
+        | SigAlg::EcdsaSha3_224
+        | SigAlg::EcdsaSha3_256
+        | SigAlg::EcdsaSha3_384
+        | SigAlg::EcdsaSha3_512 => Ok(EVP_PKEY_EC as c_int),
+        SigAlg::Ed25519 | SigAlg::Ed25519ctx | SigAlg::Ed25519ph => {
+            Ok(EVP_PKEY_ED25519 as c_int)
+        }
+        SigAlg::Ed448 | SigAlg::Ed448ph => Ok(EVP_PKEY_ED448 as c_int),
+        SigAlg::Mldsa44 | SigAlg::Mldsa65 | SigAlg::Mldsa87 => {
+            mldsa_to_evp_type(alg)
+        }
+        SigAlg::Rsa
+        | SigAlg::RsaNoPad
+        | SigAlg::RsaSha1
+        | SigAlg::RsaSha2_224
+        | SigAlg::RsaSha2_256
+        | SigAlg::RsaSha2_384
+        | SigAlg::RsaSha2_512
+        | SigAlg::RsaSha3_224
+        | SigAlg::RsaSha3_256
+        | SigAlg::RsaSha3_384
+        | SigAlg::RsaSha3_512 => Ok(EVP_PKEY_RSA as c_int),
+        SigAlg::RsaPss
+        | SigAlg::RsaPssSha1
+        | SigAlg::RsaPssSha2_224
+        | SigAlg::RsaPssSha2_256
+        | SigAlg::RsaPssSha2_384
+        | SigAlg::RsaPssSha2_512
+        | SigAlg::RsaPssSha3_224
+        | SigAlg::RsaPssSha3_256
+        | SigAlg::RsaPssSha3_384
+        | SigAlg::RsaPssSha3_512 => Ok(EVP_PKEY_RSA as c_int),
+        SigAlg::SlhdsaSha2_128s
+        | SigAlg::SlhdsaShake128s
+        | SigAlg::SlhdsaSha2_128f
+        | SigAlg::SlhdsaShake128f
+        | SigAlg::SlhdsaSha2_192s
+        | SigAlg::SlhdsaShake192s
+        | SigAlg::SlhdsaSha2_192f
+        | SigAlg::SlhdsaShake192f
+        | SigAlg::SlhdsaSha2_256s
+        | SigAlg::SlhdsaShake256s
+        | SigAlg::SlhdsaSha2_256f
+        | SigAlg::SlhdsaShake256f => slhdsa_to_evp_type(alg),
+        #[cfg(feature = "rfc9580")]
+        SigAlg::Dsa => Ok(EVP_PKEY_DSA as c_int),
+    }
+}
+
+/// Checks if a signature algorithm is available
+pub fn available(ctx: &OsslContext, alg: SigAlg) -> bool {
+    let name = sigalg_to_ossl_name(alg);
+    let ptr = unsafe {
+        ERR_set_mark();
+        let p = EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null());
+        ERR_pop_to_mark();
+        p
+    };
+
+    if ptr.is_null() {
+        false
+    } else {
+        unsafe { EVP_SIGNATURE_free(ptr) };
+        true
+    }
+}
+
 /// Helper that returns the OpenSSL digest name associated to a sigalg
 ///
 /// note, that this is relevant only for the mechanism using legacy API
@@ -598,7 +716,7 @@ impl OsslSignature {
         libctx: &OsslContext,
         op: SigOp,
         alg: SigAlg,
-        key: &mut EvpPkey,
+        key: &EvpPkey,
         params: Option<&OsslParam>,
     ) -> Result<OsslSignature, Error> {
         let mut ctx = OsslSignature {
@@ -665,7 +783,7 @@ impl OsslSignature {
                             digest_ptr,
                             libctx.ptr(),
                             std::ptr::null(),
-                            key.as_mut_ptr(),
+                            key.as_ptr() as *mut EVP_PKEY,
                             params_ptr,
                         ),
                         SigOp::Verify => EVP_DigestVerifyInit_ex(
@@ -674,7 +792,7 @@ impl OsslSignature {
                             digest_ptr,
                             libctx.ptr(),
                             std::ptr::null(),
-                            key.as_mut_ptr(),
+                            key.as_ptr() as *mut EVP_PKEY,
                             params_ptr,
                         ),
                     }

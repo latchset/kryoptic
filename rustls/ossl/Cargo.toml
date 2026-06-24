@@ -1,0 +1,21 @@
+[package]
+name = "rustls-ossl"
+version = "0.0.1"
+description = "A Rustls crypt provider that uses ossl bindings"
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+
+[features]
+default = ["tls12", "dynamic"]
+tls12 = ["rustls/tls12"]
+dynamic = ["ossl/dynamic"]
+
+[dependencies]
+rustls = { version = ">=0.23.37, <0.24", default-features = false }
+ossl = { workspace = true, features = ["ossl320"] }
+
+[dev-dependencies]
+rustls = { version = ">=0.23.37, <0.24", default-features = false, features = ["std"] }
+rustls-pemfile = "2.2"

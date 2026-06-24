@@ -153,6 +153,17 @@ impl EvpMdCtx {
     }
 }
 
+#[cfg(ossl_v320)]
+impl Clone for EvpMdCtx {
+    fn clone(&self) -> Self {
+        let ptr = unsafe { EVP_MD_CTX_dup(self.ptr) };
+        if ptr.is_null() {
+            panic!("EVP_MD_CTX_dup failed");
+        }
+        EvpMdCtx { ptr }
+    }
+}
+
 impl Drop for EvpMdCtx {
     fn drop(&mut self) {
         unsafe {
@@ -245,6 +256,22 @@ impl OsslDigest {
         };
         dctx.reset(params)?;
         Ok(dctx)
+    }
+
+    pub fn available(ctx: &OsslContext, digest: DigestAlg) -> bool {
+        let name = digest_to_string(digest);
+        let arg = unsafe {
+            ERR_set_mark();
+            let m =
+                EVP_MD_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut());
+            ERR_pop_to_mark();
+            m
+        };
+        if !arg.is_null() {
+            unsafe { EVP_MD_free(arg) };
+            return true;
+        }
+        return false;
     }
 
     /// Re-initializes an existing context discarding any existing state
@@ -343,6 +370,17 @@ impl OsslDigest {
     #[cfg(not(ossl_v400))]
     pub fn set_state(&mut self, _state: &[u8]) -> Result<(), Error> {
         Err(Error::new(ErrorKind::WrapperError))
+    }
+}
+
+#[cfg(ossl_v320)]
+impl Clone for OsslDigest {
+    fn clone(&self) -> Self {
+        OsslDigest {
+            ctx: self.ctx.clone(),
+            md: self.md.clone(),
+            size: self.size,
+        }
     }
 }
 
