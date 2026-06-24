@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         name: [standard, i686, minimal, pqc, no_sha1]
-        linking: [dynamic, static, fips]
+        linking: [dynamic, static, fips, openssl-sys]
         build: [debug, release]
         db: [sqlitedb, nssdb]
         exclude:
@@ -162,6 +162,8 @@ jobs:
             FEATURES="${FEATURES},${FEATURE_SET},ossl400"
           elif [ "${{ matrix.linking }}" = "fips" ]; then
             FEATURES="${FEATURES},fips"
+          elif [ "${{ matrix.linking }}" = "openssl-sys" ]; then
+            FEATURES="${FEATURES},${FEATURE_SET},openssl-sys"
           fi
 
           if [ "${{ matrix.build }}" = "release" ]; then

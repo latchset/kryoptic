@@ -4,6 +4,11 @@ All notable changes to this project should be documented in this file.
 
 ## [Unreleased]
 
+* Provide a way to build ossl bindings against low-level `openssl-sys` crate
+  to prevent issues with cargo linking to different openssl library
+  - [Build against openssl-sys low-level
+     bindings](https://github.com/latchset/kryoptic/pull/466)
+
 * Added support for HOTP mechanism and OTP tokens
   - [Add support fot CKM_HOTP and OTP key
     factory](https://github.com/latchset/kryoptic/pull/461)

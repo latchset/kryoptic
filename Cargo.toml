@@ -111,7 +111,8 @@ standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp"]
 fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh",
 "hash_all", "kdf_all", "rsa", "pqc", "dep:vsprintf"]
 
-dynamic = ["ossl/dynamic"] # Builds against system libcrypto.so
+dynamic = ["ossl/dynamic"] # Builds dynamically against system libcrypto.so
+openssl-sys = ["ossl/openssl-sys"] # Builds against system libcrypto through openssl-sys
 
 log = ["dep:log", "dep:simplelog", "ossl/log"] # Enables error/info tracing
 slow = [] # Enables slow tests
