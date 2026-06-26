@@ -23,12 +23,14 @@ check-static:
 check-format:
 	@find ./cdylib -name '*.rs' | xargs rustfmt --check --color auto
 	@find ./ossl -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
+	@find ./ossl-sys -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
 	@find ./src -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
 	@find ./tools -name '*.rs' | xargs rustfmt --check --color auto
 
 fix-format:
 	@find ./cdylib -name '*.rs' | xargs rustfmt
 	@find ./ossl -name '*.rs' | xargs rustfmt --edition 2021
+	@find ./ossl-sys -name '*.rs' | xargs rustfmt --edition 2021
 	@find ./src -name '*.rs' | xargs rustfmt --edition 2021
 	@find ./tools -name '*.rs' | xargs rustfmt
 
@@ -62,7 +64,7 @@ scope:
 		if [[ -n "$$OSSLFILES" ]]; then
 			read OSSLFILE < <(ls -t $$OSSLFILES)
 		fi
-		scope -- cdylib ossl pkcs11 src tools $$PKCSFILE $$OSSLFILE
+		scope -- cdylib ossl ossl-sys pkcs11 src tools $$PKCSFILE $$OSSLFILE
 	fi
 
 tags: scope

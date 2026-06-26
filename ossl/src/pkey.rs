@@ -1037,7 +1037,7 @@ unsafe extern "C" fn export_params_callback(
     return 0;
 }
 
-#[cfg(not(feature = "openssl-sys"))]
+#[cfg(feature = "ossl-sys")]
 pub type FfiPkeyClassType = u32;
 
 #[cfg(feature = "openssl-sys")]

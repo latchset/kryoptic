@@ -1,0 +1,28 @@
+[package]
+name = "ossl-sys"
+version.workspace = true
+edition.workspace = true
+description = "Low-level OpenSSL version 3+ bindings"
+# FIXME should really be "openssl" but it would conflict with openssl-sys
+# even if these are mutually exclusive in ossl crate
+# https://github.com/rust-lang/cargo/issues/5969#issuecomment-2525190266
+links = "openssl4"
+homepage.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+
+[lib]
+test = true
+
+[build-dependencies]
+bindgen = "0.72"
+pkg-config = "0.3"
+
+[dependencies]
+cfg-if = "1.0.0"
+libc = "0.2.151"
+
+[features]
+# By default, we build sources and link statically against libcrypto.a
+dynamic = [] # Dynamically link against libcrypto.so
+fips = [] # Builds against sources and libfips.a instead of libcrypto
