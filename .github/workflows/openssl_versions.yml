@@ -160,6 +160,8 @@ jobs:
 
           if [ "${{ matrix.build }}" = "false" ]; then
             FEATURES="$FEATURES,dynamic"
+          else
+            FEATURES="$FEATURES,ossl-sys"
           fi
 
           # create a bugus configuration file to make sure it is not used during tests
