@@ -4,6 +4,20 @@ All notable changes to this project should be documented in this file.
 
 ## [Unreleased]
 
+Unreleased changes
+
+### What Changed
+
+
+
+## [1.5.1]
+## 2026-06-29
+
+This release adds important bug fixes and minor additional features on top of
+the 1.5.1 release.
+
+### What Changed
+
 * Provide a way to build ossl bindings against low-level `openssl-sys` crate
   to prevent issues with cargo linking to different openssl library
   - [Build against openssl-sys low-level
@@ -298,3 +312,4 @@ that includes non public interfaces.
 [1.4.0]: https://github.com/latchset/kryoptic/releases/tag/v1.4.0
 [1.5.0]: https://github.com/latchset/kryoptic/releases/tag/v1.5.0
 [1.5.1]: https://github.com/latchset/kryoptic/releases/tag/v1.5.1
+[1.5.2]: https://github.com/latchset/kryoptic/releases/tag/v1.5.2
