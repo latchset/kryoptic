@@ -7,7 +7,7 @@ on:
     branches: ["main"]
 
 env:
-  OPENSSL_FIPS_BRANCH: kryoptic_ossl40
+  OPENSSL_FIPS_BRANCH: kryoptic_ossl401
   OPENSSL_STATIC_BRANCH: master
 
 jobs:
