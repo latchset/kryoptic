@@ -3,7 +3,7 @@ members = ["ossl", "ossl-sys", "cdylib", "tools"]
 default-members = [".", "ossl", "cdylib"]
 
 [workspace.package]
-version = "1.5.1"
+version = "1.5.2"
 edition = "2024"
 description = "A PKCS #11 software token written in Rust"
 homepage = "https://github.com/latchset/kryoptic"
@@ -11,8 +11,8 @@ repository = "https://github.com/latchset/kryoptic"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
-kryoptic-lib = { version = "1.5.1", path = ".", default-features = false }
-ossl = { version = "1.5.1",  path = "ossl", default-features = false }
+kryoptic-lib = { version = "1.5.2", path = ".", default-features = false }
+ossl = { version = "1.5.2",  path = "ossl", default-features = false }
 
 [package]
 name = "kryoptic-lib"
