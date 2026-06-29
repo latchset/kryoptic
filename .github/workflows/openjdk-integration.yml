@@ -3,7 +3,7 @@ name: OpenJDK Integration Tests
 # Run OpenJDK tests listed in testdata/openjdk/openjdk-jtreg-tests.txt.
 
 env:
-  OPENSSL_BRANCH: kryoptic_ossl40
+  OPENSSL_BRANCH: kryoptic_ossl401
   # Keep jtreg_version, openjdk_feature, and openjdk_name in sync with
   # testdata/openjdk/jtreg-kryoptic.sh.
   jtreg_version: 8+2
