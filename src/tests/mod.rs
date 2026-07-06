@@ -5,6 +5,8 @@ use std::ffi::CString;
 use std::fs::{create_dir_all, remove_dir_all, OpenOptions};
 use std::io::Write;
 use std::sync::Once;
+use std::thread;
+use std::time::Duration;
 
 #[cfg(feature = "log")]
 use crate::log;
@@ -198,8 +200,22 @@ impl TestToken<'_> {
             drop(FINI.read().unwrap());
         } else {
             self.sync = None;
+
             /* wait for all others to complete */
-            drop(SYNC.write().unwrap());
+            loop {
+                /* This needs to use try_write() because a queued write lock
+                 * may actually block read() attempts, which would cause
+                 * tests to deadlock, sleeps between attempts. */
+                thread::sleep(Duration::from_millis(5));
+                match SYNC.try_write() {
+                    Ok(lock) => {
+                        drop(lock);
+                        break;
+                    }
+                    Err(_) => (),
+                }
+            }
+
             let ret = fn_finalize(std::ptr::null_mut());
             assert_eq!(ret, CKR_OK);
             /* winner finalized and completed the tests */
