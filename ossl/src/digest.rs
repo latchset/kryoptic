@@ -179,6 +179,8 @@ pub enum DigestAlg {
     Sha3_512,
     #[cfg(feature = "rfc9580")]
     Md5,
+    #[cfg(feature = "rfc9580")]
+    RipeMd160,
 }
 
 pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
@@ -196,6 +198,8 @@ pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
         DigestAlg::Sha3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
         #[cfg(feature = "rfc9580")]
         DigestAlg::Md5 => cstr!(OSSL_DIGEST_NAME_MD5),
+        #[cfg(feature = "rfc9580")]
+        DigestAlg::RipeMd160 => cstr!(OSSL_DIGEST_NAME_RIPEMD160),
     }
 }
 
@@ -214,6 +218,8 @@ pub(crate) fn string_to_digest(digest: &CStr) -> Result<DigestAlg, Error> {
         b"SHA3-512" => Ok(DigestAlg::Sha3_512),
         #[cfg(feature = "rfc9580")]
         b"MD5" => Ok(DigestAlg::Md5),
+        #[cfg(feature = "rfc9580")]
+        b"RIPEMD160" => Ok(DigestAlg::RipeMd160),
         _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
