@@ -8,11 +8,14 @@
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
+use crate::aes::AES_BLOCK_SIZE;
 use crate::attribute::{Attribute, CkAttrs};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::kasn1::{pkcs, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
+use crate::misc::{warn_weak_key_wrap, zeromem};
 use crate::object::*;
+use crate::ossl::aes::AesOperation;
 use crate::ossl::rsa::*;
 use crate::pkcs11::*;
 
@@ -57,6 +60,18 @@ static RSA_MECHS: LazyLock<[Box<dyn Mechanism>; 4]> = LazyLock::new(|| {
     ]
 });
 
+/// Mechanism object implementing the CKM_RSA_AES_KEY_WRAP composite key
+/// wrapping mechanism.
+static RSA_AES_KW_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
+    Box::new(RsaAesKeyWrapMechanism {
+        info: CK_MECHANISM_INFO {
+            ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
+            ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
+            flags: CKF_WRAP | CKF_UNWRAP,
+        },
+    })
+});
+
 /// The static RSA Public Key factory.
 static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(RSAPubFactory::new()));
@@ -97,6 +112,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     }
     mechs.add_mechanism(CKM_RSA_PKCS_KEY_PAIR_GEN, &RSA_MECHS[2]);
     mechs.add_mechanism(CKM_RSA_PKCS_OAEP, &RSA_MECHS[3]);
+    mechs.add_mechanism(CKM_RSA_AES_KEY_WRAP, &RSA_AES_KW_MECH);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
@@ -776,6 +792,330 @@ impl Mechanism for RsaPKCSMechanism {
         }
         let keydata =
             RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info)?;
+        key_template
+            .as_key_factory()?
+            .import_from_wrapped(keydata, template)
+    }
+}
+
+/// Returns the NIST SP800-57 security strength (in bits) provided by an RSA
+/// key of the given modulus size in bits.
+fn rsa_security_bits(modulus_bits: usize) -> usize {
+    match modulus_bits {
+        b if b >= 15360 => 256,
+        b if b >= 7680 => 192,
+        b if b >= 3072 => 128,
+        b if b >= 2048 => 112,
+        b if b >= 1024 => 80,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod weak_wrap_tests {
+    use super::rsa_security_bits;
+    use crate::misc::is_weak_key_wrap;
+
+    /// Convenience helper mirroring the decision made in `wrap_key`: does
+    /// wrapping an `aes_bits` AES key with an RSA key of `rsa_bits` modulus
+    /// trigger the weak-wrap warning?
+    fn warns(rsa_bits: usize, aes_bits: usize) -> bool {
+        is_weak_key_wrap(rsa_security_bits(rsa_bits), aes_bits)
+    }
+
+    #[test]
+    fn rsa_security_strength_mapping() {
+        assert_eq!(rsa_security_bits(2048), 112);
+        assert_eq!(rsa_security_bits(3072), 128);
+        assert_eq!(rsa_security_bits(4096), 128);
+        assert_eq!(rsa_security_bits(7680), 192);
+        assert_eq!(rsa_security_bits(15360), 256);
+    }
+
+    #[test]
+    fn rsa2048_warns_only_above_aes128() {
+        /* RSA-2048 (112 bits): AES-128 tolerated, AES-192/256 flagged */
+        assert!(!warns(2048, 128));
+        assert!(warns(2048, 192));
+        assert!(warns(2048, 256));
+    }
+
+    #[test]
+    fn rsa3072_4096_warn_above_aes128() {
+        /* RSA-3072/4096 (128 bits): AES-128 fine, anything above flagged */
+        assert!(!warns(3072, 128));
+        assert!(warns(3072, 256));
+        assert!(!warns(4096, 128));
+        assert!(warns(4096, 192));
+        assert!(warns(4096, 256));
+    }
+
+    #[test]
+    fn large_rsa_does_not_warn() {
+        /* RSA-7680 (192 bits) and RSA-15360 (256 bits) cover the AES sizes */
+        assert!(!warns(7680, 192));
+        assert!(warns(7680, 256));
+        assert!(!warns(15360, 256));
+    }
+}
+
+/// Object implementing the CKM_RSA_AES_KEY_WRAP composite mechanism.
+///
+/// [RSA AES KEY WRAP](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203524)
+/// (Version 3.1)
+///
+/// The mechanism wraps a target key by:
+///  1. generating a fresh random temporary AES key,
+///  2. wrapping the target key with AES Key Wrap with Padding
+///     (`CKM_AES_KEY_WRAP_KWP`, NIST SP800-38F),
+///  3. wrapping the temporary AES key with RSA-OAEP.
+///
+/// The wrapped output is the RSA-OAEP wrapped temporary AES key concatenated
+/// with the AES-KWP wrapped target key.
+#[derive(Debug)]
+struct RsaAesKeyWrapMechanism {
+    info: CK_MECHANISM_INFO,
+}
+
+impl RsaAesKeyWrapMechanism {
+    /// Validates the requested temporary AES key size and returns its length
+    /// in bytes.
+    fn aes_key_bytes(aes_key_bits: CK_ULONG) -> Result<usize> {
+        match aes_key_bits {
+            128 => Ok(16),
+            192 => Ok(24),
+            256 => Ok(32),
+            _ => Err(CKR_MECHANISM_PARAM_INVALID)?,
+        }
+    }
+
+    /// Builds the inner CKM_RSA_PKCS_OAEP mechanism from the parameters of the
+    /// CKM_RSA_AES_KEY_WRAP mechanism.
+    fn oaep_mechanism(
+        params: &CK_RSA_AES_KEY_WRAP_PARAMS,
+    ) -> Result<CK_MECHANISM> {
+        if params.pOAEPParams.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        Ok(CK_MECHANISM {
+            mechanism: CKM_RSA_PKCS_OAEP,
+            pParameter: params.pOAEPParams as CK_VOID_PTR,
+            ulParameterLen: CK_ULONG::try_from(std::mem::size_of::<
+                CK_RSA_PKCS_OAEP_PARAMS,
+            >())?,
+        })
+    }
+
+    /// The inner AES Key Wrap with Padding mechanism, which takes no
+    /// parameters.
+    fn kwp_mechanism() -> CK_MECHANISM {
+        CK_MECHANISM {
+            mechanism: CKM_AES_KEY_WRAP_KWP,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        }
+    }
+
+    /// Constructs an in-memory, ephemeral AES key object from raw bytes to be
+    /// used solely for the internal AES-KWP operation.
+    fn ephemeral_aes_key(value: &[u8]) -> Result<Object> {
+        let mut key = Object::new(CKO_SECRET_KEY);
+        key.set_zeroize();
+        key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?;
+        key.set_attr(Attribute::from_ulong(
+            CKA_VALUE_LEN,
+            CK_ULONG::try_from(value.len())?,
+        ))?;
+        key.set_attr(Attribute::from_bytes(CKA_VALUE, value.to_vec()))?;
+        Ok(key)
+    }
+
+    /// Generates an in-memory, ephemeral AES key object of `aes_len` bytes.
+    ///
+    /// This routes through [default_secret_key_generate], the same
+    /// CSPRNG-backed helper used to generate all other secret keys in the
+    /// token, so the temporary key benefits from the exact same generation
+    /// path. The object is kept in memory only, never stored, and is used
+    /// solely for the internal AES-KWP operation.
+    fn generate_ephemeral_aes_key(aes_len: usize) -> Result<Object> {
+        let mut key = Object::new(CKO_SECRET_KEY);
+        key.set_zeroize();
+        key.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_AES))?;
+        key.set_attr(Attribute::from_ulong(
+            CKA_VALUE_LEN,
+            CK_ULONG::try_from(aes_len)?,
+        ))?;
+        default_secret_key_generate(&mut key)?;
+        Ok(key)
+    }
+}
+
+impl Mechanism for RsaAesKeyWrapMechanism {
+    fn info(&self) -> &CK_MECHANISM_INFO {
+        &self.info
+    }
+
+    /// Implements the RSA AES key wrap operation (Wrap)
+    ///
+    /// [RSA AES KEY WRAP](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203524)
+    /// (Version 3.1)
+    fn wrap_key(
+        &self,
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        key: &Object,
+        data: &mut [u8],
+        key_template: &Box<dyn ObjectFactory>,
+    ) -> Result<usize> {
+        if self.info.flags & CKF_WRAP != CKF_WRAP {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+
+        /* the wrapping key must be an RSA public key */
+        if wrapping_key.get_attr_as_ulong(CKA_CLASS)? != CKO_PUBLIC_KEY
+            || wrapping_key.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_RSA
+        {
+            return Err(CKR_WRAPPING_KEY_TYPE_INCONSISTENT)?;
+        }
+
+        let params = mech.get_parameters::<CK_RSA_AES_KEY_WRAP_PARAMS>()?;
+        let aes_len = Self::aes_key_bytes(params.ulAESKeyBits)?;
+        let oaep_mech = Self::oaep_mechanism(&params)?;
+        let kwp_mech = Self::kwp_mechanism();
+
+        /* the RSA-OAEP wrapped temporary AES key (C1) has the size of the
+         * RSA modulus */
+        let modulus_len = wrapping_key.get_attr_as_bytes(CKA_MODULUS)?.len();
+
+        /* warn if the wrapping key is weaker than the wrapped AES key */
+        warn_weak_key_wrap(
+            rsa_security_bits(modulus_len * 8),
+            usize::try_from(params.ulAESKeyBits)?,
+        );
+
+        /* export the target key material to be wrapped */
+        let mut keydata =
+            key_template.as_key_factory()?.export_for_wrapping(key)?;
+
+        /* AES-KWP output length (C2), per NIST SP800-38F: the input padded to
+         * an 8-byte boundary plus an 8-byte integrity check block */
+        let c2_len = ((keydata.len() + AES_BLOCK_SIZE - 1) / 8) * 8;
+        let needed = modulus_len + c2_len;
+        if data.is_empty() {
+            zeromem(keydata.as_mut_slice());
+            return Ok(needed);
+        }
+        if data.len() < needed {
+            zeromem(keydata.as_mut_slice());
+            return Err(Error::buf_too_small(needed));
+        }
+
+        /* generate the ephemeral AES key using secret key generation */
+        let aesobj = match Self::generate_ephemeral_aes_key(aes_len) {
+            Ok(o) => o,
+            Err(e) => {
+                zeromem(keydata.as_mut_slice());
+                return Err(e);
+            }
+        };
+        let mut aeskey = match aesobj.get_attr_as_bytes(CKA_VALUE) {
+            Ok(v) => v.clone(),
+            Err(e) => {
+                zeromem(keydata.as_mut_slice());
+                return Err(e);
+            }
+        };
+
+        /* wrap the target key with AES-KWP into the tail of the output
+         * (keydata is consumed and zeroized by AesOperation::wrap) */
+        let c2_written = match AesOperation::wrap(
+            &kwp_mech,
+            &aesobj,
+            keydata,
+            &mut data[modulus_len..needed],
+        ) {
+            Ok(len) => len,
+            Err(e) => {
+                zeromem(aeskey.as_mut_slice());
+                return Err(e);
+            }
+        };
+
+        /* wrap the ephemeral AES key with RSA-OAEP into the head of the output
+         * (aeskey is consumed and zeroized by RsaPKCSOperation::wrap) */
+        let c1_written = match RsaPKCSOperation::wrap(
+            &oaep_mech,
+            wrapping_key,
+            aeskey,
+            &mut data[..modulus_len],
+            &self.info,
+        ) {
+            Ok(len) => len,
+            Err(e) => {
+                /* scrub the AES-KWP output already written */
+                zeromem(&mut data[..needed]);
+                return Err(e);
+            }
+        };
+
+        Ok(c1_written + c2_written)
+    }
+
+    /// Implements the RSA AES key wrap operation (Unwrap)
+    ///
+    /// [RSA AES KEY WRAP](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203524)
+    /// (Version 3.1)
+    fn unwrap_key(
+        &self,
+        mech: &CK_MECHANISM,
+        wrapping_key: &Object,
+        data: &[u8],
+        template: &[CK_ATTRIBUTE],
+        key_template: &Box<dyn ObjectFactory>,
+    ) -> Result<Object> {
+        if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
+
+        /* the unwrapping key must be an RSA private key */
+        if wrapping_key.get_attr_as_ulong(CKA_CLASS)? != CKO_PRIVATE_KEY
+            || wrapping_key.get_attr_as_ulong(CKA_KEY_TYPE)? != CKK_RSA
+        {
+            return Err(CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT)?;
+        }
+
+        let params = mech.get_parameters::<CK_RSA_AES_KEY_WRAP_PARAMS>()?;
+        let aes_len = Self::aes_key_bytes(params.ulAESKeyBits)?;
+        let oaep_mech = Self::oaep_mechanism(&params)?;
+        let kwp_mech = Self::kwp_mechanism();
+
+        /* the RSA-OAEP wrapped temporary AES key (C1) is exactly one RSA
+         * block long, the remainder is the AES-KWP wrapped target key (C2) */
+        let modulus_len = wrapping_key.get_attr_as_bytes(CKA_MODULUS)?.len();
+        if data.len() <= modulus_len {
+            return Err(CKR_WRAPPED_KEY_LEN_RANGE)?;
+        }
+        let (c1, c2) = data.split_at(modulus_len);
+
+        /* recover the temporary AES key with RSA-OAEP */
+        let mut aeskey =
+            RsaPKCSOperation::unwrap(&oaep_mech, wrapping_key, c1, &self.info)?;
+        if aeskey.len() != aes_len {
+            zeromem(aeskey.as_mut_slice());
+            return Err(CKR_WRAPPED_KEY_INVALID)?;
+        }
+        let aesobj = match Self::ephemeral_aes_key(&aeskey) {
+            Ok(o) => o,
+            Err(e) => {
+                zeromem(aeskey.as_mut_slice());
+                return Err(e);
+            }
+        };
+        zeromem(aeskey.as_mut_slice());
+
+        /* recover the target key material with AES-KWP */
+        let keydata = AesOperation::unwrap(&kwp_mech, &aesobj, c2)?;
+
         key_template
             .as_key_factory()?
             .import_from_wrapped(keydata, template)

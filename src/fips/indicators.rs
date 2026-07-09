@@ -283,7 +283,7 @@ struct FipsMechanism {
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 17],
-    mechs: [FipsMechanism; 93],
+    mechs: [FipsMechanism; 94],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -412,6 +412,21 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
                 restrict!(),
             ],
             genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_RSA_AES_KEY_WRAP,
+            operations: CKF_WRAP | CKF_UNWRAP,
+            restrictions: [
+                restrict!(CKK_RSA, range!(2048, 16384)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
         },
         FipsMechanism {
             mechanism: CKM_SHA1_RSA_PKCS,
