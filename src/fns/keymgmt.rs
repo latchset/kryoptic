@@ -553,10 +553,20 @@ fn derive_key(
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 /* 3. A non-null salt must be provided */
-                if params.ulSaltType == CKF_HKDF_SALT_NULL
-                    || params.pSalt.is_null()
-                {
-                    return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                match params.ulSaltType {
+                    CKF_HKDF_SALT_DATA => {
+                        if params.pSalt.is_null() || params.ulSaltLen == 0 {
+                            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                        }
+                    }
+                    CKF_HKDF_SALT_KEY => {
+                        if params.hSaltKey == CK_INVALID_HANDLE {
+                            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                        }
+                    }
+                    _ => {
+                        return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                    }
                 }
             } else if !key.get_attr_as_bool(CKA_DERIVE)? {
                 return Err(CKR_KEY_FUNCTION_NOT_PERMITTED)?;
