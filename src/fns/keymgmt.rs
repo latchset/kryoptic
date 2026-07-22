@@ -531,7 +531,7 @@ fn derive_key(
 
     /* key checks
      * NOTE: we avoid checking for CKA_DERIVE for CKM_PUB_KEY_FROM_PRIV_KEY
-     * because we think this operation should alays be possible regardless
+     * because we think this operation should always be possible regardless
      * of whether private key should generally allow key derivation. This
      * is our (Kryoptic team) interpretation and may change if/when the
      * OASIS PKCS#11 TC clarifies the spec in this regard.
@@ -598,7 +598,7 @@ fn derive_key(
             for h in handles {
                 objs.push(token.get_object_by_handle(*h)?);
             }
-            /* shenanigans to deal with borrow checkr on token */
+            /* shenanigans to deal with borrow checker on token */
             let mut send = Vec::<&object::Object>::with_capacity(objs.len());
             for o in &objs {
                 send.push(o);
