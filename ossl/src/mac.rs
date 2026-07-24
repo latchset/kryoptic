@@ -6,7 +6,7 @@
 use std::ffi::CStr;
 
 use crate::bindings::*;
-use crate::digest::DigestAlg;
+use crate::digest::{DigestAlg, OsslDigest};
 use crate::{
     cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParamBuilder,
     OsslSecret,
@@ -53,6 +53,16 @@ impl Drop for EvpMacCtx {
     }
 }
 
+impl Clone for EvpMacCtx {
+    fn clone(&self) -> Self {
+        let ptr = unsafe { EVP_MAC_CTX_dup(self.ptr) };
+        if ptr.is_null() {
+            panic!("EVP_MAC_CTX_dup failed");
+        }
+        EvpMacCtx { ptr }
+    }
+}
+
 unsafe impl Send for EvpMacCtx {}
 unsafe impl Sync for EvpMacCtx {}
 
@@ -77,41 +87,43 @@ pub enum MacAlg {
 
 pub(crate) fn mac_to_digest_and_type(
     mac: MacAlg,
-) -> Result<(DigestAlg, &'static CStr), Error> {
-    Ok(match mac {
-        MacAlg::HmacSha1 => (DigestAlg::Sha1, cstr!(OSSL_MAC_NAME_HMAC)),
+) -> (Option<DigestAlg>, &'static CStr) {
+    match mac {
+        MacAlg::HmacSha1 => (Some(DigestAlg::Sha1), cstr!(OSSL_MAC_NAME_HMAC)),
         MacAlg::HmacSha2_224 => {
-            (DigestAlg::Sha2_224, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha2_224), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha2_256 => {
-            (DigestAlg::Sha2_256, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha2_256), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha2_384 => {
-            (DigestAlg::Sha2_384, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha2_384), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha2_512 => {
-            (DigestAlg::Sha2_512, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha2_512), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha2_512_224 => {
-            (DigestAlg::Sha2_512_224, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha2_512_224), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha2_512_256 => {
-            (DigestAlg::Sha2_512_256, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha2_512_256), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha3_224 => {
-            (DigestAlg::Sha3_224, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha3_224), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha3_256 => {
-            (DigestAlg::Sha3_256, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha3_256), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha3_384 => {
-            (DigestAlg::Sha3_384, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha3_384), cstr!(OSSL_MAC_NAME_HMAC))
         }
         MacAlg::HmacSha3_512 => {
-            (DigestAlg::Sha3_512, cstr!(OSSL_MAC_NAME_HMAC))
+            (Some(DigestAlg::Sha3_512), cstr!(OSSL_MAC_NAME_HMAC))
         }
-        _ => return Err(Error::new(ErrorKind::WrapperError)),
-    })
+        MacAlg::CmacAes128 | MacAlg::CmacAes192 | MacAlg::CmacAes256 => {
+            (None, cstr!(OSSL_MAC_NAME_CMAC))
+        }
+    }
 }
 
 pub(crate) fn add_mac_alg_to_params(
@@ -214,7 +226,7 @@ pub(crate) fn add_mac_alg_to_params(
 }
 
 /// Higher level wrapper for Mac operations
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OsslMac {
     /// The OpenSSL message mac context (`EVP_MAC_CTX`).
     ctx: EvpMacCtx,
@@ -261,6 +273,26 @@ impl OsslMac {
         mctx.size = unsafe { EVP_MAC_CTX_get_mac_size(mctx.ctx.as_mut_ptr()) };
 
         Ok(mctx)
+    }
+
+    pub fn available(ctx: &OsslContext, alg: MacAlg) -> bool {
+        let (digest, name) = mac_to_digest_and_type(alg);
+        let arg = unsafe {
+            ERR_set_mark();
+            let m =
+                EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut());
+            ERR_pop_to_mark();
+            m
+        };
+        if !arg.is_null() {
+            unsafe { EVP_MAC_free(arg) };
+            if let Some(d) = digest {
+                return OsslDigest::available(ctx, d);
+            } else {
+                return true;
+            }
+        }
+        return false;
     }
 
     pub fn reinit(&mut self) -> Result<(), Error> {

@@ -127,6 +127,8 @@ pub enum EncAlg {
     AesOfb(AesSize),
     AesWrap(AesSize),
     AesWrapPad(AesSize),
+    ChaCha20,
+    ChaCha20Poly1305,
     /* 3DES */
     #[cfg(feature = "rfc9580")]
     TripleDesCfb,
@@ -233,6 +235,8 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
             AesSize::Aes192 => c"AES-192-WRAP-PAD",
             AesSize::Aes256 => c"AES-256-WRAP-PAD",
         },
+        EncAlg::ChaCha20 => c"ChaCha20",
+        EncAlg::ChaCha20Poly1305 => c"ChaCha20-Poly1305",
         #[cfg(feature = "rfc9580")]
         EncAlg::TripleDesCfb => c"DES-EDE3-CFB",
         #[cfg(feature = "rfc9580")]
@@ -370,7 +374,8 @@ impl OsslCipher {
             EncAlg::AesCcm(_)
             | EncAlg::AesGcm(_)
             | EncAlg::AesGcmSiv(_)
-            | EncAlg::AesOcb(_) => ctx.aead_setup(alg, &aead)?,
+            | EncAlg::AesOcb(_)
+            | EncAlg::ChaCha20Poly1305 => ctx.aead_setup(alg, &aead)?,
             EncAlg::AesCts(_, mode) => {
                 let mut params_builder = OsslParamBuilder::with_capacity(1);
                 params_builder.add_const_c_string(
@@ -604,6 +609,32 @@ impl OsslCipher {
                 &mut outlen,
                 input.as_ptr(),
                 c_int::try_from(input.len())?,
+            )
+        };
+        if ret != 1 {
+            trace_ossl!("EVP_CipherUpdate()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(usize::try_from(outlen)?)
+    }
+
+    /// Ingests plain text data and possibly outputs encrypted data in-place.
+    ///
+    /// This api is equivalent to `update` but uses the same buffer for
+    /// input and output.
+    pub fn update_in_place(&mut self, data: &mut [u8]) -> Result<usize, Error> {
+        if data.len() < self.buffer_size(data.len()) {
+            return Err(Error::new(ErrorKind::BufferSize));
+        }
+
+        let mut outlen = c_int::try_from(data.len())?;
+        let ret = unsafe {
+            EVP_CipherUpdate(
+                self.ctx.as_mut_ptr(),
+                data.as_mut_ptr(),
+                &mut outlen,
+                data.as_ptr(),
+                c_int::try_from(data.len())?,
             )
         };
         if ret != 1 {

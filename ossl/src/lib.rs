@@ -240,6 +240,7 @@ pub struct OsslContext {
 }
 
 static LEGACY_PROVIDER_NAME: &CStr = c"legacy";
+static FIPS_PROVIDER_NAME: &CStr = c"fips";
 
 impl OsslContext {
     pub fn new_lib_ctx() -> OsslContext {
@@ -326,6 +327,38 @@ impl OsslContext {
             self.providers.push(provider);
             Ok(())
         }
+    }
+
+    pub fn load_fips_provider(&mut self) -> Result<(), Error> {
+        if unsafe {
+            OSSL_PROVIDER_available(self.ptr(), FIPS_PROVIDER_NAME.as_ptr())
+        } == 1
+        {
+            return Ok(());
+        }
+
+        let provider = unsafe {
+            OSSL_PROVIDER_load(self.ptr(), FIPS_PROVIDER_NAME.as_ptr())
+        };
+        if provider.is_null() {
+            Err(Error::new(ErrorKind::OsslError))
+        } else {
+            self.providers.push(provider);
+            Ok(())
+        }
+    }
+
+    pub fn enforce_fips(&mut self) -> Result<(), Error> {
+        self.load_fips_provider()?;
+        if unsafe { EVP_default_properties_enable_fips(self.ptr(), 1) } != 1 {
+            trace_ossl!("EVP_default_properties_enable_fips()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(())
+    }
+
+    pub fn fips_is_enabled(&self) -> bool {
+        unsafe { EVP_default_properties_is_fips_enabled(self.ptr()) == 1 }
     }
 
     pub fn ptr(&self) -> *mut OSSL_LIB_CTX {
@@ -1131,7 +1164,7 @@ impl<'a> OsslParam<'a> {
 /// Once created, the capacity of an `OsslSecret` cannot be changed, preventing
 /// accidental reallocations that might leave copies of the secret data in
 /// unmanaged memory.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OsslSecret {
     data: Vec<u8>,
 }
