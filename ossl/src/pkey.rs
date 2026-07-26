@@ -11,6 +11,39 @@ use crate::{
     cstr, trace_ossl, Error, ErrorKind, OsslContext, OsslParam,
     OsslParamBuilder, OsslSecret,
 };
+use bitflags::bitflags;
+
+bitflags! {
+    /// Wrapper bitfield for import and export functions
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct PkeyClass: u32 {
+        const NONE        = 0;
+        /// based on OSSL_KEYMGMT_SELECT_PRIVATE_KEY
+        const SELECT_PRIVATE_KEY = 0x01;
+        /// based on OSSL_KEYMGMT_SELECT_PUBLIC_KEY
+        const SELECT_PUBLIC_KEY = 0x02;
+        /// based on OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS
+        const SELECT_DOMAIN_PARAMETERS = 0x04;
+        /// based on OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS
+        const SELECT_OTHER_PARAMETERS = 0x80;
+        /// based on OSSL_KEYMGMT_SELECT_ALL_PARAMETERS
+        const SELECT_ALL_PARAMETERS = Self::SELECT_DOMAIN_PARAMETERS.bits() | Self::SELECT_OTHER_PARAMETERS.bits();
+        /// based on EVP_PKEY_KEY_PARAMETERS
+        const PARAMETERS  = Self::SELECT_ALL_PARAMETERS.bits();
+        /// based on EVP_PKEY_PRIVATE_KEY
+        const PRIVATE_KEY = Self::SELECT_PRIVATE_KEY.bits() | Self::PARAMETERS.bits();
+        /// based on EVP_PKEY_PUBLIC_KEY
+        const PUBLIC_KEY  = Self::SELECT_PUBLIC_KEY.bits() | Self::PARAMETERS.bits();
+        /// based on EVP_PKEY_KEYPAIR
+        const KEYPAIR     = Self::PUBLIC_KEY.bits() | Self::SELECT_PRIVATE_KEY.bits();
+    }
+}
+
+impl From<PkeyClass> for u32 {
+    fn from(val: PkeyClass) -> Self {
+        val.bits()
+    }
+}
 
 /// Wrapper around OpenSSL's `EVP_PKEY_CTX`, managing its lifecycle.
 /// Used for various public key algorithm operations (key generation, signing,
@@ -756,7 +789,7 @@ fn params_to_mldsa_data(
                     // asked for key pair here so if it not available,
                     // retry exporting just public key part
                     // https://github.com/openssl/openssl/issues/27542
-                    let p2 = pkey.export_params(EVP_PKEY_PUBLIC_KEY)?;
+                    let p2 = pkey.export_params(PkeyClass::PUBLIC_KEY)?;
                     match p2.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
                         Ok(p) => Some(p.to_vec()),
                         Err(e) => match e.kind() {
@@ -828,7 +861,7 @@ fn params_to_slhdsa_data(
                     // asked for key pair here so if it not available,
                     // retry exporting just public key part
                     // https://github.com/openssl/openssl/issues/27542
-                    let p2 = pkey.export_params(EVP_PKEY_PUBLIC_KEY)?;
+                    let p2 = pkey.export_params(PkeyClass::PRIVATE_KEY)?;
                     match p2.get_octet_string(cstr!(OSSL_PKEY_PARAM_PUB_KEY)) {
                         Ok(p) => Some(p.to_vec()),
                         Err(e) => match e.kind() {
@@ -1055,10 +1088,14 @@ impl EvpPkey {
     ///
     /// Used for importing public or private keys based on their components
     /// (e.g., modulus/exponent for RSA, curve/point for EC).
+    ///
+    /// The `pkey_type` argument specifies which components we import
+    /// (e.g., PkeyClass::PRIVATE_KEY, PkeyClass::PUBLIC_KEY,
+    /// PkeyClass::KEYPAIR, ...).
     pub fn fromdata(
         ctx: &OsslContext,
         pkey_name: &CStr,
-        pkey_type: FfiPkeyClassType,
+        pkey_type: impl Into<u32>,
         params: &OsslParam,
     ) -> Result<EvpPkey, Error> {
         let mut pctx = EvpPkeyCtx::new(ctx, pkey_name)?;
@@ -1072,7 +1109,7 @@ impl EvpPkey {
             EVP_PKEY_fromdata(
                 pctx.as_mut_ptr(),
                 &mut pkey,
-                pkey_type as c_int,
+                pkey_type.into() as c_int,
                 params.as_ptr() as *mut OSSL_PARAM,
             )
         };
@@ -1086,16 +1123,20 @@ impl EvpPkey {
     /// Exports key material components into an `OsslParam` structure.
     ///
     /// The `selection` argument specifies which components to export
-    /// (e.g., public, private, parameters).
+    /// (e.g., PkeyClass::PRIVATE_KEY, PkeyClass::PUBLIC_KEY, ...).
     fn export_params(
         &self,
-        selection: FfiPkeyClassType,
+        selection: PkeyClass,
     ) -> Result<OsslParam<'_>, Error> {
         #[cfg(ossl_v400)]
         {
             let mut params: *mut OSSL_PARAM = std::ptr::null_mut();
             let ret = unsafe {
-                EVP_PKEY_todata(self.ptr, selection as c_int, &mut params)
+                EVP_PKEY_todata(
+                    self.ptr,
+                    selection.bits() as c_int,
+                    &mut params,
+                )
             };
             if ret != 1 {
                 trace_ossl!("EVP_PKEY_todata()");
@@ -1110,7 +1151,7 @@ impl EvpPkey {
             let ret = unsafe {
                 EVP_PKEY_export(
                     self.ptr,
-                    selection as c_int,
+                    selection.bits() as c_int,
                     Some(export_params_callback),
                     &mut params_builder as *mut OsslParamBuilder as *mut c_void,
                 )
@@ -1218,7 +1259,7 @@ impl EvpPkey {
         pkey_type: EvpPkeyType,
         data: PkeyData,
     ) -> Result<EvpPkey, Error> {
-        let mut pkey_class: FfiPkeyClassType = 0;
+        let mut pkey_class = PkeyClass::NONE;
         let mut params_builder = OsslParamBuilder::with_capacity(2);
         params_builder.zeroize = true;
 
@@ -1233,14 +1274,14 @@ impl EvpPkey {
             | EvpPkeyType::BrainpoolP512r1 => match &data {
                 PkeyData::Ecc(ecc) => {
                     if let Some(p) = &ecc.pubkey {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &ecc.prikey {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder
                             .add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
                     }
@@ -1253,14 +1294,14 @@ impl EvpPkey {
             | EvpPkeyType::X448 => match &data {
                 PkeyData::Ecc(ecc) => {
                     if let Some(p) = &ecc.pubkey {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &ecc.prikey {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
@@ -1281,14 +1322,14 @@ impl EvpPkey {
             | EvpPkeyType::Modp8192 => match &data {
                 PkeyData::Ffdh(ffdh) => {
                     if let Some(p) = &ffdh.pubkey {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                         params_builder.add_bn(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &ffdh.prikey {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder
                             .add_bn(cstr!(OSSL_PKEY_PARAM_PRIV_KEY), p)?
                     }
@@ -1301,21 +1342,21 @@ impl EvpPkey {
                 #[cfg(ossl_v350)]
                 PkeyData::Mlkey(mlk) => {
                     if let Some(p) = &mlk.pubkey {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &mlk.prikey {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
                         )?
                     }
                     if let Some(p) = &mlk.seed {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_DSA_SEED),
                             p,
@@ -1330,21 +1371,21 @@ impl EvpPkey {
                 #[cfg(ossl_v350)]
                 PkeyData::Mlkey(mlk) => {
                     if let Some(p) = &mlk.pubkey {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &mlk.prikey {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
                         )?
                     }
                     if let Some(p) = &mlk.seed {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_ML_KEM_SEED),
                             p,
@@ -1368,14 +1409,14 @@ impl EvpPkey {
                 #[cfg(ossl_v350)]
                 PkeyData::SlhDsaKey(sdk) => {
                     if let Some(p) = &sdk.pubkey {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PUB_KEY),
                             p.as_slice(),
                         )?
                     }
                     if let Some(p) = &sdk.prikey {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                         params_builder.add_octet_slice(
                             cstr!(OSSL_PKEY_PARAM_PRIV_KEY),
                             p,
@@ -1387,9 +1428,9 @@ impl EvpPkey {
             EvpPkeyType::Rsa(_, _) => match &data {
                 PkeyData::Rsa(rsa) => {
                     if rsa_data_to_params(&rsa, &mut params_builder)? {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                     } else {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
@@ -1398,9 +1439,9 @@ impl EvpPkey {
             EvpPkeyType::Dsa(_) => match &data {
                 PkeyData::Dsa(dsa) => {
                     if dsa_data_to_params(&dsa, &mut params_builder)? {
-                        pkey_class |= EVP_PKEY_PRIVATE_KEY;
+                        pkey_class |= PkeyClass::PRIVATE_KEY;
                     } else {
-                        pkey_class |= EVP_PKEY_PUBLIC_KEY;
+                        pkey_class |= PkeyClass::PUBLIC_KEY;
                     }
                 }
                 _ => return Err(Error::new(ErrorKind::WrapperError)),
@@ -1413,7 +1454,7 @@ impl EvpPkey {
 
     /// Export public point in encoded form and/or private key
     pub fn export(&self) -> Result<PkeyData, Error> {
-        let params = self.export_params(EVP_PKEY_KEYPAIR)?;
+        let params = self.export_params(PkeyClass::KEYPAIR)?;
         let pkey_type = pkey_to_type(&self, &params)?;
         Ok(match pkey_type {
             EvpPkeyType::P256
