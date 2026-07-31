@@ -22,14 +22,12 @@ Version:        1.5.2
 Release:        %autorelease
 Summary:        PKCS #11 software token written in Rust
 
-SourceLicense:  GPL-3.0-or-later
+SourceLicense:  Apache-2.0
 # LICENSE.dependencies contains a full license breakdown
 License: %{shrink:
  Apache-2.0 AND
- (Apache-2.0 OR BSL-1.0) AND
  (Apache-2.0 OR MIT) AND
  BSD-3-Clause AND
- GPL-3.0-or-later AND
  ISC AND
  MIT AND
  (MIT OR Apache-2.0) AND
