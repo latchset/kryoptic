@@ -9,7 +9,7 @@ description = "Low-level OpenSSL version 3+ bindings"
 links = "openssl4"
 homepage.workspace = true
 repository.workspace = true
-license = "Apache-2.0"
+license.workspace = true
 
 [lib]
 test = true

@@ -96,22 +96,12 @@ This command accepts the same feature set as the build command
 
 # License
 
-The license is currently set as the GPLv3.0+ as released by the FSF.
+The license is currently set as the Apache Software License 2.0 the same license
+OpenSSL uses.
 
-This license is compatible with the OpenSSL ASL2.0 license and is a strong
-copyleft license, which we find useful.
-
-Unlike other copyleft projects we are not dogmatic and chose this license
-for the benefits we think it will bring to a self-contained project like
-kryoptic. Namely that it strongly encourages modifications to be
-contributed back.
-
-If a party asks for it, we will pragmatically evaluate a different license
-and will be open to making a change if we think that such a change would in fact
-be in the best interest of the project. Note that requests of this kind
-need to come with a well-reasoned rationale that shows benefits both for
-the requesting party and the upstream project.
-
+In versions prior than and including 1.5.2 the license for the token code was 
+the GPLv3.0+ as released by the FSF, we changed it to make the project more
+easily reusable across a wider set of Open Source communities.
 
 # Contributions
 

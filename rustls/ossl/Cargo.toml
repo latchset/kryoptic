@@ -5,7 +5,7 @@ description = "A Rustls crypto provider that uses ossl bindings"
 edition.workspace = true
 homepage.workspace = true
 repository.workspace = true
-license = "Apache-2.0"
+license.workspace = true
 
 [features]
 default = ["tls12", "dynamic"]
