@@ -235,18 +235,28 @@ pub(crate) use trace_ossl;
 pub struct OsslContext {
     context: *mut OSSL_LIB_CTX,
     providers: Vec<*mut OSSL_PROVIDER>,
+    propq: Option<&'static CStr>,
     #[cfg(feature = "fips")]
     is_fips: bool,
 }
 
 static LEGACY_PROVIDER_NAME: &CStr = c"legacy";
+static DEFAULT_PROVIDER_NAME: &CStr = c"default";
 static FIPS_PROVIDER_NAME: &CStr = c"fips";
 
+static FIPS_PROVIDER_PERMISIVE_PROPQ: &CStr = c"?fips=yes";
+
 impl OsslContext {
+    /// Creates a new empty OpenSSL library context.
+    ///
+    /// For most of the applications, its recommented to load the default
+    /// configuration file after this call to make sure the application
+    /// behaves as expected using `load_default_configuration()`.
     pub fn new_lib_ctx() -> OsslContext {
         OsslContext {
             context: unsafe { OSSL_LIB_CTX_new() },
             providers: Vec::new(),
+            propq: None,
             #[cfg(feature = "fips")]
             is_fips: false,
         }
@@ -257,6 +267,7 @@ impl OsslContext {
         OsslContext {
             context: ctx,
             providers: Vec::new(),
+            propq: None,
             #[cfg(feature = "fips")]
             is_fips: false,
         }
@@ -267,6 +278,7 @@ impl OsslContext {
         OsslContext {
             context: ctx,
             providers: vec![prov as *mut OSSL_PROVIDER],
+            propq: None,
             is_fips: true,
         }
     }
@@ -306,21 +318,15 @@ impl OsslContext {
         self.load_configuration_file(None)
     }
 
-    pub fn load_legacy_provider(&mut self) -> Result<(), Error> {
+    fn load_provider(&mut self, name: &CStr) -> Result<(), Error> {
         if cfg!(feature = "fips") {
             return Err(Error::new(ErrorKind::OsslError));
         }
-
-        if unsafe {
-            OSSL_PROVIDER_available(self.ptr(), LEGACY_PROVIDER_NAME.as_ptr())
-        } == 1
-        {
+        if unsafe { OSSL_PROVIDER_available(self.ptr(), name.as_ptr()) } == 1 {
             return Ok(());
         }
 
-        let provider = unsafe {
-            OSSL_PROVIDER_load(self.ptr(), LEGACY_PROVIDER_NAME.as_ptr())
-        };
+        let provider = unsafe { OSSL_PROVIDER_load(self.ptr(), name.as_ptr()) };
         if provider.is_null() {
             Err(Error::new(ErrorKind::OsslError))
         } else {
@@ -329,23 +335,39 @@ impl OsslContext {
         }
     }
 
+    pub fn load_legacy_provider(&mut self) -> Result<(), Error> {
+        self.load_provider(LEGACY_PROVIDER_NAME)
+    }
+
     pub fn load_fips_provider(&mut self) -> Result<(), Error> {
+        self.load_provider(FIPS_PROVIDER_NAME)
+    }
+
+    pub fn load_default_provider(&mut self) -> Result<(), Error> {
+        self.load_provider(DEFAULT_PROVIDER_NAME)
+    }
+
+    /// Sets the permissive FIPS mode context.
+    ///
+    /// In strict FIPS mode, the default property query rqeuires
+    /// all operations to go through the FIPS provider. But there
+    /// are some operations we might want to keep working even
+    /// though they are not available in the FIPS provider.
+    /// Due to the way how OpenSSL works, to make this working we
+    /// need to explicitly load the default provider and then
+    /// configure the property query to prefer fips provider, but
+    /// fall back to default one if the algorithm is not available.
+    ///
+    /// This is no-op when the FIPS provider is not loaded.
+    pub fn set_permissive_fips(&mut self) -> Result<(), Error> {
         if unsafe {
             OSSL_PROVIDER_available(self.ptr(), FIPS_PROVIDER_NAME.as_ptr())
         } == 1
         {
-            return Ok(());
+            self.load_default_provider()?;
+            self.propq = Some(FIPS_PROVIDER_PERMISIVE_PROPQ);
         }
-
-        let provider = unsafe {
-            OSSL_PROVIDER_load(self.ptr(), FIPS_PROVIDER_NAME.as_ptr())
-        };
-        if provider.is_null() {
-            Err(Error::new(ErrorKind::OsslError))
-        } else {
-            self.providers.push(provider);
-            Ok(())
-        }
+        Ok(())
     }
 
     pub fn enforce_fips(&mut self) -> Result<(), Error> {
@@ -363,6 +385,13 @@ impl OsslContext {
 
     pub fn ptr(&self) -> *mut OSSL_LIB_CTX {
         self.context
+    }
+
+    pub(crate) fn propq_ptr(&self) -> *const c_char {
+        match &self.propq {
+            Some(p) => p.as_ptr() as *const c_char,
+            None => std::ptr::null(),
+        }
     }
 }
 

@@ -25,9 +25,8 @@ struct EvpKdfCtx {
 impl EvpKdfCtx {
     /// Instantiates a new Kdf context
     fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpKdfCtx, Error> {
-        let arg = unsafe {
-            EVP_KDF_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
-        };
+        let arg =
+            unsafe { EVP_KDF_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr()) };
         if arg.is_null() {
             trace_ossl!("EVP_KDF_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));

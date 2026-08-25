@@ -18,9 +18,8 @@ pub struct EvpMd {
 /// Methods for creating and accessing `EvpMd`.
 impl EvpMd {
     pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMd, Error> {
-        let ptr = unsafe {
-            EVP_MD_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
-        };
+        let ptr =
+            unsafe { EVP_MD_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr()) };
         if ptr.is_null() {
             trace_ossl!("EVP_MD_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));
@@ -268,8 +267,7 @@ impl OsslDigest {
         let name = digest_to_string(digest);
         let arg = unsafe {
             ERR_set_mark();
-            let m =
-                EVP_MD_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut());
+            let m = EVP_MD_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr());
             ERR_pop_to_mark();
             m
         };

@@ -65,7 +65,7 @@ impl EvpRandCtx {
         pers: &[u8],
     ) -> Result<EvpRandCtx, Error> {
         let rand = unsafe {
-            EVP_RAND_fetch(ctx.ptr(), c"HMAC-DRBG".as_ptr(), std::ptr::null())
+            EVP_RAND_fetch(ctx.ptr(), c"HMAC-DRBG".as_ptr(), ctx.propq_ptr())
         };
         if rand.is_null() {
             trace_ossl!("EVP_RAND_fetch()");

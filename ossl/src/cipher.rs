@@ -22,7 +22,7 @@ struct EvpCipher {
 impl EvpCipher {
     fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpCipher, Error> {
         let ptr = unsafe {
-            EVP_CIPHER_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+            EVP_CIPHER_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr())
         };
         if ptr.is_null() {
             trace_ossl!("EVP_CIPHER_fetch()");

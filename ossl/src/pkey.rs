@@ -29,7 +29,7 @@ impl EvpPkeyCtx {
             EVP_PKEY_CTX_new_from_name(
                 ctx.ptr(),
                 name.as_ptr(),
-                std::ptr::null(),
+                ctx.propq_ptr(),
             )
         };
         if ptr.is_null() {
@@ -1330,7 +1330,7 @@ impl EvpPkey {
                 &mut pp,
                 der.len().try_into()?,
                 ctx.ptr(),
-                std::ptr::null(),
+                ctx.propq_ptr(),
             )
         };
         if pkey.is_null() {
@@ -1420,7 +1420,7 @@ impl EvpPkey {
             EVP_PKEY_CTX_new_from_name(
                 ctx.ptr(),
                 name.as_ptr(),
-                std::ptr::null(),
+                ctx.propq_ptr(),
             )
         };
         if !ptr.is_null() {
@@ -1506,7 +1506,7 @@ impl EvpPkey {
                 EVP_PKEY_CTX_new_from_pkey(
                     ctx.ptr(),
                     self.ptr,
-                    std::ptr::null_mut(),
+                    ctx.propq_ptr(),
                 ),
             )
         }

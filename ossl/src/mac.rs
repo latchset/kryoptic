@@ -21,9 +21,8 @@ pub struct EvpMacCtx {
 /// Methods for creating (from a named MAC) and accessing `EvpMacCtx`.
 impl EvpMacCtx {
     fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpMacCtx, Error> {
-        let arg = unsafe {
-            EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
-        };
+        let arg =
+            unsafe { EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr()) };
         if arg.is_null() {
             trace_ossl!("EVP_MAC_fetch()");
             return Err(Error::new(ErrorKind::NullPtr));
@@ -269,8 +268,7 @@ impl OsslMac {
         let (digest, name) = mac_to_digest_and_type(alg);
         let arg = unsafe {
             ERR_set_mark();
-            let m =
-                EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut());
+            let m = EVP_MAC_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr());
             ERR_pop_to_mark();
             m
         };

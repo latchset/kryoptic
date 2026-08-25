@@ -31,7 +31,7 @@ impl EvpSignature {
     /// Creates a new `EvpSignature` instance by fetching it by name.
     pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpSignature, Error> {
         let ptr: *mut EVP_SIGNATURE = unsafe {
-            EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null_mut())
+            EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr())
         };
         if ptr.is_null() {
             trace_ossl!("EVP_SIGNATURE_fetch()");
@@ -420,7 +420,7 @@ pub fn available(ctx: &OsslContext, alg: SigAlg) -> bool {
     let name = sigalg_to_ossl_name(alg);
     let ptr = unsafe {
         ERR_set_mark();
-        let p = EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), std::ptr::null());
+        let p = EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr());
         ERR_pop_to_mark();
         p
     };
@@ -775,6 +775,12 @@ impl OsslSignature {
             #[cfg(not(feature = "fips"))]
             {
                 let mut lctx = EvpMdCtx::new()?;
+                unsafe {
+                    EVP_MD_CTX_set_pkey_ctx(
+                        lctx.as_mut_ptr(),
+                        ctx.pkey_ctx.as_mut_ptr(),
+                    )
+                }
                 let ret = unsafe {
                     match ctx.op {
                         SigOp::Sign => EVP_DigestSignInit_ex(
@@ -782,7 +788,7 @@ impl OsslSignature {
                             std::ptr::null_mut(),
                             digest_ptr,
                             libctx.ptr(),
-                            std::ptr::null(),
+                            libctx.propq_ptr(),
                             key.as_ptr() as *mut EVP_PKEY,
                             params_ptr,
                         ),
@@ -791,7 +797,7 @@ impl OsslSignature {
                             std::ptr::null_mut(),
                             digest_ptr,
                             libctx.ptr(),
-                            std::ptr::null(),
+                            libctx.propq_ptr(),
                             key.as_ptr() as *mut EVP_PKEY,
                             params_ptr,
                         ),
