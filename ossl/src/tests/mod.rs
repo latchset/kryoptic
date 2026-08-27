@@ -48,3 +48,6 @@ mod cipher;
 
 #[cfg(feature = "rfc9580")]
 mod digest;
+
+#[cfg(all(ossl_v350, not(feature = "fips")))]
+mod mldsa;

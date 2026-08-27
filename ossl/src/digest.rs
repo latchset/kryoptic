@@ -187,6 +187,8 @@ pub enum DigestAlg {
     Sha3_256,
     Sha3_384,
     Sha3_512,
+    Shake128,
+    Shake256,
     #[cfg(feature = "rfc9580")]
     Md5,
     #[cfg(feature = "rfc9580")]
@@ -206,6 +208,8 @@ pub(crate) fn digest_to_string(digest: DigestAlg) -> &'static CStr {
         DigestAlg::Sha3_256 => cstr!(OSSL_DIGEST_NAME_SHA3_256),
         DigestAlg::Sha3_384 => cstr!(OSSL_DIGEST_NAME_SHA3_384),
         DigestAlg::Sha3_512 => cstr!(OSSL_DIGEST_NAME_SHA3_512),
+        DigestAlg::Shake128 => c"SHAKE-128",
+        DigestAlg::Shake256 => c"SHAKE-256",
         #[cfg(feature = "rfc9580")]
         DigestAlg::Md5 => cstr!(OSSL_DIGEST_NAME_MD5),
         #[cfg(feature = "rfc9580")]
@@ -226,6 +230,8 @@ pub(crate) fn string_to_digest(digest: &CStr) -> Result<DigestAlg, Error> {
         b"SHA3-256" => Ok(DigestAlg::Sha3_256),
         b"SHA3-384" => Ok(DigestAlg::Sha3_384),
         b"SHA3-512" => Ok(DigestAlg::Sha3_512),
+        b"SHAKE-128" => Ok(DigestAlg::Shake128),
+        b"SHAKE-256" => Ok(DigestAlg::Shake256),
         #[cfg(feature = "rfc9580")]
         b"MD5" => Ok(DigestAlg::Md5),
         #[cfg(feature = "rfc9580")]
@@ -333,6 +339,22 @@ impl OsslDigest {
             return Err(Error::new(ErrorKind::OsslError));
         }
         Ok(usize::try_from(retlen)?)
+    }
+
+    /// Sets the requested output length for an XOF algorithm like SHAKE.
+    #[cfg(ossl_v350)]
+    pub fn set_xoflen(&mut self, len: usize) -> Result<(), Error> {
+        let mut params_builder = crate::OsslParamBuilder::with_capacity(1);
+        params_builder
+            .add_owned_uint(cstr!(OSSL_DIGEST_PARAM_XOFLEN), len as c_uint)?;
+        let params = params_builder.finalize();
+        if unsafe {
+            EVP_MD_CTX_set_params(self.ctx.as_mut_ptr(), params.as_ptr())
+        } != 1
+        {
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(())
     }
 
     /// Provides the size of the expected output digest

@@ -5,6 +5,7 @@ pub const OSSL_PARAM_UTF8_STRING: u32 = 4;
 // Signature + AsymCipher
 pub const OSSL_SIGNATURE_PARAM_CONTEXT_STRING: &[u8; 15] = b"context-string\0";
 pub const OSSL_SIGNATURE_PARAM_DETERMINISTIC: &[u8; 14] = b"deterministic\0";
+pub const OSSL_SIGNATURE_PARAM_MU: &[u8; 3] = b"mu\0";
 pub const OSSL_SIGNATURE_PARAM_PSS_SALTLEN: &[u8; 8] = b"saltlen\0";
 pub const OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING: &[u8; 17] =
     b"message-encoding\0";
@@ -36,6 +37,7 @@ pub const OSSL_DIGEST_NAME_SHA3_224: &[u8; 9] = b"SHA3-224\0";
 pub const OSSL_DIGEST_NAME_SHA3_256: &[u8; 9] = b"SHA3-256\0";
 pub const OSSL_DIGEST_NAME_SHA3_384: &[u8; 9] = b"SHA3-384\0";
 pub const OSSL_DIGEST_NAME_SHA3_512: &[u8; 9] = b"SHA3-512\0";
+pub const OSSL_DIGEST_PARAM_XOFLEN: &[u8; 7] = b"xoflen\0";
 
 // Rand
 pub const OSSL_RAND_PARAM_STRENGTH: &[u8; 9] = b"strength\0";

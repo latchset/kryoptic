@@ -650,6 +650,126 @@ pub fn mldsa_params<'a>(
     return Ok(Some(params));
 }
 
+/// Generator for the exact `mu` (μ) value required for ML-DSA signatures
+/// according to FIPS 204.
+#[cfg(ossl_v350)]
+pub struct MuGenerator {
+    shake_mu: crate::digest::OsslDigest,
+    tr: Vec<u8>,
+    context: Option<Vec<u8>>,
+}
+
+#[cfg(ossl_v350)]
+impl MuGenerator {
+    pub fn new(
+        libctx: &OsslContext,
+        pkey: &EvpPkey,
+        context: Option<&[u8]>,
+    ) -> Result<Self, Error> {
+        if let Some(c) = context {
+            if c.len() > 255 {
+                return Err(Error::new(ErrorKind::BadArg));
+            }
+        }
+
+        let pkey_data = pkey.export_public()?;
+        let pk_bytes = match pkey_data {
+            crate::pkey::PkeyData::Mlkey(mlk) => {
+                mlk.pubkey.clone().ok_or(Error::new(ErrorKind::NullPtr))?
+            }
+            _ => return Err(Error::new(ErrorKind::WrapperError)),
+        };
+
+        let mut tr = vec![0u8; 64];
+        let mut shake_tr =
+            crate::digest::OsslDigest::new(libctx, DigestAlg::Shake256, None)?;
+        shake_tr.update(&pk_bytes)?;
+        shake_tr.set_xoflen(64)?;
+        shake_tr.finalize(&mut tr)?;
+
+        let mut mugen = MuGenerator {
+            shake_mu: crate::digest::OsslDigest::new(
+                libctx,
+                DigestAlg::Shake256,
+                None,
+            )?,
+            tr,
+            context: context.map(|c| c.to_vec()),
+        };
+        mugen._init()?;
+        Ok(mugen)
+    }
+
+    fn _init(&mut self) -> Result<(), Error> {
+        self.shake_mu.update(&self.tr)?;
+
+        let ctx_len = match &self.context {
+            Some(c) => c.len() as u8,
+            None => 0,
+        };
+
+        let mut m_prime = Vec::with_capacity(2 + ctx_len as usize);
+        m_prime.push(0x00);
+        m_prime.push(ctx_len);
+        if let Some(c) = &self.context {
+            m_prime.extend_from_slice(c);
+        }
+        self.shake_mu.update(&m_prime)?;
+
+        Ok(())
+    }
+
+    pub fn reinit(&mut self) -> Result<(), Error> {
+        self.shake_mu.reset(None)?;
+        self._init()
+    }
+
+    pub fn update(&mut self, data: &[u8]) -> Result<(), Error> {
+        self.shake_mu.update(data)
+    }
+
+    pub fn finalize(
+        &mut self,
+        data: Option<&[u8]>,
+        out_mu: &mut [u8],
+    ) -> Result<(), Error> {
+        if out_mu.len() != 64 {
+            return Err(Error::new(ErrorKind::BadArg));
+        }
+        if let Some(d) = data {
+            self.shake_mu.update(d)?;
+        }
+        self.shake_mu.set_xoflen(64)?;
+        self.shake_mu.finalize(out_mu)?;
+        Ok(())
+    }
+}
+
+/// Helper to generate OsslParam arrays for Mldsa initialization with mu.
+/// When this helper is used, the signature will only be one shot and only a
+/// properly calculated MU buffer (which must be exactly 64 bytes in length)
+/// can be used as data for the sign()/verify() calls.
+#[cfg(ossl_v350)]
+pub fn mldsa_with_mu<'a>(
+    context: Option<&'a Vec<u8>>,
+    deterministic: bool,
+) -> Result<Option<OsslParam<'a>>, Error> {
+    let mut params_builder = OsslParamBuilder::with_capacity(3);
+    params_builder.add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_MU), 1)?;
+    if let Some(ctx) = context {
+        params_builder.add_octet_string(
+            cstr!(OSSL_SIGNATURE_PARAM_CONTEXT_STRING),
+            ctx,
+        )?;
+    }
+    if deterministic {
+        params_builder
+            .add_owned_int(cstr!(OSSL_SIGNATURE_PARAM_DETERMINISTIC), 1)?;
+    }
+    let params = params_builder.finalize();
+    return Ok(Some(params));
+}
+
 /// Helper to generate OsslParam arrays for SLH-DSA initialization
 /// FIXME: The same as mldsa_params?
 #[cfg(ossl_v350)]
