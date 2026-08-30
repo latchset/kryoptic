@@ -798,3 +798,206 @@ fn test_rsa_public_key_info() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_rsa_aes_key_wrap() {
+    let mut testtokn = TestToken::initialized("test_rsa_aes_key_wrap", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* RSA key pair used to wrap/unwrap */
+    let (pubkey, prikey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_WRAP, true), (CKA_ENCRYPT, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA)],
+        &[],
+        &[
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_UNWRAP, true),
+            (CKA_DECRYPT, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    let oaep = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA256,
+        mgf: CKG_MGF1_SHA256,
+        source: CKZ_DATA_SPECIFIED,
+        pSourceData: std::ptr::null_mut(),
+        ulSourceDataLen: 0,
+    };
+
+    /* Wrap/unwrap an AES key of each allowed size */
+    for value_len in [16usize, 24, 32] {
+        let value = vec![0x5Au8; value_len];
+        let wp_handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_AES)],
+            &[(CKA_VALUE, value.as_slice())],
+            &[(CKA_EXTRACTABLE, true)],
+        ));
+
+        let params = CK_RSA_AES_KEY_WRAP_PARAMS {
+            ulAESKeyBits: 256,
+            pOAEPParams: &oaep as *const _ as *mut _,
+        };
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_RSA_AES_KEY_WRAP,
+            pParameter: &params as *const _ as CK_VOID_PTR,
+            ulParameterLen: sizeof!(CK_RSA_AES_KEY_WRAP_PARAMS),
+        };
+
+        /* get length */
+        let mut wraplen = 0;
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            pubkey,
+            wp_handle,
+            std::ptr::null_mut(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let mut wrapped = vec![0u8; wraplen as usize];
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            pubkey,
+            wp_handle,
+            wrapped.as_mut_ptr(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        wrapped.truncate(wraplen as usize);
+
+        /* unwrap into a new extractable AES key */
+        let mut template = make_attr_template(
+            &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
+            &[],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+        );
+
+        let mut uw_handle = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mut mechanism,
+            prikey,
+            wrapped.as_mut_ptr(),
+            wrapped.len() as CK_ULONG,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+            &mut uw_handle,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        /* the recovered key material must match the original */
+        let recovered =
+            ret_or_panic!(extract_value(session, uw_handle, CKA_VALUE));
+        assert_eq!(recovered, value);
+    }
+
+    testtokn.finalize();
+}
+
+/// Interoperability test for CKM_RSA_AES_KEY_WRAP.
+///
+/// The wrapped blob is built independently with the OpenSSL CLI (a separate
+/// implementation and code path): the RSA-OAEP wrapped ephemeral AES key
+/// concatenated with the AES-256-KWP wrapped target key. This validates the
+/// framing (C1 || C2 layout), the KWP integrity check value handling and the
+/// OAEP parameter wiring against the reference tool.
+#[test]
+#[parallel]
+fn test_rsa_aes_key_wrap_vector() {
+    let file = std::fs::File::open("testdata/rsa_aes_key_wrap.json").unwrap();
+    let data: serde_json::Value = serde_json::from_reader(file).unwrap();
+    let hx = |k: &str| -> Vec<u8> {
+        hex::decode(data[k].as_str().unwrap()).unwrap()
+    };
+
+    let modulus = hx("modulus");
+    let public_exponent = hx("public_exponent");
+    let private_exponent = hx("private_exponent");
+    let prime_1 = hx("prime_1");
+    let prime_2 = hx("prime_2");
+    let exponent_1 = hx("exponent_1");
+    let exponent_2 = hx("exponent_2");
+    let coefficient = hx("coefficient");
+    let mut wrapped = hx("wrapped");
+    let expected = hx("expected");
+    let aes_key_bits = data["aes_key_bits"].as_u64().unwrap() as CK_ULONG;
+
+    let mut testtokn =
+        TestToken::initialized("test_rsa_aes_key_wrap_vector", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let prikey = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_RSA)],
+        &[
+            (CKA_MODULUS, modulus.as_slice()),
+            (CKA_PUBLIC_EXPONENT, public_exponent.as_slice()),
+            (CKA_PRIVATE_EXPONENT, private_exponent.as_slice()),
+            (CKA_PRIME_1, prime_1.as_slice()),
+            (CKA_PRIME_2, prime_2.as_slice()),
+            (CKA_EXPONENT_1, exponent_1.as_slice()),
+            (CKA_EXPONENT_2, exponent_2.as_slice()),
+            (CKA_COEFFICIENT, coefficient.as_slice()),
+        ],
+        &[(CKA_UNWRAP, true), (CKA_DECRYPT, true)],
+    ));
+
+    let oaep = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA256,
+        mgf: CKG_MGF1_SHA256,
+        source: CKZ_DATA_SPECIFIED,
+        pSourceData: std::ptr::null_mut(),
+        ulSourceDataLen: 0,
+    };
+    let params = CK_RSA_AES_KEY_WRAP_PARAMS {
+        ulAESKeyBits: aes_key_bits,
+        pOAEPParams: &oaep as *const _ as *mut _,
+    };
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_RSA_AES_KEY_WRAP,
+        pParameter: &params as *const _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_RSA_AES_KEY_WRAP_PARAMS),
+    };
+
+    let mut template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+
+    let mut uw_handle = CK_INVALID_HANDLE;
+    let ret = fn_unwrap_key(
+        session,
+        &mut mechanism,
+        prikey,
+        wrapped.as_mut_ptr(),
+        wrapped.len() as CK_ULONG,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut uw_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let recovered = ret_or_panic!(extract_value(session, uw_handle, CKA_VALUE));
+    assert_eq!(recovered, expected);
+
+    testtokn.finalize();
+}

@@ -4,7 +4,7 @@ All notable changes to this project should be documented in this file.
 
 ## [Unreleased]
 
-Unreleased changes
+* Added support for CKM_RSA_AES_KEY_WRAP mechanism
 
 ### What Changed
 

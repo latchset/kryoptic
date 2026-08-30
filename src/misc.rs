@@ -39,6 +39,75 @@ macro_rules! void_ptr {
 }
 pub(crate) use void_ptr;
 
+/// Returns `true` if wrapping an AES key of `aes_key_bits` bits with a
+/// wrapping key that provides `wrap_strength_bits` of security strength should
+/// be flagged as weak.
+///
+/// AES-128 is always considered acceptable as a baseline (per NIST guidance a
+/// 112/128-bit wrapping key is adequate to protect an AES-128 key), so a
+/// wrapping is only considered weak when a stronger AES key (>= 192 bits) is
+/// wrapped by a wrapping key of lower security strength.
+pub fn is_weak_key_wrap(
+    wrap_strength_bits: usize,
+    aes_key_bits: usize,
+) -> bool {
+    aes_key_bits > 128 && aes_key_bits > wrap_strength_bits
+}
+
+/// Emits a warning (when the `log` feature is enabled) if a key-wrapping
+/// operation protects an AES key with a wrapping key that provides less
+/// security strength than the AES key itself.
+///
+/// See [is_weak_key_wrap] for the exact condition.
+///
+/// `wrap_strength_bits` is the NIST SP800-57 security strength of the wrapping
+/// key, and `aes_key_bits` is the size in bits of the AES key being wrapped.
+pub fn warn_weak_key_wrap(wrap_strength_bits: usize, aes_key_bits: usize) {
+    if is_weak_key_wrap(wrap_strength_bits, aes_key_bits) {
+        #[cfg(feature = "log")]
+        log::warn!(
+            "Key wrap: wrapping key security strength ({} bits) is weaker \
+             than the wrapped AES key ({} bits); the effective protection is \
+             reduced to {} bits",
+            wrap_strength_bits,
+            aes_key_bits,
+            wrap_strength_bits
+        );
+    }
+}
+
+#[cfg(test)]
+mod weak_key_wrap_tests {
+    use super::is_weak_key_wrap;
+
+    #[test]
+    fn aes128_is_always_tolerated() {
+        /* AES-128 is the baseline and never flagged, even with a 112-bit
+         * (RSA-2048) or weaker wrapping key */
+        assert!(!is_weak_key_wrap(112, 128));
+        assert!(!is_weak_key_wrap(128, 128));
+        assert!(!is_weak_key_wrap(80, 128));
+    }
+
+    #[test]
+    fn stronger_aes_than_wrapper_is_weak() {
+        /* RSA-2048 (112 bits) wrapping AES-192/256 */
+        assert!(is_weak_key_wrap(112, 192));
+        assert!(is_weak_key_wrap(112, 256));
+        /* RSA-3072/4096 (128 bits) wrapping AES-192/256 */
+        assert!(is_weak_key_wrap(128, 192));
+        assert!(is_weak_key_wrap(128, 256));
+    }
+
+    #[test]
+    fn matching_or_stronger_wrapper_is_not_weak() {
+        /* wrapping key at least as strong as the AES key */
+        assert!(!is_weak_key_wrap(192, 192));
+        assert!(!is_weak_key_wrap(256, 256));
+        assert!(!is_weak_key_wrap(256, 192));
+    }
+}
+
 /// Convenience macro to type cast any pointer into a CK_BYTE_PTR
 macro_rules! byte_ptr {
     ($ptr:expr) => {
