@@ -51,3 +51,41 @@ mod digest;
 
 #[cfg(all(ossl_v350, not(feature = "fips")))]
 mod mldsa;
+
+#[cfg(feature = "dynamic")]
+#[test]
+fn test_permissive_fips() {
+    let mut ctx = crate::OsslContext::new_lib_ctx();
+    ctx.load_default_configuration().unwrap();
+    let res = ctx.set_permissive_fips();
+    assert!(res.is_ok());
+}
+
+#[cfg(feature = "dynamic")]
+#[test]
+fn test_provider_version() {
+    let mut ctx = crate::OsslContext::new_lib_ctx();
+    ctx.load_default_provider().unwrap();
+    let prov = unsafe {
+        crate::bindings::OSSL_PROVIDER_load(
+            ctx.ptr(),
+            crate::DEFAULT_PROVIDER_NAME.as_ptr(),
+        )
+    };
+    assert!(!prov.is_null());
+    let mut pb = crate::OsslParamBuilder::with_capacity(1);
+    pb.add_empty_utf8_ptr(crate::cstr!(
+        crate::bindings::OSSL_PROV_PARAM_VERSION
+    ))
+    .unwrap();
+    let mut params = pb.finalize();
+    let ret = unsafe {
+        crate::bindings::OSSL_PROVIDER_get_params(prov, params.as_mut_ptr())
+    };
+    unsafe { crate::bindings::OSSL_PROVIDER_unload(prov) };
+    assert_eq!(ret, 1);
+    let ver = params
+        .get_utf8_string(crate::cstr!(crate::bindings::OSSL_PROV_PARAM_VERSION))
+        .unwrap();
+    assert!(!ver.to_bytes().is_empty());
+}

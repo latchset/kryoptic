@@ -238,6 +238,7 @@ pub struct OsslContext {
     propq: Option<&'static CStr>,
     #[cfg(feature = "fips")]
     is_fips: bool,
+    broken_shake: bool,
 }
 
 static LEGACY_PROVIDER_NAME: &CStr = c"legacy";
@@ -259,6 +260,7 @@ impl OsslContext {
             propq: None,
             #[cfg(feature = "fips")]
             is_fips: false,
+            broken_shake: false,
         }
     }
 
@@ -270,6 +272,7 @@ impl OsslContext {
             propq: None,
             #[cfg(feature = "fips")]
             is_fips: false,
+            broken_shake: false,
         }
     }
 
@@ -280,6 +283,7 @@ impl OsslContext {
             providers: vec![prov as *mut OSSL_PROVIDER],
             propq: None,
             is_fips: true,
+            broken_shake: false,
         }
     }
 
@@ -364,6 +368,29 @@ impl OsslContext {
             OSSL_PROVIDER_available(self.ptr(), FIPS_PROVIDER_NAME.as_ptr())
         } == 1
         {
+            let prov = unsafe {
+                OSSL_PROVIDER_load(self.ptr(), FIPS_PROVIDER_NAME.as_ptr())
+            };
+            if prov.is_null() {
+                trace_ossl!("OSSL_PROVIDER_load()");
+                return Err(Error::new(ErrorKind::NullPtr));
+            }
+            let mut params_builder = OsslParamBuilder::with_capacity(1);
+            params_builder
+                .add_empty_utf8_ptr(cstr!(OSSL_PROV_PARAM_VERSION))?;
+            let mut params = params_builder.finalize();
+            let ret =
+                unsafe { OSSL_PROVIDER_get_params(prov, params.as_mut_ptr()) };
+            unsafe { OSSL_PROVIDER_unload(prov) };
+            if ret != 1 {
+                trace_ossl!("OSSL_PROVIDER_get_params()");
+                return Err(Error::new(ErrorKind::OsslError));
+            }
+            let version =
+                params.get_utf8_string(cstr!(OSSL_PROV_PARAM_VERSION))?;
+            if version == c"3.0.7" {
+                self.broken_shake = true;
+            }
             self.load_default_provider()?;
             self.propq = Some(FIPS_PROVIDER_PERMISIVE_PROPQ);
         }
@@ -688,6 +715,22 @@ impl<'a> OsslParamBuilder<'a> {
                 key.as_ptr(),
                 void_ptr!(v.as_mut_ptr()) as *mut c_char,
                 len,
+            )
+        };
+        self.v.push(v);
+        self.p.to_mut().push(param);
+        Ok(())
+    }
+
+    /// Adds an empty sized pointer to receive string pointer values from queries
+    /// like get_params()
+    pub fn add_empty_utf8_ptr(&mut self, key: &CStr) -> Result<(), Error> {
+        let mut v = vec![0u8; std::mem::size_of::<*const c_char>()];
+        let param = unsafe {
+            OSSL_PARAM_construct_utf8_ptr(
+                key.as_ptr(),
+                v.as_mut_ptr() as *mut *mut c_char,
+                0,
             )
         };
         self.v.push(v);
