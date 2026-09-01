@@ -29,7 +29,7 @@ impl EvpPkeyCtx {
             EVP_PKEY_CTX_new_from_name(
                 ctx.ptr(),
                 name.as_ptr(),
-                ctx.propq_ptr(),
+                ctx.pkey_name_propq_ptr(name),
             )
         };
         if ptr.is_null() {
@@ -1415,13 +1415,10 @@ impl EvpPkey {
 
     /// Checks if the specific key type is available in the current context.
     pub fn available(ctx: &OsslContext, pkey_type: EvpPkeyType) -> bool {
+        let propq = ctx.pkey_type_propq_ptr(&pkey_type);
         let name = pkey_type_to_name(pkey_type);
         let ptr = unsafe {
-            EVP_PKEY_CTX_new_from_name(
-                ctx.ptr(),
-                name.as_ptr(),
-                ctx.propq_ptr(),
-            )
+            EVP_PKEY_CTX_new_from_name(ctx.ptr(), name.as_ptr(), propq)
         };
         if !ptr.is_null() {
             unsafe {
@@ -1497,17 +1494,18 @@ impl EvpPkey {
     ///
     /// Used to prepare for operations using this specific key.
     pub fn new_ctx(&self, ctx: &OsslContext) -> Result<EvpPkeyCtx, Error> {
+        let propq = match self.get_type() {
+            Ok(t) => ctx.pkey_type_propq_ptr(&t),
+            Err(_) => ctx.propq_ptr(),
+        };
+
         /* this function takes care of checking for NULL */
         unsafe {
             EvpPkeyCtx::from_ptr(
                 /* this function will use refcounting to keep EVP_PKEY
                  * alive for the lifetime of the context, so it is ok
                  * to not use rust lifetimes here */
-                EVP_PKEY_CTX_new_from_pkey(
-                    ctx.ptr(),
-                    self.ptr,
-                    ctx.propq_ptr(),
-                ),
+                EVP_PKEY_CTX_new_from_pkey(ctx.ptr(), self.ptr, propq),
             )
         }
     }
