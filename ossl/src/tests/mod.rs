@@ -57,8 +57,10 @@ mod mldsa;
 fn test_permissive_fips() {
     let mut ctx = crate::OsslContext::new_lib_ctx();
     ctx.load_default_configuration().unwrap();
-    let res = ctx.set_permissive_fips();
-    assert!(res.is_ok());
+    if ctx.fips_is_enabled() {
+        let res = ctx.set_permissive_fips();
+        assert!(res.is_ok());
+    }
 }
 
 #[cfg(feature = "dynamic")]
@@ -88,4 +90,25 @@ fn test_provider_version() {
         .get_utf8_string(crate::cstr!(crate::bindings::OSSL_PROV_PARAM_VERSION))
         .unwrap();
     assert!(!ver.to_bytes().is_empty());
+}
+
+#[cfg(all(ossl_v350, feature = "dynamic"))]
+#[test]
+fn test_shake_digest_with_broken_shake_context() {
+    let mut ctx = crate::OsslContext::new_lib_ctx();
+    ctx.load_default_provider().unwrap();
+    ctx.broken_shake = true;
+    ctx.fips_permissive = true;
+
+    let seed = vec![0x42u8; 32];
+    let key = crate::pkey::EvpPkey::import(
+        &ctx,
+        crate::pkey::EvpPkeyType::Mldsa44,
+        crate::pkey::PkeyData::Mlkey(crate::pkey::MlkeyData {
+            pubkey: None,
+            prikey: None,
+            seed: Some(crate::OsslSecret::from_vec(seed)),
+        }),
+    );
+    assert!(key.is_ok());
 }

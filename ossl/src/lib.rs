@@ -238,6 +238,7 @@ pub struct OsslContext {
     propq: Option<&'static CStr>,
     #[cfg(feature = "fips")]
     is_fips: bool,
+    fips_permissive: bool,
     broken_shake: bool,
 }
 
@@ -246,6 +247,7 @@ static DEFAULT_PROVIDER_NAME: &CStr = c"default";
 static FIPS_PROVIDER_NAME: &CStr = c"fips";
 
 static FIPS_PROVIDER_PERMISIVE_PROPQ: &CStr = c"?fips=yes";
+pub(crate) static DEFAULT_NON_FIPS_PROPQ: &CStr = c"provider=default,fips=no";
 
 impl OsslContext {
     /// Creates a new empty OpenSSL library context.
@@ -260,6 +262,7 @@ impl OsslContext {
             propq: None,
             #[cfg(feature = "fips")]
             is_fips: false,
+            fips_permissive: false,
             broken_shake: false,
         }
     }
@@ -272,6 +275,7 @@ impl OsslContext {
             propq: None,
             #[cfg(feature = "fips")]
             is_fips: false,
+            fips_permissive: false,
             broken_shake: false,
         }
     }
@@ -283,6 +287,7 @@ impl OsslContext {
             providers: vec![prov as *mut OSSL_PROVIDER],
             propq: None,
             is_fips: true,
+            fips_permissive: false,
             broken_shake: false,
         }
     }
@@ -393,6 +398,7 @@ impl OsslContext {
             }
             self.load_default_provider()?;
             self.propq = Some(FIPS_PROVIDER_PERMISIVE_PROPQ);
+            self.fips_permissive = true;
         }
         Ok(())
     }
@@ -419,6 +425,77 @@ impl OsslContext {
             Some(p) => p.as_ptr() as *const c_char,
             None => std::ptr::null(),
         }
+    }
+
+    pub(crate) fn digest_propq_ptr(&self, name: &CStr) -> *const c_char {
+        if self.broken_shake && self.fips_permissive {
+            if let Ok(alg) = crate::digest::string_to_digest(name) {
+                return self.digest_alg_propq_ptr(alg);
+            }
+        }
+        self.propq_ptr()
+    }
+
+    pub(crate) fn digest_alg_propq_ptr(
+        &self,
+        digest: crate::digest::DigestAlg,
+    ) -> *const c_char {
+        if self.broken_shake && self.fips_permissive {
+            match digest {
+                crate::digest::DigestAlg::Shake128
+                | crate::digest::DigestAlg::Shake256 => {
+                    return DEFAULT_NON_FIPS_PROPQ.as_ptr();
+                }
+                _ => (),
+            }
+        }
+        self.propq_ptr()
+    }
+
+    pub(crate) fn sigalg_propq_ptr(
+        &self,
+        alg: crate::signature::SigAlg,
+    ) -> *const c_char {
+        if self.broken_shake && self.fips_permissive {
+            match alg {
+                crate::signature::SigAlg::Mldsa44
+                | crate::signature::SigAlg::Mldsa65
+                | crate::signature::SigAlg::Mldsa87 => {
+                    return DEFAULT_NON_FIPS_PROPQ.as_ptr();
+                }
+                _ => (),
+            }
+        }
+        self.propq_ptr()
+    }
+
+    pub(crate) fn pkey_type_propq_ptr(
+        &self,
+        pkey_type: &crate::pkey::EvpPkeyType,
+    ) -> *const c_char {
+        if self.broken_shake && self.fips_permissive {
+            match pkey_type {
+                crate::pkey::EvpPkeyType::Mldsa44
+                | crate::pkey::EvpPkeyType::Mldsa65
+                | crate::pkey::EvpPkeyType::Mldsa87 => {
+                    return DEFAULT_NON_FIPS_PROPQ.as_ptr();
+                }
+                _ => (),
+            }
+        }
+        self.propq_ptr()
+    }
+
+    pub(crate) fn pkey_name_propq_ptr(&self, name: &CStr) -> *const c_char {
+        if self.broken_shake && self.fips_permissive {
+            match name.to_bytes() {
+                b"ML-DSA-44" | b"ML-DSA-65" | b"ML-DSA-87" => {
+                    return DEFAULT_NON_FIPS_PROPQ.as_ptr();
+                }
+                _ => (),
+            }
+        }
+        self.propq_ptr()
     }
 }
 

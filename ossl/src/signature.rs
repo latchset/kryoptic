@@ -31,7 +31,11 @@ impl EvpSignature {
     /// Creates a new `EvpSignature` instance by fetching it by name.
     pub fn new(ctx: &OsslContext, name: &CStr) -> Result<EvpSignature, Error> {
         let ptr: *mut EVP_SIGNATURE = unsafe {
-            EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr())
+            EVP_SIGNATURE_fetch(
+                ctx.ptr(),
+                name.as_ptr(),
+                ctx.pkey_name_propq_ptr(name),
+            )
         };
         if ptr.is_null() {
             trace_ossl!("EVP_SIGNATURE_fetch()");
@@ -420,7 +424,11 @@ pub fn available(ctx: &OsslContext, alg: SigAlg) -> bool {
     let name = sigalg_to_ossl_name(alg);
     let ptr = unsafe {
         ERR_set_mark();
-        let p = EVP_SIGNATURE_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr());
+        let p = EVP_SIGNATURE_fetch(
+            ctx.ptr(),
+            name.as_ptr(),
+            ctx.sigalg_propq_ptr(alg),
+        );
         ERR_pop_to_mark();
         p
     };
