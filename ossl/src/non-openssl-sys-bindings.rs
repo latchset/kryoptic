@@ -2,6 +2,9 @@
 
 pub const OSSL_PARAM_UTF8_STRING: u32 = 4;
 
+// Provider
+pub const OSSL_PROV_PARAM_VERSION: &[u8; 8] = b"version\0";
+
 // Signature + AsymCipher
 pub const OSSL_SIGNATURE_PARAM_CONTEXT_STRING: &[u8; 15] = b"context-string\0";
 pub const OSSL_SIGNATURE_PARAM_DETERMINISTIC: &[u8; 14] = b"deterministic\0";
