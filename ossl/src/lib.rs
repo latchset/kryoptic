@@ -111,6 +111,10 @@ pub enum ErrorKind {
     BufferSize,
     /// An optional argument is required or has a bad value
     BadArg,
+    /// A signature/MAC verification operation completed normally but the
+    /// signature did not match — distinct from OsslError, which indicates
+    /// the verification operation itself could not be completed
+    VerifyFailed,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -124,6 +128,7 @@ impl std::fmt::Display for ErrorKind {
             ErrorKind::BadArg => {
                 "An optional argument is required or has a bad value"
             }
+            ErrorKind::VerifyFailed => "The signature or MAC did not verify",
         })
     }
 }

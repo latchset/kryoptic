@@ -1193,7 +1193,14 @@ impl OsslSignature {
                 };
                 if ret != 1 {
                     trace_ossl!("EVP_DigestVerify()");
-                    return Err(Error::new(ErrorKind::OsslError));
+                    // EVP_DigestVerify(): 1 = valid signature, 0 = the
+                    // signature does not verify (not an error condition),
+                    // < 0 = the verification operation itself failed.
+                    return Err(Error::new(if ret == 0 {
+                        ErrorKind::VerifyFailed
+                    } else {
+                        ErrorKind::OsslError
+                    }));
                 }
             }
             #[cfg(feature = "fips")]
@@ -1212,7 +1219,14 @@ impl OsslSignature {
             };
             if ret != 1 {
                 trace_ossl!("EVP_PKEY_verify()");
-                return Err(Error::new(ErrorKind::OsslError));
+                // EVP_PKEY_verify(): 1 = valid signature, 0 = the signature
+                // does not verify (not an error condition), < 0 = the
+                // verification operation itself failed.
+                return Err(Error::new(if ret == 0 {
+                    ErrorKind::VerifyFailed
+                } else {
+                    ErrorKind::OsslError
+                }));
             }
         }
         Ok(())
@@ -1432,7 +1446,14 @@ impl OsslSignature {
                 };
                 if ret != 1 {
                     trace_ossl!("EVP_DigestVerifyFinal()");
-                    return Err(Error::new(ErrorKind::OsslError));
+                    // EVP_DigestVerifyFinal(): 1 = valid signature, 0 = the
+                    // signature does not verify (not an error condition),
+                    // < 0 = the verification operation itself failed.
+                    return Err(Error::new(if ret == 0 {
+                        ErrorKind::VerifyFailed
+                    } else {
+                        ErrorKind::OsslError
+                    }));
                 } else {
                     return Ok(());
                 }
@@ -1455,7 +1476,15 @@ impl OsslSignature {
             };
             if ret != 1 {
                 trace_ossl!("EVP_PKEY_verify_message_final()");
-                return Err(Error::new(ErrorKind::OsslError));
+                // EVP_PKEY_verify_message_final(): 1 = valid signature,
+                // 0 = the signature does not verify (not an error
+                // condition), < 0 = the verification operation itself
+                // failed.
+                return Err(Error::new(if ret == 0 {
+                    ErrorKind::VerifyFailed
+                } else {
+                    ErrorKind::OsslError
+                }));
             }
 
             return Ok(());

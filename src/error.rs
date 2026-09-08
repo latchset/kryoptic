@@ -278,6 +278,12 @@ impl From<ossl::Error> for Error {
         match error.kind() {
             ossl::ErrorKind::KeyError => Error::ck_rv(CKR_KEY_INDIGESTIBLE),
             ossl::ErrorKind::WrapperError => Error::ck_rv(CKR_GENERAL_ERROR),
+            // The verification operation completed normally but the
+            // signature/MAC did not match — PKCS#11 v3.2 5.1 mandates
+            // CKR_SIGNATURE_INVALID for this, not a device/general error.
+            ossl::ErrorKind::VerifyFailed => {
+                Error::ck_rv(CKR_SIGNATURE_INVALID)
+            }
             _ => Error::ck_rv(CKR_DEVICE_ERROR),
         }
     }
