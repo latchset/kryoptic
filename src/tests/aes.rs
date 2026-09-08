@@ -2083,3 +2083,128 @@ fn test_aes_iv_generators() {
 
     testtokn.finalize();
 }
+
+/// Regression test for the null-buffer length-probe of the one-shot
+/// C_EncryptMessage/C_DecryptMessage functions on CKM_AES_CCM: calling
+/// either with a NULL output pointer (to learn the required buffer size,
+/// per PKCS#11's usual "call once with NULL to get the length" idiom) must
+/// report the real length rather than 0. Before the fix, self.params
+/// (populated only by msg_encrypt_new/msg_decrypt_new, which the one-shot
+/// entry point only reaches on the *second*, real call) hadn't been set
+/// yet at probe time, so CCM's msg_encryption_len/msg_decryption_len read
+/// a stale/default datalen of 0.
+#[test]
+#[parallel]
+fn test_aes_ccm_message_one_shot_length_probe() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_ccm_message_one_shot_length_probe",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let nonce = b"BA0987654321".to_vec();
+    let aad = b"AUTH ME".to_vec();
+    let plaintext = b"01234567".to_vec();
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* --- Encrypt: probe, then the real call --- */
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut nonce_buf = nonce.clone();
+    let mut tag = [0u8; 8];
+    let mut params = CK_CCM_MESSAGE_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce_buf.as_mut_ptr(),
+        ulNonceLen: nonce_buf.len() as CK_ULONG,
+        ulNonceFixedBits: 0,
+        nonceGenerator: CKG_NO_GENERATE,
+        pMAC: tag.as_mut_ptr(),
+        ulMACLen: tag.len() as CK_ULONG,
+    };
+
+    let mut probed_len: CK_ULONG = 0;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut probed_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(probed_len as usize, plaintext.len());
+
+    let mut enc = vec![0u8; probed_len as usize];
+    let mut enc_len = enc.len() as CK_ULONG;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(enc_len as usize, plaintext.len());
+
+    /* --- Decrypt: probe, then the real call, and check the round-trip --- */
+    let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut probed_len: CK_ULONG = 0;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc.as_ptr() as *mut CK_BYTE,
+        enc_len,
+        std::ptr::null_mut(),
+        &mut probed_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(probed_len as usize, plaintext.len());
+
+    let mut dec = vec![0u8; probed_len as usize];
+    let mut dec_len = dec.len() as CK_ULONG;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc.as_ptr() as *mut CK_BYTE,
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(dec_len as usize, plaintext.len());
+    assert_eq!(dec, plaintext);
+
+    testtokn.finalize();
+}

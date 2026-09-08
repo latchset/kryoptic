@@ -668,8 +668,14 @@ fn encrypt_message(
     }
 
     if ciphertext.is_null() {
+        // A one-step C_EncryptMessage call is, by the msg_encryption_len
+        // contract (see MsgEncryption::msg_encryption_len), equivalent to
+        // a multi-part finalization -- pass final=true so mechanisms whose
+        // output length depends on it (e.g. CKM_AES_CCM, which buffers and
+        // writes nothing until the whole message is available) report the
+        // length the subsequent real call will actually produce.
         let retlen =
-            CK_ULONG::try_from(operation.msg_encryption_len(plen, false)?)
+            CK_ULONG::try_from(operation.msg_encryption_len(plen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
             *pul_ciphertext_len = retlen;
@@ -1062,8 +1068,11 @@ fn decrypt_message(
     }
 
     if plaintext.is_null() {
+        // See the identical comment in encrypt_message: a one-step
+        // C_DecryptMessage call is equivalent to a multi-part
+        // finalization for the msg_decryption_len contract.
         let retlen =
-            CK_ULONG::try_from(operation.msg_decryption_len(clen, false)?)
+            CK_ULONG::try_from(operation.msg_decryption_len(clen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
             *pul_plaintext_len = retlen;

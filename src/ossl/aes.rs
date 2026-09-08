@@ -2189,13 +2189,31 @@ impl MsgEncryption for AesOperation {
     fn msg_encryption_len(
         &mut self,
         data_len: usize,
-        _fin: bool,
+        fin: bool,
     ) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
-            CKM_AES_CCM => Ok(self.params.datalen),
+            CKM_AES_CCM => {
+                if fin {
+                    /* CCM is one-shot in OpenSSL: nothing is written to the
+                     * cipher buffer until the whole message (whatever was
+                     * already buffered by prior msg_encrypt_next calls, plus
+                     * this final chunk) has been accumulated. Using
+                     * self.params.datalen here would be wrong (and, for the
+                     * one-step msg_encrypt entry point, simply unset) before
+                     * the per-message CK_CCM_MESSAGE_PARAMS have been parsed
+                     * by msg_encrypt_begin/msg_encrypt_new -- buffer.len() +
+                     * data_len is always the correct total regardless of
+                     * whether that has happened yet. */
+                    Ok(self.buffer.len() + data_len)
+                } else {
+                    /* Intermediate (non-final) chunks are only buffered;
+                     * msg_encrypt_next never writes any output for CCM. */
+                    Ok(0)
+                }
+            }
             CKM_AES_GCM => Ok(data_len),
             _ => Err(self.op_err(CKR_GENERAL_ERROR)),
         }
@@ -2393,13 +2411,26 @@ impl MsgDecryption for AesOperation {
     fn msg_decryption_len(
         &mut self,
         data_len: usize,
-        _fin: bool,
+        fin: bool,
     ) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
-            CKM_AES_CCM => Ok(self.params.datalen),
+            CKM_AES_CCM => {
+                // See the identical comment in msg_encryption_len: CCM is
+                // one-shot in OpenSSL, nothing is written to the plaintext
+                // buffer until the whole message is available, and
+                // self.params.datalen is unset until msg_decrypt_begin has
+                // parsed the per-message CK_CCM_MESSAGE_PARAMS -- which,
+                // for the one-step msg_decrypt entry point, hasn't happened
+                // yet when this is called to probe the required length.
+                if fin {
+                    Ok(self.buffer.len() + data_len)
+                } else {
+                    Ok(0)
+                }
+            }
             CKM_AES_GCM => Ok(data_len),
             _ => Err(self.op_err(CKR_GENERAL_ERROR)),
         }
