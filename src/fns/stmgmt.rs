@@ -36,6 +36,7 @@ fn get_slot_list(
     unsafe {
         let num: CK_ULONG = *count;
         if num < silen {
+            *count = silen;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
@@ -157,6 +158,10 @@ fn get_mechanism_list(
     let mechs = token.get_mechs_list();
     let num = unsafe { *count };
     if (num as usize) < mechs.len() {
+        unsafe {
+            *count = CK_ULONG::try_from(mechs.len())
+                .map_err(|_| CKR_GENERAL_ERROR)?;
+        }
         return Err(CKR_BUFFER_TOO_SMALL)?;
     }
     for (udx, mech) in mechs.iter().enumerate() {

@@ -798,3 +798,185 @@ fn test_rsa_public_key_info() {
 
     testtokn.finalize();
 }
+
+/// Regression test: C_Encrypt with a too-small output buffer must return
+/// CKR_BUFFER_TOO_SMALL *and* report the real required length in
+/// pulEncryptedDataLen (PKCS#11 v3.2 5.2), so a caller can retry with a
+/// correctly-sized buffer. Every existing RSA encrypt test either
+/// pre-allocates an already-large-enough buffer or probes with a NULL
+/// buffer first (see tests::util::encrypt) -- neither exercises this path,
+/// which is why this went unnoticed: on a too-small non-NULL buffer,
+/// encrypt() in ossl/rsa.rs returns Err(Error::buf_too_small(outlen)), but
+/// the CK_RV conversion in fns/encryption.rs (`Err(e) => e.rv()`) discarded
+/// e.reqsize() and never wrote it back into *pul_encrypted_data_len --
+/// which was left holding whatever the caller originally passed in.
+#[test]
+#[parallel]
+fn test_rsa_encrypt_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_rsa_encrypt_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (hpub, _hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true),],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_SENSITIVE, true),
+            (CKA_DECRYPT, true),
+        ],
+    ));
+
+    /* OAEP, not classic RSA_PKCS v1.5 encryption: raw PKCS#1v1.5 encryption
+     * is denied in FIPS-mode builds, and this test must pass there too. */
+    let params = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA256,
+        mgf: CKG_MGF1_SHA256,
+        source: CKZ_DATA_SPECIFIED,
+        pSourceData: std::ptr::null_mut(),
+        ulSourceDataLen: 0,
+    };
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS_OAEP,
+        pParameter: &params as *const _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_RSA_PKCS_OAEP_PARAMS),
+    };
+    let ret = fn_encrypt_init(session, &mut mechanism, hpub);
+    assert_eq!(ret, CKR_OK);
+
+    /* Deliberately too small: a 2048-bit key's RSA_PKCS_OAEP ciphertext is
+     * exactly 256 bytes. */
+    let data = "plaintext";
+    let mut enc: [u8; 8] = [0; 8];
+    let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        enc_len, 256,
+        "CKR_BUFFER_TOO_SMALL must report the real required length (256 \
+         for a 2048-bit RSA_PKCS_OAEP ciphertext), not leave \
+         *pulEncryptedDataLen at whatever the caller originally passed in (8)"
+    );
+
+    /* Retry with a correctly-sized buffer, exactly as a real caller would;
+     * confirm the operation is still active and produces real output. */
+    let mut enc2 = vec![0u8; enc_len as usize];
+    let mut enc2_len = enc2.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        enc2.as_mut_ptr(),
+        &mut enc2_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(enc2_len, 256);
+
+    testtokn.finalize();
+}
+
+/// Same as test_rsa_encrypt_buffer_too_small_reports_required_len, but for the mirror
+/// C_Decrypt call site (a distinct fn_encrypt/fn_decrypt pair in fns/encryption.rs, so a
+/// distinct place the fix could have been missed).
+#[test]
+#[parallel]
+fn test_rsa_decrypt_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_rsa_decrypt_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true),],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_SENSITIVE, true),
+            (CKA_DECRYPT, true),
+        ],
+    ));
+
+    /* OAEP, not classic RSA_PKCS v1.5 encryption: raw PKCS#1v1.5 encryption
+     * is denied in FIPS-mode builds, and this test must pass there too. */
+    let params = CK_RSA_PKCS_OAEP_PARAMS {
+        hashAlg: CKM_SHA256,
+        mgf: CKG_MGF1_SHA256,
+        source: CKZ_DATA_SPECIFIED,
+        pSourceData: std::ptr::null_mut(),
+        ulSourceDataLen: 0,
+    };
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_RSA_PKCS_OAEP,
+        pParameter: &params as *const _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_RSA_PKCS_OAEP_PARAMS),
+    };
+    let data = "plaintext";
+    /* the safe null-probe idiom (tests::util::encrypt) is unaffected by the bug -- use it to
+     * produce a real ciphertext to decrypt */
+    let enc =
+        ret_or_panic!(encrypt(session, hpub, data.as_bytes(), &mechanism));
+    assert_eq!(enc.len(), 256);
+
+    let mut mechanism = mechanism;
+    let ret = fn_decrypt_init(session, &mut mechanism, hpri);
+    assert_eq!(ret, CKR_OK);
+
+    /* Deliberately too small. Unlike encrypt (whose ciphertext length is always exactly
+     * the modulus size), RSA_PKCS_OAEP decrypt cannot know the exact unpadded plaintext
+     * length without fully performing the decryption (that's what the tmp-buffer bridging
+     * further down in ossl/rsa.rs::decrypt is for) -- so, consistent with what the
+     * null-buffer probe (decryption_len(), used by C_Decrypt's NULL-output path) already
+     * reports, the required length here is the conservative modulus-size upper bound (256),
+     * not the eventual 9-byte plaintext. */
+    let mut dec: [u8; 2] = [0; 2];
+    let mut dec_len: CK_ULONG = dec.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc.as_ptr() as *mut u8,
+        enc.len() as CK_ULONG,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        dec_len, 256,
+        "CKR_BUFFER_TOO_SMALL must report the modulus-size upper bound \
+         (256, matching decryption_len()'s own null-probe answer), not \
+         leave *pulDataLen at whatever the caller originally passed in (2)"
+    );
+
+    let mut dec2 = vec![0u8; dec_len as usize];
+    let mut dec2_len = dec2.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc.as_ptr() as *mut u8,
+        enc.len() as CK_ULONG,
+        dec2.as_mut_ptr(),
+        &mut dec2_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec2[..dec2_len as usize], data.as_bytes());
+
+    testtokn.finalize();
+}

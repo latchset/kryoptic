@@ -647,7 +647,7 @@ impl Decryption for RsaPKCSOperation {
             }
 
             if plain.len() < outlen && plain.len() < self.output_len {
-                return Err(CKR_BUFFER_TOO_SMALL)?;
+                return Err(Error::buf_too_small(outlen));
             }
             self.finalized = true;
 

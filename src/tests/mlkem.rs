@@ -453,6 +453,94 @@ fn test_groups(session: CK_SESSION_HANDLE, data: Value) {
     }
 }
 
+/// Regression test: C_EncapsulateKey with a too-small ciphertext buffer must return
+/// CKR_BUFFER_TOO_SMALL *and* report the real ciphertext length in *pulCiphertextLen (PKCS#11
+/// v3.2 5.2), not leave it at whatever the caller originally passed in.
+#[test]
+#[parallel]
+fn test_mlkem_encapsulate_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_mlkem_encapsulate_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pub_handle, _priv_handle) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_KEM_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512)
+        ],
+        &[],
+        &[(CKA_ENCAPSULATE, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM),],
+        &[],
+        &[(CKA_DECAPSULATE, true),],
+    ));
+
+    let key_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_KEM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* ML-KEM-512's ciphertext is exactly 768 bytes. */
+    let mut ciphertext: [u8; 4] = [0; 4];
+    let mut outlen: CK_ULONG = ciphertext.len() as CK_ULONG;
+    let mut handle_enc = CK_INVALID_HANDLE;
+    let ret = fn_encapsulate_key(
+        session,
+        &mut mechanism,
+        pub_handle,
+        key_template.as_ptr() as *mut _,
+        key_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        &mut outlen,
+        &mut handle_enc,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        outlen, 768,
+        "CKR_BUFFER_TOO_SMALL must report the real required length (768 \
+         for ML-KEM-512), not leave *pulCiphertextLen at whatever the \
+         caller originally passed in (4)"
+    );
+
+    let mut ciphertext2 = vec![0u8; outlen as usize];
+    let mut outlen2 = ciphertext2.len() as CK_ULONG;
+    let ret = fn_encapsulate_key(
+        session,
+        &mut mechanism,
+        pub_handle,
+        key_template.as_ptr() as *mut _,
+        key_template.len() as CK_ULONG,
+        ciphertext2.as_mut_ptr(),
+        &mut outlen2,
+        &mut handle_enc,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(outlen2, 768);
+
+    testtokn.finalize();
+}
+
 #[test]
 #[parallel]
 fn test_mlkem_decap_vector() {

@@ -205,3 +205,106 @@ fn test_mechanism_objects() {
 
     testtokn.finalize();
 }
+
+/// Regression test: C_GetMechanismList with a too-small list buffer must return
+/// CKR_BUFFER_TOO_SMALL *and* report the real mechanism count in *pulCount (PKCS#11 v3.2 5.2),
+/// not leave it at whatever the caller originally passed in.
+#[test]
+#[parallel]
+fn test_get_mechanism_list_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_get_mechanism_list_buffer_too_small_reports_required_len",
+        None,
+    );
+
+    let mut real_count: CK_ULONG = 0;
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        std::ptr::null_mut(),
+        &mut real_count,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert!(real_count > 1);
+
+    let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; 1];
+    let mut count: CK_ULONG = 1;
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        count, real_count,
+        "CKR_BUFFER_TOO_SMALL must report the real mechanism count ({}), \
+         not leave *pulCount at whatever the caller originally passed in (1)",
+        real_count
+    );
+
+    testtokn.finalize();
+}
+
+/// Regression test: C_GetSlotList with a too-small slot-list buffer must return
+/// CKR_BUFFER_TOO_SMALL *and* report the real slot count in *pulCount.
+#[test]
+#[parallel]
+fn test_get_slot_list_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_get_slot_list_buffer_too_small_reports_required_len",
+        None,
+    );
+
+    let mut real_count: CK_ULONG = 0;
+    let ret = fn_get_slot_list(CK_FALSE, std::ptr::null_mut(), &mut real_count);
+    assert_eq!(ret, CKR_OK);
+    assert!(real_count > 0);
+
+    if real_count > 1 {
+        let mut slots: Vec<CK_SLOT_ID> = vec![0; 1];
+        let mut count: CK_ULONG = 1;
+        let ret = fn_get_slot_list(
+            CK_FALSE,
+            slots.as_mut_ptr() as CK_SLOT_ID_PTR,
+            &mut count,
+        );
+        assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+        assert_eq!(
+            count, real_count,
+            "CKR_BUFFER_TOO_SMALL must report the real slot count ({}), \
+             not leave *pulCount at whatever the caller originally passed in (1)",
+            real_count
+        );
+    }
+
+    testtokn.finalize();
+}
+
+/// Regression test: C_GetInterfaceList with a too-small interface-list buffer must return
+/// CKR_BUFFER_TOO_SMALL *and* report the real interface count in *pulCount.
+#[test]
+#[parallel]
+fn test_get_interface_list_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_get_interface_list_buffer_too_small_reports_required_len",
+        None,
+    );
+
+    let mut real_count: CK_ULONG = 0;
+    let ret = fn_get_interface_list(std::ptr::null_mut(), &mut real_count);
+    assert_eq!(ret, CKR_OK);
+    assert!(real_count > 1);
+
+    let mut ifaces: Vec<CK_INTERFACE> = Vec::with_capacity(1);
+    unsafe { ifaces.set_len(1) };
+    let mut count: CK_ULONG = 1;
+    let ret = fn_get_interface_list(ifaces.as_mut_ptr(), &mut count);
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        count, real_count,
+        "CKR_BUFFER_TOO_SMALL must report the real interface count ({}), \
+         not leave *pulCount at whatever the caller originally passed in (1)",
+        real_count
+    );
+
+    testtokn.finalize();
+}
