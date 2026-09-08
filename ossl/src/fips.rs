@@ -273,12 +273,17 @@ impl ProviderSignatureCtx {
         unsafe {
             match (*self.vtable).digest_verify_final {
                 Some(f) => {
-                    if f(
+                    let ret = f(
                         self.ctx,
                         signature.as_ptr() as *const c_uchar,
                         signature.len(),
-                    ) != 1
-                    {
+                    );
+                    // 1 = valid signature, 0 = the signature does not
+                    // verify (not an error condition), < 0 = the
+                    // verification operation itself failed.
+                    if ret == 0 {
+                        return Err(Error::new(ErrorKind::VerifyFailed));
+                    } else if ret != 1 {
                         return Err(Error::new(ErrorKind::OsslError));
                     }
                 }
@@ -296,14 +301,19 @@ impl ProviderSignatureCtx {
         unsafe {
             match (*self.vtable).digest_verify {
                 Some(f) => {
-                    if f(
+                    let ret = f(
                         self.ctx,
                         signature.as_ptr() as *const c_uchar,
                         signature.len(),
                         tbs.as_ptr() as *const c_uchar,
                         tbs.len(),
-                    ) != 1
-                    {
+                    );
+                    // 1 = valid signature, 0 = the signature does not
+                    // verify (not an error condition), < 0 = the
+                    // verification operation itself failed.
+                    if ret == 0 {
+                        return Err(Error::new(ErrorKind::VerifyFailed));
+                    } else if ret != 1 {
                         return Err(Error::new(ErrorKind::OsslError));
                     }
                 }
