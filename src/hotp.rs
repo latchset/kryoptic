@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::sync::LazyLock;
 
 use crate::attribute::{Attribute, CkAttrs};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::hash::{HASH_LEN_SHA1, HASH_LEN_SHA256, HASH_LEN_SHA512};
 use crate::mechanism::{
     Mac, MechOperation, Mechanism, Mechanisms, Sign, Verify,
@@ -546,7 +546,7 @@ impl Sign for HOTPOperation {
         let total_size = struct_size + param_size + self.length;
 
         if signature.len() < total_size {
-            return Err(CKR_BUFFER_TOO_SMALL)?;
+            return Err(Error::buf_too_small(total_size));
         }
 
         self.finalized = true;

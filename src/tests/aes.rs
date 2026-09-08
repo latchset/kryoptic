@@ -2208,3 +2208,349 @@ fn test_aes_ccm_message_one_shot_length_probe() {
 
     testtokn.finalize();
 }
+
+/// Regression test for the streaming C_EncryptUpdate call site (fns/encryption.rs
+/// internal_encrypt_update, a distinct place the CKR_BUFFER_TOO_SMALL reqsize fix could have
+/// been missed vs. the one-shot C_Encrypt / C_Decrypt call sites).
+#[test]
+#[parallel]
+fn test_aes_encrypt_update_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_encrypt_update_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let iv = "FEDCBA0987654321";
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_CBC,
+        pParameter: void_ptr!(iv.as_bytes()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    /* Exactly one block: CBC (no padding) always emits AES_BLOCK_SIZE bytes for it. */
+    let data = "0123456789ABCDEF";
+    let mut enc: [u8; 4] = [0; 4];
+    let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
+    let ret = fn_encrypt_update(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        enc_len, AES_BLOCK_SIZE as CK_ULONG,
+        "CKR_BUFFER_TOO_SMALL must report the real required length ({} \
+         bytes), not leave *pulEncryptedPartLen at whatever the caller \
+         originally passed in (4)",
+        AES_BLOCK_SIZE
+    );
+
+    let mut enc2 = vec![0u8; enc_len as usize];
+    let mut enc2_len = enc2.len() as CK_ULONG;
+    let ret = fn_encrypt_update(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        enc2.as_mut_ptr(),
+        &mut enc2_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(enc2_len, AES_BLOCK_SIZE as CK_ULONG);
+
+    testtokn.finalize();
+}
+
+/// Regression test for the streaming C_EncryptFinal call site (fns/encryption.rs
+/// encrypt_final), distinct from C_EncryptUpdate above -- CBC_PAD's finalize path has its own
+/// buf_too_small(AES_BLOCK_SIZE) check for the padding block.
+#[test]
+#[parallel]
+fn test_aes_encrypt_final_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_encrypt_final_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let iv = "FEDCBA0987654321";
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_bytes()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    /* One full block via the safe null-probe helper (unaffected by the bug); CBC_PAD always
+     * adds a full dummy padding block on Final for block-aligned input. */
+    let data = vec![0x0Au8; AES_BLOCK_SIZE];
+    let enc = ret_or_panic!(encrypt_update(session, &data));
+    assert_eq!(enc.len(), AES_BLOCK_SIZE);
+
+    let mut fin: [u8; 4] = [0; 4];
+    let mut fin_len: CK_ULONG = fin.len() as CK_ULONG;
+    let ret = fn_encrypt_final(session, fin.as_mut_ptr(), &mut fin_len);
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        fin_len, AES_BLOCK_SIZE as CK_ULONG,
+        "CKR_BUFFER_TOO_SMALL must report the real required length ({} \
+         bytes), not leave *pulLastEncryptedPartLen at whatever the \
+         caller originally passed in (4)",
+        AES_BLOCK_SIZE
+    );
+
+    let mut fin2 = vec![0u8; fin_len as usize];
+    let mut fin2_len = fin2.len() as CK_ULONG;
+    let ret = fn_encrypt_final(session, fin2.as_mut_ptr(), &mut fin2_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(fin2_len, AES_BLOCK_SIZE as CK_ULONG);
+
+    testtokn.finalize();
+}
+
+/// Regression test for the one-shot C_EncryptMessage call site (fns/encryption.rs
+/// encrypt_message -> operation.msg_encrypt, which for CKM_AES_GCM delegates internally to
+/// msg_encrypt_next's own buf_too_small(plain.len()) check).
+#[test]
+#[parallel]
+fn test_aes_gcm_encrypt_message_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_gcm_encrypt_message_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut iv = [0u8; 12];
+    let mut tag = [0u8; 16];
+    let mut params = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv.as_mut_ptr(),
+        ulIvLen: iv.len() as CK_ULONG,
+        ulIvFixedBits: 0,
+        ivGenerator: CKG_NO_GENERATE,
+        pTag: tag.as_mut_ptr(),
+        ulTagBits: (tag.len() * 8) as CK_ULONG,
+    };
+    let plaintext = b"Hello world!";
+    let mut enc: [u8; 4] = [0; 4];
+    let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        enc_len,
+        plaintext.len() as CK_ULONG,
+        "CKR_BUFFER_TOO_SMALL must report the real required length ({} \
+         bytes), not leave *pulCiphertextLen at whatever the caller \
+         originally passed in (4)",
+        plaintext.len()
+    );
+
+    testtokn.finalize();
+}
+
+/// Regression test for the streaming C_EncryptMessageNext call site (fns/encryption.rs
+/// encrypt_message_next -> operation.msg_encrypt_next), distinct from the one-shot
+/// C_EncryptMessage above -- reached only through the explicit Begin/Next API, never through
+/// the one-shot entry point.
+#[test]
+#[parallel]
+fn test_aes_gcm_encrypt_message_next_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_gcm_encrypt_message_next_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut iv = [0u8; 12];
+    let mut tag = [0u8; 16];
+    let mut params = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv.as_mut_ptr(),
+        ulIvLen: iv.len() as CK_ULONG,
+        ulIvFixedBits: 0,
+        ivGenerator: CKG_NO_GENERATE,
+        pTag: tag.as_mut_ptr(),
+        ulTagBits: (tag.len() * 8) as CK_ULONG,
+    };
+
+    let ret = fn_encrypt_message_begin(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let plaintext = b"Hello world!";
+    let mut enc: [u8; 4] = [0; 4];
+    let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
+    let ret = fn_encrypt_message_next(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+        0, /* not CKF_END_OF_MESSAGE */
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        enc_len,
+        plaintext.len() as CK_ULONG,
+        "CKR_BUFFER_TOO_SMALL must report the real required length ({} \
+         bytes), not leave *pulCiphertextPartLen at whatever the caller \
+         originally passed in (4)",
+        plaintext.len()
+    );
+
+    testtokn.finalize();
+}
+
+/// Regression test for the C_WrapKey call site (fns/keymgmt.rs wrap_key), the only affected
+/// site outside fns/encryption.rs -- it converts its Result via a bare
+/// `Err(e) => return Err(e)?` (not even `Err(e) => e.rv()`, but the same effect: the
+/// output-length pointer is never written to on this path either).
+#[test]
+#[parallel]
+fn test_aes_wrap_key_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_wrap_key_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let wrapping_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_WRAP, true), (CKA_UNWRAP, true),],
+    ));
+    let target_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_EXTRACTABLE, true),],
+    ));
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP_KWP,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut wrapped: [u8; 4] = [0; 4];
+    let mut wrapped_len: CK_ULONG = wrapped.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        wrapping_handle,
+        target_handle,
+        wrapped.as_mut_ptr(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    /* AES-KWP wraps a 32-byte key into 40 bytes (two 8-byte overhead blocks). */
+    assert_eq!(
+        wrapped_len, 40,
+        "CKR_BUFFER_TOO_SMALL must report the real required length (40 \
+         bytes), not leave *pulWrappedKeyLen at whatever the caller \
+         originally passed in (4)"
+    );
+
+    let mut wrapped2 = vec![0u8; wrapped_len as usize];
+    let mut wrapped2_len = wrapped2.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        wrapping_handle,
+        target_handle,
+        wrapped2.as_mut_ptr(),
+        &mut wrapped2_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(wrapped2_len, 40);
+
+    testtokn.finalize();
+}

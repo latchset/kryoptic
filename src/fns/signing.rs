@@ -104,6 +104,7 @@ fn sign(
     }
     unsafe {
         if *pul_signature_len < sig_len {
+            *pul_signature_len = sig_len;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
@@ -235,6 +236,7 @@ fn sign_final(
     }
     unsafe {
         if *pul_signature_len < sig_len {
+            *pul_signature_len = sig_len;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }

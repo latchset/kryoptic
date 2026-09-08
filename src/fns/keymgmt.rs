@@ -12,7 +12,7 @@ use crate::log_debug;
 use crate::misc::bytes_to_slice;
 use crate::object;
 use crate::pkcs11::*;
-use crate::{fail_if_cka_token_true, STATE};
+use crate::{fail_if_cka_token_true, report_reqsize, STATE};
 
 #[cfg(feature = "fips")]
 use crate::fips;
@@ -312,8 +312,10 @@ fn wrap_key(
             usize::try_from(pwraplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
         unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) }
     };
-    let outlen = match mech.wrap_key(&mechanism, &wkey, &key, wrapped, factory)
-    {
+    let outlen = match report_reqsize(
+        mech.wrap_key(&mechanism, &wkey, &key, wrapped, factory),
+        pul_wrapped_key_len,
+    ) {
         Ok(len) => {
             #[cfg(feature = "fips")]
             session.set_fips_indicator(fips::indicators::is_approved(
@@ -864,6 +866,9 @@ fn encapsulate_key(
         return Ok(());
     }
     if ciphertext_len > enclen {
+        unsafe {
+            *encrypted_part_len = ctext_len;
+        }
         return Err(CKR_BUFFER_TOO_SMALL)?;
     }
 

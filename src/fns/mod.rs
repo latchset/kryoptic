@@ -6,7 +6,7 @@
 //! This module and its submodules contain the implementation of the various
 //! PKCS#11 functions exported via the Function List.
 
-use crate::error::Result;
+use crate::error::{ErrorKind, Result};
 use crate::pkcs11::*;
 use crate::{get_random_data, random_add_seed, STATE};
 
@@ -37,6 +37,30 @@ pub(crate) fn fail_if_cka_token_true(template: &[CK_ATTRIBUTE]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// If `result` failed with CKR_BUFFER_TOO_SMALL, writes the error's required size into
+/// `out_len` before returning it unchanged. PKCS#11 v3.2 5.2 requires a function returning
+/// CKR_BUFFER_TOO_SMALL to report the real required length so a caller can retry with a
+/// correctly-sized buffer; every `extern "C" fn_*` wrapper's `Err(e) => e.rv()` conversion
+/// discards `e.reqsize()` (the field `Error::buf_too_small` exists specifically to carry this
+/// value) otherwise, leaving the output-length pointer at whatever the caller originally
+/// passed in. `out_len` may be null (some call sites have none to report through); a null
+/// pointer, or a `reqsize` that doesn't fit in a `CK_ULONG`, makes this a no-op.
+pub(crate) fn report_reqsize<T>(
+    result: Result<T>,
+    out_len: CK_ULONG_PTR,
+) -> Result<T> {
+    if let Err(ref e) = result {
+        if e.kind() == ErrorKind::BufferTooSmall && !out_len.is_null() {
+            if let Ok(reqsize) = CK_ULONG::try_from(e.reqsize()) {
+                unsafe {
+                    *out_len = reqsize;
+                }
+            }
+        }
+    }
+    result
 }
 
 #[inline(always)]

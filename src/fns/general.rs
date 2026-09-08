@@ -202,6 +202,7 @@ fn get_interface_list(
     }
     unsafe {
         if *count < iflen {
+            *count = iflen;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }

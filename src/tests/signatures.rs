@@ -598,3 +598,128 @@ fn test_hmac_save_restore() {
 
     testtokn.finalize();
 }
+
+/// Regression test: C_Sign with a too-small signature buffer must return CKR_BUFFER_TOO_SMALL
+/// *and* report the real signature length in *pulSignatureLen (PKCS#11 v3.2 5.2). Our own
+/// wrapper always probes with a NULL buffer first (the other, already-correct branch), so this
+/// specific too-small-non-NULL-buffer path had no coverage anywhere.
+#[test]
+#[parallel]
+fn test_sign_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_sign_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (_hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_VERIFY, true),],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_SENSITIVE, true), (CKA_SIGN, true),],
+    ));
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_sign_init(session, &mut mechanism, hpri);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "data to sign";
+    let mut sig: [u8; 4] = [0; 4];
+    let mut sig_len: CK_ULONG = sig.len() as CK_ULONG;
+    let ret = fn_sign(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sig.as_mut_ptr(),
+        &mut sig_len,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        sig_len, 256,
+        "CKR_BUFFER_TOO_SMALL must report the real required length (256 \
+         for a 2048-bit RSA signature), not leave *pulSignatureLen at \
+         whatever the caller originally passed in (4)"
+    );
+
+    let mut sig2 = vec![0u8; sig_len as usize];
+    let mut sig2_len = sig2.len() as CK_ULONG;
+    let ret = fn_sign(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+        sig2.as_mut_ptr(),
+        &mut sig2_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sig2_len, 256);
+
+    testtokn.finalize();
+}
+
+/// Same as test_sign_buffer_too_small_reports_required_len, but for the C_SignFinal call site
+/// (fns/signing.rs sign_final, a distinct place the fix could have been missed).
+#[test]
+#[parallel]
+fn test_sign_final_buffer_too_small_reports_required_len() {
+    let mut testtokn = TestToken::initialized(
+        "test_sign_final_buffer_too_small_reports_required_len",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (_hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_VERIFY, true),],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_SENSITIVE, true), (CKA_SIGN, true),],
+    ));
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_sign_init(session, &mut mechanism, hpri);
+    assert_eq!(ret, CKR_OK);
+
+    let data = "data to sign";
+    let ret = fn_sign_update(
+        session,
+        data.as_ptr() as *mut u8,
+        data.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut sig: [u8; 4] = [0; 4];
+    let mut sig_len: CK_ULONG = sig.len() as CK_ULONG;
+    let ret = fn_sign_final(session, sig.as_mut_ptr(), &mut sig_len);
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    assert_eq!(
+        sig_len, 256,
+        "CKR_BUFFER_TOO_SMALL must report the real required length (256 \
+         for a 2048-bit RSA signature), not leave *pulSignatureLen at \
+         whatever the caller originally passed in (4)"
+    );
+
+    let mut sig2 = vec![0u8; sig_len as usize];
+    let mut sig2_len = sig2.len() as CK_ULONG;
+    let ret = fn_sign_final(session, sig2.as_mut_ptr(), &mut sig2_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(sig2_len, 256);
+
+    testtokn.finalize();
+}
