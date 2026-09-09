@@ -2209,6 +2209,156 @@ fn test_aes_ccm_message_one_shot_length_probe() {
     testtokn.finalize();
 }
 
+/// Regression test: CKM_AES_CCM with a 7-byte nonce (the maximum-length nonce, giving the
+/// SP800-38C length field L = 15 - 7 = 8) must accept messages longer than 1 byte.
+///
+/// AesOperation::init_params computed the per-nonce-length data cap as `1 << (8 * l)`. CK_ULONG
+/// is 64 bits wide on this (LP64) target, and for l == 8 that shift amount is 64 -- out of range
+/// for a u64 shift, which silently wraps to `1 << 0 == 1` in a release build (no panic, since
+/// overflow-checks are off). The cap then rejected any data longer than 1 byte for exactly the
+/// nonce length meant to be the *least* restrictive one.
+#[test]
+#[parallel]
+fn test_aes_ccm_nonce7_allows_data_longer_than_one_byte() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_ccm_nonce7_allows_data_longer_than_one_byte",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let data = b"this plaintext is well over one byte long".to_vec();
+    let tag_len = 16usize;
+    let nonce = b"1234567".to_vec();
+    assert_eq!(nonce.len(), 7);
+    let aad = b"AUTH ME".to_vec();
+
+    let mut param = CK_CCM_PARAMS {
+        ulDataLen: data.len() as CK_ULONG,
+        pNonce: nonce.as_ptr() as *mut CK_BYTE,
+        ulNonceLen: nonce.len() as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: &mut param as *mut CK_CCM_PARAMS as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut enc = ret_or_panic!(encrypt_update(session, &data));
+    let mut enc_final = ret_or_panic!(encrypt_final(session));
+    enc.append(&mut enc_final);
+    assert_eq!(enc.len(), data.len() + tag_len);
+
+    let dec = ret_or_panic!(decrypt(session, handle, &enc, &mechanism));
+    assert_eq!(dec, data);
+
+    testtokn.finalize();
+}
+
+/// Same as test_aes_ccm_nonce7_allows_data_longer_than_one_byte, but for the message-mode
+/// CK_CCM_MESSAGE_PARAMS call site (fns/dualcrypto.rs's fn_encrypt_message/fn_decrypt_message
+/// via AesOperation::init_msg_params) -- a distinct place the identical shift-overflow bug was
+/// duplicated.
+#[test]
+#[parallel]
+fn test_aes_ccm_message_nonce7_allows_data_longer_than_one_byte() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_ccm_message_nonce7_allows_data_longer_than_one_byte",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut nonce = b"1234567".to_vec();
+    assert_eq!(nonce.len(), 7);
+    let aad = b"AUTH ME".to_vec();
+    let plaintext = b"this plaintext is well over one byte long".to_vec();
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut tag = [0u8; 16];
+    let mut params = CK_CCM_MESSAGE_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce.as_mut_ptr(),
+        ulNonceLen: nonce.len() as CK_ULONG,
+        ulNonceFixedBits: 0,
+        nonceGenerator: CKG_NO_GENERATE,
+        pMAC: tag.as_mut_ptr(),
+        ulMACLen: tag.len() as CK_ULONG,
+    };
+
+    let mut enc = vec![0u8; plaintext.len()];
+    let mut enc_len = enc.len() as CK_ULONG;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(enc_len as usize, plaintext.len());
+
+    let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut dec = vec![0u8; plaintext.len()];
+    let mut dec_len = dec.len() as CK_ULONG;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc.as_ptr() as *mut CK_BYTE,
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(dec_len as usize, plaintext.len());
+    assert_eq!(dec, plaintext);
+
+    testtokn.finalize();
+}
+
 /// Regression test for the streaming C_EncryptUpdate call site (fns/encryption.rs
 /// internal_encrypt_update, a distinct place the CKR_BUFFER_TOO_SMALL reqsize fix could have
 /// been missed vs. the one-shot C_Encrypt / C_Decrypt call sites).
