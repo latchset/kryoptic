@@ -2209,6 +2209,171 @@ fn test_aes_ccm_message_one_shot_length_probe() {
     testtokn.finalize();
 }
 
+/// Regression test: CKM_AES_CCM must support a zero-length payload -- authenticating only the
+/// associated data, with no plaintext at all (NIST SP 800-38C explicitly permits this). This
+/// exercises the classic, non-message-mode CK_CCM_PARAMS path via C_Encrypt/C_Decrypt.
+/// AesOperation::encrypt_update's buffering condition (`plain.len() < self.params.datalen`)
+/// never fires when datalen == 0, so no OpenSSL update() call ever happened and encrypt_final's
+/// tag retrieval failed downstream with a confusing CKR_DEVICE_ERROR ("tag not set").
+#[test]
+#[parallel]
+fn test_aes_ccm_classic_empty_data_authenticates_aad() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_ccm_classic_empty_data_authenticates_aad",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let iv = "BA0987654321";
+    let aad = "AAD only, no payload";
+    let tag_len = 16usize;
+    let mut param = CK_CCM_PARAMS {
+        ulDataLen: 0,
+        pNonce: iv.as_ptr() as *mut CK_BYTE,
+        ulNonceLen: iv.len() as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: &mut param as *mut CK_CCM_PARAMS as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+
+    let enc = ret_or_panic!(encrypt(session, handle, &[], &mechanism));
+    assert_eq!(
+        enc.len(),
+        tag_len,
+        "an AAD-only CCM ciphertext is just the authentication tag"
+    );
+
+    let dec = ret_or_panic!(decrypt(session, handle, &enc, &mechanism));
+    assert_eq!(dec.len(), 0);
+
+    testtokn.finalize();
+}
+
+/// Same as test_aes_ccm_classic_empty_data_authenticates_aad, but for the message-mode
+/// CK_CCM_MESSAGE_PARAMS call sites (fns/encryption.rs's fn_encrypt_message/fn_decrypt_message,
+/// where `plaintext_len == 0`/`ciphertext_len == 0` were bundled into the same reject-condition
+/// as a genuinely null pointer).
+#[test]
+#[parallel]
+fn test_aes_ccm_message_empty_data_authenticates_aad() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_ccm_message_empty_data_authenticates_aad",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut nonce = b"BA0987654321".to_vec();
+    let aad = b"AAD only, no payload".to_vec();
+    let plaintext: Vec<u8> = vec![];
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut tag = [0u8; 16];
+    let mut params = CK_CCM_MESSAGE_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce.as_mut_ptr(),
+        ulNonceLen: nonce.len() as CK_ULONG,
+        ulNonceFixedBits: 0,
+        nonceGenerator: CKG_NO_GENERATE,
+        pMAC: tag.as_mut_ptr(),
+        ulMACLen: tag.len() as CK_ULONG,
+    };
+
+    // The wrapper's usual idiom: probe first (NULL ciphertext) with the real, empty,
+    // non-null plaintext pointer -- this is exactly the call the fix must not reject.
+    let mut probed_len: CK_ULONG = 0;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut probed_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(
+        probed_len, 0,
+        "an AAD-only CCM message produces no ciphertext bytes"
+    );
+
+    let mut enc: Vec<u8> = vec![];
+    let mut enc_len: CK_ULONG = 0;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(enc_len, 0);
+
+    let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut dec: Vec<u8> = vec![];
+    let mut dec_len: CK_ULONG = 0;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc.as_ptr() as *mut CK_BYTE,
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(
+        ret, CKR_OK,
+        "AAD-only decrypt must verify the tag and succeed"
+    );
+    assert_eq!(dec_len, 0);
+
+    testtokn.finalize();
+}
+
 /// Regression test: CKM_AES_CCM with a 7-byte nonce (the maximum-length nonce, giving the
 /// SP800-38C length field L = 15 - 7 = 8) must accept messages longer than 1 byte.
 ///
@@ -2481,6 +2646,96 @@ fn test_aes_encrypt_final_buffer_too_small_reports_required_len() {
     let ret = fn_encrypt_final(session, fin2.as_mut_ptr(), &mut fin2_len);
     assert_eq!(ret, CKR_OK);
     assert_eq!(fin2_len, AES_BLOCK_SIZE as CK_ULONG);
+
+    testtokn.finalize();
+}
+
+/// Regression test: unlike CCM (see test_aes_ccm_message_empty_data_authenticates_aad), GCM's
+/// message-mode msg_encrypt_next/msg_decrypt_next already guarded their ctx.update() calls
+/// behind `plain.len() > 0` / `cipher.len() > 0` before the fns/encryption.rs-level zero-length
+/// fix -- so removing that fix's now-shared, mechanism-agnostic `_len == 0` argument check could
+/// not have newly exposed a GCM-specific bug the way it needed a CCM-specific one (see the other
+/// commit in this fix). This confirms a zero-length, AAD-only message round-trips correctly for
+/// CKM_AES_GCM's message-mode API too.
+#[test]
+#[parallel]
+fn test_aes_gcm_message_empty_data_authenticates_aad() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_gcm_message_empty_data_authenticates_aad",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let aad = b"AAD only, no payload".to_vec();
+    let plaintext: Vec<u8> = vec![];
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut iv = [0u8; 12];
+    let mut tag = [0u8; 16];
+    let mut params = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv.as_mut_ptr(),
+        ulIvLen: iv.len() as CK_ULONG,
+        ulIvFixedBits: 0,
+        ivGenerator: CKG_NO_GENERATE,
+        pTag: tag.as_mut_ptr(),
+        ulTagBits: (tag.len() * 8) as CK_ULONG,
+    };
+
+    let mut enc: Vec<u8> = vec![];
+    let mut enc_len: CK_ULONG = 0;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK, "GCM AAD-only encrypt");
+    assert_eq!(enc_len, 0);
+
+    let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut dec: Vec<u8> = vec![];
+    let mut dec_len: CK_ULONG = 0;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc.as_ptr() as *mut CK_BYTE,
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(
+        ret, CKR_OK,
+        "GCM AAD-only decrypt must verify the tag and succeed"
+    );
+    assert_eq!(dec_len, 0);
 
     testtokn.finalize();
 }
