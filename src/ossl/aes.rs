@@ -224,8 +224,9 @@ impl AesOperation {
                 let max_data_len: CK_ULONG = (1 as CK_ULONG)
                     .checked_shl(8 * l as u32)
                     .unwrap_or(CK_ULONG::MAX);
-                if params.ulDataLen == 0
-                    || params.ulDataLen > max_data_len
+                /* ulDataLen == 0 (an AAD-only message, authenticating no payload) is
+                 * spec-legal per NIST SP 800-38C and not rejected here. */
+                if params.ulDataLen > max_data_len
                     || params.ulDataLen > (CK_ULONG::MAX - params.ulMACLen)
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -784,8 +785,9 @@ impl AesOperation {
                 let max_data_len: CK_ULONG = (1 as CK_ULONG)
                     .checked_shl(8 * l as u32)
                     .unwrap_or(CK_ULONG::MAX);
-                if params.ulDataLen == 0
-                    || params.ulDataLen > max_data_len
+                /* ulDataLen == 0 (an AAD-only message, authenticating no payload) is
+                 * spec-legal per NIST SP 800-38C and not rejected here. */
+                if params.ulDataLen > max_data_len
                     || params.ulDataLen > (CK_ULONG::MAX - params.ulMACLen)
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -1294,7 +1296,24 @@ impl Encryption for AesOperation {
         let mut plain_end = plain.len();
         match self.mech {
             CKM_AES_CCM => {
-                if plain.len() < self.params.datalen {
+                if self.params.datalen == 0 {
+                    /* A zero-length CCM message (AAD-only, no payload) never
+                     * satisfies `plain.len() < self.params.datalen` below --
+                     * there is nothing left to wait for -- so without this,
+                     * no update() call ever reaches OpenSSL, and
+                     * encrypt_final's tag retrieval fails downstream with
+                     * "tag not set". OpenSSL's CCM provider needs at least
+                     * one EVP_EncryptUpdate call, even with zero-length
+                     * data, to leave the AAD phase and compute the tag. */
+                    cipher_offset = ctx.update(&[], cipher).or_else(|_| {
+                        self.finalized = true;
+                        Err(CKR_DEVICE_ERROR)
+                    })?;
+                    if cipher_offset != 0 {
+                        return Err(self.op_err(CKR_DEVICE_ERROR));
+                    }
+                    plain_offset = plain_end;
+                } else if plain.len() < self.params.datalen {
                     self.buffer.extend_from_slice(plain);
                     if self.buffer.len() == self.params.datalen {
                         cipher_offset = ctx

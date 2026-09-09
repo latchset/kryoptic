@@ -659,7 +659,6 @@ fn encrypt_message(
     if parameter.is_null()
         || parameter_len == 0
         || plaintext.is_null()
-        || plaintext_len == 0
         || pul_ciphertext_len.is_null()
     {
         return Err(CKR_ARGUMENTS_BAD)?;
@@ -852,7 +851,6 @@ fn encrypt_message_next(
     if parameter.is_null()
         || parameter_len == 0
         || plaintext_part.is_null()
-        || plaintext_part_len == 0
         || pul_ciphertext_part_len.is_null()
     {
         return Err(CKR_ARGUMENTS_BAD)?;
@@ -1058,7 +1056,6 @@ fn decrypt_message(
     if parameter.is_null()
         || parameter_len == 0
         || ciphertext.is_null()
-        || ciphertext_len == 0
         || pul_plaintext_len.is_null()
     {
         return Err(CKR_ARGUMENTS_BAD)?;
@@ -1249,7 +1246,6 @@ fn decrypt_message_next(
     if parameter.is_null()
         || parameter_len == 0
         || ciphertext_part.is_null()
-        || ciphertext_part_len == 0
         || pul_plaintext_part_len.is_null()
     {
         return Err(CKR_ARGUMENTS_BAD)?;
