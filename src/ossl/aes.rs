@@ -213,8 +213,19 @@ impl AesOperation {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let l = 15 - params.ulNonceLen;
+                /* l can be as large as 8 (nonceLen == 7), and CK_ULONG's
+                 * width varies by platform (32 bits on i686, 64 on
+                 * x86_64/aarch64/...), so a plain `1 << (8 * l)` can shift
+                 * out of range. checked_shl()'s contract is exactly "None
+                 * if the shift amount is >= the type's own bit width",
+                 * which is precisely "no representable cap, i.e. every
+                 * CK_ULONG value fits" -- correct on any width without
+                 * needing to reason about any other type. */
+                let max_data_len: CK_ULONG = (1 as CK_ULONG)
+                    .checked_shl(8 * l as u32)
+                    .unwrap_or(CK_ULONG::MAX);
                 if params.ulDataLen == 0
-                    || params.ulDataLen > (1 << (8 * l))
+                    || params.ulDataLen > max_data_len
                     || params.ulDataLen > (CK_ULONG::MAX - params.ulMACLen)
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
@@ -762,8 +773,19 @@ impl AesOperation {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let l = 15 - params.ulNonceLen;
+                /* l can be as large as 8 (nonceLen == 7), and CK_ULONG's
+                 * width varies by platform (32 bits on i686, 64 on
+                 * x86_64/aarch64/...), so a plain `1 << (8 * l)` can shift
+                 * out of range. checked_shl()'s contract is exactly "None
+                 * if the shift amount is >= the type's own bit width",
+                 * which is precisely "no representable cap, i.e. every
+                 * CK_ULONG value fits" -- correct on any width without
+                 * needing to reason about any other type. */
+                let max_data_len: CK_ULONG = (1 as CK_ULONG)
+                    .checked_shl(8 * l as u32)
+                    .unwrap_or(CK_ULONG::MAX);
                 if params.ulDataLen == 0
-                    || params.ulDataLen > (1 << (8 * l))
+                    || params.ulDataLen > max_data_len
                     || params.ulDataLen > (CK_ULONG::MAX - params.ulMACLen)
                 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
