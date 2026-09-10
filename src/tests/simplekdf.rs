@@ -908,3 +908,165 @@ fn test_derive_pub_from_priv() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_derive_template() {
+    let mut testtokn = TestToken::initialized("test_derive_template", None);
+    let session = testtokn.get_session(false);
+
+    let base_key = hex::decode("01234567").unwrap();
+    let mut enc_true = CK_TRUE;
+    let mut vlen: CK_ULONG = 8;
+    let inner_dt = [
+        CK_ATTRIBUTE {
+            type_: CKA_ENCRYPT,
+            pValue: &mut enc_true as *mut _ as *mut std::ffi::c_void,
+            ulValueLen: sizeof!(CK_BBOOL),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_VALUE_LEN,
+            pValue: &mut vlen as *mut _ as *mut std::ffi::c_void,
+            ulValueLen: sizeof!(CK_ULONG),
+        },
+    ];
+    let mut ck_class = CKO_SECRET_KEY;
+    let mut ck_ktype = CKK_GENERIC_SECRET;
+    let mut ck_derive = CK_TRUE;
+    let mut ck_extractable = CK_TRUE;
+    let mut ck_sensitive = CK_FALSE;
+    let base_key_template = [
+        CK_ATTRIBUTE {
+            type_: CKA_CLASS,
+            pValue: &mut ck_class as *mut _ as *mut _,
+            ulValueLen: sizeof!(CK_ULONG),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_KEY_TYPE,
+            pValue: &mut ck_ktype as *mut _ as *mut _,
+            ulValueLen: sizeof!(CK_ULONG),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_VALUE,
+            pValue: base_key.as_ptr() as *mut _,
+            ulValueLen: base_key.len() as CK_ULONG,
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_DERIVE,
+            pValue: &mut ck_derive as *mut _ as *mut _,
+            ulValueLen: sizeof!(CK_BBOOL),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_EXTRACTABLE,
+            pValue: &mut ck_extractable as *mut _ as *mut _,
+            ulValueLen: sizeof!(CK_BBOOL),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_SENSITIVE,
+            pValue: &mut ck_sensitive as *mut _ as *mut _,
+            ulValueLen: sizeof!(CK_BBOOL),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: inner_dt.as_ptr() as *mut _,
+            ulValueLen: CK_ULONG::try_from(std::mem::size_of_val(&inner_dt))
+                .unwrap(),
+        },
+    ];
+    let mut base_key_handle = CK_INVALID_HANDLE;
+    let ret = fn_create_object(
+        session,
+        base_key_template.as_ptr() as *mut _,
+        base_key_template.len() as CK_ULONG,
+        &mut base_key_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let data = hex::decode("89abcdef").unwrap();
+    let params = CK_KEY_DERIVATION_STRING_DATA {
+        pData: data.as_ptr() as *mut _,
+        ulLen: data.len() as CK_ULONG,
+    };
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_CONCATENATE_BASE_AND_DATA,
+        pParameter: void_ptr!(&params),
+        ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
+    };
+
+    // 1. Calling derive without specifying CKA_ENCRYPT -> inherits CKA_ENCRYPT = true
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut is_enc: CK_BBOOL = CK_FALSE;
+    let mut q_tmpl = make_ptrs_template(&[(
+        CKA_ENCRYPT,
+        void_ptr!(&mut is_enc),
+        std::mem::size_of::<CK_BBOOL>(),
+    )]);
+    let ret =
+        fn_get_attribute_value(session, dk_handle, q_tmpl.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(is_enc, CK_TRUE);
+
+    // 2. Calling derive with matching CKA_ENCRYPT = true -> succeeds
+    let match_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+        ],
+    );
+    let mut dk_match = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        match_template.as_ptr() as *mut _,
+        match_template.len() as CK_ULONG,
+        &mut dk_match,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    // 3. Calling derive with conflicting CKA_ENCRYPT = false -> fails with CKR_TEMPLATE_INCONSISTENT
+    let conflict_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, false)],
+    );
+    let mut dk_conflict = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        conflict_template.as_ptr() as *mut _,
+        conflict_template.len() as CK_ULONG,
+        &mut dk_conflict,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    testtokn.finalize();
+}
