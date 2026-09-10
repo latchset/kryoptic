@@ -357,6 +357,39 @@ pub fn deserialize_template(data: &[u8]) -> Result<Vec<Attribute>> {
     Ok(attrs)
 }
 
+/// Merges a template attribute into a user-provided template,
+///
+/// If any attribute in `template_attr` is present in `raw_tmpl` with a conflicting value,
+/// returns `CKR_TEMPLATE_INCONSISTENT`.
+/// Attributes in `stored_attrs` that are not present in `template` are appended to the merged template.
+pub fn merge_template_attribute<'a>(
+    template_attr: &Attribute,
+    raw_tmpl: &'a [CK_ATTRIBUTE],
+) -> Result<CkAttrs<'a>> {
+    let stored_attrs = template_attr.to_template()?;
+    if !stored_attrs.is_empty() {
+        let mut merged = CkAttrs::from(raw_tmpl);
+        for stored in stored_attrs {
+            match raw_tmpl.iter().find(|a| a.type_ == stored.get_type()) {
+                Some(req_attr) => {
+                    if !stored.match_ck_attr(req_attr) {
+                        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                    }
+                }
+                None => {
+                    merged.add_owned_slice(
+                        stored.get_type(),
+                        stored.get_value(),
+                    )?;
+                }
+            }
+        }
+        Ok(merged)
+    } else {
+        Ok(CkAttrs::from(raw_tmpl))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

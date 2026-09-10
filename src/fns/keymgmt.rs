@@ -6,6 +6,7 @@
 //! This module contains the implementation of the Key Management functions
 //! as defined in the PKCS#11 specification.
 
+use crate::attribute::{merge_template_attribute, CkAttrs};
 use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
@@ -829,19 +830,13 @@ fn encapsulate_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let tmpl: &[CK_ATTRIBUTE] =
+    let raw_tmpl: &[CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts(template, cnt) };
-    if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
-    }
 
     let penclen = unsafe { *encrypted_part_len as CK_ULONG };
     let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let slot_id = session.get_slot_id();
-
-    #[cfg(feature = "fips")]
-    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(pubkey_handle)?;
@@ -849,6 +844,22 @@ fn encapsulate_key(
         CKR_OK => (),
         err => return Err(err)?,
     }
+
+    let merged_attrs: CkAttrs<'_>;
+    let tmpl: &[CK_ATTRIBUTE] =
+        if let Some(et) = key.get_attr(CKA_ENCAPSULATE_TEMPLATE) {
+            merged_attrs = merge_template_attribute(et, raw_tmpl)?;
+            merged_attrs.as_slice()
+        } else {
+            raw_tmpl
+        };
+
+    if !session.is_writable() {
+        fail_if_cka_token_true(tmpl)?;
+    }
+    #[cfg(feature = "fips")]
+    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
+
     let factories = token.get_object_factories();
     let factory = factories.get_obj_factory_from_key_template(tmpl)?;
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
@@ -972,11 +983,8 @@ fn decapsulate_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let tmpl: &[CK_ATTRIBUTE] =
+    let raw_tmpl: &[CK_ATTRIBUTE] =
         unsafe { std::slice::from_raw_parts(template, cnt) };
-    if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
-    }
 
     let enclen =
         usize::try_from(encrypted_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
@@ -985,15 +993,28 @@ fn decapsulate_key(
 
     let slot_id = session.get_slot_id();
 
-    #[cfg(feature = "fips")]
-    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
-
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(privkey_handle)?;
     match check_allowed_mechs(&mechanism, &key) {
         CKR_OK => (),
         err => return Err(err)?,
     }
+
+    let merged_attrs: CkAttrs<'_>;
+    let tmpl: &[CK_ATTRIBUTE] =
+        if let Some(dt) = key.get_attr(CKA_DECAPSULATE_TEMPLATE) {
+            merged_attrs = merge_template_attribute(dt, raw_tmpl)?;
+            merged_attrs.as_slice()
+        } else {
+            raw_tmpl
+        };
+
+    if !session.is_writable() {
+        fail_if_cka_token_true(tmpl)?;
+    }
+    #[cfg(feature = "fips")]
+    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
+
     let factories = token.get_object_factories();
     let factory = factories.get_obj_factory_from_key_template(tmpl)?;
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;

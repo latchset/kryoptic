@@ -3,7 +3,7 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::{Attribute, CkAttrs};
+use crate::attribute::{merge_template_attribute, Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::zeromem;
@@ -141,10 +141,17 @@ pub trait KeyFactory: ObjectFactory {
         template: &[CK_ATTRIBUTE],
         origin: &Object,
     ) -> Result<Object> {
-        /* FIXME: handle CKA_DERIVE_TEMPLATE */
+        let merged_attrs: CkAttrs<'_>;
+        let final_template: &[CK_ATTRIBUTE] =
+            if let Some(dt) = origin.get_attr(CKA_DERIVE_TEMPLATE) {
+                merged_attrs = merge_template_attribute(dt, template)?;
+                merged_attrs.as_slice()
+            } else {
+                template
+            };
 
         let mut obj = self.internal_key_create(
-            template,
+            final_template,
             OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
             OAFlags::AlwaysRequired,
         )?;
@@ -240,7 +247,7 @@ pub trait PubKeyFactory: KeyFactory {
             CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval;
             Attribute::from_bool; val false));
         attrs.push(attr_element!(
-            CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
             CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
@@ -248,6 +255,9 @@ pub trait PubKeyFactory: KeyFactory {
         attrs.push(attr_element!(
             CKA_ENCAPSULATE; OAFlags::Defval; Attribute::from_bool;
             val false));
+        attrs.push(attr_element!(
+            CKA_ENCAPSULATE_TEMPLATE; OAFlags::empty();
+            Attribute::from_template_bytes; val Vec::new()));
     }
 
     fn pub_from_private(
@@ -299,7 +309,7 @@ pub trait PrivKeyFactory: KeyFactory {
             CKA_WRAP_WITH_TRUSTED; OAFlags::Defval | OAFlags::ChangeToTrue;
             Attribute::from_bool; val false));
         attrs.push(attr_element!(
-            CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
             CKA_ALWAYS_AUTHENTICATE; OAFlags::Defval; Attribute::from_bool;
@@ -308,11 +318,14 @@ pub trait PrivKeyFactory: KeyFactory {
             CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
-            CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
             CKA_DECAPSULATE; OAFlags::Defval; Attribute::from_bool;
             val false));
+        attrs.push(attr_element!(
+            CKA_DECAPSULATE_TEMPLATE; OAFlags::empty();
+            Attribute::from_template_bytes; val Vec::new()));
     }
 }
 
@@ -361,13 +374,13 @@ pub trait SecretKeyFactory: KeyFactory {
             CKA_TRUSTED; OAFlags::NeverSettable | OAFlags::Defval;
             Attribute::from_bool; val false));
         attrs.push(attr_element!(
-            CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
-            CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            CKA_UNWRAP_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
-            CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_bytes;
+            CKA_DERIVE_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
     }
 
