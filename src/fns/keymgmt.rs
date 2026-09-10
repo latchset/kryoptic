@@ -305,6 +305,20 @@ fn wrap_key(
         }
     }
 
+    if let Some(wt) = wkey.get_attr(CKA_WRAP_TEMPLATE) {
+        let stored_attrs = wt.to_template()?;
+        for stored in &stored_attrs {
+            match key.get_attr(stored.get_type()) {
+                Some(key_attr) => {
+                    if key_attr.get_value() != stored.get_value() {
+                        return Err(CKR_ACTION_PROHIBITED)?;
+                    }
+                }
+                None => return Err(CKR_ACTION_PROHIBITED)?,
+            }
+        }
+    }
+
     let pwraplen = unsafe { *pul_wrapped_key_len as CK_ULONG };
     let wrapped: &mut [u8] = if wrapped_key.is_null() {
         &mut [] /* empty buffer will be always too small */
@@ -403,16 +417,16 @@ fn unwrap_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
+    let raw_tmpl: &[CK_ATTRIBUTE] =
+        unsafe { std::slice::from_raw_parts(template, cnt) };
     if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
+        fail_if_cka_token_true(raw_tmpl)?;
     }
 
     let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
-    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
+    fips::check_key_template(raw_tmpl, rstate.get_fips_behavior(slot_id)?)?;
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(unwrapping_key_handle)?;
@@ -422,8 +436,6 @@ fn unwrap_key(
         err => return Err(err)?,
     }
 
-    let factories = token.get_object_factories();
-    let factory = factories.get_obj_factory_from_key_template(tmpl)?;
     let wklen =
         usize::try_from(wrapped_key_len).map_err(|_| CKR_GENERAL_ERROR)?;
     let data: &[u8] = unsafe { std::slice::from_raw_parts(wrapped_key, wklen) };
@@ -436,6 +448,35 @@ fn unwrap_key(
     if !key.get_attr_as_bool(CKA_UNWRAP)? {
         return Err(CKR_WRAPPING_KEY_HANDLE_INVALID)?;
     }
+
+    let merged_attrs: CkAttrs<'_>;
+    let tmpl: &[CK_ATTRIBUTE] =
+        if let Some(ut) = key.get_attr(CKA_UNWRAP_TEMPLATE) {
+            let stored_attrs = ut.to_template()?;
+            if !stored_attrs.is_empty() {
+                merged_attrs = crate::attribute::merge_template_attributes(
+                    raw_tmpl,
+                    &stored_attrs,
+                )?;
+                let merged_tmpl = merged_attrs.as_slice();
+                if !session.is_writable() {
+                    fail_if_cka_token_true(merged_tmpl)?;
+                }
+                #[cfg(feature = "fips")]
+                fips::check_key_template(
+                    merged_tmpl,
+                    rstate.get_fips_behavior(slot_id)?,
+                )?;
+                merged_tmpl
+            } else {
+                raw_tmpl
+            }
+        } else {
+            raw_tmpl
+        };
+
+    let factories = token.get_object_factories();
+    let factory = factories.get_obj_factory_from_key_template(tmpl)?;
 
     let result = mech.unwrap_key(&mechanism, &key, data, tmpl, factory);
     match result {
