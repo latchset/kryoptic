@@ -2023,29 +2023,42 @@ impl Decryption for AesOperation {
                     return Err(CKR_ENCRYPTED_DATA_INVALID)?;
                 }
 
-                let pad = unwrap_buf[unwrap_buf.len() - 1] as usize;
-                if pad == 0 || pad > AES_KW_SEMIBLOCK || pad > unwrap_buf.len()
-                {
+                let n = unwrap_buf.len();
+
+                // Upfront public buffer length check:
+                // Valid PKCS#7 padding is at most AES_KW_SEMIBLOCK (8 bytes),
+                // so the plaintext length is at least n - AES_KW_SEMIBLOCK.
+                // If plain is smaller than this minimum, it cannot hold any
+                // valid plaintext regardless of padding.
+                if plain.len() < n - AES_KW_SEMIBLOCK {
                     zeromem(unwrap_buf.as_mut_slice());
-                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                    return Err(error::Error::buf_too_small(
+                        n - AES_KW_SEMIBLOCK,
+                    ));
                 }
-                let pad_start = unwrap_buf.len() - pad;
-                let mut pad_valid = true;
-                for &b in &unwrap_buf[pad_start..] {
-                    if b != pad as u8 {
-                        pad_valid = false;
-                    }
+
+                // Constant-time candidate suffix matching:
+                // Evaluates all 8 valid padding patterns unconditionally.
+                let tail = &unwrap_buf[n - AES_KW_SEMIBLOCK..];
+                let mut pad_len = 0usize;
+                let mut valid = 0usize;
+
+                for k in 1..=AES_KW_SEMIBLOCK {
+                    let expected = [k as u8; AES_KW_SEMIBLOCK];
+                    let matches = constant_time_eq(
+                        &tail[AES_KW_SEMIBLOCK - k..],
+                        &expected[..k],
+                    ) as usize;
+                    pad_len |= k * matches;
+                    valid |= matches;
                 }
-                if !pad_valid {
+
+                if valid != 1 {
                     zeromem(unwrap_buf.as_mut_slice());
                     return Err(CKR_ENCRYPTED_DATA_INVALID)?;
                 }
 
-                let plain_len = pad_start;
-                if plain_len < AES_KW_SEMIBLOCK {
-                    zeromem(unwrap_buf.as_mut_slice());
-                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
-                }
+                let plain_len = n - pad_len;
                 if plain.len() < plain_len {
                     zeromem(unwrap_buf.as_mut_slice());
                     return Err(error::Error::buf_too_small(plain_len));

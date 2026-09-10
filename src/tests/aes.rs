@@ -2998,7 +2998,8 @@ fn test_aes_key_wrap_pkcs7() {
 
     // 1. Test round-trip across various payload lengths (>= 8 bytes) with default and custom IVs
     // Note: PKCS#7 pads to semiblock (8 bytes), and AES Key Wrap requires at least 2 semiblocks (16 bytes).
-    let test_lengths = [8, 9, 15, 16, 20, 24, 31, 32, 48, 64];
+    let test_lengths =
+        [8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 24, 31, 32, 48, 64];
     for &len in &test_lengths {
         let plaintext: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
 
