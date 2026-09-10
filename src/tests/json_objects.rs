@@ -200,6 +200,23 @@ impl JsonObjects {
                         }
                         None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
                     },
+                    AttrType::TemplateType => match val.as_str() {
+                        Some(s) => {
+                            let len = match BASE64.decode_len(s.len()) {
+                                Ok(l) => l,
+                                Err(_) => return Err(CKR_GENERAL_ERROR)?,
+                            };
+                            let mut v = vec![0; len];
+                            match BASE64.decode_mut(s.as_bytes(), &mut v) {
+                                Ok(l) => Attribute::from_template_bytes(
+                                    id,
+                                    v[0..l].to_vec(),
+                                ),
+                                Err(_) => return Err(CKR_GENERAL_ERROR)?,
+                            }
+                        }
+                        None => return Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
+                    },
                     AttrType::DenyType => continue,
                     AttrType::IgnoreType => continue,
                 };
