@@ -21,6 +21,7 @@ pub fn get_tmpdir() -> PathBuf {
     )
 }
 
+#[allow(dead_code)]
 fn setup_common() -> (Pkcs11, Slot) {
     let module = get_module();
 
@@ -67,6 +68,7 @@ fn reload_common((pkcs11, _slot): (Pkcs11, Slot)) -> (Pkcs11, Slot) {
     (pkcs11, slot)
 }
 
+#[allow(dead_code)]
 fn setup_test_dir(name: &str) -> PathBuf {
     let tmpdir = get_tmpdir();
     let testdir = tmpdir.join(name);
@@ -139,6 +141,7 @@ fn generate_config(
     confname
 }
 
+#[allow(dead_code)]
 pub fn setup_token(name: &str, common_config_lines: &[&str]) -> (Pkcs11, Slot) {
     let testdir = setup_test_dir(name);
     let confname = generate_config(name, &testdir, common_config_lines);

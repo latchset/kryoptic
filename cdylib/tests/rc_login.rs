@@ -3,15 +3,13 @@
 
 mod rc_common;
 
-use cryptoki::session::UserType;
-use cryptoki::types::AuthPin;
-
 #[test]
 #[cfg(feature = "integration_tests")]
 fn test_login() -> Result<(), Box<dyn std::error::Error>> {
     use cryptoki::context::Function;
     use cryptoki::error::{Error, RvError};
-    use cryptoki::session::SessionState;
+    use cryptoki::session::{SessionState, UserType};
+    use cryptoki::types::AuthPin;
 
     let (pkcs11, slot) = rc_common::setup_token("test_login", &[]);
 
