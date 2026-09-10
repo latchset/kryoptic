@@ -212,6 +212,18 @@ impl SqliteStorage {
                             Self::add_ulong_array(obj, atype, val)?
                         }
                         AttrType::DateType => Self::add_date(obj, atype, val)?,
+                        AttrType::TemplateType => obj.set_attr(
+                            match val.as_blob_or_null().map_err(bad_storage)? {
+                                Some(v) => Attribute::from_template_bytes(
+                                    atype,
+                                    v.to_vec(),
+                                ),
+                                None => Attribute::from_template_bytes(
+                                    atype,
+                                    Vec::new(),
+                                ),
+                            },
+                        )?,
                         AttrType::DenyType | AttrType::IgnoreType => {
                             return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
                         }
@@ -309,6 +321,7 @@ impl SqliteStorage {
                     v
                 }),
                 AttrType::DateType => Value::from(a.to_date_string()?),
+                AttrType::TemplateType => Value::from(a.get_value().clone()),
                 AttrType::DenyType | AttrType::IgnoreType => continue,
             };
             let _ = stmt
@@ -505,6 +518,9 @@ impl StorageRaw for SqliteStorage {
                 }),
                 AttrType::DateType => {
                     Value::from(Attribute::from_ck_attr(a)?.to_date_string()?)
+                }
+                AttrType::TemplateType => {
+                    Value::from(Attribute::from_ck_attr(a)?.get_value().clone())
                 }
                 AttrType::DenyType | AttrType::IgnoreType => {
                     return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
