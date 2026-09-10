@@ -12,6 +12,12 @@ Unreleased changes
   - [Implement
      CKM_AES_KEY_WRAP_PKCS7](https://github.com/latchset/kryoptic/pull/501)
 
+* Added support for template attributes like CKA_DERIVE_TEMPLATE, which can
+  be used to enforce specific attribute on key create through use of other keys
+  (derivation, encapsualtion, wrapping)
+  - [Template attributes](https://github.com/latchset/kryoptic/pull/500)
+
+
 ## [1.5.1]
 ## 2026-06-29
 
