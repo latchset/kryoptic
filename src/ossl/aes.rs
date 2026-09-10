@@ -181,6 +181,7 @@ impl AesOperation {
             CKM_AES_CTS,
             CKM_AES_KEY_WRAP,
             CKM_AES_KEY_WRAP_KWP,
+            CKM_AES_KEY_WRAP_PKCS7,
         ] {
             mechs.add_mechanism(*ckm, &(*AES_MECHS)[0]);
         }
@@ -385,7 +386,7 @@ impl AesOperation {
                     taglen: 0,
                 })
             }
-            CKM_AES_KEY_WRAP => {
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PKCS7 => {
                 let iv = match mech.ulParameterLen {
                     0 => AesIvData::none()?,
                     8 => AesIvData::simple(bytes_to_vec(
@@ -474,7 +475,7 @@ impl AesOperation {
             CKM_AES_CFB128 => EncAlg::AesCfb128(size),
             #[cfg(not(feature = "fips"))]
             CKM_AES_OFB => EncAlg::AesOfb(size),
-            CKM_AES_KEY_WRAP => EncAlg::AesWrap(size),
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PKCS7 => EncAlg::AesWrap(size),
             CKM_AES_KEY_WRAP_KWP => EncAlg::AesWrapPad(size),
             _ => return Err(CKR_MECHANISM_INVALID)?,
         })
@@ -1276,6 +1277,10 @@ impl Encryption for AesOperation {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
             }
+            CKM_AES_KEY_WRAP_PKCS7 => {
+                self.buffer.extend_from_slice(plain);
+                return Ok(0);
+            }
             _ => (),
         }
         if cipher.len() < outlen {
@@ -1491,6 +1496,26 @@ impl Encryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
+            CKM_AES_KEY_WRAP_PKCS7 => {
+                if self.buffer.len() < AES_KWP_BLOCK {
+                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                }
+                let pad = AES_KWP_BLOCK - (self.buffer.len() % AES_KWP_BLOCK);
+                let needed = self.buffer.len() + pad + AES_KWP_BLOCK;
+                if cipher.len() < needed {
+                    return Err(error::Error::buf_too_small(needed));
+                }
+
+                self.finalized = true;
+
+                self.buffer.resize(self.buffer.len() + pad, pad as u8);
+                outlen = ctx.update(self.buffer.as_slice(), cipher)?;
+                zeromem(self.buffer.as_mut_slice());
+                self.buffer.clear();
+                if outlen != needed {
+                    return Err(self.op_err(CKR_DEVICE_ERROR));
+                }
+            }
             _ => {
                 self.finalized = true;
                 return Err(CKR_GENERAL_ERROR)?;
@@ -1547,6 +1572,14 @@ impl Encryption for AesOperation {
                     ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
                         * AES_KWP_BLOCK
                 }
+                CKM_AES_KEY_WRAP_PKCS7 => {
+                    let tot = self.buffer.len() + data_len;
+                    if tot < AES_KWP_BLOCK {
+                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    }
+                    ((tot + AES_KWP_BLOCK) / AES_KWP_BLOCK) * AES_KWP_BLOCK
+                        + AES_KWP_BLOCK
+                }
                 #[cfg(not(feature = "fips"))]
                 CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                     data_len
@@ -1577,6 +1610,7 @@ impl Encryption for AesOperation {
                     ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
                         * AES_KWP_BLOCK
                 }
+                CKM_AES_KEY_WRAP_PKCS7 => 0,
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };
@@ -1635,6 +1669,11 @@ impl Decryption for AesOperation {
                 if cipher.len() % AES_KWP_BLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
+            }
+            CKM_AES_KEY_WRAP_PKCS7 => {
+                self.in_use = true;
+                self.buffer.extend_from_slice(cipher);
+                return Ok(0);
             }
             _ => (),
         }
@@ -1937,6 +1976,67 @@ impl Decryption for AesOperation {
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => (),
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
+            CKM_AES_KEY_WRAP_PKCS7 => {
+                if self.buffer.len() < 24
+                    || self.buffer.len() % AES_KWP_BLOCK != 0
+                {
+                    zeromem(self.buffer.as_mut_slice());
+                    self.buffer.clear();
+                    return Err(CKR_ENCRYPTED_DATA_LEN_RANGE)?;
+                }
+
+                let mut unwrap_buf = vec![0u8; self.buffer.len()];
+                let res = ctx
+                    .update(self.buffer.as_slice(), unwrap_buf.as_mut_slice());
+                zeromem(self.buffer.as_mut_slice());
+                self.buffer.clear();
+                let unwrapped_len = match res {
+                    Ok(len) => len,
+                    Err(_) => {
+                        zeromem(unwrap_buf.as_mut_slice());
+                        return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                    }
+                };
+                unwrap_buf.truncate(unwrapped_len);
+
+                if unwrap_buf.len() < 16
+                    || unwrap_buf.len() % AES_KWP_BLOCK != 0
+                {
+                    zeromem(unwrap_buf.as_mut_slice());
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+
+                let pad = unwrap_buf[unwrap_buf.len() - 1] as usize;
+                if pad == 0 || pad > AES_KWP_BLOCK || pad > unwrap_buf.len() {
+                    zeromem(unwrap_buf.as_mut_slice());
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+                let pad_start = unwrap_buf.len() - pad;
+                let mut pad_valid = true;
+                for &b in &unwrap_buf[pad_start..] {
+                    if b != pad as u8 {
+                        pad_valid = false;
+                    }
+                }
+                if !pad_valid {
+                    zeromem(unwrap_buf.as_mut_slice());
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+
+                let plain_len = pad_start;
+                if plain_len < AES_KWP_BLOCK {
+                    zeromem(unwrap_buf.as_mut_slice());
+                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                }
+                if plain.len() < plain_len {
+                    zeromem(unwrap_buf.as_mut_slice());
+                    return Err(error::Error::buf_too_small(plain_len));
+                }
+
+                plain[..plain_len].copy_from_slice(&unwrap_buf[..plain_len]);
+                zeromem(unwrap_buf.as_mut_slice());
+                outlen = plain_len;
+            }
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
 
@@ -1991,6 +2091,13 @@ impl Decryption for AesOperation {
                     }
                     self.buffer.len() + data_len
                 }
+                CKM_AES_KEY_WRAP_PKCS7 => {
+                    let tot = self.buffer.len() + data_len;
+                    if tot < 24 || tot % AES_KWP_BLOCK != 0 {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                    }
+                    tot - AES_KWP_BLOCK
+                }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         } else {
@@ -2033,6 +2140,7 @@ impl Decryption for AesOperation {
                         (data_len / AES_KWP_BLOCK) * AES_KWP_BLOCK
                     }
                 }
+                CKM_AES_KEY_WRAP_PKCS7 => 0,
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };
