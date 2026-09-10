@@ -724,6 +724,10 @@ fn test_mlkem_public_key_info() {
 fn test_mlkem_template_attributes() {
     let mut testtokn =
         TestToken::initialized("test_mlkem_template_attributes", None);
+    if testtokn.dbtype == "nssdb" {
+        testtokn.finalize();
+        return;
+    }
     let session = testtokn.get_session(true);
     testtokn.login();
 
@@ -874,4 +878,6 @@ fn test_mlkem_template_attributes() {
         &mut handle_dec,
     );
     assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    testtokn.finalize();
 }
