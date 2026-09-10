@@ -888,6 +888,152 @@ impl ObjectFactories {
         self.get_factory(ObjectType::new(class, type_))
     }
 
+    fn get_template_attribute(
+        oa: &Attribute,
+        ck_attr: &mut CK_ATTRIBUTE,
+        result: &mut CK_RV,
+    ) -> Result<()> {
+        let stored_attrs = oa.to_template()?;
+        let stored_count = stored_attrs.len();
+        let ck_attr_size = std::mem::size_of::<CK_ATTRIBUTE>();
+        let expected_len = CK_ULONG::try_from(stored_count * ck_attr_size)?;
+
+        // 1. Size Inquiry (ck_attr.pValue.is_null())
+        if ck_attr.pValue.is_null() {
+            ck_attr.ulValueLen = expected_len;
+            return Ok(());
+        }
+
+        // 2. Validation
+        let val_len = usize::try_from(ck_attr.ulValueLen)?;
+        if val_len % ck_attr_size != 0 {
+            ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            if *result == CKR_OK {
+                *result = CKR_TEMPLATE_INCONSISTENT;
+            }
+            return Ok(());
+        }
+
+        if (ck_attr.pValue as usize) % std::mem::align_of::<CK_ATTRIBUTE>() != 0
+        {
+            ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            if *result == CKR_OK {
+                *result = CKR_TEMPLATE_INCONSISTENT;
+            }
+            return Ok(());
+        }
+
+        let app_count = val_len / ck_attr_size;
+        if app_count != stored_count {
+            ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            if *result == CKR_OK {
+                *result = CKR_TEMPLATE_INCONSISTENT;
+            }
+            return Ok(());
+        }
+
+        if app_count == 0 {
+            ck_attr.ulValueLen = 0;
+            return Ok(());
+        }
+
+        let app_attrs: &mut [CK_ATTRIBUTE] = unsafe {
+            std::slice::from_raw_parts_mut(
+                ck_attr.pValue as *mut CK_ATTRIBUTE,
+                app_count,
+            )
+        };
+
+        let unavail_count = app_attrs
+            .iter()
+            .filter(|a| a.type_ == CK_UNAVAILABLE_INFORMATION)
+            .count();
+
+        if unavail_count != 0 && unavail_count != app_count {
+            ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+            if *result == CKR_OK {
+                *result = CKR_TEMPLATE_INCONSISTENT;
+            }
+            return Ok(());
+        }
+
+        // 3. Field Discovery Mode (all types == CK_UNAVAILABLE_INFORMATION)
+        if unavail_count == app_count {
+            if app_attrs
+                .iter()
+                .any(|a| !a.pValue.is_null() || a.ulValueLen != 0)
+            {
+                ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                if *result == CKR_OK {
+                    *result = CKR_TEMPLATE_INCONSISTENT;
+                }
+                return Ok(());
+            }
+
+            for i in 0..app_count {
+                app_attrs[i].type_ = stored_attrs[i].get_type();
+                app_attrs[i].ulValueLen =
+                    CK_ULONG::try_from(stored_attrs[i].get_value().len())?;
+                app_attrs[i].pValue = std::ptr::null_mut();
+            }
+            ck_attr.ulValueLen = expected_len;
+            return Ok(());
+        }
+
+        // 4. Value Retrieval Mode (all types specified)
+        for (idx, a) in app_attrs.iter().enumerate() {
+            if app_attrs[idx + 1..]
+                .iter()
+                .any(|other| other.type_ == a.type_)
+            {
+                ck_attr.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                if *result == CKR_OK {
+                    *result = CKR_TEMPLATE_INCONSISTENT;
+                }
+                return Ok(());
+            }
+        }
+
+        for inner in app_attrs.iter_mut() {
+            match stored_attrs.iter().find(|sa| sa.get_type() == inner.type_) {
+                Some(sa) => {
+                    let attr_val = sa.get_value();
+                    let attr_len = CK_ULONG::try_from(attr_val.len())?;
+                    if inner.pValue.is_null() {
+                        inner.ulValueLen = attr_len;
+                    } else if inner.ulValueLen == CK_UNAVAILABLE_INFORMATION {
+                        if *result == CKR_OK {
+                            *result = CKR_TEMPLATE_INCONSISTENT;
+                        }
+                    } else if inner.ulValueLen < attr_len {
+                        inner.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        if *result == CKR_OK {
+                            *result = CKR_BUFFER_TOO_SMALL;
+                        }
+                    } else {
+                        inner.ulValueLen = attr_len;
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                attr_val.as_ptr(),
+                                inner.pValue as *mut u8,
+                                attr_val.len(),
+                            );
+                        }
+                    }
+                }
+                None => {
+                    inner.ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    if *result == CKR_OK {
+                        *result = CKR_TEMPLATE_INCONSISTENT;
+                    }
+                }
+            }
+        }
+
+        ck_attr.ulValueLen = expected_len;
+        Ok(())
+    }
+
     /// Helper to check if the template includes invalid or sensitive
     /// attributes related to the specified object. This is done by
     /// sourcing the object factory related to the provide object and
@@ -966,6 +1112,10 @@ impl ObjectFactories {
 
             match obj_attrs.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(oa) => {
+                    if oa.get_attrtype() == AttrType::TemplateType {
+                        Self::get_template_attribute(oa, ck_attr, &mut result)?;
+                        continue;
+                    }
                     let attr_val = oa.get_value();
                     let attr_len = CK_ULONG::try_from(attr_val.len())?;
                     if ck_attr.pValue.is_null() {
@@ -1109,4 +1259,141 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     #[cfg(feature = "profiles")]
     ot.add_factory(ObjectType::new(CKO_PROFILE, 0), &(*PROFILE_FACTORY));
     ot.add_factory(ObjectType::new(CKO_MECHANISM, 0), &(*MECHANISM_FACTORY));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::attribute::serialize_template;
+
+    #[test]
+    fn test_get_template_attribute_lifecycle() {
+        let mut of = ObjectFactories::new();
+        of.add_factory(
+            ObjectType::new(CKO_SECRET_KEY, CKK_GENERIC_SECRET),
+            &(*GENERIC_SECRET_FACTORY),
+        );
+
+        let mut obj = Object::new(CKO_SECRET_KEY);
+        obj.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))
+            .unwrap();
+        obj.set_attr(Attribute::from_bool(CKA_EXTRACTABLE, true))
+            .unwrap();
+        obj.set_attr(Attribute::from_bool(CKA_SENSITIVE, false))
+            .unwrap();
+
+        let inner_attrs = vec![
+            Attribute::from_bool(CKA_ENCRYPT, true),
+            Attribute::from_ulong(CKA_VALUE_LEN, 32),
+        ];
+        let serialized = serialize_template(&inner_attrs).unwrap();
+        obj.set_attr(Attribute::from_template_bytes(
+            CKA_DERIVE_TEMPLATE,
+            serialized,
+        ))
+        .unwrap();
+
+        let ck_attr_size = std::mem::size_of::<CK_ATTRIBUTE>();
+
+        // 1. Size Inquiry
+        let mut query = [CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: std::ptr::null_mut(),
+            ulValueLen: 0,
+        }];
+        assert!(of.get_object_attributes(&obj, &mut query).is_ok());
+        assert_eq!(query[0].ulValueLen, (2 * ck_attr_size) as CK_ULONG);
+
+        // 2. Discovery Mode
+        let mut disc_attrs = [
+            CK_ATTRIBUTE {
+                type_: CK_UNAVAILABLE_INFORMATION,
+                pValue: std::ptr::null_mut(),
+                ulValueLen: 0,
+            },
+            CK_ATTRIBUTE {
+                type_: CK_UNAVAILABLE_INFORMATION,
+                pValue: std::ptr::null_mut(),
+                ulValueLen: 0,
+            },
+        ];
+        let mut query = [CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: disc_attrs.as_mut_ptr() as *mut std::ffi::c_void,
+            ulValueLen: (2 * ck_attr_size) as CK_ULONG,
+        }];
+        assert!(of.get_object_attributes(&obj, &mut query).is_ok());
+        assert_eq!(disc_attrs[0].type_, CKA_ENCRYPT);
+        assert_eq!(disc_attrs[0].ulValueLen, 1);
+        assert!(disc_attrs[0].pValue.is_null());
+        assert_eq!(disc_attrs[1].type_, CKA_VALUE_LEN);
+        assert_eq!(disc_attrs[1].ulValueLen, sizeof!(CK_ULONG));
+        assert!(disc_attrs[1].pValue.is_null());
+
+        // 3. Discovery with non-null pValue -> CKR_TEMPLATE_INCONSISTENT
+        let mut dummy = 0u8;
+        disc_attrs[0].pValue = &mut dummy as *mut _ as *mut std::ffi::c_void;
+        disc_attrs[0].type_ = CK_UNAVAILABLE_INFORMATION;
+        disc_attrs[1].type_ = CK_UNAVAILABLE_INFORMATION;
+        let mut query = [CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: disc_attrs.as_mut_ptr() as *mut std::ffi::c_void,
+            ulValueLen: (2 * ck_attr_size) as CK_ULONG,
+        }];
+        assert_eq!(
+            of.get_object_attributes(&obj, &mut query).unwrap_err().rv(),
+            CKR_TEMPLATE_INCONSISTENT
+        );
+
+        // 4. Mixed types -> CKR_TEMPLATE_INCONSISTENT
+        disc_attrs[0].pValue = std::ptr::null_mut();
+        disc_attrs[0].type_ = CKA_ENCRYPT;
+        disc_attrs[1].type_ = CK_UNAVAILABLE_INFORMATION;
+        let mut query = [CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: disc_attrs.as_mut_ptr() as *mut std::ffi::c_void,
+            ulValueLen: (2 * ck_attr_size) as CK_ULONG,
+        }];
+        assert_eq!(
+            of.get_object_attributes(&obj, &mut query).unwrap_err().rv(),
+            CKR_TEMPLATE_INCONSISTENT
+        );
+
+        // 5. Value Retrieval Mode
+        let mut enc_val: CK_BBOOL = CK_FALSE;
+        let mut vlen_val: CK_ULONG = 0;
+        let mut val_attrs = [
+            CK_ATTRIBUTE {
+                type_: CKA_ENCRYPT,
+                pValue: &mut enc_val as *mut _ as *mut std::ffi::c_void,
+                ulValueLen: sizeof!(CK_BBOOL),
+            },
+            CK_ATTRIBUTE {
+                type_: CKA_VALUE_LEN,
+                pValue: &mut vlen_val as *mut _ as *mut std::ffi::c_void,
+                ulValueLen: sizeof!(CK_ULONG),
+            },
+        ];
+        let mut query = [CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: val_attrs.as_mut_ptr() as *mut std::ffi::c_void,
+            ulValueLen: (2 * ck_attr_size) as CK_ULONG,
+        }];
+        assert!(of.get_object_attributes(&obj, &mut query).is_ok());
+        assert_eq!(enc_val, CK_TRUE);
+        assert_eq!(vlen_val, 32);
+
+        // 6. Buffer too small
+        val_attrs[0].ulValueLen = 0;
+        let mut query = [CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: val_attrs.as_mut_ptr() as *mut std::ffi::c_void,
+            ulValueLen: (2 * ck_attr_size) as CK_ULONG,
+        }];
+        assert_eq!(
+            of.get_object_attributes(&obj, &mut query).unwrap_err().rv(),
+            CKR_BUFFER_TOO_SMALL
+        );
+        assert_eq!(val_attrs[0].ulValueLen, CK_UNAVAILABLE_INFORMATION);
+    }
 }
