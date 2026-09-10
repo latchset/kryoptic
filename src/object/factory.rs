@@ -19,7 +19,6 @@ use super::key::{
     GenericSecretKeyFactory, GenericSecretKeyMechanism, KeyFactory,
     PubKeyFactory, SecretKeyFactory,
 };
-use super::otp::OTPKeyFactory;
 use super::Object;
 
 #[cfg(feature = "nssdb")]

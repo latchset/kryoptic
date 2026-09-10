@@ -3,13 +3,13 @@
 
 mod rc_common;
 
-use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass};
-use cryptoki::session::UserType;
-use cryptoki::types::AuthPin;
-
 #[test]
 #[cfg(feature = "integration_tests")]
 fn rc_eddsa_compat() -> Result<(), Box<dyn std::error::Error>> {
+    use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass};
+    use cryptoki::session::UserType;
+    use cryptoki::types::AuthPin;
+
     // Setup with default configuration
     let (pkcs11, slot) = rc_common::setup_token("rc_eddsa_compat", &[]);
 
