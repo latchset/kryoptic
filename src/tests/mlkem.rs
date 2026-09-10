@@ -795,7 +795,7 @@ fn test_mlkem_template_attributes() {
     };
 
     // 1. Encapsulate with template omitting CKA_ENCRYPT -> inherits CKA_ENCRYPT = true
-    let key_template = make_attr_template(
+    let encap_template = make_attr_template(
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
@@ -811,8 +811,8 @@ fn test_mlkem_template_attributes() {
         session,
         &mut mechanism,
         pub_handle,
-        key_template.as_ptr() as *mut _,
-        key_template.len() as CK_ULONG,
+        encap_template.as_ptr() as *mut _,
+        encap_template.len() as CK_ULONG,
         ciphertext.as_mut_ptr(),
         &mut outlen,
         &mut handle_enc,
@@ -831,7 +831,7 @@ fn test_mlkem_template_attributes() {
     assert_eq!(is_enc, CK_TRUE);
 
     // 2. Encapsulate with conflicting template (CKA_ENCRYPT = false) -> fails
-    let conflict_template = make_attr_template(
+    let encap_conflict_template = make_attr_template(
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
@@ -844,8 +844,8 @@ fn test_mlkem_template_attributes() {
         session,
         &mut mechanism,
         pub_handle,
-        conflict_template.as_ptr() as *mut _,
-        conflict_template.len() as CK_ULONG,
+        encap_conflict_template.as_ptr() as *mut _,
+        encap_conflict_template.len() as CK_ULONG,
         ciphertext.as_mut_ptr(),
         &mut outlen,
         &mut handle_enc,
@@ -853,26 +853,55 @@ fn test_mlkem_template_attributes() {
     assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
 
     // 3. Decapsulate with template omitting CKA_DECRYPT -> inherits CKA_DECRYPT = true
+    let decap_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true)],
+    );
     let mut handle_dec = CK_INVALID_HANDLE;
     let ret = fn_decapsulate_key(
         session,
         &mut mechanism,
         priv_handle,
-        key_template.as_ptr() as *mut _,
-        key_template.len() as CK_ULONG,
+        decap_template.as_ptr() as *mut _,
+        decap_template.len() as CK_ULONG,
         ciphertext.as_mut_ptr(),
         outlen,
         &mut handle_dec,
     );
     assert_eq!(ret, CKR_OK);
 
+    let mut is_dec: CK_BBOOL = CK_FALSE;
+    let mut q_tmpl = make_ptrs_template(&[(
+        CKA_DECRYPT,
+        void_ptr!(&mut is_dec),
+        std::mem::size_of::<CK_BBOOL>(),
+    )]);
+    let ret =
+        fn_get_attribute_value(session, handle_dec, q_tmpl.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(is_dec, CK_TRUE);
+
     // 4. Decapsulate with conflicting template (CKA_DECRYPT = false) -> fails
+    let decap_conflict_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_DECRYPT, false)],
+    );
     let ret = fn_decapsulate_key(
         session,
         &mut mechanism,
         priv_handle,
-        conflict_template.as_ptr() as *mut _,
-        conflict_template.len() as CK_ULONG,
+        decap_conflict_template.as_ptr() as *mut _,
+        decap_conflict_template.len() as CK_ULONG,
         ciphertext.as_mut_ptr(),
         outlen,
         &mut handle_dec,
