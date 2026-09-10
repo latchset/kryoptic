@@ -28,7 +28,7 @@ const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 /// Minimum number of bits required for random IV generation.
 const MIN_RANDOM_IV_BITS: usize = 64;
 
-const AES_KWP_BLOCK: usize = AES_BLOCK_SIZE / 2;
+const AES_KW_SEMIBLOCK: usize = AES_BLOCK_SIZE / 2;
 
 /// Convenience function to cast aead parameters passed as separate
 /// pointer/length variables into the structure they represent.
@@ -1273,7 +1273,7 @@ impl Encryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP => {
-                if plain.len() % AES_KWP_BLOCK != 0 {
+                if plain.len() % AES_KW_SEMIBLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
             }
@@ -1497,11 +1497,12 @@ impl Encryption for AesOperation {
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
             CKM_AES_KEY_WRAP_PKCS7 => {
-                if self.buffer.len() < AES_KWP_BLOCK {
+                if self.buffer.len() < AES_KW_SEMIBLOCK {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
-                let pad = AES_KWP_BLOCK - (self.buffer.len() % AES_KWP_BLOCK);
-                let needed = self.buffer.len() + pad + AES_KWP_BLOCK;
+                let pad =
+                    AES_KW_SEMIBLOCK - (self.buffer.len() % AES_KW_SEMIBLOCK);
+                let needed = self.buffer.len() + pad + AES_KW_SEMIBLOCK;
                 if cipher.len() < needed {
                     return Err(error::Error::buf_too_small(needed));
                 }
@@ -1562,23 +1563,24 @@ impl Encryption for AesOperation {
                         * AES_BLOCK_SIZE
                 }
                 CKM_AES_KEY_WRAP => {
-                    if data_len % AES_KWP_BLOCK != 0 {
+                    if data_len % AES_KW_SEMIBLOCK != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     } else {
-                        data_len + AES_KWP_BLOCK
+                        data_len + AES_KW_SEMIBLOCK
                     }
                 }
                 CKM_AES_KEY_WRAP_KWP => {
-                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
-                        * AES_KWP_BLOCK
+                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KW_SEMIBLOCK)
+                        * AES_KW_SEMIBLOCK
                 }
                 CKM_AES_KEY_WRAP_PKCS7 => {
                     let tot = self.buffer.len() + data_len;
-                    if tot < AES_KWP_BLOCK {
+                    if tot < AES_KW_SEMIBLOCK {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     }
-                    ((tot + AES_KWP_BLOCK) / AES_KWP_BLOCK) * AES_KWP_BLOCK
-                        + AES_KWP_BLOCK
+                    ((tot + AES_KW_SEMIBLOCK) / AES_KW_SEMIBLOCK)
+                        * AES_KW_SEMIBLOCK
+                        + AES_KW_SEMIBLOCK
                 }
                 #[cfg(not(feature = "fips"))]
                 CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
@@ -1600,15 +1602,15 @@ impl Encryption for AesOperation {
                     data_len
                 }
                 CKM_AES_KEY_WRAP => {
-                    if data_len % AES_KWP_BLOCK != 0 {
+                    if data_len % AES_KW_SEMIBLOCK != 0 {
                         return Err(self.op_err(CKR_DATA_LEN_RANGE));
                     } else {
-                        data_len + AES_KWP_BLOCK
+                        data_len + AES_KW_SEMIBLOCK
                     }
                 }
                 CKM_AES_KEY_WRAP_KWP => {
-                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KWP_BLOCK)
-                        * AES_KWP_BLOCK
+                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KW_SEMIBLOCK)
+                        * AES_KW_SEMIBLOCK
                 }
                 CKM_AES_KEY_WRAP_PKCS7 => 0,
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
@@ -1666,7 +1668,7 @@ impl Decryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                if cipher.len() % AES_KWP_BLOCK != 0 {
+                if cipher.len() % AES_KW_SEMIBLOCK != 0 {
                     return Err(self.op_err(CKR_DATA_LEN_RANGE));
                 }
             }
@@ -1978,7 +1980,7 @@ impl Decryption for AesOperation {
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
             CKM_AES_KEY_WRAP_PKCS7 => {
                 if self.buffer.len() < 24
-                    || self.buffer.len() % AES_KWP_BLOCK != 0
+                    || self.buffer.len() % AES_KW_SEMIBLOCK != 0
                 {
                     zeromem(self.buffer.as_mut_slice());
                     self.buffer.clear();
@@ -2000,14 +2002,15 @@ impl Decryption for AesOperation {
                 unwrap_buf.truncate(unwrapped_len);
 
                 if unwrap_buf.len() < 16
-                    || unwrap_buf.len() % AES_KWP_BLOCK != 0
+                    || unwrap_buf.len() % AES_KW_SEMIBLOCK != 0
                 {
                     zeromem(unwrap_buf.as_mut_slice());
                     return Err(CKR_ENCRYPTED_DATA_INVALID)?;
                 }
 
                 let pad = unwrap_buf[unwrap_buf.len() - 1] as usize;
-                if pad == 0 || pad > AES_KWP_BLOCK || pad > unwrap_buf.len() {
+                if pad == 0 || pad > AES_KW_SEMIBLOCK || pad > unwrap_buf.len()
+                {
                     zeromem(unwrap_buf.as_mut_slice());
                     return Err(CKR_ENCRYPTED_DATA_INVALID)?;
                 }
@@ -2024,7 +2027,7 @@ impl Decryption for AesOperation {
                 }
 
                 let plain_len = pad_start;
-                if plain_len < AES_KWP_BLOCK {
+                if plain_len < AES_KW_SEMIBLOCK {
                     zeromem(unwrap_buf.as_mut_slice());
                     return Err(CKR_ENCRYPTED_DATA_INVALID)?;
                 }
@@ -2086,17 +2089,17 @@ impl Decryption for AesOperation {
                     self.buffer.len() + data_len
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                    if data_len % AES_KWP_BLOCK != 0 {
+                    if data_len % AES_KW_SEMIBLOCK != 0 {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.buffer.len() + data_len
                 }
                 CKM_AES_KEY_WRAP_PKCS7 => {
                     let tot = self.buffer.len() + data_len;
-                    if tot < 24 || tot % AES_KWP_BLOCK != 0 {
+                    if tot < 24 || tot % AES_KW_SEMIBLOCK != 0 {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
-                    tot - AES_KWP_BLOCK
+                    tot - AES_KW_SEMIBLOCK
                 }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
@@ -2125,7 +2128,7 @@ impl Decryption for AesOperation {
                     data_len
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                    if data_len % AES_KWP_BLOCK != 0 {
+                    if data_len % AES_KW_SEMIBLOCK != 0 {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     } else {
                         /* Originally this was ((data_len / 8) * 8) - 8
@@ -2137,7 +2140,7 @@ impl Decryption for AesOperation {
                          * as the input buffer regardless of the actual final
                          * length, and needs to be a multiple of 8.
                          */
-                        (data_len / AES_KWP_BLOCK) * AES_KWP_BLOCK
+                        (data_len / AES_KW_SEMIBLOCK) * AES_KW_SEMIBLOCK
                     }
                 }
                 CKM_AES_KEY_WRAP_PKCS7 => 0,
