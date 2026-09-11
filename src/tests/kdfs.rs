@@ -219,6 +219,138 @@ fn test_sp800_kdf() {
     assert_eq!(ret, CKR_OK);
 }
 
+/// Regression test: CK_SP800_108_DKM_LENGTH must embed the derived key length in *bits*
+/// (NIST SP 800-108's definition of L), not the bytes that CKA_VALUE_LEN and Kryoptic's
+/// internal klen/slen use -- Sp800Operation::derive computed klen/slen in bytes and passed
+/// them straight through to dkm_update with no *8 conversion, corrupting every derivation
+/// that uses a CK_SP800_108_DKM_LENGTH segment (previously undetected because the only
+/// other CKM_SP800_108_COUNTER_KDF test never uses that segment).
+///
+/// The expected value is independently computed: HMAC-SHA256(KI, counter=1 (32-bit BE) ||
+/// L=256 (32-bit BE, the bit-length of a 32-byte key)) -- a single iteration exactly fills a
+/// 32-byte output with a 32-byte-digest PRF, so no truncation/concatenation logic is
+/// exercised, isolating the DKM-length encoding itself.
+///
+/// Not run under the fips feature: `src/sp800_108.rs` swaps in an entirely separate
+/// OpenSSL-KBKDF-backed implementation (`ossl::kbkdf`) there instead of this file's
+/// `native::sp800_108`, and that backend only supports
+/// CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS with a 32-bit big-endian width ("OpenSSL
+/// limitations", see ossl/kbkdf.rs) -- it rejects this test's SUM_OF_KEYS configuration
+/// with CKR_MECHANISM_PARAM_INVALID regardless of this fix, since it never reaches the
+/// code this test exists to cover.
+#[cfg(all(feature = "sp800_108", not(feature = "fips")))]
+#[test]
+#[parallel]
+fn test_sp800_kdf_dkm_length_is_in_bits() {
+    let mut testtokn =
+        TestToken::initialized("test_sp800_kdf_dkm_length_is_in_bits", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let ki: [u8; 16] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+        0x0c, 0x0d, 0x0e, 0x0f,
+    ];
+    let handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, &ki)],
+        &[(CKA_DERIVE, true)],
+    ));
+
+    let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
+        bLittleEndian: 0,
+        ulWidthInBits: 32,
+    };
+    let mut dkm_format = CK_SP800_108_DKM_LENGTH_FORMAT {
+        dkmLengthMethod: CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS,
+        bLittleEndian: 0,
+        ulWidthInBits: 32,
+    };
+    let mut data_params = [
+        CK_PRF_DATA_PARAM {
+            type_: CK_SP800_108_ITERATION_VARIABLE,
+            pValue: &mut counter_format as *mut _ as CK_VOID_PTR,
+            ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
+        },
+        CK_PRF_DATA_PARAM {
+            type_: CK_SP800_108_DKM_LENGTH,
+            pValue: &mut dkm_format as *mut _ as CK_VOID_PTR,
+            ulValueLen: sizeof!(CK_SP800_108_DKM_LENGTH_FORMAT),
+        },
+    ];
+    let mut params = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: data_params.len() as CK_ULONG,
+        pDataParams: data_params.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+
+    let mut derived = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut derived,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut extract_template = [CK_ATTRIBUTE {
+        type_: CKA_VALUE,
+        pValue: std::ptr::null_mut(),
+        ulValueLen: 0,
+    }];
+    let ret = fn_get_attribute_value(
+        session,
+        derived,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut value = vec![0u8; extract_template[0].ulValueLen as usize];
+    extract_template[0].pValue = value.as_mut_ptr() as CK_VOID_PTR;
+    let ret = fn_get_attribute_value(
+        session,
+        derived,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let expected: [u8; 32] = [
+        0xf4, 0x1e, 0x7a, 0xa8, 0x7a, 0x28, 0x4c, 0x0d, 0xcf, 0x00, 0x0b, 0xc2,
+        0x70, 0x43, 0x54, 0x71, 0xf9, 0xc7, 0x48, 0x28, 0xfb, 0x6f, 0x47, 0x1d,
+        0x6d, 0xaa, 0x6d, 0x20, 0x62, 0x9b, 0xd7, 0xe4,
+    ];
+    assert_eq!(
+        value, expected,
+        "CK_SP800_108_DKM_LENGTH must embed the derived key length in bits (256), \
+         not bytes (32) -- HMAC-SHA256(KI, counter=1 || L) with the wrong L produces a \
+         completely different key"
+    );
+
+    testtokn.finalize();
+}
+
 #[cfg(feature = "aes")]
 #[test]
 #[parallel]

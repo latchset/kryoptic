@@ -190,19 +190,24 @@ impl Sp800Operation {
     /// Feed the length of the sum of the segments or of the keys
     /// to be produced
     ///
+    /// `klen`/`slen` must already be in *bits* (NIST SP800-108 defines L, the DKM
+    /// length fed into the fixed input, as the output length in bits) -- converting
+    /// from PKCS#11's byte-based CKA_VALUE_LEN is the caller's responsibility, done
+    /// once where klen/slen are computed rather than on every call here.
+    ///
     /// NOTE: In this function the len is intentionally truncated by
     /// casting, do not convert with try_from()
     fn dkm_update(
         param: &Sp800DKMLengthFormat,
-        klen: usize,
-        slen: usize,
+        klen: u64,
+        slen: u64,
         op: &mut Box<dyn Mac>,
     ) -> Result<()> {
         let mut len = match param.method {
             CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS => slen,
             CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS => klen,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
-        } as u64;
+        };
         /* up to 64 bits */
         match param.bits {
             8 => {
@@ -286,8 +291,8 @@ impl Sp800Operation {
         params: &Vec<Sp800Params>,
         op: &mut Box<dyn Mac>,
         ctr: usize,
-        dkmklen: usize,
-        dkmslen: usize,
+        dkmklen: u64,
+        dkmslen: u64,
     ) -> Result<()> {
         let mut seen_dkmlen = false;
         let mut seen_iter = false;
@@ -332,8 +337,8 @@ impl Sp800Operation {
         op: &mut Box<dyn Mac>,
         iv: &[u8],
         ctr: usize,
-        dkmklen: usize,
-        dkmslen: usize,
+        dkmklen: u64,
+        dkmslen: u64,
     ) -> Result<()> {
         let mut seen_dkmlen = false;
         let mut seen_iter = false;
@@ -467,6 +472,15 @@ impl Derive for Sp800Operation {
 
         let mut dkm = vec![0u8; slen];
 
+        /* dkm_update() (fed via counter_updates/feedback_updates below) requires its
+         * klen/slen in *bits* per NIST SP800-108's definition of L -- klen/slen
+         * themselves must stay in bytes above (they size `dkm` and the segment loop
+         * bound), so convert into separate bit-valued locals here, in u64 so the
+         * multiply can't overflow usize on 32-bit targets even though `keysize`'s own
+         * bound (<= u32::MAX bytes, checked above) makes that unreachable in practice. */
+        let dkmklen = klen as u64 * 8;
+        let dkmslen = slen as u64 * 8;
+
         /* for each segment */
         let mut cursor = 0;
         for ctr in 0..(slen / segment) {
@@ -479,8 +493,8 @@ impl Derive for Sp800Operation {
                         &self.params,
                         &mut op,
                         ctr + 1,
-                        klen,
-                        slen,
+                        dkmklen,
+                        dkmslen,
                     )?;
                 }
                 CKM_SP800_108_FEEDBACK_KDF => {
@@ -494,8 +508,8 @@ impl Derive for Sp800Operation {
                         &mut op,
                         iv,
                         ctr + 1,
-                        klen,
-                        slen,
+                        dkmklen,
+                        dkmslen,
                     )?;
                 }
                 _ => return Err(CKR_GENERAL_ERROR)?,
