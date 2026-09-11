@@ -718,3 +718,195 @@ fn test_mlkem_public_key_info() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_mlkem_template_attributes() {
+    let mut testtokn =
+        TestToken::initialized("test_mlkem_template_attributes", None);
+    if testtokn.dbtype == "nssdb" {
+        testtokn.finalize();
+        return;
+    }
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pub_handle, priv_handle) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_KEM_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+        ],
+        &[],
+        &[(CKA_ENCAPSULATE, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM),],
+        &[],
+        &[(CKA_DECAPSULATE, true)],
+    ));
+
+    // Set CKA_ENCAPSULATE_TEMPLATE on public key requiring CKA_ENCRYPT = true
+    let mut enc_true = CK_TRUE;
+    let inner_enc_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_ENCRYPT,
+        pValue: &mut enc_true as *mut _ as *mut std::ffi::c_void,
+        ulValueLen: sizeof!(CK_BBOOL),
+    }];
+    let set_enc_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_ENCAPSULATE_TEMPLATE,
+        pValue: inner_enc_tmpl.as_ptr() as *mut _,
+        ulValueLen: CK_ULONG::try_from(std::mem::size_of_val(&inner_enc_tmpl))
+            .unwrap(),
+    }];
+    let ret = fn_set_attribute_value(
+        session,
+        pub_handle,
+        set_enc_tmpl.as_ptr() as *mut _,
+        1,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    // Set CKA_DECAPSULATE_TEMPLATE on private key requiring CKA_DECRYPT = true
+    let mut dec_true = CK_TRUE;
+    let inner_dec_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_DECRYPT,
+        pValue: &mut dec_true as *mut _ as *mut std::ffi::c_void,
+        ulValueLen: sizeof!(CK_BBOOL),
+    }];
+    let set_dec_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_DECAPSULATE_TEMPLATE,
+        pValue: inner_dec_tmpl.as_ptr() as *mut _,
+        ulValueLen: CK_ULONG::try_from(std::mem::size_of_val(&inner_dec_tmpl))
+            .unwrap(),
+    }];
+    let ret = fn_set_attribute_value(
+        session,
+        priv_handle,
+        set_dec_tmpl.as_ptr() as *mut _,
+        1,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_KEM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    // 1. Encapsulate with template omitting CKA_ENCRYPT -> inherits CKA_ENCRYPT = true
+    let encap_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_DECRYPT, true)],
+    );
+    let mut ciphertext = [0u8; 800];
+    let mut outlen: CK_ULONG = 800;
+    let mut handle_enc = CK_INVALID_HANDLE;
+    let ret = fn_encapsulate_key(
+        session,
+        &mut mechanism,
+        pub_handle,
+        encap_template.as_ptr() as *mut _,
+        encap_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        &mut outlen,
+        &mut handle_enc,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut is_enc: CK_BBOOL = CK_FALSE;
+    let mut q_tmpl = make_ptrs_template(&[(
+        CKA_ENCRYPT,
+        void_ptr!(&mut is_enc),
+        std::mem::size_of::<CK_BBOOL>(),
+    )]);
+    let ret =
+        fn_get_attribute_value(session, handle_enc, q_tmpl.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(is_enc, CK_TRUE);
+
+    // 2. Encapsulate with conflicting template (CKA_ENCRYPT = false) -> fails
+    let encap_conflict_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, false)],
+    );
+    let ret = fn_encapsulate_key(
+        session,
+        &mut mechanism,
+        pub_handle,
+        encap_conflict_template.as_ptr() as *mut _,
+        encap_conflict_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        &mut outlen,
+        &mut handle_enc,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    // 3. Decapsulate with template omitting CKA_DECRYPT -> inherits CKA_DECRYPT = true
+    let decap_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true)],
+    );
+    let mut handle_dec = CK_INVALID_HANDLE;
+    let ret = fn_decapsulate_key(
+        session,
+        &mut mechanism,
+        priv_handle,
+        decap_template.as_ptr() as *mut _,
+        decap_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        outlen,
+        &mut handle_dec,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut is_dec: CK_BBOOL = CK_FALSE;
+    let mut q_tmpl = make_ptrs_template(&[(
+        CKA_DECRYPT,
+        void_ptr!(&mut is_dec),
+        std::mem::size_of::<CK_BBOOL>(),
+    )]);
+    let ret =
+        fn_get_attribute_value(session, handle_dec, q_tmpl.as_mut_ptr(), 1);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(is_dec, CK_TRUE);
+
+    // 4. Decapsulate with conflicting template (CKA_DECRYPT = false) -> fails
+    let decap_conflict_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_DECRYPT, false)],
+    );
+    let ret = fn_decapsulate_key(
+        session,
+        &mut mechanism,
+        priv_handle,
+        decap_conflict_template.as_ptr() as *mut _,
+        decap_conflict_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        outlen,
+        &mut handle_dec,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    testtokn.finalize();
+}

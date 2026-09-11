@@ -30,6 +30,7 @@ pub enum AttrType {
     DateType,
     DenyType,
     IgnoreType,
+    TemplateType,
 }
 
 impl AttrType {
@@ -251,8 +252,8 @@ static ATTRMAP: &[Attrmap<'_>] = &[
     attrmap_element!(CKA_VALIDATION_CERTIFICATE_URI; as StringType),
     attrmap_element!(CKA_VALIDATION_VENDOR_URI; as StringType),
     attrmap_element!(CKA_VALIDATION_PROFILE; as StringType),
-    attrmap_element!(CKA_ENCAPSULATE_TEMPLATE; as DenyType),
-    attrmap_element!(CKA_DECAPSULATE_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_ENCAPSULATE_TEMPLATE; as TemplateType),
+    attrmap_element!(CKA_DECAPSULATE_TEMPLATE; as TemplateType),
     attrmap_element!(CKA_TRUST_SERVER_AUTH; as NumType),
     attrmap_element!(CKA_TRUST_CLIENT_AUTH; as NumType),
     attrmap_element!(CKA_TRUST_CODE_SIGNING; as NumType),
@@ -265,9 +266,9 @@ static ATTRMAP: &[Attrmap<'_>] = &[
     attrmap_element!(CKA_HASH_OF_CERTIFICATE; as BytesType),
     attrmap_element!(CKA_PUBLIC_CRC64_VALUE; as BytesType),
     attrmap_element!(CKA_SEED; as BytesType),
-    attrmap_element!(CKA_WRAP_TEMPLATE; as DenyType),
-    attrmap_element!(CKA_UNWRAP_TEMPLATE; as DenyType),
-    attrmap_element!(CKA_DERIVE_TEMPLATE; as DenyType),
+    attrmap_element!(CKA_WRAP_TEMPLATE; as TemplateType),
+    attrmap_element!(CKA_UNWRAP_TEMPLATE; as TemplateType),
+    attrmap_element!(CKA_DERIVE_TEMPLATE; as TemplateType),
     attrmap_element!(CKA_ALLOWED_MECHANISMS; as UlongArrayType),
     attrmap_element!(CKA_VENDOR_DEFINED; as DenyType),
     /* Additional Vendor defined Attributes */
@@ -289,6 +290,99 @@ static ATTRMAP: &[Attrmap<'_>] = &[
     attrmap_element!(CKA_NSS_CERT_MD5_HASH; as BytesType),
 ];
 
+/// Serializes a slice of Attributes into a canonical byte vector.
+pub fn serialize_template(attrs: &[Attribute]) -> Result<Vec<u8>> {
+    let count = u32::try_from(attrs.len())?;
+    let mut total_len: usize = 4;
+    for attr in attrs {
+        total_len = total_len
+            .checked_add(8 + 4)
+            .and_then(|l| l.checked_add(attr.value.len()))
+            .ok_or(CKR_DEVICE_MEMORY)?;
+    }
+
+    let mut buf = Vec::with_capacity(total_len);
+    buf.extend_from_slice(&count.to_le_bytes());
+    for attr in attrs {
+        let ck_type = u64::try_from(attr.ck_type)?;
+        buf.extend_from_slice(&ck_type.to_le_bytes());
+        let val_len = u32::try_from(attr.value.len())?;
+        buf.extend_from_slice(&val_len.to_le_bytes());
+        buf.extend_from_slice(&attr.value);
+    }
+    Ok(buf)
+}
+
+/// Deserializes a canonical byte slice into a vector of Attributes.
+pub fn deserialize_template(data: &[u8]) -> Result<Vec<Attribute>> {
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+    if data.len() < 4 {
+        return Err(CKR_DEVICE_MEMORY)?;
+    }
+    let count = u32::from_le_bytes(data[..4].try_into()?) as usize;
+    let mut offset = 4;
+    let mut attrs = Vec::with_capacity(count);
+    for _ in 0..count {
+        if offset + 8 + 4 > data.len() {
+            return Err(CKR_DEVICE_MEMORY)?;
+        }
+        let ck_type_u64 =
+            u64::from_le_bytes(data[offset..offset + 8].try_into()?);
+        let ck_type = CK_ULONG::try_from(ck_type_u64)?;
+        offset += 8;
+
+        let attrtype = AttrType::attr_id_to_attrtype(ck_type)?;
+
+        let val_len =
+            u32::from_le_bytes(data[offset..offset + 4].try_into()?) as usize;
+        offset += 4;
+
+        if offset + val_len > data.len() {
+            return Err(CKR_DEVICE_MEMORY)?;
+        }
+        let value = data[offset..offset + val_len].to_vec();
+        offset += val_len;
+
+        attrs.push(Attribute {
+            ck_type,
+            attrtype,
+            value,
+        });
+    }
+    if offset != data.len() {
+        return Err(CKR_DEVICE_MEMORY)?;
+    }
+    Ok(attrs)
+}
+
+/// Merges a stored template attribute from a key into a user-provided template.
+///
+/// If any attribute in `stored_attrs` is present in `template` with a conflicting value,
+/// returns `CKR_TEMPLATE_INCONSISTENT`.
+/// Attributes in `stored_attrs` that are not present in `template` are appended to the merged template.
+pub fn merge_template_attributes<'a>(
+    template: &'a [CK_ATTRIBUTE],
+    stored_attrs: &[Attribute],
+) -> Result<CkAttrs<'a>> {
+    let mut merged = CkAttrs::from(template);
+    for stored in stored_attrs {
+        match template.iter().find(|a| a.type_ == stored.get_type()) {
+            Some(req_attr) => {
+                if !stored.match_ck_attr(req_attr) {
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                }
+            }
+            None => {
+                merged
+                    .add_owned_slice(stored.get_type(), stored.get_value())?;
+            }
+        }
+    }
+    Ok(merged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +392,68 @@ mod tests {
         let mut copy = (*ATTRMAP).to_vec();
         copy.sort();
         assert_eq!(ATTRMAP, copy.as_slice());
+    }
+
+    #[test]
+    fn test_template_serialization_roundtrip() {
+        let attrs = vec![
+            Attribute::from_bool(CKA_ENCRYPT, true),
+            Attribute::from_ulong(CKA_CLASS, CKO_SECRET_KEY),
+            Attribute::from_bytes(CKA_ID, vec![1, 2, 3, 4]),
+        ];
+        let serialized = serialize_template(&attrs).unwrap();
+        let deserialized = deserialize_template(&serialized).unwrap();
+        assert_eq!(attrs.len(), deserialized.len());
+        for (a, b) in attrs.iter().zip(deserialized.iter()) {
+            assert_eq!(a.get_type(), b.get_type());
+            assert_eq!(a.get_attrtype(), b.get_attrtype());
+            assert_eq!(a.get_value(), b.get_value());
+        }
+    }
+
+    #[test]
+    fn test_empty_template_serialization() {
+        let attrs: Vec<Attribute> = Vec::new();
+        let serialized = serialize_template(&attrs).unwrap();
+        let deserialized = deserialize_template(&serialized).unwrap();
+        assert!(deserialized.is_empty());
+
+        let from_empty_slice = deserialize_template(&[]).unwrap();
+        assert!(from_empty_slice.is_empty());
+    }
+
+    #[test]
+    fn test_from_template_recursion_denied() {
+        let inner_tmpl = Attribute::from_template(
+            CKA_WRAP_TEMPLATE,
+            &[Attribute::from_bool(CKA_ENCRYPT, true)],
+        )
+        .unwrap();
+        let res = Attribute::from_template(CKA_DERIVE_TEMPLATE, &[inner_tmpl]);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().rv(), CKR_TEMPLATE_INCONSISTENT);
+    }
+
+    #[test]
+    fn test_from_ck_attr_template() {
+        let mut enc = CK_TRUE;
+        let inner_ck = [CK_ATTRIBUTE {
+            type_: CKA_ENCRYPT,
+            pValue: &mut enc as *mut _ as *mut std::ffi::c_void,
+            ulValueLen: sizeof!(CK_BBOOL),
+        }];
+        let tmpl_attr = CK_ATTRIBUTE {
+            type_: CKA_DERIVE_TEMPLATE,
+            pValue: inner_ck.as_ptr() as *mut std::ffi::c_void,
+            ulValueLen: CK_ULONG::try_from(std::mem::size_of_val(&inner_ck))
+                .unwrap(),
+        };
+        let attr = Attribute::from_ck_attr(&tmpl_attr).unwrap();
+        assert_eq!(attr.get_attrtype(), AttrType::TemplateType);
+        let inner = attr.to_template().unwrap();
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner[0].get_type(), CKA_ENCRYPT);
+        assert_eq!(inner[0].to_bool().unwrap(), true);
     }
 }
 
@@ -330,6 +486,35 @@ impl Attribute {
     pub fn match_ck_attr(&self, attr: &CK_ATTRIBUTE) -> bool {
         if self.ck_type != attr.type_ {
             return false;
+        }
+        if self.attrtype == AttrType::TemplateType {
+            let self_tmpl = match self.to_template() {
+                Ok(t) => t,
+                Err(_) => return false,
+            };
+            let other_attr = match Attribute::from_ck_attr(attr) {
+                Ok(a) => a,
+                Err(_) => return false,
+            };
+            let other_tmpl = match other_attr.to_template() {
+                Ok(t) => t,
+                Err(_) => return false,
+            };
+            if self_tmpl.len() != other_tmpl.len() {
+                return false;
+            }
+            for ot in &other_tmpl {
+                match self_tmpl.iter().find(|st| st.get_type() == ot.get_type())
+                {
+                    Some(st) => {
+                        if st.get_value() != ot.get_value() {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+            return true;
         }
         match attr.to_buf() {
             Ok(buf) => buf == self.value,
@@ -594,6 +779,43 @@ impl Attribute {
         }
     }
 
+    /// Constructs an attribute as a template type with raw serialized bytes
+    pub fn from_template_bytes(t: CK_ULONG, val: Vec<u8>) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::TemplateType,
+            value: val,
+        }
+    }
+
+    /// Constructs an attribute as a template type from a slice of Attributes.
+    /// Denies recursion: returns CKR_TEMPLATE_INCONSISTENT if any attribute is itself a template.
+    #[allow(dead_code)]
+    pub fn from_template(
+        t: CK_ULONG,
+        attrs: &[Attribute],
+    ) -> Result<Attribute> {
+        for a in attrs {
+            if a.attrtype == AttrType::TemplateType {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        }
+        let val = serialize_template(attrs)?;
+        Ok(Attribute {
+            ck_type: t,
+            attrtype: AttrType::TemplateType,
+            value: val,
+        })
+    }
+
+    /// Deserializes the internal value as a vector of Attributes
+    pub fn to_template(&self) -> Result<Vec<Attribute>> {
+        if self.attrtype != AttrType::TemplateType {
+            return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+        }
+        deserialize_template(&self.value)
+    }
+
     /// Converts a CK_ATTRIBUTE to an Attribute object with a typed
     /// copy of the data
     pub fn from_ck_attr(attr: &CK_ATTRIBUTE) -> Result<Attribute> {
@@ -624,7 +846,51 @@ impl Attribute {
             AttrType::IgnoreType => {
                 Ok(Attribute::from_ignore(attr.type_, None))
             }
+            AttrType::TemplateType => Self::from_ck_template(attr.type_, attr),
         }
+    }
+
+    fn from_ck_template(
+        ck_type: CK_ULONG,
+        attr: &CK_ATTRIBUTE,
+    ) -> Result<Attribute> {
+        if attr.ulValueLen == 0 {
+            return Ok(Attribute::from_template_bytes(ck_type, Vec::new()));
+        }
+        if attr.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        let ck_attr_size = std::mem::size_of::<CK_ATTRIBUTE>();
+        let val_len = usize::try_from(attr.ulValueLen)?;
+        if val_len % ck_attr_size != 0 {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        let count = val_len / ck_attr_size;
+        if (attr.pValue as usize) % std::mem::align_of::<CK_ATTRIBUTE>() != 0 {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        let inner_ck_attrs: &[CK_ATTRIBUTE] = unsafe {
+            std::slice::from_raw_parts(
+                attr.pValue as *const CK_ATTRIBUTE,
+                count,
+            )
+        };
+        let mut inner_attrs = Vec::<Attribute>::with_capacity(count);
+        for inner in inner_ck_attrs {
+            let inner_atype = match Attrmap::search_by_id(inner.type_) {
+                Some(a) => a.atype,
+                None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
+            };
+            if inner_atype == AttrType::TemplateType {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+            if inner_attrs.iter().any(|a| a.get_type() == inner.type_) {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+            inner_attrs.push(Attribute::from_ck_attr(inner)?);
+        }
+        let serialized = serialize_template(&inner_attrs)?;
+        Ok(Attribute::from_template_bytes(ck_type, serialized))
     }
 }
 

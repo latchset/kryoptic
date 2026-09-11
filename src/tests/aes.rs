@@ -1724,7 +1724,7 @@ fn test_aes_iv_generators() {
             ulNonceLen: nonce2.len() as CK_ULONG,
             ulNonceFixedBits: 64,
             nonceGenerator: CKG_GENERATE_COUNTER,
-            pMAC: tag2.as_ptr() as *mut CK_BYTE,
+            pMAC: tag2.as_mut_ptr(),
             ulMACLen: tag2.len() as CK_ULONG,
         };
 

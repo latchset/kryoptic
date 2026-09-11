@@ -7,6 +7,7 @@ use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
 use cryptoki::session::UserType;
 use cryptoki::types::AuthPin;
 
+#[allow(dead_code)]
 fn test_re_initialize_common(
     dbtype: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {

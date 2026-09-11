@@ -1033,3 +1033,186 @@ fn test_sensitive_attributes_matrix() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_wrap_unwrap_template() {
+    let mut testtokn =
+        TestToken::initialized("test_wrap_unwrap_template", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    // 1. Create a key to be wrapped (AES key with CKA_ENCRYPT=true, CKA_DECRYPT=true)
+    let key_to_wrap = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+
+    // 2. Create a wrapping key with CKA_WRAP_TEMPLATE requiring CKA_ENCRYPT = true
+    let mut enc_true = CK_TRUE;
+    let inner_wrap_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_ENCRYPT,
+        pValue: &mut enc_true as *mut _ as *mut std::ffi::c_void,
+        ulValueLen: sizeof!(CK_BBOOL),
+    }];
+    let wrapping_key = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+    let set_wrap_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_WRAP_TEMPLATE,
+        pValue: inner_wrap_tmpl.as_ptr() as *mut _,
+        ulValueLen: CK_ULONG::try_from(std::mem::size_of_val(&inner_wrap_tmpl))
+            .unwrap(),
+    }];
+    let ret = fn_set_attribute_value(
+        session,
+        wrapping_key,
+        set_wrap_tmpl.as_ptr() as *mut _,
+        1,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let iv = [0xCCu8; 4];
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP_KWP,
+        pParameter: void_ptr!(&iv),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+
+    // Wrapping key_to_wrap succeeds because it has CKA_ENCRYPT = true
+    let mut wrapped = vec![0u8; 256];
+    let mut wrapped_len = wrapped.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        wrapping_key,
+        key_to_wrap,
+        wrapped.as_mut_ptr(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    // 3. Create another key without CKA_ENCRYPT (CKA_ENCRYPT = false)
+    let non_encrypt_key = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_ENCRYPT, false),
+            (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
+    ));
+    let mut fail_len = wrapped.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        wrapping_key,
+        non_encrypt_key,
+        wrapped.as_mut_ptr(),
+        &mut fail_len,
+    );
+    assert_eq!(ret, CKR_ACTION_PROHIBITED);
+
+    // 4. Test CKA_UNWRAP_TEMPLATE on unwrapping key
+    let mut dec_true = CK_TRUE;
+    let inner_unwrap_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_DECRYPT,
+        pValue: &mut dec_true as *mut _ as *mut std::ffi::c_void,
+        ulValueLen: sizeof!(CK_BBOOL),
+    }];
+    let set_unwrap_tmpl = [CK_ATTRIBUTE {
+        type_: CKA_UNWRAP_TEMPLATE,
+        pValue: inner_unwrap_tmpl.as_ptr() as *mut _,
+        ulValueLen: CK_ULONG::try_from(std::mem::size_of_val(
+            &inner_unwrap_tmpl,
+        ))
+        .unwrap(),
+    }];
+    let ret = fn_set_attribute_value(
+        session,
+        wrapping_key,
+        set_unwrap_tmpl.as_ptr() as *mut _,
+        1,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    // 4a. Unwrap with template omitting CKA_DECRYPT -> inherits CKA_DECRYPT = true
+    let unwrap_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_EXTRACTABLE, true)],
+    );
+    let mut unwrapped_handle = CK_INVALID_HANDLE;
+    let ret = fn_unwrap_key(
+        session,
+        &mut mechanism,
+        wrapping_key,
+        wrapped.as_mut_ptr(),
+        wrapped_len,
+        unwrap_template.as_ptr() as *mut _,
+        unwrap_template.len() as CK_ULONG,
+        &mut unwrapped_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut is_dec: CK_BBOOL = CK_FALSE;
+    let mut q_tmpl = make_ptrs_template(&[(
+        CKA_DECRYPT,
+        void_ptr!(&mut is_dec),
+        std::mem::size_of::<CK_BBOOL>(),
+    )]);
+    let ret = fn_get_attribute_value(
+        session,
+        unwrapped_handle,
+        q_tmpl.as_mut_ptr(),
+        1,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(is_dec, CK_TRUE);
+
+    // 4b. Unwrap with conflicting template (CKA_DECRYPT = false) -> CKR_TEMPLATE_INCONSISTENT
+    let conflict_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],
+        &[],
+        &[(CKA_DECRYPT, false)],
+    );
+    let mut fail_handle = CK_INVALID_HANDLE;
+    let ret = fn_unwrap_key(
+        session,
+        &mut mechanism,
+        wrapping_key,
+        wrapped.as_mut_ptr(),
+        wrapped_len,
+        conflict_template.as_ptr() as *mut _,
+        conflict_template.len() as CK_ULONG,
+        &mut fail_handle,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    testtokn.finalize();
+}

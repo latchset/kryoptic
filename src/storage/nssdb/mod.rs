@@ -570,7 +570,7 @@ impl NSSStorage {
                     AttrType::DenyType => {
                         return Err(CKR_ATTRIBUTE_TYPE_INVALID)?
                     }
-                    AttrType::UlongArrayType => {
+                    AttrType::UlongArrayType | AttrType::TemplateType => {
                         /* currently unsupported */
                         return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
@@ -736,6 +736,9 @@ impl NSSStorage {
             } else {
                 query.params.push(match atype {
                     AttrType::NumType => num_to_val(template[idx].to_ulong()?)?,
+                    AttrType::TemplateType => {
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+                    }
                     _ => Value::from(template[idx].to_buf()?),
                 });
             }
@@ -949,6 +952,9 @@ impl NSSStorage {
                     AttrType::DenyType | AttrType::IgnoreType => {
                         ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
                     }
+                    AttrType::TemplateType => {
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
+                    }
                     _ => ValueRef::from(a_val.as_slice()).into(),
                 }
             });
@@ -1019,6 +1025,9 @@ impl NSSStorage {
                     AttrType::NumType => num_to_val(attr.to_ulong()?)?,
                     AttrType::DenyType | AttrType::IgnoreType => {
                         ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                    }
+                    AttrType::TemplateType => {
+                        return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
                     _ => ValueRef::from(a_val.as_slice()).into(),
                 }
