@@ -711,7 +711,11 @@ fn test_aes_operations() {
         assert_eq!(&enc, &ciphertext);
     }
 
-    for mech in [CKM_AES_KEY_WRAP, CKM_AES_KEY_WRAP_KWP] {
+    for mech in [
+        CKM_AES_KEY_WRAP,
+        CKM_AES_KEY_WRAP_KWP,
+        CKM_AES_KEY_WRAP_PKCS7,
+    ] {
         /* AES KEY WRAP */
 
         /* encryption and key wrapping operations should give the same
@@ -720,7 +724,7 @@ fn test_aes_operations() {
         let data = [0x55u8; AES_BLOCK_SIZE];
         let iv = [0xCCu8; 8];
         let iv_len = match mech {
-            CKM_AES_KEY_WRAP => 8,
+            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PKCS7 => 8,
             CKM_AES_KEY_WRAP_KWP => 4,
             _ => panic!("uh?"),
         };
@@ -795,7 +799,14 @@ fn test_aes_operations() {
             &mut wp_handle2,
         );
         assert_eq!(ret, CKR_OK);
-        assert_eq!(check_object_validation(session, wp_handle2, 1), true);
+        let approval = match mech {
+            CKM_AES_KEY_WRAP_PKCS7 => 0,
+            _ => 1,
+        };
+        assert_eq!(
+            check_object_validation(session, wp_handle2, approval),
+            true
+        );
 
         let mut value = [0u8; AES_BLOCK_SIZE];
         let mut extract_template = make_ptrs_template(&[(
@@ -2956,6 +2967,200 @@ fn test_aes_wrap_key_buffer_too_small_reports_required_len() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(wrapped2_len, 40);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+#[cfg(not(feature = "fips"))]
+fn test_aes_key_wrap_pkcs7() {
+    let mut testtokn = TestToken::initialized("test_aes_key_wrap_pkcs7", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let wrapping_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    let custom_iv = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+
+    // 1. Test round-trip across various payload lengths (>= 8 bytes) with default and custom IVs
+    // Note: PKCS#7 pads to semiblock (8 bytes), and AES Key Wrap requires at least 2 semiblocks (16 bytes).
+    let test_lengths =
+        [8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 24, 31, 32, 48, 64];
+    for &len in &test_lengths {
+        let plaintext: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+
+        for use_custom_iv in [false, true] {
+            let mechanism = if use_custom_iv {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP_PKCS7,
+                    pParameter: void_ptr!(custom_iv.as_ptr()),
+                    ulParameterLen: custom_iv.len() as CK_ULONG,
+                }
+            } else {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP_PKCS7,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            };
+
+            // Expected ciphertext length: padded to multiple of 8 (semiblock) + 8 bytes (IV)
+            let expected_padded = ((len + 8) / 8) * 8;
+            let expected_ct_len = expected_padded + 8;
+
+            // One-shot Encrypt
+            let ct = ret_or_panic!(encrypt(
+                session,
+                wrapping_handle,
+                &plaintext,
+                &mechanism
+            ));
+            assert_eq!(ct.len(), expected_ct_len);
+
+            // One-shot Decrypt
+            let pt = ret_or_panic!(decrypt(
+                session,
+                wrapping_handle,
+                &ct,
+                &mechanism
+            ));
+            assert_eq!(pt, plaintext);
+
+            // Multi-part streaming Encrypt
+            let mut mech_clone = mechanism.clone();
+            let ret =
+                fn_encrypt_init(session, &mut mech_clone, wrapping_handle);
+            assert_eq!(ret, CKR_OK);
+
+            let half = len / 2;
+            let enc_part1 =
+                ret_or_panic!(encrypt_update(session, &plaintext[..half]));
+            assert_eq!(enc_part1.len(), 0);
+            let enc_part2 =
+                ret_or_panic!(encrypt_update(session, &plaintext[half..]));
+            assert_eq!(enc_part2.len(), 0);
+
+            let ct_multi = ret_or_panic!(encrypt_final(session));
+            assert_eq!(ct_multi.len(), expected_ct_len);
+            assert_eq!(ct_multi, ct);
+
+            // Multi-part streaming Decrypt
+            let ret =
+                fn_decrypt_init(session, &mut mech_clone, wrapping_handle);
+            assert_eq!(ret, CKR_OK);
+
+            let ct_half = ct.len() / 2;
+            let dec_part1 =
+                ret_or_panic!(decrypt_update(session, &ct[..ct_half]));
+            assert_eq!(dec_part1.len(), 0);
+            let dec_part2 =
+                ret_or_panic!(decrypt_update(session, &ct[ct_half..]));
+            assert_eq!(dec_part2.len(), 0);
+
+            let pt_multi = ret_or_panic!(decrypt_final(session));
+            assert_eq!(pt_multi, plaintext);
+        }
+    }
+
+    // 2. Test payload length < 8 bytes (must fail with CKR_DATA_LEN_RANGE)
+    let default_mech = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP_PKCS7,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    for short_len in [0, 1, 4, 7] {
+        let short_pt = vec![0x55u8; short_len];
+        let res = encrypt(session, wrapping_handle, &short_pt, &default_mech);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().rv(), CKR_DATA_LEN_RANGE);
+    }
+
+    // 3. Test invalid parameter lengths (must be 0 or 8)
+    for bad_len in [1, 4, 7, 9, 16] {
+        let bad_iv = vec![0xAAu8; bad_len];
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_AES_KEY_WRAP_PKCS7,
+            pParameter: void_ptr!(bad_iv.as_ptr()),
+            ulParameterLen: bad_len as CK_ULONG,
+        };
+        let ret = fn_encrypt_init(session, &mut mechanism, wrapping_handle);
+        assert_eq!(ret, CKR_ARGUMENTS_BAD);
+
+        let ret = fn_decrypt_init(session, &mut mechanism, wrapping_handle);
+        assert_eq!(ret, CKR_ARGUMENTS_BAD);
+    }
+
+    // 4. Test invalid ciphertext lengths (< 24 bytes, or not multiple of 8)
+    for bad_ct_len in [0, 7, 8, 15, 16, 20, 23, 25, 27, 31] {
+        let bad_ct = vec![0x42u8; bad_ct_len];
+        let res = decrypt(session, wrapping_handle, &bad_ct, &default_mech);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().rv(), CKR_ENCRYPTED_DATA_LEN_RANGE);
+    }
+
+    // 4. Test corrupted ciphertext (RFC 3394 integrity failure)
+    let valid_pt = b"Hello, PKCS#7 Key Wrap!";
+    let mut ct = ret_or_panic!(encrypt(
+        session,
+        wrapping_handle,
+        valid_pt,
+        &default_mech
+    ));
+    // Flip a bit in the ciphertext
+    ct[0] ^= 0x01;
+    let res = decrypt(session, wrapping_handle, &ct, &default_mech);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().rv(), CKR_ENCRYPTED_DATA_INVALID);
+
+    // 6. Test with known RFC 3394 test vector:
+    // RFC 3394 §4.1:
+    // K = 000102030405060708090a0b0c0d0e0f
+    // Plaintext = 00112233445566778899aabbccddee (15 bytes)
+    // With 8-byte PKCS#7 padding: 1 byte of 0x01 is appended -> 16 bytes:
+    // P_padded = 00112233445566778899aabbccddee01 (2 semiblocks)
+    // RFC 3394 Key Wrap of P_padded produces 3 semiblocks (24 bytes):
+    // C = 79ceb64913b3d068aa92a2cea546fcb3154a3f9ba5e0a2bc
+    let rfc_key_bytes =
+        hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+    let rfc_key_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &rfc_key_bytes)],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    ));
+    let rfc_pt = hex::decode("00112233445566778899aabbccddee").unwrap();
+    let expected_rfc_ct =
+        hex::decode("79ceb64913b3d068aa92a2cea546fcb3154a3f9ba5e0a2bc")
+            .unwrap();
+
+    let rfc_ct =
+        ret_or_panic!(encrypt(session, rfc_key_handle, &rfc_pt, &default_mech));
+    assert_eq!(rfc_ct, expected_rfc_ct);
+
+    let decrypted_rfc_pt =
+        ret_or_panic!(decrypt(session, rfc_key_handle, &rfc_ct, &default_mech));
+    assert_eq!(decrypted_rfc_pt, rfc_pt);
+
+    // 7. Test FIPS indicator (under FIPS mode, CKM_AES_KEY_WRAP_PKCS7 is not approved)
+    #[cfg(feature = "fips")]
+    {
+        assert_eq!(check_validation(session, 0), true);
+    }
 
     testtokn.finalize();
 }
