@@ -8,7 +8,9 @@ Unreleased changes
 
 ### What Changed
 
-
+* Added support for CKM_AES_KEY_WRAP_PKCS7
+  - [Implement
+     CKM_AES_KEY_WRAP_PKCS7](https://github.com/latchset/kryoptic/pull/501)
 
 ## [1.5.1]
 ## 2026-06-29
