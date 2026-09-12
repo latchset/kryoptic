@@ -2,6 +2,8 @@
 // See LICENSE.txt file for terms
 
 pub mod aes;
+#[cfg(feature = "chacha20")]
+pub mod chacha20;
 pub mod common;
 pub mod drbg;
 
