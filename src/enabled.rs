@@ -4,6 +4,9 @@
 #[cfg(feature = "aes")]
 mod aes;
 
+#[cfg(feature = "chacha20")]
+mod chacha20;
+
 #[cfg(feature = "ecc")]
 mod ec;
 
@@ -66,6 +69,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "aes")]
     aes::register(mechs, ot);
+
+    #[cfg(feature = "chacha20")]
+    chacha20::register(mechs, ot);
 
     #[cfg(feature = "ecdsa")]
     ec::ecdsa::register(mechs, ot);

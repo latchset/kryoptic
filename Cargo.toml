@@ -77,6 +77,7 @@ ossl.workspace = true
 
 [features]
 aes = []
+chacha20 = []
 ecc = []
 ecdsa = ["ecc"]
 ecdh = ["ecc"]
@@ -106,7 +107,7 @@ ecc_all = ["ecc_min", "ec_montgomery", "eddsa"]
 hash_all = ["hash", "hmac"]
 kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf", "simplekdf"]
 
-standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp"]
+standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp", "chacha20"]
 
 fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh",
 "hash_all", "kdf_all", "rsa", "pqc", "dep:vsprintf"]

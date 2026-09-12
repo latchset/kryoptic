@@ -342,6 +342,9 @@ mod mechs;
 #[cfg(feature = "aes")]
 mod aes;
 
+#[cfg(feature = "chacha20")]
+mod chacha20;
+
 #[cfg(feature = "rsa")]
 mod rsa;
 
