@@ -531,8 +531,8 @@ impl GenericSecretKeyFactory {
             | OAFlags::SettableOnlyOnCreate; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
-            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; Attribute::from_bytes;
-            val Vec::new()));
+            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; Attribute::from_ulong;
+            val 0));
 
         /* default to private */
         let private = attr_element!(

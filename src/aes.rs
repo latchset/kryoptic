@@ -114,7 +114,7 @@ impl AesKeyFactory {
             Attribute::from_bytes; val Vec::new()));
         attributes.push(attr_element!(
             CKA_VALUE_LEN; OAFlags::RequiredOnGenerate;
-            Attribute::from_bytes; val Vec::new()));
+            Attribute::from_ulong; val 0));
 
         factory.data.finalize();
 
