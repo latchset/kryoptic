@@ -53,7 +53,8 @@ pub fn osslctx() -> &'static OsslContext {
 
     #[cfg(not(feature = "fips"))]
     {
-        OSSL_CONTEXT.get_or_init(|| ossl::OsslContext::new_lib_ctx())
+        OSSL_CONTEXT
+            .get_or_init(|| ossl::OsslContext::new_lib_ctx_checked().unwrap())
     }
 }
 

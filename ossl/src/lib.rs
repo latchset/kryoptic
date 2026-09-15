@@ -260,6 +260,13 @@ impl OsslContext {
     /// For most of the applications, its recommented to load the default
     /// configuration file after this call to make sure the application
     /// behaves as expected using `load_default_configuration()`.
+    ///
+    /// On OSSL_LIB_CTX_new() failure this function silently returns the
+    /// default context (NULL ptr), use new_lib_ctx_checked() instead.
+    #[deprecated(
+        since = "1.5.3",
+        note = "Please use `new_lib_ctx_checked` instead."
+    )]
     pub fn new_lib_ctx() -> OsslContext {
         OsslContext {
             context: unsafe { OSSL_LIB_CTX_new() },
@@ -272,7 +279,31 @@ impl OsslContext {
         }
     }
 
+    /// Creates a new empty OpenSSL library context.
+    ///
+    /// For most of the applications, its recommented to load the default
+    /// configuration file after this call to make sure the application
+    /// behaves as expected using `load_default_configuration()`.
+    pub fn new_lib_ctx_checked() -> Result<OsslContext, Error> {
+        let ctx = unsafe { OSSL_LIB_CTX_new() };
+        if ctx.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        Ok(OsslContext {
+            context: ctx,
+            providers: Vec::new(),
+            propq: None,
+            #[cfg(feature = "fips")]
+            is_fips: false,
+            fips_permissive: false,
+            broken_shake: false,
+        })
+    }
+
     #[allow(dead_code)]
+    /// note this function excplitly does NOT check if the libctx pointer
+    /// is not NULL, because the NULL pointer is the OpenSSL default ctx
+    /// and it is legal, although discouraged to grab such context
     pub fn from_ctx(ctx: *mut OSSL_LIB_CTX) -> OsslContext {
         OsslContext {
             context: ctx,
@@ -516,6 +547,7 @@ impl Drop for OsslContext {
             while let Some(provider) = self.providers.pop() {
                 OSSL_PROVIDER_unload(provider);
             }
+            // Note, this is a no-op on the default context, so always safe
             OSSL_LIB_CTX_free(self.context);
         }
     }
