@@ -9,7 +9,9 @@ use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
 use crate::mechanism::*;
-use crate::misc::{bytes_to_slice, bytes_to_vec, zeromem, CK_ULONG_SIZE};
+use crate::misc::{
+    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, zeromem, CK_ULONG_SIZE,
+};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 use std::fmt::Debug;
@@ -459,18 +461,14 @@ impl TLSKDFOperation {
             session_hash: Vec::new(),
             version: None,
             prf: prf,
-            label: unsafe {
-                bytes_to_slice(
-                    params.pLabel as *const u8,
-                    params.ulLabelLength as usize,
-                )
-            },
-            context: unsafe {
-                bytes_to_slice(
-                    params.pContextData as *const u8,
-                    params.ulContextDataLength as usize,
-                )
-            },
+            label: bytes_to_slice(
+                params.pLabel as *const u8,
+                params.ulLabelLength as usize,
+            ),
+            context: bytes_to_slice(
+                params.pContextData as *const u8,
+                params.ulContextDataLength as usize,
+            ),
             maclen: 0,
             keylen: 0,
             ivlen: 0,
@@ -819,14 +817,12 @@ impl TLSKDFOperation {
                 Some(mo) => mo,
                 None => return Err(CKR_GENERAL_ERROR)?,
             };
-            let cliiv = unsafe {
-                core::slice::from_raw_parts_mut((*mat_out).pIVClient, ivlen)
-            };
+            let (cli_ptr, srv_ptr) =
+                unsafe { ((*mat_out).pIVClient, (*mat_out).pIVServer) };
+            let cliiv = bytes_to_slice_mut(cli_ptr, ivlen)?;
             cliiv.copy_from_slice(&dkm[i..(i + ivlen)]);
             i += ivlen;
-            let srviv = unsafe {
-                core::slice::from_raw_parts_mut((*mat_out).pIVServer, ivlen)
-            };
+            let srviv = bytes_to_slice_mut(srv_ptr, ivlen)?;
             srviv.copy_from_slice(&dkm[i..(i + ivlen)]);
         }
 

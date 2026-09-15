@@ -227,3 +227,21 @@ fn test_set_attr_rsa() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_template_null_ptr() {
+    let mut testtokn = TestToken::initialized("test_template_null_ptr", None);
+    let session = testtokn.get_session(true);
+
+    // ptr is null, len > 0 -> CKR_ARGUMENTS_BAD
+    let ret = fn_find_objects_init(session, std::ptr::null_mut(), 1);
+    assert_eq!(ret, CKR_ARGUMENTS_BAD);
+
+    // ptr is null, len == 0 -> CKR_OK
+    let ret = fn_find_objects_init(session, std::ptr::null_mut(), 0);
+    assert_eq!(ret, CKR_OK);
+    let _ = fn_find_objects_final(session);
+
+    testtokn.finalize();
+}

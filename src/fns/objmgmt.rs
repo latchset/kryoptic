@@ -10,6 +10,7 @@ use crate::config;
 use crate::error::Result;
 use crate::log_debug;
 use crate::mechanism::SearchOperation;
+use crate::misc::{bytes_to_slice_mut, struct_to_slice, struct_to_slice_mut};
 use crate::pkcs11::vendor::KRY_UNSPEC;
 use crate::pkcs11::*;
 use crate::{fail_if_cka_token_true, STATE};
@@ -24,7 +25,7 @@ fn create_object(
     count: CK_ULONG,
     object_handle: CK_OBJECT_HANDLE_PTR,
 ) -> Result<()> {
-    if template.is_null() || object_handle.is_null() {
+    if object_handle.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
@@ -40,20 +41,19 @@ fn create_object(
         s
     };
     let cnt = usize::try_from(count).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
+    let tmpl = struct_to_slice(template, cnt)?;
     if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
+        fail_if_cka_token_true(&tmpl)?;
     }
 
     let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
-    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
+    fips::check_key_template(&tmpl, rstate.get_fips_behavior(slot_id)?)?;
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
 
-    let key_handle = token.create_object(s_handle, tmpl)?;
+    let key_handle = token.create_object(s_handle, &tmpl)?;
 
     #[cfg(feature = "fips")]
     {
@@ -133,22 +133,15 @@ fn copy_object(
     let rstate = STATE.rlock()?;
     let session = rstate.get_session(s_handle)?;
     let cnt = usize::try_from(count).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let tmpl: &mut [CK_ATTRIBUTE] = if cnt > 0 {
-        if template.is_null() {
-            return Err(CKR_ARGUMENTS_BAD)?;
-        }
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) }
-    } else {
-        &mut []
-    };
+    let tmpl = struct_to_slice(template, cnt)?;
     if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
+        fail_if_cka_token_true(&tmpl)?;
     }
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
 
     /* TODO: return CKR_ACTION_PROHIBITED instead of CKR_USER_NOT_LOGGED_IN ? */
-    let oh = token.copy_object(s_handle, o_handle, tmpl)?;
+    let oh = token.copy_object(s_handle, o_handle, &tmpl)?;
 
     unsafe {
         *ph_new_object = oh;
@@ -270,14 +263,7 @@ fn get_attribute_value(
     count: CK_ULONG,
 ) -> Result<()> {
     let cnt = usize::try_from(count).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    if cnt > 0 && template.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    let mut tmpl: &mut [CK_ATTRIBUTE] = if cnt > 0 {
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) }
-    } else {
-        &mut []
-    };
+    let mut tmpl = struct_to_slice_mut(template, cnt)?;
 
     /* must do this before we lock STATE or risk deadlocking in tests with
      * a parallel thread calling fn_initialize() */
@@ -334,12 +320,8 @@ fn get_attribute_value(
                             .map_err(|_| CKR_GENERAL_ERROR)?;
                     }
                 } else {
-                    let buf: &mut [u8] = unsafe {
-                        std::slice::from_raw_parts_mut(
-                            a.pValue as *mut u8,
-                            buflen,
-                        )
-                    };
+                    let buf: &mut [u8] =
+                        bytes_to_slice_mut(a.pValue as *mut u8, buflen)?;
                     let out = point_buf_to_der(buf, input_ec_point_len)?;
                     if let Some(v) = out {
                         if v.len() > input_ec_point_len {
@@ -414,15 +396,8 @@ fn set_attribute_value(
         }
     }
     let cnt = usize::try_from(count).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    if cnt > 0 && template.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    let mut tmpl: &mut [CK_ATTRIBUTE] = if cnt > 0 {
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) }
-    } else {
-        &mut []
-    };
-    token.set_object_attrs(o_handle, &mut tmpl)
+    let tmpl = struct_to_slice(template, cnt)?;
+    token.set_object_attrs(o_handle, &tmpl)
 }
 
 /// Implementation of C_SetAttributeValue function
@@ -461,15 +436,8 @@ fn find_objects_init(
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let cnt = usize::try_from(count).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    if cnt > 0 && template.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    let tmpl: &mut [CK_ATTRIBUTE] = if cnt > 0 {
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) }
-    } else {
-        &mut []
-    };
-    session.new_search_operation(&mut token, tmpl)
+    let tmpl = struct_to_slice(template, cnt)?;
+    session.new_search_operation(&mut token, &tmpl)
 }
 
 /// Implementation of C_FindObjectsInit function

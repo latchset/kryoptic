@@ -4,6 +4,8 @@
 //! This module implements miscellaneous utilities that do not really
 //! belong in any specific module
 
+use std::borrow::Cow;
+
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::object::{Object, ObjectFactories, ObjectType};
@@ -11,25 +13,6 @@ use crate::pkcs11::*;
 
 /// Constant containing the size of a CK_ULONG on this architecture
 pub const CK_ULONG_SIZE: usize = std::mem::size_of::<CK_ULONG>();
-
-/// Convenience helper to copy a pointer+length obtained via FFI into a
-/// valid Vector of bytes.
-pub fn bytes_to_vec<T>(ptr: *const T, len: usize) -> Vec<u8> {
-    if ptr.is_null() || len == 0 {
-        Vec::new()
-    } else {
-        let mut v = Vec::<u8>::with_capacity(len);
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                ptr as *const u8,
-                v.as_mut_ptr(),
-                len,
-            );
-            v.set_len(len);
-        }
-        v
-    }
-}
 
 /// Convenience macro to type cast any pointer into a CK_VOID_PTR
 macro_rules! void_ptr {
@@ -56,39 +39,195 @@ macro_rules! sizeof {
 }
 pub(crate) use sizeof;
 
+/// Helper function to parse a CK_ULONG into a usize.
+pub(crate) fn parse_len(val: CK_ULONG) -> Result<usize> {
+    usize::try_from(val).map_err(|_| CKR_ARGUMENTS_BAD.into())
+}
+
+/// Trait representing 1-byte sized types that have no alignment requirements.
+pub(crate) trait Byte: Copy {}
+
+impl Byte for u8 {}
+impl Byte for i8 {}
+impl Byte for bool {}
+
 /// Convenience function to return a reference to a slice from
-/// a pointer+length obtained via FFI
+/// a pointer+length obtained via FFI for 1-byte sized types.
 ///
 /// Uses unsafe functions:
 /// - std::slice::from_raw_parts()
 ///
-/// If len is 0 and empty slice reference is returned
-pub(crate) unsafe fn bytes_to_slice<'a, T>(
+/// If len is 0 an empty slice reference is returned
+pub(crate) fn bytes_to_slice<'a, T: Byte>(
     ptr: *const T,
     len: usize,
 ) -> &'a [T] {
-    if len > 0 {
-        unsafe { std::slice::from_raw_parts(ptr, len) }
-    } else {
+    if ptr.is_null() || len == 0 {
         &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(ptr, len) }
     }
 }
 
+/// Convenience helper to copy a pointer+length obtained via FFI into a
+/// valid Vector of bytes.
+pub fn bytes_to_vec<T>(ptr: *const T, len: usize) -> Vec<u8> {
+    bytes_to_slice(ptr as *const u8, len).to_vec()
+}
+
 /// Convenience function to return a mutable reference to a slice from
-/// a pointer+length obtained via FFI
+/// a pointer+length obtained via FFI for 1-byte sized types.
 ///
 /// Uses unsafe functions:
 /// - std::slice::from_raw_parts_mut()
 ///
-/// If len is 0 an error is returned
-pub(crate) unsafe fn bytes_to_slice_mut<'a, T>(
+/// If ptr is null an error is returned.
+/// If len is 0 an empty slice reference is returned.
+pub(crate) fn bytes_to_slice_mut<'a, T: Byte>(
     ptr: *mut T,
     len: usize,
 ) -> Result<&'a mut [T]> {
-    if len > 0 {
-        Ok(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+    if ptr.is_null() {
+        Err(CKR_ARGUMENTS_BAD)?
+    } else if len == 0 {
+        Ok(&mut [])
     } else {
-        Err(CKR_GENERAL_ERROR)?
+        Ok(unsafe { std::slice::from_raw_parts_mut(ptr, len) })
+    }
+}
+
+/// Convenience function to return a slice from a pointer+length obtained
+/// via FFI as a Cow, handling alignment requirements for multi-byte types.
+///
+/// Uses unsafe functions:
+/// - std::slice::from_raw_parts()
+/// - std::ptr::copy_nonoverlapping()
+///
+/// If len is 0 an empty slice reference is returned.
+/// If len > 0 and ptr is null an error is returned.
+/// If ptr is aligned, Cow::Borrowed is returned.
+/// If ptr is not aligned, the data is copied to a Vec and Cow::Owned is returned.
+pub(crate) fn struct_to_slice<'a, T: Clone>(
+    ptr: *const T,
+    len: usize,
+) -> Result<Cow<'a, [T]>> {
+    if len == 0 {
+        Ok(Cow::Borrowed(&[]))
+    } else if ptr.is_null() {
+        Err(CKR_ARGUMENTS_BAD)?
+    } else if ptr.is_aligned() {
+        Ok(Cow::Borrowed(unsafe {
+            std::slice::from_raw_parts(ptr, len)
+        }))
+    } else {
+        let mut v = Vec::<T>::with_capacity(len);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                ptr as *const u8,
+                v.as_mut_ptr() as *mut u8,
+                len * std::mem::size_of::<T>(),
+            );
+            v.set_len(len);
+        }
+        Ok(Cow::Owned(v))
+    }
+}
+
+/// A copy-on-write smart pointer for mutable slices from FFI pointers.
+///
+/// When the pointer is aligned, it borrows the slice mutably.
+/// When the pointer is unaligned, it copies the data to an aligned Vec,
+/// allows in-place mutation, and writes the modified data back to the
+/// original pointer upon drop.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) enum CowMut<'a, T> {
+    Borrowed(&'a mut [T]),
+    Owned { vec: Vec<T>, ptr: *mut T },
+}
+
+impl<T> std::ops::Deref for CowMut<'_, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            CowMut::Borrowed(s) => s,
+            CowMut::Owned { vec, .. } => vec.as_slice(),
+        }
+    }
+}
+
+impl<T> std::ops::DerefMut for CowMut<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            CowMut::Borrowed(s) => s,
+            CowMut::Owned { vec, .. } => vec.as_mut_slice(),
+        }
+    }
+}
+
+impl<T> AsRef<[T]> for CowMut<'_, T> {
+    fn as_ref(&self) -> &[T] {
+        self
+    }
+}
+
+impl<T> AsMut<[T]> for CowMut<'_, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self
+    }
+}
+
+impl<T> Drop for CowMut<'_, T> {
+    fn drop(&mut self) {
+        if let CowMut::Owned { vec, ptr } = self {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    vec.as_ptr() as *const u8,
+                    *ptr as *mut u8,
+                    vec.len() * std::mem::size_of::<T>(),
+                );
+            }
+        }
+    }
+}
+
+/// Convenience function to return a mutable slice from a pointer+length obtained
+/// via FFI as a CowMut, handling alignment requirements for multi-byte types.
+///
+/// Uses unsafe functions:
+/// - std::slice::from_raw_parts_mut()
+/// - std::ptr::copy_nonoverlapping()
+///
+/// If ptr is null an error is returned.
+/// If len is 0 an empty slice reference is returned.
+/// If ptr is aligned, CowMut::Borrowed is returned.
+/// If ptr is not aligned, the data is copied to a Vec and CowMut::Owned is returned,
+/// which copies the data back to the pointer upon drop.
+#[allow(dead_code)]
+pub(crate) fn struct_to_slice_mut<'a, T: Clone>(
+    ptr: *mut T,
+    len: usize,
+) -> Result<CowMut<'a, T>> {
+    if ptr.is_null() {
+        Err(CKR_ARGUMENTS_BAD)?
+    } else if len == 0 {
+        Ok(CowMut::Borrowed(&mut []))
+    } else if ptr.is_aligned() {
+        Ok(CowMut::Borrowed(unsafe {
+            std::slice::from_raw_parts_mut(ptr, len)
+        }))
+    } else {
+        let mut v = Vec::<T>::with_capacity(len);
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                ptr as *const u8,
+                v.as_mut_ptr() as *mut u8,
+                len * std::mem::size_of::<T>(),
+            );
+            v.set_len(len);
+        }
+        Ok(CowMut::Owned { vec: v, ptr })
     }
 }
 
@@ -202,4 +341,131 @@ pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
 /// This future-proofs the ability to use an alternative crypto backend
 pub fn zeromem(mem: &mut [u8]) {
     ossl::zeromem(mem);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bytes_to_slice() {
+        let data = [1u8, 2, 3, 4];
+        let s = bytes_to_slice(data.as_ptr(), data.len());
+        assert_eq!(s, &[1, 2, 3, 4]);
+
+        let empty: *const u8 = std::ptr::null();
+        let s = bytes_to_slice(empty, 0);
+        assert_eq!(s, &[] as &[u8]);
+    }
+
+    #[test]
+    fn test_bytes_to_slice_mut() {
+        let mut data = [1u8, 2, 3, 4];
+        let s = bytes_to_slice_mut(data.as_mut_ptr(), data.len()).unwrap();
+        s[0] = 10;
+        assert_eq!(data[0], 10);
+
+        let empty: *mut u8 = std::ptr::null_mut();
+        let s = bytes_to_slice_mut(empty, 0);
+        assert!(s.is_err());
+
+        let mut dummy = 0u8;
+        let s = bytes_to_slice_mut(&mut dummy, 0).unwrap();
+        assert_eq!(s, &mut [] as &mut [u8]);
+    }
+
+    #[test]
+    fn test_struct_to_slice_empty() {
+        let p: *const u32 = std::ptr::null();
+        let s = struct_to_slice(p, 0).unwrap();
+        assert_eq!(s.len(), 0);
+        assert!(matches!(s, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_struct_to_slice_null() {
+        let p: *const u32 = std::ptr::null();
+        let s = struct_to_slice(p, 1);
+        assert!(s.is_err());
+    }
+
+    #[test]
+    fn test_struct_to_slice_aligned() {
+        let data = [1u32, 2, 3, 4];
+        let s = struct_to_slice(data.as_ptr(), data.len()).unwrap();
+        assert_eq!(s.as_ref(), &[1, 2, 3, 4]);
+        assert!(matches!(s, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_struct_to_slice_unaligned() {
+        #[repr(align(8))]
+        struct AlignedBuf([u8; 32]);
+        let mut buf = AlignedBuf([0u8; 32]);
+        let unaligned_bytes = &mut buf.0[1..17];
+        let values = [10u32, 20, 30, 40];
+        for (i, v) in values.iter().enumerate() {
+            unaligned_bytes[i * 4..(i + 1) * 4]
+                .copy_from_slice(&v.to_ne_bytes());
+        }
+        let unaligned_ptr = unaligned_bytes.as_ptr() as *const u32;
+        assert!(!unaligned_ptr.is_aligned());
+        let s = struct_to_slice(unaligned_ptr, 4).unwrap();
+        assert_eq!(s.as_ref(), &[10, 20, 30, 40]);
+        assert!(matches!(s, Cow::Owned(_)));
+    }
+
+    #[test]
+    fn test_struct_to_slice_mut_empty() {
+        let p: *mut u32 = std::ptr::null_mut();
+        let s = struct_to_slice_mut(p, 0);
+        assert!(s.is_err());
+
+        let mut dummy = 0u32;
+        let s = struct_to_slice_mut(&mut dummy, 0).unwrap();
+        assert_eq!(&*s, &[] as &[u32]);
+    }
+
+    #[test]
+    fn test_struct_to_slice_mut_aligned() {
+        let mut data = [1u32, 2, 3, 4];
+        {
+            let mut s =
+                struct_to_slice_mut(data.as_mut_ptr(), data.len()).unwrap();
+            assert!(matches!(s, CowMut::Borrowed(_)));
+            assert_eq!(&*s, &[1, 2, 3, 4]);
+            s[0] = 42;
+        }
+        assert_eq!(data[0], 42);
+    }
+
+    #[test]
+    fn test_struct_to_slice_mut_unaligned() {
+        #[repr(align(8))]
+        struct AlignedBuf([u8; 32]);
+        let mut buf = AlignedBuf([0u8; 32]);
+        let unaligned_bytes = &mut buf.0[1..17];
+        let values = [10u32, 20, 30, 40];
+        for (i, v) in values.iter().enumerate() {
+            unaligned_bytes[i * 4..(i + 1) * 4]
+                .copy_from_slice(&v.to_ne_bytes());
+        }
+        let unaligned_ptr = unaligned_bytes.as_mut_ptr() as *mut u32;
+        assert!(!unaligned_ptr.is_aligned());
+        {
+            let mut s = struct_to_slice_mut(unaligned_ptr, 4).unwrap();
+            assert!(matches!(s, CowMut::Owned { .. }));
+            assert_eq!(&*s, &[10, 20, 30, 40]);
+            s[1] = 99;
+        }
+        let new_val = u32::from_ne_bytes(buf.0[5..9].try_into().unwrap());
+        assert_eq!(new_val, 99);
+    }
+
+    #[test]
+    fn test_parse_len() {
+        let val: CK_ULONG = 10;
+        let l = parse_len(val).unwrap();
+        assert_eq!(l, 10);
+    }
 }

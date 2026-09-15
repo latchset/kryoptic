@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::mechanism::*;
-use crate::misc::{sizeof, zeromem};
+use crate::misc::{sizeof, struct_to_slice, zeromem};
 use crate::native::hmac::HMACOperation;
 use crate::object::*;
 use crate::pkcs11::*;
@@ -220,9 +220,9 @@ impl HMACMechanism {
         if mech.ulParameterLen != sizeof!(CK_ULONG) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        let genlen = usize::try_from(unsafe {
-            std::slice::from_raw_parts(mech.pParameter as *const CK_ULONG, 1)[0]
-        })?;
+        let genlen = usize::try_from(
+            struct_to_slice(mech.pParameter as *const CK_ULONG, 1)?[0],
+        )?;
         if genlen < self.minlen || genlen > self.maxlen {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
