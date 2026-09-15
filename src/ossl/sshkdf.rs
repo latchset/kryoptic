@@ -53,18 +53,14 @@ impl SSHKDFOperation {
             finalized: false,
             prf: params.prfHashMechanism,
             purpose: purpose,
-            exchange_hash: unsafe {
-                bytes_to_slice(
-                    params.pExchangeHash as *const u8,
-                    params.ulExchangeHashLen as usize,
-                )
-            },
-            session_id: unsafe {
-                bytes_to_slice(
-                    params.pSessionId as *const u8,
-                    params.ulSessionIdLen as usize,
-                )
-            },
+            exchange_hash: bytes_to_slice(
+                params.pExchangeHash as *const u8,
+                params.ulExchangeHashLen as usize,
+            ),
+            session_id: bytes_to_slice(
+                params.pSessionId as *const u8,
+                params.ulSessionIdLen as usize,
+            ),
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
         })

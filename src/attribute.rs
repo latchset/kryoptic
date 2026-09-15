@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::error::{Error, Result};
-use crate::misc::{sizeof, void_ptr, zeromem};
+use crate::misc::{sizeof, struct_to_slice, void_ptr, zeromem};
 use crate::pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
 use crate::pkcs11::*;
 
@@ -969,9 +969,7 @@ impl<'a> CkAttrs<'a> {
         }
         Ok(CkAttrs {
             v: Vec::new(),
-            p: Cow::Borrowed(unsafe {
-                std::slice::from_raw_parts(a, usize::try_from(l)?)
-            }),
+            p: struct_to_slice(a as *const CK_ATTRIBUTE, usize::try_from(l)?)?,
             zeroize: false,
             br: Vec::new(),
         })

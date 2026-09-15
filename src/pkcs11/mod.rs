@@ -10,7 +10,10 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
+use std::borrow::Cow;
+
 use crate::error::Result;
+use crate::misc::{bytes_to_slice, struct_to_slice};
 
 include!(concat!(env!("OUT_DIR"), "/pkcs11_bindings.rs"));
 
@@ -945,12 +948,10 @@ impl CK_ATTRIBUTE {
         if self.pValue.is_null() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
-        let buf: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const _,
-                usize::try_from(self.ulValueLen)?,
-            )
-        };
+        let buf: &[u8] = bytes_to_slice(
+            self.pValue as *const u8,
+            usize::try_from(self.ulValueLen)?,
+        );
         match std::str::from_utf8(buf) {
             Ok(s) => Ok(s.to_string()),
             Err(_) => Err(CKR_ATTRIBUTE_VALUE_INVALID)?,
@@ -967,12 +968,10 @@ impl CK_ATTRIBUTE {
         if self.pValue.is_null() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
-        Ok(unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const u8,
-                usize::try_from(self.ulValueLen)?,
-            )
-        })
+        Ok(bytes_to_slice(
+            self.pValue as *const u8,
+            usize::try_from(self.ulValueLen)?,
+        ))
     }
 
     /// Returns a copy of the internal buffer as an vector
@@ -1064,12 +1063,10 @@ impl CK_OTP_PARAM {
         if self.pValue.is_null() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        Ok(unsafe {
-            std::slice::from_raw_parts(
-                self.pValue as *const u8,
-                usize::try_from(self.ulValueLen)?,
-            )
-        })
+        Ok(bytes_to_slice(
+            self.pValue as *const u8,
+            usize::try_from(self.ulValueLen)?,
+        ))
     }
 
     /// Returns a copy of the internal buffer as an vector
@@ -1084,18 +1081,13 @@ impl CK_OTP_PARAMS {
     /// Returns the internal data memory buffer as a slice
     ///
     /// Errors out if the internal data pointer is null
-    pub fn to_slice(&self) -> Result<&[CK_OTP_PARAM]> {
+    pub fn to_slice(&self) -> Result<Cow<'_, [CK_OTP_PARAM]>> {
         if self.ulCount == 0 {
-            return Ok(&[]);
+            return Ok(Cow::Borrowed(&[]));
         }
         if self.pParams.is_null() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        Ok(unsafe {
-            std::slice::from_raw_parts(
-                self.pParams,
-                usize::try_from(self.ulCount)?,
-            )
-        })
+        struct_to_slice(self.pParams, usize::try_from(self.ulCount)?)
     }
 }

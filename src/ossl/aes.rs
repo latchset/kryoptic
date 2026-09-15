@@ -1057,9 +1057,10 @@ impl AesOperation {
         )?);
 
         if self.params.iv.generator != CKG_NO_GENERATE {
-            let iv = unsafe {
-                bytes_to_slice_mut(iv_ptr as *mut u8, self.params.iv.buf.len())
-            }?;
+            let iv = bytes_to_slice_mut(
+                iv_ptr as *mut u8,
+                self.params.iv.buf.len(),
+            )?;
             iv.copy_from_slice(&self.params.iv.buf);
         }
 
@@ -2333,9 +2334,8 @@ impl MsgEncryption for AesOperation {
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
-        let tagbuf = unsafe {
-            bytes_to_slice_mut(tagptr as *mut u8, self.params.taglen as usize)
-        }?;
+        let tagbuf =
+            bytes_to_slice_mut(tagptr as *mut u8, self.params.taglen as usize)?;
 
         if !ctx.get_tag(tagbuf).is_ok() {
             zeromem(cipher);
@@ -2505,9 +2505,8 @@ impl MsgDecryption for AesOperation {
             }
         }
 
-        let tagbuf = unsafe {
-            bytes_to_slice(tagptr as *const u8, self.params.taglen as usize)
-        };
+        let tagbuf =
+            bytes_to_slice(tagptr as *const u8, self.params.taglen as usize);
 
         /* The tag must be set first for CCM and does not hurt GCM */
         if let Some(ctx) = &mut self.ctx {

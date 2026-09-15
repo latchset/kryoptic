@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::zeromem;
+use crate::misc::{bytes_to_slice, zeromem};
 use crate::object::*;
 use crate::ossl::aes::*;
 use crate::pkcs11::*;
@@ -568,12 +568,7 @@ impl AesKDFOperation<'_> {
             mech: CKM_AES_ECB,
             finalized: false,
             iv: &[],
-            data: unsafe {
-                std::slice::from_raw_parts(
-                    params.pData,
-                    usize::try_from(params.ulLen)?,
-                )
-            },
+            data: bytes_to_slice(params.pData, usize::try_from(params.ulLen)?),
             #[cfg(feature = "fips")]
             fips_approved: None,
         })
@@ -592,13 +587,8 @@ impl AesKDFOperation<'_> {
         Ok(AesKDFOperation {
             mech: CKM_AES_CBC,
             finalized: false,
-            iv: unsafe { std::slice::from_raw_parts(params.iv.as_ptr(), 16) },
-            data: unsafe {
-                std::slice::from_raw_parts(
-                    params.pData,
-                    usize::try_from(params.length)?,
-                )
-            },
+            iv: bytes_to_slice(params.iv.as_ptr(), 16),
+            data: bytes_to_slice(params.pData, usize::try_from(params.length)?),
             #[cfg(feature = "fips")]
             fips_approved: None,
         })

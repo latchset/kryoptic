@@ -11,6 +11,7 @@ use std::sync::RwLockWriteGuard;
 use crate::error::Result;
 use crate::fns::log_debug;
 use crate::mechanism::Digest;
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut};
 use crate::pkcs11::*;
 use crate::session::Session;
 use crate::STATE;
@@ -93,9 +94,8 @@ fn digest(
         }
     }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
-    let digest: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(pdigest, digest_len) };
+    let data: &[u8] = bytes_to_slice(pdata, dlen);
+    let digest: &mut [u8] = bytes_to_slice_mut(pdigest, digest_len)?;
     operation.digest(data, digest)?;
 
     unsafe {
@@ -145,7 +145,7 @@ pub(crate) fn internal_digest_update(
 ) -> Result<()> {
     let operation = session.get_operation::<dyn Digest>()?;
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    let data: &[u8] = bytes_to_slice(part, plen);
     operation.digest_update(data)
 }
 
@@ -266,8 +266,7 @@ fn digest_final(
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
-    let digest: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(pdigest, digest_len) };
+    let digest: &mut [u8] = bytes_to_slice_mut(pdigest, digest_len)?;
     operation.digest_final(digest)?;
 
     unsafe {

@@ -10,7 +10,9 @@ use crate::attribute::{merge_template_attribute, CkAttrs};
 use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
-use crate::misc::bytes_to_slice;
+use crate::misc::{
+    bytes_to_slice, bytes_to_slice_mut, parse_len, struct_to_slice,
+};
 use crate::object;
 use crate::pkcs11::*;
 use crate::{fail_if_cka_token_true, report_reqsize, STATE};
@@ -26,7 +28,7 @@ fn generate_key(
     count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> Result<()> {
-    if mechptr.is_null() || template.is_null() || key_handle.is_null() {
+    if mechptr.is_null() || key_handle.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
@@ -43,17 +45,16 @@ fn generate_key(
     };
 
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
-    let cnt = usize::try_from(count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
+    let cnt = usize::try_from(count).map_err(|_| CKR_ARGUMENTS_BAD)?;
+    let tmpl = struct_to_slice(template, cnt)?;
     if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
+        fail_if_cka_token_true(&tmpl)?;
     }
 
     let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
-    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
+    fips::check_key_template(&tmpl, rstate.get_fips_behavior(slot_id)?)?;
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
 
@@ -64,7 +65,8 @@ fn generate_key(
         return Err(CKR_MECHANISM_INVALID)?;
     }
 
-    let key = match mech.generate_key(&mechanism, tmpl, mechanisms, factories) {
+    let key = match mech.generate_key(&mechanism, &tmpl, mechanisms, factories)
+    {
         #[allow(unused_mut)]
         Ok(mut k) => {
             #[cfg(feature = "fips")]
@@ -124,12 +126,7 @@ fn generate_key_pair(
     public_key: CK_OBJECT_HANDLE_PTR,
     private_key: CK_OBJECT_HANDLE_PTR,
 ) -> Result<()> {
-    if mechptr.is_null()
-        || public_key_template.is_null()
-        || private_key_template.is_null()
-        || public_key.is_null()
-        || private_key.is_null()
-    {
+    if mechptr.is_null() || public_key.is_null() || private_key.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
@@ -148,21 +145,19 @@ fn generate_key_pair(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let pubcnt = usize::try_from(public_key_attribute_count)
         .map_err(|_| CKR_GENERAL_ERROR)?;
-    let pubtmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(public_key_template, pubcnt) };
+    let pubtmpl = struct_to_slice(public_key_template, pubcnt)?;
     let pricnt = usize::try_from(private_key_attribute_count)
         .map_err(|_| CKR_GENERAL_ERROR)?;
-    let pritmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(private_key_template, pricnt) };
+    let pritmpl = struct_to_slice(private_key_template, pricnt)?;
     if !session.is_writable() {
-        fail_if_cka_token_true(pritmpl)?;
-        fail_if_cka_token_true(pubtmpl)?;
+        fail_if_cka_token_true(&pritmpl)?;
+        fail_if_cka_token_true(&pubtmpl)?;
     }
 
     let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
-    fips::check_key_template(pritmpl, rstate.get_fips_behavior(slot_id)?)?;
+    fips::check_key_template(&pritmpl, rstate.get_fips_behavior(slot_id)?)?;
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
 
@@ -171,7 +166,7 @@ fn generate_key_pair(
         return Err(CKR_MECHANISM_INVALID)?;
     }
 
-    let result = mech.generate_keypair(&mechanism, pubtmpl, pritmpl);
+    let result = mech.generate_keypair(&mechanism, &pubtmpl, &pritmpl);
     match result {
         #[allow(unused_mut)]
         Ok((mut pubkey, mut privkey)) => {
@@ -319,13 +314,12 @@ fn wrap_key(
         }
     }
 
-    let pwraplen = unsafe { *pul_wrapped_key_len as CK_ULONG };
     let wrapped: &mut [u8] = if wrapped_key.is_null() {
-        &mut [] /* empty buffer will be always too small */
+        &mut []
     } else {
-        let wraplen =
-            usize::try_from(pwraplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-        unsafe { std::slice::from_raw_parts_mut(wrapped_key, wraplen) }
+        let pwraplen = unsafe { *pul_wrapped_key_len as CK_ULONG };
+        let wraplen = parse_len(pwraplen)?;
+        bytes_to_slice_mut(wrapped_key, wraplen)?
     };
     let outlen = match report_reqsize(
         mech.wrap_key(&mechanism, &wkey, &key, wrapped, factory),
@@ -394,11 +388,7 @@ fn unwrap_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> Result<()> {
-    if mechptr.is_null()
-        || wrapped_key.is_null()
-        || template.is_null()
-        || key_handle.is_null()
-    {
+    if mechptr.is_null() || wrapped_key.is_null() || key_handle.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
@@ -417,8 +407,7 @@ fn unwrap_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let raw_tmpl: &[CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts(template, cnt) };
+    let raw_tmpl = struct_to_slice(template, cnt)?;
 
     let slot_id = session.get_slot_id();
 
@@ -432,7 +421,7 @@ fn unwrap_key(
 
     let wklen =
         usize::try_from(wrapped_key_len).map_err(|_| CKR_GENERAL_ERROR)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(wrapped_key, wklen) };
+    let data: &[u8] = bytes_to_slice(wrapped_key, wklen);
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_WRAP != CKF_WRAP {
         return Err(CKR_MECHANISM_INVALID)?;
@@ -446,10 +435,10 @@ fn unwrap_key(
     let merged_attrs: CkAttrs<'_>;
     let tmpl: &[CK_ATTRIBUTE] =
         if let Some(ut) = key.get_attr(CKA_UNWRAP_TEMPLATE) {
-            merged_attrs = merge_template_attribute(ut, raw_tmpl)?;
+            merged_attrs = merge_template_attribute(ut, &raw_tmpl)?;
             merged_attrs.as_slice()
         } else {
-            raw_tmpl
+            &raw_tmpl
         };
 
     if !session.is_writable() {
@@ -461,7 +450,7 @@ fn unwrap_key(
     let factories = token.get_object_factories();
     let factory = factories.get_obj_factory_from_key_template(tmpl)?;
 
-    let result = mech.unwrap_key(&mechanism, &key, data, tmpl, factory);
+    let result = mech.unwrap_key(&mechanism, &key, data, &tmpl, factory);
     match result {
         #[allow(unused_mut)]
         Ok(mut obj) => {
@@ -532,7 +521,7 @@ fn derive_key(
     attribute_count: CK_ULONG,
     key_handle: CK_OBJECT_HANDLE_PTR,
 ) -> Result<()> {
-    if mechptr.is_null() || template.is_null() {
+    if mechptr.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
@@ -542,16 +531,15 @@ fn derive_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let tmpl: &mut [CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts_mut(template, cnt) };
+    let tmpl = struct_to_slice(template, cnt)?;
     if !session.is_writable() {
-        fail_if_cka_token_true(tmpl)?;
+        fail_if_cka_token_true(&tmpl)?;
     }
 
     let slot_id = session.get_slot_id();
 
     #[cfg(feature = "fips")]
-    fips::check_key_template(tmpl, rstate.get_fips_behavior(slot_id)?)?;
+    fips::check_key_template(&tmpl, rstate.get_fips_behavior(slot_id)?)?;
 
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(base_key_handle)?;
@@ -640,7 +628,7 @@ fn derive_key(
 
     let mut result = operation.derive(
         &key,
-        tmpl,
+        &tmpl,
         token.get_mechanisms(),
         token.get_object_factories(),
     )?;
@@ -689,25 +677,21 @@ fn derive_key(
                     CKM_SP800_108_COUNTER_KDF => {
                         let params = mechanism
                             .get_parameters::<CK_SP800_108_KDF_PARAMS>()?;
-                        unsafe {
-                            bytes_to_slice(
-                                params.pAdditionalDerivedKeys
-                                    as *const CK_DERIVED_KEY,
-                                params.ulAdditionalDerivedKeys as usize,
-                            )
-                        }
+                        struct_to_slice(
+                            params.pAdditionalDerivedKeys
+                                as *const CK_DERIVED_KEY,
+                            params.ulAdditionalDerivedKeys as usize,
+                        )?
                     }
                     CKM_SP800_108_FEEDBACK_KDF => {
                         let params = mechanism
                             .get_parameters::<CK_SP800_108_FEEDBACK_KDF_PARAMS>(
                         )?;
-                        unsafe {
-                            bytes_to_slice(
-                                params.pAdditionalDerivedKeys
-                                    as *const CK_DERIVED_KEY,
-                                params.ulAdditionalDerivedKeys as usize,
-                            )
-                        }
+                        struct_to_slice(
+                            params.pAdditionalDerivedKeys
+                                as *const CK_DERIVED_KEY,
+                            params.ulAdditionalDerivedKeys as usize,
+                        )?
                     }
 
                     _ => return Err(CKR_MECHANISM_INVALID)?,
@@ -840,10 +824,7 @@ fn encapsulate_key(
     encrypted_part_len: *mut CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> Result<()> {
-    if mechptr.is_null()
-        || template.is_null()
-        || encrypted_part_len.is_null()
-        || key_handle.is_null()
+    if mechptr.is_null() || encrypted_part_len.is_null() || key_handle.is_null()
     {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -854,8 +835,7 @@ fn encapsulate_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let raw_tmpl: &[CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts(template, cnt) };
+    let raw_tmpl = struct_to_slice(template as *const CK_ATTRIBUTE, cnt)?;
 
     let penclen = unsafe { *encrypted_part_len as CK_ULONG };
     let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
@@ -872,10 +852,10 @@ fn encapsulate_key(
     let merged_attrs: CkAttrs<'_>;
     let tmpl: &[CK_ATTRIBUTE] =
         if let Some(et) = key.get_attr(CKA_ENCAPSULATE_TEMPLATE) {
-            merged_attrs = merge_template_attribute(et, raw_tmpl)?;
+            merged_attrs = merge_template_attribute(et, &raw_tmpl)?;
             merged_attrs.as_slice()
         } else {
-            raw_tmpl
+            &raw_tmpl
         };
 
     if !session.is_writable() {
@@ -907,12 +887,11 @@ fn encapsulate_key(
         return Err(CKR_BUFFER_TOO_SMALL)?;
     }
 
-    let encpart: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
+    let encpart: &mut [u8] = bytes_to_slice_mut(encrypted_part, enclen)?;
 
     #[allow(unused_mut)]
     let (mut obj, outlen) =
-        mech.encapsulate(&mechanism, &key, factory, tmpl, encpart)?;
+        mech.encapsulate(&mechanism, &key, factory, &tmpl, encpart)?;
 
     #[cfg(feature = "fips")]
     {
@@ -993,11 +972,7 @@ fn decapsulate_key(
     encrypted_part_len: CK_ULONG,
     key_handle: *mut CK_OBJECT_HANDLE,
 ) -> Result<()> {
-    if mechptr.is_null()
-        || template.is_null()
-        || encrypted_part.is_null()
-        || key_handle.is_null()
-    {
+    if mechptr.is_null() || encrypted_part.is_null() || key_handle.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
@@ -1007,13 +982,11 @@ fn decapsulate_key(
     let mechanism = CK_MECHANISM::from_ptr(mechptr);
     let cnt =
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
-    let raw_tmpl: &[CK_ATTRIBUTE] =
-        unsafe { std::slice::from_raw_parts(template, cnt) };
+    let raw_tmpl = struct_to_slice(template as *const CK_ATTRIBUTE, cnt)?;
 
     let enclen =
         usize::try_from(encrypted_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let encpart: &[u8] =
-        unsafe { std::slice::from_raw_parts(encrypted_part, enclen) };
+    let encpart: &[u8] = bytes_to_slice(encrypted_part, enclen);
 
     let slot_id = session.get_slot_id();
 
@@ -1027,10 +1000,10 @@ fn decapsulate_key(
     let merged_attrs: CkAttrs<'_>;
     let tmpl: &[CK_ATTRIBUTE] =
         if let Some(dt) = key.get_attr(CKA_DECAPSULATE_TEMPLATE) {
-            merged_attrs = merge_template_attribute(dt, raw_tmpl)?;
+            merged_attrs = merge_template_attribute(dt, &raw_tmpl)?;
             merged_attrs.as_slice()
         } else {
-            raw_tmpl
+            &raw_tmpl
         };
 
     if !session.is_writable() {

@@ -12,10 +12,10 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
-use std::slice;
 use std::sync::{LazyLock, Mutex};
 
 use crate::error::Result;
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut};
 use crate::ossl::common::osslctx;
 
 use ossl::bindings::*;
@@ -122,8 +122,8 @@ unsafe extern "C" fn fips_get_nonce(
             len = salt_len;
         }
 
-        let r = unsafe { slice::from_raw_parts_mut(*pout, len) };
-        let s = unsafe { slice::from_raw_parts(salt as *const u8, len) };
+        let r = bytes_to_slice_mut(unsafe { *pout }, len).unwrap();
+        let s = bytes_to_slice(salt as *const u8, len);
 
         for p in r.iter_mut().zip(s.iter()) {
             *p.0 |= *p.1;
@@ -414,7 +414,7 @@ unsafe extern "C" fn fips_bio_new_membuf(
         Ok(s) => s,
         Err(_) => unsafe { libc::strlen(buf as *const c_char) },
     };
-    let v = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size) };
+    let v = bytes_to_slice_mut(buf as *mut u8, size).unwrap();
     Box::into_raw(Box::new(FipsBio {
         op: Bio::MemOp(MemBio::new(v)),
     })) as *mut OSSL_CORE_BIO
@@ -430,8 +430,7 @@ unsafe extern "C" fn fips_bio_read_ex(
         return 0;
     }
 
-    let mut readvec =
-        unsafe { slice::from_raw_parts_mut(data as *mut u8, data_len) };
+    let mut readvec = bytes_to_slice_mut(data as *mut u8, data_len).unwrap();
     let mut fbio: Box<FipsBio> = unsafe { Box::from_raw(bio as *mut FipsBio) };
 
     let ret = match fbio.op {
