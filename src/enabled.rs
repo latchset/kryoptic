@@ -24,6 +24,9 @@ mod hkdf;
 #[cfg(feature = "hmac")]
 mod hmac;
 
+#[cfg(feature = "ike")]
+mod ike;
+
 #[cfg(feature = "hotp")]
 mod hotp;
 
@@ -96,6 +99,9 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 
     #[cfg(feature = "hmac")]
     hmac::register(mechs, ot);
+
+    #[cfg(feature = "ike")]
+    ike::register(mechs, ot);
 
     #[cfg(feature = "hotp")]
     hotp::register(mechs, ot);
