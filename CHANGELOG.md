@@ -8,6 +8,11 @@ Unreleased changes
 
 ### What Changed
 
+* Added support for the IKE-derive mechanism family (CKM_IKE_PRF_DERIVE,
+  CKM_IKE1_PRF_DERIVE, CKM_IKE1_EXTENDED_DERIVE, CKM_IKE2_PRF_PLUS_DERIVE)
+  - [Add support for the IKE-derive mechanism
+     family](https://github.com/latchset/kryoptic/pull/512)
+
 * Added support for CKM_AES_KEY_WRAP_PKCS7
   - [Implement
      CKM_AES_KEY_WRAP_PKCS7](https://github.com/latchset/kryoptic/pull/501)

@@ -383,6 +383,9 @@ mod kdfs;
 #[cfg(feature = "hmac")]
 mod mac_vectors;
 
+#[cfg(feature = "ike")]
+mod ike;
+
 #[cfg(feature = "aes")]
 mod aes_kw_vectors;
 

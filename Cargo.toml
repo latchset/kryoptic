@@ -87,6 +87,7 @@ ffdh = []
 hash = []
 hkdf = ["hmac"]
 hmac = ["hash"]
+ike = ["hmac"]
 no_sha1 = []
 pbkdf2 = ["hmac"]
 profiles = []
@@ -107,7 +108,12 @@ ecc_all = ["ecc_min", "ec_montgomery", "eddsa"]
 hash_all = ["hash", "hmac"]
 kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf", "simplekdf"]
 
-standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp", "chacha20"]
+# ike is deliberately not part of kdf_all: kdf_all is also pulled in by the
+# fips feature, and this module has no FIPS self-test/FipsApproval
+# bookkeeping (RFC 2409/7296's IKE-derive constructions are not themselves
+# NIST/FIPS-validated mechanisms) -- the same reasoning that keeps chacha20
+# out of hash_all/kdf_all and only in standard below.
+standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp", "chacha20", "ike"]
 
 fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh",
 "hash_all", "kdf_all", "rsa", "pqc", "dep:vsprintf"]
