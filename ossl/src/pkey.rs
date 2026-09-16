@@ -1232,40 +1232,43 @@ unsafe extern "C" fn export_params_callback(
         return 0;
     }
 
-    /* get num of elements */
-    let mut nelem = 0;
-    let mut total_size = 0;
-    let mut counter = params;
-    unsafe {
-        while !(*counter).key.is_null() {
-            nelem += 1;
-            total_size += std::mem::size_of::<OSSL_PARAM>();
-            total_size += (*counter).data_size;
-            counter = counter.offset(1);
-        }
-    }
-    let pslice = unsafe { std::slice::from_raw_parts(params, nelem) };
-
     let params_builder: &mut OsslParamBuilder =
         unsafe { &mut *(arg as *mut OsslParamBuilder) };
-    let ret = params_builder.copy_params(&pslice);
+    let ret = params_builder.copy_params_from_ptr(params);
 
     /* Zeroize any allocated data wich may hold copies of secrets.
      * This is not the most clean way to do it, because this depends
      * on knowing how OpenSSL internally builds parameter slices, and if
      * that ever changes we may be overwrting memory that was not a
      * temporary copy */
-    let max_ptr = pslice.as_ptr().wrapping_add(total_size) as *const c_void;
-    let base_ptr = pslice.as_ptr() as *const c_void;
-    for p in pslice {
-        if p.data.is_null() {
-            continue;
-        }
-        let pdata = p.data as *const c_void;
-        if pdata > base_ptr && pdata < max_ptr {
-            unsafe {
-                OPENSSL_cleanse(p.data, p.data_size);
+    let mut total_size = 0;
+    let mut counter = params;
+    unsafe {
+        loop {
+            let p = std::ptr::read_unaligned(counter);
+            if p.key.is_null() {
+                break;
             }
+            total_size += std::mem::size_of::<OSSL_PARAM>();
+            total_size += p.data_size;
+            counter = counter.offset(1);
+        }
+        let max_ptr =
+            (params as *const u8).wrapping_add(total_size) as *const c_void;
+        let base_ptr = params as *const c_void;
+        let mut counter = params;
+        loop {
+            let p = std::ptr::read_unaligned(counter);
+            if p.key.is_null() {
+                break;
+            }
+            if !p.data.is_null() {
+                let pdata = p.data as *const c_void;
+                if pdata > base_ptr && pdata < max_ptr {
+                    OPENSSL_cleanse(p.data, p.data_size);
+                }
+            }
+            counter = counter.offset(1);
         }
     }
     if ret.is_ok() {

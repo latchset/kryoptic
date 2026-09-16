@@ -92,7 +92,7 @@ fn test_provider_version() {
     assert!(!ver.to_bytes().is_empty());
 }
 
-#[cfg(all(ossl_v350, feature = "dynamic"))]
+#[cfg(all(ossl_v350, feature = "dynamic", not(feature = "fips")))]
 #[test]
 fn test_shake_digest_with_broken_shake_context() {
     let mut ctx = crate::OsslContext::new_lib_ctx();
@@ -111,4 +111,100 @@ fn test_shake_digest_with_broken_shake_context() {
         }),
     );
     assert!(key.is_ok());
+}
+
+// libfips.a does not have all of the accessors for memory allocation until
+// it is properly initialized in a provider so we can't run this unit test
+// in those builds as it calls OSSL_PARAM_dup.
+#[cfg(not(feature = "fips"))]
+#[test]
+fn test_ossl_param_from_ptr_alignment() {
+    use std::ffi::c_int;
+
+    let key = c"test_int";
+    let val: c_int = 42;
+    let param = unsafe {
+        crate::bindings::OSSL_PARAM_construct_int(
+            key.as_ptr(),
+            &val as *const _ as *mut c_int,
+        )
+    };
+    let end = unsafe { crate::bindings::OSSL_PARAM_construct_end() };
+    let params = [param, end];
+
+    // Aligned test
+    let dup_params =
+        unsafe { crate::bindings::OSSL_PARAM_dup(params.as_ptr()) };
+    assert!(!dup_params.is_null());
+    let ossl_param = crate::OsslParam::from_ptr(dup_params).unwrap();
+    assert!(matches!(ossl_param.0.p, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(ossl_param.get_int(key).unwrap(), 42);
+
+    // Unaligned test
+    #[repr(align(8))]
+    struct AlignedBuf([u8; 128]);
+    let mut buf = AlignedBuf([0u8; 128]);
+    let unaligned_offset = 1;
+    let param_size = std::mem::size_of::<crate::bindings::OSSL_PARAM>() * 2;
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            params.as_ptr() as *const u8,
+            buf.0.as_mut_ptr().add(unaligned_offset),
+            param_size,
+        );
+    }
+    let unaligned_ptr = unsafe {
+        buf.0.as_mut_ptr().add(unaligned_offset)
+            as *mut crate::bindings::OSSL_PARAM
+    };
+    assert!(!unaligned_ptr.is_aligned());
+
+    let mut ossl_param_unaligned =
+        crate::OsslParam::from_ptr(unaligned_ptr).unwrap();
+    assert!(matches!(
+        ossl_param_unaligned.0.p,
+        std::borrow::Cow::Owned(_)
+    ));
+    assert_eq!(ossl_param_unaligned.get_int(key).unwrap(), 42);
+    ossl_param_unaligned.0.freeptr = None;
+}
+
+#[test]
+fn test_ossl_param_copy_params_from_ptr_unaligned() {
+    use std::ffi::c_int;
+
+    let key = c"test_int";
+    let val: c_int = 12345;
+    let param = unsafe {
+        crate::bindings::OSSL_PARAM_construct_int(
+            key.as_ptr(),
+            &val as *const _ as *mut c_int,
+        )
+    };
+    let end = unsafe { crate::bindings::OSSL_PARAM_construct_end() };
+    let params = [param, end];
+
+    #[repr(align(8))]
+    struct AlignedBuf([u8; 128]);
+    let mut buf = AlignedBuf([0u8; 128]);
+    let unaligned_offset = 1;
+    let param_size = std::mem::size_of::<crate::bindings::OSSL_PARAM>() * 2;
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            params.as_ptr() as *const u8,
+            buf.0.as_mut_ptr().add(unaligned_offset),
+            param_size,
+        );
+    }
+    let unaligned_ptr = unsafe {
+        buf.0.as_mut_ptr().add(unaligned_offset)
+            as *const crate::bindings::OSSL_PARAM
+    };
+    assert!(!unaligned_ptr.is_aligned());
+
+    let mut builder = crate::OsslParamBuilder::new();
+    let res = builder.copy_params_from_ptr(unaligned_ptr);
+    assert!(res.is_ok());
+    let ossl_param = builder.finalize();
+    assert_eq!(ossl_param.get_int(key).unwrap(), val);
 }
