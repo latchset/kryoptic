@@ -698,9 +698,8 @@ pub struct OsslParamBuilder<'a> {
     p: Cow<'a, [OSSL_PARAM]>,
     /// Flag indicating the storage buffer should be zeroized on drop
     zeroize: bool,
-    /// Flag indicating `p` contains an owned pointer we are responsible
-    /// for freeing
-    freeptr: bool,
+    /// Raw pointer from OpenSSL to be freed on drop
+    freeptr: Option<*mut OSSL_PARAM>,
     /// Use an enum to hold references to data we need to keep around as
     /// a pointer to their data is stored in the OSSL_PARAM array
     br: Vec<BorrowedReference<'a>>,
@@ -712,16 +711,14 @@ pub struct OsslParam<'a>(OsslParamBuilder<'a>);
 
 impl Drop for OsslParamBuilder<'_> {
     fn drop(&mut self) {
-        if self.freeptr {
+        if let Some(ptr) = self.freeptr {
             #[cfg(ossl_v400)]
             unsafe {
-                OSSL_PARAM_clear_free(
-                    self.p.as_ref().as_ptr() as *mut OSSL_PARAM
-                );
+                OSSL_PARAM_clear_free(ptr);
             }
             #[cfg(not(ossl_v400))]
             unsafe {
-                OSSL_PARAM_free(self.p.as_ref().as_ptr() as *mut OSSL_PARAM);
+                OSSL_PARAM_free(ptr);
             }
         }
         if self.zeroize {
@@ -748,7 +745,7 @@ impl<'a> OsslParamBuilder<'a> {
             v: Vec::new(),
             p: Cow::Owned(Vec::with_capacity(capacity + 1)),
             zeroize: false,
-            freeptr: false,
+            freeptr: None,
             br: Vec::new(),
         }
     }
@@ -1082,6 +1079,7 @@ impl<'a> OsslParamBuilder<'a> {
     /// This method performs a deep copy of each parameter, including its key
     /// and data. This is useful for persisting parameters that may have been
     /// returned by OpenSSL and point to temporary internal buffers.
+    #[allow(dead_code)]
     pub fn copy_params(&mut self, params: &[OSSL_PARAM]) -> Result<(), Error> {
         for p in params {
             if p.data.is_null() {
@@ -1115,6 +1113,57 @@ impl<'a> OsslParamBuilder<'a> {
         Ok(())
     }
 
+    /// Copies parameters from an existing raw `OSSL_PARAM` pointer into the
+    /// builder, handling potentially unaligned pointers.
+    ///
+    /// This method performs a deep copy of each parameter, including its key
+    /// and data, until a terminating null parameter is encountered.
+    pub fn copy_params_from_ptr(
+        &mut self,
+        ptr: *const OSSL_PARAM,
+    ) -> Result<(), Error> {
+        if ptr.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let mut counter = ptr;
+        unsafe {
+            loop {
+                let p = std::ptr::read_unaligned(counter);
+                if p.key.is_null() {
+                    break;
+                }
+                if p.data.is_null() {
+                    return Err(Error::new(ErrorKind::NullPtr));
+                }
+                let k = CStr::from_ptr(p.key as *const c_char);
+                let key = k.to_bytes_with_nul().to_vec();
+                let data_size = if p.data_type == OSSL_PARAM_UTF8_STRING {
+                    /* For OSSL_PARAM_UTF8_STRING, OpenSSL gives the strlen() as
+                     * size instead of the actual allocated size which include the
+                     * terminating zero byte */
+                    p.data_size + 1
+                } else {
+                    p.data_size
+                };
+                let val =
+                    std::slice::from_raw_parts(p.data as *const u8, data_size)
+                        .to_vec();
+                let param = OSSL_PARAM {
+                    key: key.as_ptr() as *const c_char,
+                    data_type: p.data_type,
+                    data: val.as_ptr() as *mut c_void,
+                    data_size: p.data_size,
+                    return_size: 0,
+                };
+                self.v.push(key);
+                self.v.push(val);
+                self.p.to_mut().push(param);
+                counter = counter.offset(1);
+            }
+        }
+        Ok(())
+    }
+
     /// Finalizes the `OSSL_PARAM` array by adding the end marker.
     pub fn finalize(mut self) -> OsslParam<'a> {
         self.p.to_mut().push(unsafe { OSSL_PARAM_construct_end() });
@@ -1131,15 +1180,15 @@ impl<'a> OsslParam<'a> {
             v: Vec::new(),
             p: Cow::Owned(Vec::with_capacity(1)),
             zeroize: false,
-            freeptr: false,
+            freeptr: None,
             br: Vec::new(),
         };
         p.finalize()
     }
 
     /// Creates an `OsslParam` instance by borrowing an existing `OSSL_PARAM`
-    /// array from OpenSSL. Takes ownership of the pointer and marks it to be
-    /// freed on drop.
+    /// array from OpenSSL, or creating an aligned copy if unaligned. Takes
+    /// ownership of the pointer and marks it to be freed on drop.
     pub fn from_ptr(ptr: *mut OSSL_PARAM) -> Result<OsslParam<'static>, Error> {
         if ptr.is_null() {
             return Err(Error::new(ErrorKind::NullPtr));
@@ -1148,19 +1197,34 @@ impl<'a> OsslParam<'a> {
         let mut nelem = 0;
         let mut counter = ptr;
         unsafe {
-            while !(*counter).key.is_null() {
+            while !std::ptr::addr_of!((*counter).key)
+                .read_unaligned()
+                .is_null()
+            {
                 nelem += 1;
                 counter = counter.offset(1);
             }
         }
+        let p = if ptr.is_aligned() {
+            Cow::Borrowed(unsafe { std::slice::from_raw_parts(ptr, nelem + 1) })
+        } else {
+            let mut v = Vec::<OSSL_PARAM>::with_capacity(nelem + 1);
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    ptr as *const u8,
+                    v.as_mut_ptr() as *mut u8,
+                    (nelem + 1) * std::mem::size_of::<OSSL_PARAM>(),
+                );
+                v.set_len(nelem + 1);
+            }
+            Cow::Owned(v)
+        };
         /* Mark as finalized as no changes are allowed to imported params */
         Ok(OsslParam(OsslParamBuilder {
             v: Vec::new(),
-            p: Cow::Borrowed(unsafe {
-                std::slice::from_raw_parts(ptr, nelem + 1)
-            }),
             zeroize: false,
-            freeptr: true,
+            p,
+            freeptr: Some(ptr),
             br: Vec::new(),
         }))
     }
@@ -1172,7 +1236,6 @@ impl<'a> OsslParam<'a> {
     }
 
     /// Returns a mutable pointer to the finalized `OSSL_PARAM` array.
-    #[allow(dead_code)]
     pub fn as_mut_ptr(&mut self) -> *mut OSSL_PARAM {
         self.0.p.to_mut().as_mut_ptr()
     }
