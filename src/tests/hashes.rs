@@ -39,6 +39,7 @@ fn test_hashes_digest() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
+    assert_eq!(check_validation(session, 1), true);
 
     /* update digest */
     ret = fn_digest_init(session, &mut mechanism);
@@ -57,6 +58,7 @@ fn test_hashes_digest() {
     ret = fn_digest_final(session, digest2.as_mut_ptr(), &mut digest2_len);
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
+    assert_eq!(check_validation(session, 1), true);
 
     /* ==== SHA 384 ==== */
 
@@ -89,6 +91,7 @@ fn test_hashes_digest() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
+    assert_eq!(check_validation(session, 1), true);
 
     /* ==== SHA 512 ==== */
 
@@ -121,6 +124,7 @@ fn test_hashes_digest() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(hash, digest);
+    assert_eq!(check_validation(session, 1), true);
 
     #[cfg(not(feature = "no_sha1"))]
     {
@@ -151,6 +155,7 @@ fn test_hashes_digest() {
         );
         assert_eq!(ret, CKR_OK);
         assert_eq!(hash, digest);
+        assert_eq!(check_validation(session, 0), true);
     }
 
     testtokn.finalize();

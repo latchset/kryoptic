@@ -929,7 +929,7 @@ fn test_hkdf() {
 }
 
 #[cfg(feature = "pbkdf2")]
-#[cfg(not(feature = "no_sha1"))]
+#[cfg(all(not(feature = "fips"), not(feature = "no_sha1")))]
 #[test]
 #[parallel]
 fn test_pbkdf2() {
@@ -1042,6 +1042,84 @@ fn test_pbkdf2() {
         assert_eq!(ret, CKR_OK);
         assert_eq!(result, test.3);
     }
+
+    testtokn.finalize();
+}
+
+#[cfg(feature = "pbkdf2")]
+#[cfg(feature = "fips")]
+#[test]
+#[parallel]
+fn test_pbkdf2_fips() {
+    let mut testtokn = TestToken::initialized("test_pbkdf2_fips", None);
+    let session = testtokn.get_session(false);
+
+    testtokn.login();
+
+    // 1. SHA-1 PRF must fail with CKR_MECHANISM_PARAM_INVALID
+    #[cfg(not(feature = "no_sha1"))]
+    {
+        let salt = b"saltSALTsaltSALTsaltSALTsaltSALTsalt";
+        let password = b"passwordPASSWORDpassword";
+        let params_sha1 = CK_PKCS5_PBKD2_PARAMS2 {
+            saltSource: CKZ_DATA_SPECIFIED,
+            pSaltSourceData: void_ptr!(salt.as_ptr()),
+            ulSaltSourceDataLen: salt.len() as CK_ULONG,
+            iterations: 4096,
+            prf: CKP_PKCS5_PBKD2_HMAC_SHA1,
+            pPrfData: std::ptr::null_mut(),
+            ulPrfDataLen: 0,
+            pPassword: password.as_ptr() as *const _ as *mut _,
+            ulPasswordLen: password.len() as CK_ULONG,
+        };
+
+        let ret = generate_key(
+            session,
+            CKM_PKCS5_PBKD2,
+            void_ptr!(&params_sha1),
+            sizeof!(CK_PKCS5_PBKD2_PARAMS2),
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 32)],
+            &[],
+            &[
+                (CKA_WRAP, true),
+                (CKA_UNWRAP, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
+        );
+        assert_eq!(ret.unwrap_err().rv(), CKR_MECHANISM_PARAM_INVALID);
+    }
+
+    // 2. Approved SHA-256 PRF succeeds and reports FIPS approved
+    let salt = b"saltSALTsaltSALTsaltSALTsaltSALTsalt";
+    let password = b"passwordPASSWORDpassword";
+    let params_sha256 = CK_PKCS5_PBKD2_PARAMS2 {
+        saltSource: CKZ_DATA_SPECIFIED,
+        pSaltSourceData: void_ptr!(salt.as_ptr()),
+        ulSaltSourceDataLen: salt.len() as CK_ULONG,
+        iterations: 4096,
+        prf: CKP_PKCS5_PBKD2_HMAC_SHA256,
+        pPrfData: std::ptr::null_mut(),
+        ulPrfDataLen: 0,
+        pPassword: password.as_ptr() as *const _ as *mut _,
+        ulPasswordLen: password.len() as CK_ULONG,
+    };
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_PKCS5_PBKD2,
+        void_ptr!(&params_sha256),
+        sizeof!(CK_PKCS5_PBKD2_PARAMS2),
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 32)],
+        &[],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true)
+        ],
+    ));
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, handle, 1), true);
 
     testtokn.finalize();
 }

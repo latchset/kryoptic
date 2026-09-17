@@ -457,7 +457,7 @@ fn test_aes_operations() {
         enc.append(&mut enc_final);
 
         /* test that we can get correct indicators based on inputs */
-        assert_eq!(check_validation(session, 1), true);
+        assert_eq!(check_validation(session, 0), true);
 
         let ret = fn_decrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
@@ -485,7 +485,7 @@ fn test_aes_operations() {
         assert_eq!(enc, enc2);
 
         /* test that we can get correct indicators based on inputs */
-        assert_eq!(check_validation(session, 1), true);
+        assert_eq!(check_validation(session, 0), true);
 
         /* GCM without TAG should fail */
         let iv = "BA0987654321";
@@ -3161,6 +3161,210 @@ fn test_aes_key_wrap_pkcs7() {
     {
         assert_eq!(check_validation(session, 0), true);
     }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_aes_gcm_fips_indicators() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_gcm_fips_indicators", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    let plaintext = b"Hello world!";
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    // 1. C_EncryptMessage with CKG_GENERATE_RANDOM and 32 fixed bits (64 random bits) -> non-approved (Issue #3)
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut iv_rnd = [0u8; 12];
+    let mut tag_rnd = [0u8; 16];
+    let mut param_rnd_64 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_rnd.as_mut_ptr(),
+        ulIvLen: iv_rnd.len() as CK_ULONG,
+        ulIvFixedBits: 32, // 32 fixed bits -> 64 random bits (non-compliant with IG C.H, requires >= 96 bits)
+        ivGenerator: CKG_GENERATE_RANDOM,
+        pTag: tag_rnd.as_mut_ptr(),
+        ulTagBits: (tag_rnd.len() * 8) as CK_ULONG,
+    };
+    let mut enc = vec![0u8; plaintext.len()];
+    let mut enc_len = enc.len() as CK_ULONG;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_rnd_64),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    // 64 random bits is non-compliant with IG C.H (requires >= 96 bits)
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+    // Compliant CKG_GENERATE_RANDOM with 0 fixed bits (96 random bits)
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut param_rnd_96 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_rnd.as_mut_ptr(),
+        ulIvLen: iv_rnd.len() as CK_ULONG,
+        ulIvFixedBits: 0, // 0 fixed bits -> 96 random bits (compliant with IG C.H)
+        ivGenerator: CKG_GENERATE_RANDOM,
+        pTag: tag_rnd.as_mut_ptr(),
+        ulTagBits: (tag_rnd.len() * 8) as CK_ULONG,
+    };
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_rnd_96),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+    // 2. C_EncryptMessage with CKG_GENERATE_COUNTER_XOR and 32 counter bits (64 fixed bits) -> non-approved (Issue #4)
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut iv_xor = [0u8; 12];
+    let mut tag_xor = [0u8; 16];
+    let mut param_xor_32 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_xor.as_mut_ptr(),
+        ulIvLen: iv_xor.len() as CK_ULONG,
+        ulIvFixedBits: 64, // 64 fixed bits -> 32 counter bits (non-compliant for TLS 1.3)
+        ivGenerator: CKG_GENERATE_COUNTER_XOR,
+        pTag: tag_xor.as_mut_ptr(),
+        ulTagBits: (tag_xor.len() * 8) as CK_ULONG,
+    };
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_xor_32),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    // 32 counter bits for CKG_GENERATE_COUNTER_XOR is non-compliant
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+    // Compliant CKG_GENERATE_COUNTER_XOR with 64 counter bits (32 fixed bits)
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut param_xor_64 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_xor.as_mut_ptr(),
+        ulIvLen: iv_xor.len() as CK_ULONG,
+        ulIvFixedBits: 32, // 32 fixed bits -> 64 counter bits (compliant with IG C.H for TLS 1.3)
+        ivGenerator: CKG_GENERATE_COUNTER_XOR,
+        pTag: tag_xor.as_mut_ptr(),
+        ulTagBits: (tag_xor.len() * 8) as CK_ULONG,
+    };
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_xor_64),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+    // 3. C_DecryptMessage with non-compliant 24-bit tag (3 bytes) -> non-approved (Issue #5)
+    let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut tag_24 = [0u8; 3]; // 24 bits = 3 bytes
+    let mut param_24 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_rnd.as_mut_ptr(),
+        ulIvLen: iv_rnd.len() as CK_ULONG,
+        ulIvFixedBits: 0,
+        ivGenerator: CKG_GENERATE_RANDOM,
+        pTag: tag_24.as_mut_ptr(),
+        ulTagBits: 24,
+    };
+    let mut dec = vec![0u8; enc_len as usize];
+    let mut dec_len = dec.len() as CK_ULONG;
+    let _ = fn_decrypt_message(
+        session,
+        void_ptr!(&mut param_24),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        enc.as_ptr() as *mut CK_BYTE,
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    // Non-compliant tag (24 bits < 64 bits) must report non-approved indicator (0)
+    assert_eq!(check_validation(session, 0), true);
+
+    // 4. C_Encrypt with CKM_AES_GCM and external IV -> non-approved (Issue #2)
+    let iv_ext = [0x42u8; 12];
+    let aad = b"AAD";
+    let param_ext = CK_GCM_PARAMS {
+        pIv: iv_ext.as_ptr() as *mut CK_BYTE,
+        ulIvLen: iv_ext.len() as CK_ULONG,
+        ulIvBits: (iv_ext.len() * 8) as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulTagBits: 128,
+    };
+    let mut gcm_mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: void_ptr!(&param_ext),
+        ulParameterLen: sizeof!(CK_GCM_PARAMS),
+    };
+    let ret = fn_encrypt_init(session, &mut gcm_mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut enc_ext = vec![0u8; plaintext.len() + 16];
+    let mut enc_ext_len = enc_ext.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc_ext.as_mut_ptr(),
+        &mut enc_ext_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
 
     testtokn.finalize();
 }

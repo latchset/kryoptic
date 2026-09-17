@@ -47,7 +47,7 @@ fn sign_init(
         session.set_operation::<dyn Sign>(operation, key.always_auth());
 
         #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_SIGN, &key);
+        init_fips_approval(session, mechanism.mechanism, CKF_SIGN, Some(&key));
 
         Ok(())
     } else {
@@ -339,7 +339,12 @@ fn verify_init(
         session.set_operation::<dyn Verify>(operation, false);
 
         #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
+        init_fips_approval(
+            session,
+            mechanism.mechanism,
+            CKF_VERIFY,
+            Some(&key),
+        );
 
         Ok(())
     } else {
@@ -744,7 +749,7 @@ fn verify_signature_init(
     session.set_operation::<dyn VerifySignature>(operation, false);
 
     #[cfg(feature = "fips")]
-    init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, &key);
+    init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, Some(&key));
 
     Ok(())
 }

@@ -77,6 +77,10 @@ impl MechOperation for HashOperation {
             .get_state(state)
             .map_err(|_| CKR_STATE_UNSAVEABLE)?)
     }
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        Some(true)
+    }
 }
 
 impl Digest for HashOperation {

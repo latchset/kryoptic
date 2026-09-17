@@ -98,7 +98,12 @@ impl Mechanism for PBKDF2Mechanism {
 
         let prf = match params.prf {
             #[cfg(not(feature = "no_sha1"))]
-            CKP_PKCS5_PBKD2_HMAC_SHA1 => CKM_SHA_1_HMAC,
+            CKP_PKCS5_PBKD2_HMAC_SHA1 => {
+                #[cfg(feature = "fips")]
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+                #[cfg(not(feature = "fips"))]
+                CKM_SHA_1_HMAC
+            }
             CKP_PKCS5_PBKD2_HMAC_SHA224 => CKM_SHA224_HMAC,
             CKP_PKCS5_PBKD2_HMAC_SHA256 => CKM_SHA256_HMAC,
             CKP_PKCS5_PBKD2_HMAC_SHA384 => CKM_SHA384_HMAC,

@@ -627,7 +627,8 @@ impl AesOperation {
         #[cfg(feature = "fips")]
         fips_approval.update();
 
-        Ok(AesOperation {
+        #[allow(unused_mut)]
+        let mut op = AesOperation {
             mech: mech.mechanism,
             op: CKF_ENCRYPT,
             key: aeskey,
@@ -639,7 +640,14 @@ impl AesOperation {
             blockctr: 0,
             #[cfg(feature = "fips")]
             fips_approval: fips_approval,
-        })
+        };
+
+        #[cfg(feature = "fips")]
+        if op.mech == CKM_AES_GCM || op.mech == CKM_AES_CCM {
+            op.fips_approval_aead()?;
+        }
+
+        Ok(op)
     }
 
     /// Instantiates a new Decryption AES Operation
@@ -666,7 +674,8 @@ impl AesOperation {
         #[cfg(feature = "fips")]
         fips_approval.update();
 
-        Ok(AesOperation {
+        #[allow(unused_mut)]
+        let mut op = AesOperation {
             mech: mech.mechanism,
             op: CKF_DECRYPT,
             key: aeskey,
@@ -678,7 +687,14 @@ impl AesOperation {
             blockctr: 0,
             #[cfg(feature = "fips")]
             fips_approval: fips_approval,
-        })
+        };
+
+        #[cfg(feature = "fips")]
+        if op.mech == CKM_AES_GCM || op.mech == CKM_AES_CCM {
+            op.fips_approval_aead()?;
+        }
+
+        Ok(op)
     }
 
     /// Instantiates a new AES Key-Wrap Operation
@@ -1156,14 +1172,35 @@ impl AesOperation {
         /* The IV must be generated in FIPS mode */
         match self.params.iv.generator {
             CKG_NO_GENERATE => match self.op {
-                CKF_MESSAGE_ENCRYPT => self.fips_approval.set(false),
-                CKF_MESSAGE_DECRYPT => self.fips_approval.set(true),
+                CKF_ENCRYPT | CKF_WRAP | CKF_MESSAGE_ENCRYPT => {
+                    self.fips_approval.set(false);
+                }
+                CKF_DECRYPT | CKF_UNWRAP | CKF_MESSAGE_DECRYPT => {
+                    self.fips_approval.set(true);
+                }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             },
-            CKG_GENERATE_RANDOM => self.fips_approval.set(true),
-            CKG_GENERATE | CKG_GENERATE_COUNTER | CKG_GENERATE_COUNTER_XOR => {
+            CKG_GENERATE_RANDOM => {
+                let random_bits =
+                    self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
+                if random_bits < 96 {
+                    self.fips_approval.set(false);
+                } else {
+                    self.fips_approval.set(true);
+                }
+            }
+            CKG_GENERATE | CKG_GENERATE_COUNTER => {
                 if self.params.iv.fixedbits < 32 {
-                    self.fips_approval.set(false)
+                    self.fips_approval.set(false);
+                } else {
+                    self.fips_approval.set(true);
+                }
+            }
+            CKG_GENERATE_COUNTER_XOR => {
+                let counter_bits =
+                    self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
+                if counter_bits < 64 {
+                    self.fips_approval.set(false);
                 } else {
                     self.fips_approval.set(true)
                 }
