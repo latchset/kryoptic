@@ -299,6 +299,7 @@ fn test_hmac_signatures() {
             &mut mechanism,
         );
         assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 0), true);
 
         let result = match sig_gen(
             session,
@@ -310,6 +311,7 @@ fn test_hmac_signatures() {
             Err(e) => panic!("f{e}"),
         };
         assert_eq!(testcase.result, result);
+        assert_eq!(check_validation(session, 0), true);
     }
 
     /* ### SHA256 HMAC */
@@ -331,6 +333,8 @@ fn test_hmac_signatures() {
         &mut mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    // "HMAC Test Key" is only 7 bytes (56 bits), less than the 112 bits required for FIPS
+    assert_eq!(check_validation(session, 0), true);
 
     let result =
         match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
@@ -339,6 +343,7 @@ fn test_hmac_signatures() {
             Err(e) => panic!("f{e}"),
         };
     assert_eq!(testcase.result, result);
+    assert_eq!(check_validation(session, 0), true);
 
     /* ### SHA384 HMAC */
 
@@ -359,6 +364,7 @@ fn test_hmac_signatures() {
         &mut mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
 
     let result =
         match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
@@ -367,6 +373,7 @@ fn test_hmac_signatures() {
             Err(e) => panic!("f{e}"),
         };
     assert_eq!(testcase.result, result);
+    assert_eq!(check_validation(session, 0), true);
 
     /* ### SHA512 HMAC */
 
@@ -387,6 +394,7 @@ fn test_hmac_signatures() {
         &mut mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
 
     let result =
         match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
@@ -395,6 +403,7 @@ fn test_hmac_signatures() {
             Err(e) => panic!("f{e}"),
         };
     assert_eq!(testcase.result, result);
+    assert_eq!(check_validation(session, 0), true);
 
     /* ### SHA3 256 HMAC ### */
 
@@ -425,6 +434,7 @@ fn test_hmac_signatures() {
         &mut mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
 
     /* check SignatureVerify API too */
     let ret = sig_verifysig(
@@ -435,6 +445,7 @@ fn test_hmac_signatures() {
         &mut mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
 
     let result =
         match sig_gen(session, key_handle, &mut testcase.value, &mut mechanism)
@@ -443,6 +454,102 @@ fn test_hmac_signatures() {
             Err(e) => panic!("f{e}"),
         };
     assert_eq!(testcase.result, result);
+    assert_eq!(check_validation(session, 0), true);
+
+    /* ### FIPS-compliant HMAC with 32-byte (256-bit) key ### */
+    let fips_hmac_key = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 32)],
+        &[],
+        &[(CKA_SIGN, true), (CKA_VERIFY, true)],
+    ));
+
+    {
+        let mut data = b"Truncation test data".to_vec();
+
+        // Truncated to 16 bytes (>= 8 bytes): approved
+        let size_16: CK_ULONG = 16;
+        let mut mech_gen_16 = CK_MECHANISM {
+            mechanism: CKM_SHA256_HMAC_GENERAL,
+            pParameter: void_ptr!(&size_16),
+            ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+        };
+        let sig_16 = match sig_gen(
+            session,
+            fips_hmac_key,
+            &mut data,
+            &mut mech_gen_16,
+        ) {
+            Ok(r) => r,
+            Err(e) => panic!("sig_gen failed: {e}"),
+        };
+        assert_eq!(sig_16.len(), 16);
+        assert_eq!(
+            sig_verify(
+                session,
+                fips_hmac_key,
+                &mut data,
+                sig_16.as_slice(),
+                &mut mech_gen_16
+            ),
+            CKR_OK
+        );
+        assert_eq!(check_validation(session, 1), true);
+
+        // Truncated to 4 bytes (< 8 bytes): non-approved
+        let size_4: CK_ULONG = 4;
+        let mut mech_gen_4 = CK_MECHANISM {
+            mechanism: CKM_SHA256_HMAC_GENERAL,
+            pParameter: void_ptr!(&size_4),
+            ulParameterLen: CK_ULONG_SIZE as CK_ULONG,
+        };
+        let sig_4 =
+            match sig_gen(session, fips_hmac_key, &mut data, &mut mech_gen_4) {
+                Ok(r) => r,
+                Err(e) => panic!("sig_gen failed: {e}"),
+            };
+        assert_eq!(sig_4.len(), 4);
+        assert_eq!(
+            sig_verify(
+                session,
+                fips_hmac_key,
+                &mut data,
+                sig_4.as_slice(),
+                &mut mech_gen_4
+            ),
+            CKR_OK
+        );
+        // FIPS indicator should be 0 (non-approved)
+        assert_eq!(check_validation(session, 0), true);
+
+        // Full SHA-256 HMAC with compliant key: approved
+        let mut mech_full = CK_MECHANISM {
+            mechanism: CKM_SHA256_HMAC,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let sig_full = ret_or_panic!(sig_gen(
+            session,
+            fips_hmac_key,
+            &mut data,
+            &mut mech_full
+        ));
+        assert_eq!(sig_full.len(), 32);
+        assert_eq!(
+            sig_verify(
+                session,
+                fips_hmac_key,
+                &mut data,
+                sig_full.as_slice(),
+                &mut mech_full
+            ),
+            CKR_OK
+        );
+        assert_eq!(check_validation(session, 1), true);
+    }
 
     /* check different HMAC fails due to key being specific to HMAC */
     mechanism.mechanism = CKM_SHA256_HMAC;

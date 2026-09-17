@@ -40,6 +40,9 @@ fn digest_init(
         let operation = mech.digest_new(&mechanism)?;
         session.set_operation::<dyn Digest>(operation, false);
 
+        #[cfg(feature = "fips")]
+        init_fips_approval(session, mechanism.mechanism, CKF_DIGEST, None);
+
         Ok(())
     } else {
         Err(CKR_MECHANISM_INVALID)?
@@ -206,14 +209,6 @@ fn digest_key(
     };
     let data = key.get_attr_as_bytes(CKA_VALUE)?;
     operation.digest_update(data)?;
-
-    #[cfg(feature = "fips")]
-    {
-        /* need to do this last as we need to drop operation
-         * before we can pass session mutably to a caller */
-        let mech = operation.mechanism()?;
-        init_fips_approval(session, mech, CKF_DIGEST, &key);
-    }
     Ok(())
 }
 
