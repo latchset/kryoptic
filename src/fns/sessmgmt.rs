@@ -12,7 +12,7 @@ use crate::mechanism::{
     Decryption, Digest, Encryption, MsgDecryption, MsgEncryption,
     SearchOperation, Sign, Verify,
 };
-use crate::misc::bytes_to_slice;
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut};
 use crate::object::Object;
 use crate::pkcs11::*;
 use crate::STATE;
@@ -181,8 +181,7 @@ fn get_operation_state(
             .map_err(|_| CKR_ARGUMENTS_BAD)?
     };
 
-    let state: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(operation_state, state_len) };
+    let state: &mut [u8] = bytes_to_slice_mut(operation_state, state_len)?;
     let slot_id = session.get_slot_id();
     let token = rstate.get_token_from_slot(slot_id)?;
     let outlen = session.state_save(token.get_mechanisms(), state)?;
@@ -234,8 +233,7 @@ fn set_operation_state(
     let mut session = rstate.get_session_mut(s_handle)?;
     let state_len =
         usize::try_from(operation_state_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let state: &[u8] =
-        unsafe { std::slice::from_raw_parts(operation_state, state_len) };
+    let state: &[u8] = bytes_to_slice(operation_state, state_len);
     let slot_id = session.get_slot_id();
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
 
@@ -296,7 +294,7 @@ fn login(
             return Err(CKR_SESSION_READ_ONLY_EXISTS)?;
         }
     }
-    let vpin = unsafe { bytes_to_slice(pin as *const u8, pin_len as usize) };
+    let vpin = bytes_to_slice(pin as *const u8, pin_len as usize);
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     if user_type == CKU_CONTEXT_SPECIFIC {
         let session = rstate.get_session_mut(s_handle)?;

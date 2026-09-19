@@ -187,12 +187,10 @@ impl HKDFOperation {
             salt_key: [params.hSaltKey],
             salt: salt,
             info: if params.ulInfoLen > 0 {
-                Some(unsafe {
-                    bytes_to_slice(
-                        params.pInfo as *const u8,
-                        params.ulInfoLen as usize,
-                    )
-                })
+                Some(bytes_to_slice(
+                    params.pInfo as *const u8,
+                    params.ulInfoLen as usize,
+                ))
             } else {
                 None
             },

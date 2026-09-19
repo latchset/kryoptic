@@ -12,6 +12,7 @@ use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
 use crate::mechanism::{Sign, Verify, VerifySignature};
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut};
 use crate::pkcs11::*;
 use crate::session::Session;
 use crate::STATE;
@@ -109,9 +110,8 @@ fn sign(
         }
     }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
-    let signature: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
+    let data: &[u8] = bytes_to_slice(pdata, dlen);
+    let signature: &mut [u8] = bytes_to_slice_mut(psignature, signature_len)?;
 
     operation.sign(data, signature)?;
 
@@ -171,7 +171,7 @@ pub(crate) fn internal_sign_update(
 ) -> Result<()> {
     let operation = session.get_operation::<dyn Sign>()?;
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    let data: &[u8] = bytes_to_slice(part, plen);
     operation.sign_update(data)
 }
 
@@ -240,8 +240,7 @@ fn sign_final(
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
-    let signature: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
+    let signature: &mut [u8] = bytes_to_slice_mut(psignature, signature_len)?;
     operation.sign_final(signature)?;
 
     if let Some((handle, attrs)) = operation.updates_object() {
@@ -392,9 +391,8 @@ fn verify(
         return Err(CKR_SIGNATURE_LEN_RANGE)?;
     }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
-    let signature: &[u8] =
-        unsafe { std::slice::from_raw_parts(psignature, signature_len) };
+    let data: &[u8] = bytes_to_slice(pdata, dlen);
+    let signature: &[u8] = bytes_to_slice(psignature, signature_len);
     operation.verify(data, signature)?;
 
     if let Some((handle, attrs)) = operation.updates_object() {
@@ -449,7 +447,7 @@ pub(crate) fn internal_verify_update(
 ) -> Result<()> {
     let operation = session.get_operation::<dyn Verify>()?;
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    let data: &[u8] = bytes_to_slice(part, plen);
     operation.verify_update(data)
 }
 
@@ -509,8 +507,7 @@ fn verify_final(
     if psignature_len != sig_len {
         return Err(CKR_SIGNATURE_LEN_RANGE)?;
     }
-    let signature: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(psignature, signature_len) };
+    let signature: &mut [u8] = bytes_to_slice_mut(psignature, signature_len)?;
     operation.verify_final(signature)?;
 
     if let Some((handle, attrs)) = operation.updates_object() {
@@ -738,8 +735,7 @@ fn verify_signature_init(
 
     let sig_len =
         usize::try_from(psignature_len).map_err(|_| CKR_GENERAL_ERROR)?;
-    let signature: &[u8] =
-        unsafe { std::slice::from_raw_parts(psignature, sig_len) };
+    let signature: &[u8] = bytes_to_slice(psignature, sig_len);
     let operation = mech.verify_signature_new(&mechanism, &key, signature)?;
     session.set_operation::<dyn VerifySignature>(operation, false);
 
@@ -796,7 +792,7 @@ fn verify_signature(
     let slot_id = session.get_slot_id();
     let operation = session.get_operation::<dyn VerifySignature>()?;
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
+    let data: &[u8] = bytes_to_slice(pdata, dlen);
     operation.verify(data)?;
 
     if let Some((handle, attrs)) = operation.updates_object() {
@@ -850,7 +846,7 @@ fn verify_signature_update(
     let mut session = rstate.get_session_mut(s_handle)?;
     let operation = session.get_operation::<dyn VerifySignature>()?;
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
+    let data: &[u8] = bytes_to_slice(part, plen);
     operation.verify_update(data)
 }
 

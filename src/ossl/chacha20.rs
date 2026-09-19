@@ -787,8 +787,7 @@ impl MsgEncryption for ChaChaOperation {
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
-        let tagbuf =
-            unsafe { bytes_to_slice_mut(params.pTag, POLY1305_TAG_SIZE) }?;
+        let tagbuf = bytes_to_slice_mut(params.pTag, POLY1305_TAG_SIZE)?;
         if ctx.get_tag(tagbuf).is_err() {
             zeromem(cipher);
             return Err(self.op_err(CKR_DEVICE_ERROR));
@@ -892,7 +891,7 @@ impl MsgDecryption for ChaChaOperation {
         let params = Self::parse_msg_params(param, paramlen)?;
         let outlen = self.msg_decrypt_next(param, paramlen, cipher, plain)?;
 
-        let tag = unsafe { bytes_to_slice(params.pTag, POLY1305_TAG_SIZE) };
+        let tag = bytes_to_slice(params.pTag, POLY1305_TAG_SIZE);
 
         let ctx = match &mut self.ctx {
             Some(c) => c,

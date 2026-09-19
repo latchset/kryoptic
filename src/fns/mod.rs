@@ -7,6 +7,7 @@
 //! PKCS#11 functions exported via the Function List.
 
 use crate::error::{ErrorKind, Result};
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut};
 use crate::pkcs11::*;
 use crate::{get_random_data, random_add_seed, STATE};
 
@@ -72,7 +73,7 @@ fn seed_random(
     /* check session is valid */
     drop(STATE.rlock()?.get_session(s_handle)?);
     let len = usize::try_from(seed_len).map_err(|_| CKR_GENERAL_ERROR)?;
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(seed, len) };
+    let data: &[u8] = bytes_to_slice(seed, len);
     random_add_seed(data)
 }
 
@@ -107,8 +108,7 @@ fn generate_random(
     /* check session is valid */
     drop(STATE.rlock()?.get_session(s_handle)?);
     let rndlen = usize::try_from(random_len).map_err(|_| CKR_GENERAL_ERROR)?;
-    let data: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(random_data, rndlen) };
+    let data: &mut [u8] = bytes_to_slice_mut(random_data, rndlen)?;
     get_random_data(data)
 }
 

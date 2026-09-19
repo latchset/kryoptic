@@ -4,7 +4,7 @@
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::bytes_to_slice;
+use crate::misc::{bytes_to_slice, struct_to_slice};
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::osslctx;
 use crate::pkcs11::*;
@@ -256,18 +256,14 @@ impl Sp800Operation {
     pub fn counter_kdf_new(
         params: CK_SP800_108_KDF_PARAMS,
     ) -> Result<Sp800Operation> {
-        let data_params = unsafe {
-            bytes_to_slice(
-                params.pDataParams as *const CK_PRF_DATA_PARAM,
-                params.ulNumberOfDataParams as usize,
-            )
-        };
-        let addl_drv_keys = unsafe {
-            bytes_to_slice(
-                params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
-                params.ulAdditionalDerivedKeys as usize,
-            )
-        };
+        let data_params = struct_to_slice(
+            params.pDataParams as *const CK_PRF_DATA_PARAM,
+            params.ulNumberOfDataParams as usize,
+        )?;
+        let addl_drv_keys = struct_to_slice(
+            params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
+            params.ulAdditionalDerivedKeys as usize,
+        )?;
         Ok(Sp800Operation {
             mech: CKM_SP800_108_COUNTER_KDF,
             prf: params.prfType,
@@ -283,22 +279,19 @@ impl Sp800Operation {
     pub fn feedback_kdf_new(
         params: CK_SP800_108_FEEDBACK_KDF_PARAMS,
     ) -> Result<Sp800Operation> {
-        let data_params = unsafe {
-            bytes_to_slice(
-                params.pDataParams as *const CK_PRF_DATA_PARAM,
-                params.ulNumberOfDataParams as usize,
-            )
-        };
-        let addl_drv_keys = unsafe {
-            bytes_to_slice(
-                params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
-                params.ulAdditionalDerivedKeys as usize,
-            )
-        };
+        let data_params = struct_to_slice(
+            params.pDataParams as *const CK_PRF_DATA_PARAM,
+            params.ulNumberOfDataParams as usize,
+        )?;
+        let addl_drv_keys = struct_to_slice(
+            params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
+            params.ulAdditionalDerivedKeys as usize,
+        )?;
         let iv = if params.pIV != std::ptr::null_mut() && params.ulIVLen != 0 {
-            Some(unsafe {
-                bytes_to_slice(params.pIV as *const u8, params.ulIVLen as usize)
-            })
+            Some(bytes_to_slice(
+                params.pIV as *const u8,
+                params.ulIVLen as usize,
+            ))
         } else if params.pIV == std::ptr::null_mut() && params.ulIVLen == 0 {
             None
         } else {
@@ -428,14 +421,12 @@ impl Derive for Sp800Operation {
 
         /* additional keys */
         for ak in &self.addl_drv_keys {
-            let tmpl: &[CK_ATTRIBUTE] = unsafe {
-                std::slice::from_raw_parts_mut(
-                    ak.pTemplate,
-                    usize::try_from(ak.ulAttributeCount)
-                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
-                )
-            };
-            let obj = match objfactories.derive_key_from_template(key, tmpl) {
+            let tmpl = struct_to_slice(
+                ak.pTemplate,
+                usize::try_from(ak.ulAttributeCount)
+                    .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+            )?;
+            let obj = match objfactories.derive_key_from_template(key, &tmpl) {
                 Ok(o) => o,
                 Err(e) => {
                     /* mark the handle as invalid */

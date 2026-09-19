@@ -417,7 +417,7 @@ impl HOTPOperation {
             if params.ulCount > 0 && params.pParams.is_null() {
                 return Err(CKR_MECHANISM_PARAM_INVALID)?;
             }
-            for p in params.to_slice()? {
+            for p in params.to_slice()?.iter() {
                 match p.type_ {
                     CK_OTP_FLAGS => {
                         let flags = p.to_ulong()?;

@@ -12,6 +12,7 @@ use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
 use crate::mechanism::{Decryption, Encryption, MsgDecryption, MsgEncryption};
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut, parse_len};
 use crate::pkcs11::*;
 use crate::report_reqsize;
 use crate::session::Session;
@@ -105,11 +106,10 @@ fn encrypt(
         }
         return Ok(());
     }
-    let data: &[u8] = unsafe { std::slice::from_raw_parts(pdata, dlen) };
     let penclen = unsafe { *pul_encrypted_data_len as CK_ULONG };
-    let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let encdata: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(encrypted_data, enclen) };
+    let enclen = parse_len(penclen)?;
+    let data: &[u8] = bytes_to_slice(pdata, dlen);
+    let encdata: &mut [u8] = bytes_to_slice_mut(encrypted_data, enclen)?;
     let outlen = report_reqsize(
         operation.encrypt(data, encdata),
         pul_encrypted_data_len,
@@ -172,11 +172,10 @@ pub(crate) fn internal_encrypt_update(
     let len = if encrypted_part.is_null() {
         operation.encryption_len(plen, false)?
     } else {
-        let data: &[u8] = unsafe { std::slice::from_raw_parts(part, plen) };
         let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
-        let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-        let encpart: &mut [u8] =
-            unsafe { std::slice::from_raw_parts_mut(encrypted_part, enclen) };
+        let enclen = parse_len(penclen)?;
+        let data: &[u8] = bytes_to_slice(part, plen);
+        let encpart: &mut [u8] = bytes_to_slice_mut(encrypted_part, enclen)?;
         report_reqsize(
             operation.encrypt_update(data, encpart),
             pul_encrypted_part_len,
@@ -264,9 +263,8 @@ fn encrypt_final(
         return Ok(());
     }
     let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
-    let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let enclast: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(last_encrypted_part, enclen) };
+    let enclen = parse_len(penclen)?;
+    let enclast: &mut [u8] = bytes_to_slice_mut(last_encrypted_part, enclen)?;
     let outlen = report_reqsize(
         operation.encrypt_final(enclast),
         pul_last_encrypted_part_len,
@@ -392,12 +390,10 @@ fn decrypt(
         }
         return Ok(());
     }
-    let enc: &[u8] =
-        unsafe { std::slice::from_raw_parts(encrypted_data, elen) };
     let pdlen = unsafe { *pul_data_len as CK_ULONG };
-    let dlen = usize::try_from(pdlen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let ddata: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(data, dlen) };
+    let dlen = parse_len(pdlen)?;
+    let enc: &[u8] = bytes_to_slice(encrypted_data, elen);
+    let ddata: &mut [u8] = bytes_to_slice_mut(data, dlen)?;
     let outlen = report_reqsize(operation.decrypt(enc, ddata), pul_data_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
     unsafe { *pul_data_len = retlen };
@@ -458,12 +454,10 @@ pub(crate) fn internal_decrypt_update(
     let len = if part.is_null() {
         operation.decryption_len(elen, false)?
     } else {
-        let enc: &[u8] =
-            unsafe { std::slice::from_raw_parts(encrypted_part, elen) };
         let pplen = unsafe { *pul_part_len as CK_ULONG };
-        let plen = usize::try_from(pplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-        let dpart: &mut [u8] =
-            unsafe { std::slice::from_raw_parts_mut(part, plen) };
+        let plen = parse_len(pplen)?;
+        let enc: &[u8] = bytes_to_slice(encrypted_part, elen);
+        let dpart: &mut [u8] = bytes_to_slice_mut(part, plen)?;
         report_reqsize(operation.decrypt_update(enc, dpart), pul_part_len)?
     };
     let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
@@ -548,9 +542,8 @@ fn decrypt_final(
         return Ok(());
     }
     let pplen = unsafe { *pul_last_part_len as CK_ULONG };
-    let plen = usize::try_from(pplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let dlast: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(last_part, plen) };
+    let plen = parse_len(pplen)?;
+    let dlast: &mut [u8] = bytes_to_slice_mut(last_part, plen)?;
     let outlen =
         report_reqsize(operation.decrypt_final(dlast), pul_last_part_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -667,8 +660,6 @@ fn encrypt_message(
     let alen =
         usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let plen = usize::try_from(plaintext_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
-    let clen = usize::try_from(pclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
@@ -693,14 +684,15 @@ fn encrypt_message(
         return Ok(());
     }
 
+    let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
+    let clen = parse_len(pclen)?;
     let adata: &[u8] = if associated_data.is_null() {
         &[]
     } else {
-        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+        bytes_to_slice(associated_data, alen)
     };
-    let plain: &[u8] = unsafe { std::slice::from_raw_parts(plaintext, plen) };
-    let cipher: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(ciphertext, clen) };
+    let plain: &[u8] = bytes_to_slice(plaintext, plen);
+    let cipher: &mut [u8] = bytes_to_slice_mut(ciphertext, clen)?;
 
     let outlen = report_reqsize(
         operation.msg_encrypt(parameter, parameter_len, adata, plain, cipher),
@@ -799,7 +791,7 @@ fn encrypt_message_begin(
     let adata: &[u8] = if associated_data.is_null() {
         &[]
     } else {
-        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+        bytes_to_slice(associated_data, alen)
     };
     operation.msg_encrypt_begin(parameter, parameter_len, adata)
 }
@@ -858,8 +850,6 @@ fn encrypt_message_next(
 
     let plen =
         usize::try_from(plaintext_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let pclen = unsafe { *pul_ciphertext_part_len as CK_ULONG };
-    let clen = usize::try_from(pclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let fin = match flags {
         CKF_END_OF_MESSAGE => true,
@@ -884,10 +874,10 @@ fn encrypt_message_next(
         return Ok(());
     }
 
-    let plain: &[u8] =
-        unsafe { std::slice::from_raw_parts(plaintext_part, plen) };
-    let cipher: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(ciphertext_part, clen) };
+    let pclen = unsafe { *pul_ciphertext_part_len as CK_ULONG };
+    let clen = parse_len(pclen)?;
+    let plain: &[u8] = bytes_to_slice(plaintext_part, plen);
+    let cipher: &mut [u8] = bytes_to_slice_mut(ciphertext_part, clen)?;
 
     let outlen = report_reqsize(
         match fin {
@@ -1065,8 +1055,6 @@ fn decrypt_message(
         usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let clen =
         usize::try_from(ciphertext_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
-    let plen = usize::try_from(pplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
@@ -1088,14 +1076,15 @@ fn decrypt_message(
         return Ok(());
     }
 
+    let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
+    let plen = parse_len(pplen)?;
     let adata: &[u8] = if associated_data.is_null() {
         &[]
     } else {
-        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+        bytes_to_slice(associated_data, alen)
     };
-    let cipher: &[u8] = unsafe { std::slice::from_raw_parts(ciphertext, clen) };
-    let plain: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(plaintext, plen) };
+    let cipher: &[u8] = bytes_to_slice(ciphertext, clen);
+    let plain: &mut [u8] = bytes_to_slice_mut(plaintext, plen)?;
 
     let outlen = report_reqsize(
         operation.msg_decrypt(parameter, parameter_len, adata, cipher, plain),
@@ -1194,7 +1183,7 @@ fn decrypt_message_begin(
     let adata: &[u8] = if associated_data.is_null() {
         &[]
     } else {
-        unsafe { std::slice::from_raw_parts(associated_data, alen) }
+        bytes_to_slice(associated_data, alen)
     };
     operation.msg_decrypt_begin(parameter, parameter_len, adata)
 }
@@ -1253,8 +1242,6 @@ fn decrypt_message_next(
 
     let clen =
         usize::try_from(ciphertext_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let pplen = unsafe { *pul_plaintext_part_len as CK_ULONG };
-    let plen = usize::try_from(pplen).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let fin = match flags {
         CKF_END_OF_MESSAGE => true,
@@ -1279,10 +1266,10 @@ fn decrypt_message_next(
         return Ok(());
     }
 
-    let cipher: &[u8] =
-        unsafe { std::slice::from_raw_parts(ciphertext_part, clen) };
-    let plain: &mut [u8] =
-        unsafe { std::slice::from_raw_parts_mut(plaintext_part, plen) };
+    let pplen = unsafe { *pul_plaintext_part_len as CK_ULONG };
+    let plen = parse_len(pplen)?;
+    let cipher: &[u8] = bytes_to_slice(ciphertext_part, clen);
+    let plain: &mut [u8] = bytes_to_slice_mut(plaintext_part, plen)?;
 
     let outlen = report_reqsize(
         match fin {
