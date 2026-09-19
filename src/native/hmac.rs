@@ -270,10 +270,11 @@ impl MechOperation for HMACOperation {
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
-        // There is no need to track fips approval for HMAC as all checks are
-        // performed ahead of time by the indicator machinery when the
-        // operation is initialized
-        None
+        if self.outputlen < 8 {
+            Some(false)
+        } else {
+            Some(true)
+        }
     }
     fn state_size(&self) -> Result<usize> {
         let dummy_dgst_state = vec![0u8; self.inner.state_size()?];

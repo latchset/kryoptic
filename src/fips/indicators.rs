@@ -580,7 +580,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         },
         FipsMechanism {
             mechanism: CKM_AES_ECB,
-            operations: CKF_ENCRYPT | CKF_DECRYPT,
+            operations: CKF_DECRYPT,
             restrictions: [restrict!(CKK_AES), restrict!()],
             genflags: 0,
         },

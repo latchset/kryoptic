@@ -50,7 +50,12 @@ fn encrypt_init(
         session.set_operation::<dyn Encryption>(operation, false);
 
         #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
+        init_fips_approval(
+            session,
+            mechanism.mechanism,
+            CKF_ENCRYPT,
+            Some(&key),
+        );
 
         Ok(())
     } else {
@@ -336,7 +341,12 @@ fn decrypt_init(
         session.set_operation::<dyn Decryption>(operation, key.always_auth());
 
         #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);
+        init_fips_approval(
+            session,
+            mechanism.mechanism,
+            CKF_DECRYPT,
+            Some(&key),
+        );
 
         Ok(())
     } else {
@@ -613,7 +623,12 @@ fn message_encrypt_init(
         let operation = mech.msg_encryption_op(&mechanism, &key)?;
         session.set_operation::<dyn MsgEncryption>(operation, false);
         #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_ENCRYPT, &key);
+        init_fips_approval(
+            session,
+            mechanism.mechanism,
+            CKF_ENCRYPT,
+            Some(&key),
+        );
 
         Ok(())
     } else {
@@ -672,6 +687,10 @@ fn encrypt_message(
 
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+
+    #[cfg(feature = "fips")]
+    session.reset_fips_indicator();
+
     let operation = session.get_operation::<dyn MsgEncryption>()?;
     if operation.busy() {
         return Err(CKR_OPERATION_ACTIVE)?;
@@ -1010,7 +1029,12 @@ fn message_decrypt_init(
         let operation = mech.msg_decryption_op(&mechanism, &key)?;
         session.set_operation::<dyn MsgDecryption>(operation, false);
         #[cfg(feature = "fips")]
-        init_fips_approval(session, mechanism.mechanism, CKF_DECRYPT, &key);
+        init_fips_approval(
+            session,
+            mechanism.mechanism,
+            CKF_DECRYPT,
+            Some(&key),
+        );
 
         Ok(())
     } else {
@@ -1070,6 +1094,10 @@ fn decrypt_message(
 
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
+
+    #[cfg(feature = "fips")]
+    session.reset_fips_indicator();
+
     let operation = session.get_operation::<dyn MsgDecryption>()?;
     if operation.busy() {
         return Err(CKR_OPERATION_ACTIVE)?;

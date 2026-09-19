@@ -398,9 +398,9 @@ pub(crate) fn init_fips_approval(
     mut session: RwLockWriteGuard<'_, Session>,
     mechanism: CK_MECHANISM_TYPE,
     op: CK_FLAGS,
-    key: &object::Object,
+    key: Option<&object::Object>,
 ) {
-    let key_ok = fips::indicators::is_approved(mechanism, op, Some(key), None);
+    let key_ok = fips::indicators::is_approved(mechanism, op, key, None);
     session.set_fips_indicator(key_ok);
 }
 
