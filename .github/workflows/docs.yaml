@@ -1,0 +1,31 @@
+name: Documentation
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  docs:
+    name: cargo docs-rs
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -Dwarnings
+    steps:
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libsqlite3-dev clang pkg-config
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install nightly tool chain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo docs-rs
+        uses: dtolnay/install@cargo-docs-rs
+
+      - name: Run cargo docs-rs
+        run: cargo docs-rs
