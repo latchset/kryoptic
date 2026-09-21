@@ -3,7 +3,9 @@
 
 #[cfg(not(feature = "fips"))]
 static TEST_CONTEXT: ::std::sync::LazyLock<crate::OsslContext> =
-    ::std::sync::LazyLock::new(|| crate::OsslContext::new_lib_ctx());
+    ::std::sync::LazyLock::new(|| {
+        crate::OsslContext::new_lib_ctx_checked().unwrap()
+    });
 
 #[cfg(not(feature = "fips"))]
 pub fn test_ossl_context() -> &'static crate::OsslContext {
@@ -13,7 +15,7 @@ pub fn test_ossl_context() -> &'static crate::OsslContext {
 #[cfg(all(not(feature = "fips"), feature = "rfc9580"))]
 static TEST_LEGACY_CONTEXT: ::std::sync::LazyLock<crate::OsslContext> =
     ::std::sync::LazyLock::new(|| {
-        let mut context = crate::OsslContext::new_lib_ctx();
+        let mut context = crate::OsslContext::new_lib_ctx_checked().unwrap();
         // Ignore the errors to load legacy provider
         let _ = context.load_legacy_provider();
         context
@@ -55,7 +57,7 @@ mod mldsa;
 #[cfg(feature = "dynamic")]
 #[test]
 fn test_permissive_fips() {
-    let mut ctx = crate::OsslContext::new_lib_ctx();
+    let mut ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
     ctx.load_default_configuration().unwrap();
     if ctx.fips_is_enabled() {
         let res = ctx.set_permissive_fips();
@@ -66,7 +68,7 @@ fn test_permissive_fips() {
 #[cfg(feature = "dynamic")]
 #[test]
 fn test_provider_version() {
-    let mut ctx = crate::OsslContext::new_lib_ctx();
+    let mut ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
     ctx.load_default_provider().unwrap();
     let prov = unsafe {
         crate::bindings::OSSL_PROVIDER_load(
@@ -95,7 +97,7 @@ fn test_provider_version() {
 #[cfg(all(ossl_v350, feature = "dynamic", not(feature = "fips")))]
 #[test]
 fn test_shake_digest_with_broken_shake_context() {
-    let mut ctx = crate::OsslContext::new_lib_ctx();
+    let mut ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
     ctx.load_default_provider().unwrap();
     ctx.broken_shake = true;
     ctx.fips_permissive = true;

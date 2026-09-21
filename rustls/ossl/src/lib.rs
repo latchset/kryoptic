@@ -22,8 +22,8 @@ static OSSL_CONTEXT: std::sync::OnceLock<OsslContext> =
 
 pub fn osslctx() -> &'static OsslContext {
     OSSL_CONTEXT.get_or_init(|| {
-        let mut ctx = OsslContext::new_lib_ctx();
-        let _ = ctx.load_default_configuration();
+        let mut ctx = OsslContext::new_lib_ctx_checked().unwrap();
+        ctx.load_default_configuration().unwrap();
         ctx
     })
 }
