@@ -136,3 +136,11 @@ ossl400 = ["ossl/ossl400"]
 vsprintf = ["dep:vsprintf"]
 
 hotp = []
+
+[package.metadata.docs.rs]
+#Sadly docs-rs seem to still depend on 3.0.x, so we need to suppress any feture
+#that requires 3.2.0 or newer until docs.rs starts using a newer openssl
+#version.
+features = ["minimal", "openssl-sys", "kdf_all", "log", "hotp", "chacha20"]
+no-default-features = true
+default-target = "x86_64-unknown-linux-gnu"
