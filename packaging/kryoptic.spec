@@ -18,7 +18,7 @@
 %endif
 
 Name:           kryoptic
-Version:        1.5.2
+Version:        1.5.3
 Release:        %autorelease
 Summary:        PKCS #11 software token written in Rust
 

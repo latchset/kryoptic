@@ -8,6 +8,11 @@ Unreleased changes
 
 ### What Changed
 
+
+## [1.5.3]
+
+### What Changed
+
 * Added support for the IKE-derive mechanism family (CKM_IKE_PRF_DERIVE,
   CKM_IKE1_PRF_DERIVE, CKM_IKE1_EXTENDED_DERIVE, CKM_IKE2_PRF_PLUS_DERIVE)
   - [Add support for the IKE-derive mechanism
@@ -22,8 +27,17 @@ Unreleased changes
   (derivation, encapsualtion, wrapping)
   - [Template attributes](https://github.com/latchset/kryoptic/pull/500)
 
+* A new experimental rustls-ossl driver for Rustls was added, that uses the ossl
+  bindings.
+  - [Add experimental rustls backend that uses the ossl
+    bindings](https://github.com/latchset/kryoptic/pull/454)
 
-## [1.5.1]
+* The overall project license was changed from GPLv3 to ASL 2.0
+  - [Change license from GPLv3 to
+    Apache 2.0](https://github.com/latchset/kryoptic/pull/483)
+
+
+## [1.5.2]
 ## 2026-06-29
 
 This release adds important bug fixes and minor additional features on top of
@@ -326,3 +340,4 @@ that includes non public interfaces.
 [1.5.0]: https://github.com/latchset/kryoptic/releases/tag/v1.5.0
 [1.5.1]: https://github.com/latchset/kryoptic/releases/tag/v1.5.1
 [1.5.2]: https://github.com/latchset/kryoptic/releases/tag/v1.5.2
+[1.5.3]: https://github.com/latchset/kryoptic/releases/tag/v1.5.3
