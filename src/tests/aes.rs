@@ -2095,6 +2095,75 @@ fn test_aes_iv_generators() {
     testtokn.finalize();
 }
 
+#[test]
+#[parallel]
+fn test_aes_gcm_multipart_decryption() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_gcm_multipart_decryption", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16)],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let iv = b"123456789012";
+    let aad = b"test aad";
+    let tag_len = 16usize;
+    let param = CK_GCM_PARAMS {
+        pIv: iv.as_ptr() as *mut CK_BYTE,
+        ulIvLen: iv.len() as CK_ULONG,
+        ulIvBits: (iv.len() * 8) as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulTagBits: (tag_len * 8) as CK_ULONG,
+    };
+
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: void_ptr!(&param),
+        ulParameterLen: sizeof!(CK_GCM_PARAMS),
+    };
+
+    // 128 bytes plaintext: 00, 01, 02, ...
+    let plaintext: Vec<u8> = (0..128).map(|i| i as u8).collect();
+
+    let ct = ret_or_panic!(encrypt(session, handle, &plaintext, &mechanism,));
+    assert_eq!(ct.len(), plaintext.len() + tag_len);
+
+    // Test decrypting with various chunk sizes (including chunks > taglen)
+    for chunk_size in [17, 32, 48, 64, 100] {
+        let ret = fn_decrypt_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut decrypted = Vec::new();
+        let mut offset = 0;
+        while offset < ct.len() {
+            let end = std::cmp::min(offset + chunk_size, ct.len());
+            let chunk = &ct[offset..end];
+            let mut dec_part = ret_or_panic!(decrypt_update(session, chunk));
+            decrypted.append(&mut dec_part);
+            offset = end;
+        }
+        let mut dec_final = ret_or_panic!(decrypt_final(session));
+        decrypted.append(&mut dec_final);
+
+        assert_eq!(
+            decrypted, plaintext,
+            "failed to decrypt correctly with chunk size {}",
+            chunk_size
+        );
+    }
+
+    testtokn.finalize();
+}
+
 /// Regression test for the null-buffer length-probe of the one-shot
 /// C_EncryptMessage/C_DecryptMessage functions on CKM_AES_CCM: calling
 /// either with a NULL output pointer (to learn the required buffer size,
