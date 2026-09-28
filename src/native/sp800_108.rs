@@ -441,9 +441,16 @@ impl Derive for Sp800Operation {
             let obj = match objfactories.derive_key_from_template(key, &tmpl) {
                 Ok(o) => o,
                 Err(e) => {
-                    /* mark the handle as invalid */
-                    unsafe {
-                        core::ptr::write(ak.phKey, CK_INVALID_HANDLE);
+                    /* mark the handle as invalid, unless the caller passed
+                     * a null phKey (CK_DERIVED_KEY::phKey is a plain
+                     * caller-supplied pointer, not validated by
+                     * struct_to_slice, which only checks the outer array
+                     * pointer -- writing through a null one here would be
+                     * undefined behavior). */
+                    if !ak.phKey.is_null() {
+                        unsafe {
+                            core::ptr::write(ak.phKey, CK_INVALID_HANDLE);
+                        }
                     }
                     return Err(e);
                 }

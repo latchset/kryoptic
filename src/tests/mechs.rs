@@ -3,6 +3,12 @@
 
 use crate::tests::*;
 
+use crate::error::Result;
+use crate::mechanism::Mechanism;
+use crate::object::Object;
+use crate::storage::StorageDBInfo;
+use crate::Token;
+
 use serial_test::parallel;
 
 #[test]
@@ -60,6 +66,102 @@ fn test_get_mechs() {
     let mut info: CK_MECHANISM_INFO = Default::default();
     let ret = fn_get_mechanism_info(testtokn.get_slot(), mechs[0], &mut info);
     assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+/// Regression test: a mechanism must never be listed by
+/// `C_GetMechanismList` if it then unconditionally fails on every real
+/// use ("advertised then failing" -- PKCS#11 v3.2 §5.2). AWS-LC has no
+/// feedback-mode KBKDF primitive at all, so under `awslc-fips` (which
+/// routes `CKM_SP800_108_FEEDBACK_KDF` through the AWS-LC-backed
+/// `crate::awslc::kbkdf`) it must be absent from the list entirely, not
+/// merely fail when attempted. Plain `awslc` is unaffected -- non-FIPS
+/// builds use `crate::native::sp800_108`, which genuinely supports it.
+#[test]
+#[parallel]
+#[cfg(feature = "sp800_108")]
+fn test_mechanism_list_omits_unsupported_feedback_kdf_under_awslc_fips() {
+    let mut testtokn = TestToken::initialized(
+        "test_mechanism_list_omits_unsupported_feedback_kdf_under_awslc_fips",
+        None,
+    );
+
+    let mut count: CK_ULONG = 0;
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        std::ptr::null_mut(),
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    if cfg!(feature = "awslc-fips") {
+        assert!(
+            !mechs.contains(&CKM_SP800_108_FEEDBACK_KDF),
+            "CKM_SP800_108_FEEDBACK_KDF must not be advertised under \
+             awslc-fips, since AWS-LC has no feedback-mode KBKDF \
+             primitive and every C_DeriveKey call on it would fail"
+        );
+    } else {
+        assert!(
+            mechs.contains(&CKM_SP800_108_FEEDBACK_KDF),
+            "CKM_SP800_108_FEEDBACK_KDF should be usable (and therefore \
+             listed) on this backend"
+        );
+    }
+
+    testtokn.finalize();
+}
+
+/// Regression test: same "advertised then failing" anti-pattern as above
+/// (PKCS#11 v3.2 §5.2), for `CKM_AES_CTS`. AWS-LC has no ciphertext-
+/// stealing primitive at all, so it must be absent from the mechanism
+/// list under both `awslc`/`awslc-fips`, not merely fail when attempted.
+#[test]
+#[parallel]
+#[cfg(feature = "aes")]
+fn test_mechanism_list_omits_unsupported_cts_under_awslc() {
+    let mut testtokn = TestToken::initialized(
+        "test_mechanism_list_omits_unsupported_cts_under_awslc",
+        None,
+    );
+
+    let mut count: CK_ULONG = 0;
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        std::ptr::null_mut(),
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut mechs: Vec<CK_MECHANISM_TYPE> = vec![0; count as usize];
+    let ret = fn_get_mechanism_list(
+        testtokn.get_slot(),
+        mechs.as_mut_ptr() as CK_MECHANISM_TYPE_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    if cfg!(any(feature = "awslc", feature = "awslc-fips")) {
+        assert!(
+            !mechs.contains(&CKM_AES_CTS),
+            "CKM_AES_CTS must not be advertised under awslc/awslc-fips, \
+             since AWS-LC has no ciphertext-stealing primitive and every \
+             C_EncryptInit/C_DecryptInit call on it would fail"
+        );
+    } else {
+        assert!(
+            mechs.contains(&CKM_AES_CTS),
+            "CKM_AES_CTS should be usable (and therefore listed) on this \
+             backend"
+        );
+    }
 
     testtokn.finalize();
 }
@@ -307,4 +409,210 @@ fn test_get_interface_list_buffer_too_small_reports_required_len() {
     );
 
     testtokn.finalize();
+}
+
+/// Regression test for the general "advertised but not implemented" bug
+/// class R-02 and R-03 both represented: a mechanism appears in
+/// `C_GetMechanismList` with a capability flag set, but the concrete
+/// `Mechanism` implementation never actually overrides the trait method
+/// that flag implies, so a real caller unconditionally hits
+/// `CKR_MECHANISM_INVALID` -- the exact sentinel every default method on
+/// `crate::mechanism::Mechanism` returns verbatim (see that trait's
+/// definition: every one of its ~15 operation-constructor methods has a
+/// default body of `Err(CKR_MECHANISM_INVALID)?`).
+///
+/// Drives every registered mechanism's entry-point constructor directly
+/// against the internal `Mechanisms` registry (bypassing full
+/// session/object setup, which is irrelevant to this check) with a
+/// minimal, deliberately-underspecified key and null mechanism
+/// parameters, and flags anything that returns that literal sentinel: a
+/// real implementation should reject bad/missing input with a more
+/// specific `CK_RV` (`CKR_ARGUMENTS_BAD`, `CKR_MECHANISM_PARAM_INVALID`,
+/// `CKR_KEY_TYPE_INCONSISTENT`, etc.), matching the convention already
+/// used throughout this codebase for "this specific variant isn't
+/// supported" rejections (e.g. `crate::awslc::mldsa`'s
+/// `CKH_DETERMINISTIC_REQUIRED` handling uses
+/// `CKR_MECHANISM_PARAM_INVALID`, not `CKR_MECHANISM_INVALID`).
+///
+/// This would have caught R-02 (`CKM_SP800_108_FEEDBACK_KDF` advertised
+/// under `awslc-fips` while routing to a `derive_operation` that
+/// unconditionally rejected it) and R-03 (`CKM_AES_CTS` advertised while
+/// AWS-LC has no primitive for it at all) before either was fixed by
+/// de-registering the mechanism outright.
+#[test]
+#[parallel]
+fn test_every_advertised_mechanism_has_a_real_implementation() {
+    // Db-agnostic on purpose: this test only needs the registered
+    // Mechanisms/ObjectFactories Token::new() always builds, not real
+    // storage, so it must build under either db backend alone (mirroring
+    // TestToken::get_default_db's own sqlitedb/nssdb selection, which
+    // isn't reusable here since it's private). `cleanup_path` is the real
+    // filesystem path to remove afterwards (nssdb's `dbargs` also carries
+    // the `configDir=` key prefix, which isn't itself a path).
+    std::fs::create_dir_all("test").unwrap();
+    #[cfg(feature = "sqlitedb")]
+    let (dbtype, dbargs, cleanup_path) = {
+        let path = format!(
+            "test/kryoptic_mech_coverage_test_{:x}.sql",
+            std::process::id()
+        );
+        (crate::storage::sqlite::DBINFO.dbtype(), path.clone(), path)
+    };
+    #[cfg(all(not(feature = "sqlitedb"), feature = "nssdb"))]
+    let (dbtype, dbargs, cleanup_path) = {
+        let path = format!(
+            "test/kryoptic_mech_coverage_test_{:x}",
+            std::process::id()
+        );
+        (
+            crate::storage::nssdb::DBINFO.dbtype(),
+            format!("configDir={}/", path),
+            path,
+        )
+    };
+    let _ = std::fs::remove_file(&cleanup_path);
+    let _ = std::fs::remove_dir_all(&cleanup_path);
+    let token = Token::new(dbtype, Some(dbargs.clone())).expect("Token::new");
+    let mechs = token.get_mechanisms();
+    let factories = token.get_object_factories();
+
+    // A generic-secret-key factory, used only to obtain *some*
+    // `&Box<dyn ObjectFactory>` for the wrap/unwrap/encapsulate/decapsulate
+    // probes below -- none of those calls are expected to succeed with
+    // this deliberately minimal input, they only need a factory reference
+    // to reach the mechanism's own dispatch logic.
+    let class: CK_ULONG = CKO_SECRET_KEY;
+    let key_type: CK_ULONG = CKK_GENERIC_SECRET;
+    let generic_template = [
+        CK_ATTRIBUTE {
+            type_: CKA_CLASS,
+            pValue: &class as *const CK_ULONG as CK_VOID_PTR,
+            ulValueLen: std::mem::size_of::<CK_ULONG>() as CK_ULONG,
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_KEY_TYPE,
+            pValue: &key_type as *const CK_ULONG as CK_VOID_PTR,
+            ulValueLen: std::mem::size_of::<CK_ULONG>() as CK_ULONG,
+        },
+    ];
+    let factory = factories
+        .get_obj_factory_from_key_template(&generic_template)
+        .expect("generic-secret factory must exist");
+
+    // Deliberately minimal: no CKA_VALUE, no CKA_MODULUS, nothing --
+    // exercising the "operation constructor rejects this before even
+    // reaching AWS-LC" path, not a real crypto operation.
+    let dummy_key = Object::new(CKO_SECRET_KEY);
+
+    fn is_unimplemented_stub<T>(r: &Result<T>) -> bool {
+        matches!(r, Err(e) if e.rv() == CKR_MECHANISM_INVALID)
+    }
+
+    let mut violations: Vec<(CK_MECHANISM_TYPE, &'static str)> = Vec::new();
+    for mech_type in mechs.list() {
+        let entry = mechs.get(mech_type).expect("just listed");
+        let flags = entry.info().flags;
+        let mech = CK_MECHANISM {
+            mechanism: mech_type,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        if flags & CKF_ENCRYPT != 0
+            && is_unimplemented_stub(&entry.encryption_new(&mech, &dummy_key))
+        {
+            violations.push((mech_type, "encrypt"));
+        }
+        if flags & CKF_DECRYPT != 0
+            && is_unimplemented_stub(&entry.decryption_new(&mech, &dummy_key))
+        {
+            violations.push((mech_type, "decrypt"));
+        }
+        if flags & CKF_DIGEST != 0
+            && is_unimplemented_stub(&entry.digest_new(&mech))
+        {
+            violations.push((mech_type, "digest"));
+        }
+        if flags & CKF_SIGN != 0
+            && is_unimplemented_stub(&entry.sign_new(&mech, &dummy_key))
+        {
+            violations.push((mech_type, "sign"));
+        }
+        if flags & CKF_VERIFY != 0
+            && is_unimplemented_stub(&entry.verify_new(&mech, &dummy_key))
+        {
+            violations.push((mech_type, "verify"));
+        }
+        if flags & CKF_DERIVE != 0
+            && is_unimplemented_stub(&entry.derive_operation(&mech))
+        {
+            violations.push((mech_type, "derive"));
+        }
+        if flags & CKF_GENERATE != 0
+            && is_unimplemented_stub(&entry.generate_key(
+                &mech,
+                &[],
+                mechs,
+                factories,
+            ))
+        {
+            violations.push((mech_type, "generate"));
+        }
+        if flags & CKF_GENERATE_KEY_PAIR != 0
+            && is_unimplemented_stub(&entry.generate_keypair(&mech, &[], &[]))
+        {
+            violations.push((mech_type, "generate_keypair"));
+        }
+        if flags & CKF_WRAP != 0 {
+            let mut out: [u8; 0] = [];
+            let r = entry
+                .wrap_key(&mech, &dummy_key, &dummy_key, &mut out, factory);
+            if is_unimplemented_stub(&r) {
+                violations.push((mech_type, "wrap"));
+            }
+        }
+        if flags & CKF_UNWRAP != 0
+            && is_unimplemented_stub(&entry.unwrap_key(
+                &mech,
+                &dummy_key,
+                &[],
+                &[],
+                factory,
+            ))
+        {
+            violations.push((mech_type, "unwrap"));
+        }
+        if flags & CKF_ENCAPSULATE != 0 {
+            let mut out: [u8; 0] = [];
+            let r =
+                entry.encapsulate(&mech, &dummy_key, factory, &[], &mut out);
+            if is_unimplemented_stub(&r) {
+                violations.push((mech_type, "encapsulate"));
+            }
+        }
+        if flags & CKF_DECAPSULATE != 0
+            && is_unimplemented_stub(&entry.decapsulate(
+                &mech,
+                &dummy_key,
+                factory,
+                &[],
+                &[],
+            ))
+        {
+            violations.push((mech_type, "decapsulate"));
+        }
+    }
+
+    drop(token);
+    let _ = std::fs::remove_file(&cleanup_path);
+    let _ = std::fs::remove_dir_all(&cleanup_path);
+
+    assert!(
+        violations.is_empty(),
+        "mechanisms advertised via C_GetMechanismList with a capability \
+         flag set, but whose corresponding operation constructor is the \
+         unimplemented trait default (always CKR_MECHANISM_INVALID \
+         regardless of input): {:?}",
+        violations
+    );
 }

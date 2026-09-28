@@ -11,7 +11,39 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+#[cfg(all(feature = "ossl-backend", feature = "awslc"))]
+compile_error!("features `ossl-backend` and `awslc` are mutually exclusive");
+#[cfg(all(feature = "ossl-backend", feature = "awslc-fips"))]
+compile_error!(
+    "features `ossl-backend` and `awslc-fips` are mutually exclusive"
+);
+#[cfg(all(feature = "awslc", feature = "awslc-fips"))]
+compile_error!("features `awslc` and `awslc-fips` are mutually exclusive");
+#[cfg(not(any(
+    feature = "ossl-backend",
+    feature = "awslc",
+    feature = "awslc-fips"
+)))]
+compile_error!(
+    "exactly one crypto backend must be enabled: `ossl-backend` (default), `awslc`, or `awslc-fips`"
+);
+// AWS-LC has no ChaCha20/ChaCha20-Poly1305 implementation, and
+// `crate::awslc` has no `chacha20` module -- without this guard,
+// enabling the two together fails deep inside `crate::chacha20`'s
+// `use crate::ossl::chacha20::*;` (resolved via the `use awslc as ossl;`
+// backend alias below) with a generic "unresolved import" error that gives
+// no hint about the real, feature-combination-level cause.
+#[cfg(all(
+    feature = "chacha20",
+    any(feature = "awslc", feature = "awslc-fips")
+))]
+compile_error!(
+    "feature `chacha20` is not supported by the `awslc`/`awslc-fips` backends: AWS-LC has no ChaCha20 implementation"
+);
+
 mod attribute;
+#[cfg(any(feature = "awslc", feature = "awslc-fips"))]
+mod awslc;
 mod config;
 mod defaults;
 mod encryption;
@@ -21,7 +53,28 @@ mod mechanism;
 mod misc;
 mod native;
 mod object;
+#[cfg(feature = "ossl-backend")]
 mod ossl;
+// When the `awslc` or `awslc-fips` feature is enabled, `crate::ossl` is
+// bound to the awslc-backed module tree instead of the OpenSSL-backed
+// one, so every existing `crate::ossl::...` reference (src/hash.rs,
+// src/rng.rs, ...) resolves to whichever backend is active without
+// needing to change those call sites per backend.
+#[cfg(any(feature = "awslc", feature = "awslc-fips"))]
+use awslc as ossl;
+// `src/awslc/*.rs` itself references the *external* `awslc` crate
+// directly by name in ~27 call sites, via this alias (`crate::lowlevel`)
+// rather than the crate name directly. The dependency's local name is
+// `awslc_backend`, not `awslc` (see the matching comment on the
+// `awslc-backend` entry in Cargo.toml's `[dependencies]` for why), so
+// this doesn't collide with the local `mod awslc;` above and needs no
+// `::`-prefixed extern-prelude disambiguation. The `awslc` crate itself
+// picks between plain and FIPS-140-3-validated AWS-LC internally, via
+// its own `non-fips`/`fips` features (set by the matching feature
+// below) -- from this crate's perspective it's the same external crate
+// either way.
+#[cfg(any(feature = "awslc", feature = "awslc-fips"))]
+use awslc_backend as lowlevel;
 mod rng;
 mod session;
 mod slot;
@@ -99,7 +152,7 @@ pub(crate) struct State {
 impl State {
     /// Initializes the global state. Clears existing slots and sessions.
     pub(crate) fn initialize(&mut self) {
-        #[cfg(feature = "fips")]
+        #[cfg(all(feature = "fips", feature = "ossl-backend"))]
         fips::provider::init();
 
         self.slots.clear();

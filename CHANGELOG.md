@@ -8,6 +8,17 @@ Unreleased changes
 
 ### What Changed
 
+* Added a second, independent crypto backend implemented against AWS-LC,
+  selectable at compile time via the `awslc` (non-FIPS) or `awslc-fips`
+  (FIPS-140-3-validated) Cargo feature, alongside the existing OpenSSL-based
+  backend (`ossl-backend`, unchanged, still the default). Covers AES
+  (including PKCS#11 v3 message-mode streaming), RSA, ECDSA/ECDH, EdDSA
+  (Ed25519), X25519, finite-field DH, ML-KEM, ML-DSA, HKDF, SP 800-108 KBKDF
+  (counter mode), and SSHKDF. Ciphertext stealing (`CKM_AES_CTS`), Ed448/X448
+  (Curve448), SLH-DSA, and ML-DSA's deterministic (non-hedged) signing mode
+  are permanent, documented gaps, since AWS-LC has no primitive for any of
+  them.
+
 
 ## [1.5.3]
 

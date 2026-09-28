@@ -31,11 +31,13 @@ use ossl::OsslSecret;
 #[cfg(feature = "fips")]
 use crate::fips::FipsApproval;
 
-pub const MIN_RSA_SIZE_BITS: usize =
-    if cfg!(feature = "fips") { 2048 } else { 1024 };
-
-pub const MAX_RSA_SIZE_BITS: usize = 16384;
-pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
+// Backend-agnostic; defined once in crate::rsa (the mechanism-registration
+// module both backends share), re-exported here so crate::rsa's own
+// `use crate::ossl::rsa::*;` keeps resolving them per active backend.
+// `MIN_RSA_SIZE_BYTES` isn't re-exported: crate::rsa is the only consumer
+// (it's a local, same-file definition there, so its own glob import of
+// this module never actually needs it back).
+pub use crate::rsa::{MAX_RSA_SIZE_BITS, MIN_RSA_SIZE_BITS};
 
 /// Converts a PKCS#11 RSA key `Object` into an `EvpPkey`.
 ///
@@ -258,7 +260,16 @@ impl RsaPKCSOperation {
     fn max_message_len(modulus: usize, mech: &CK_MECHANISM) -> Result<usize> {
         match mech.mechanism {
             CKM_RSA_X_509 => Ok(modulus),
-            CKM_RSA_PKCS => Ok(modulus - 11),
+            // Both subtractions below can underflow for a small enough key
+            // combined with a large enough OAEP hash (e.g. a 1024-bit/
+            // 128-byte key with SHA-512/SHA3-512, whose 2*64+2 overhead
+            // already exceeds the modulus size): report CKR_KEY_SIZE_RANGE
+            // rather than letting an unchecked usize subtraction panic
+            // (debug) or wrap to a huge bogus value that silently defeats
+            // this pre-check (release).
+            CKM_RSA_PKCS => {
+                Ok(modulus.checked_sub(11).ok_or(CKR_KEY_SIZE_RANGE)?)
+            }
             CKM_RSA_PKCS_PSS => {
                 let params = mech.get_parameters::<CK_RSA_PKCS_PSS_PARAMS>()?;
                 Ok(Self::hash_len(params.hashAlg)?)
@@ -268,7 +279,7 @@ impl RsaPKCSOperation {
                     mech.get_parameters::<CK_RSA_PKCS_OAEP_PARAMS>()?;
                 let hs = Self::hash_len(params.hashAlg)?;
 
-                Ok(modulus - 2 * hs - 2)
+                Ok(modulus.checked_sub(2 * hs + 2).ok_or(CKR_KEY_SIZE_RANGE)?)
             }
             _ => Ok(0),
         }

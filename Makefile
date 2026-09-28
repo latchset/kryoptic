@@ -6,7 +6,7 @@ build:
 	cargo build --features nssdb
 
 fips:
-	cargo build --no-default-features --features fips,nssdb
+	cargo build --no-default-features --features fips,ossl-backend,nssdb
 
 static:
 	cargo build --no-default-features --features standard
@@ -15,7 +15,7 @@ check:
 	cargo test --features nssdb,log $(TESTS)
 
 check-fips:
-	cargo test --no-default-features --features fips,nssdb,log $(TESTS)
+	cargo test --no-default-features --features fips,ossl-backend,nssdb,log $(TESTS)
 
 check-static:
 	cargo test --no-default-features --features standard,log $(TESTS)
@@ -27,6 +27,7 @@ check-format:
 	@find ./src -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
 	@find ./tools -name '*.rs' | xargs rustfmt --check --color auto
 	@find ./rustls -name '*.rs' | xargs rustfmt --check --color auto
+	@find ./awslc -name '*.rs' | xargs rustfmt --check --color auto --edition 2021
 
 fix-format:
 	@find ./cdylib -name '*.rs' | xargs rustfmt
@@ -35,6 +36,7 @@ fix-format:
 	@find ./src -name '*.rs' | xargs rustfmt --edition 2021
 	@find ./tools -name '*.rs' | xargs rustfmt
 	@find ./rustls -name '*.rs' | xargs rustfmt
+	@find ./awslc -name '*.rs' | xargs rustfmt --edition 2021
 
 check-spell:
 	@.github/codespell.sh
@@ -47,7 +49,7 @@ docs:
 	cargo doc --no-default-features --features standard,pqc,nssdb,log --document-private-items
 
 docs-fips:
-	cargo doc --no-default-features --features fips --document-private-items
+	cargo doc --no-default-features --features fips,ossl-backend --document-private-items
 
 manpages:
 	pandoc -s -t man doc/kryoptic.conf.man.md -o kryoptic.conf.5

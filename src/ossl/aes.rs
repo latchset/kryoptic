@@ -6,11 +6,13 @@
 use crate::aes::*;
 use crate::error;
 use crate::error::Result;
-use crate::get_random_data;
 use crate::mechanism::*;
 use crate::misc::{
     bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, void_ptr, zeromem,
 };
+#[cfg(feature = "fips")]
+use crate::native::aes_iv::fips_approval_aead;
+use crate::native::aes_iv::{generate_iv, AesIvData};
 use crate::object::Object;
 use crate::ossl::common::osslctx;
 use crate::pkcs11::*;
@@ -23,10 +25,10 @@ use ossl::OsslSecret;
 #[cfg(feature = "fips")]
 use crate::fips::FipsApproval;
 
-/// Maximum buffer size for accumulating data in CCM mode (1 MiB).
-const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
-/// Minimum number of bits required for random IV generation.
-const MIN_RANDOM_IV_BITS: usize = 64;
+// Backend-agnostic; defined once in crate::aes, re-exported here so
+// crate::aes's own `use crate::ossl::aes::*;` keeps resolving them per
+// active backend.
+pub use crate::aes::{MAX_CCM_BUF, MIN_RANDOM_IV_BITS};
 
 const AES_KW_SEMIBLOCK: usize = AES_BLOCK_SIZE / 2;
 
@@ -57,54 +59,6 @@ fn object_to_raw_key(key: &Object) -> Result<OsslSecret> {
     let val = key.get_attr_as_bytes(CKA_VALUE)?;
     check_key_len(val.len())?;
     Ok(OsslSecret::from_slice(&val))
-}
-
-/// AES Initialization Vector Object
-///
-/// Defines the characteristics of the IV to be used in the AES operation
-/// it is referenced from. Size, generation method, counter, etc..
-#[derive(Debug)]
-struct AesIvData {
-    /// The IV buffer. May hold the initial value or be updated by a generator.
-    buf: Vec<u8>,
-    /// Number of fixed bits at the start of the IV (for counter modes).
-    fixedbits: usize,
-    /// IV generation method (e.g., `CKG_GENERATE_COUNTER`).
-    generator: CK_GENERATOR_FUNCTION,
-    /// Current counter value (if applicable).
-    counter: u64,
-    /// Maximum counter value before wrapping/error (if applicable).
-    maxcount: u64,
-}
-
-impl AesIvData {
-    /// Returns an empty IV container
-    fn none() -> Result<AesIvData> {
-        Ok(AesIvData {
-            buf: Vec::new(),
-            fixedbits: 0,
-            generator: CKG_NO_GENERATE,
-            counter: 0,
-            maxcount: 0,
-        })
-    }
-
-    /// Returns an IV container with the specified IV
-    fn simple(iv: Vec<u8>) -> Result<AesIvData> {
-        Ok(AesIvData {
-            buf: iv,
-            fixedbits: 0,
-            generator: CKG_NO_GENERATE,
-            counter: 0,
-            maxcount: 0,
-        })
-    }
-}
-
-impl Drop for AesIvData {
-    fn drop(&mut self) {
-        zeromem(self.buf.as_mut_slice());
-    }
 }
 
 /// AES Parameters Object
@@ -481,76 +435,6 @@ impl AesOperation {
         })
     }
 
-    /// Helper function that generate IVs according to the parameters
-    /// stored in the object.
-    ///
-    /// Each call returns the next IV and updates counters or any other
-    /// data in the operation object as needed.
-    fn generate_iv(params: &mut AesParams) -> Result<()> {
-        let genbits = params.iv.buf.len() * 8 - params.iv.fixedbits;
-        if params.iv.counter == 0 {
-            params.iv.maxcount = if genbits >= 64 {
-                u64::MAX
-            } else {
-                1u64 << genbits
-            }
-        }
-
-        if params.iv.counter >= params.iv.maxcount {
-            return Err(CKR_DATA_LEN_RANGE)?;
-        }
-
-        let mut genidx = params.iv.fixedbits / 8;
-        let bits = genbits % 8;
-        let mask = if bits == 0 { 0xff } else { (1u8 << bits) - 1 };
-        let genbytes = (genbits + 7) / 8;
-
-        match params.iv.generator {
-            CKG_GENERATE | CKG_GENERATE_COUNTER => {
-                let cntbuf = params.iv.counter.to_be_bytes();
-                params.iv.buf[genidx] &= !mask;
-                if genbytes > cntbuf.len() {
-                    genidx += 1;
-                    let cntidx = params.iv.buf.len() - cntbuf.len();
-                    params.iv.buf[genidx..cntidx].fill(0);
-                    params.iv.buf[cntidx..].copy_from_slice(&cntbuf);
-                } else {
-                    let cntidx = cntbuf.len() - genbytes;
-                    params.iv.buf[genidx] |= cntbuf[cntidx] & mask;
-                    params.iv.buf[(genidx + 1)..]
-                        .copy_from_slice(&cntbuf[(cntidx + 1)..]);
-                }
-            }
-            CKG_GENERATE_COUNTER_XOR => {
-                let cntbuf = params.iv.counter.to_be_bytes();
-                if genbytes > cntbuf.len() {
-                    let cntidx = params.iv.buf.len() - cntbuf.len();
-                    params.iv.buf[cntidx..]
-                        .iter_mut()
-                        .zip(cntbuf.iter())
-                        .for_each(|(iv, cn)| *iv ^= *cn);
-                } else {
-                    let cntidx = cntbuf.len() - genbytes;
-                    params.iv.buf[genidx] ^= cntbuf[cntidx] & mask;
-                    params.iv.buf[(genidx + 1)..]
-                        .iter_mut()
-                        .zip(cntbuf[(cntidx + 1)..].iter())
-                        .for_each(|(iv, cn)| *iv ^= *cn);
-                }
-            }
-            CKG_GENERATE_RANDOM => {
-                let mut genbuf = vec![0u8; (genbits + 7) / 8];
-                get_random_data(&mut genbuf)?;
-                params.iv.buf[genidx] ^= genbuf[0] & mask;
-                params.iv.buf[(genidx + 1)..].copy_from_slice(&genbuf[1..]);
-            }
-            _ => return Err(CKR_GENERAL_ERROR)?,
-        }
-
-        params.iv.counter += 1;
-        Ok(())
-    }
-
     /// Encryption/Decryption Initialization helper
     ///
     /// Sets up all the required context or parameters setting to direct
@@ -564,7 +448,7 @@ impl AesOperation {
     ) -> Result<OsslCipher> {
         /* Generates IV for some AEAD modes */
         if params.iv.generator != CKG_NO_GENERATE {
-            Self::generate_iv(params)?;
+            generate_iv(&mut params.iv)?;
         }
 
         let mut ctx = OsslCipher::new(
@@ -644,7 +528,12 @@ impl AesOperation {
 
         #[cfg(feature = "fips")]
         if op.mech == CKM_AES_GCM || op.mech == CKM_AES_CCM {
-            op.fips_approval_aead()?;
+            fips_approval_aead(
+                &mut op.fips_approval,
+                &op.params.iv,
+                op.op,
+                op.params.taglen,
+            )?;
         }
 
         Ok(op)
@@ -691,7 +580,12 @@ impl AesOperation {
 
         #[cfg(feature = "fips")]
         if op.mech == CKM_AES_GCM || op.mech == CKM_AES_CCM {
-            op.fips_approval_aead()?;
+            fips_approval_aead(
+                &mut op.fips_approval,
+                &op.params.iv,
+                op.op,
+                op.params.taglen,
+            )?;
         }
 
         Ok(op)
@@ -1081,7 +975,12 @@ impl AesOperation {
         }
 
         #[cfg(feature = "fips")]
-        self.fips_approval_aead()?;
+        fips_approval_aead(
+            &mut self.fips_approval,
+            &self.params.iv,
+            self.op,
+            self.params.taglen,
+        )?;
 
         Ok(())
     }
@@ -1144,83 +1043,13 @@ impl AesOperation {
         )?);
 
         #[cfg(feature = "fips")]
-        self.fips_approval_aead()?;
+        fips_approval_aead(
+            &mut self.fips_approval,
+            &self.params.iv,
+            self.op,
+            self.params.taglen,
+        )?;
 
-        Ok(())
-    }
-
-    /// AEAD specific FIPS checks
-    #[cfg(feature = "fips")]
-    fn fips_approval_aead(&mut self) -> Result<()> {
-        if self.fips_approval.is_not_approved() {
-            /* if the indicator is already set as not approved,
-             * just return, there is no point testing further
-             * as we should never overwrite an unapproved state
-             */
-            return Ok(());
-        }
-
-        /* For AEAD we handle indicators directly because OpenSSL has an
-         * inflexible API that provides incorrect answers when we
-         * generate the IV outside of that code */
-
-        /* The IV size must be 12 in FIPS mode */
-        if self.params.iv.buf.len() != 12 {
-            self.fips_approval.set(false);
-            return Ok(());
-        }
-
-        /* The IV must be generated in FIPS mode */
-        match self.params.iv.generator {
-            CKG_NO_GENERATE => match self.op {
-                CKF_ENCRYPT | CKF_WRAP | CKF_MESSAGE_ENCRYPT => {
-                    self.fips_approval.set(false);
-                }
-                CKF_DECRYPT | CKF_UNWRAP | CKF_MESSAGE_DECRYPT => {
-                    self.fips_approval.set(true);
-                }
-                _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
-            },
-            CKG_GENERATE_RANDOM => {
-                let random_bits =
-                    self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
-                if random_bits < 96 {
-                    self.fips_approval.set(false);
-                } else {
-                    self.fips_approval.set(true);
-                }
-            }
-            CKG_GENERATE | CKG_GENERATE_COUNTER => {
-                if self.params.iv.fixedbits < 32 {
-                    self.fips_approval.set(false);
-                } else {
-                    self.fips_approval.set(true);
-                }
-            }
-            CKG_GENERATE_COUNTER_XOR => {
-                let counter_bits =
-                    self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
-                if counter_bits < 64 {
-                    self.fips_approval.set(false);
-                } else {
-                    self.fips_approval.set(true)
-                }
-            }
-            _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
-        };
-
-        /*
-         * NIST SP 800-38D: 5.2.1.2 Output Data
-         * > t may be any one of the following five values: 128, 120, 112,
-         * > 104, or 96. For certain applications, t may be 64 or 32;
-         *
-         * We assume here that 64b (8B) is still acceptable value and since
-         * we take the length from user in bytes, we do not have to bother
-         * about values non-dividable by 8.
-         */
-        if self.params.taglen < 8 {
-            self.fips_approval.set(false);
-        }
         Ok(())
     }
 }

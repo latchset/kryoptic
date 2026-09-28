@@ -375,7 +375,11 @@ mod signatures;
 
 mod keys;
 
-#[cfg(feature = "sp800_108")]
+/* Excluded under awslc-fips: test_kdf_ctr_vector mixes multiple CMAC PRFs
+ * and all four SP 800-108 counter widths (8/16/24/32-bit) in one
+ * data-driven test, but AWS-LC's KBKDF_ctr_hmac only supports
+ * 32-bit-counter/HMAC, so the test can't be safely partially reverted. */
+#[cfg(all(feature = "sp800_108", not(feature = "awslc-fips")))]
 mod kdf_vectors;
 
 mod kdfs;
@@ -403,11 +407,12 @@ mod combined;
 #[cfg(feature = "mlkem")]
 mod mlkem;
 
-#[cfg(feature = "mldsa")]
+#[cfg(all(feature = "mldsa", not(feature = "awslc-fips")))]
 mod mldsa;
 
 #[cfg(all(
     feature = "slhdsa",
+    not(any(feature = "awslc", feature = "awslc-fips")),
     any(not(feature = "fips"), feature = "ossl400")
 ))]
 mod slhdsa;

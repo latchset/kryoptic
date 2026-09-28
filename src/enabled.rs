@@ -51,13 +51,27 @@ mod simplekdf;
 #[cfg(feature = "mlkem")]
 mod mlkem;
 
-#[cfg(feature = "mldsa")]
+// Excluded under awslc-fips specifically (not plain awslc): AWS-LC does
+// implement ML-DSA sign/verify, but its presence inside AWS-LC-FIPS's
+// validated boundary is not publicly confirmed as of this writing (only
+// ML-KEM is documented as validated in the AWS-LC-FIPS 3.0 module), so
+// this backend declines to advertise/perform ML-DSA operations under a
+// FIPS-mode build until that changes, rather than claim an approval
+// status kryoptic cannot vouch for. Plain awslc has no such restriction.
+#[cfg(all(feature = "mldsa", not(feature = "awslc-fips")))]
 mod mldsa;
 
 // In fips builds enable slhdsa only if ossl400 was selected, which is required
-// for deferred self tests
+// for deferred self tests. Never for awslc/awslc-fips: AWS-LC has no SLH-DSA/
+// SPHINCS+ primitive at all (confirmed against aws-lc-sys's public headers --
+// no matching symbols anywhere, for either backend variant), so this is
+// excluded outright rather than relying on the ossl400 check above, which is
+// an OpenSSL-FIPS-module-specific requirement that says nothing about this
+// backend (and, unlike awslc-fips, plain awslc doesn't imply `fips` at all,
+// so that check alone doesn't protect it).
 #[cfg(all(
     feature = "slhdsa",
+    not(any(feature = "awslc", feature = "awslc-fips")),
     any(not(feature = "fips"), feature = "ossl400")
 ))]
 mod slhdsa;
@@ -127,11 +141,14 @@ fn register_all(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
     #[cfg(feature = "mlkem")]
     mlkem::register(mechs, ot);
 
-    #[cfg(feature = "mldsa")]
+    // See the `not(feature = "awslc-fips")` mod-inclusion gate above for
+    // why this is excluded specifically under awslc-fips.
+    #[cfg(all(feature = "mldsa", not(feature = "awslc-fips")))]
     mldsa::register(mechs, ot);
 
     #[cfg(all(
         feature = "slhdsa",
+        not(any(feature = "awslc", feature = "awslc-fips")),
         any(not(feature = "fips"), feature = "ossl400")
     ))]
     slhdsa::register(mechs, ot);

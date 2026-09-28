@@ -18,6 +18,17 @@ use crate::pkcs11::*;
 
 use asn1;
 
+/// Minimum/maximum RSA key sizes this project accepts, and the byte-length
+/// equivalent of the minimum. Backend-agnostic (not a property of either
+/// crypto library) and shared by both `src/ossl/rsa.rs` and
+/// `src/awslc/rsa.rs`, which each `pub use` these back out so that this
+/// module's own `use crate::ossl::rsa::*;` above keeps resolving them
+/// polymorphically per active backend without needing its own copy.
+pub const MIN_RSA_SIZE_BITS: usize =
+    if cfg!(feature = "fips") { 2048 } else { 1024 };
+pub const MAX_RSA_SIZE_BITS: usize = 16384;
+pub const MIN_RSA_SIZE_BYTES: usize = MIN_RSA_SIZE_BITS / 8;
+
 /// Object that holds Mechanisms for RSA
 static RSA_MECHS: LazyLock<[Box<dyn Mechanism>; 4]> = LazyLock::new(|| {
     [

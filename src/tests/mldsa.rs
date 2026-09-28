@@ -56,6 +56,14 @@ fn test_mldsa_generate() {
 
 #[test]
 #[parallel]
+#[cfg_attr(
+    any(feature = "awslc", feature = "awslc-fips"),
+    ignore = "This test exercises only CKH_DETERMINISTIC_REQUIRED (plain \
+              and Hash-)ML-DSA signing (RFC 9814/FIPS 204 deterministic \
+              mode), which AWS-LC's ML-DSA signing API does not support; \
+              documented permanent gap. Basic (hedged) ML-DSA sign/verify \
+              is still covered by test_mldsa_generate."
+)]
 fn test_mldsa_operations() {
     let mut testtokn = TestToken::initialized("test_mldsa_operations", None);
 

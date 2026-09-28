@@ -89,6 +89,11 @@ fn test_ec_montgomery_derive_x25519() {
 
 #[test]
 #[parallel]
+#[cfg_attr(
+    any(feature = "awslc", feature = "awslc-fips"),
+    ignore = "AWS-LC has no X448 (Curve448/Ed448-Goldilocks) support; \
+              documented permanent gap"
+)]
 fn test_ec_montgomery_derive_x448() {
     test_ec_montgomery_derive(TestUnit {
         curve: "x448",
@@ -652,6 +657,91 @@ fn test_montgomery_public_key_info() {
         CKA_PUBLIC_KEY_INFO
     ));
     assert_eq!(imported_pri_key_info, spki_der);
+
+    testtokn.finalize();
+}
+
+/// Regression test: `C_DeriveKey`/`CKM_ECDH1_DERIVE` on an X25519
+/// (`CKK_EC_MONTGOMERY`) private key with a small-order/all-zero peer
+/// public value (a well-known invalid-curve attack input RFC 7748 §6.1
+/// notes X25519 implementations must reject) must never return
+/// `CKR_SIGNATURE_INVALID` -- that code is reserved for `C_Verify`/
+/// `C_VerifyFinal`/`C_VerifyRecover` and is not among `C_DeriveKey`'s
+/// valid return values, even though the underlying rejection shares some
+/// mechanics with a failed cryptographic check.
+#[test]
+#[parallel]
+fn test_ec_montgomery_derive_rejects_low_order_point_with_valid_rv() {
+    let mut testtokn = TestToken::initialized(
+        "test_ec_montgomery_derive_rejects_low_order_point_with_valid_rv",
+        None,
+    );
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    let ec_params = hex::decode("130a63757276653235353139")
+        .expect("Failed to decode hex params");
+    let a_priv = hex::decode(
+        "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+    )
+    .expect("Failed to decode alice's value");
+    let alice_handle = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC_MONTGOMERY)],
+        &[
+            (CKA_LABEL, "Alice's EC Montgomery Private Key".as_bytes()),
+            (CKA_VALUE, a_priv.as_slice()),
+            (CKA_EC_PARAMS, ec_params.as_slice()),
+        ],
+        &[(CKA_DERIVE, true)]
+    ));
+
+    // The all-zero point: a canonical small-order X25519 input whose
+    // shared secret AWS-LC's X25519() explicitly detects and rejects.
+    let mut low_order_point = [0u8; 32];
+    let mut params = CK_ECDH1_DERIVE_PARAMS {
+        kdf: CKD_NULL,
+        ulSharedDataLen: 0,
+        pSharedData: std::ptr::null_mut(),
+        ulPublicDataLen: low_order_point.len() as CK_ULONG,
+        pPublicData: low_order_point.as_mut_ptr(),
+    };
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
+
+    let mut s_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        alice_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut s_handle,
+    );
+    assert_ne!(
+        ret, CKR_SIGNATURE_INVALID,
+        "CKR_SIGNATURE_INVALID is not a valid C_DeriveKey return code"
+    );
 
     testtokn.finalize();
 }

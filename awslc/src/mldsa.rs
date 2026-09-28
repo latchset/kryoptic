@@ -1,0 +1,1758 @@
+// ML-DSA (FIPS 204) signatures, wrapping AWS-LC's generic
+// EVP_PKEY/EVP_PKEY_CTX interface (AWS-LC has no dedicated classic API
+// for ML-DSA, unlike RSA/EC).
+//
+// `sign`/`verify`'s FIPS 204 context-string support is NOT a thin AWS-LC
+// wrapper: AWS-LC's own context-string setter
+// (`EVP_PKEY_CTX_set_signature_context`) is unconditionally unsupported
+// for ML-DSA, so this module computes FIPS 204's `mu` value itself (via
+// AWS-LC's SHAKE256 primitive) and feeds it through AWS-LC's digest-mode
+// `EVP_PKEY_sign`/`EVP_PKEY_verify`. See `MlDsaKey::sign`'s doc comment
+// for the full empirical justification, including why FIPS 204's
+// deterministic-signing variant (`MlDsaHedge::DeterministicRequired`)
+// remains a genuine, unresolvable AWS-LC gap even after that change.
+//
+// `sign_prehashed`/`verify_prehashed` extend the same `mu`-computation
+// machinery to FIPS 204's HashML-DSA (prehash) mode: `mu` is defined
+// identically for both modes (`mu = SHAKE256(SHAKE256(pk, 64) || M',
+// 64)`), so `compute_mu_for_m_prime` is the single shared implementation,
+// parameterized only by an already fully-formed message representative
+// `M'` -- the two modes differ ONLY in how `M'` itself is built. See
+// `compute_mu_for_m_prime`'s and `sign_prehashed`'s doc comments for the
+// full construction.
+
+use crate::cipher::zeromem;
+use crate::error::{Error, ErrorKind};
+use crate::ffi;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MlDsaParamSet {
+    MlDsa44,
+    MlDsa65,
+    MlDsa87,
+}
+
+impl MlDsaParamSet {
+    fn nid(self) -> i32 {
+        match self {
+            MlDsaParamSet::MlDsa44 => ffi::NID_MLDSA44,
+            MlDsaParamSet::MlDsa65 => ffi::NID_MLDSA65,
+            MlDsaParamSet::MlDsa87 => ffi::NID_MLDSA87,
+        }
+    }
+}
+
+/// FIPS 204's hedge/determinism choice for `MlDsaKey::sign`.
+///
+/// `Hedged` is the only variant AWS-LC's public API can actually deliver --
+/// every ML-DSA signing path in AWS-LC unconditionally draws fresh
+/// randomness (`RAND_bytes`) for FIPS 204's `rnd` value, with no override
+/// hook exposed anywhere in its public API. `DeterministicRequired`
+/// documents the caller's request for FIPS 204's deterministic variant
+/// (`rnd = 0` in place of the random 32 bytes); `MlDsaKey::sign` always
+/// returns `Err(WrapperError)` for it rather than silently signing with
+/// hedged randomness instead -- see `MlDsaKey::sign`'s doc comment for the
+/// full empirical justification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MlDsaHedge {
+    Hedged,
+    DeterministicRequired,
+}
+
+// `#[derive(Debug)]` here only ever prints the raw `*mut EVP_PKEY` pointer
+// address, never key material -- matches `MlKemKey`'s precedent
+// (`awslc/src/mlkem.rs`), which derives `Debug` for the same reason (holds
+// only a raw pointer).
+#[derive(Debug)]
+pub struct MlDsaKey {
+    pkey: *mut ffi::EVP_PKEY,
+}
+
+// SAFETY: `MlDsaKey` exclusively owns its `*mut EVP_PKEY` (never aliased by
+// any other live reference), so moving it across threads (Send) is sound.
+//
+// Sync additionally requires that concurrent calls through `&MlDsaKey` from
+// multiple threads are race-free. `public_key`/`private_key` only call
+// `EVP_PKEY_get_raw_public_key`/`get_raw_private_key`, which take a `const
+// EVP_PKEY *` (per `aws-lc/include/openssl/evp.h`) and never mutate the
+// pointee. `sign`/`verify` each construct their own fresh `EVP_PKEY_CTX` per
+// call via `EVP_PKEY_CTX_new(self.pkey, ...)`, which up-refs `self.pkey`
+// (mirrors `MlKemKey`'s documented up-ref pattern in `awslc/src/mlkem.rs`)
+// rather than mutating it in place; the `EVP_MD_CTX`s `compute_mu`'s
+// `shake256` helper allocates are entirely private per-call scratch state
+// (SHAKE256 over caller-supplied bytes), never touching `self.pkey` at all.
+// So no method reachable from `&self` racily mutates the shared pointee.
+unsafe impl Send for MlDsaKey {}
+unsafe impl Sync for MlDsaKey {}
+
+impl Drop for MlDsaKey {
+    fn drop(&mut self) {
+        unsafe { ffi::EVP_PKEY_free(self.pkey) };
+    }
+}
+
+impl MlDsaKey {
+    pub fn generate(param_set: MlDsaParamSet) -> Result<MlDsaKey, Error> {
+        let ctx = unsafe {
+            ffi::EVP_PKEY_CTX_new_id(ffi::EVP_PKEY_PQDSA, std::ptr::null_mut())
+        };
+        if ctx.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let ok = unsafe {
+            ffi::EVP_PKEY_keygen_init(ctx) == 1
+                && ffi::EVP_PKEY_CTX_pqdsa_set_params(ctx, param_set.nid()) == 1
+        };
+        if !ok {
+            unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let mut pkey: *mut ffi::EVP_PKEY = std::ptr::null_mut();
+        let ret = unsafe { ffi::EVP_PKEY_keygen(ctx, &mut pkey) };
+        unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+        if ret != 1 || pkey.is_null() {
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        Ok(MlDsaKey { pkey })
+    }
+
+    /// 32-byte FIPS 204 seed. Unlike ML-KEM, no separate deterministic-
+    /// keygen call is needed here -- `EVP_PKEY_pqdsa_new_raw_private_key`
+    /// auto-detects seed-length input and expands it into a full key
+    /// pair, per its own header doc comment. Verified empirically to
+    /// hold for all three parameter sets (ML-DSA-44/65/87), not just one
+    /// case -- see `from_seed_matches_fips204_seed_length_for_all_param_sets`
+    /// below.
+    pub fn from_seed(
+        param_set: MlDsaParamSet,
+        seed: &[u8; 32],
+    ) -> Result<MlDsaKey, Error> {
+        let pkey = unsafe {
+            ffi::EVP_PKEY_pqdsa_new_raw_private_key(
+                param_set.nid(),
+                seed.as_ptr(),
+                seed.len(),
+            )
+        };
+        if pkey.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        Ok(MlDsaKey { pkey })
+    }
+
+    pub fn from_public_key(
+        param_set: MlDsaParamSet,
+        bytes: &[u8],
+    ) -> Result<MlDsaKey, Error> {
+        let pkey = unsafe {
+            ffi::EVP_PKEY_pqdsa_new_raw_public_key(
+                param_set.nid(),
+                bytes.as_ptr(),
+                bytes.len(),
+            )
+        };
+        if pkey.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        Ok(MlDsaKey { pkey })
+    }
+
+    /// `bytes` must be the full expanded private key, NOT a seed --
+    /// `EVP_PKEY_pqdsa_new_raw_private_key` auto-detects by length, so
+    /// passing the wrong length here silently goes through the other
+    /// code path. Confirm this distinction is handled correctly at the
+    /// call site in the integration layer (`src/awslc/mldsa.rs`), not
+    /// just here.
+    pub fn from_private_key(
+        param_set: MlDsaParamSet,
+        bytes: &[u8],
+    ) -> Result<MlDsaKey, Error> {
+        let pkey = unsafe {
+            ffi::EVP_PKEY_pqdsa_new_raw_private_key(
+                param_set.nid(),
+                bytes.as_ptr(),
+                bytes.len(),
+            )
+        };
+        if pkey.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        Ok(MlDsaKey { pkey })
+    }
+
+    pub fn public_key(&self) -> Result<Vec<u8>, Error> {
+        let mut len: usize = 0;
+        if unsafe {
+            ffi::EVP_PKEY_get_raw_public_key(
+                self.pkey,
+                std::ptr::null_mut(),
+                &mut len,
+            )
+        } != 1
+        {
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let mut buf = vec![0u8; len];
+        let mut len2 = len;
+        if unsafe {
+            ffi::EVP_PKEY_get_raw_public_key(
+                self.pkey,
+                buf.as_mut_ptr(),
+                &mut len2,
+            )
+        } != 1
+        {
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        buf.truncate(len2);
+        Ok(buf)
+    }
+
+    pub fn private_key(&self) -> Result<Vec<u8>, Error> {
+        let mut len: usize = 0;
+        if unsafe {
+            ffi::EVP_PKEY_get_raw_private_key(
+                self.pkey,
+                std::ptr::null_mut(),
+                &mut len,
+            )
+        } != 1
+        {
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let mut buf = vec![0u8; len];
+        let mut len2 = len;
+        if unsafe {
+            ffi::EVP_PKEY_get_raw_private_key(
+                self.pkey,
+                buf.as_mut_ptr(),
+                &mut len2,
+            )
+        } != 1
+        {
+            zeromem(&mut buf);
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        buf.truncate(len2);
+        Ok(buf)
+    }
+
+    /// `sign`/`verify` do NOT use `EVP_PKEY_CTX_set_signature_context` --
+    /// confirmed empirically (and from AWS-LC's own header doc comment on
+    /// that function: "EVP_PKEY_ED25519PH is the only key type that
+    /// currently supports setting a signature context") that it is
+    /// unconditionally unsupported for ML-DSA/PQDSA keys, failing loudly
+    /// with `COMMAND_NOT_SUPPORTED` in both orderings relative to `_init`.
+    /// This traces to PQDSA's `EVP_PKEY_METHOD` setting `ctrl = NULL`
+    /// (`crypto/fipsmodule/evp/p_pqdsa.c`): `EVP_PKEY_CTX_ctrl`, which the
+    /// setter is implemented on top of, requires a non-NULL `ctrl` and
+    /// fails immediately otherwise. So AWS-LC's own EVP_PKEY_CTX path
+    /// genuinely cannot deliver a FIPS 204 context string for ML-DSA at
+    /// all, for any input.
+    ///
+    /// Instead, `sign`/`verify` compute FIPS 204's `mu` value themselves
+    /// (`Self::compute_mu`, below) and feed it through the DIGEST-mode
+    /// `EVP_PKEY_sign`/`EVP_PKEY_verify` entry points, which DO work for
+    /// ML-DSA and accept an arbitrary caller-supplied 64-byte digest input
+    /// (AWS-LC calls it `mu`) with no context-string involvement at all on
+    /// AWS-LC's side -- the context string is fully absorbed into `mu`
+    /// before AWS-LC ever sees it. Concretely:
+    /// `mu = SHAKE256(SHAKE256(pk, 64) || 0x00 || len(ctx) || ctx || msg,
+    /// 64)`, confirmed both by reading AWS-LC's own
+    /// `crypto/fipsmodule/ml_dsa/ml_dsa_ref/sign.c`
+    /// (`ml_dsa_sign_internal`'s `external_mu == 0` branch, which is what
+    /// AWS-LC's own raw/message-mode signing computes internally) and,
+    /// much more importantly, empirically: this exact formula, computed
+    /// with AWS-LC's own `EVP_shake256()`/`EVP_DigestFinalXOF`, reproduces
+    /// a real, independent FIPS 204 known-answer test vector byte-for-byte
+    /// -- see `verify_matches_kryoptic_reference_known_answer_vector`
+    /// below, which is kryoptic's own `src/tests/mldsa.rs` ML-DSA-44
+    /// context+signature test vector (an ACVP-derived vector, not one this
+    /// crate invented), reproduced here independently. `EVP_PKEY_sign`/
+    /// `EVP_PKEY_verify` (digest mode) is the entry point AWS-LC's own test
+    /// suite (`crypto/evp_extra/p_pqdsa_test.cc`) uses for exactly this
+    /// pattern -- passing a pre-computed `mu` directly to
+    /// `EVP_PKEY_sign`/`EVP_PKEY_verify` after `_init`.
+    ///
+    /// This is a materially different implementation strategy than a pure
+    /// EVP_PKEY/EVP_PKEY_CTX wrapper (this file now computes a real piece
+    /// of FIPS 204's protocol logic, not just AWS-LC glue) -- authorized
+    /// explicitly because kryoptic's own reference test suite
+    /// (`src/tests/mldsa.rs`) has fixed known-answer vectors that require a
+    /// working context string, the same pattern used for ECDH's
+    /// X9.63/SP800-56C KDF work (a well-specified public algorithm
+    /// hand-implemented on top of an available AWS-LC primitive -- here,
+    /// SHAKE256 via `EVP_shake256()`/`EVP_DigestFinalXOF` -- rather than a
+    /// documented gap).
+    ///
+    /// `context` semantics: `None` and `Some(&[])` are equivalent (FIPS
+    /// 204's default/empty context); a context longer than 255 bytes
+    /// returns `Err(WrapperError)` (FIPS 204's 1-byte length-prefix limit;
+    /// also matches AWS-LC's own `ctxlen > 255` check in its raw-mode
+    /// signing, which this digest-mode path bypasses and so must replicate
+    /// itself).
+    fn compute_mu(
+        pk: &[u8],
+        context: &[u8],
+        msg: &[u8],
+    ) -> Result<[u8; 64], Error> {
+        if context.len() > 255 {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+        let pre = [0u8, context.len() as u8];
+        Self::compute_mu_for_m_prime(pk, &[&pre, context, msg])
+    }
+
+    /// Computes FIPS 204's `mu = SHAKE256(SHAKE256(pk, 64) || M', 64)` for
+    /// an ALREADY fully-formed message representative `M'`, supplied as a
+    /// list of byte-slice parts to concatenate (avoiding a copy of a
+    /// potentially large message/hash into one buffer).
+    ///
+    /// FIPS 204 defines `mu` identically for pure ML-DSA and for
+    /// HashML-DSA -- the two modes differ ONLY in how `M'` itself is
+    /// constructed (pure mode: `M' = 0x00 || len(ctx) || ctx || msg`, this
+    /// crate's `compute_mu`, below; HashML-DSA: `M' = 0x01 || len(ctx) ||
+    /// ctx || OID || Hash(msg)`, FIPS 204 Algorithm 4 Step 23 / Algorithm 5
+    /// Step 18, built by the integration layer -- `crate::awslc::mldsa` in
+    /// the main kryoptic crate, which has access to the DER-encoded
+    /// hash-algorithm OID this needs; this crate deliberately has no
+    /// ASN.1 dependency). This method is the single shared implementation
+    /// of `mu` for both: `compute_mu` (pure mode) and `sign_prehashed`/
+    /// `verify_prehashed` (HashML-DSA, below) all funnel through it rather
+    /// than each re-deriving the `tr`/SHAKE256 computation independently.
+    fn compute_mu_for_m_prime(
+        pk: &[u8],
+        m_prime_parts: &[&[u8]],
+    ) -> Result<[u8; 64], Error> {
+        let tr = Self::shake256(&[pk], 64)?;
+        let mut parts: Vec<&[u8]> = Vec::with_capacity(m_prime_parts.len() + 1);
+        parts.push(tr.as_slice());
+        parts.extend_from_slice(m_prime_parts);
+        let mu_vec = Self::shake256(&parts, 64)?;
+        let mut mu = [0u8; 64];
+        mu.copy_from_slice(&mu_vec);
+        Ok(mu)
+    }
+
+    /// One-shot SHAKE256 (a real XOF -- `out_len` is caller-chosen, not
+    /// tied to any fixed digest size) over the concatenation of `parts`,
+    /// using AWS-LC's own `EVP_shake256()`/`EVP_DigestFinalXOF`.
+    fn shake256(parts: &[&[u8]], out_len: usize) -> Result<Vec<u8>, Error> {
+        let md_ctx = unsafe { ffi::EVP_MD_CTX_new() };
+        if md_ctx.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let mut ok = unsafe {
+            ffi::EVP_DigestInit_ex(
+                md_ctx,
+                ffi::EVP_shake256(),
+                std::ptr::null_mut(),
+            ) == 1
+        };
+        for part in parts {
+            if !ok {
+                break;
+            }
+            ok = unsafe {
+                ffi::EVP_DigestUpdate(
+                    md_ctx,
+                    part.as_ptr() as *const std::os::raw::c_void,
+                    part.len(),
+                ) == 1
+            };
+        }
+        if !ok {
+            unsafe { ffi::EVP_MD_CTX_free(md_ctx) };
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let mut out = vec![0u8; out_len];
+        let ret = unsafe {
+            ffi::EVP_DigestFinalXOF(md_ctx, out.as_mut_ptr(), out.len())
+        };
+        unsafe { ffi::EVP_MD_CTX_free(md_ctx) };
+        if ret != 1 {
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        Ok(out)
+    }
+
+    /// `hedge: MlDsaHedge::DeterministicRequired` always returns
+    /// `Err(WrapperError)` without calling into AWS-LC at all: AWS-LC's
+    /// public API provides NO way to select or override FIPS 204's `rnd`
+    /// value (deterministic signing sets `rnd = 0` in place of the normal
+    /// 32 random bytes) -- confirmed via three independent lines of
+    /// evidence, not assumed:
+    ///  - reading every ML-DSA-reachable signing function in AWS-LC's
+    ///    vendored C sources (`crypto/fipsmodule/ml_dsa/ml_dsa_ref/sign.c`):
+    ///    `ml_dsa_sign`/`ml_dsa_extmu_sign` both unconditionally call
+    ///    `RAND_bytes(rnd, ML_DSA_RNDBYTES)` internally, with no parameter
+    ///    or ctrl to override it; the internal function that DOES take an
+    ///    explicit `rnd` (`ml_dsa_sign_internal`) is never exposed past
+    ///    that call site -- no public header declares it, and
+    ///    `aws-lc-sys`'s generated bindings contain no `ml_dsa_*` symbols
+    ///    at all (only the public `EVP_PKEY_pqdsa_*`/generic EVP surface is
+    ///    bound), so there is no supported way to reach it from Rust;
+    ///  - reading `aws-lc/include/openssl/rand.h`: `RAND_set_rand_method`
+    ///    is documented to always "return one" (i.e. a no-op that doesn't
+    ///    actually install anything) and `RAND_add` is documented to "do
+    ///    nothing"; the one real override, `RAND_reset_for_fuzzing`, only
+    ///    exists in a `BORINGSSL_UNSAFE_DETERMINISTIC_MODE` fuzzer-only
+    ///    build -- absent from `aws-lc-sys`'s generated bindings entirely,
+    ///    and no `aws-lc-sys` Cargo feature enables that build mode;
+    ///  - empirically: signing the exact same `mu` with the exact same key
+    ///    twice, back to back, produces two DIFFERENT signatures --
+    ///    confirmed with a standalone probe before writing this comment,
+    ///    and again in `sign_is_hedged_not_deterministic`, below.
+    ///
+    /// This is a genuine, narrow AWS-LC capability gap (distinct from the
+    /// context string, which IS fully deliverable -- see `compute_mu`
+    /// above), not a bug in this wrapper, and not something routable
+    /// around without either linking undocumented/unexported AWS-LC
+    /// symbols (too fragile to rely on -- no public header, no ABI
+    /// stability guarantee across AWS-LC versions) or reimplementing
+    /// ML-DSA's lattice-signing math from scratch in this crate (out of
+    /// scope for a primitive whose job is to wrap AWS-LC's public EVP
+    /// interface, not reimplement FIPS 204's core signing algorithm).
+    /// `verify_matches_kryoptic_reference_known_answer_vector` (below)
+    /// documents this gap against the exact real-world vector that needs
+    /// it (kryoptic's own `src/tests/mldsa.rs`, which uses
+    /// `CKH_DETERMINISTIC_REQUIRED`) rather than a synthetic example.
+    pub fn sign(
+        &self,
+        msg: &[u8],
+        context: Option<&[u8]>,
+        hedge: MlDsaHedge,
+    ) -> Result<Vec<u8>, Error> {
+        if hedge == MlDsaHedge::DeterministicRequired {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+        let pk = self.public_key()?;
+        let mu = Self::compute_mu(&pk, context.unwrap_or(&[]), msg)?;
+        self.sign_mu(&mu, hedge)
+    }
+
+    /// `context` semantics match `sign`'s (see `compute_mu`). FIPS 204
+    /// verification never samples randomness, so there is no hedge/
+    /// determinism concept here at all -- no `hedge` parameter.
+    pub fn verify(
+        &self,
+        msg: &[u8],
+        sig: &[u8],
+        context: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        let pk = self.public_key()?;
+        let mu = Self::compute_mu(&pk, context.unwrap_or(&[]), msg)?;
+        self.verify_mu(&mu, sig)
+    }
+
+    /// Signs FIPS 204's HashML-DSA (prehash) message representative `M'`,
+    /// supplied by the caller as a list of byte-slice parts to
+    /// concatenate (see `compute_mu_for_m_prime`'s doc comment for the
+    /// full construction and why this crate doesn't build `M'` itself).
+    ///
+    /// `mu`'s computation and the underlying digest-mode `EVP_PKEY_sign`
+    /// call (`sign_mu`, below) are IDENTICAL to pure-mode `sign` -- only
+    /// `M'`'s construction differs between pure ML-DSA and HashML-DSA.
+    /// This method exists specifically so that sharing isn't duplicated:
+    /// `crate::awslc::mldsa` (the main kryoptic crate's integration layer)
+    /// builds HashML-DSA's `M' = 0x01 || len(ctx) || ctx || OID ||
+    /// Hash(msg)` (FIPS 204 Algorithm 4 Step 23 / Algorithm 5 Step 18) and
+    /// calls this directly, rather than this crate re-deriving OID
+    /// encoding it has no ASN.1 support for.
+    ///
+    /// Same hedge/determinism caveats as `sign` (see its doc comment) --
+    /// `MlDsaHedge::DeterministicRequired` always fails here too, for the
+    /// same reason (AWS-LC's ML-DSA signing is unconditionally hedged
+    /// regardless of which `M'` is being signed).
+    pub fn sign_prehashed(
+        &self,
+        m_prime_parts: &[&[u8]],
+        hedge: MlDsaHedge,
+    ) -> Result<Vec<u8>, Error> {
+        if hedge == MlDsaHedge::DeterministicRequired {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+        let pk = self.public_key()?;
+        let mu = Self::compute_mu_for_m_prime(&pk, m_prime_parts)?;
+        self.sign_mu(&mu, hedge)
+    }
+
+    /// Verifies FIPS 204's HashML-DSA (prehash) message representative
+    /// `M'` -- see `sign_prehashed`'s doc comment for the full rationale.
+    /// No `hedge`/determinism concept for verification, same as `verify`.
+    pub fn verify_prehashed(
+        &self,
+        m_prime_parts: &[&[u8]],
+        sig: &[u8],
+    ) -> Result<(), Error> {
+        let pk = self.public_key()?;
+        let mu = Self::compute_mu_for_m_prime(&pk, m_prime_parts)?;
+        self.verify_mu(&mu, sig)
+    }
+
+    /// Shared FFI core behind both `sign` (pure mode) and `sign_prehashed`
+    /// (HashML-DSA): signs an already-computed `mu` value via AWS-LC's
+    /// digest-mode `EVP_PKEY_sign`. See `sign`'s doc comment for the full
+    /// empirical justification of this approach and of
+    /// `MlDsaHedge::DeterministicRequired` always failing.
+    fn sign_mu(
+        &self,
+        mu: &[u8; 64],
+        hedge: MlDsaHedge,
+    ) -> Result<Vec<u8>, Error> {
+        if hedge == MlDsaHedge::DeterministicRequired {
+            return Err(Error::new(ErrorKind::WrapperError));
+        }
+        let ctx =
+            unsafe { ffi::EVP_PKEY_CTX_new(self.pkey, std::ptr::null_mut()) };
+        if ctx.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        if unsafe { ffi::EVP_PKEY_sign_init(ctx) } != 1 {
+            unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let mut sig_len: usize = 0;
+        let probe = unsafe {
+            ffi::EVP_PKEY_sign(
+                ctx,
+                std::ptr::null_mut(),
+                &mut sig_len,
+                mu.as_ptr(),
+                mu.len(),
+            )
+        };
+        if probe != 1 {
+            unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let mut sig = vec![0u8; sig_len];
+        let mut sig_len2 = sig_len;
+        let ret = unsafe {
+            ffi::EVP_PKEY_sign(
+                ctx,
+                sig.as_mut_ptr(),
+                &mut sig_len2,
+                mu.as_ptr(),
+                mu.len(),
+            )
+        };
+        unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+        if ret != 1 {
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        sig.truncate(sig_len2);
+        Ok(sig)
+    }
+
+    /// Shared FFI core behind both `verify` (pure mode) and
+    /// `verify_prehashed` (HashML-DSA): verifies an already-computed `mu`
+    /// value via AWS-LC's digest-mode `EVP_PKEY_verify`.
+    fn verify_mu(&self, mu: &[u8; 64], sig: &[u8]) -> Result<(), Error> {
+        let ctx =
+            unsafe { ffi::EVP_PKEY_CTX_new(self.pkey, std::ptr::null_mut()) };
+        if ctx.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        if unsafe { ffi::EVP_PKEY_verify_init(ctx) } != 1 {
+            unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+            return Err(Error::new(ErrorKind::BackendError));
+        }
+        let ret = unsafe {
+            ffi::EVP_PKEY_verify(
+                ctx,
+                sig.as_ptr(),
+                sig.len(),
+                mu.as_ptr(),
+                mu.len(),
+            )
+        };
+        unsafe { ffi::EVP_PKEY_CTX_free(ctx) };
+        if ret != 1 {
+            return Err(Error::new(ErrorKind::VerifyFailed));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_sign_verify_round_trip() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"hello ML-DSA";
+        let sig = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        assert_eq!(sig.len(), 3309);
+        key.verify(msg, &sig, None).unwrap();
+    }
+
+    #[test]
+    fn verify_rejects_tampered_message() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"hello ML-DSA";
+        let sig = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        assert!(key.verify(b"goodbye ML-DSA", &sig, None).is_err());
+    }
+
+    #[test]
+    fn public_key_size_matches_spec() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        assert_eq!(key.public_key().unwrap().len(), 1952);
+    }
+
+    #[test]
+    fn from_seed_is_deterministic() {
+        let seed = [0x33u8; 32];
+        let key1 = MlDsaKey::from_seed(MlDsaParamSet::MlDsa65, &seed).unwrap();
+        let key2 = MlDsaKey::from_seed(MlDsaParamSet::MlDsa65, &seed).unwrap();
+        assert_eq!(key1.public_key().unwrap(), key2.public_key().unwrap());
+    }
+
+    #[test]
+    fn from_seed_derived_key_signs_and_verifies() {
+        let seed = [0x99u8; 32];
+        let key = MlDsaKey::from_seed(MlDsaParamSet::MlDsa65, &seed).unwrap();
+        let msg = b"seed-derived signing";
+        let sig = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        key.verify(msg, &sig, None).unwrap();
+    }
+
+    #[test]
+    fn from_public_key_can_verify_but_not_sign() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let pub_bytes = key.public_key().unwrap();
+        let pubkey_only =
+            MlDsaKey::from_public_key(MlDsaParamSet::MlDsa65, &pub_bytes)
+                .unwrap();
+        let msg = b"signed by the full key";
+        let sig = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        pubkey_only.verify(msg, &sig, None).unwrap();
+    }
+
+    #[test]
+    fn context_string_changes_signature_and_is_required_to_match_on_verify() {
+        // FIPS 204's context string is bound into the signature (via `mu`,
+        // see `MlDsaKey::compute_mu`) -- a signature made with one context
+        // must not verify against a different context. This is the
+        // originally-intended test from the task brief; it now actually
+        // exercises real, working context support (superseding the
+        // `Err(BackendError)`-on-`Some(_)` behavior of the plain
+        // `EVP_PKEY_CTX_set_signature_context` path, which never worked for
+        // ML-DSA at all -- see `sign`'s doc comment).
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"contextual message";
+        let sig_ctx_a = key
+            .sign(msg, Some(b"context-a"), MlDsaHedge::Hedged)
+            .unwrap();
+        assert!(key.verify(msg, &sig_ctx_a, Some(b"context-b")).is_err());
+        // Also must not verify with no context at all (None/empty is a
+        // different, specific context value, not a wildcard).
+        assert!(key.verify(msg, &sig_ctx_a, None).is_err());
+        key.verify(msg, &sig_ctx_a, Some(b"context-a")).unwrap();
+    }
+
+    #[test]
+    fn none_and_empty_context_are_equivalent() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"contextual message";
+        let sig = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        // A signature made with no context (None) must verify against an
+        // explicitly-present-but-empty context (Some(&[])), and vice versa
+        // -- FIPS 204 treats them as exactly the same context value.
+        key.verify(msg, &sig, Some(b"")).unwrap();
+
+        let sig2 = key.sign(msg, Some(b""), MlDsaHedge::Hedged).unwrap();
+        key.verify(msg, &sig2, None).unwrap();
+    }
+
+    #[test]
+    fn context_longer_than_255_bytes_is_rejected() {
+        // FIPS 204's context string has a 1-byte length prefix (max 255).
+        // AWS-LC's own raw-mode signing enforces this itself, but this
+        // primitive bypasses that path entirely (see `sign`'s doc comment),
+        // so it must enforce the same limit itself.
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"contextual message";
+        let too_long = vec![0u8; 256];
+        assert!(key.sign(msg, Some(&too_long), MlDsaHedge::Hedged).is_err());
+        assert!(key.verify(msg, &[0u8; 3309], Some(&too_long)).is_err());
+    }
+
+    #[test]
+    fn sign_is_hedged_not_deterministic() {
+        // Confirms empirically (not just from reading AWS-LC's source) that
+        // AWS-LC's ML-DSA signing draws fresh randomness every call: the
+        // exact same key, message, and context produce two DIFFERENT
+        // signatures across two separate `sign` calls. This is the direct
+        // evidence behind `MlDsaHedge::DeterministicRequired` always
+        // returning `Err` -- see `sign`'s doc comment.
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"hedged signing";
+        let sig1 = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        let sig2 = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+        assert_ne!(sig1, sig2);
+        // Both must still be valid signatures of the same message.
+        key.verify(msg, &sig1, None).unwrap();
+        key.verify(msg, &sig2, None).unwrap();
+    }
+
+    #[test]
+    fn deterministic_required_is_rejected() {
+        // AWS-LC's public API provides no way to force deterministic
+        // (non-hedged) ML-DSA signing -- see `sign`'s doc comment for the
+        // full empirical justification (source reading, header reading,
+        // AND the `sign_is_hedged_not_deterministic` probe above). This
+        // must return an error rather than silently falling back to hedged
+        // signing (which would violate the caller's explicit request).
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let msg = b"deterministic signing requested";
+        assert!(key
+            .sign(msg, None, MlDsaHedge::DeterministicRequired)
+            .is_err());
+    }
+
+    #[test]
+    fn ml_dsa_44_and_87_round_trip() {
+        for ps in [MlDsaParamSet::MlDsa44, MlDsaParamSet::MlDsa87] {
+            let key = MlDsaKey::generate(ps).unwrap();
+            let msg = b"multi-parameter-set message";
+            let sig = key.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+            key.verify(msg, &sig, None).unwrap();
+        }
+    }
+
+    /// The brief's design research only live-tested `from_seed`'s 32-byte
+    /// FIPS 204 seed auto-detection against ML-DSA-65. Confirm the same
+    /// 32-byte seed is accepted (and remains deterministic) for ML-DSA-44
+    /// and ML-DSA-87 too, rather than assuming it generalizes.
+    #[test]
+    fn from_seed_matches_fips204_seed_length_for_all_param_sets() {
+        for ps in [MlDsaParamSet::MlDsa44, MlDsaParamSet::MlDsa87] {
+            let seed = [0x55u8; 32];
+            let key1 = MlDsaKey::from_seed(ps, &seed).unwrap();
+            let key2 = MlDsaKey::from_seed(ps, &seed).unwrap();
+            assert_eq!(key1.public_key().unwrap(), key2.public_key().unwrap());
+            let msg = b"seed-derived multi-param message";
+            let sig = key1.sign(msg, None, MlDsaHedge::Hedged).unwrap();
+            key1.verify(msg, &sig, None).unwrap();
+        }
+    }
+
+    /// Decodes a hex string with no separators (panics on malformed input
+    /// -- test-only helper, not worth pulling in the `hex` crate as a dev-
+    /// dependency just for this one test).
+    fn hex_decode(s: &str) -> Vec<u8> {
+        assert_eq!(s.len() % 2, 0);
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// A real, independent FIPS 204 known-answer test vector: the exact
+    /// ML-DSA-44 private key, 84-byte context string, message, and
+    /// `CKH_DETERMINISTIC_REQUIRED` expected signature that kryoptic's own
+    /// reference PKCS#11 test suite (`src/tests/mldsa.rs`,
+    /// `test_mldsa_operations`, first ML-DSA-44 block) checks byte-for-byte
+    /// against the OpenSSL backend -- an ACVP-derived vector, not one this
+    /// crate invented. Reproduced here independently to verify this
+    /// primitive's `compute_mu`/context-string handling for real, per the
+    /// coordinator's explicit instruction: this is a much stronger check
+    /// than self-consistency alone.
+    #[test]
+    fn verify_matches_kryoptic_reference_known_answer_vector() {
+        let msg = hex_decode(
+            "\
+            1E5A78AD64DF229AA22FD794EC0E82D0F69953118C09D134DFA20F1CC64A3671\
+            DDA292BFD9AC708D156639FFD63844C793D849C7743B4FB1195259D46D3801DB\
+            2EADCD31D515A93F60C84CDCBAEB8739777C54C826651FAAD368D582EBD05562\
+            42F4EA5D71BB44E8A06F2C94E52319EED545A4C29A44D0190A3FED19FD49AE8C\
+            5C32FFD4DA5C7E1C3FEE0CF67E2AE9C082D2CC9A5DB29441C9C4B9F0D883D6AC\
+            65AABECFE49CC1A1DF01752F8699DDC42FC59DD4F614371B02E3709BFE5D1EB4\
+            1D92905CEE18861FA7C3AE94CD97253A60B84EF638F43FF507ADE86ABB69658D\
+            9643C6ABD33E7C7DBBD5C9350A3EC8EA4E2C0463EBB4F8E43D639B6B9642F571\
+            F9B8D295817367651B39AA30D97D59A2187EACB1DA5E4669D9471E3BA498B766\
+            06A2B363E0E068FADDDFC1311DD12C5C9E3F044DA9FB13AC1CB376EA6E4444DD\
+            6BC80205D9F8E11DCB56ACED0A621C50328D7FE975222F08A78D5CC2FE34508A\
+            CCCB9439225EE91E29796FD804BB397875741EBFCF11A8FF022463C3170A963B\
+            2EB1A943DB91C5514C4FFB1E22312D0B5073CD94707F3B760F6FCBE7AF366E24\
+            98920A32C68AEC42098F3E0B87B86FCE0B12F9852F2ECE38E36FCDC7D4CEE08B\
+            5A83D791FF391E4AF9FCC33EB81FE5DD36A0B58FC1C8A76F240A6BE4D4E53FCD\
+            CDF62A6D96A56EC1A2BA4ED69EF2424E54A2AC139CAE8184F06D376EFAC00547\
+            D26131FA6D3A80E3B4513E434D98DC5C7866A5DA2C112FFFF197A816892213E0\
+            FE9B6E7A4FBBB4F97CD925CBAD731C9883C0910EA103E341DC80B52234FCBCD9\
+            1DEBB66A315F1D097447DD10520B7FA7BADC1245FC30CCB4059FD96CC529415A\
+            E978D62C1BD77596068E3E6EB8E9E0B5EC7B4C7557A651F317D241A6F52398B3\
+            B596F933C06B22065169EB4E23E4874646CF905DDCF7F0E3AB96983EDDC7FFF2\
+            DC62523F2F27847CD8286C4789FD8AB0101E6DF516741608D5295A45E8FB2FBE\
+            B1754CAE949765B3C4A6D1F3FFC60C06DC81390D86B1672810E6D695DA4923AA\
+            1C6C0D95046631492CF3A67D9D26EEACBF358F0CA54B2BBF0A5014C6E092A76B\
+            246F1AED72CB3C6C8DDE58B170727925ACB72782B54819365A806040D3BF2885\
+            A517F0164C9B63E6B84454BE81853F6B90E88508174C8314856689D6B2F4B0E2\
+            9DDA36B0DD090D32BF3ECF385C9E9CE356133484A2C55FDCC8CD205ACE232587\
+            7DB15D1E69967EC56C28CD76284BE2A5C157F9D87C2E94FBF8A0465CCE795A8D\
+            B5F8833F445E3B4FEBB0B236C0587C0E2AEED428B1DB8001F1A27CA4E56A761E\
+            5E8ECEA5590D949580AAB3FC2F859D75442CC64498B91C849DDD4CD9F3BBFA9E\
+            ADE1BC5DCDC03AF1336CE2CD5F1DDE3D7B7060E00823001AEC9C6594FEC80262\
+            7712190EC318E6A40CCF6898D4082103714AA1F61D72B0C6EF7F76B36546C09C\
+            05B6D5802050881C667D52B9EAEF9A6250CBDBBE6407184D923A5E4B354C225E\
+            8852886E6A71CE4C0905FE36BF43014ECAAB0087A548EE8D2440F2EE9C912264\
+            B412FCEB3D650D5152800752953D8D8428FBDD57B1D671853DC6D378C321CD10\
+            5893734DC82A49A803B25E17CD2B53F8B8B50F6AA27BF82860C515870D1104B1\
+            97D57EE835463A38657FD3AAFFD14A524DE089C8D265E5D77BA9930362AE28D6\
+            5C5DE8187EA0D9417EE2CF885273D1F3C8773635E7610F80EDFC890E88B81B35\
+            08251DD0C512CA83167129E2E5D3D304B71CBB7EE330FC7A2EAD2A4824EFB3A7\
+            C5B45B2678891084F61A66E4DB3E2D1744ADFE3B60E0E9644C9559D596C09D7C\
+            55052012EB18B1B6571C5ECD9548108882C008C16C09ADE6C7473E2A3F67A054\
+            E7FB2DECC6B0D84D6F6A440EC6B1AB8AC0993D3615857883F1E7C3C46621209C\
+            2A257F40D3D021BFF71E47E58C9FCD8B0BA54B6003CB79673C00BCE770D06CB7\
+            4FD0AD943CB7300BF940018EECB583AECF3494D2D8706CD8B9BBF803DB1A00F9\
+            AC349A0F4D9CBFA07723D070A332223404980271CA18EBEAE0FB30FB57A72FC9\
+            B1A4C10FE98846D1A55FEBC35A4DD3EAB750AB0BE4B19E6E438398946E64FF63\
+            E72BBD761DD984AFA3E62369872F6D788F9F60570B17F46E1BDEE96E38EAB8C8\
+            C873F3C8C5628917A7B622D920B94D2DF2D07E272CC8D6DBF383D9A7F12C66C6\
+            BF4322D55C60480EC78C20E1F2E8F1F485DA9B9EB0780BEB4850290E7150A4C7\
+            9714C112AED3088D6E2F9F38B31E2B1C924AF895F4FEDB8155D1A964EEB73D66\
+            C5D3001D05833E7D70909C8BF961BCF1B517C6AEB76A9B9832C795EC51781E0B\
+            BB999A6F10E03458F8AFFF90960D49EBBEFADD0CC2F8FF604310FD3ADC372D70\
+            203299424C7AEC922488A7B7CADFA92F0171247FE83E3D54DCE6EAFC7258E1A0\
+            66C96F3F3D4A5CE279C54B004DDC462D0D7092BDD794398F72D78DA95C66586F\
+            89F593110DB79F942FFC1322CEB02B69904762CBC86A95FADA7CF6DDDE8CDE8D\
+            E819B17945D775703B5B276D8E140C69B46C353AF340893A6FD9E88227DBEF57\
+            69A237DA19E0D6C582560B51A504D3C3FE1EB8CEE3482F1FF4CB5A1C9CF7C647\
+            ACCD7262D80A876D3A188223607D05C9F58579EE229C24DC040FE5A14D10DE04\
+            796CCFAACEC948770CDA6A0724342FDA6CA72D7BFB40B37B77402B20829448A5\
+            20A7578F5872702200752ED6179B1D302F683695B6FFACD0FC271C3EEB48EC3B\
+            B182A341655E42A33CE37AA811B0A3947F17696FD0F927C3E8BDEE9A15AD057B\
+            1D3F86BB2F9D4898D7078EDDC2958EEBC132ECF1C40A7B373DD3DEAEF719AACB\
+            C03D3D9F9B65C66C092D794B316596C76BE6B3C079C6B85BDE2220F60952C650\
+            53BF42585CF9D175F265B87C655A5A5EC9E800BE69FD8B03969A986DDAB8D2C1\
+            AADEA68BC360AF6CA41DBD04CA4EF5778FFBAFDB14712EF94B06B90C657693AF\
+            6A82CB5AD1EA5A79C3152F98F6D70A4FA7FEE46E683D44763877761DD97381D3\
+            B5B4DBD49D9C767469181859E76771C1249280E74A4964465769F7475EC491DC\
+            6E16FF67982EE127E62EB7CD839BDF30BFD4E26A50EFEAB51C74037FC45CA221\
+            E59CF4C697309506FCD0D734FE80BA5AE8BCA300E5767863DC97982E35DEF7BD\
+            63B54D3EF6C7EC63D5C7E1C953C74DB5A2385DBC1905D632DAEB8E84946BCEDE\
+            992AFC4B355D934578BD06BCA9534E6B1C2D9903BC91E85F01829C890D6521DB\
+            838B1CA23269E23C3C194D0164D7B577759BE9B5465169B6CC2EB4179ACF5FC6\
+            BF6B935FCAC40605E3E0552647B58DB59A36596C2BE04617EAE766396FC51C91\
+            3F95B7F28D50AECF0815968D68539E326823DDB7619F5B765D21AF79930F1B79\
+            6DBD79E5E8F5D978EEBB0C8756A4389960F9488A3F8A4FB97B9FE866C89C8A14\
+            9CED32A0ECFE2CB0AE1C42B059D715468777151D24B766A05E66E414A6879430\
+            6C655E6CEBC01076176C41A52BAE2060B38FEE5DCDF77AFB591D61FD75431DF0\
+            C26D5E7937C9D576D4E2149EB2C0BDBF645A57C477579ECBDE9636C036E5592C\
+            0BF465E86D84BA0B5365B46BC2599190DE97E3CE6F29E42756CCFDF1D429DB89\
+            4ED7F844509B574828C6ED5C7EF498DC880AE9126FA7030339B584C5CCE3D240\
+            C233605A36199AC8AA5375722C1DDDDB92CAD5A6699EBCAE322E5DEB63019B9E\
+            391A7A5CCF2AA75DB153B02C55353196A1E8C768820B5A3C8F3085DD774C1B5A\
+            7FCBA85EB47EC3593357B2C4DA4CDEB70BD5377F5C1A6AE1782FDB9384DAB563\
+            178A7834ED3D6CD8682383ECEDD36B6AC309B72CAF33E5F700959B20572C7CB6\
+            449F9745B7A2C1C301E7B341126A77144F32BF0190F903AFD02FD6AE006DBF1B\
+            65955764E7BB9D830A4826B3E2B627D7439C8E1647E14B9C037F015426CB0B27\
+            9A96F73942BAB0DE4907E3DC96062ED184FD7A0C955AB15CCF991E9899E68BED\
+            24BCB91187ABD4BDA92371F93E1B3622179A3AB1B930E454A77FE516775A01BA\
+            0021F7CC29456CBEAE333C79AE59DCB5B096F29BA08C0F1B89E357F46A83F1E6\
+            9C1F521AD0E6B90A35DB3DC94B6D37FE73509968409EDA533CC7B3E24FA29AEC\
+            FC88E6E6574F054AFF32397ADF4CE33CC6A796056FED6E8205AA6AD530B83C6F\
+            561C152EA9FEA50A550856AE20DFFDA79DE49B8C11F00911B790E4FD5A5A5256\
+            E15A5ADDF380216234A8F578FF2613EAA8C430830E1EC9B0FA08AECB60DAB24B\
+            8155D533CAA66CCD68AAABDBA1031A665B44D80CA6D4ABB78E2483604D890CDF\
+            83977B198D6E2E80D1D658BAD557D57E68FC546CB936E3FD6F62A2F9263DA4C0\
+            65813377818363B0B1914289D11B19301DAA9DF24A7261B70FFD9CF01EE01214\
+            6029D5EF88F32906EE9FDF1AEDF2FA0C53C0D9395205E93B71BB6BAB89524F90\
+            AC2F7BCB276DF1F7E4F0F734ADD2737AA826426D70BE43DCF5FD5D7AEA0DF6E5\
+            D38CED606CA333952E4AF896E1DF38CE3656B88037221D9A90E86F5A022041DC\
+            86D813E6A0A9D061A77A908E58D4C46457609A2CE97CBEE6738E093D04DA10BF\
+            D8516AA643902ED082A1FDF60890289925743513DF192DF07E5676CF795202A5\
+            70991E816DEAD88C737945166D3D3DE95D828F07808158F6D2D7911C1DA14AC7\
+            B86A33457A861CB57BB5943710FFC70F739470C31ABB10A4DE9807899F544107\
+            B05616344DB07DCE46AAC29025378FD96130705FA8FA1ECE9F81F5F854625F3E\
+            45B96EA0D92840E3F319BE3889B025D4915CECFF9287C01FF6EF5D8E9371E805\
+            E24C404B0B20364D3002E6691A14BDFD0F89693D67418A86047AC10F7671E6D9\
+            83D84C47AD355EFA9954411C0DC599B7FED4FF794A6CDD2F93EE80691BCFA171\
+            1FF32FB3CBBCD10E03B3A945711E7485E4DCDF17E206CCB38C18037F4361AE43\
+            99B23B814A7D94DDECE17F171F6948976EC4CBC9133B235B757A30609ABDF082\
+            CAC9AFB9B5E249AFA6F2530661422EBD789D3D34E4790C486BF164932C3ACF3F\
+            E7E0594D26C035ABF8AF421F848F4CD90E5D9A69FDD8632417D67AEB8D415EE9\
+            12D795AD1B3C1A13073A0C489D241FE6DCF2D58B23E1167D8E748A41D43DE505\
+            F7E044A37528CBE4E8BE4B1356F298A1174E28734756C9567A0BD5E72002D153\
+            4E633A36C5373404661CE1ED379189635BAA44A6903468311609DAAA2C3100C9\
+            AB83A5DF55F44C5CF4B9A8AF87DF5F55B6021821CC7DD7F3428F2A129329BD0E\
+            CC69CC97E63F6574CC10236828AAC1401C6DD4EA3FCC32781B8C1EBB68186C18\
+            21D05A49207CC28AEC58EEFEF5F380604B932B0042DFDE26B2EC14A9CA51CDBA\
+            0F195BA80B0CD4476D16C91EF3E5652F35E90D36D37C317C786656F4C330A1B5\
+            77E1E45A22B54A58C9FE7C735B568D09E0D8DA6B07449BF4737E5D55659D46EA\
+            89257480EE46071055147A6E70A5FAD6BCBB910A1B2BDAEB62D2A02AC69F6D44\
+            6DED18562C49C572E2F597E230FDC714A824F4D2E1B3D8A27BA1C9B4B8E905EC\
+            F7AA6C37B9A3FAB18E73BDF3CD568D2C875914CC8B64EED925D1F926FA53E69F\
+            E96538BD294E6EBDF08036D08CFD7475C8C4079F89EF522F6896852760EA31C5\
+            444AF142CB55F08FF89DBBDD94576FABF95A112C192AE9DAA704131ADD665AAB\
+            5ECB27FCA96DCFD9F021C972C9F9337CB0638EBB958F906B469AB09B2FE1B0C2\
+            1084D7C8D3200E8715A7BCA9963075589F43FB8D286A303593FB1DB8F5E580AC\
+            CA5FA23F51D3BFACF0B725C5C523676452A580B08E7B22B2C4299B93CCFF3E3B\
+            6C81CDFD94C8FD1FF489084B1DF45E2E8EEAB73420ED2E975D37074FF3B435F9\
+            0243BA2452F54E0ADAA09EBC127FEACB798E4702F9417E26A51FF3E3D2D8C092\
+            461BCA08C0D7BDD6EDB0759E14D3B7501BDA28B4467C14CC4B7AFC0FCB3BBB50\
+            3FB390C9CF06A5A1428E7E0E0DCAA1A12EBF1F8D280045D6E59A0E667900646B\
+            BE8368B575E50F3B6750B48C52FA665AE0750F2FA779D3A86806AFDF410DF1F7\
+            1AD108742481173DEEC707FBA8AEDC94794F736AF77E3DC6F78C378C23FE026F\
+            4B5D3A2F8FDFAA54E007AEE540CA35A093D3DD437D3D5555019754CED5F7459D\
+            AC47C5DE4E6F675693F0A84CD33E5E4B5B0D84689BAFB7113B899FF7363D4588\
+            5381249F1590AD173B79F2344F91DEA18E8B0B1A7F991ED1E7DB6EFC87A3D086\
+            25F8DDB2DFECD667280301BA809EEDAA86269A07C36A803133048CECF7D51A3D\
+            3372D23D3B65C72992CF8500CA52D573C866D2A2E103F9F7351917A7166836AD\
+            04CC0C5511B51159C87B0ABC61B54B4AABA2542E831F0940C8E3F24DBE90A49C\
+            8CE6B6169D81151C9555C1EA43C1DB2767D537BA05C394BAE3AAD626D2A6AF8A\
+            664E7E3CDDB320E35D59F117DAEDEA9F0AC5F46D1A0BEB0A2394C9BD65727687\
+            6D9BD82E60E5ED5B4252C6F0CEB74FAC673B98482D1C263E7CDE21CA0E633623\
+            4AC0CF299952DBA20E2189404A67E9455FD8219B96C0473DC571803B88FB7DCC\
+            921057B7FDAE8489D72E097459EBB0FC1AA9C68B2FC934A178CCD81EDBB2D117\
+            96E32CFA6403EF25635064CA62BF0A9D8F5BEE591214B0BF0BBCBBECD3E8DA3C\
+            F96B34638940580803D9A0E0883F5D34B9AC06B5EFCB83CB47B53ABD0BF3FE03\
+            31ED09C0F3C3499611DD2596DFF8754679C7DFD2EC0B2A032C2727D3D76AE528\
+            6F7FD8FD85D7FB997EF3C019CEAFF36F891227F11B6E830AEB8F97EF5CC88AD2\
+            F6F346D267FE58A0B8FB406F151593C417849B613CDB1CB5523FFBDE78B494BE\
+            63D62E61740AF3247363CC3723D549E76E10A3F187EDA82455BADD5A22CB0485\
+            3364455FFC01D4BB76224EE40071702F9A1EA97C3AC823A8352A6248C56946C1\
+            47CDA99404E305188CDEB9AA95DD4FB703A2C3698D4C52DCF84A42021961992F\
+            CCE4C2502973D25E8837C8",
+        );
+        let pk = hex_decode(
+            "\
+            4A1FDEB2951D9D10C0330A420DFDCE3D52CD7BDD2DBCBF9BC0EAB1C0078C6CEA\
+            68CEAF48C8A355F82987011F37B785F6C8DF1A5314F692C2682C27BDF91B711B\
+            A7D65FBB18A1C2F2D40FFE2F3A52F3C1943E314C1279D3A8605EA6E06936B65C\
+            FC2B71BDB36AD0ABCCC06C0561121C5BCE8649CDE0AE4B58E3F018627F1FFFC9\
+            F34868693766B8FF457A0F4771D38412DD8DA9BE2C57CF35D74CF690B3141CC6\
+            813BDD3F8158D2C83CEC1E1280A8E1B96BE6E82C6D26D45A4BFF5A898839E4D3\
+            83111DFE2EA23340BF4BECC60D479CE75C5B17FE9A958867307FC49CA9E48AEC\
+            8FFB2D2CB82D4804CB0593984D7A337B691B1C612E3638F71F5C008BF4E4C35F\
+            199EA806FD8CF90F0C68D0D3B93F85C7F1A02FCDF2E01D8F46CFF49286744327\
+            8E3CB9FEECF941B688705150C8352D894B81F6D566595DE69C3424EADF63CFA0\
+            9623F6FD121A19C594888388AC88C948989A977227671DBDDF6C509A08960499\
+            ECB2FCC156896570B7CF9B8612B800B11261E9B180CEF423646A3F716E410D02\
+            1B7BECD0F9CFC8B5CD04D4D1482E5F51D9DE67390B523B39340534A041402EED\
+            413B654EB48A05EE557AAAB7E41F6510DCD1B2F7AF142FDB2603127878BBB298\
+            2453398E5788571F167F37FC1371F6809637B320567E129778CEC532F24A6625\
+            F84A89E4AE578CBB15E4DF8F271DFDA2D56024994B5FCFD1F3C3843DD416D7A8\
+            205116165B51D700B209AE84DC01E232CDA5E7558B8144226E2723B3618B639F\
+            A522CA280F1D99510C1293A9FFB8ED14CDBE45DE61D0042FBCF15A60CB6950D8\
+            0B62168A6C1CCAF5791A992494F4892C4BC2D1BF6DA3FFA300D4C315169DE895\
+            5BF98AE633C3492C4C07A6857B188F7B75C1DB62382AF7EBA062663F08D1AB4E\
+            A92584DD5F297FE7EB3F548D0D01C431945791AD216E0C1DA753317F22F20C54\
+            26CFAE640F27E1B0AA7E775BE8FB1085A8C68948A1DC7F04A5CA45A58B7D0223\
+            528C209F7D6040702CE58E5C0C7E54825A8C2B22FF3A08F3E26A858E1776B6C0\
+            CE0A1580F2149A45BD8D956E8C9BBF18CF5F39723EF72B9EEEB7305853AB0BFC\
+            CC49B4B501DD61125AB7159B435D607F72DD8C0292318433FAF1D94701A8F438\
+            CBB9C3F46A152B3FC6B19633B4B55B1F619B0BA2FDE2457E7A9549F6EDF7A5D2\
+            5947C372F63FF5352B66BA8F707055F1B617CB511377CC010737B223AF8F5BF2\
+            6329C32033343CC971EE11F27E4CBCBE93F534646FEAD4A77EF1036DA8A0A337\
+            CF36B93FC9BC77002D110A23C9E85120F658A3F93DCF8043A9B7A01AC11323AE\
+            FA2E9EB4259FDC7A53BD763BCCF74E34378B6ACF78DE1FCF5731F1EBBE7735F9\
+            26296BBD5B742DB88AC8476A9EC3B40E21F0DC204AAAB5FEDEF58F9C356C7CE3\
+            FFB46220A67D648B52C37412790336F42861D5235637EC2B5392CE072760DADF\
+            EF9902747018EC3EF231553833D0268D9025A316684CA2C40E4BD31BEEB88D99\
+            F752249EB0DA18A2E6CA40E81853AFC86E76A64C01CC4975E8B0AEAA44AE18F6\
+            5D7052399561CA774222DEF6BC8D49FF8C4837CBD2B9FD75EAAEC0211B1D9684\
+            B8A820B947E1A5D1B101186BDFF9B56C6D220D489D997F7959046A36E9C7879C\
+            AAB38573F1A8D11E080DE5947886C7C0637575A208C6C3D22B3E0CFB7659216C\
+            2575D11780824E4522EC3C021AA65B70DE831485E3BA3AB01E51A15C1AF6C44B\
+            8FBCC1531E6F5323DE2F9BB4E61D8222FAF2C837556887E7F2337604C8006B55\
+            2E31D94EF9A5CE8409A5C425EEAE1361901C9558B3FB18F0F6490EEF98AFBA99\
+            0E59F66A49BE91C0437616B132869B10FE542A0ADC52F2CE266E566DA4A0F0BE",
+        );
+        let sk = hex_decode(
+            "\
+            4A1FDEB2951D9D10C0330A420DFDCE3D52CD7BDD2DBCBF9BC0EAB1C0078C6CEA\
+            272C272BE86D2DEC0E3FF6F37562CF37E09E5DAA586E16D0F7715B2A58369028\
+            454D95EDDF28B43E2453CB72FC2F2528EEF36A5BC2F4446E6FD66357AA23CAF0\
+            B96FBD3621DC9A5CB08ED975F6FCE317F4C0129ED8A40A6B287F357805A4A59D\
+            1818621188411CA051C880201B406D04B9100AB74814B865C9181198A6850905\
+            418B36405A1664A20651D8C884E012918CB8048A1246420052D080844A1408DC\
+            A20118C52D1C000288460953A4705A060D9B346D5A020842326002C9490C058E\
+            0B215253C48DDA480692A46118B8090332100A886910B36C52303119332CCCC6\
+            0922852CD900291B206253886D58B2298B162C580472E3486803160113B60820\
+            3629E2A045643600602206D3144E21234D1BA1841B882594B02DE2800CA10082\
+            02272D54A46819092C13A52DA2A29090B64548146C82B66480A645C2A42C6304\
+            01A0822112142EC1848D400402583621E4C68854482211C31102192A0B480C1A\
+            077140288C98C88CE3488050802C443862A3062C19190909420E9818061C260C\
+            D1046EDC0086C2C27019462A02A6818B046994B60D1883880C336182B08824B8\
+            0562420608A508CA1668A28665118900144529D124321CC7491B818853842008\
+            1421C2120E20814D13A32D63A621022809E02212A426245A982503114A92006D\
+            A24080D08400C0048488B411D8A821E4280613204C53C01188348844464D8C02\
+            28D8126C0CB4618C148693468D249805E3000CE0A4089836724A424408236C23\
+            488D410650E142889A1602C4B8809210800C0980D3C8802496800C052DA3A824\
+            23092412003141442DDCC051A2486501492DD2A0698C460254426148106C9A14\
+            1040C68903180EDC20869B422E24328414838501244A54C80544C0905BC0301C\
+            0870A0C86D53C2600203721A1529D1203082B6491A0764C2984D4C022CDA1852\
+            59260C59A2510309110224320B43848A460899126910382A22C86D4B28722223\
+            6A53A02DC0304DA0404801314222078984981149202DC81872143730DB040E21\
+            3409DA247014976993C629A32800133489230184A4A661D83884C1324082162A\
+            4AB80D001385E2162A08B2441113651099654CC2110187415A20258AC0080028\
+            069C18650A2652E20205E294285B226E41A620DA344A20C0081B8311A3902464\
+            880C63C044D9424DE4C46082002E8B3004024720583806E2186C94482D213412\
+            8FE073A549F6DB81A91321F8632104342EAD4553868063EFCB6662F6C5AA267E\
+            FA06030CE1549E3FEA3A2D3F88A308C3A3525462FF1DDB1F406EAF108A17D657\
+            E361BDF2E5CB1F5A0F32249AFA265174E0232331EA5461ED08BD5BE1C4DE04B0\
+            C14BDB9974190259E48C98BE014353804EF603BCFC6EBE44BD7B31770300BFED\
+            F2B12E975953D8264D3DFFEFABB131637A218518A44B420B1EE26932D547099F\
+            CE3D709F63F88A5C104D0823F84E1E497D50AFEA60DE0011CFA452EC468A7D5F\
+            9D8B8CBDA58828FAE5198A0D65710D989FE23297157988EF01D2FAAC7D18525B\
+            5D7307BA7D51191B409A9529BC79DF18BB6E8A099F149096AEFBBDDCB8DBD99F\
+            44E37BDAB4A71B7806896DD330D9DB1139100167A660FE142A7DE42B1FD4A165\
+            F759DD3B6A39676B23D297C926CF08420AC5550EE35CCCED8336FBA48686F295\
+            3454FB01DAE8F19F09DAF7BF0E77B999F0734A6606C4850CD23C8B8C3C236559\
+            B4C77FC97071C8D42480F2AB705DC8316D0586C7889AD600B142861CCA6EE240\
+            5C02E8211BBEB22BA65AC926D0D1A4ED2AAE50925EC4E7074817DCADEB490026\
+            8F775E9B03B237275FC7C2D75A79B31980147F9BBBB4ABC43E3FDC990B7D3FFC\
+            E160BC426C5A303B8E3960472D35478BF1F669891181A3CD4117A67433C73A24\
+            CBD830760986D2425F14FE4BB5803DD4F3437CF39D189E8E8E7F571B29812C5D\
+            98CC359AC6ADAC4229B952C9E554A1488475D05C90F53D59FBF82E458830040B\
+            12CCA0D446E707018DD83C54BD86277FCA93B0E0B1B18374014F8FFC319E712A\
+            808F4B6F5E7A51B2B1E2D66591FEA6B3A765B9849060F02C3391F40E3F455DDB\
+            82F4EFA8056736874D32D310699ABAAAC219105BB46FD5EEA2F7BD857CC64E9B\
+            9E57BAC0994082E572CCBDB6C75923A6C8346D635A683A23C5539C93C1016DDB\
+            A53BB1553AB38169638CD1926D714609570C6BE0811765544D508D5E4095E7B5\
+            4FFFA44253C21EEBBAB5FBD0B6915ABED9B4EFA41C4025BC1FCEAD8F70037B14\
+            09496BC6FD61A7FE74EDB29FC3768314452308A44761D84AB8F412D94BC9F435\
+            1601D4D46186B52B550A242725E5247A9C4E9FFD44E0045BB41003FDFF4D5DD0\
+            E56AB4CC6BEAAF807BC453AB2477828D64B49C598C04C4DC9BBD9E042A948242\
+            4B58D8EF276D1CA26504943AD45947929F228E381E8ED1740DE279942B044BC4\
+            480B28AF4E98FAB5B871C3FC7B8F2FDAE91973BFB55208FD2984E4EB40C59506\
+            72EB257EA2053B28780DAFBD0525572343E473EDAA7133A84D98A55474D26E3A\
+            35A6FC27C112061F1128DD9189E08F4C948F5597D643A269C646575545419011\
+            9579B46603A56404FB4DC690FB874CCE7C55A48F382B8C00942C8BE164D184A8\
+            229A8B278AB5D8320AB84BD56A2F1AAB6AA0DD364598324CA8480A550125BCB7\
+            34180833BFAE1858AE2B18AD8C930B3E1D69553616AFFBE73EF40EE1089C0034\
+            F7110492888B035674A3581EA997F70C00DDE17CD83CA22936BFA14E4190F09E\
+            08AA8B30FE6F9CA273A584C0424DBFD9230FD0D6050B2E95D6C6C0C3B7485757\
+            5F995AC02837D849718A15B7842F43D20BA7262B55B2A07EE265380250831678\
+            140AE95A548908B3C656A6230293BE54ABCCBFB39A05441CAD1F22E4FF4F32B2\
+            3FAA6F4306B10B2B38D54DEE3F7B1962338C077B693D15A8B43D043EC8342A48\
+            2514FAD2708F3ADE1EC013AA01B6410DA5C61382372A38FC736B58D99DC5C1C5\
+            406F3B019D3740BEBAE743BA83F747640BED829E99C2EB6EAA7329EC74757FF5\
+            8979897B5C13630A3ABAEC5327A1E886028B43B5BD8C445746FE8A5FBCF09C70\
+            D6FFE64D818B711DA11B68F0A36240BE0E5973D5195C93E5F53217A69E19CC2A\
+            325167DF459514BB14536A30DA77DFA1F306792F10464DD3EC3E5EB67AEF7ECB\
+            34DC239E2103663E7AD9FADBDA255325854288CF46E8B3925C2648DC752E3963\
+            CC817FA8C57DAF22F960A63CD1DC11C20C311BCDAEAA98372E33CBF9C3222D26\
+            1D7D32D4B7A4BBFD5C8EBA1EAD68A8A13C8DCDA04749FEC65A8FF54EE86D56DB\
+            3A568F008DA5516B62EB896A701AAE16C319CA2104B95149AB3717E6FECE7A8C\
+            E3CF0D802F4A8F22B14F3E7BFD33DBC430F5D7D7A55544889025D8362BEE465D\
+            59E908345E6A041FA5C09045131327D1C4F92DE0BB40184225EA9EABE8BC5D3F\
+            991FB9DEA9442A69879679C637C77797BFCA279FCC83841351B9C57BE70B5C09\
+            C73F046CF1195FF1B2C95DA7E5BCDCF46BDECBA894A275D5BC70C14F4CF0A7A9\
+            626CBE322887FC7980EECAE142BFD31016F60F5F42D34C76A362E8E191ED7981",
+        );
+        let context = hex_decode(
+            "\
+            FDE19259E56C2602F3CB0DA509B912F88262A1701D4E02B513F45C97EBB100A1\
+            7B208205098D6BED2638BEBDCDC52C4C5114E8CC8FD9A180E79CE750594C3BB1\
+            88DB6A3605630C6A2F3049BECEE951FB45B5E426",
+        );
+        let expected_sig = hex_decode(
+            "\
+            A4E46D38AB1867BCDB21153C516FCBAA68875303ED438451E1F04597CE6E6B36\
+            3B0CF32EB6EDFB3031E2611DF8B6549C04350795C0562F5ABA84B3081102F769\
+            D9AC2C01CF594AE408B5165197FC44AF951C0F82D5652E3A020D7CFDB970F4AC\
+            A2236FFF136CCE66401F063ADBDDD84839B56BC82FBF5CAFECA8FB055DDCC597\
+            F7E0E444AB3EDF5688827AA5E109386EDFBB4479803A30D2523F0BBDE033134B\
+            77127BC5427310018B59E0F93812BF0EEF4EC37A77F73D0AD3E4CDC455021532\
+            0C2C562E9DDFDFA3181029BFA46FD112AB4D1FA4CD0B9699B88F1BFBA2B00F0D\
+            330C6067B248028051EE7631609FCB2BC71573086F5DB99673C4318ADF875794\
+            1B0E7117C4BC2D047D5174E3A0E1E5CEC4EC2E29B9F617A2E75A910415433994\
+            77A07F24ADBA9F786E8040A30BFFBA0103C9331D790B1629886E94D535D3DFF0\
+            43A89D5D9A5A6867920C31A94BBA0C3BCC473112087D31A54534CC772EC29106\
+            FAE39608F333238E74E18791227A475B7238B2F310AE5F1E196A3B14261C97F9\
+            5355541AC56CE398F38535965C09708EEB7FCD23FE79B3E76FE4DE388B83AD13\
+            064F9AD4469AD85655AD3790B958F7B5D82269EBD2E06C343F7207F96CD16B72\
+            00150BBD327DD9B3405D58DD063193BA5B1648C8B4997BDD65271E782D286810\
+            9AFB01D30A4BA8720DA3E447B426B33C1CD94BDE859D18613D234C74A4790E23\
+            A174BC8CAEE8EADB19A9DAC27D340E62D8C2B3DF5D0D2147C4EA61078C9E4A2B\
+            3B1F9D0EEE979154E798547CDE291DB46D257228BE695D99C7F27356EF0C9095\
+            73E989F555214C32C82C0251497B92935121CF1D921B0251025C56C7B1224AB1\
+            8D19C6233D5B232D13763794B74F43801BF4BB85380E804AE931AD473B3D51DA\
+            4AF202C46EEA5E21259F31B732BAADC74C5E90F388DC121247EB447AC71504F4\
+            83A7FBDEB5C3B6DDC6FEA607F3EB771026DDFB1756B1FB5F3DDF8AC834FD948C\
+            67F533244E8E6C9F574803E4029155B321ED4B54E1BFED00BD91FF596261F876\
+            756FBBC16EA125BE4D18ADF7B30D9DAD1A050D1B6804E6E5C88CCCAC2B3221BA\
+            2C0422B5575829A16A68D4192BE785C5AE609BF3AB68133A499BB0C3A112F391\
+            F47F3BA6828A37E6A5F776C5D45901660AE80FA23DA12C70E3BA88846864856F\
+            7C9E1EE0CBA22C1E48ACDAC8CC1E17CFE1EF2F50A7211F18E19866E6735BD17A\
+            F6696548C67CDAEC55A09951AB89426B54A2C4A9A60839D3C1B4B9FE26D9F53F\
+            4DDC832E1399BC04E4F8A1C0AC4083A0281514693F32266632010F74C4B30250\
+            0E6B8C5F2F99664D1E4D1408ED726A88E301EB9D3B5E0493D9B6FC1884BC753B\
+            5D84B96B0E5F23E786DCA71D4EEA5A35F1748B4BAC9A43CE47A6FE073CEB1A57\
+            A5BF8D24009D11019F5EB04D3C79DD948D55F7F16886679F6CA592566EA18C51\
+            646F298722414C49164E27E85F94B1D4350799B6421BC179D7AC095652DBF6C7\
+            5DBE4D2F4F831671E339941D1D21FE16BDA064C62859F5662139DF9C2F0B8A6F\
+            2562D1C7F9A509845722E916FE4D67F7CAB6E1459356499AE7FF61C9729409D4\
+            E1FD0731D69C2EEE5B7A4C5D85D2DA84984AFD6083C4794A837D0E1FD3283AEE\
+            7AB12558B186015C108F364A7EF09DD207818000267C0C975664F990CB51D482\
+            21AAEE94F5252FAD9E01652025F1678BE6044FAEBBA8E94DC43AF8902A5058CE\
+            29D6E17325B1F13A0FB3EEFE46067EEE5BF8E462CB9B6B466B14C541BD211E62\
+            60A31041C748EFDF1B35E75B0133E99283206344598ACEE2AD92519A90E99FD9\
+            6DFEECB58BB40B2ADCA1B462E910D394181F9DF9B1D92686BA21E243DB7D8FE2\
+            A0713D6CCCBC0328F3F9DBCB3037DCF9E811F8C25B0AB9E73D4BCF1335187A86\
+            EE8911BB494B8F1B0228803EA37C8EFD3D947A08226F4A262984C20A9E58558E\
+            6AE03FA694622A634594DB35CC41974DF43C12D042DD752EAE99F31D34BB52AE\
+            D1DA0069568E1C7A1EE725A7AED750DE79D94D7AB75499019D6C2DDA120A1C6F\
+            813AC008B16CAED0015AE609818FE7D8AD1EDD247DA3153EE3D9C8836C77EEC8\
+            4B885F3856DFC304B57C67D930BCD6C77A29271F9035EA6212A9DCF5526DAF19\
+            C47533BF80BB6D15ECB582A78A67BA92F5B413E17AE69C2EFF3BC2EBF5256E92\
+            832130D3EC7F7AD76CC8C5DD59FC2EE9E0A7873806C152791741E6C6533F6368\
+            506FC4A655A92CF77FC44BD4CE3A4480D588DCAB0C8B398AE8CA6A7DA65792C3\
+            946102C45DF4C72EC9FAFF22430F131EDE726DC2987B4DABB72AFE5376A9798C\
+            FF3E8758B3F7BB56692BCC4822CA337395B6C2540FE966A70AC469FF6DDF0909\
+            AB83434C34A854381F5BADF46E4DB78A317E0BCA59A3A8C5972F8D059D7B3A51\
+            470D560D3B47EBC7FA13A253662305B78F7A146FE86B4381B4EE360ADB027C96\
+            46BBCEDEB03C959E4F3111B2F8434949CBF04CD487BBD100708F47C12715E4BC\
+            9E9D87DA5717246E6F3E4354636CE312560673F4037E4651A2098553C64C11BC\
+            FC9B881C7858583066D80353ABA92869BB20B75106C233619B95D7EC58630CC2\
+            D4158650582C345D3C3110361DDE04B69F38175D136F1E28020D36D2D90F2853\
+            748A232BAEEDEC38A739781BFB7F52154BA20DF52BEBA4CD65ABC7DC57EC4845\
+            65186DAA795B42C8988293B2D4EF0524CBDE85143ADA3D1B28374D2B1A335C6A\
+            914705CBC2E2DBA7D363ED78590369FF256B3BE230412E821407865A07D1DA11\
+            7BAE75B0226D173C14B15B3E85AE50A569ABD465D4E4500FDF535BBC2C1C5AE9\
+            C1CA73753CF488A9A4BB406549BD3BE25AFC62F7B70DFC2E940B8C37CF33D2F8\
+            0AB3D1070B03617043BABF7D687CB04B33AAEE8005F58D06C4464440875A79AF\
+            4F5079FFA1CCA1B109419223FF9E56674D834FBFDE69F406873C3E54218EFD8F\
+            70D3DB7084AE9734E31906AD94491CE12B828CC785080DCC911ACF80C522817C\
+            CAEF838BC50ECBB499F12ABF32647C425C7A432C0321F13EF4E18B628DC68D7B\
+            D5D049592A73A96C2CC8F2D4924A1D14ABB2B15DB7BD5BD4A46B09FAFB0F8057\
+            8C2B8D0F4767EE26AB05D22A3BF2F02FCDA404646495F27B2A4E6BFD33E73201\
+            3DE703CAE16B45F9BC39BA8FA2EE8FF427DA4FAC6C822B905465014647873E1E\
+            E8832A87870107B9856E950EEDC6FB097F5383DDF6E4AE01C98D5AC6054AB356\
+            55318517E669E379140246AE63D52066037FF37B6814A911A15C0982140DC132\
+            143F8707C04C6F81742872FA83E6CFA8112C644BC1A86162527F924D9DF22341\
+            232E3540484956677D99D6DFFB055A7A7F8C9EAFB9BBC4C8D2D7DADEDFFA1B2B\
+            476578798091B8B9E2F0F1FBFE090B2E47818CAECED6E0E9FC00000000000000\
+            000000000000000000000000000000000D1E2D39",
+        );
+
+        assert_eq!(msg.len(), 4875);
+        assert_eq!(pk.len(), 1312);
+        assert_eq!(sk.len(), 2560);
+        assert_eq!(context.len(), 84);
+        assert_eq!(expected_sig.len(), 2420);
+
+        let pub_key =
+            MlDsaKey::from_public_key(MlDsaParamSet::MlDsa44, &pk).unwrap();
+        let priv_key =
+            MlDsaKey::from_private_key(MlDsaParamSet::MlDsa44, &sk).unwrap();
+
+        // The core claim: this primitive's manually-computed `mu` (SHAKE256
+        // of the public key, the context string, and the message, per
+        // `compute_mu`'s doc comment) is EXACTLY what AWS-LC's ML-DSA
+        // verification expects -- verifying a real, externally-produced
+        // signature against it must succeed. This alone proves the context
+        // string is correctly and exactly bound into the digest-mode
+        // EVP_PKEY_verify call, not just "some" context handling.
+        pub_key.verify(&msg, &expected_sig, Some(&context)).unwrap();
+
+        // Also verify via the private-key-derived public key (self.public_key()
+        // internally derives pk from the imported private key -- confirms
+        // that derivation path independently produces the exact same
+        // verification result, not just a coincidentally-matching pk we
+        // were handed directly).
+        priv_key
+            .verify(&msg, &expected_sig, Some(&context))
+            .unwrap();
+
+        // Signing with this exact key/context/message under hedged mode
+        // must produce A valid signature (verifiable), but -- because
+        // AWS-LC's ML-DSA signing is unconditionally hedged (see `sign`'s
+        // doc comment) -- it will almost certainly NOT match the reference
+        // vector's exact bytes, which was produced under
+        // CKH_DETERMINISTIC_REQUIRED (rnd = 0). This documents the
+        // remaining, genuine capability gap against the exact real-world
+        // vector that needs it, rather than a synthetic example.
+        let hedged_sig = priv_key
+            .sign(&msg, Some(&context), MlDsaHedge::Hedged)
+            .unwrap();
+        assert_eq!(hedged_sig.len(), expected_sig.len());
+        pub_key.verify(&msg, &hedged_sig, Some(&context)).unwrap();
+        assert_ne!(
+            hedged_sig, expected_sig,
+            "hedged signing coincidentally matched the deterministic \
+             known-answer vector; astronomically unlikely -- re-examine \
+             whether AWS-LC's RNG is actually being exercised"
+        );
+
+        // Requesting the deterministic mode this vector actually used
+        // must be rejected outright (see `sign`'s doc comment) -- not
+        // silently downgraded to hedged signing.
+        assert!(priv_key
+            .sign(&msg, Some(&context), MlDsaHedge::DeterministicRequired)
+            .is_err());
+    }
+
+    /// A real, independent FIPS 204 HashML-DSA (prehash) known-answer test
+    /// vector: the exact ML-DSA-44 public/private key, 103-byte context
+    /// string, message, and `CKH_DETERMINISTIC_REQUIRED`/SHA-256 expected
+    /// signature that kryoptic's own reference PKCS#11 test suite
+    /// (`src/tests/mldsa.rs`, `test_mldsa_operations`, second ML-DSA-44
+    /// block, `CKM_HASH_ML_DSA`/`CKM_HASH_ML_DSA_SHA256` section) checks
+    /// byte-for-byte against the OpenSSL backend -- an ACVP-derived vector,
+    /// not one this crate invented. Reproduced here independently against
+    /// `sign_prehashed`/`verify_prehashed` to
+    /// verify HashML-DSA's `M'` construction and shared `mu` computation
+    /// for real: this is a much stronger check than self-consistency
+    /// alone.
+    #[test]
+    fn hash_ml_dsa_matches_kryoptic_reference_known_answer_vector() {
+        let msg = hex_decode(
+            "\
+            7F1B9E31C79C8F1D00E705DCB09D8118DBE1CDE3574A11EB49AE1B09CBB479A38\
+            769AAA6951EAB51C511DE299F4256B7DAEAB21E52AB4929C1334F73ED552EDE11\
+            A41E07555B028E00208FA074D21F9922095EF9938A48A570FF0297ADAB7154B15\
+            2FCBEDB78C138E446A89B50B929C3CBFC1F5FAAE0300D63F97F1694E6D4A8BBDF\
+            5A9D96EA96416908D9C398AB9FF015967E81542D340CF092A972BA2A41BE09414\
+            7F0AA3E5A4A7E738DDEEC20A00C6B3A40D6A4DEEA02D004DCF03414B5F6E7C6E4\
+            38B80B2A556C235F3F300411CC83DE866F202884EE7AFFFBD594C76DDEB3BDE3F\
+            DED23EAF2AA60FE29CC6402CBDA70B7A2F368B3CBC3D15CA2FED5B66B4C2CA332\
+            D0EB3C3A807AD8D4F448BFD6A1F9AA4A33B90A57F0B4E8295E6A6D8234F2718C3\
+            BA4C584BAEA5BFDBFA37FACFBBA0D6B57EA5EBDB8DFD69670F725DC77977773F4\
+            BB91AF6501349177C336C74A59218346E51AAC666547CC532B86EF7CD3C0F56BC\
+            A061C3E54507197C52300AB2AC1F7E6A2AF388DE33EFAD8CF03B573CC579BC3E2\
+            F10C500826F61DA88FA5601F9C57E0FABBD36E84D85CD75624644A6E19266A842\
+            04881A2F1A2761EBD663F1551FD344E248DF3C21FE32A73AE42AA9C14DB0ECFBA\
+            B21DD0A50488AF968E6802D08599CF015F4928F625363D1927A679510CAC25691\
+            09BEBCC35AD6DB5E9E75621439A55BCFCA8C00077DF569DE90653723D987DE489\
+            466ADB55CCA920499FD67BD4271F7A19B7EA8A90AEAF7A764199DFCEB755C0632\
+            A4863146E74E73251AE275ACCDE83E521299359E10FD1AA7F49CAB3DC72F8C730\
+            48B3AA059C424B436B9F7F5AFAC00B4DBB40AF1CF1ABDDF268B1B1BF2B9EF12E8\
+            1548CE9D0A162D9AF4A8CECC41330FB89DE7B63274885D59D7AA6FF1BFA8EF88C\
+            436D2BBB942B36A3D66576807A6D0FB0CDBAB9967D72EF7F487EFCD806B015C00\
+            D673123E1C8439711E09938051D1B777E05CC104E05F375900C84D8C34884709D\
+            7B9E96E58EB699CA079C71E8808BCD56C0208B20B23CABFD17B197620E9FAE518\
+            2B891EA72379F90ECC28BB1F18C42A3E6E663F7D6F2550C88081C2E46868D934D\
+            6375C22FB33D241761130849340633DFDEE89B33FBB5F77AC09EB05BB7F200CBD\
+            5E5F8C02281CF8197F28BEAD0CD27B978E639865868335B36E4B183BFBB0AEDFD\
+            D8175BBFACC5176FF39C2F102D5F72216F17C2DFFEA3EC41B86DE8993E7533229\
+            C172F3F49288FA81984FB547414A3CC4AC135EE2C8A150756A5E83B6E30F4EFF1\
+            A325D02BBDE3A405EF6913AA43E6A1A956CA336524C5C2E85AFD2CCD95978398A\
+            6985BB54C2315F59A13F24CFD6254D1B5D106B38C9589FEDB1D4FD2D83F18E2B6\
+            110C97B8567A5C7EC0FAADC49D06AACF050CAE7939A9B22F130CC68093B595C1B\
+            7E9030C23D6C17F80ED3648B812E7E4CF658ED4D9999F1519BA8E18F9DD6BF643\
+            66D784EA793593E08813D8BECCEAA224C05DFEACD8278E6DEE86596AA20793C5F\
+            514A3B40BA42D643AAD01270C039F13F9BA007031EC58098B908FA799CD8D893B\
+            E5C26BFE9BDFC1CE2F9830311AFE7D2DF2373090CEABB780A150EB66FB94D3DE3\
+            2420A80CD0631EA913FDCA4D8ABDC7BF5A22DA16CBC7DF0433905CCCA530D0B3D\
+            09DCF67972D020D99C4D4C9BFBB9A61CB5B909A010E70E3984F39D270A87DE8C7\
+            79F9251F831AEACCDB153CBB77536D62CD651329983DC9C2EEFAA217CEE8BF018\
+            03103190D3F306EBA323ED833D282F141A169577F68F88D02225EC389A4FF19FD\
+            708E0A44BF0436BC829290CADBE53DCE2BBCBE02AC720E3B57C81175FCF14CC2F\
+            9A42900412D0E5F7BF3F17733D4DA43C4B07AF1B213A1A98E5B61BD63A2B08409\
+            C49FA639027EA6AE60264E2B9C86C9857528AD755697995A5212CFD3BCCF92321\
+            D03CA9E5FC8ED6DF04849BCFC0BA11B456A2334F2911D8F3E05F1FFECA6E6B9D3\
+            4A273DA20EEFA86DA0166426D7604402BC8AA389658C44416CAD4F614B1E16AC6\
+            0846C4FA3C7C00DBCAA7EE55EFBDB45633AFACD932A57A676D179CEFD55081F0B\
+            C312A2A5A73DA74836A3BD22CB12E67C3CC6533D226F833701F6E17F184450679\
+            1A071D24772298E27E002AD8EB87DB2F8E731B56FB0BC34E4FA27D0CBDF384941\
+            4BDB38D5DF536E7BB2EDDEA4682139D7AD5E408D91A37CE957A1AAE0A54115CEB\
+            715BFE245604737BF47033D958C969508861CE4F6F056FBBD8E36168B2DC2C61B\
+            64310EC6325DCA33478DF8AF3A678DC8260E78073122E8148624A32A8A7F4D3FB\
+            2680D1A5ECB170E241629E86B81E23160910A6B027883715B6D91595BEE597176\
+            64211CA8FE6920798A8FB4A44372177E0F08E3E0B393D374A618C7FB9088A3DAC\
+            E2BED9950307984EB2EA65BF81764258CE9E482343FA241CA6CD967EE1BA820DB\
+            BCBBA7A7A457E39B182055E5ADE18F80A60738B98F8789D3954DB824049D1B749\
+            BF9E996E4DB94129E01BBB975E708250D7C7B271CCCD596529C73387A71ACD3E9\
+            DBDCA6068CFD213E5576552DDC70187622A5B160F550689FE023E1FCD2680466D\
+            995E5FF8E47B33DEC1C7D257586867E701AD28603BD7FC1CC245E302B0D5AC29B\
+            CAA462FE8881052BB51E651234C44E641CFA2D3AA0218E08E4881F5CDEE2FA819\
+            F6A39C4FA9B7A381D26353B78A65443AB1F1DF7EC51F604695D89F2C91251EA49\
+            EDC88917E9833AF2198CA625E7566E8AE86F30DD447F57E341AE7DC66C5199CC5\
+            B12DF14DF2C1A5FFB3C6BB9E95617CB506F2ABC2E456CCCDD583403D3363E7536\
+            8F7BFF21CEEA032B5F22A13C354B85B240FCAAD6D05BD711F0D3C93F35AF2DEDA\
+            7EF34DBCA1C5D19F19C7A2C8EBDA121634982542C2D25C457C94E1C0404B7D95F\
+            3FF9D66CE8FBD350C6F3F6103EEB4EEFCD33FD887D1DA1C591C4B5FFADD0F5829\
+            A5B6A0C90EEA7370AC139CEEB561C8F3DC9D4FA4A73AA99F6775B8022DE2200B2\
+            D1764B6A7CB9923E37FC17B7983CED54E8DDCFD1B86410A6D4794A80D56EF6E8F\
+            167184371680B89B6B2AE84416E7FC1DC6591D50AF229F9C9CCC2883358E0E670\
+            6926180EC9BA7AA2DAD3D26DDA6396F18DD9C6457752177F270D3BE2BE649A951\
+            C5EB505715FB62BE75C6D199920D6F8B536A7E375F2CF2E3B895E7FE661FF37ED\
+            7B8EA16C5C3825CD3C3846804308858D1244BDAC88009B002151B98573682F92E\
+            D5CA1A6541AF9F4446B868DDF5F8D32D3F34E8192254A1D250577462C7A38B2C6\
+            15DFD04B697050C64FD1C21DC005A8A7D5FFBC1AE5A8CD3CED0FD47BB034163DA\
+            44DD4F83518D3AF69674AF276FA24D9F3066090765713EAC805543D2FCA3D8AC4\
+            4917F4DF9BAE4680227209938542313CF435FDCEDA86BC32A483E35F63D1EB60D\
+            E77B93B61CE28F43F6B0D13569F5BE8B3A0F1A5AE694C025356ADC4A275FB2F95\
+            5022E12AF4EDF5DB9C3816990F99524885D56F0170C10168E4304FC4049067819\
+            612EFF1A47E990003166F6AA4F683A661C932DD8CC5B8402485A98DEDF8F20B92\
+            CB8F834FC411C8B2FBC7290125EE9DBE3DBCF69C0A5D25A63FB5B6374BFBDA3F6\
+            090938441E42ECFDED7D9EB5E7FDA3BD0C9E9C3317C335F13C533E2D1978AC5B2\
+            7771002A6E88278028183DAC397B63A887DEC6C18CB6E190CDF2CA1BBEE7E7158\
+            624D9E372C3BF90BB5FE86DC41D169F4F91B98E905BE7515472EE1E18E2D01076\
+            01C9500AA34A416D672D64084613BC10E2FE9F085D175F74D486BD051D07D8C3F\
+            0A3E7D927723E20B1EBB7AB5C25EB3FF33B20BBA40119E992778CE17AF3492ED8\
+            C03E3153AF4C03AA331976F0F1FC617838085626A1843EE53B787385E863CB62A\
+            8AD58976367FB91476D28400F151AEB12D9DECEBBC77618C594BB9ADD5B175B59\
+            86060CE7744206C701FE27ACF489E70350D10FCF14E8BEAA300BA57EC2933594D\
+            544890C2E4BE3D99DE394862058D14A2A5D7090AC209E0F022B23681B94BAA674\
+            47F5D5D41160C171ABFFB2F7C0D55363C1038D49B9ECCB1A5D1D9F0D65758DA68\
+            C4705AC351B3DDACA4A88FBA86C2FCA30CD91125132CB5DA21AEF4F4B8BCC34EB\
+            5B53E09F84316225DE7C853A6D253C6CDA9921BA68F1E037A530667D53B936DFC\
+            358CD989CA4C9EF4B8B531302F2D2816CA304C29BF84428FC7D445E10ADB1319F\
+            883D4FA6991FEF5BBDA2AD2ADCB4E99E872B04FAD657F0A87431AC8425ACFE387\
+            DEFB7EC710887B7FF98F3E8ECAD2E29C873CDABE9BF8F4019B0BF20D7EEF4B19B\
+            99C80ADEA20254C6FEAA55A80A59236274631A5E89D245EA969E735D5EB699EE9\
+            BE345C0909E2B9E2C25CBF569E6A8341C7F8E78E35D8EDF989B7CDDA070FCBA9F\
+            CF9EA28D4FE202EC0DAC08A1DE76136C23DE5B7139BE2A95D30072A117ABC83E6\
+            DD3E00A1457EACB0FB2918814A2A90E2DF54C493B2873AF98C6E52AAD029EAF24\
+            2D5487843161601786A9BD6DC35CB83B1FA3B64AFC5BC25B644B75B7F251A96FF\
+            F4B716AD42DC1AB873586FADF13D43C9D2D0EAC0EAE7F9ECF6BA2030CF75D1D94\
+            8C81979955682E4FB4E96BFA81B7164E72AF4F6F4DFC70E30AB04C4C116070A18\
+            18C963A22BF4C7C6DE9FB1F52A97FA7EE146D67FE9F2112BBCA4891D48C39B008\
+            CE94016EF462E0174DFE6F0F3CAD535210D85B107960258DF53E859F53BA6C490\
+            A5C0FFCC1B8B66F8DE16EB4BF07EA4FD7F59EF882CA54CE90D317BAD26DF8ACB3\
+            1E1716ED2B47AFC0DDDADE3EB6511CE957FD4C672F672162FD281968874D68BF9\
+            D7B1014C3A7D541F617F9EBB7BBB8EC80321FC6A84A2E2E3BEA850089A5D8C7C6\
+            95FA7F4D9D2B77C3F4B14D955D4D8238931E50152F4597EA5DB1FF1FA936B7658\
+            F49053DF17F9E9224F5EDD2188BEDD9A4B9C05D4E570F9B2860BD3BCD9CB9E293\
+            56114B1726E2537B9E6C3ED0B04B0AEDBCBC63194ACBA0842C54D3D30A309124C\
+            E925396DB86511CD9A80A0793B78D349035FE3DEEA125B9B826AD77FF3D139863\
+            D2984D8F9B23BAEA41CA707558AAC9DCC3001DD9050756EFD331FF413B5EA4187\
+            F504E816A079053D732E608158CEA15EEB35DE12C17C42119A7873B77821D37D2\
+            860242C0B88010F139F0C92870975A7D76C35896769E71931F49EA18819DC80C1\
+            E78ACE7579CB20BE457BA99673053919FCD155A29465B32E99A5D7A9C0548F48A\
+            3058C428FA4A8C1D71ECC1C16B3D7CB4761DDA82423C774CD5E19218DF8DC1297\
+            BF4A4AD1817BDA7979C65CD9808CB3C764A19C662707ED505EC30B7E223B9D7AA\
+            69DA3679E30E9FE44CF2C1117D291699844C99656B83563B1E9016A7A1F49A6D7\
+            74AC12F64B0C2E37F31F5C6A9F395F2D859D6CE175EE53AF99B2AA5E20F2642B9\
+            7B05132BFEF36B1AA0B450CE4FD64935F8A6C83753D88C6DFD1E581BDD943382B\
+            406703CDBFB8F220E21FFDB432817F346737642A906CFFB31FF178E15693CA09F\
+            93F657C98FB97EF9713E23C3BE5D14AC7D850A34D326BA6E49BC956A88934C45C\
+            399A04CB470DB8DAB25DFB13E44FE948216B8B582643934331C4A6B472A1F40EF\
+            5208BCF1A6B3263A9C990C6AED8A9427EC84A7E42BA7DC5691E377A7161A44223\
+            A9EB8D9167116BE9CD13A308FD61683E171516E418B7E1AE1D362BD61C31BC6D9\
+            9C30F40E75994DF2F96FA9C2BE3A0490D96A21D12DBE7B92C74EBFBF09A80C7AF\
+            CEEB9DAB76D5B93328C000700D2208321C719CF86B3C8461BBB7BC13C708EF966\
+            BA94EEBD3667F329B884E604974E331FEC3F98A1732581DD77111F60755BC7720\
+            49E5F05407F615FBB32BC3595CD3CCADC468847F10E0509AA2F3C97B7BE6C74CA\
+            8BC1C4090F66647789AF783F3BFCA3A8C71EE1C091FDD6625814A6D3E8D96ABAF\
+            B619260D581FB2848D9FED47761CED60070911917603C1E32A99B0A8EBD517883\
+            FF90FAD2B4296837F920CE1C091BF32F35813A51EEAA8C6C65250EEA232179980\
+            AED8354EE0B91AAF307C1FC988357A8852DB026E9737182E5E8DE45D45B3FBB1D\
+            669F60B4785CE5B813D5502D7245437AD34562EC970E9A5E47DD3AF149CEC867E\
+            F6EEDC6C28BCA909CBDE81DCFCAB313CF9FA313A7AA8C4456334042ED72660BE3\
+            2FF83569130A76590A871342E08188102863BFDABB87E7A446D9DCF223AB23D13\
+            B0E4152D34C334F7DDF2F82209B3000426698963736F1614B08A54659E4383A19\
+            43DE2081DA76B109E711ACF922ACFC2026E65BE53D15192EC32D4A0D4D368F7C1\
+            8B4DD87502738B27DD34C5010347852B2938073A452DE116570B903393EDD3361\
+            CD2DAB0FAEB3B76A00381B267EAF8C20834C2A79F139466FDD3613EE92C2B5EE6\
+            2CEBFB0A8D5FEBDFA64EDA93DEE9B9497A5FBE4CBA6308CEE43E59D71B1DEEDD1\
+            59051A3413D68F30E61021B634A3B2D3859071A0873777E8F3D47F552FA41A96A\
+            3DDE1917F2A2817AC7C032E1970B2C33ACD15CC6581AF3AA6896E3BEE2BACE93E\
+            4B36F776FD90AB5CD73236722E6262105D80DC9D48D1EAC5589F0FC584EEDEB27\
+            54C8BE2C310CB99A315476C7493359933C0DD0A6F6E7AC729CA87B92A5E721EAE\
+            BB0553FB95D12A8B4BFBC3A9048FE0483A13F70D8D7D8AA08778A44B46D5AEE8E\
+            070F4838DC357B7EA87ECE92B4E926EC3000FFD5B0F1FBF88E1CEED99051328E4\
+            FEE796EEB3583A11421C9D2D138246663D5069FE83D7D817E336D60D6909F7250\
+            A0CBD95089C2369FE7122D727A2CFC7CC56930C3822E1AC8CAF8AD6C2388274E3\
+            C4CFD35A12BCC05C9221657454B77E0DA835EB8EDAF9D9E007B7C56C700C2FE6A\
+            73BEF10DD60023211D7320CC1B43474F746CE68692C1FA3E0B0BA14FEE223D43E\
+            3738992C6554669E54AAFAADBA90C1CCC45EA3D05E1DDFC50B7621D6A096BCD1D\
+            FC75276013945EAAEB676FBE4BF56E290B585AF05A3F589AEAA65AB4F1554CBA6\
+            EF5D1173528259FDA97443978E7F712170FBF55253B12CD8C5D893833384230A1\
+            E8A543088538CBAE802B6C0CE5F773DF8EED3485EEA21338D99C6EF3D42005045\
+            11F6F5AD6A004434544C84E4BA729CB7C0C533E4781C1570019A9897B10F2487A\
+            B8B40FC3F0ECE22B7B07AFFA13528326EA04C6687FBD052E334AC28330BF4CF3C\
+            2629D2A50B581D3BCBD0587F08A4ADB2CB93B5CE60ADC56DF5F7871BF9EE9808E\
+            9F845E2DAFE02560AD735C13E48EABBC82221940DA9247C0CBDA30DAE2812F1A1\
+            86C7E36065E4ED37B3779519D22B98F535341CE0499FB1DBB648CFEB4A19826C4\
+            FA359E1EFF0FC3F01DDAD5B0022557D8E47C7AA7F4144E0A9C3616213FF1550D2\
+            954C37A9274CFCEE8C218E805BAF17BAE3EA5F6A55018BEB03093CFDEACB336C3\
+            DB6AF4A106178A7220F70DD2FF3B2F05F4CEF22818E994486480A9FF42EEE0CFE\
+            BE741EAF66F7C30CE0F8EE4612230DA9211CC8D8322AA1D55EB1082485882AFDC\
+            6EF52F16C216C15B754BC306E9337502F158C59DBD3EE11758AC0D30D8A619D39\
+            5CE959833CCEAD66A4AC104C17501F8415BEE725545AA048E62E2ACED2BA6374F\
+            857CEB2CB75EE0CA1AE2684270793A59FB5C7FDE695812B9C25091ACB4F14DB20\
+            4743BB05AF39EDACCDBAE5764C6DEF38E61DE79593BC4C12D46205638ADA5C93A\
+            CC094E6DC9BAD9D5D8192D193FFFE3A6C9595ABA887F0DC3A87915CD74B2E608C\
+            89764A984BDE8BB9901D8498869A65BEECAEB93AE91D230B3D32AB17673D7B163\
+            B583E65BD170B5ED084C5BB0C197D32B8B404B6349BE4B7EBF7BF572D5C3E55C8\
+            90A1F3DD2E72F154FDD6CDD51F02FC89D873A58333A6DD5C0B842018504CA7529\
+            ACA0F06071B2C6997E9EB7930C37017C7A77A0380E082AFB7FAE85ADC893ED940\
+            0E988F2AB43152773663C6569546F3DF0C919F25F751334939CA386DA3900BA03\
+            20E87C75F1469469FFAE213DBD9723355FE6C84EF1B5E965FDE4F2D77E2721887\
+            9230078A49DD69268E3155F7931778E7B05015B88342721612112C8D8FC4D140D\
+            9A6E35269F3A6141518218D74A870FADCAD4CB3C2F23E8582718DFFF18E3EAFCE\
+            CA90041245950D13E8AAC1C7F49790011E1BBE74A00B79BB05A7FEF0B9FCCFD9E\
+            9820C387218E86BB163DE6BE98B2A707EA9EE5E189950C6D8763B3DF0BE77B716\
+            BB532F080EBB0C79D70DF0D2523130D5FFAF21B3E6953CB104473D155232CF54A\
+            0CE1ACC00602DDB9234ADD601DB2FA35090237DCC67D4D61F3F783C96AEAE84E4\
+            02BD71D49176232CFE1BCB7B5BE08C73C3C400B7A3575E3FFF5D86934AC9ADF01\
+            931F267A3771490EB2123C614D57CB60B77505CAEAE25F515255BA6170E4E11D1\
+            D040D8A697FB2410BF55D95C73554B039DA198EB8FD06A1A98FFAE9B255030FA7\
+            0396A208043AD104BDC7F08309E04C3E6DB674F48920B4A6158FA450B6FED2E5E\
+            09EA781931DEF4E0D17D8B1ACB638334A9FB128E9EF45AA183525F489DF1C9578\
+            9D3A411497DE1EDE5DE4CFCBCCDC3B832D2FD2944B831AE0BB18713CCEACF2E6A\
+            37E89F2BC607A7246736C0A256631A762C235D10339F6262CFE7411506452CAEE\
+            F531FE839D466301D5CE42A946DE302AC2A02076E1DBD57C0C8F02C37C4814B61\
+            65104975C6902E2ACB2DE0E7332BC01388E997808E140F9C85AECA0290FB3B4DC\
+            B5DC03DF69B95C19285721D59ED6F8302BD330FDF16BF254E30015C51C0B04D3B\
+            4AC492BEC2C0CBE966974D394DCC96FB2BD3414876989FF08EF0C7577F2839D2B\
+            B5B26745ABED60E7B7667A6BFA44EF768CB8A0A8308966148FD6DA8DF475FDE4D\
+            FCED8CC3FFC6A5DDD4410CF9D8EDECA9969EDF0687CFA8E7EA742154A3D2CC735\
+            18F9D90E89E07AA808252B17E5BBD1EC24CB203D33FDD9A8E75620761365026F2\
+            7B45960CBEE658A2B236555A375D5C7B829AF409CEFEA7159A4FDEE6AA5CC6D7A\
+            CE8DBA828A15D40BBC2D1D6E334DE4458A1BDFD37D3EB56EDBEAE0C370465840D\
+            488F05A1A52D30983BDDAA5584D4485C05FB1FD0C4203BEE7D4D45E1E57C896D2\
+            75BC77D2A4A43C19EC1580FD9D43B048FF1A38DD2BB69000C3FFBF8EEDF5983ED\
+            7429CFD8D84DB988E28C3D20482E794634B14EF066D1512B90457803CCB42AFE7\
+            857F84D71493130A3F4A40C84A051A7FFB5A2FA57FC356C774112198E5D7D9698\
+            B1C099C668FBD7AB96FCAC4DC86CB25EF6614A4AB3B048F1BEB67D10ECD7A0A0F\
+            1D4F152B0AE50FFFDAE1845272B2DBE32F6560E1E886DB3135A64C9FBC559AF31\
+            D368F62AF5554C6F68D321736C4C238078E63676E2745ACB1C4805EAC068C0DF8\
+            BA1734EBE27293CCCF092E338DF6B605F8A5496392AE346B7A4521E92196FFBC6\
+            6A42C7AC831ACD8C7FA1C5BB027F7E66A80420548749CE691FC1C8F4A5AC7EC64\
+            DF5B84DC20853BAB92D72F94C56896D46C43E982639BC229099A4D6C586A9E2AB\
+            12019BECB52AD69C469E436C5F02B4A88E7B5F9F29D85F819502FCDEF0014760D\
+            F585F1B21FBC213CDB1FE993DB7938683C6D6CE1AC203612CCDD8873EA44E4527\
+            7123F299487F65496A512D497C4F7D8A2B833E567EE2034AE853A1510B7E2EDF4\
+            8057D351DB207052D4CFCC54E59706F3982ACD32D9D3CFE59004B4F7482865726\
+            7B92FCAEA70CD8566BE3BBD05C5B23A315E391D5454AEB022BDC2A8A6D6110F8D\
+            D11A97D13751D24822878783F2A353AD5BCE5938F243815101023C4215A7ED45B\
+            FAFA8185F9500B8711098D6FFB124FA05BE4DC456CE3D7932F767380A4358BA5D\
+            8735169D586BA993B0062FBDB449683A47866D624BCCF4C64570CB3E936978405\
+            68A491A5F418B2CB01023C303BFA3C3A5CC73BB9811E8D04F76DFE49859A3D4CA\
+            337D570C0E07BA420674339D443C25556398373D4273D4E2562866FCCE322543C\
+            00740E5F9263D03B0FE0BE6CA2678DDDCB2CA7EE794D1746351334B0B6B40125A\
+            FEC3BC1901082E171FD114E83733897471670F447F4284C45AE7015554238212F\
+            41DFDB0EC4E43C10FFE291996CF4A5289A02EED530678FB74A86845CA3D1549EB\
+            AAB782851214A055624AF83EF86DC32CCC926A6C6DBDAB9F83C301EF98245AF66\
+            7120392771E1B0B9A5A10B1187F38A958DEEE970CB0FDAD4AF9A42E1F3AAF73FC\
+            10BD30161B0BBA2A761D6A6BF59928F2212A4897560725431AAE82D94682B7C57\
+            BA7B1A82ACB822786EE13D640C8F87C7E75A2F275EEA3C2655BE29D3241198AF3\
+            AB33ED16A668C31DBE86FAC98B9EFC4CB51A600CAB71AF95C74E928E9FE50CE9D\
+            D61DFC4443298D6AE9EE69E388AB4EE703D184D0368548AF832483F3E72BBA524\
+            33543F8D6C89CD68637500FBA7C7108ED1005A8A311C31A06C31CE00013A249EE\
+            245009A42C07097A37F1F9AF5F729014840799659876A33EE814DDD2171E78310\
+            F5F3D0C858CE4B97B3129C502022BA0EEF71E8BD3494D616C9F3110B084BB51B7\
+            0BB17B138F0B92936CBED5D81",
+        );
+        let pk = hex_decode(
+            "\
+            5D01D408A07C511354224F6F36B879E65021742956633482C378F16090C737D35\
+            F62148252CAB42053009164ADCE36E2064EFEBA6BA242FD5F7ADC4F177F23C665\
+            4A6C6D01D8A9CA87D52EF0F28DEBF9EA7CA0AB78C25AC51E406CF1CA91DD11A3C\
+            AD979691CCC9DF5C7B724F969EDB435483FFEFE9C17349AAE8E90048B5B106685\
+            B76920A5CF20332B9EBA77C9C729F7A8538FAD7D4304214228DBB0604714F079B\
+            A646498265DBE69F2A584142AE9CE722A6EE58F2CD95726D61533C0449A65D38E\
+            E38AB6BC5D74F18D0B0B2270C95258CF8FBD64499F4F47AA09039609FD678F608\
+            A88FCB2B25316B0989D53B160BE55F6352820164492D4302948292EAA832F20C5\
+            22485775EE3A9D6837B49895F948A6B729B5F4887BB33DA0D65644C29D7A2B105\
+            4DB1991B1BCF325618B45F19034DE456490729F69C9B5A89109C9EBF358400973\
+            AE46E002A6A513D2C2578F49729D37765ED3589419A3286616625EC5CE023ED43\
+            EFE075799673CED9E882A737843C7445EDEBADD9C01E960260F7FE383E4EC3009\
+            CDBD8E95754A87513A95C4B2C40F3F143B9644DC17CCB6A454CECC8B77CA7698E\
+            A964E5DD2174460FF9FE455A73D597B45CEED93DF9C836E5E2F51B586D1AD8493\
+            3904685558FC7329940BC5FEA4A041D7E38E2ED038BD4CBEB7DD0F84810E522BA\
+            F1A2B28746B51C0F20C0884CB2CC9C111C2104C9C1F69F70FF34AA17527FF97DC\
+            8FBA27BB6546C8963AD347F85D6231B6FFCFE732C7D1CCE046E118FA69C4CB13A\
+            57FEAD67E97CCBBFE7EBA349929127753D3B6AFEF5AC8B012D390BA6987C89C26\
+            E57E590831CA00AA0D49FFB993444B4B1D8744FDE8A4DE0265B70FCBD8C6F533C\
+            429D01BB0A3AC94B0A5D6DF55A8B3F988E2C76D080EF4B8F139FCC7B49E25EE75\
+            D00B60B3FC994EE6ED04C3EC4B4C7863FDCDE13DD33AFD218B0A4341542C8B70A\
+            63BBA50C636AF156C9A0A8B52CB73173C8DEDD95E52E1E136F749C9261D7334EC\
+            F2A32F9F043C7F932F149E9339810B7914A39927C33F200661DE147817E72A65A\
+            B35B872915EBEBD67CA6C08B19419262B32A5E1481960D4383619D52AB5EA9884\
+            4CFDA24540C2A459971AA1EAAB775EC53D7B9DC8DD6D3F0E305FFF2EF19D7111F\
+            BCE1FC768E348B4D98E7002AE604AE550D7DFAD3E32BAE55B96F41B143BA8244F\
+            3918780854C4B9602F23AD39CE6CF56417D6E483ED9D8CA9E8BF50A7862A32029\
+            DC780CA51043C7401AD4CF4F9B4026C1E43933D38BE3E7B21DD94683E45498289\
+            C9B60FEF2375D189C25487E5270018D6151EECFD3204F0BF94B50A9728A8F1608\
+            531DDBC0DA9E063156249E10F8C4EDCF5A888F51514C8C5309E5B476B0D19A6C7\
+            B920E0506961FEA94EA6FEB4B4B287667059CC7BA75AF14A091D73E8BA6F0935A\
+            E52AA1489DECC09B88C0B36F8448FF4A0EE0061AF5B2E7BE7EC73B9D95472C6F9\
+            BC28391E909C2E26567F3BBEDC78009A6FBA059E0A53B12F097BCB96A3828D8FA\
+            8C496AFA9F64A5601B3AB7A2980E81AB10DF20F0F13A1185B32BE71DE0655D258\
+            BBA091EDF82B48FD2F0FC3AD4BC8CBA2766CC7CAD5D7541D0C13208046CF3F2DE\
+            BCE81F918BCB0E21C429AF158CD467BDC554E072375DD2C39748ADADEFC6E9832\
+            8B2D1F0FA4F4DFBA8EB24D48B93E7D8115F6E93CC8EE58AB9FEED6543B40E2F4B\
+            4A9263418BBABF1AC92977BECBC1D30DE804CE95B05FF086CE87431609F808541\
+            9CB240E756E314CEE7A11BD0D7B10560CBB5BEB0AAD5A154049E91FD1E7318AF1\
+            5C288A5391F0CCCFB6F2578B0AE60C1AF326469B981A366B2F9C9DD2A1EBFB8C9\
+            2AF5D8A1EA3BDE429489EE4A",
+        );
+        let sk = hex_decode(
+            "\
+            5D01D408A07C511354224F6F36B879E65021742956633482C378F16090C737D3E\
+            8AE25BE2146D68ED33A1C22FFF6911000C36F90F50CA6077134CF908113C2892F\
+            BBD14CC761D516A4B0B5180F4E5F3BB1352952F8FDBA56CAEC87C209E95AADFBF\
+            94B64BD54E3CFAC86EEA090E00C990AA20647B19211E0DD93CE0AFE7731FAD922\
+            4D82320E0A128124048418948108B7254B008052288C1C469052C601A01484821\
+            6511088841928058AB208D8348954129164228C043085DB302CD24282A41405A4\
+            1081C4304823B9801C0370140864DC38291B050224990D60B070491222D3186D9\
+            AA8055CC2890247801934221B4640C1442244902019A00812B524103724D04890\
+            A0824D41B0801B35229B24054B080559C4440427425B826C61422D8844429B148\
+            A1C0130D0446AD3040C1B376EC9400118016413826D60040284384C8994650823\
+            70D22850990451CC4490C0A885A316700A045112A204D9268ED8465224A5644B0\
+            06013928CD1004C59482009912541B881D0C451D8A82D04254E02444ED9468D91\
+            1000608009229030C19670C2364153B2618930708B942549A6041C02055A380E1\
+            2892104458611007163C628CC068C42284DE388080C1924084242D20866D0484D\
+            0C125250A40D09146D0927104928660AB12010298C8A2430CB0671CCA24463040\
+            CC14624111609234185DB260021354809800942C2651CA3204B0670538445D028\
+            30E40644DCA49021B20C61480160304122B91118A5090C216E9996011B2152A42\
+            2290A4752C0005201A28C40C881413232D3280ED8962C18B4110CB77098344D0C\
+            C981C8B48DDAA6305B18851AA36D13334910B768D8222DD9288C41122A8C984D2\
+            1B9905890240BA530C2369219200DC12221DCA42080329123496EA4C470A3A491\
+            C39048212850194621A390010306025B242C02304604C610DC180914B18983384\
+            940080263181240324D9322502020015B42909B40226448010A172C22B14D5A24\
+            4D4912819094300CA0919A049104478148205018016D234070DA284993A420138\
+            141D236529B0681130710234430D1105118880163164A60024C8AC89042382102\
+            3864C92241DB026CD2A8919434898B98250001699B942D1C098E1B4568A20282D\
+            C36098838428C4821189370DB064480308E12978450322E24259018010C144106\
+            A282640A316A11420E98988C533860039468D23666C0B42924191180168E51384\
+            E60B480D48621CC3489C834051282690291814CD7C382B88E8EE9A144119C5D4A\
+            AC200B3572B2AE374572A225B1184A00E310A3AECCD2EFFA498A96D878DE9D99A\
+            E41A5CBCFC62225DDD986DBC48C8638337D3E8BBDF7C02F478061DA67F5D24F68\
+            4396FD06C5F46D11041C31B3B123F1AA0D098A66ABFC2F27725D0607E64153304\
+            E5CE0FBBE597070DAC3FBCB688A2E4CEFFBD7068629BED23D4C884AD910F58D37\
+            76FD4F57F1E5E43F9BE85672DBADEC5A054345B132454920BDA3AF35ABCB025A6\
+            4139A04B5468222F03494819A76655CD38B9650CC14AE9A5A8A8438B133423296\
+            960BBEEC8A3815AFCB2AC8D126D7302498654130A186EA56D54C26F10D28B3337\
+            8E50C1453FF4F471790C92DBFB37AACCDC6895F685A3A67AEA3875E6C0E116924\
+            65FC915206314529E50D9990AE6A0355633545EC0BBDD171A3F6B4C2798D5FF71\
+            F98FD025938CBB0C4361E596ED90262367AC676885AD0327CFB72859A2F9C6C9D\
+            6F3AD0A6F764F2C732DA9987F966331D1F4E2325022609D9649067921FFDE26BD\
+            3550D0192F87B9D811BC5E3DF47A357963B111F8B2D1C247F5839BE8888F8E8CA\
+            8E847B9FF9780D637B7FD1CC9A6302378E6AB51FDA85185C331257CAB4564368C\
+            1E27FB53C41B4C90F62E7BDA598FCBC5E3FF6C68C5D7D2AB4215EF5C755A404CE\
+            40F409412D48BDC2E337792C04771447FC6AC9E2E6D66D2913B68A90A25824E5F\
+            AB3C28C60B2DD852A8218D4E543832009814B318745F0D71D7C11E0743B259963\
+            5B2E838A24EF85824EA6B0E9EFB9DCCA91B380FD4AE1741CB50AEB35574DB1D01\
+            217A1114DDAEEB0E828EC5A712CD2975D9DA7AD04BE715BE8E63CBC35B0D9E39F\
+            E857BA39F532F4976A8563B7F0883E69D1286440F406A7662B42FDB4B1662DCDD\
+            ACB05A91C37899DC348F6677092560302DF1228CA8248BFC168A8E6CD404D2959\
+            3F4763EB2642885437D07B017DC0DD2FD509A7CB66219FB111482074448DE0FF0\
+            F83A453F7658628C86C54767D5D216A45F2ADFE02EBBABB4D18F83D2BDE3FCA7A\
+            F3AEADCC12EEE7529F9082677C5DC8B4163EBF88EE9CFF24507817225619663B4\
+            D2166CC6226E761C1EB02DD72EBDDEEA136C4968177331BF7DC3AC3239C3B4226\
+            68CD2C34DAF7653054A8A88E0D9D98D91096F41A1B1AC557374E156D15C459542\
+            241B49889039EF34D586B4D0597C6E273DC725350701FC4B6E97BD7E0DFCA29E2\
+            0490BA02C6FEB27342DAA1A7BE6646457DC3BB16C26709796A0F76B3BD66E096F\
+            3E6F3E803228A5CF18CDD628231961E5476D11EEBCFA14F413C6FD0860AA90390\
+            A91CB8426310ED36D7E32AA7AFA9B5F7007E4BCA7E7122B5A5F7FE6DD9825C9D5\
+            D35CFACB65C0911B875CC3836A025AAFCBB4B4D624E7F9FCB35D115735321BAB3\
+            7B4994F83EE33C08137386D957A4611C461CF2395E0C0CD8EB9B24D7F09EB5E8E\
+            193191B9566B9EF4949F6ED0ACE40ACA4819CC4694AEEC9BA295068DC33B22C4B\
+            E812328808D4BE72B483EFD66276E05B2D5497703162E751606B4098D2F4B62EA\
+            F95E0B35BE46C42502FAC97B116B7993B0C07CFE8221AD474E8E7AFB6A11600ED\
+            4D771666F3F043666F7E442F0DF6F944FD6779133F07BFB503E53DA646B619434\
+            93E566237994674C103EC1CC90339128A2CBEE05189DF3F3D0C04BA656AC76347\
+            800506D0F783BBE1FFBA7D84289FE21F45823699B038402E503127303DE23FDF4\
+            ECE1863FDA48AA9EEA99C9D527DE046B27C2A4E2950824BD58FEC67A8B626DD08\
+            A8EBB3C3090682F37780CBABEB362DBDED2C2803EAC9B404B1DF08E9841C09DB5\
+            958A9D4D11B6CE3C33D31973BAE53D3D3B27329D36F26E19317A52201AA3B3C94\
+            869A99ED5AB08896B78727E81BE0128488F5010E03B1BE13BAD0DD96DCB9E5E9E\
+            507B475BBFE17D53444C3405C30948B581CE7153B2246003AB652473C6FC47195\
+            E1F67C83BB5FA6EE204A01661450820DCB5CACE8A654D6F9EDF50EBF982AC6CCD\
+            9585378EE5A70CBE9F80B2D619FEFFC9D3AB1C1AA9CC22F9305A8CD1D3C3E77EC\
+            F898F6A0C388C0F53AD058933C92A61FD9921E1D7085632ED2FF3EE8B216A1D3D\
+            D13D72197C2C46E207F124D6250D4E0365F027C2D23DECCF0ED2C89CEC0F5A762\
+            04030D4BE30657F8CD6925C12702348069EE9703C9C4E17CE7FA905BC7DA82A7B\
+            3F582A1D91571F4256075C0C03800161520C166C6BB729F0CB24835B4CBA9672E\
+            3EDD1A51797601B4F4914FA38EF4BF85733F2621B8CC55548C11C39C9166352E8\
+            14119622AA295DB4CAEF137A63136B4EF918FF077F78F17C5B46AFE215CFBF5B8\
+            513F24C05A833AADFDF64BFDD201F86EEFE31B7D2D78C6BDC7",
+        );
+        let context = hex_decode(
+            "\
+            EE0B3F679FB50F59AD31328AAF4E702CCF6092DA4794DCF07C8EA278B34228A41\
+            561C369271AFDD26159DCF071223BB5D7B789270150C5B17467829C8871B28A21\
+            A3ADEA0347E35987932A0C465157FF2B2AE966CD4A48C24CC7B10B7484658C652\
+            241C82266DF",
+        );
+        let expected_sig = hex_decode(
+            "\
+            457A6EC9995A33364F79E317A689F9B7A40B5FBCF6F687D6C03B3AF63049AFCC3\
+            CAF35EC9E6EDC280B19989DE1F86A17FA11EA00C181C7960DB382E7E53B0761E4\
+            7A33521FB9A8E134C9CDF599969B1E69E6756F33522D4F37D3DB6FDDCEE1D845A\
+            C497AE90763A815C50E8DA9A8A4D33296C359A2F4C60EB706E709C1747A9B57E6\
+            57054BC6F48896F8F4AEB1384F4BE6ED43FE7E21DC5044DE4937534A2FDC91019\
+            037BCD0B9988A109A80A10046EC0F458603F274E3B020C724FB637857E233BC80\
+            39FF74D2AFB1006BDDDF0D3F8AD78CC8D3C1E8118B64F9A898573F03022AA588C\
+            32798047A7B9D7C3E2428AC5D05180C9EA6AC23C1058574EC3D6A732BAFA405C6\
+            4B9B98B86B6D4D31EB08514FEAA89B92EDEB0A286DC315EA6520BD16C724AF7BB\
+            793795DABA885C0BDCD4E140955C935B3BDCBD4C5466BBF4056DFAA36D5B49F5D\
+            802A03B4D8DD66E71F9E8F8CFDFD73FD117EFC251E1B26C9FDD1F54C442F0998D\
+            6FA53D01886E8EF2E2548790788EBD629C76AA00220C57D6727F44089E6D91B7B\
+            E63B1C47586B8929BA2F9AA23E5F5D9F4E993F7733BA2958DA3EEF1C27E59B03E\
+            92DF7BED81BC8F19AE559498DDA07017F4A8CACEC1AB62359E88019DB68627214\
+            C96C430538C8EE9249145544AA76FAFF0FF3A7BF1E2BF7AEFBB6CA89A2947EA93\
+            0957B37C0732CB6D6148F5A5FA825FA95B43C2F5666101539F89087F6350F4547\
+            1A9A91B4D9B1A95A2C26FDE28AEA86AAF1840174E990D3B2FDCF0F4E412A1BBD6\
+            8A6F3FBF0CC965DA87AA32CDFC38E0AACBDB54CB37653738145481AE773C8C5CA\
+            E9C6A089AEAA7EF0A99A01127F6E6FBFF31D265E7974041599B22C34646F2F359\
+            ABC581859CBD60AC830CD7E94438C07203C546B9211E806096C5944C27352CE71\
+            61052F818CA58E6934C9F3111DA8377E3D7F7C8C125C5BA21C543F1A5147EA4E2\
+            BDFCC952811ED35AF8FDD29254EB644D5096DBCDA6253B33612074FEDE1B69A09\
+            C1EEB5467BAA0EF5A09666813A8A4FB733E3B0026EDE4157A6CFA5AB17760904A\
+            F2D61E84845B2E68F1622018DFAB293C5042EC4CF1A66CC5065513FA6E378497B\
+            6A2F80BE9AE9DED9F4D1B12B1C61FD21E5CC1080981F2FE8FE580C3C67AD0917E\
+            727B50879726B4ED45199BA2E51B466B8A044B71CDFA33F19967C9553EB4410A2\
+            C4C67FEFCC2B4069E8FC87D5E7E23E0CF70AF38761B61FB2AEB30950F2994EC56\
+            10A5BB8CEC40FA7A36A6A782657366ED0533A74F0B7B5C46163DF2AAA74E6C590\
+            39CBD44CCAD17847C1F2B8AE84F002EA710BC86BF7D8EEC25C0153F178CD3074D\
+            3CE956E2773BA23B5A915AB281BD6CF7C7FB21C59BD0502C4A7C42CE95740D7E6\
+            7759240C0551B2A7D5F34891237E6D7BA33F85D86AA3128D883690F05AA705306\
+            68DE2D847185E7ED3EE0AF73D4610FFFCA26DC55FAD06AE1115780E80ABE7AB26\
+            0C713E8860B5B6DD7DBCB348942C8AE01B196BD6819EDD70D8A7D0DD7171504DB\
+            138AB0DA9D1B065B298A783CBC81ABF992FAE50CADE8AB3D196EF31CC5A56A13D\
+            79495FB15DA8916E5CE12218A96DA1A37A37A7B395A7D5A623CEB1589C1366CEE\
+            E81CE7AE221D70B125477FA923322F331B467B0703CD2AD8C1737DA058B79065E\
+            5700764BCA97F55DA8EDA1E9491AD7A2718BA43FCA4BAE04F1099504049186812\
+            3AE6E18907AC84403FFE735FEDD113CB18D234195362154A7EFC46FC7DFD2142F\
+            36561BECA0A8CD64B2551E95523BFC59C894F1548B28360162EB8F94C5D22836E\
+            714971B979B4AC989C236A05159701CD422387837FD12DC5A628C99237825DCD6\
+            5253F54301941194BDDD321587122B316480803524BF40F0ED4EBEF738DACC8F1\
+            0A9DDB8D9146FFE18C6F81D71722EFA82ED627BA265DC2C2F8B3BAE65F3A7A6E9\
+            7E5D4E46865AC59349A96FDF9F60938BC68B78C33A0A170F2CE0EDB5C27402CFE\
+            65B1D0C45D80DCBABE788E53217BA28801AC212537A4AA2173AD05910D1B6D134\
+            1B076014C355604F51F90AA49F26A0E3968609B2E429F033715E3EA1A795656AA\
+            32526C506A5DA001DCEB12C6BF6771EE512DEF97B8AB8042EE2E69624FA50AF84\
+            D4195F46A2DC491DD97A91FE9C930102D6A5929EA862A83DE50588FF753698D38\
+            AAE0361CB58CE71D7B1E5E140026ECE2B61DD5A3C2034AE7B9419482758A0AE15\
+            FAEC3AF7E4E5A488B7A0A8098B5906EA6B5389FE8953EF09D3658B5064903EA55\
+            4DAC1267D99DD6049838A77A60DA65C1298606B10CBB4019CABE50A32068BE5E0\
+            C5844904E8CE939CEC047CCAD0567A50C6CA2DEF596F3BA16B88FA84E9F4E5EEA\
+            6FC75CFC4A9D709EF4568B6BA96D3498C55F20F6CD3548455E1CB8BDC25DD260C\
+            E81BBB5A3A9CC486FB52289ED80F8DCCBC88C93082C4AA07C562CF38873C5BD4D\
+            49579357EA582EA76F39D64B51D3A46A5D64127B1ABFB4513CFA1259F565CB415\
+            DEACDB320C9558A4EB8F7E660DE0E16C4FEB2C16145BAD8FED7D398273840E44C\
+            8C61175FF49F818C66E4509647D6A59847E9D9C1C6BFB1EC8B0AD3D037F2F87DC\
+            484AD73DA55625369F6DF6D39BDE5459C73850F7A9D92310CCF4BC140452A1A11\
+            4A3CDBACA839D12718182202C98A55FABEE98F75705C6112828DE5EE71C8C205D\
+            31254D70520851C60A271AD1CCEC87FFB662A927001BCEED02B90C467A508197A\
+            24B6156DFB89F135BF8DD94807B3928D942C29A42E3FD8B5E05AB61691112EF8D\
+            371AADC5F952BD8CD88EB9D975BB35BA81A4127CF3F43536176FA89B30CD65D10\
+            8D7F7CF60D9A2985DB5753AB6053375D3ED4C71F65713DCAD86B596BB42AB45D3\
+            5F4931F49F0D5DD30AF519493FE81F07872AB5AA7BA76B31F7F1D9DE36286CD97\
+            C00D54146C08E5AB1C6BA476B4BB491E621866BEDF0208711A72DE26C0BBD2D40\
+            E7F63B025A6F6CAE47EF751355F58600232E20ACA0CF09C90C0DD0468C7C54B72\
+            219411A3766FF7A9FA886D0AB486D998C0C9838B8F4CC9F06B26E001724ADD3EC\
+            14D1DCAA8A788F1555993D935CDAB2D3A78E3A63A9BAA2DDA730C5D61491C51AA\
+            6AB974B184AC44AB08EEB9DE2ACF9B608A49A7FD758FE7FA62A13FCE4CCEE0567\
+            4805ADBED232A8F813448C347E5398EB74903ADBE127BC27F9D32D7CD6BE6E070\
+            C74FBCFD1345E5DCDDBC62BBAFBF084A64C16BD01FD637FDE908285D4D8E53215\
+            36B4429CAC6DFB028C9BACFCAFB8B38D15B367B480CAF7EFDD467ECC2AEEE0280\
+            1F39BA7332716D1FD5944A1B4D3F340FC1AAEE38D7006314152E8D9FB1D203C54\
+            555E909299AEB3C5CCCEE3EEF8FF15243E71A1ACB3C0DCE9090E1C434D5A64707\
+            798A5ABB8BEC3D9E4E61C2C747585A8B1BDC9E300000000000000000000000000\
+            0000000000000000000000121C2E38",
+        );
+
+        assert_eq!(msg.len(), 7390);
+        assert_eq!(pk.len(), 1312);
+        assert_eq!(sk.len(), 2560);
+        assert_eq!(context.len(), 103);
+        assert_eq!(expected_sig.len(), 2420);
+
+        // DER encoding of the SHA-256 `AlgorithmIdentifier` OID
+        // (2.16.840.1.101.3.4.2.1), hardcoded here since this crate
+        // deliberately has no ASN.1 dependency (see `sign_prehashed`'s doc
+        // comment) -- this is the same, standard, widely-published DER
+        // encoding used e.g. in RSA PKCS#1 `DigestInfo` for SHA-256,
+        // independently reproducible as `06 09` (OID tag/length) followed
+        // by the base-128 encoding of arcs 2.16.840.1.101.3.4.2.1.
+        const SHA256_OID_DER: [u8; 11] = [
+            0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+        ];
+
+        // Hash the message ourselves via this crate's own SHA-256
+        // primitive (`crate::digest`), exactly as the integration layer
+        // (`crate::awslc::mldsa` in the main kryoptic crate) will for the
+        // internal-hashing `CKM_HASH_ML_DSA_SHA256` variant.
+        let mut hasher =
+            crate::digest::Digest::new(crate::digest::DigestAlg::Sha2_256)
+                .unwrap();
+        hasher.update(&msg).unwrap();
+        let mut hashed_msg = [0u8; 32];
+        hasher.finalize(&mut hashed_msg).unwrap();
+
+        // M' = 0x01 || len(ctx) || ctx || OID || Hash(msg)
+        let prefix = [1u8, u8::try_from(context.len()).unwrap()];
+        let m_prime: [&[u8]; 4] =
+            [&prefix, &context, &SHA256_OID_DER, &hashed_msg];
+
+        let pub_key =
+            MlDsaKey::from_public_key(MlDsaParamSet::MlDsa44, &pk).unwrap();
+        let priv_key =
+            MlDsaKey::from_private_key(MlDsaParamSet::MlDsa44, &sk).unwrap();
+
+        // The core claim: this primitive's HashML-DSA `M'`/shared-`mu`
+        // computation is EXACTLY what AWS-LC's ML-DSA verification
+        // expects -- verifying a real, externally-produced HashML-DSA
+        // signature against it must succeed.
+        pub_key.verify_prehashed(&m_prime, &expected_sig).unwrap();
+        priv_key.verify_prehashed(&m_prime, &expected_sig).unwrap();
+
+        // Signing with this exact key/M' under hedged mode must produce A
+        // valid signature (verifiable), but -- because AWS-LC's ML-DSA
+        // signing is unconditionally hedged (see `sign`'s doc comment) --
+        // it will almost certainly NOT match the reference vector's exact
+        // bytes, which was produced under CKH_DETERMINISTIC_REQUIRED
+        // (rnd = 0). This documents the same remaining, genuine capability
+        // gap `verify_matches_kryoptic_reference_known_answer_vector`
+        // documents for pure mode, now confirmed for HashML-DSA too.
+        let hedged_sig = priv_key
+            .sign_prehashed(&m_prime, MlDsaHedge::Hedged)
+            .unwrap();
+        assert_eq!(hedged_sig.len(), expected_sig.len());
+        pub_key.verify_prehashed(&m_prime, &hedged_sig).unwrap();
+        assert_ne!(
+            hedged_sig, expected_sig,
+            "hedged signing coincidentally matched the deterministic \
+             known-answer vector; astronomically unlikely -- re-examine \
+             whether AWS-LC's RNG is actually being exercised"
+        );
+
+        // Requesting the deterministic mode this vector actually used
+        // must be rejected outright (see `sign`'s doc comment) -- not
+        // silently downgraded to hedged signing.
+        assert!(priv_key
+            .sign_prehashed(&m_prime, MlDsaHedge::DeterministicRequired)
+            .is_err());
+    }
+
+    /// `sign_prehashed`/`verify_prehashed` round trip for a fresh,
+    /// non-vector key: confirms the shared `mu` machinery produces
+    /// self-consistent, tamper-sensitive signatures for an arbitrary `M'`
+    /// (not just the one fixed known-answer vector above).
+    #[test]
+    fn sign_prehashed_verify_prehashed_round_trip_and_tamper_detection() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let prefix = [1u8, 0u8];
+        let oid = [0x06u8, 0x01, 0x02]; // arbitrary placeholder OID bytes
+        let hashed_msg = [0x42u8; 32];
+        let m_prime: [&[u8]; 3] = [&prefix, &oid, &hashed_msg];
+
+        let sig = key.sign_prehashed(&m_prime, MlDsaHedge::Hedged).unwrap();
+        key.verify_prehashed(&m_prime, &sig).unwrap();
+
+        // A different M' (tampered hashed-message part) must be rejected.
+        let mut tampered_hash = hashed_msg;
+        tampered_hash[0] ^= 0xff;
+        let tampered_m_prime: [&[u8]; 3] = [&prefix, &oid, &tampered_hash];
+        assert!(key.verify_prehashed(&tampered_m_prime, &sig).is_err());
+    }
+
+    /// `sign_prehashed` must reject `MlDsaHedge::DeterministicRequired`
+    /// exactly like `sign` does (same underlying AWS-LC gap, shared
+    /// `sign_mu` implementation) -- not silently fall back to hedged
+    /// signing.
+    #[test]
+    fn sign_prehashed_rejects_deterministic_required() {
+        let key = MlDsaKey::generate(MlDsaParamSet::MlDsa65).unwrap();
+        let prefix = [1u8, 0u8];
+        let hashed_msg = [0x11u8; 32];
+        let m_prime: [&[u8]; 2] = [&prefix, &hashed_msg];
+        assert!(key
+            .sign_prehashed(&m_prime, MlDsaHedge::DeterministicRequired)
+            .is_err());
+    }
+}

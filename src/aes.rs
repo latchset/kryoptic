@@ -73,6 +73,18 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 /// variants
 pub const AES_BLOCK_SIZE: usize = 16;
 
+/// Maximum buffer size for accumulating data in CCM/GCM mode (1 MiB).
+/// Project policy, not a value FIPS 197/SP 800-38x mandates -- defined
+/// once here (rather than per backend) and `pub use`d back out by both
+/// `src/ossl/aes.rs` and `src/awslc/aes.rs`, so this module's own
+/// `use crate::ossl::aes::*;` above keeps resolving it polymorphically
+/// per active backend with a single source of truth.
+pub const MAX_CCM_BUF: usize = 1 << 20; /* 1 MiB */
+
+/// Minimum number of bits required for random IV/nonce generation. Same
+/// sharing rationale as `MAX_CCM_BUF` above.
+pub const MIN_RANDOM_IV_BITS: usize = 64;
+
 pub(crate) fn check_key_len(len: usize) -> Result<()> {
     match len {
         16 | 24 | 32 => Ok(()),

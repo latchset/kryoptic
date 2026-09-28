@@ -608,6 +608,15 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [restrict!(CKK_AES), restrict!()],
             genflags: 0,
         },
+        /* CKM_AES_CCM deliberately has no entry here: awslc-fips's CCM
+         * decrypt can never report FIPS-approved end-to-end through this
+         * table even though src/awslc/aes.rs's own per-operation approval
+         * wiring is correct (a known, deliberate gap, not addressed
+         * here). */
+        /* KRM_SSHKDF_DERIVE (SSHKDF) similarly has no entry here for the
+         * same reason: src/awslc/sshkdf.rs's own wiring is correct but
+         * unobservable through the PKCS#11 surface until this table gets
+         * an entry. */
         FipsMechanism {
             mechanism: CKM_AES_CTS,
             operations: CKF_ENCRYPT | CKF_DECRYPT,
