@@ -355,3 +355,113 @@ fn test_ecdsa_public_key_info() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_ecdsa_indicators() {
+    let mut testtokn = TestToken::initialized("test_ecdsa_indicators", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    /* EC_PARAMS for P-256 */
+    let ec_params = asn1::write_single(&oid::EC_SECP256R1).unwrap();
+
+    /* generate key pair and store it */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_EC_KEY_PAIR_GEN,
+        &[],
+        &[(CKA_EC_PARAMS, &ec_params)],
+        &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+        &[],
+        &[(CKA_EC_PARAMS, &ec_params)],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_SIGN, true),
+        ],
+    ));
+
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, hpub, 1), true);
+    assert_eq!(check_object_validation(session, hpri, 1), true);
+
+    let data = b"Sample data for ECDSA indicator test";
+
+    /* Test approved mechanism: CKM_ECDSA_SHA256 */
+    let mut mech_sha256 = CK_MECHANISM {
+        mechanism: CKM_ECDSA_SHA256,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* One-shot sign and verify */
+    let sig = ret_or_panic!(sig_gen(session, hpri, data, &mech_sha256));
+    assert_eq!(check_validation(session, 1), true);
+
+    let ret = sig_verify(session, hpub, data, sig.as_slice(), &mech_sha256);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* Multi-part sign and verify */
+    let data_vec = data.to_vec();
+    let sig_mp = ret_or_panic!(sig_gen_multipart(
+        session,
+        hpri,
+        &data_vec,
+        &mech_sha256
+    ));
+    assert_eq!(check_validation(session, 1), true);
+
+    let ret = fn_verify_init(session, &mut mech_sha256, hpub);
+    assert_eq!(ret, CKR_OK);
+    let half = data.len() / 2;
+    let ret = fn_verify_update(
+        session,
+        data[..half].as_ptr() as *mut u8,
+        half as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_verify_update(
+        session,
+        data[half..].as_ptr() as *mut u8,
+        (data.len() - half) as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_verify_final(
+        session,
+        sig_mp.as_ptr() as *mut u8,
+        sig_mp.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* VerifySignature API */
+    let ret = sig_verifysig(session, hpub, data, sig.as_slice(), &mech_sha256);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* Test unapproved mechanism: CKM_ECDSA */
+    let hash = [0x5au8; 32];
+    let mech_raw = CK_MECHANISM {
+        mechanism: CKM_ECDSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let sig_raw = ret_or_panic!(sig_gen(session, hpri, &hash, &mech_raw));
+    assert_eq!(check_validation(session, 0), true);
+
+    let ret = sig_verify(session, hpub, &hash, sig_raw.as_slice(), &mech_raw);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
+    let ret =
+        sig_verifysig(session, hpub, &hash, sig_raw.as_slice(), &mech_raw);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
+    testtokn.finalize();
+}

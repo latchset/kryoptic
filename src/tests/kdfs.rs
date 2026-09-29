@@ -1520,3 +1520,59 @@ fn test_hkdf_from_data_object() {
 
     testtokn.finalize();
 }
+
+#[cfg(feature = "hkdf")]
+#[test]
+#[parallel]
+fn test_hkdf_key_gen_indicators() {
+    let mut testtokn =
+        TestToken::initialized("test_hkdf_key_gen_indicators", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    // CKM_HKDF_KEY_GEN has restriction: step_and_range!(256, 384, 512; 160, 224)
+    // In bytes: range 20..=28 bytes, steps 32, 48, 64 bytes.
+
+    // 1. Key in range [160, 224] bits: 24 bytes (192 bits) - approved
+    let h192 = ret_or_panic!(generate_key(
+        session,
+        CKM_HKDF_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_HKDF), (CKA_VALUE_LEN, 24)],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, h192, 1), true);
+
+    // 2. Key matching discrete step: 32 bytes (256 bits) - approved
+    let h256 = ret_or_panic!(generate_key(
+        session,
+        CKM_HKDF_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_HKDF), (CKA_VALUE_LEN, 32)],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, h256, 1), true);
+
+    // 3. Key outside range and steps: 16 bytes (128 bits < 160 bits) - not approved
+    let h128 = ret_or_panic!(generate_key(
+        session,
+        CKM_HKDF_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_HKDF), (CKA_VALUE_LEN, 16)],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(check_object_validation(session, h128, 0), true);
+
+    testtokn.finalize();
+}

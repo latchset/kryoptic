@@ -15,6 +15,8 @@ use crate::object::Object;
 use crate::ossl::common::*;
 use crate::pkcs11::*;
 
+#[cfg(feature = "fips")]
+use crate::fips::FipsApproval;
 use ossl::pkey::{EccData, EvpPkey, PkeyData};
 use ossl::signature::{OsslSignature, SigAlg, SigOp};
 use ossl::OsslSecret;
@@ -159,6 +161,9 @@ pub struct EcdsaOperation {
     in_use: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: OsslSignature,
+    /// FIPS approval status for the operation.
+    #[cfg(feature = "fips")]
+    fips_approval: FipsApproval,
 }
 
 impl EcdsaOperation {
@@ -173,6 +178,9 @@ impl EcdsaOperation {
         key: &Object,
         signature: Option<Vec<u8>>,
     ) -> Result<EcdsaOperation> {
+        #[cfg(feature = "fips")]
+        let mut fips_approval = FipsApproval::init();
+
         let (op, mut pkey) = match flag {
             CKF_SIGN => (SigOp::Sign, privkey_from_object(key)?),
             CKF_VERIFY => (SigOp::Verify, pubkey_from_object(key)?),
@@ -194,12 +202,18 @@ impl EcdsaOperation {
             sigctx.set_signature(sig.as_slice())?;
             zeromem(sig.as_mut_slice());
         }
+
+        #[cfg(feature = "fips")]
+        fips_approval.update();
+
         Ok(EcdsaOperation {
             mech: mech.mechanism,
             output_len: output_len,
             finalized: false,
             in_use: false,
             sigctx: sigctx,
+            #[cfg(feature = "fips")]
+            fips_approval: fips_approval,
         })
     }
 
@@ -280,6 +294,11 @@ impl MechOperation for EcdsaOperation {
     fn finalized(&self) -> bool {
         self.finalized
     }
+
+    #[cfg(feature = "fips")]
+    fn fips_approved(&self) -> Option<bool> {
+        self.fips_approval.approval()
+    }
 }
 
 impl Sign for EcdsaOperation {
@@ -296,11 +315,18 @@ impl Sign for EcdsaOperation {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
 
+            #[cfg(feature = "fips")]
+            self.fips_approval.clear();
+
             let mut sig = vec![0u8; self.sigctx.sign(data, None)?];
             let len = self.sigctx.sign(data, Some(sig.as_mut_slice()))?;
             sig.resize(len, 0);
             let ret = ossl_to_pkcs11_signature(&sig, signature);
             zeromem(sig.as_mut_slice());
+
+            #[cfg(feature = "fips")]
+            self.fips_approval.finalize();
+
             return ret;
         }
         self.sign_update(data)?;
@@ -316,7 +342,17 @@ impl Sign for EcdsaOperation {
         }
         self.in_use = true;
 
-        Ok(self.sigctx.update(data)?)
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
+        match self.sigctx.update(data) {
+            Ok(()) => {
+                #[cfg(feature = "fips")]
+                self.fips_approval.update();
+                Ok(())
+            }
+            Err(e) => Err(e)?,
+        }
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
@@ -326,6 +362,9 @@ impl Sign for EcdsaOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
         self.finalized = true;
 
         let mut sig = vec![0u8; signature.len() + 10];
@@ -340,6 +379,10 @@ impl Sign for EcdsaOperation {
 
         let ret = ossl_to_pkcs11_signature(&sig, signature);
         zeromem(sig.as_mut_slice());
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
         ret
     }
 
@@ -367,12 +410,34 @@ impl EcdsaOperation {
                 if s.len() != self.output_len {
                     return Err(CKR_SIGNATURE_LEN_RANGE)?;
                 }
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.clear();
+
                 let mut sig = pkcs11_to_ossl_signature(s)?;
                 let ret = self.sigctx.verify(data, Some(sig.as_slice()));
                 zeromem(sig.as_mut_slice());
-                return Ok(ret?);
+
+                if ret.is_err() {
+                    return Err(CKR_SIGNATURE_INVALID)?;
+                }
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.finalize();
+
+                return Ok(());
             } else {
-                return Ok(self.sigctx.verify(data, None)?);
+                #[cfg(feature = "fips")]
+                self.fips_approval.clear();
+
+                if self.sigctx.verify(data, None).is_err() {
+                    return Err(CKR_SIGNATURE_INVALID)?;
+                }
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.finalize();
+
+                return Ok(());
             }
         }
         self.verify_int_update(data)?;
@@ -389,7 +454,17 @@ impl EcdsaOperation {
         }
         self.in_use = true;
 
-        Ok(self.sigctx.update(data)?)
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
+        match self.sigctx.update(data) {
+            Ok(()) => {
+                #[cfg(feature = "fips")]
+                self.fips_approval.update();
+                Ok(())
+            }
+            Err(e) => Err(e)?,
+        }
     }
 
     /// Internal helper for the final step of multi-part verification.
@@ -402,18 +477,28 @@ impl EcdsaOperation {
         }
         self.finalized = true;
 
+        #[cfg(feature = "fips")]
+        self.fips_approval.clear();
+
         // convert PKCS #11 signature to OpenSSL format
         if let Some(s) = &signature {
             if s.len() != self.output_len {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
             let mut sig = pkcs11_to_ossl_signature(s)?;
-            let ret = self.sigctx.verify_final(Some(sig.as_slice()));
+            let res = self.sigctx.verify_final(Some(sig.as_slice()));
             zeromem(sig.as_mut_slice());
-            Ok(ret?)
-        } else {
-            Ok(self.sigctx.verify_final(None)?)
+            if res.is_err() {
+                return Err(CKR_SIGNATURE_INVALID)?;
+            }
+        } else if self.sigctx.verify_final(None).is_err() {
+            return Err(CKR_SIGNATURE_INVALID)?;
         }
+
+        #[cfg(feature = "fips")]
+        self.fips_approval.finalize();
+
+        Ok(())
     }
 }
 

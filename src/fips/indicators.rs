@@ -193,6 +193,22 @@ macro_rules! step {
     };
 }
 
+/// Helper to initialize sizes specified in bytes for algorithm definitions
+macro_rules! step_bytes {
+    ($s1:expr) => {
+        step!($s1 * 8)
+    };
+    ($s1:expr, $s2:expr) => {
+        step!($s1 * 8, $s2 * 8)
+    };
+    ($s1:expr, $s2:expr, $s3:expr) => {
+        step!($s1 * 8, $s2 * 8, $s3 * 8)
+    };
+    ($s1:expr, $s2:expr, $s3:expr, $s4:expr) => {
+        step!($s1 * 8, $s2 * 8, $s3 * 8, $s4 * 8)
+    };
+}
+
 /// Helper to initialize key size ranges
 macro_rules! range {
     ($r1:expr, $r2:expr) => {
@@ -245,6 +261,8 @@ fn flag_to_op(flag: CK_FLAGS) -> Result<CK_ATTRIBUTE_TYPE> {
         CKF_WRAP => CKA_WRAP,
         CKF_UNWRAP => CKA_UNWRAP,
         CKF_DERIVE => CKA_DERIVE,
+        CKF_ENCAPSULATE => CKA_ENCAPSULATE,
+        CKF_DECAPSULATE => CKA_DECAPSULATE,
         _ => return Err(CKR_GENERAL_ERROR)?,
     })
 }
@@ -282,8 +300,8 @@ struct FipsMechanism {
 
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
-    keys: [FipsKeyType; 17],
-    mechs: [FipsMechanism; 93],
+    keys: [FipsKeyType; 22],
+    mechs: [FipsMechanism; 109],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -370,7 +388,12 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         FipsKeyType {
             keytype: CKK_EC_EDWARDS,
             operations: CKF_SIGN | CKF_VERIFY,
-            sizes: step!(255, 448),
+            sizes: step!(255, 456),
+        },
+        FipsKeyType {
+            keytype: CKK_DH,
+            operations: CKF_DERIVE,
+            sizes: range!(2048, 8192),
         },
         FipsKeyType {
             keytype: CKK_HKDF,
@@ -379,13 +402,33 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         },
         FipsKeyType {
             keytype: CKK_ML_KEM,
-            operations: CKF_ENCAPSULATE | CKF_DECAPSULATE,
-            sizes: step!(1632, 2400, 3168),
+            operations: CKF_ENCAPSULATE,
+            sizes: step_bytes!(800, 1184, 1568),
+        },
+        FipsKeyType {
+            keytype: CKK_ML_KEM,
+            operations: CKF_DECAPSULATE,
+            sizes: step_bytes!(1632, 2400, 3168),
         },
         FipsKeyType {
             keytype: CKK_ML_DSA,
-            operations: CKF_SIGN | CKF_VERIFY,
-            sizes: step!(2560, 4032, 4896),
+            operations: CKF_VERIFY,
+            sizes: step_bytes!(1312, 1952, 2592),
+        },
+        FipsKeyType {
+            keytype: CKK_ML_DSA,
+            operations: CKF_SIGN,
+            sizes: step_bytes!(2560, 4032, 4896),
+        },
+        FipsKeyType {
+            keytype: CKK_SLH_DSA,
+            operations: CKF_VERIFY,
+            sizes: step_bytes!(32, 48, 64),
+        },
+        FipsKeyType {
+            keytype: CKK_SLH_DSA,
+            operations: CKF_SIGN,
+            sizes: step_bytes!(64, 96, 128),
         },
     ],
     mechs: [
@@ -521,6 +564,25 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [restrict!(CKK_RSA), restrict!()],
             genflags: 0,
         },
+        /* FFDH */
+        FipsMechanism {
+            mechanism: CKM_DH_PKCS_KEY_PAIR_GEN,
+            operations: CKF_GENERATE_KEY_PAIR,
+            restrictions: [restrict!(CKK_DH), restrict!()],
+            genflags: CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_DH_PKCS_DERIVE,
+            operations: CKF_DERIVE,
+            restrictions: [restrict!(CKK_DH), restrict!()],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
+        },
         /* ECC */
         FipsMechanism {
             mechanism: CKM_EC_KEY_PAIR_GEN,
@@ -549,6 +611,12 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         FipsMechanism {
             mechanism: CKM_ECDSA_SHA512,
             operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_EC), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_ECDH1_DERIVE,
+            operations: CKF_DERIVE,
             restrictions: [restrict!(CKK_EC), restrict!()],
             genflags: 0,
         },
@@ -604,6 +672,12 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         },
         FipsMechanism {
             mechanism: CKM_AES_GCM,
+            operations: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            restrictions: [restrict!(CKK_AES), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_AES_CCM,
             operations: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
             restrictions: [restrict!(CKK_AES), restrict!()],
             genflags: 0,
@@ -1082,8 +1156,14 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         FipsMechanism {
             mechanism: CKM_ML_KEM,
             operations: CKF_ENCAPSULATE | CKF_DECAPSULATE,
-            restrictions: [restrict!(CKK_ML_KEM), restrict!()],
-            genflags: 0,
+            restrictions: [restrict!(KRY_UNSPEC), restrict!()],
+            genflags: CKF_SIGN
+                | CKF_VERIFY
+                | CKF_ENCRYPT
+                | CKF_DECRYPT
+                | CKF_WRAP
+                | CKF_UNWRAP
+                | CKF_DERIVE,
         },
         /* ML-DSA */
         FipsMechanism {
@@ -1152,32 +1232,102 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [restrict!(CKK_ML_DSA), restrict!()],
             genflags: 0,
         },
+        /* SLH-DSA */
+        FipsMechanism {
+            mechanism: CKM_SLH_DSA_KEY_PAIR_GEN,
+            operations: CKF_GENERATE_KEY_PAIR,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: CKF_SIGN | CKF_VERIFY,
+        },
+        FipsMechanism {
+            mechanism: CKM_SLH_DSA,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA224,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA256,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA384,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA512,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA3_224,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA3_256,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA3_384,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHA3_512,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHAKE128,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA_SHAKE256,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
     ],
 };
 
 /// Helper to test a key length for restrictions
 fn size_check(len: usize, sizes: ([usize; 4], (usize, usize))) -> Option<bool> {
-    let mut size_check: Option<bool> = None;
-    for size in sizes.0 {
-        if size != 0 && size_check != Some(true) {
-            if len == size {
-                size_check = Some(true);
-            } else {
-                size_check = Some(false);
-            }
-        }
+    if sizes.0 == [0, 0, 0, 0] && sizes.1 == (0, 0) {
+        return None;
     }
-    if size_check.is_none() && sizes.1 != (0, 0) {
+
+    if sizes.0.iter().any(|&s| s != 0 && s == len) {
+        return Some(true);
+    }
+
+    if sizes.1 != (0, 0) {
         let (min, max) = sizes.1;
-        if min != 0 && len < min {
-            size_check = Some(false);
-        } else if max != 0 && len > max {
-            size_check = Some(false);
-        } else {
-            size_check = Some(true);
+        let min_ok = min == 0 || len >= min;
+        let max_ok = max == 0 || len <= max;
+        if min_ok && max_ok {
+            return Some(true);
         }
     }
-    size_check
+
+    Some(false)
 }
 
 /// Helper to check a key object
@@ -1200,6 +1350,10 @@ fn check_key(
             Ok(m) => m.len(),
             Err(_) => return false,
         },
+        CKK_DH => match obj.get_attr_as_bytes(CKA_PRIME) {
+            Ok(p) => p.len(),
+            Err(_) => return false,
+        },
         CKK_EC | CKK_EC_EDWARDS => match get_oid_from_obj(obj) {
             Ok(oid) => match oid_to_bits(oid) {
                 Ok(l) => btb!(l),
@@ -1207,6 +1361,12 @@ fn check_key(
             },
             Err(_) => return false,
         },
+        CKK_ML_DSA | CKK_ML_KEM | CKK_SLH_DSA => {
+            match obj.get_attr_as_bytes(CKA_VALUE) {
+                Ok(v) => btb!(v.len() * 8),
+                Err(_) => return false,
+            }
+        }
         _ => {
             /* assume everything else is a symmetric key */
             match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
@@ -1225,6 +1385,8 @@ fn check_key(
             CKF_WRAP,
             CKF_UNWRAP,
             CKF_DERIVE,
+            CKF_ENCAPSULATE,
+            CKF_DECAPSULATE,
         ] {
             if gf & f == 0 {
                 /* op disallowed */
@@ -1357,7 +1519,7 @@ pub fn is_approved(
         /* only output keys */
         CKF_GENERATE | CKF_GENERATE_KEY_PAIR => 2,
         /* both input and output */
-        CKF_UNWRAP | CKF_DERIVE => 3,
+        CKF_UNWRAP | CKF_DERIVE | CKF_ENCAPSULATE | CKF_DECAPSULATE => 3,
         /* invalid op */
         _ => return false,
     };

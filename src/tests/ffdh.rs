@@ -358,3 +358,79 @@ fn test_ffdh_public_key_info() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_ffdh_indicators() {
+    let mut testtokn = TestToken::initialized("test_ffdh_indicators", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let (pubkey, privkey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_DH_PKCS_KEY_PAIR_GEN,
+        &[(CKA_CLASS, CKO_PUBLIC_KEY), (CKA_KEY_TYPE, CKK_DH),],
+        &[(CKA_PRIME, &FFDHE2048_P), (CKA_BASE, &GENERATOR2),],
+        &[(CKA_DERIVE, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
+
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, pubkey, 1), true);
+    assert_eq!(check_object_validation(session, privkey, 1), true);
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
+    );
+
+    let mut peerpub = vec![0u8; FFDHE2048_P.len()];
+    let mut extract_template = make_ptrs_template(&[(
+        CKA_VALUE,
+        void_ptr!(peerpub.as_mut_ptr()),
+        peerpub.len(),
+    )]);
+
+    let ret = fn_get_attribute_value(
+        session,
+        pubkey,
+        extract_template.as_mut_ptr(),
+        extract_template.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    peerpub.resize(extract_template[0].ulValueLen as usize, 0);
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_DH_PKCS_DERIVE,
+        pParameter: void_ptr!(peerpub.as_ptr()),
+        ulParameterLen: peerpub.len() as CK_ULONG,
+    };
+
+    let mut secret = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        privkey,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut secret,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(check_object_validation(session, secret, 1), true);
+
+    testtokn.finalize();
+}
