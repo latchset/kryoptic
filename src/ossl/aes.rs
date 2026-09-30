@@ -603,10 +603,11 @@ impl AesOperation {
         Ok(ctx)
     }
 
-    /// Instantiates a new Encryption AES Operation
-    pub fn encrypt_new(
+    /// Encryption/Decryption Operation initialization helper
+    fn cipher_new(
         mech: &CK_MECHANISM,
         key: &Object,
+        enc: bool,
     ) -> Result<AesOperation> {
         #[cfg(feature = "fips")]
         let mut fips_approval = FipsApproval::init();
@@ -617,12 +618,8 @@ impl AesOperation {
         #[cfg(feature = "fips")]
         fips_approval.clear();
 
-        let ctx = Self::cipher_initialize(
-            mech.mechanism,
-            &mut params,
-            &aeskey,
-            true,
-        )?;
+        let ctx =
+            Self::cipher_initialize(mech.mechanism, &mut params, &aeskey, enc)?;
 
         #[cfg(feature = "fips")]
         fips_approval.update();
@@ -630,7 +627,7 @@ impl AesOperation {
         #[allow(unused_mut)]
         let mut op = AesOperation {
             mech: mech.mechanism,
-            op: CKF_ENCRYPT,
+            op: if enc { CKF_ENCRYPT } else { CKF_DECRYPT },
             key: aeskey,
             params: params,
             finalized: false,
@@ -650,51 +647,20 @@ impl AesOperation {
         Ok(op)
     }
 
+    /// Instantiates a new Encryption AES Operation
+    pub fn encrypt_new(
+        mech: &CK_MECHANISM,
+        key: &Object,
+    ) -> Result<AesOperation> {
+        Self::cipher_new(mech, key, true)
+    }
+
     /// Instantiates a new Decryption AES Operation
     pub fn decrypt_new(
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<AesOperation> {
-        #[cfg(feature = "fips")]
-        let mut fips_approval = FipsApproval::init();
-
-        let mut params = Self::init_params(mech)?;
-        let aeskey = object_to_raw_key(key)?;
-
-        #[cfg(feature = "fips")]
-        fips_approval.clear();
-
-        let ctx = Self::cipher_initialize(
-            mech.mechanism,
-            &mut params,
-            &aeskey,
-            false,
-        )?;
-
-        #[cfg(feature = "fips")]
-        fips_approval.update();
-
-        #[allow(unused_mut)]
-        let mut op = AesOperation {
-            mech: mech.mechanism,
-            op: CKF_DECRYPT,
-            key: aeskey,
-            params: params,
-            finalized: false,
-            in_use: false,
-            ctx: Some(ctx),
-            buffer: Vec::new(),
-            blockctr: 0,
-            #[cfg(feature = "fips")]
-            fips_approval: fips_approval,
-        };
-
-        #[cfg(feature = "fips")]
-        if op.mech == CKM_AES_GCM || op.mech == CKM_AES_CCM {
-            op.fips_approval_aead()?;
-        }
-
-        Ok(op)
+        Self::cipher_new(mech, key, false)
     }
 
     /// Instantiates a new AES Key-Wrap Operation
