@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::bytes_to_vec;
+use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::pkcs11::*;
 
@@ -39,7 +39,7 @@ struct KeyInfo {
 
 impl Drop for KeyInfo {
     fn drop(&mut self) {
-        ossl::zeromem(self.value.as_mut_slice());
+        zeromem(self.value.as_mut_slice());
     }
 }
 
@@ -357,7 +357,13 @@ impl Derive for SimpleKDFOperation {
             .as_secret_key_factory()?
             .set_key(&mut dkey, secret)?;
 
-        #[cfg(feature = "fips")]
+        // ossl-backend only: this mechanism is pure byte manipulation and
+        // calls into no crypto library, so approval is fully determined by
+        // `receives_objects`' `is_key_approved()` check. Under ossl-backend
+        // `finalize()` is a harmless no-op (no indicator can have fired),
+        // but awslc-fips' counter-based `update()` would see an unmoved
+        // counter and clobber that result down to `Some(false)`.
+        #[cfg(all(feature = "fips", feature = "ossl-backend"))]
         self.fips_approval.finalize();
 
         Ok(vec![dkey])

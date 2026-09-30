@@ -1,0 +1,34 @@
+[package]
+name = "awslc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+aws-lc-sys = { version = "0.34", optional = true }
+# Pinned to an exact version, not a caret range: aws-lc-fips-sys's own
+# README warns that consumers who need to stay on a specific
+# FIPS-140-3-validated module version should pin exactly, since a minor
+# version bump can move to a different underlying validated module.
+aws-lc-fips-sys = { version = "=0.14.2", optional = true }
+
+[build-dependencies]
+cc = "1"
+
+[features]
+# Exactly one of these two must be enabled (see the compile_error! guard
+# in src/lib.rs) -- they select which FFI crate `ffi` aliases to, and
+# thus which AWS-LC variant (plain or FIPS-140-3-validated) every
+# module in this crate ultimately calls into. `non-fips` is the
+# default so that an unqualified `cargo build -p awslc` (or
+# `--workspace`, which builds every member with its own default
+# features) keeps working the same way this crate always has, without
+# requiring an explicit feature choice -- kryoptic-lib itself always
+# selects one explicitly (its `awslc`/`awslc-fips` features set
+# `default-features = false` on this crate; see the matching comment
+# on its own `awslc-backend` dependency entry) so this default never
+# matters for its own builds, only for standalone/workspace-wide ones.
+default = ["non-fips"]
+non-fips = ["dep:aws-lc-sys"]
+fips = ["dep:aws-lc-fips-sys"]

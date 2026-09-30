@@ -54,18 +54,54 @@ In order to make a different selection you need to use the cargo
 switch to disable default features (`--no-default-features`) and then
 specify the features you want to build with, eg:
 
-    $ cargo build --no-default-features --features fips,sqlitedb,nssdb
+    $ cargo build --no-default-features --features fips,ossl-backend,sqlitedb,nssdb
 
 Note that you can set `OSSL_BINDGEN_CLANG_ARGS` (whitespace delimited)
 to pass additional arguments into bindgen, in case that is important
 for your build.
+
+# Crypto Backends
+
+Kryoptic's cryptographic primitives are implemented against a pluggable
+backend, selected at compile time via exactly one of three mutually
+exclusive Cargo features:
+
+ * `ossl-backend` (the default, pulled in by `standard`): OpenSSL, as
+   described above.
+ * `awslc`: [AWS-LC](https://github.com/aws/aws-lc) (Amazon's
+   BoringSSL-derived library), non-FIPS.
+ * `awslc-fips`: AWS-LC's FIPS-140-3-validated module.
+
+The `awslc`/`awslc-fips` backends need no system OpenSSL at all -- Cargo
+fetches and builds `aws-lc-sys`/`aws-lc-fips-sys` from source, which in
+turn need `cmake` and (for `awslc-fips` specifically) Go and Perl in
+addition to a C compiler. Select one with the same `--no-default-features
+--features ...` pattern used above -- note that `standard` itself pulls in
+`ossl-backend` and `chacha20`, both incompatible with `awslc`/`awslc-fips`,
+so list the individual algorithm features you need instead, e.g.:
+
+    $ cargo build --no-default-features --features \
+        awslc,sqlitedb,ecc_all,ffdh,hash_all,kdf_all,rsa,hotp,ike
+    $ cargo build --no-default-features --features \
+        awslc-fips,sqlitedb,ecc_all,ffdh,hash_all,kdf_all,rsa,hotp,ike
+
+A handful of mechanisms AWS-LC has no primitive for at all (ciphertext
+stealing, Ed448/X448, SLH-DSA, and ML-DSA's deterministic signing mode)
+are permanent, documented gaps under `awslc`/`awslc-fips` -- correctly
+absent from `C_GetMechanismList` rather than advertised and then failing.
 
 # FIPS Builds
 
 The `--feature fips` builds create a token linking just to OpenSSL libfips.a
 and enable FIPS behavior, restricting how algorithms behave and reporting
 FIPS indicators for (non)approved algorithms and operations. It forces the
-presence of the PKCS#11 3.2 interfaces as well as the PQC algorithms.
+presence of the PKCS#11 3.2 interfaces as well as the PQC algorithms. See
+"Crypto Backends" above for the AWS-LC-FIPS alternative (`awslc-fips`):
+you don't need to pass `--features fips` yourself for it -- `awslc-fips`
+already implies it (and gates the same `fips`-conditional behavior in
+shared, backend-agnostic code, e.g. minimum RSA key size), it just never
+touches the OpenSSL-specific FIPS provider this section otherwise
+describes.
 
 The FIPS build allows to specify the name, version, and additional build
 information returned by the embedded OpenSSL FIPS provider by setting the

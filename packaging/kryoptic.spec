@@ -8,6 +8,24 @@
 
 %global features kryoptic-lib/nssdb,kryoptic-lib/pqc,kryoptic-lib/standard,kryoptic-lib/dynamic,profiles
 
+# The workspace also contains awslc (an alternate crypto backend,
+# selected only via its own opt-in feature, not used here) and ossl-sys
+# (a build dependency of ossl, not a package to build directly).
+# awslc's aws-lc-sys/aws-lc-fips-sys dependencies aren't packaged in
+# Fedora, so any command that resolves against the
+# whole workspace fails on them even though this build never selects
+# them. shipped_packages names exactly the workspace members this
+# package ships or needs to build them (matching
+# [workspace.default-members] in Cargo.toml, plus the `tools` member,
+# which provides softhsm_migrate and isn't itself a default member), so
+# that builds and license queries can be scoped with plain, stable
+# cargo -p flags instead of resolving the whole workspace. -p takes the
+# real [package] name declared in each member's own Cargo.toml, not its
+# directory name -- these differ for two of the four members here: the
+# `cdylib` directory's package is named "kryoptic", and the `tools`
+# directory's package is named "kryoptic-tools".
+%global shipped_packages -p kryoptic-lib -p ossl -p kryoptic -p kryoptic-tools
+
 %if 0%{?rhel}
 # RHEL: Use bundled deps as it doesn't ship Rust libraries
 %global bundled_rust_deps 1
@@ -75,6 +93,20 @@ Supporting tools for kryoptic software token.
 Most notably a migration tool for the SoftHSM database.
 
 %prep
+# awslc is not in [workspace.default-members] and isn't built by
+# %{features}; its aws-lc-sys/aws-lc-fips-sys deps aren't needed for
+# this package and aren't in Fedora's repos yet, so the
+# %generate_buildrequires block below strips cargo2rpm's (correct, but
+# unwanted here) requirements for them. NOTE: this comment must stay
+# here, before the %if that follows -- moving explanatory comments
+# into the %else branch below (right before %generate_buildrequires,
+# where they'd read more naturally) makes rpmbuild fail with "Unknown
+# option v in cargo_generate_buildrequires(naf:t)"; a multi-line prose
+# comment placed inside this %if/%else block, immediately before that
+# macro invocation, corrupts its argument parsing even though the
+# comment itself is inert everywhere else this was tried (confirmed by
+# bisection with rpmspec -P; root cause not fully understood beyond
+# "don't put long comments there").
 %if %{with gpgcheck}
 %{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE2}' --data='%{SOURCE0}'
 %{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE1}'
@@ -89,14 +121,28 @@ rm -f Cargo.lock
 %cargo_prep
 
 %generate_buildrequires
-%cargo_generate_buildrequires -f %{features}
+buildreqs="$(%{cargo_generate_buildrequires -f %{features}})"
+echo "$buildreqs" | grep -v -E 'crate\(aws-lc-(fips-)?sys'
 %endif
 
 %build
 export CONFDIR=%{_sysconfdir}
-%cargo_build -f %{features} -- --all
-%{cargo_license_summary -f %{features}}
-%{cargo_license -f %{features}} > LICENSE.dependencies
+# Built via shipped_packages (see its definition above), not the
+# cargo_build/cargo_license_summary/cargo_license macros or a bare
+# --workspace build: those all resolve every workspace member,
+# including awslc, which this package never selects and which can't
+# build here (its aws-lc-sys/aws-lc-fips-sys dependencies aren't
+# packaged in Fedora). Expanded manually rather than passing
+# shipped_packages as trailing arguments to those macros: RPM's own
+# macro argument scanner treats any dash-prefixed trailing token as an
+# attempted flag to the macro itself and rejects it as unrecognized,
+# in both the macro's bare and curly call forms.
+%{__cargo} build %{__cargo_common_opts} --profile rpm %{__cargo_parse_opts -f %{features}} %{shipped_packages}
+# Mirrors what cargo_license_summary/cargo_license (via cargo2rpm) do,
+# scoped to shipped_packages for the same reason as the build line
+# above. -Z avoid-dev-deps matches cargo_build's own common options.
+%{__cargo} tree -Z avoid-dev-deps %{shipped_packages} --offline --edges=no-build,no-dev,no-proc-macro --target=all --prefix=none --format '# {l}' --features=%{features} | sort -u
+%{__cargo} tree -Z avoid-dev-deps %{shipped_packages} --offline --edges=no-build,no-dev,no-proc-macro --target=all --prefix=none --format '{l}: {p}' --features=%{features} | sort -u > LICENSE.dependencies
 
 pandoc -s -t man doc/kryoptic.conf.man.md -o kryoptic.conf.5
 pandoc -s -t man doc/kryoptic.man.md -o kryoptic.7

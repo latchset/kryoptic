@@ -21,6 +21,8 @@ cryptoki = "0.12.0"
 [features]
 default = ["kryoptic-lib/default"]
 
+awslc = ["kryoptic-lib/awslc"]
+awslc-fips = ["kryoptic-lib/awslc-fips"]
 ecc_all = ["kryoptic-lib/ecc_all"]
 hash_all = ["kryoptic-lib/hash_all"]
 kdf_all = ["kryoptic-lib/kdf_all"]
@@ -31,7 +33,7 @@ minimal = ["kryoptic-lib/minimal"]
 nssdb = ["kryoptic-lib/nssdb"]
 
 standard = ["kryoptic-lib/standard"]
-fips = ["kryoptic-lib/fips"]
+fips = ["kryoptic-lib/fips", "kryoptic-lib/ossl-backend"]
 ossl400 = ["kryoptic-lib/ossl400"]
 
 integration_tests = []

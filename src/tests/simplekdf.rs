@@ -2,6 +2,13 @@
 // See LICENSE.txt file for terms
 
 use crate::tests::*;
+// `api_level()` reports the *OpenSSL* library version at runtime and is
+// only meaningful (and only buildable -- the `ossl` crate is not a
+// dependency at all under `awslc`) when the ossl-backend is in use. Its
+// only use site is gated on `all(ecdsa, ossl-backend)`, so the import
+// must match exactly or it's unused (and warns) whenever ossl-backend is
+// enabled without ecdsa.
+#[cfg(all(feature = "ecdsa", feature = "ossl-backend"))]
 use ::ossl::api_level;
 
 use serial_test::parallel;
@@ -638,7 +645,12 @@ fn test_derive_pub_from_priv() {
         derived_bools: &'a [(CK_ATTRIBUTE_TYPE, bool)],
     }
 
-    let mut test_cases = Vec::new();
+    // `mut` is only exercised by `.push()` calls gated behind various
+    // key-type features (rsa/ecdsa/eddsa/ec_montgomery/PQC); when none of
+    // those are enabled, the vector is never pushed to and `mut` is
+    // unused.
+    #[allow(unused_mut)]
+    let mut test_cases: Vec<TestCase> = Vec::new();
 
     #[cfg(feature = "rsa")]
     test_cases.push(TestCase {
@@ -673,8 +685,19 @@ fn test_derive_pub_from_priv() {
     let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
     #[cfg(feature = "ecdsa")]
     let ecdsa_params = [(CKA_EC_PARAMS, secp256r1_oid.as_slice())];
+    // Only OpenSSL 4.0+ (ossl-backend) had the pre-existing version gate
+    // this test case needs; AWS-LC's ECDSA support has no equivalent
+    // version concern, so it always runs when `awslc` is the active
+    // backend.
+    #[cfg(all(feature = "ecdsa", feature = "ossl-backend"))]
+    let ecdsa_case_applies = api_level() >= ossl::common::OPENSSL_4_0;
+    #[cfg(all(
+        feature = "ecdsa",
+        any(feature = "awslc", feature = "awslc-fips")
+    ))]
+    let ecdsa_case_applies = true;
     #[cfg(feature = "ecdsa")]
-    if api_level() >= ossl::common::OPENSSL_4_0 {
+    if ecdsa_case_applies {
         test_cases.push(TestCase {
             name: "ECDSA",
             gen_mech: CKM_EC_KEY_PAIR_GEN,
@@ -758,7 +781,7 @@ fn test_derive_pub_from_priv() {
         ],
     });
 
-    #[cfg(feature = "mldsa")]
+    #[cfg(all(feature = "mldsa", not(feature = "awslc-fips")))]
     test_cases.push(TestCase {
         name: "MLDSA",
         gen_mech: CKM_ML_DSA_KEY_PAIR_GEN,
@@ -806,6 +829,7 @@ fn test_derive_pub_from_priv() {
 
     #[cfg(all(
         feature = "slhdsa",
+        not(any(feature = "awslc", feature = "awslc-fips")),
         any(not(feature = "fips"), feature = "ossl400")
     ))]
     test_cases.push(TestCase {

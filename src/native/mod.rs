@@ -4,6 +4,8 @@
 //! This is a meta crate to provide access to native Rust implementations
 //! of cryptographic mechanisms
 
+#[cfg(feature = "aes")]
+pub mod aes_iv;
 #[cfg(feature = "hmac")]
 pub mod hmac;
 #[cfg(all(feature = "pbkdf2", not(feature = "fips")))]

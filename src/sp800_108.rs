@@ -33,9 +33,19 @@ static SP800_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
 });
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for ckm in &[CKM_SP800_108_COUNTER_KDF, CKM_SP800_108_FEEDBACK_KDF] {
-        mechs.add_mechanism(*ckm, &SP800_KDF_MECH);
-    }
+    mechs.add_mechanism(CKM_SP800_108_COUNTER_KDF, &SP800_KDF_MECH);
+    // AWS-LC has no feedback-mode KBKDF primitive at all (see
+    // crate::awslc::kbkdf::Sp800Operation::feedback_kdf_new). Under
+    // awslc-fips this dispatcher routes through crate::ossl::kbkdf, which
+    // the `use awslc as ossl;` backend alias resolves to
+    // crate::awslc::kbkdf, so this mechanism must not be advertised here:
+    // C_GetMechanismList must not report a mechanism that then
+    // unconditionally fails on every C_DeriveKey call. Plain awslc
+    // (non-FIPS) is unaffected -- without `feature = "fips"` this
+    // dispatcher uses crate::native::sp800_108 instead, a pure-Rust
+    // implementation with genuine feedback-mode support.
+    #[cfg(not(feature = "awslc-fips"))]
+    mechs.add_mechanism(CKM_SP800_108_FEEDBACK_KDF, &SP800_KDF_MECH);
 }
 
 #[derive(Debug)]

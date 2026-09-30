@@ -335,12 +335,17 @@ pub fn copy_sized_string(s: &[u8], d: &mut [u8]) {
     }
 }
 
-/// Helper function to abstract the zeromem function from the ossl
-/// module.
+/// Securely zeroes a buffer.
 ///
-/// This future-proofs the ability to use an alternative crypto backend
+/// Backend-independent: this is not a cryptographic operation, so it
+/// doesn't depend on either the `ossl` or `awslc` crate. Uses volatile
+/// writes plus a compiler fence to prevent the zeroing from being
+/// optimized away.
 pub fn zeromem(mem: &mut [u8]) {
-    ossl::zeromem(mem);
+    for byte in mem.iter_mut() {
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
 }
 
 #[cfg(test)]

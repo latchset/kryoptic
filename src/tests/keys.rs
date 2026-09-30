@@ -966,6 +966,7 @@ fn test_sensitive_attributes_matrix() {
                     sensitive,
                     extractable,
                 ),
+                #[cfg(any(feature = "rsa", feature = "ecdsa"))]
                 true => gen_pair(
                     session,
                     test_def.mechanism,
@@ -973,6 +974,11 @@ fn test_sensitive_attributes_matrix() {
                     &test_def.generation_attribute,
                     sensitive,
                     extractable,
+                ),
+                #[cfg(not(any(feature = "rsa", feature = "ecdsa")))]
+                true => unreachable!(
+                    "no key_tests entry sets generate_pair = true \
+                     without rsa/ecdsa"
                 ),
             };
 

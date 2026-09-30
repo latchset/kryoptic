@@ -1,10 +1,10 @@
 #!/bin/bash
 
-CODESPELL="codespell --ignore-words-list=gost,sorce,clen,ot,crate,aci"
+CODESPELL="codespell --ignore-words-list=gost,sorce,clen,ot,crate,aci,finall"
 
 result=0
 echo "Running codespell on source code..."
-$CODESPELL src || result=1
+$CODESPELL src awslc || result=1
 
 # assuming the main branch is there
 for COMMIT in $(git rev-list origin/main.. --); do

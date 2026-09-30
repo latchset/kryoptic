@@ -30,3 +30,28 @@ impl RNG {
         self.drbg.reseed(buffer, &noaddtl)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RNG;
+
+    #[test]
+    fn generates_varying_output() {
+        let mut rng = RNG::new("HMAC DRBG SHA256").unwrap();
+        let mut a = [0u8; 32];
+        let mut b = [0u8; 32];
+        rng.generate_random(&mut a).unwrap();
+        rng.generate_random(&mut b).unwrap();
+        assert_ne!(a, [0u8; 32]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn add_seed_does_not_error() {
+        let mut rng = RNG::new("HMAC DRBG SHA256").unwrap();
+        rng.add_seed(b"some caller-supplied seed material").unwrap();
+        let mut out = [0u8; 16];
+        rng.generate_random(&mut out).unwrap();
+        assert_ne!(out, [0u8; 16]);
+    }
+}

@@ -17,8 +17,6 @@ use crate::pkcs11::*;
 #[cfg(feature = "nssdb")]
 use crate::pkcs11::vendor::nss::*;
 
-use ossl::BorrowedReference;
-
 /// List of attribute types we understand
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum AttrType {
@@ -910,6 +908,23 @@ impl<'a> std::ops::Deref for RemovedAttr<'a> {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
+}
+
+/// Holds a reference to data we need to keep around for the life of a
+/// CkAttrs array (a pointer to it is stored in a CK_ATTRIBUTE). Backend-
+/// independent — this is PKCS#11 attribute bookkeeping, not crypto.
+///
+/// The variants' payloads are never read back -- they exist purely to
+/// keep the referenced data alive for the `CkAttrs` array's lifetime, not
+/// to be inspected -- so the compiler correctly flags them as dead code.
+/// This is expected and not a bug: `#[allow(dead_code)]` documents that
+/// rather than silently discarding a real warning.
+#[derive(Debug)]
+#[allow(dead_code)]
+enum BorrowedReference<'a> {
+    CharBool(&'a CK_BBOOL),
+    Slice(&'a [u8]),
+    Ulong(&'a CK_ULONG),
 }
 
 /// Helper object to represent managed arrays of CK_ATTRIBUTEs

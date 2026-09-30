@@ -1,5 +1,5 @@
 [workspace]
-members = ["ossl", "ossl-sys", "cdylib", "tools", "rustls/ossl"]
+members = ["ossl", "ossl-sys", "cdylib", "tools", "rustls/ossl", "awslc"]
 default-members = [".", "ossl", "cdylib"]
 
 [workspace.package]
@@ -73,7 +73,43 @@ simplelog = { version = "0.12.2", default-features = false, optional = true }
 toml = { version = "1.0.2", default-features = false, features = ["display", "parse", "serde"] }
 uuid = { version = "1.4.1", features = ["v4", "v8"] }
 vsprintf = { version = "2.0.0", optional = true }
-ossl.workspace = true
+ossl = { workspace = true, optional = true }
+# Local dependency name deliberately differs from the package's own
+# name (`awslc`, matching its directory) to avoid a real Cargo quirk:
+# this manifest also defines its own `awslc` feature (the public one
+# selecting this backend), and referencing `awslc/<subfeature>` when a
+# *sibling feature* is also literally named `awslc` makes Cargo
+# silently activate that sibling feature too, as a side effect of the
+# dependency-feature syntax (see rust-lang/cargo #10788 and its
+# neighboring reports) -- with both `non-fips` and `fips` needing to
+# reference this same dependency's sub-features, this made
+# `awslc-fips` always additionally (and wrongly) turn on plain `awslc`
+# too. Renaming the local alias to `awslc-backend` sidesteps the
+# collision entirely; the crate's own package/directory name, and
+# every public Cargo feature name this workspace exposes (`awslc`,
+# `awslc-fips`), are unaffected -- only Rust code needs `awslc_backend`
+# (not `awslc`) to name the extern crate (see src/lib.rs).
+# `default-features = false`: the `awslc` crate defaults to its own
+# `non-fips` feature so a standalone/workspace-wide build of it keeps
+# working unqualified, but kryoptic-lib itself always explicitly picks
+# `non-fips` or `fips` below (via `awslc`/`awslc-fips`) -- without this,
+# selecting `awslc-fips` would activate the dependency's default
+# `non-fips` feature too, alongside the explicitly requested `fips`,
+# reintroducing the exact both-features-active conflict this dependency
+# rename was meant to fix.
+awslc-backend = { package = "awslc", path = "awslc", optional = true, default-features = false }
+# `src/fips/mod.rs`'s `FipsApproval` calls AWS-LC-FIPS's service-
+# indicator API (`FIPS_service_indicator_before_call`/`after_call`)
+# directly -- the `awslc` crate has no safe wrapper for it, since it's
+# a FIPS-specific concept this crate's `Mechanism`/`Sign`/`Verify`
+# implementations don't otherwise need. Pinned to an exact version, not
+# a caret range: aws-lc-fips-sys's own README warns that consumers who
+# need to stay on a specific FIPS-140-3-validated module version should
+# pin exactly, since a minor version bump can move to a different
+# underlying validated module. Kept in sync with the `awslc` crate's
+# own identical pin on the same dependency (Cargo unifies both to one
+# resolved version regardless, since it's the same crate either way).
+aws-lc-fips-sys = { version = "=0.14.2", optional = true }
 
 [features]
 aes = []
@@ -81,7 +117,7 @@ chacha20 = []
 ecc = []
 ecdsa = ["ecc"]
 ecdh = ["ecc"]
-eddsa = ["ecc", "ossl/ossl320"]
+eddsa = ["ecc", "ossl?/ossl320"]
 ec_montgomery = ["ecc"]
 ffdh = []
 hash = []
@@ -101,7 +137,7 @@ simplekdf = []
 sqlitedb = ["dep:rusqlite", "aes", "hkdf", "pbkdf2"]
 nssdb = ["dep:rusqlite", "aes", "hmac", "pbkdf2"]
 
-default = ["standard", "dynamic"]
+default = ["standard", "dynamic", "ossl-backend"]
 
 ecc_min = ["ecdsa", "ecdh"]
 ecc_all = ["ecc_min", "ec_montgomery", "eddsa"]
@@ -113,26 +149,30 @@ kdf_all = ["hkdf", "pbkdf2", "sp800_108", "sshkdf", "tlskdf", "simplekdf"]
 # bookkeeping (RFC 2409/7296's IKE-derive constructions are not themselves
 # NIST/FIPS-validated mechanisms) -- the same reasoning that keeps chacha20
 # out of hash_all/kdf_all and only in standard below.
-standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp", "chacha20", "ike"]
+standard = ["sqlitedb", "ecc_all", "ffdh", "hash_all", "kdf_all", "rsa", "hotp", "chacha20", "ike", "ossl-backend"]
 
-fips = ["ossl/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh",
+fips = ["ossl?/fips", "sqlitedb", "rusqlite/bundled", "aes", "ecc_all", "ffdh",
 "hash_all", "kdf_all", "rsa", "pqc", "dep:vsprintf"]
 
-dynamic = ["ossl/dynamic"] # Builds dynamically against system libcrypto.so
-openssl-sys = ["ossl/openssl-sys"] # Builds against system libcrypto through openssl-sys
+dynamic = ["ossl?/dynamic"] # Builds dynamically against system libcrypto.so
+openssl-sys = ["ossl?/openssl-sys"] # Builds against system libcrypto through openssl-sys
 
-log = ["dep:log", "dep:simplelog", "ossl/log"] # Enables error/info tracing
+ossl-backend = ["dep:ossl"] # Builds the default, OpenSSL-backed crypto backend
+awslc = ["dep:awslc-backend", "awslc-backend/non-fips"] # Builds the AWS-LC-backed crypto backend instead of ossl-backend
+awslc-fips = ["dep:awslc-backend", "awslc-backend/fips", "dep:aws-lc-fips-sys", "fips"]
+
+log = ["dep:log", "dep:simplelog", "ossl?/log"] # Enables error/info tracing
 slow = [] # Enables slow tests
 
-mlkem = ["ossl/ossl350"]
-mldsa = ["hash", "ossl/ossl350"]
-slhdsa = ["hash", "ossl/ossl350"]
+mlkem = ["ossl?/ossl350"]
+mldsa = ["hash", "ossl?/ossl350"]
+slhdsa = ["hash", "ossl?/ossl350"]
 
 pqc = ["mlkem", "mldsa", "slhdsa"]
 
-minimal = ["sqlitedb", "aes", "ecc_min", "hash_all", "rsa"]
+minimal = ["sqlitedb", "aes", "ecc_min", "hash_all", "rsa", "ossl-backend"]
 
-ossl400 = ["ossl/ossl400"]
+ossl400 = ["ossl?/ossl400"]
 vsprintf = ["dep:vsprintf"]
 
 hotp = []

@@ -714,8 +714,14 @@ fn derive_key(
                     }
                 }
                 for i in 0..adk.len() {
-                    unsafe {
-                        core::ptr::write(adk[i].phKey, ah[i]);
+                    /* CK_DERIVED_KEY::phKey is a plain caller-supplied
+                     * pointer, not validated by struct_to_slice (which
+                     * only checks the outer array pointer) -- writing
+                     * through a null one would be undefined behavior. */
+                    if !adk[i].phKey.is_null() {
+                        unsafe {
+                            core::ptr::write(adk[i].phKey, ah[i]);
+                        }
                     }
                 }
             }

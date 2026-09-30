@@ -161,7 +161,10 @@ jobs:
           elif [ "${{ matrix.linking }}" = "static" ]; then
             FEATURES="${FEATURES},${FEATURE_SET},ossl-sys,ossl400"
           elif [ "${{ matrix.linking }}" = "fips" ]; then
-            FEATURES="${FEATURES},fips"
+            # fips no longer implies a backend, so name one explicitly.
+            # Deliberately not ${FEATURE_SET}: standard would also pull in
+            # hotp/chacha20/ike, widening what the fips leg tests.
+            FEATURES="${FEATURES},fips,ossl-backend"
           elif [ "${{ matrix.linking }}" = "openssl-sys" ]; then
             FEATURES="${FEATURES},${FEATURE_SET},openssl-sys"
           fi
@@ -228,3 +231,129 @@ jobs:
           path: |
             /var/cache/libdnf5
           key: ${{ runner.os }}-dnf-${{ steps.get-date.outputs.date }}
+
+  build-awslc:
+    name: Build (awslc)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [awslc, awslc-fips]
+        name: [standard, i686, minimal, pqc, no_sha1]
+        build: [debug, release]
+        db: [sqlitedb, nssdb]
+        exclude:
+          # aws-lc-fips-sys's CMake build cannot cross-compile for i686: its
+          # FIPS module-verification step ("bcm.o") mixes 32-bit and 64-bit
+          # object files and fails to link ("relocatable linking with
+          # relocations from format elf32-i386 ... to format elf64-x86-64
+          # is not supported"). Plain aws-lc-sys (awslc, non-fips) has no
+          # such step and cross-compiles for i686 without issue -- verified
+          # directly against both crates in this same container image.
+          - backend: awslc-fips
+            name: i686
+          # Selecting the awslc-fips feature unconditionally implies fips,
+          # which unconditionally implies the same broad
+          # ecc_all,ffdh,hash_all,kdf_all,rsa,pqc feature set "standard"
+          # already requests here (Cargo's feature union has no way to turn
+          # a feature back off) -- so "minimal" and "pqc" are redundant
+          # with "standard" for this backend specifically. This exactly
+          # mirrors why the ossl build job above already excludes
+          # name:minimal/linking:fips and name:pqc/linking:fips for the
+          # identical underlying reason.
+          - backend: awslc-fips
+            name: minimal
+          - backend: awslc-fips
+            name: pqc
+          - name: no_sha1 # nssdb doesn't work with no_sha1
+            db: nssdb
+    container: quay.io/fedora/fedora:latest
+    steps:
+      - name: Get Date for DNF cache entry
+        id: get-date
+        run: |
+          echo "date=$(/bin/date -u "+%Y%V")" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Restore DNF cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /var/cache/libdnf5
+          key: ${{ runner.os }}-dnf-awslc-${{ steps.get-date.outputs.date }}
+
+      - name: Install Dependencies
+        run: |
+          dnf -y install git cargo clang-devel golang cmake perl-interpreter \
+            zlib-devel sed sqlite-devel
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            dnf -y install rust-std-static.i686 glibc-devel.i686 \
+              sqlite-devel.i686 libatomic.i686
+          fi
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Generate lock file
+        run: cargo generate-lockfile
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-awslc-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build & test
+        run: |
+          export KRYOPTIC_TESTS_DEFAULT_DB="${{ matrix.db }}"
+          # awslc has no equivalent of ossl-backend's own "standard"/
+          # "minimal" Cargo features: both of those hard-code
+          # `ossl-backend` in their own definition, so they can't be reused
+          # for this backend. This is the closest match to "standard" that
+          # actually compiles under awslc: chacha20 is deliberately left
+          # out (it has no awslc-side implementation at all -- a real,
+          # confirmed gap, unlike hotp/ike which do compile here).
+          FEATURES="${{ matrix.backend }},${{ matrix.db }},ecc_all,ffdh,hash_all,kdf_all,rsa,hotp,ike"
+          OPTS="--no-default-features"
+
+          if [ "${{ matrix.name }}" = "i686" ]; then
+            export PKG_CONFIG_SYSROOT_DIR=/
+            export CC_i686_unknown_linux_gnu=gcc
+            export CFLAGS_i686_unknown_linux_gnu=-m32
+            OPTS="${OPTS} --target i686-unknown-linux-gnu"
+          elif [ "${{ matrix.name }}" = "minimal" ]; then
+            FEATURES="${{ matrix.backend }},${{ matrix.db }},aes,ecc_min,hash_all,rsa"
+          elif [ "${{ matrix.name }}" = "pqc" ]; then
+            FEATURES="${FEATURES},pqc,slow"
+          elif [ "${{ matrix.name }}" = "no_sha1" ]; then
+            FEATURES="${FEATURES},no_sha1"
+          fi
+
+          if [ "${{ matrix.build }}" = "release" ]; then
+            OPTS="${OPTS} --release"
+          fi
+
+          # Scoped to -p kryoptic-lib: this container has no OpenSSL dev
+          # headers installed (it only needs AWS-LC's build deps), so a
+          # bare `cargo build` would also try to build the `ossl`
+          # workspace member and fail with "No OpenSSL version detected".
+          cargo build -vv -p kryoptic-lib $OPTS --features "$FEATURES"
+          # --test-threads=1: the test harness's global C_Initialize/
+          # C_Finalize singleton (src/tests/mod.rs's FINI/SYNC/INIT
+          # coordination) is shared process-wide; a panic mid-test while
+          # holding its lock can poison it for every other test in the
+          # binary under default parallel scheduling.
+          cargo test -vv -p kryoptic-lib $OPTS --features "$FEATURES" -- --test-threads=1
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Build logs awslc-${{ matrix.backend }}-${{ matrix.name }}-${{ matrix.build }}-${{ matrix.db }}
+          path: |
+            target/debug/build/*/output
+            target/release/build/*/output

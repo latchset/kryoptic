@@ -104,7 +104,7 @@ fn test_nssdb_token() {
 
 #[test]
 #[parallel]
-#[cfg(feature = "mldsa")]
+#[cfg(all(feature = "mldsa", not(feature = "awslc-fips")))]
 fn test_nssdb_token_mldsa() {
     let name = String::from("test_nssdb_token_mldsa");
     let datadir = "testdata/nssdbdir2";

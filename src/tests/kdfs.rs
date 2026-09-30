@@ -7,7 +7,11 @@ use crate::tests::*;
 use itertools::Itertools;
 use serial_test::parallel;
 
-#[cfg(feature = "sp800_108")]
+/* Excluded under awslc-fips: mixes an unsupported 8-bit counter with
+ * feedback mode, which has no AWS-LC primitive at all (see
+ * test_sp800_kdf_awslc_ctr_hmac below, which covers the supported
+ * subset instead). */
+#[cfg(all(feature = "sp800_108", not(feature = "awslc-fips")))]
 #[test]
 #[parallel]
 fn test_sp800_kdf() {
@@ -238,7 +242,11 @@ fn test_sp800_kdf() {
 /// limitations", see ossl/kbkdf.rs) -- it rejects this test's SUM_OF_KEYS configuration
 /// with CKR_MECHANISM_PARAM_INVALID regardless of this fix, since it never reaches the
 /// code this test exists to cover.
-#[cfg(all(feature = "sp800_108", not(feature = "fips")))]
+#[cfg(all(
+    feature = "sp800_108",
+    not(feature = "fips"),
+    not(feature = "awslc-fips")
+))]
 #[test]
 #[parallel]
 fn test_sp800_kdf_dkm_length_is_in_bits() {
@@ -347,6 +355,134 @@ fn test_sp800_kdf_dkm_length_is_in_bits() {
          not bytes (32) -- HMAC-SHA256(KI, counter=1 || L) with the wrong L produces a \
          completely different key"
     );
+
+    testtokn.finalize();
+}
+
+/// `awslc-fips`'s KBKDF counter-mode support is narrower than
+/// `ossl-backend`'s: AWS-LC's `KBKDF_ctr_hmac()` hardcodes a 32-bit
+/// big-endian counter and only supports HMAC as the PRF (see
+/// `src/awslc/kbkdf.rs`'s module doc comment), unlike OpenSSL's KBKDF
+/// provider, which also supports 8/16/24-bit counters and a CMAC PRF --
+/// exactly what `test_sp800_kdf` above exercises (with an 8-bit counter),
+/// which is why that shared native/ossl test stays excluded here rather
+/// than being restructured. This test exercises exactly the subset
+/// `awslc-fips` does support end-to-end, and documents the narrowing by
+/// checking that an out-of-range counter width is rejected.
+#[cfg(all(feature = "sp800_108", feature = "awslc-fips"))]
+#[test]
+#[parallel]
+fn test_sp800_kdf_awslc_ctr_hmac() {
+    let mut testtokn =
+        TestToken::initialized("test_sp800_kdf_awslc_ctr_hmac", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_DERIVE, true),],
+    ));
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    );
+
+    /* An 8-bit counter is valid for ossl-backend but AWS-LC's
+     * KBKDF_ctr_hmac() only supports a 32-bit counter. */
+    let mut unsupported_counter_format = CK_SP800_108_COUNTER_FORMAT {
+        bLittleEndian: 0,
+        ulWidthInBits: 8,
+    };
+    let mut unsupported_data_params = [CK_PRF_DATA_PARAM {
+        type_: CK_SP800_108_ITERATION_VARIABLE,
+        pValue: &mut unsupported_counter_format as *mut _ as CK_VOID_PTR,
+        ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
+    }];
+    let mut unsupported_params = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: unsupported_data_params.len() as CK_ULONG,
+        pDataParams: unsupported_data_params.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+    let mut unsupported_mech = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut unsupported_params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+    let mut unused_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut unsupported_mech,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut unused_handle,
+    );
+    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+
+    /* The supported subset: 32-bit big-endian counter, HMAC-SHA256 PRF. */
+    let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
+        bLittleEndian: 0,
+        ulWidthInBits: 32,
+    };
+    let mut data_params = [CK_PRF_DATA_PARAM {
+        type_: CK_SP800_108_ITERATION_VARIABLE,
+        pValue: &mut counter_format as *mut _ as CK_VOID_PTR,
+        ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
+    }];
+    let mut params = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: data_params.len() as CK_ULONG,
+        pDataParams: data_params.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+
+    let mut derived = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut derived,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut val: CK_ULONG = 0;
+    let attrtmpl = make_ptrs_template(&[(
+        CKA_VALUE_LEN,
+        void_ptr!(&mut val),
+        CK_ULONG_SIZE,
+    )]);
+    let ret = fn_get_attribute_value(
+        session,
+        derived,
+        attrtmpl.as_ptr() as *mut _,
+        attrtmpl.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(val, 16);
+
+    assert_eq!(check_validation(session, 1), true);
 
     testtokn.finalize();
 }
@@ -805,11 +941,35 @@ fn test_hkdf() {
                     &mut flags,
                 );
                 assert_eq!(ret, CKR_OK);
-                if kopt.2 < 14 {
-                    assert_eq!(flags, 0);
+
+                /* AWS-LC's HKDF FIPS service indicator is narrower than
+                 * the generic key-size-only rule below: confirmed from
+                 * AWS-LC's own crypto/fipsmodule/hkdf/hkdf.c and
+                 * service_indicator.c -- `HKDF_extract` (Extract-only)
+                 * never signals approved, for any digest; the combined
+                 * `HKDF()` call (Extract-and-Expand) only signals
+                 * approved when `info` is non-empty; `HKDF_expand`
+                 * (Expand-only) has no such restriction. */
+                let approved = if kopt.2 < 14 {
+                    false
+                } else if cfg!(feature = "awslc-fips") {
+                    match (mode.0, mode.1) {
+                        (true, false) => false,   /* Extract-only */
+                        (true, true) => use_info, /* Extract-and-Expand */
+                        (false, true) => true,    /* Expand-only */
+                        _ => unreachable!(),
+                    }
                 } else {
-                    assert_eq!(flags, crate::fips::indicators::KRF_FIPS);
-                }
+                    true
+                };
+                assert_eq!(
+                    flags,
+                    if approved {
+                        crate::fips::indicators::KRF_FIPS
+                    } else {
+                        0
+                    }
+                );
             }
         }
     }

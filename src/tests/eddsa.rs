@@ -217,114 +217,118 @@ fn test_eddsa_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
-    /* Ed448 */
-    let mut handle: CK_ULONG = CK_INVALID_HANDLE;
-    let template = make_attr_template(
-        &[(CKA_CLASS, CKO_PRIVATE_KEY)],
-        &[(CKA_ID, "\x03".as_bytes())],
-        &[],
-    );
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 1);
-    assert_ne!(handle, CK_INVALID_HANDLE);
-    let ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
+    /* Ed448: AWS-LC has no Ed448 (Curve448/Ed448-Goldilocks) support --
+     * documented permanent gap. The Ed25519 coverage above still runs
+     * for awslc/awslc-fips. */
+    if !cfg!(any(feature = "awslc", feature = "awslc-fips")) {
+        let mut handle: CK_ULONG = CK_INVALID_HANDLE;
+        let template = make_attr_template(
+            &[(CKA_CLASS, CKO_PRIVATE_KEY)],
+            &[(CKA_ID, "\x03".as_bytes())],
+            &[],
+        );
+        let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
+        assert_eq!(ret, CKR_OK);
+        let mut count: CK_ULONG = 0;
+        let ret = fn_find_objects(session, &mut handle, 1, &mut count);
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(count, 1);
+        assert_ne!(handle, CK_INVALID_HANDLE);
+        let ret = fn_find_objects_final(session);
+        assert_eq!(ret, CKR_OK);
 
-    /* sign init without parameters fails */
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_EDDSA,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    let ret = fn_sign_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+        /* sign init without parameters fails */
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_EDDSA,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let ret = fn_sign_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
 
-    /* the ed448 requires params */
-    let params: CK_EDDSA_PARAMS = CK_EDDSA_PARAMS {
-        phFlag: CK_FALSE,
-        pContextData: std::ptr::null_mut(),
-        ulContextDataLen: 0,
-    };
-    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
-        mechanism: CKM_EDDSA,
-        pParameter: &params as *const _ as CK_VOID_PTR,
-        ulParameterLen: sizeof!(CK_EDDSA_PARAMS),
-    };
-    let ret = fn_sign_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OK);
+        /* the ed448 requires params */
+        let params: CK_EDDSA_PARAMS = CK_EDDSA_PARAMS {
+            phFlag: CK_FALSE,
+            pContextData: std::ptr::null_mut(),
+            ulContextDataLen: 0,
+        };
+        let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+            mechanism: CKM_EDDSA,
+            pParameter: &params as *const _ as CK_VOID_PTR,
+            ulParameterLen: sizeof!(CK_EDDSA_PARAMS),
+        };
+        let ret = fn_sign_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
 
-    /* a second invocation should return an error */
-    let ret = fn_sign_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OPERATION_ACTIVE);
+        /* a second invocation should return an error */
+        let ret = fn_sign_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OPERATION_ACTIVE);
 
-    /* 2nd Test vector from rfc8032 for Ed448 */
-    let data = "\x03";
-    let sign: [u8; 114] = [0; 114];
-    let mut sign_len: CK_ULONG = 114;
-    let ret = fn_sign(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(sign_len, 114);
-    let signature = hex::decode(
-        "26b8f91727bd62897af15e41eb43c377efb9c610d48f2335cb0bd0087810f435\
-         2541b143c4b981b7e18f62de8ccdf633fc1bf037ab7cd779805e0dbcc0aae1cb\
-         cee1afb2e027df36bc04dcecbf154336c19f0af7e0a6472905e799f1953d2a0f\
-         f3348ab21aa4adafd1d234441cf807c03a00",
-    )
-    .expect("failed to decode expected signature");
-    assert_eq!(signature, sign);
+        /* 2nd Test vector from rfc8032 for Ed448 */
+        let data = "\x03";
+        let sign: [u8; 114] = [0; 114];
+        let mut sign_len: CK_ULONG = 114;
+        let ret = fn_sign(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            sign.as_ptr() as *mut _,
+            &mut sign_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(sign_len, 114);
+        let signature = hex::decode(
+            "26b8f91727bd62897af15e41eb43c377efb9c610d48f2335cb0bd0087810f435\
+             2541b143c4b981b7e18f62de8ccdf633fc1bf037ab7cd779805e0dbcc0aae1cb\
+             cee1afb2e027df36bc04dcecbf154336c19f0af7e0a6472905e799f1953d2a0f\
+             f3348ab21aa4adafd1d234441cf807c03a00",
+        )
+        .expect("failed to decode expected signature");
+        assert_eq!(signature, sign);
 
-    /* a second invocation should return an error */
-    let ret = fn_sign(
-        session,
-        CString::new(data).unwrap().into_raw() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut _,
-        &mut sign_len,
-    );
-    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+        /* a second invocation should return an error */
+        let ret = fn_sign(
+            session,
+            CString::new(data).unwrap().into_raw() as *mut u8,
+            data.len() as CK_ULONG,
+            sign.as_ptr() as *mut _,
+            &mut sign_len,
+        );
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
 
-    /* test that signature verification works */
-    let template = make_attr_template(
-        &[(CKA_CLASS, CKO_PUBLIC_KEY)],
-        &[(CKA_ID, "\x03".as_bytes())],
-        &[],
-    );
-    let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
-    assert_eq!(ret, CKR_OK);
-    let mut count: CK_ULONG = 0;
-    let ret = fn_find_objects(session, &mut handle, 1, &mut count);
-    assert_eq!(ret, CKR_OK);
-    assert_eq!(count, 1);
-    assert_ne!(handle, CK_INVALID_HANDLE);
-    let ret = fn_find_objects_final(session);
-    assert_eq!(ret, CKR_OK);
+        /* test that signature verification works */
+        let template = make_attr_template(
+            &[(CKA_CLASS, CKO_PUBLIC_KEY)],
+            &[(CKA_ID, "\x03".as_bytes())],
+            &[],
+        );
+        let ret = fn_find_objects_init(session, template.as_ptr() as *mut _, 2);
+        assert_eq!(ret, CKR_OK);
+        let mut count: CK_ULONG = 0;
+        let ret = fn_find_objects(session, &mut handle, 1, &mut count);
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(count, 1);
+        assert_ne!(handle, CK_INVALID_HANDLE);
+        let ret = fn_find_objects_final(session);
+        assert_eq!(ret, CKR_OK);
 
-    let ret = fn_verify_init(session, &mut mechanism, handle);
-    assert_eq!(ret, CKR_OK);
+        let ret = fn_verify_init(session, &mut mechanism, handle);
+        assert_eq!(ret, CKR_OK);
 
-    let ret = fn_verify(
-        session,
-        data.as_ptr() as *mut u8,
-        data.len() as CK_ULONG,
-        sign.as_ptr() as *mut u8,
-        sign_len,
-    );
-    assert_eq!(ret, CKR_OK);
+        let ret = fn_verify(
+            session,
+            data.as_ptr() as *mut u8,
+            data.len() as CK_ULONG,
+            sign.as_ptr() as *mut u8,
+            sign_len,
+        );
+        assert_eq!(ret, CKR_OK);
 
-    /* Re-Verify using the SignatureVerification APIs */
-    let ret =
-        sig_verifysig(session, handle, data.as_bytes(), &sign, &mechanism);
-    assert_eq!(ret, CKR_OK);
+        /* Re-Verify using the SignatureVerification APIs */
+        let ret =
+            sig_verifysig(session, handle, data.as_bytes(), &sign, &mechanism);
+        assert_eq!(ret, CKR_OK);
+    }
 }
 
 #[derive(Debug)]
@@ -550,6 +554,24 @@ fn test_eddsa_units(session: CK_SESSION_HANDLE, test_data: Vec<EddsaTestUnit>) {
                 }
                 continue;
             }
+            if cfg!(any(feature = "awslc", feature = "awslc-fips"))
+                && unit.algo.as_str() == "Ed25519ph"
+            {
+                /* The awslc-fips backend deliberately narrows CKM_EDDSA to
+                 * plain Ed25519 only under FIPS (see check_params's doc
+                 * comment in src/awslc/eddsa.rs): not because AWS-LC's FIPS
+                 * module actually lacks Ed25519ph, but to avoid changing
+                 * this backend's FIPS approval surface. Documented
+                 * permanent divergence from the reference backend, which
+                 * only narrows Ed25519ctx under FIPS. */
+                if ret != CKR_MECHANISM_PARAM_INVALID {
+                    panic!(
+                        "Expected {} but got {} for unit test at line {}",
+                        CKR_MECHANISM_PARAM_INVALID, ret, unit.line
+                    );
+                }
+                continue;
+            }
         }
         if ret != CKR_OK {
             panic!("Failed ({}) unit test at line {}", ret, unit.line);
@@ -586,7 +608,13 @@ fn test_eddsa_units(session: CK_SESSION_HANDLE, test_data: Vec<EddsaTestUnit>) {
 #[parallel]
 fn test_eddsa_vector() {
     /* Taken from RFC, filtered out the headers */
-    let test_data = parse_eddsa_vector("testdata/rfc8032.txt");
+    let mut test_data = parse_eddsa_vector("testdata/rfc8032.txt");
+    /* AWS-LC has no Ed448 (Curve448/Ed448-Goldilocks) support --
+     * documented permanent gap -- so importing an Ed448 key is rejected
+     * outright; only the Ed25519 vectors run for awslc/awslc-fips. */
+    if cfg!(any(feature = "awslc", feature = "awslc-fips")) {
+        test_data.retain(|unit| !unit.algo.starts_with("Ed448"));
+    }
 
     let mut testtokn = TestToken::initialized("test_eddsa_vector", None);
     let session = testtokn.get_session(false);

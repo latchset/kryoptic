@@ -7,6 +7,20 @@ use serial_test::parallel;
 
 const AES_BLOCK_SIZE: usize = 16;
 
+/// Whether the active backend's AES-GCM/CCM implementation streams
+/// ciphertext incrementally across `C_Encrypt/DecryptUpdate`/`Message*Next`
+/// calls (the reference OpenSSL backend does), or instead buffers the
+/// whole message and emits it all at once on the final call (AWS-LC's
+/// `AesGcm`/`AesCcm` are one-shot primitives with no incremental update --
+/// see `crate::awslc::aes::AesOperation::encryption_len`'s doc comment).
+/// Centralizing this one query, rather than repeating the
+/// `cfg!(any(feature = "awslc", feature = "awslc-fips"))` check at every
+/// affected assertion below, means a future third backend only needs to
+/// update this one function to get every dependent assertion right.
+const fn aead_buffers_whole_message() -> bool {
+    cfg!(any(feature = "awslc", feature = "awslc-fips"))
+}
+
 fn get_gcm_test_data() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let iv =
         hex::decode("3d8cf16e262880ddfe0c86eb").expect("failed to decode IV");
@@ -372,7 +386,12 @@ fn test_aes_operations() {
         assert_eq!(ret, Err(CKR_DATA_LEN_RANGE));
     }
 
-    {
+    // CTS (ciphertext stealing): AWS-LC has no primitive for it at all
+    // (verified: no matching symbols anywhere in its headers), a genuine,
+    // accepted permanent gap for this backend (tracked, not silently
+    // dropped) -- see crate::awslc::aes::AesOperation::register_mechanisms'
+    // own doc comment for the same conclusion reached independently there.
+    if !cfg!(any(feature = "awslc", feature = "awslc-fips")) {
         /* AES CTS */
 
         let iv = "FEDCBA0987654321";
@@ -441,19 +460,36 @@ fn test_aes_operations() {
         let ret = fn_encrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
-        /* Stream mode, so arbitrary data size and matching output */
+        /* Stream mode, so arbitrary data size and matching output.
+         *
+         * AWS-LC's AesGcm is a one-shot AEAD with no incremental update
+         * (see AesOperation::encryption_len's doc comment), so under the
+         * awslc/awslc-fips backends encrypt_update never emits output
+         * early: everything is buffered and emitted at once by
+         * encrypt_final. The per-call length assertions below only hold
+         * for backends with true incremental GCM streaming; the overall
+         * round trip (final ciphertext/plaintext content) is checked
+         * unconditionally either way. */
         let data = b"01234567";
         let mut enc =
             ret_or_panic!(encrypt_update(session, &data[..data.len() - 1]));
-        assert_eq!(enc.len(), data.len() - 1);
+        if !aead_buffers_whole_message() {
+            assert_eq!(enc.len(), data.len() - 1);
+        }
 
         let mut enc_next =
             ret_or_panic!(encrypt_update(session, &data[data.len() - 1..]));
-        assert_eq!(enc_next.len(), 1);
+        if !aead_buffers_whole_message() {
+            assert_eq!(enc_next.len(), 1);
+        }
         enc.append(&mut enc_next);
 
         let mut enc_final = ret_or_panic!(encrypt_final(session));
-        assert_eq!(enc_final.len(), tag_len);
+        if aead_buffers_whole_message() {
+            assert_eq!(enc_final.len(), data.len() + tag_len);
+        } else {
+            assert_eq!(enc_final.len(), tag_len);
+        }
         enc.append(&mut enc_final);
 
         /* test that we can get correct indicators based on inputs */
@@ -464,15 +500,24 @@ fn test_aes_operations() {
 
         /* pass partial tag only */
         let dec = ret_or_panic!(decrypt_update(session, &enc[..enc.len() - 1]));
-        assert_eq!(dec.len(), data.len() - 1);
-        assert_eq!(&data[..data.len() - 1], dec.as_slice());
+        if !aead_buffers_whole_message() {
+            assert_eq!(dec.len(), data.len() - 1);
+            assert_eq!(&data[..data.len() - 1], dec.as_slice());
+        }
 
         let dec = ret_or_panic!(decrypt_update(session, &enc[enc.len() - 1..]));
-        assert_eq!(dec.len(), 1);
-        assert_eq!(&data[data.len() - 1..], dec.as_slice());
+        if !aead_buffers_whole_message() {
+            assert_eq!(dec.len(), 1);
+            assert_eq!(&data[data.len() - 1..], dec.as_slice());
+        }
 
         let dec_final = ret_or_panic!(decrypt_final(session));
-        assert_eq!(dec_final.len(), 0);
+        if aead_buffers_whole_message() {
+            assert_eq!(dec_final.len(), data.len());
+            assert_eq!(data, dec_final.as_slice());
+        } else {
+            assert_eq!(dec_final.len(), 0);
+        }
 
         /* retry with one-shot decrypt operation */
         let dec2 = ret_or_panic!(decrypt(session, handle, &enc, &mechanism));
@@ -859,36 +904,80 @@ fn test_aes_operations() {
         );
         assert_eq!(ret, CKR_OK);
 
-        /* Stream mode, so arbitrary data size and matching output */
+        /* Stream mode, so arbitrary data size and matching output.
+         *
+         * AWS-LC's AesGcm/AesCcm message-mode operations buffer everything
+         * and only emit ciphertext at the CKF_END_OF_MESSAGE Next call (see
+         * AesOperation::msg_encryption_len's doc comment in
+         * src/awslc/aes.rs), unlike the reference backend's true
+         * incremental streaming. So under awslc/awslc-fips the first
+         * (non-final) Next call must emit nothing (any buffer size is
+         * accepted), and the final Next call emits the *entire* buffered
+         * ciphertext at once -- it cannot be written into a slice sized
+         * and offset for a single incremental byte, unlike the reference. */
         let data = "01234567";
-        let enc: [u8; 8] = [0; 8];
-        let mut enc_len = enc.len() as CK_ULONG;
-        let ret = fn_encrypt_message_next(
-            session,
-            void_ptr!(&mut param),
-            sizeof!(CK_GCM_MESSAGE_PARAMS),
-            data.as_ptr() as *mut CK_BYTE,
-            (data.len() - 1) as CK_ULONG,
-            enc.as_ptr() as *mut _,
-            &mut enc_len,
-            0,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len as usize, data.len() - 1);
+        let mut enc: [u8; 8] = [0; 8];
+        if aead_buffers_whole_message() {
+            // A non-null ciphertext_part is required here: a null pointer
+            // takes fns/encryption.rs's length-query branch instead of
+            // actually buffering plain, which would silently lose this
+            // call's plaintext.
+            let mut enc_len = enc.len() as CK_ULONG;
+            let ret = fn_encrypt_message_next(
+                session,
+                void_ptr!(&mut param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+                data.as_ptr() as *mut CK_BYTE,
+                (data.len() - 1) as CK_ULONG,
+                enc.as_mut_ptr(),
+                &mut enc_len,
+                0,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(enc_len, 0);
 
-        enc_len = 1 as CK_ULONG;
-        let ret = fn_encrypt_message_next(
-            session,
-            void_ptr!(&mut param),
-            sizeof!(CK_GCM_MESSAGE_PARAMS),
-            unsafe { data.as_ptr().offset(7) } as *mut CK_BYTE,
-            1 as CK_ULONG,
-            unsafe { enc.as_ptr().offset(7) } as *mut _,
-            &mut enc_len,
-            CKF_END_OF_MESSAGE,
-        );
-        assert_eq!(ret, CKR_OK);
-        assert_eq!(enc_len, 1);
+            enc_len = enc.len() as CK_ULONG;
+            let ret = fn_encrypt_message_next(
+                session,
+                void_ptr!(&mut param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+                unsafe { data.as_ptr().offset(7) } as *mut CK_BYTE,
+                1 as CK_ULONG,
+                enc.as_mut_ptr(),
+                &mut enc_len,
+                CKF_END_OF_MESSAGE,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(enc_len as usize, data.len());
+        } else {
+            let mut enc_len = enc.len() as CK_ULONG;
+            let ret = fn_encrypt_message_next(
+                session,
+                void_ptr!(&mut param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+                data.as_ptr() as *mut CK_BYTE,
+                (data.len() - 1) as CK_ULONG,
+                enc.as_mut_ptr(),
+                &mut enc_len,
+                0,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(enc_len as usize, data.len() - 1);
+
+            enc_len = 1 as CK_ULONG;
+            let ret = fn_encrypt_message_next(
+                session,
+                void_ptr!(&mut param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+                unsafe { data.as_ptr().offset(7) } as *mut CK_BYTE,
+                1 as CK_ULONG,
+                unsafe { enc.as_mut_ptr().offset(7) } as *mut _,
+                &mut enc_len,
+                CKF_END_OF_MESSAGE,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(enc_len, 1);
+        }
 
         /* test that we can get correct indicators based on inputs */
         assert_eq!(check_validation(session, 0), true);
@@ -2888,10 +2977,18 @@ fn test_aes_gcm_encrypt_message_buffer_too_small_reports_required_len() {
     testtokn.finalize();
 }
 
-/// Regression test for the streaming C_EncryptMessageNext call site (fns/encryption.rs
-/// encrypt_message_next -> operation.msg_encrypt_next), distinct from the one-shot
-/// C_EncryptMessage above -- reached only through the explicit Begin/Next API, never through
-/// the one-shot entry point.
+/// Regression test for the streaming C_EncryptMessageNext/C_EncryptMessageNext(END_OF_MESSAGE)
+/// call sites (fns/encryption.rs encrypt_message_next -> operation.msg_encrypt_next/
+/// msg_encrypt_final), distinct from the one-shot C_EncryptMessage above -- reached only
+/// through the explicit Begin/Next API, never through the one-shot entry point.
+///
+/// AWS-LC's AesGcm has no incremental primitive (see AesOperation::msg_encrypt_final's doc
+/// comment), so that backend buffers every non-final Next call's plaintext and only performs
+/// the real seal at Final: a non-final Next never emits output and accepts any buffer size,
+/// while Final is where a too-small buffer must correctly report the real required length.
+/// The reference backend streams GCM incrementally instead, so there a non-final Next call
+/// emits (or reports the required length for) its own plaintext immediately, and Final only
+/// ever has the tag left to emit.
 #[test]
 #[parallel]
 fn test_aes_gcm_encrypt_message_next_buffer_too_small_reports_required_len() {
@@ -2941,27 +3038,131 @@ fn test_aes_gcm_encrypt_message_next_buffer_too_small_reports_required_len() {
     assert_eq!(ret, CKR_OK);
 
     let plaintext = b"Hello world!";
-    let mut enc: [u8; 4] = [0; 4];
-    let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
-    let ret = fn_encrypt_message_next(
-        session,
-        void_ptr!(&mut params),
-        sizeof!(CK_GCM_MESSAGE_PARAMS),
-        plaintext.as_ptr() as *mut CK_BYTE,
-        plaintext.len() as CK_ULONG,
-        enc.as_mut_ptr(),
-        &mut enc_len,
-        0, /* not CKF_END_OF_MESSAGE */
-    );
-    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
-    assert_eq!(
-        enc_len,
-        plaintext.len() as CK_ULONG,
-        "CKR_BUFFER_TOO_SMALL must report the real required length ({} \
-         bytes), not leave *pulCiphertextPartLen at whatever the caller \
-         originally passed in (4)",
-        plaintext.len()
-    );
+
+    if aead_buffers_whole_message() {
+        /* A non-final Next call only buffers: it emits nothing, so even a
+         * too-small-for-the-plaintext buffer is accepted. */
+        let mut enc: [u8; 4] = [0; 4];
+        let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut params),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            plaintext.as_ptr() as *mut CK_BYTE,
+            plaintext.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+            0, /* not CKF_END_OF_MESSAGE */
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, 0);
+
+        /* Final performs the real seal over everything buffered (the whole
+         * plaintext, since this call itself passes none): a too-small
+         * buffer must report the real required length, not leave it
+         * untouched. */
+        let mut small_enc: [u8; 4] = [0; 4];
+        let mut small_enc_len: CK_ULONG = small_enc.len() as CK_ULONG;
+        // A non-null-but-empty plaintext pointer: fn_encrypt_message_next
+        // requires plaintext_part to be non-null regardless of length (the
+        // dispatch checks `plaintext_part.is_null()` before ever reading
+        // it, per fns/encryption.rs's encrypt_message_next).
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut params),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            plaintext.as_ptr() as *mut CK_BYTE,
+            0,
+            small_enc.as_mut_ptr(),
+            &mut small_enc_len,
+            CKF_END_OF_MESSAGE,
+        );
+        assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+        assert_eq!(
+            small_enc_len,
+            plaintext.len() as CK_ULONG,
+            "CKR_BUFFER_TOO_SMALL must report the real required length ({} \
+             bytes), not leave *pulCiphertextPartLen at whatever the \
+             caller originally passed in (4)",
+            plaintext.len()
+        );
+
+        /* The operation must still be usable after the non-fatal
+         * buffer-too-small error: retrying Final with a correctly-sized
+         * buffer succeeds. */
+        let mut enc_final = vec![0u8; plaintext.len()];
+        let mut enc_final_len: CK_ULONG = enc_final.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut params),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            plaintext.as_ptr() as *mut CK_BYTE,
+            0,
+            enc_final.as_mut_ptr(),
+            &mut enc_final_len,
+            CKF_END_OF_MESSAGE,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_final_len, plaintext.len() as CK_ULONG);
+    } else {
+        /* The reference backend streams GCM incrementally: a non-final
+         * Next call emits output immediately, so a too-small buffer must
+         * report the real required length right away. */
+        let mut small_enc: [u8; 4] = [0; 4];
+        let mut small_enc_len: CK_ULONG = small_enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut params),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            plaintext.as_ptr() as *mut CK_BYTE,
+            plaintext.len() as CK_ULONG,
+            small_enc.as_mut_ptr(),
+            &mut small_enc_len,
+            0, /* not CKF_END_OF_MESSAGE */
+        );
+        assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+        assert_eq!(small_enc_len, plaintext.len() as CK_ULONG);
+
+        /* The operation must still be usable after the non-fatal
+         * buffer-too-small error: retrying with a correctly-sized buffer
+         * streams the whole plaintext out immediately. */
+        let mut enc = vec![0u8; plaintext.len()];
+        let mut enc_len: CK_ULONG = enc.len() as CK_ULONG;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut params),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            plaintext.as_ptr() as *mut CK_BYTE,
+            plaintext.len() as CK_ULONG,
+            enc.as_mut_ptr(),
+            &mut enc_len,
+            0,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(enc_len, plaintext.len() as CK_ULONG);
+
+        /* The reference backend writes the tag directly to params.pTag,
+         * not the ciphertext buffer (see msg_encrypt_final/
+         * msg_encryption_len's CKM_AES_GCM arms in src/ossl/aes.rs: the
+         * cipher buffer only ever needs to fit this call's own plaintext
+         * chunk, and the GCM arm returns `data_len` unconditionally,
+         * regardless of `fin`). With no more plaintext to stream, Final
+         * needs no ciphertext buffer at all and just finalizes the tag. */
+        let mut tag_out: [u8; 0] = [];
+        let mut tag_out_len: CK_ULONG = 0;
+        let ret = fn_encrypt_message_next(
+            session,
+            void_ptr!(&mut params),
+            sizeof!(CK_GCM_MESSAGE_PARAMS),
+            plaintext.as_ptr() as *mut CK_BYTE,
+            0,
+            tag_out.as_mut_ptr(),
+            &mut tag_out_len,
+            CKF_END_OF_MESSAGE,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(tag_out_len, 0);
+    }
 
     testtokn.finalize();
 }
