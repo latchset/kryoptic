@@ -561,16 +561,25 @@ impl Sign for HOTPOperation {
                 signature.as_mut_ptr().add(struct_size) as *mut CK_OTP_PARAM;
             let p_value = signature.as_mut_ptr().add(struct_size + param_size);
 
-            std::ptr::write_unaligned(&mut (*sig_info).pParams, p_params);
-            std::ptr::write_unaligned(&mut (*sig_info).ulCount, 1);
-
-            std::ptr::write_unaligned(&mut (*p_params).type_, CK_OTP_VALUE);
             std::ptr::write_unaligned(
-                &mut (*p_params).pValue,
+                std::ptr::addr_of_mut!((*sig_info).pParams),
+                p_params,
+            );
+            std::ptr::write_unaligned(
+                std::ptr::addr_of_mut!((*sig_info).ulCount),
+                1,
+            );
+
+            std::ptr::write_unaligned(
+                std::ptr::addr_of_mut!((*p_params).type_),
+                CK_OTP_VALUE,
+            );
+            std::ptr::write_unaligned(
+                std::ptr::addr_of_mut!((*p_params).pValue),
                 p_value as *mut std::ffi::c_void,
             );
             std::ptr::write_unaligned(
-                &mut (*p_params).ulValueLen,
+                std::ptr::addr_of_mut!((*p_params).ulValueLen),
                 self.length as CK_ULONG,
             );
 
