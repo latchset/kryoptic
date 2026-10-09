@@ -43,6 +43,10 @@ softhsm-tests:
 	cargo build --workspace
 	tools/softhsm/test.sh
 
+otp-tests:
+	cargo build --workspace
+	tools/otp/test.sh
+
 docs:
 	cargo doc --no-default-features --features standard,pqc,nssdb,log --document-private-items
 
