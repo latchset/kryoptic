@@ -43,6 +43,10 @@ softhsm-tests:
 	cargo build --workspace
 	tools/softhsm/test.sh
 
+otp-tests:
+	cargo build --workspace
+	tools/otp/test.sh
+
 docs:
 	cargo doc --no-default-features --features standard,pqc,nssdb,log --document-private-items
 
@@ -53,6 +57,7 @@ manpages:
 	pandoc -s -t man doc/kryoptic.conf.man.md -o kryoptic.conf.5
 	pandoc -s -t man doc/kryoptic.man.md -o kryoptic.7
 	pandoc -s -t man tools/softhsm/softhsm_migrate.man.md -o softhsm_migrate.1
+	pandoc -s -t man tools/otp/kryoptic_otp.man.md -o kryoptic_otp.1
 
 .ONESHELL:
 SHELL = /bin/bash

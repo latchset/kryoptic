@@ -26,10 +26,15 @@ name = "profile_conformance"
 path = "profiles/profile-conformance.rs"
 required-features = ["profiles"]
 
+[[bin]]
+name = "kryoptic_otp"
+path = "otp/main.rs"
+
 [dependencies]
 clap = { version = "4.5.26", default-features = false, features = ["cargo", "derive", "help", "std", "usage"] }
 kryoptic-lib.workspace = true
 cryptoki = "0.12.0"
+data-encoding = "2.4.0"
 hex = "0.4.3"
 libc = "0.2.151"
 serde = { version = "1.0.180", features = ["derive"] }
