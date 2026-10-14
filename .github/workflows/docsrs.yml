@@ -1,0 +1,29 @@
+name: build docs with docs-rs
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  doc:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -Dwarnings
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get install libssl-dev
+
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Checkout Nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Checkout Cargo-docs-rs
+        uses: dtolnay/install@cargo-docs-rs
+
+      - name: Build Docs
+        run: cargo docs-rs
