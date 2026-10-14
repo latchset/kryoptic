@@ -274,7 +274,14 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
                     _ => return Err(CKR_GENERAL_ERROR)?,
                 }
             }
-            CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => val.to_vec(),
+            /* RFC 8410: the privateKey is a CurvePrivateKey,
+             * itself an OCTET STRING */
+            CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => {
+                match asn1::write_single(&val.as_slice()) {
+                    Ok(p) => p,
+                    _ => return Err(CKR_GENERAL_ERROR)?,
+                }
+            }
             _ => return Err(CKR_GENERAL_ERROR)?,
         }
     };
@@ -298,6 +305,15 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
     drop(pkeyinfo);
     zeromem(asn1_vec.as_mut_slice());
     ret
+}
+
+/// Extracts the raw key from an RFC 8410 CurvePrivateKey, the OCTET STRING
+/// that the privateKey field of an EdDSA or XDH PrivateKeyInfo holds
+fn parse_curve_private_key(pkeyval: &[u8]) -> Result<&[u8]> {
+    match asn1::parse_single::<&[u8]>(pkeyval) {
+        Ok(k) => Ok(k),
+        Err(_) => Err(CKR_WRAPPED_KEY_INVALID)?,
+    }
 }
 
 /// Common function to parse a private EC key from PKCS#8 encoded data
@@ -354,11 +370,11 @@ pub fn import_from_wrapped(
             ecpkey.private_key.as_bytes()
         }
         CKK_EC_EDWARDS => match oid {
-            &ED25519_OID | &ED448_OID => pkeyval,
+            &ED25519_OID | &ED448_OID => parse_curve_private_key(pkeyval)?,
             _ => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         },
         CKK_EC_MONTGOMERY => match oid {
-            &X25519_OID | &X448_OID => pkeyval,
+            &X25519_OID | &X448_OID => parse_curve_private_key(pkeyval)?,
             _ => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         },
         _ => return Err(CKR_GENERAL_ERROR)?,

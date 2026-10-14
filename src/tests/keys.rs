@@ -756,6 +756,174 @@ fn test_secret_key_defaults() {
     testtokn.finalize();
 }
 
+#[cfg(any(feature = "eddsa", feature = "ec_montgomery"))]
+#[test]
+#[parallel]
+fn test_curve_key_wrap_rfc8410() {
+    let mut testtokn =
+        TestToken::initialized("test_curve_key_wrap_rfc8410", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let aes_key_val = [0x70u8; 32];
+    let wk_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &aes_key_val)],
+        &[
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true)
+        ],
+    ));
+    let iv = [0u8; 16];
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+
+    struct TestData {
+        /* RFC 8410 PrivateKeyInfo, as OpenSSL writes it */
+        pkcs8: &'static str,
+        key_type: CK_KEY_TYPE,
+        op_flag: CK_ATTRIBUTE_TYPE,
+    }
+
+    let mut testdata = Vec::<TestData>::new();
+    /* RFC 8032, 7.1 TEST 2 */
+    #[cfg(feature = "eddsa")]
+    testdata.push(TestData {
+        pkcs8: "302e020100300506032b657004220420\
+                4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+        key_type: CKK_EC_EDWARDS,
+        op_flag: CKA_SIGN,
+    });
+    /* RFC 7748, 6.1 Alice */
+    #[cfg(feature = "ec_montgomery")]
+    testdata.push(TestData {
+        pkcs8: "302e020100300506032b656e04220420\
+                77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+        key_type: CKK_EC_MONTGOMERY,
+        op_flag: CKA_DERIVE,
+    });
+
+    for t in &testdata {
+        let pkcs8 =
+            hex::decode(t.pkcs8).expect("Failed to decode PrivateKeyInfo");
+        let mut wrapped =
+            ret_or_panic!(encrypt(session, wk_handle, &pkcs8, &mechanism));
+
+        let mut pri_template = make_attr_template(
+            &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, t.key_type)],
+            &[],
+            &[
+                (CKA_TOKEN, false),
+                (CKA_SENSITIVE, true),
+                (CKA_EXTRACTABLE, true),
+                (t.op_flag, true),
+            ],
+        );
+        let mut prikey = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mechanism as *const _ as CK_MECHANISM_PTR,
+            wk_handle,
+            wrapped.as_mut_ptr(),
+            wrapped.len() as CK_ULONG,
+            pri_template.as_mut_ptr(),
+            pri_template.len() as CK_ULONG,
+            &mut prikey,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        if t.op_flag == CKA_SIGN {
+            /* The unwrapped key makes RFC 8032's signature */
+            let sig = ret_or_panic!(sig_gen(
+                session,
+                prikey,
+                &[0x72u8],
+                &CK_MECHANISM {
+                    mechanism: CKM_EDDSA,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                },
+            ));
+            assert_eq!(
+                hex::encode(sig),
+                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
+                 085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+            );
+        } else {
+            /* The unwrapped key agrees RFC 7748's secret with Bob */
+            let mut bob_point = hex::decode(
+                "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
+            )
+            .expect("Failed to decode bob's point");
+            let mut params = CK_ECDH1_DERIVE_PARAMS {
+                kdf: CKD_NULL,
+                ulSharedDataLen: 0,
+                pSharedData: std::ptr::null_mut(),
+                ulPublicDataLen: bob_point.len() as CK_ULONG,
+                pPublicData: bob_point.as_mut_ptr(),
+            };
+            let mut derive_mech: CK_MECHANISM = CK_MECHANISM {
+                mechanism: CKM_ECDH1_DERIVE,
+                pParameter: &mut params as *mut _ as CK_VOID_PTR,
+                ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+            };
+            let derive_template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                    (CKA_VALUE_LEN, 32),
+                ],
+                &[],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+            );
+            let mut s_handle = CK_INVALID_HANDLE;
+            let ret = fn_derive_key(
+                session,
+                &mut derive_mech,
+                prikey,
+                derive_template.as_ptr() as *mut _,
+                derive_template.len() as CK_ULONG,
+                &mut s_handle,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(
+                hex::encode(ret_or_panic!(extract_key_value(
+                    session, s_handle
+                ))),
+                "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+            );
+        }
+
+        /* And wraps back to the same RFC 8410 PrivateKeyInfo */
+        let mut rewrapped = vec![0u8; 256];
+        let mut rewrapped_len = rewrapped.len() as CK_ULONG;
+        let ret = fn_wrap_key(
+            session,
+            &mechanism as *const _ as CK_MECHANISM_PTR,
+            wk_handle,
+            prikey,
+            rewrapped.as_mut_ptr(),
+            &mut rewrapped_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        rewrapped.resize(rewrapped_len as usize, 0);
+        let decrypted =
+            ret_or_panic!(decrypt(session, wk_handle, &rewrapped, &mechanism));
+        assert_eq!(hex::encode(decrypted), hex::encode(pkcs8));
+    }
+
+    testtokn.finalize();
+}
+
 #[cfg(feature = "rsa")]
 #[test]
 #[parallel]
