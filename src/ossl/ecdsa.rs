@@ -356,16 +356,17 @@ impl Sign for EcdsaOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if !self.in_use {
+        if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if self.finalized {
+        self.finalized = true;
+        /* CKM_ECDSA is single-part only */
+        if self.mech == CKM_ECDSA {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
-        self.finalized = true;
 
         let mut sig = vec![0u8; signature.len() + 10];
 
@@ -469,13 +470,14 @@ impl EcdsaOperation {
 
     /// Internal helper for the final step of multi-part verification.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
+        /* CKM_ECDSA is single-part only */
+        if self.mech == CKM_ECDSA {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();

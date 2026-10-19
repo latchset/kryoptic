@@ -757,6 +757,9 @@ impl Sign for RsaPKCSOperation {
         if !self.in_use {
             match self.mech {
                 CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                    /* single-part only, the failed call terminates
+                     * the operation */
+                    self.finalized = true;
                     return Err(CKR_OPERATION_NOT_INITIALIZED)?;
                 }
                 _ => (),
@@ -780,13 +783,17 @@ impl Sign for RsaPKCSOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
+        /* these mechanisms are single-part only */
+        match self.mech {
+            CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+            }
+            _ => (),
+        }
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -865,6 +872,9 @@ impl RsaPKCSOperation {
         if !self.in_use {
             match self.mech {
                 CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                    /* single-part only, the failed call terminates
+                     * the operation */
+                    self.finalized = true;
                     return Err(CKR_OPERATION_NOT_INITIALIZED)?;
                 }
                 _ => (),
@@ -889,13 +899,17 @@ impl RsaPKCSOperation {
 
     /// Internal helper for the final step of multi-part verification.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.finalized = true;
+        /* these mechanisms are single-part only */
+        match self.mech {
+            CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+            }
+            _ => (),
+        }
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();

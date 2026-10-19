@@ -830,3 +830,331 @@ fn test_sign_final_buffer_too_small_reports_required_len() {
 
     testtokn.finalize();
 }
+
+/// Signs an empty message with C_SignInit + C_SignFinal, with no
+/// C_SignUpdate, and checks C_VerifyFinal with no C_VerifyUpdate and
+/// C_Verify over empty data accept the signature
+#[cfg(any(
+    feature = "ecdsa",
+    feature = "eddsa",
+    feature = "rsa",
+    feature = "mldsa",
+    feature = "slhdsa"
+))]
+fn check_final_empty_message(
+    session: CK_SESSION_HANDLE,
+    hpub: CK_OBJECT_HANDLE,
+    hpri: CK_OBJECT_HANDLE,
+    mechanism: &CK_MECHANISM,
+) -> Vec<u8> {
+    let mech = mechanism as *const _ as CK_MECHANISM_PTR;
+    let ret = fn_sign_init(session, mech, hpri);
+    assert_eq!(ret, CKR_OK);
+    let mut sig_len: CK_ULONG = 0;
+    let ret = fn_sign_final(session, std::ptr::null_mut(), &mut sig_len);
+    assert_eq!(ret, CKR_OK);
+    let mut signature = vec![0u8; sig_len as usize];
+    let ret = fn_sign_final(session, signature.as_mut_ptr(), &mut sig_len);
+    assert_eq!(
+        ret, CKR_OK,
+        "C_SignFinal, mechanism {}",
+        mechanism.mechanism
+    );
+    signature.resize(sig_len as usize, 0);
+
+    let ret = fn_verify_init(session, mech, hpub);
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_verify_final(
+        session,
+        signature.as_mut_ptr(),
+        signature.len() as CK_ULONG,
+    );
+    assert_eq!(
+        ret, CKR_OK,
+        "C_VerifyFinal, mechanism {}",
+        mechanism.mechanism
+    );
+
+    let ret = sig_verify(session, hpub, &[], &signature, mechanism);
+    assert_eq!(ret, CKR_OK, "C_Verify, mechanism {}", mechanism.mechanism);
+
+    signature
+}
+
+/// Single-part only mechanisms reject C_SignUpdate, C_SignFinal,
+/// C_VerifyUpdate and C_VerifyFinal, and the failed call terminates the
+/// operation
+#[cfg(any(
+    feature = "ecdsa",
+    feature = "rsa",
+    feature = "mldsa",
+    feature = "slhdsa"
+))]
+fn check_final_single_part_only(
+    session: CK_SESSION_HANDLE,
+    hpub: CK_OBJECT_HANDLE,
+    hpri: CK_OBJECT_HANDLE,
+    mechanism: &CK_MECHANISM,
+    sig_len: usize,
+) {
+    let mech = mechanism as *const _ as CK_MECHANISM_PTR;
+    let mut signature = vec![0u8; sig_len];
+
+    let ret = fn_sign_init(session, mech, hpri);
+    assert_eq!(ret, CKR_OK);
+    let mut len = signature.len() as CK_ULONG;
+    let ret = fn_sign_final(session, signature.as_mut_ptr(), &mut len);
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+    let ret = fn_sign_init(session, mech, hpri);
+    assert_eq!(ret, CKR_OK, "C_SignInit, mechanism {}", mechanism.mechanism);
+
+    let ret = fn_verify_init(session, mech, hpub);
+    assert_eq!(ret, CKR_OK);
+    let ret = fn_verify_final(
+        session,
+        signature.as_mut_ptr(),
+        signature.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+    let ret = fn_verify_init(session, mech, hpub);
+    assert_eq!(
+        ret, CKR_OK,
+        "C_VerifyInit, mechanism {}",
+        mechanism.mechanism
+    );
+
+    let ret = fn_session_cancel(session, CKF_SIGN | CKF_VERIFY);
+    assert_eq!(ret, CKR_OK);
+
+    let mut data = [0u8; 4];
+    let ret = fn_sign_init(session, mech, hpri);
+    assert_eq!(ret, CKR_OK);
+    let ret =
+        fn_sign_update(session, data.as_mut_ptr(), data.len() as CK_ULONG);
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+    let ret = fn_sign_init(session, mech, hpri);
+    assert_eq!(ret, CKR_OK, "C_SignInit, mechanism {}", mechanism.mechanism);
+
+    let ret = fn_verify_init(session, mech, hpub);
+    assert_eq!(ret, CKR_OK);
+    let ret =
+        fn_verify_update(session, data.as_mut_ptr(), data.len() as CK_ULONG);
+    assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+    let ret = fn_verify_init(session, mech, hpub);
+    assert_eq!(
+        ret, CKR_OK,
+        "C_VerifyInit, mechanism {}",
+        mechanism.mechanism
+    );
+
+    let ret = fn_session_cancel(session, CKF_SIGN | CKF_VERIFY);
+    assert_eq!(ret, CKR_OK);
+}
+
+#[cfg(any(
+    feature = "ecdsa",
+    feature = "eddsa",
+    feature = "rsa",
+    feature = "mldsa",
+    feature = "slhdsa"
+))]
+#[test]
+#[parallel]
+fn test_sign_verify_final_empty_message() {
+    let mut testtokn =
+        TestToken::initialized("test_sign_verify_final_empty_message", None);
+    let session = testtokn.get_session(false);
+
+    /* login */
+    testtokn.login();
+
+    let mech = |mechanism| CK_MECHANISM {
+        mechanism: mechanism,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    #[cfg(any(feature = "mldsa", feature = "slhdsa"))]
+    let hash_params = CK_HASH_SIGN_ADDITIONAL_CONTEXT {
+        hedgeVariant: CKH_HEDGE_PREFERRED,
+        pContext: std::ptr::null_mut(),
+        ulContextLen: 0,
+        hash: CKM_SHA256,
+    };
+    #[cfg(any(feature = "ecdsa", feature = "rsa"))]
+    let sha256_empty = hex::decode(
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    )
+    .unwrap();
+
+    #[cfg(feature = "ecdsa")]
+    {
+        let ec_params = hex::decode("06082a8648ce3d030107").unwrap();
+        let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+            session,
+            CKM_EC_KEY_PAIR_GEN,
+            &[],
+            &[(CKA_EC_PARAMS, &ec_params)],
+            &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+            &[],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+        ));
+        let sig = check_final_empty_message(
+            session,
+            hpub,
+            hpri,
+            &mech(CKM_ECDSA_SHA256),
+        );
+        /* it is a signature of SHA-256("") */
+        let ret =
+            sig_verify(session, hpub, &sha256_empty, &sig, &mech(CKM_ECDSA));
+        assert_eq!(ret, CKR_OK);
+        check_final_single_part_only(
+            session,
+            hpub,
+            hpri,
+            &mech(CKM_ECDSA),
+            sig.len(),
+        );
+    }
+
+    #[cfg(feature = "eddsa")]
+    {
+        /* RFC 8032, 7.1 TEST 1, an empty message */
+        let ed25519_params =
+            hex::decode("130c656477617264733235353139").unwrap();
+        let sk = hex::decode(
+            "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+        )
+        .unwrap();
+        let pk = hex::decode(
+            "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        )
+        .unwrap();
+        let hpri = ret_or_panic!(import_object(
+            session,
+            CKO_PRIVATE_KEY,
+            &[(CKA_KEY_TYPE, CKK_EC_EDWARDS)],
+            &[(CKA_EC_PARAMS, &ed25519_params), (CKA_VALUE, &sk)],
+            &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+        ));
+        let hpub = ret_or_panic!(import_object(
+            session,
+            CKO_PUBLIC_KEY,
+            &[(CKA_KEY_TYPE, CKK_EC_EDWARDS)],
+            &[(CKA_EC_PARAMS, &ed25519_params), (CKA_EC_POINT, &pk)],
+            &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+        ));
+        let sig =
+            check_final_empty_message(session, hpub, hpri, &mech(CKM_EDDSA));
+        assert_eq!(
+            hex::encode(sig),
+            "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155\
+             5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+        );
+    }
+
+    #[cfg(feature = "rsa")]
+    {
+        let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+            session,
+            CKM_RSA_PKCS_KEY_PAIR_GEN,
+            &[(CKA_MODULUS_BITS, 2048)],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+            &[],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+        ));
+        let sig = check_final_empty_message(
+            session,
+            hpub,
+            hpri,
+            &mech(CKM_SHA256_RSA_PKCS),
+        );
+        /* it is a signature of the DigestInfo of SHA-256("") */
+        let mut digest_info =
+            hex::decode("3031300d060960864801650304020105000420").unwrap();
+        digest_info.extend_from_slice(&sha256_empty);
+        let ret =
+            sig_verify(session, hpub, &digest_info, &sig, &mech(CKM_RSA_PKCS));
+        assert_eq!(ret, CKR_OK);
+        for m in [CKM_RSA_PKCS, CKM_RSA_X_509] {
+            check_final_single_part_only(
+                session,
+                hpub,
+                hpri,
+                &mech(m),
+                sig.len(),
+            );
+        }
+    }
+
+    #[cfg(feature = "mldsa")]
+    {
+        let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+            session,
+            CKM_ML_DSA_KEY_PAIR_GEN,
+            &[(CKA_PARAMETER_SET, CKP_ML_DSA_44)],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+            &[],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+        ));
+        let sig =
+            check_final_empty_message(session, hpub, hpri, &mech(CKM_ML_DSA));
+        check_final_empty_message(
+            session,
+            hpub,
+            hpri,
+            &mech(CKM_HASH_ML_DSA_SHA256),
+        );
+        check_final_single_part_only(
+            session,
+            hpub,
+            hpri,
+            &CK_MECHANISM {
+                mechanism: CKM_HASH_ML_DSA,
+                pParameter: void_ptr!(&hash_params),
+                ulParameterLen: sizeof!(CK_HASH_SIGN_ADDITIONAL_CONTEXT),
+            },
+            sig.len(),
+        );
+    }
+
+    #[cfg(feature = "slhdsa")]
+    {
+        let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+            session,
+            CKM_SLH_DSA_KEY_PAIR_GEN,
+            &[(CKA_PARAMETER_SET, CKP_SLH_DSA_SHA2_128F)],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+            &[],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+        ));
+        let sig =
+            check_final_empty_message(session, hpub, hpri, &mech(CKM_SLH_DSA));
+        check_final_empty_message(
+            session,
+            hpub,
+            hpri,
+            &mech(CKM_HASH_SLH_DSA_SHA256),
+        );
+        check_final_single_part_only(
+            session,
+            hpub,
+            hpri,
+            &CK_MECHANISM {
+                mechanism: CKM_HASH_SLH_DSA,
+                pParameter: void_ptr!(&hash_params),
+                ulParameterLen: sizeof!(CK_HASH_SIGN_ADDITIONAL_CONTEXT),
+            },
+            sig.len(),
+        );
+    }
+
+    testtokn.finalize();
+}

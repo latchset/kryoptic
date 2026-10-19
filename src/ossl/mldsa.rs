@@ -588,9 +588,6 @@ impl MlDsaOperation {
     /// Computes M' if necessary and performs the final OpenSSL verification
     /// call.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -602,6 +599,8 @@ impl MlDsaOperation {
 
         match self.mech {
             CKM_ML_DSA => self.sigctx.verify_final(signature)?,
+            /* CKM_HASH_ML_DSA is single-part only */
+            CKM_HASH_ML_DSA => return Err(CKR_OPERATION_NOT_INITIALIZED)?,
             CKM_HASH_ML_DSA_SHA224
             | CKM_HASH_ML_DSA_SHA256
             | CKM_HASH_ML_DSA_SHA384
@@ -695,9 +694,6 @@ impl Sign for MlDsaOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
@@ -708,6 +704,8 @@ impl Sign for MlDsaOperation {
 
         let siglen = match self.mech {
             CKM_ML_DSA => self.sigctx.sign_final(signature)?,
+            /* CKM_HASH_ML_DSA is single-part only */
+            CKM_HASH_ML_DSA => return Err(CKR_OPERATION_NOT_INITIALIZED)?,
             CKM_HASH_ML_DSA_SHA224
             | CKM_HASH_ML_DSA_SHA256
             | CKM_HASH_ML_DSA_SHA384

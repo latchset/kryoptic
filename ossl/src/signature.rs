@@ -852,7 +852,10 @@ impl OsslSignature {
             op: op,
             legacy_ctx: None,
             supports_updates: false,
-            data: None,
+            /* Start with an empty message, so that a final call with
+             * no update signs or verifies the empty message, while a
+             * second final call still finds no data */
+            data: Some(Vec::new()),
             signature: None,
         };
 
