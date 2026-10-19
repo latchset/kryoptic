@@ -253,29 +253,33 @@ fn test_get_slot_list_buffer_too_small_reports_required_len() {
         "test_get_slot_list_buffer_too_small_reports_required_len",
         None,
     );
+    let mut testtokn2 = TestToken::initialized(
+        "test_get_slot_list_buffer_too_small_reports_required_len_2",
+        None,
+    );
 
     let mut real_count: CK_ULONG = 0;
     let ret = fn_get_slot_list(CK_FALSE, std::ptr::null_mut(), &mut real_count);
     assert_eq!(ret, CKR_OK);
-    assert!(real_count > 0);
+    assert!(real_count >= 2);
 
-    if real_count > 1 {
-        let mut slots: Vec<CK_SLOT_ID> = vec![0; 1];
-        let mut count: CK_ULONG = 1;
-        let ret = fn_get_slot_list(
-            CK_FALSE,
-            slots.as_mut_ptr() as CK_SLOT_ID_PTR,
-            &mut count,
-        );
-        assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
-        assert_eq!(
-            count, real_count,
-            "CKR_BUFFER_TOO_SMALL must report the real slot count ({}), \
-             not leave *pulCount at whatever the caller originally passed in (1)",
-            real_count
-        );
-    }
+    let mut slots: Vec<CK_SLOT_ID> = vec![0; 1];
+    let mut count: CK_ULONG = 1;
+    let ret = fn_get_slot_list(
+        CK_FALSE,
+        slots.as_mut_ptr() as CK_SLOT_ID_PTR,
+        &mut count,
+    );
+    assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
+    /* Other #[parallel] tests may concurrently add slots, so count >= real_count */
+    assert!(
+        count >= 2,
+        "CKR_BUFFER_TOO_SMALL must report the real slot count (>=2), \
+         not leave *pulCount at whatever the caller originally passed in (1); got {}",
+        count
+    );
 
+    testtokn2.finalize();
     testtokn.finalize();
 }
 
