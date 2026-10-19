@@ -341,13 +341,14 @@ impl Derive for SimpleKDFOperation {
                 let base_byte = (bit_offset - bit_shift) / 8;
 
                 for i in 0..keylen {
-                    let first_half = base_key_info.value
-                        [(base_byte + i) % outlen]
-                        << bit_shift;
-                    let second_half = base_key_info.value
-                        [(base_byte + i + 1) % outlen]
-                        >> (8 - bit_shift);
-                    secret[i] = first_half | second_half;
+                    /* take each output byte from a 16 bit window over
+                     * two consecutive base bytes, so that no shift is
+                     * ever as wide as a byte, even when bit_shift is 0 */
+                    let window = u16::from_be_bytes([
+                        base_key_info.value[(base_byte + i) % outlen],
+                        base_key_info.value[(base_byte + i + 1) % outlen],
+                    ]);
+                    secret[i] = (window >> (8 - bit_shift)) as u8;
                 }
             }
             _ => return Err(CKR_MECHANISM_INVALID)?,

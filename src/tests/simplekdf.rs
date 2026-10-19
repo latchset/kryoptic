@@ -286,6 +286,58 @@ fn test_concatenate_kdf(session: CK_ULONG, token: bool) {
     let exp_value = vec![0b1001_0101u8, 0b0010_0110u8];
     let value = ret_or_panic!(extract_key_value(session, dk_handle));
     assert_eq!(value, exp_value);
+
+    // Extract key from key, at byte aligned and wrapping bit indexes
+    let testdata = [
+        ("01020408102040800102040810204080", 0, 4, "01020408"),
+        ("01020408102040800102040810204080", 8, 4, "02040810"),
+        ("01020408102040800102040810204080", 13, 4, "40810204"),
+        ("01020408102040800102040810204080", 120, 2, "8001"),
+        ("329f84a9", 24, 2, "a932"),
+        ("329f84a9", 28, 2, "9329"),
+    ];
+    for (base, bit, len, expected) in testdata {
+        let base_key = hex::decode(base).unwrap();
+        let base_key_handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[(CKA_VALUE, base_key.as_slice()),],
+            &[
+                (CKA_DERIVE, true),
+                (CKA_EXTRACTABLE, true),
+                (CKA_SENSITIVE, false)
+            ],
+        ));
+        let params: CK_EXTRACT_PARAMS = bit;
+        let derive_mech = CK_MECHANISM {
+            mechanism: CKM_EXTRACT_KEY_FROM_KEY,
+            pParameter: void_ptr!(&params),
+            ulParameterLen: sizeof!(CK_EXTRACT_PARAMS),
+        };
+        let derive_template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                (CKA_VALUE_LEN, len),
+            ],
+            &[],
+            &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        );
+        let mut dk_handle = CK_INVALID_HANDLE;
+        let ret = fn_derive_key(
+            session,
+            &derive_mech as *const _ as CK_MECHANISM_PTR,
+            base_key_handle,
+            derive_template.as_ptr() as *mut _,
+            derive_template.len() as CK_ULONG,
+            &mut dk_handle,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        let value = ret_or_panic!(extract_key_value(session, dk_handle));
+        assert_eq!(hex::encode(value), expected, "bit index {}", bit);
+    }
 }
 
 #[test]
