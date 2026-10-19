@@ -1042,7 +1042,7 @@ fn test_aes_operations() {
         assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
 
         let ret = fn_message_encrypt_final(session);
-        assert_eq!(ret, CKR_OK);
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
     }
 
     {

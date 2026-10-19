@@ -161,6 +161,7 @@ impl HMACOperation {
 
         let hash = hmac_mech_to_hash_mech(mech)?;
         op.inner = hash::internal_hash_restore_op(hash, save_state.dgst_state)?;
+        op.in_use = true;
         Ok(op)
     }
 

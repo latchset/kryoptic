@@ -470,12 +470,12 @@ fn find_objects(
     max_object_count: CK_ULONG,
     pul_object_count: CK_ULONG_PTR,
 ) -> Result<()> {
+    let rstate = STATE.rlock()?;
+    let mut session = rstate.get_session_mut(s_handle)?;
+    let mut operation = session.get_operation::<dyn SearchOperation>()?;
     if ph_object.is_null() || pul_object_count.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let operation = session.get_operation::<dyn SearchOperation>()?;
     let moc =
         usize::try_from(max_object_count).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let handles = operation.results(moc)?;
@@ -494,7 +494,7 @@ fn find_objects(
     unsafe {
         *pul_object_count = poc;
     }
-    Ok(())
+    operation.ok()
 }
 
 /// Implementation of C_FindObjects function

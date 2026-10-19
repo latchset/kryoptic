@@ -12,7 +12,7 @@ use crate::fns::encryption::{
 };
 use crate::fns::log_debug;
 use crate::fns::signing::{internal_sign_update, internal_verify_update};
-use crate::mechanism::{Digest, Sign, Verify};
+use crate::mechanism::{Decryption, Digest, Encryption, Sign, Verify};
 use crate::pkcs11::*;
 use crate::STATE;
 
@@ -28,26 +28,37 @@ fn digest_encrypt_update(
     encrypted_part: CK_BYTE_PTR,
     pul_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    if part.is_null() || pul_encrypted_part_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
 
-    session.check_op::<dyn Digest>()?;
-
-    internal_encrypt_update(
-        &mut session,
-        part,
-        part_len,
-        encrypted_part,
-        pul_encrypted_part_len,
-    )?;
+    let res = session
+        .check_op::<dyn Digest>()
+        .and_then(|_| session.check_op::<dyn Encryption>())
+        .and_then(|_| {
+            internal_encrypt_update(
+                &mut session,
+                part,
+                part_len,
+                encrypted_part,
+                pul_encrypted_part_len,
+            )
+        });
+    if let Err(e) = res {
+        if e.kind() != crate::error::ErrorKind::BufferTooSmall {
+            let _ = session.cancel_operation::<dyn Digest>();
+            let _ = session.cancel_operation::<dyn Encryption>();
+        }
+        return Err(e);
+    }
     if encrypted_part.is_null() {
         return Ok(());
     }
 
-    internal_digest_update(&mut session, part, part_len)
+    if let Err(e) = internal_digest_update(&mut session, part, part_len) {
+        let _ = session.cancel_operation::<dyn Encryption>();
+        return Err(e);
+    }
+    Ok(())
 }
 
 pub extern "C" fn fn_digest_encrypt_update(
@@ -91,27 +102,38 @@ fn decrypt_digest_update(
     part: CK_BYTE_PTR,
     pul_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    if encrypted_part.is_null() || pul_part_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
 
-    session.check_op::<dyn Digest>()?;
-
-    internal_decrypt_update(
-        &mut session,
-        encrypted_part,
-        encrypted_part_len,
-        part,
-        pul_part_len,
-    )?;
+    let res = session
+        .check_op::<dyn Digest>()
+        .and_then(|_| session.check_op::<dyn Decryption>())
+        .and_then(|_| {
+            internal_decrypt_update(
+                &mut session,
+                encrypted_part,
+                encrypted_part_len,
+                part,
+                pul_part_len,
+            )
+        });
+    if let Err(e) = res {
+        if e.kind() != crate::error::ErrorKind::BufferTooSmall {
+            let _ = session.cancel_operation::<dyn Digest>();
+            let _ = session.cancel_operation::<dyn Decryption>();
+        }
+        return Err(e);
+    }
     if part.is_null() {
         return Ok(());
     }
 
     let part_len: CK_ULONG = unsafe { *pul_part_len };
-    internal_digest_update(&mut session, part, part_len)
+    if let Err(e) = internal_digest_update(&mut session, part, part_len) {
+        let _ = session.cancel_operation::<dyn Decryption>();
+        return Err(e);
+    }
+    Ok(())
 }
 
 pub extern "C" fn fn_decrypt_digest_update(
@@ -155,26 +177,37 @@ fn sign_encrypt_update(
     encrypted_part: CK_BYTE_PTR,
     pul_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    if part.is_null() || pul_encrypted_part_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
 
-    session.check_op::<dyn Sign>()?;
-
-    internal_encrypt_update(
-        &mut session,
-        part,
-        part_len,
-        encrypted_part,
-        pul_encrypted_part_len,
-    )?;
+    let res = session
+        .check_op::<dyn Sign>()
+        .and_then(|_| session.check_op::<dyn Encryption>())
+        .and_then(|_| {
+            internal_encrypt_update(
+                &mut session,
+                part,
+                part_len,
+                encrypted_part,
+                pul_encrypted_part_len,
+            )
+        });
+    if let Err(e) = res {
+        if e.kind() != crate::error::ErrorKind::BufferTooSmall {
+            let _ = session.cancel_operation::<dyn Sign>();
+            let _ = session.cancel_operation::<dyn Encryption>();
+        }
+        return Err(e);
+    }
     if encrypted_part.is_null() {
         return Ok(());
     }
 
-    internal_sign_update(&mut session, part, part_len)
+    if let Err(e) = internal_sign_update(&mut session, part, part_len) {
+        let _ = session.cancel_operation::<dyn Encryption>();
+        return Err(e);
+    }
+    Ok(())
 }
 
 pub extern "C" fn fn_sign_encrypt_update(
@@ -218,27 +251,38 @@ fn decrypt_verify_update(
     part: CK_BYTE_PTR,
     pul_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    if encrypted_part.is_null() || pul_part_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
 
-    session.check_op::<dyn Verify>()?;
-
-    internal_decrypt_update(
-        &mut session,
-        encrypted_part,
-        encrypted_part_len,
-        part,
-        pul_part_len,
-    )?;
+    let res = session
+        .check_op::<dyn Verify>()
+        .and_then(|_| session.check_op::<dyn Decryption>())
+        .and_then(|_| {
+            internal_decrypt_update(
+                &mut session,
+                encrypted_part,
+                encrypted_part_len,
+                part,
+                pul_part_len,
+            )
+        });
+    if let Err(e) = res {
+        if e.kind() != crate::error::ErrorKind::BufferTooSmall {
+            let _ = session.cancel_operation::<dyn Verify>();
+            let _ = session.cancel_operation::<dyn Decryption>();
+        }
+        return Err(e);
+    }
     if part.is_null() {
         return Ok(());
     }
 
     let part_len: CK_ULONG = unsafe { *pul_part_len };
-    internal_verify_update(&mut session, part, part_len)
+    if let Err(e) = internal_verify_update(&mut session, part, part_len) {
+        let _ = session.cancel_operation::<dyn Decryption>();
+        return Err(e);
+    }
+    Ok(())
 }
 
 pub extern "C" fn fn_decrypt_verify_update(

@@ -653,6 +653,17 @@ fn test_ec_keys() {
         &mut siglen,
     );
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+    /* The failed C_Sign call terminated the active operation; re-initialize */
+    let ret = fn_sign_init(
+        session,
+        &CK_MECHANISM {
+            mechanism: CKM_ECDSA_SHA256,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        } as *const _ as CK_MECHANISM_PTR,
+        prikey,
+    );
+    assert_eq!(ret, CKR_OK);
 
     if testtokn.dbtype != "nssdb" {
         /* attempt context specific login (wrong pin) */
@@ -676,6 +687,17 @@ fn test_ec_keys() {
         &mut siglen,
     );
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
+    /* Re-initialize the operation before context-specific login */
+    let ret = fn_sign_init(
+        session,
+        &CK_MECHANISM {
+            mechanism: CKM_ECDSA_SHA256,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        } as *const _ as CK_MECHANISM_PTR,
+        prikey,
+    );
+    assert_eq!(ret, CKR_OK);
 
     /* attempt context specific login (right pin) */
     let pin = "12345678";
