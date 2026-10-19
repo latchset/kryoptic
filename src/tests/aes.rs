@@ -390,29 +390,29 @@ fn test_aes_operations() {
             CKR_DATA_LEN_RANGE
         );
 
-        /* CTS requires at least one block */
-        let data = "0123456789ABCDEF1111";
+        /* The output is as long as the input, and must fit in a buffer
+         * of that size, also past two blocks (the helpers query the
+         * size first and pass a buffer of exactly that size) */
+        for len in [16, 20, 31, 32, 33, 47, 48, 49, 100] {
+            let data = vec![0x5au8; len];
 
-        let enc = ret_or_panic!(encrypt(
-            session,
-            handle,
-            data.as_bytes(),
-            &mechanism,
-        ));
-        assert_eq!(enc.len(), data.len());
+            let enc =
+                ret_or_panic!(encrypt(session, handle, &data, &mechanism));
+            assert_eq!(enc.len(), data.len());
 
-        let dec = ret_or_panic!(decrypt(
-            session,
-            handle,
-            enc.as_slice(),
-            &CK_MECHANISM {
-                mechanism: CKM_AES_CTS,
-                pParameter: void_ptr!(iv.as_bytes()),
-                ulParameterLen: iv.len() as CK_ULONG,
-            }
-        ));
-        assert_eq!(dec.len(), data.len());
-        assert_eq!(data.as_bytes(), dec.as_slice());
+            let dec = ret_or_panic!(decrypt(
+                session,
+                handle,
+                enc.as_slice(),
+                &CK_MECHANISM {
+                    mechanism: CKM_AES_CTS,
+                    pParameter: void_ptr!(iv.as_bytes()),
+                    ulParameterLen: iv.len() as CK_ULONG,
+                }
+            ));
+            assert_eq!(dec.len(), data.len());
+            assert_eq!(data, dec);
+        }
     }
 
     {
