@@ -193,14 +193,18 @@ struct Attribute<'a> {
 /// Sequence of [Attribute] objects
 type Attributes<'a> = asn1::SetOf<'a, Attribute<'a>>;
 
-/// Defined in [RFC 5958](https://www.rfc-editor.org/rfc/rfc5958)
+/// Defined in [RFC 5958](https://www.rfc-editor.org/rfc/rfc5958) as
+/// OneAsymmetricKey, in a module with IMPLICIT TAGS
 #[derive(asn1::Asn1Read, asn1::Asn1Write)]
 pub struct PrivateKeyInfo<'a> {
     version: Version,
     algorithm: Box<pkcs::AlgorithmIdentifier<'a>>,
     private_key: DerEncOctetString<'a>,
-    #[explicit(1)]
+    #[implicit(0)]
     attributes: Option<Attributes<'a>>,
+    /// Only in version 1 (v2); accepted on parse but otherwise ignored
+    #[implicit(1)]
+    public_key: Option<asn1::BitString<'a>>,
 }
 
 #[allow(dead_code)]
@@ -215,6 +219,7 @@ impl PrivateKeyInfo<'_> {
             algorithm: Box::new(algorithm),
             private_key: DerEncOctetString::new(private_key_asn1)?,
             attributes: None,
+            public_key: None,
         })
     }
 
