@@ -1214,6 +1214,9 @@ impl Encryption for AesOperation {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+        if self.in_use {
+            return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
+        }
         let outl = self.encrypt_update(plain, cipher)?;
         if outl > cipher.len() {
             return Err(self.op_err(CKR_GENERAL_ERROR));
@@ -1632,6 +1635,9 @@ impl Decryption for AesOperation {
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
         if self.finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if self.in_use {
+            return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
         }
         let outl = self.decrypt_update(cipher, plain)?;
         if outl > plain.len() {

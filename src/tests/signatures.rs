@@ -830,3 +830,89 @@ fn test_sign_final_buffer_too_small_reports_required_len() {
 
     testtokn.finalize();
 }
+
+#[cfg(feature = "hmac")]
+#[test]
+#[parallel]
+fn test_verify_signature_len_range_terminates_operation() {
+    let mut testtokn = TestToken::initialized(
+        "test_verify_signature_len_range_terminates_operation",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let key = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 32)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+    ));
+
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_SHA256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let mut data = b"data".to_vec();
+    let mut short_sig = [0u8; 1];
+
+    // Single-part C_Verify with wrong signature length must return
+    // CKR_SIGNATURE_LEN_RANGE and terminate the active verify operation.
+    assert_eq!(fn_verify_init(session, &mut mechanism, key), CKR_OK);
+    assert_eq!(
+        fn_verify(
+            session,
+            data.as_mut_ptr(),
+            data.len() as CK_ULONG,
+            short_sig.as_mut_ptr(),
+            short_sig.len() as CK_ULONG,
+        ),
+        CKR_SIGNATURE_LEN_RANGE
+    );
+    assert_eq!(fn_verify_init(session, &mut mechanism, key), CKR_OK);
+
+    // Multi-part C_VerifyUpdate + C_VerifyFinal with wrong signature length
+    // must also return CKR_SIGNATURE_LEN_RANGE and terminate the operation.
+    assert_eq!(
+        fn_verify_update(session, data.as_mut_ptr(), data.len() as CK_ULONG,),
+        CKR_OK
+    );
+    assert_eq!(
+        fn_verify_final(
+            session,
+            short_sig.as_mut_ptr(),
+            short_sig.len() as CK_ULONG,
+        ),
+        CKR_SIGNATURE_LEN_RANGE
+    );
+    assert_eq!(fn_verify_init(session, &mut mechanism, key), CKR_OK);
+
+    // Null pointer error (CKR_ARGUMENTS_BAD) in C_VerifyUpdate must also
+    // terminate the active verify operation.
+    assert_eq!(
+        fn_verify_update(session, std::ptr::null_mut(), 4),
+        CKR_ARGUMENTS_BAD
+    );
+    assert_eq!(fn_verify_init(session, &mut mechanism, key), CKR_OK);
+
+    // Null pointer error (CKR_ARGUMENTS_BAD) in C_Verify must also
+    // terminate the active verify operation.
+    assert_eq!(
+        fn_verify(
+            session,
+            std::ptr::null_mut(),
+            data.len() as CK_ULONG,
+            short_sig.as_mut_ptr(),
+            short_sig.len() as CK_ULONG,
+        ),
+        CKR_ARGUMENTS_BAD
+    );
+    assert_eq!(fn_verify_init(session, &mut mechanism, key), CKR_OK);
+    assert_eq!(fn_verify_init(session, std::ptr::null_mut(), key), CKR_OK);
+
+    testtokn.finalize();
+}

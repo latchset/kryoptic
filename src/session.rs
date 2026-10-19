@@ -5,6 +5,7 @@
 //! session state (login status, active operations), and handles
 //! session-specific operations like object searching.
 
+use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use crate::encryption;
@@ -17,6 +18,71 @@ use crate::token::Token;
 
 #[cfg(feature = "fips")]
 use crate::fips;
+
+/// RAII wrapper around an active session operation that cancels the operation
+/// when dropped, unless marked as valid via `ok()`, `done()`, or a
+/// `CKR_BUFFER_TOO_SMALL` result in `report_reqsize()`.
+pub struct Operation<'a, O: ManageOperation + ?Sized> {
+    slot: &'a mut Option<Box<O>>,
+    active: bool,
+}
+
+impl<'a, O: ManageOperation + ?Sized> Operation<'a, O> {
+    pub fn new(slot: &'a mut Option<Box<O>>) -> Self {
+        Self {
+            slot,
+            active: false,
+        }
+    }
+
+    /// Marks the operation to stay active and returns `Ok(())`.
+    pub fn ok(&mut self) -> Result<()> {
+        self.active = true;
+        Ok(())
+    }
+
+    /// Finalizes the operation.
+    pub fn done(&mut self) {
+        self.active = false;
+    }
+
+    /// Reports the required output buffer size into `out_len` if `result` is
+    /// `CKR_BUFFER_TOO_SMALL`, and marks the operation to stay active.
+    pub fn report_reqsize<T>(
+        &mut self,
+        result: Result<T>,
+        out_len: CK_ULONG_PTR,
+    ) -> Result<T> {
+        let res = crate::report_reqsize(result, out_len);
+        if let Err(ref e) = res {
+            if e.kind() == crate::error::ErrorKind::BufferTooSmall {
+                self.active = true;
+            }
+        }
+        res
+    }
+}
+
+impl<'a, O: ManageOperation + ?Sized> Deref for Operation<'a, O> {
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        self.slot.as_deref().unwrap()
+    }
+}
+
+impl<'a, O: ManageOperation + ?Sized> DerefMut for Operation<'a, O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.slot.as_deref_mut().unwrap()
+    }
+}
+
+impl<'a, O: ManageOperation + ?Sized> Drop for Operation<'a, O> {
+    fn drop(&mut self) {
+        if !self.active {
+            *self.slot = None;
+        }
+    }
+}
 
 /// Represents an active object search operation within a session.
 #[derive(Debug)]
@@ -67,7 +133,7 @@ pub trait ManageOperation {
     fn cancel_operation(so: &mut SessionOperations) -> Result<()>;
     fn check_op(so: &SessionOperations) -> Result<()>;
     fn check_no_op(so: &SessionOperations) -> Result<()>;
-    fn get_op(so: &mut SessionOperations) -> Result<&mut Self>;
+    fn get_op(so: &mut SessionOperations) -> Result<Operation<'_, Self>>;
     fn set_op(so: &mut SessionOperations, op: Box<Self>);
 }
 
@@ -99,14 +165,14 @@ macro_rules! impl_mop {
                 Ok(())
             }
 
-            fn get_op(so: &mut SessionOperations) -> Result<&mut Self> {
+            fn get_op(
+                so: &mut SessionOperations,
+            ) -> Result<Operation<'_, Self>> {
                 match so.$($opname).+ {
-                    Some(ref mut o) => if o.finalized() {
-                        Err(CKR_OPERATION_NOT_INITIALIZED)?
-                    } else {
-                        Ok(&mut **o)
-                    },
-                    None => Err(CKR_OPERATION_NOT_INITIALIZED)?,
+                    Some(ref o) if !o.finalized() => {
+                        Ok(Operation::new(&mut so.$($opname).+))
+                    }
+                    _ => Err(CKR_OPERATION_NOT_INITIALIZED)?,
                 }
             }
 
@@ -536,14 +602,16 @@ impl Session {
         }
     }
 
-    /// Gets a mutable reference to the currently active operation of type `O`.
+    /// Gets a wrapper around the currently active operation of type `O`.
     ///
     /// Checks login status before returning the operation.
     pub fn get_operation<O: ManageOperation + ?Sized>(
         &mut self,
-    ) -> Result<&mut O> {
-        self.check_login_status()?;
-        O::get_op(&mut self.operations)
+    ) -> Result<Operation<'_, O>> {
+        let res = self.check_login_status();
+        let op = O::get_op(&mut self.operations)?;
+        res?;
+        Ok(op)
     }
 
     /// Sets the active operation of type `O`.

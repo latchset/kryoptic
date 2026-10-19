@@ -74,12 +74,12 @@ fn digest(
     pdigest: CK_BYTE_PTR,
     pul_digest_len: CK_ULONG_PTR,
 ) -> Result<()> {
+    let rstate = STATE.rlock()?;
+    let mut session = rstate.get_session_mut(s_handle)?;
+    let mut operation = session.get_operation::<dyn Digest>()?;
     if pdata.is_null() || pul_digest_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let operation = session.get_operation::<dyn Digest>()?;
     let digest_len = operation.digest_len()?;
     let dgst_len =
         CK_ULONG::try_from(digest_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -88,11 +88,12 @@ fn digest(
         unsafe {
             *pul_digest_len = dgst_len;
         }
-        return Ok(());
+        return operation.ok();
     }
     unsafe {
         if *pul_digest_len < dgst_len {
             *pul_digest_len = dgst_len;
+            operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
@@ -105,11 +106,15 @@ fn digest(
         *pul_digest_len = dgst_len;
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
@@ -146,10 +151,14 @@ pub(crate) fn internal_digest_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let operation = session.get_operation::<dyn Digest>()?;
+    let mut operation = session.get_operation::<dyn Digest>()?;
+    if part.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
-    operation.digest_update(data)
+    operation.digest_update(data)?;
+    operation.ok()
 }
 
 #[inline(always)]
@@ -158,9 +167,6 @@ fn digest_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    if part.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     internal_digest_update(&mut session, part, part_len)
@@ -197,7 +203,7 @@ fn digest_key(
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn Digest>()?;
+    let mut operation = session.get_operation::<dyn Digest>()?;
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     let key = token.get_object_by_handle(key_handle)?;
     if key.get_attr_as_ulong(CKA_CLASS)? != CKO_SECRET_KEY {
@@ -209,7 +215,7 @@ fn digest_key(
     };
     let data = key.get_attr_as_bytes(CKA_VALUE)?;
     operation.digest_update(data)?;
-    Ok(())
+    operation.ok()
 }
 
 /// Implementation of C_DigestKey function
@@ -239,12 +245,12 @@ fn digest_final(
     pdigest: CK_BYTE_PTR,
     pul_digest_len: CK_ULONG_PTR,
 ) -> Result<()> {
+    let rstate = STATE.rlock()?;
+    let mut session = rstate.get_session_mut(s_handle)?;
+    let mut operation = session.get_operation::<dyn Digest>()?;
     if pul_digest_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let operation = session.get_operation::<dyn Digest>()?;
     let digest_len = operation.digest_len()?;
     let dgst_len =
         CK_ULONG::try_from(digest_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -253,11 +259,12 @@ fn digest_final(
         unsafe {
             *pul_digest_len = dgst_len;
         }
-        return Ok(());
+        return operation.ok();
     }
     unsafe {
         if *pul_digest_len < dgst_len {
             *pul_digest_len = dgst_len;
+            operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
@@ -268,11 +275,15 @@ fn digest_final(
         *pul_digest_len = dgst_len;
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 

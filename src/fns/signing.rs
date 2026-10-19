@@ -87,13 +87,13 @@ fn sign(
     psignature: CK_BYTE_PTR,
     pul_signature_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    if pdata.is_null() || pul_signature_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn Sign>()?;
+    let mut operation = session.get_operation::<dyn Sign>()?;
+    if pdata.is_null() || pul_signature_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let signature_len = operation.signature_len()?;
     let sig_len =
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -101,11 +101,12 @@ fn sign(
         unsafe {
             *pul_signature_len = sig_len;
         }
-        return Ok(());
+        return operation.ok();
     }
     unsafe {
         if *pul_signature_len < sig_len {
             *pul_signature_len = sig_len;
+            operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
@@ -126,11 +127,15 @@ fn sign(
         *pul_signature_len = sig_len;
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
@@ -169,10 +174,14 @@ pub(crate) fn internal_sign_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let operation = session.get_operation::<dyn Sign>()?;
+    let mut operation = session.get_operation::<dyn Sign>()?;
+    if part.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
-    operation.sign_update(data)
+    operation.sign_update(data)?;
+    operation.ok()
 }
 
 #[inline(always)]
@@ -181,9 +190,6 @@ fn sign_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    if part.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     internal_sign_update(&mut session, part, part_len)
@@ -218,13 +224,13 @@ fn sign_final(
     psignature: CK_BYTE_PTR,
     pul_signature_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    if pul_signature_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn Sign>()?;
+    let mut operation = session.get_operation::<dyn Sign>()?;
+    if pul_signature_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let signature_len = operation.signature_len()?;
     let sig_len =
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -232,11 +238,12 @@ fn sign_final(
         unsafe {
             *pul_signature_len = sig_len;
         }
-        return Ok(());
+        return operation.ok();
     }
     unsafe {
         if *pul_signature_len < sig_len {
             *pul_signature_len = sig_len;
+            operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
@@ -254,11 +261,15 @@ fn sign_final(
         *pul_signature_len = sig_len;
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
@@ -382,13 +393,13 @@ fn verify(
     psignature: CK_BYTE_PTR,
     psignature_len: CK_ULONG,
 ) -> Result<()> {
-    if pdata.is_null() || psignature.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn Verify>()?;
+    let mut operation = session.get_operation::<dyn Verify>()?;
+    if pdata.is_null() || psignature.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let signature_len = operation.signature_len()?;
     let sig_len =
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -407,11 +418,15 @@ fn verify(
         }
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
@@ -450,10 +465,14 @@ pub(crate) fn internal_verify_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let operation = session.get_operation::<dyn Verify>()?;
+    let mut operation = session.get_operation::<dyn Verify>()?;
+    if part.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
-    operation.verify_update(data)
+    operation.verify_update(data)?;
+    operation.ok()
 }
 
 #[inline(always)]
@@ -462,9 +481,6 @@ fn verify_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    if part.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     internal_verify_update(&mut session, part, part_len)
@@ -499,13 +515,13 @@ fn verify_final(
     psignature: CK_BYTE_PTR,
     psignature_len: CK_ULONG,
 ) -> Result<()> {
-    if psignature.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn Verify>()?;
+    let mut operation = session.get_operation::<dyn Verify>()?;
+    if psignature.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let signature_len = operation.signature_len()?;
     let sig_len =
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -522,11 +538,15 @@ fn verify_final(
         }
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
@@ -789,13 +809,13 @@ fn verify_signature(
     pdata: *mut CK_BYTE,
     data_len: CK_ULONG,
 ) -> Result<()> {
-    if pdata.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn VerifySignature>()?;
+    let mut operation = session.get_operation::<dyn VerifySignature>()?;
+    if pdata.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(pdata, dlen);
     operation.verify(data)?;
@@ -807,11 +827,15 @@ fn verify_signature(
         }
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
@@ -844,15 +868,16 @@ fn verify_signature_update(
     part: *mut CK_BYTE,
     part_len: CK_ULONG,
 ) -> Result<()> {
+    let rstate = STATE.rlock()?;
+    let mut session = rstate.get_session_mut(s_handle)?;
+    let mut operation = session.get_operation::<dyn VerifySignature>()?;
     if part.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let operation = session.get_operation::<dyn VerifySignature>()?;
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
-    operation.verify_update(data)
+    operation.verify_update(data)?;
+    operation.ok()
 }
 
 /// Implementation of C_VerifySignatureUpdate
@@ -883,7 +908,7 @@ fn verify_signature_final(s_handle: CK_SESSION_HANDLE) -> Result<()> {
     let rstate = STATE.rlock()?;
     let mut session = rstate.get_session_mut(s_handle)?;
     let slot_id = session.get_slot_id();
-    let operation = session.get_operation::<dyn VerifySignature>()?;
+    let mut operation = session.get_operation::<dyn VerifySignature>()?;
     operation.verify_final()?;
 
     if let Some((handle, attrs)) = operation.updates_object() {
@@ -893,11 +918,15 @@ fn verify_signature_final(s_handle: CK_SESSION_HANDLE) -> Result<()> {
         }
     }
 
+    operation.done();
+
     #[cfg(feature = "fips")]
     {
         let approved = operation.fips_approved();
+        drop(operation);
         finalize_fips_approval(session, approved);
     }
+
     Ok(())
 }
 
