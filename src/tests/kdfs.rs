@@ -426,6 +426,92 @@ fn test_aes_enc_kdf() {
     assert_eq!(ret, CKR_OK);
 }
 
+#[cfg(feature = "aes")]
+#[test]
+#[parallel]
+fn test_aes_enc_kdf_vectors() {
+    let mut testtokn = TestToken::initialized("test_aes_enc_kdf_vectors", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let key: Vec<u8> = (0x00..0x10).collect();
+    let aeskey = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, key.as_slice())],
+        &[(CKA_DERIVE, true)],
+    ));
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+
+    let mut data: Vec<u8> = (0x40..0x60).collect();
+
+    /* The derived value is the ECB encryption of the data */
+    let mut ecb_params = CK_KEY_DERIVATION_STRING_DATA {
+        pData: data.as_mut_ptr(),
+        ulLen: data.len() as CK_ULONG,
+    };
+    let mut ecb_mech = CK_MECHANISM {
+        mechanism: CKM_AES_ECB_ENCRYPT_DATA,
+        pParameter: &mut ecb_params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
+    };
+    let mut ecb_key = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut ecb_mech,
+        aeskey,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut ecb_key,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(
+        hex::encode(ret_or_panic!(extract_key_value(session, ecb_key))),
+        "d533e59b45a153ed7e5e9c5dfcfd4aaa3ef0b1a5e3059dab21fce23a7b61c4ca"
+    );
+
+    /* The derived value is the CBC encryption of the data under
+     * the IV from the parameters */
+    let mut cbc_params = CK_AES_CBC_ENCRYPT_DATA_PARAMS {
+        iv: [0xa5u8; 16],
+        pData: data.as_mut_ptr(),
+        length: data.len() as CK_ULONG,
+    };
+    let mut cbc_mech = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_ENCRYPT_DATA,
+        pParameter: &mut cbc_params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_AES_CBC_ENCRYPT_DATA_PARAMS),
+    };
+    let mut cbc_key = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut cbc_mech,
+        aeskey,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut cbc_key,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(
+        hex::encode(ret_or_panic!(extract_key_value(session, cbc_key))),
+        "09c25f3f3d6cad3b2d17c685549fde628529cf04762a5974df55d50d75698c6d"
+    );
+
+    testtokn.finalize();
+}
+
 #[cfg(feature = "hash")]
 #[test]
 #[parallel]

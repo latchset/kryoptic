@@ -537,7 +537,7 @@ impl Mechanism for AesMechanism {
 struct AesKDFOperation<'a> {
     mech: CK_MECHANISM_TYPE,
     finalized: bool,
-    iv: &'a [u8],
+    iv: Vec<u8>,
     data: &'a [u8],
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
@@ -567,7 +567,7 @@ impl AesKDFOperation<'_> {
         Ok(AesKDFOperation {
             mech: CKM_AES_ECB,
             finalized: false,
-            iv: &[],
+            iv: Vec::new(),
             data: bytes_to_slice(params.pData, usize::try_from(params.ulLen)?),
             #[cfg(feature = "fips")]
             fips_approved: None,
@@ -587,7 +587,8 @@ impl AesKDFOperation<'_> {
         Ok(AesKDFOperation {
             mech: CKM_AES_CBC,
             finalized: false,
-            iv: bytes_to_slice(params.iv.as_ptr(), 16),
+            /* params is a local copy, so the IV must be copied too */
+            iv: params.iv.to_vec(),
             data: bytes_to_slice(params.pData, usize::try_from(params.length)?),
             #[cfg(feature = "fips")]
             fips_approved: None,
