@@ -1123,7 +1123,11 @@ fn test_sign_verify_final_empty_message() {
         );
     }
 
-    #[cfg(feature = "slhdsa")]
+    /* SLH-DSA is disabled in FIPS builds without ossl400 */
+    #[cfg(all(
+        feature = "slhdsa",
+        any(not(feature = "fips"), feature = "ossl400")
+    ))]
     {
         let (hpub, hpri) = ret_or_panic!(generate_key_pair(
             session,
