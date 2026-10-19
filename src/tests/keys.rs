@@ -983,6 +983,119 @@ fn test_rsa_key_unwrap_vector() {
     assert_eq!(ret, CKR_OK);
 }
 
+#[cfg(any(feature = "rsa", feature = "eddsa"))]
+#[test]
+#[parallel]
+fn test_key_unwrap_rfc5958_fields() {
+    let mut testtokn =
+        TestToken::initialized("test_key_unwrap_rfc5958_fields", None);
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let aes_key_val = [0x70u8; 32];
+    let wk_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &aes_key_val)],
+        &[
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true)
+        ],
+    ));
+    let iv = [0u8; 16];
+    let mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+
+    let unwrap = |pkcs8: &[u8], key_type: CK_KEY_TYPE| -> CK_OBJECT_HANDLE {
+        let mut wrapped =
+            ret_or_panic!(encrypt(session, wk_handle, pkcs8, &mechanism));
+        let mut pri_template = make_attr_template(
+            &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, key_type)],
+            &[],
+            &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+        );
+        let mut prikey = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mechanism as *const _ as CK_MECHANISM_PTR,
+            wk_handle,
+            wrapped.as_mut_ptr(),
+            wrapped.len() as CK_ULONG,
+            pri_template.as_mut_ptr(),
+            pri_template.len() as CK_ULONG,
+            &mut prikey,
+        );
+        assert_eq!(ret, CKR_OK);
+        prikey
+    };
+
+    /* RFC 8032, 7.1 TEST 2, with the optional fields of RFC 5958 */
+    #[cfg(feature = "eddsa")]
+    {
+        let testdata = [
+            /* version 1 with [1] IMPLICIT publicKey */
+            "3051020101300506032b657004220420\
+             4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb\
+             812100\
+             3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+            /* version 0 with empty [0] IMPLICIT attributes */
+            "3030020100300506032b657004220420\
+             4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb\
+             a000",
+            /* version 1 with attributes and publicKey, laid out as in
+             * RFC 8410, 10.3 */
+            "3072020101300506032b657004220420\
+             4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb\
+             a01f301d060a2a864886f70d01090914310f0c0d437572646c6520436861697273\
+             812100\
+             3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+        ];
+        for t in testdata {
+            let pkcs8 =
+                hex::decode(t).expect("Failed to decode PrivateKeyInfo");
+            let prikey = unwrap(&pkcs8, CKK_EC_EDWARDS);
+            let sig = ret_or_panic!(sig_gen(
+                session,
+                prikey,
+                &[0x72u8],
+                &CK_MECHANISM {
+                    mechanism: CKM_EDDSA,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                },
+            ));
+            assert_eq!(
+                hex::encode(sig),
+                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da\
+                 085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+            );
+        }
+    }
+
+    /* The softokn RSA key with empty [0] IMPLICIT attributes appended */
+    #[cfg(feature = "rsa")]
+    {
+        let data =
+            ret_or_panic!(fs::read("testdata/rsa_wrapped_key_softokn.data"));
+        let mut pkcs8 =
+            ret_or_panic!(decrypt(session, wk_handle, &data, &mechanism));
+        assert_eq!(pkcs8[..4], [0x30, 0x82, 0x04, 0xbd]);
+        pkcs8[3] += 2;
+        pkcs8.extend_from_slice(&[0xa0, 0x00]);
+        unwrap(&pkcs8, CKK_RSA);
+    }
+
+    testtokn.finalize();
+}
+
 #[test]
 #[parallel]
 fn test_sensitive_attributes_matrix() {
