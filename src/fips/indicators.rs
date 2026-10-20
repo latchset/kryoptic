@@ -706,7 +706,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         },
         FipsMechanism {
             mechanism: CKM_AES_GCM,
-            operations: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+            operations: CKF_ENCRYPT | CKF_DECRYPT | CKF_UNWRAP,
             restrictions: [restrict!(CKK_AES), restrict!()],
             genflags: 0,
         },

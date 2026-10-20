@@ -607,7 +607,7 @@ impl AesOperation {
     fn cipher_new(
         mech: &CK_MECHANISM,
         key: &Object,
-        enc: bool,
+        op_flag: CK_FLAGS,
     ) -> Result<AesOperation> {
         #[cfg(feature = "fips")]
         let mut fips_approval = FipsApproval::init();
@@ -618,6 +618,10 @@ impl AesOperation {
         #[cfg(feature = "fips")]
         fips_approval.clear();
 
+        let enc = match op_flag {
+            CKF_ENCRYPT | CKF_WRAP | CKF_MESSAGE_ENCRYPT => true,
+            _ => false,
+        };
         let ctx =
             Self::cipher_initialize(mech.mechanism, &mut params, &aeskey, enc)?;
 
@@ -627,7 +631,7 @@ impl AesOperation {
         #[allow(unused_mut)]
         let mut op = AesOperation {
             mech: mech.mechanism,
-            op: if enc { CKF_ENCRYPT } else { CKF_DECRYPT },
+            op: op_flag,
             key: aeskey,
             params: params,
             finalized: false,
@@ -652,7 +656,7 @@ impl AesOperation {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<AesOperation> {
-        Self::cipher_new(mech, key, true)
+        Self::cipher_new(mech, key, CKF_ENCRYPT)
     }
 
     /// Instantiates a new Decryption AES Operation
@@ -660,7 +664,7 @@ impl AesOperation {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<AesOperation> {
-        Self::cipher_new(mech, key, false)
+        Self::cipher_new(mech, key, CKF_DECRYPT)
     }
 
     /// Instantiates a new AES Key-Wrap Operation
@@ -670,7 +674,7 @@ impl AesOperation {
         mut keydata: Vec<u8>,
         output: &mut [u8],
     ) -> Result<usize> {
-        let mut op = match Self::encrypt_new(mech, wrapping_key) {
+        let mut op = match Self::cipher_new(mech, wrapping_key, CKF_WRAP) {
             Ok(o) => o,
             Err(e) => {
                 zeromem(keydata.as_mut_slice());
@@ -718,7 +722,7 @@ impl AesOperation {
         wrapping_key: &Object,
         data: &[u8],
     ) -> Result<Vec<u8>> {
-        let mut op = Self::decrypt_new(mech, wrapping_key)?;
+        let mut op = Self::cipher_new(mech, wrapping_key, CKF_UNWRAP)?;
         let mut result = vec![0u8; data.len()];
         let outlen = op.decrypt(data, result.as_mut_slice())?;
         result.resize(outlen, 0);
@@ -1129,51 +1133,64 @@ impl AesOperation {
         /* For AEAD we handle indicators directly because OpenSSL has an
          * inflexible API that provides incorrect answers when we
          * generate the IV outside of that code */
+        if self.mech == CKM_AES_GCM {
+            /* The IV size must be 12 in FIPS mode for GCM */
+            if self.params.iv.buf.len() != 12 {
+                self.fips_approval.set(false);
+                return Ok(());
+            }
 
-        /* The IV size must be 12 in FIPS mode */
-        if self.params.iv.buf.len() != 12 {
-            self.fips_approval.set(false);
-            return Ok(());
-        }
-
-        /* The IV must be generated in FIPS mode */
-        match self.params.iv.generator {
-            CKG_NO_GENERATE => match self.op {
-                CKF_ENCRYPT | CKF_WRAP | CKF_MESSAGE_ENCRYPT => {
-                    self.fips_approval.set(false);
-                }
+            /* For decryption, the IV always comes from the outside, so
+             * restrictions on the IV generator only apply to encryption. */
+            match self.op {
                 CKF_DECRYPT | CKF_UNWRAP | CKF_MESSAGE_DECRYPT => {
                     self.fips_approval.set(true);
                 }
+                CKF_ENCRYPT | CKF_WRAP | CKF_MESSAGE_ENCRYPT => {
+                    match self.params.iv.generator {
+                        CKG_NO_GENERATE => {
+                            self.fips_approval.set(false);
+                        }
+                        CKG_GENERATE_RANDOM => {
+                            let random_bits = self.params.iv.buf.len() * 8
+                                - self.params.iv.fixedbits;
+                            if random_bits < 96 {
+                                self.fips_approval.set(false);
+                            } else {
+                                self.fips_approval.set(true);
+                            }
+                        }
+                        CKG_GENERATE | CKG_GENERATE_COUNTER => {
+                            if self.params.iv.fixedbits < 32 {
+                                self.fips_approval.set(false);
+                            } else {
+                                self.fips_approval.set(true);
+                            }
+                        }
+                        CKG_GENERATE_COUNTER_XOR => {
+                            let counter_bits = self.params.iv.buf.len() * 8
+                                - self.params.iv.fixedbits;
+                            if counter_bits != 64 {
+                                self.fips_approval.set(false);
+                            } else {
+                                self.fips_approval.set(true);
+                            }
+                        }
+                        _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
+                    }
+                }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
-            },
-            CKG_GENERATE_RANDOM => {
-                let random_bits =
-                    self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
-                if random_bits < 96 {
-                    self.fips_approval.set(false);
-                } else {
+            }
+        } else if self.mech == CKM_AES_CCM {
+            /* CCM nonce does not have GCM IV generation requirements */
+            match self.op {
+                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP
+                | CKF_MESSAGE_ENCRYPT | CKF_MESSAGE_DECRYPT => {
                     self.fips_approval.set(true);
                 }
+                _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
-            CKG_GENERATE | CKG_GENERATE_COUNTER => {
-                if self.params.iv.fixedbits < 32 {
-                    self.fips_approval.set(false);
-                } else {
-                    self.fips_approval.set(true);
-                }
-            }
-            CKG_GENERATE_COUNTER_XOR => {
-                let counter_bits =
-                    self.params.iv.buf.len() * 8 - self.params.iv.fixedbits;
-                if counter_bits < 64 {
-                    self.fips_approval.set(false);
-                } else {
-                    self.fips_approval.set(true)
-                }
-            }
-            _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
-        };
+        }
 
         /*
          * NIST SP 800-38D: 5.2.1.2 Output Data
