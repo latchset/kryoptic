@@ -564,7 +564,15 @@ impl SlhDsaOperation {
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
 
-                return self.verify_hash(data, signature);
+                #[cfg(feature = "fips")]
+                self.fips_approval.clear();
+
+                self.verify_hash(data, signature)?;
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.finalize();
+
+                return Ok(());
             }
             _ => self.verify_int_update(data)?,
         }
@@ -609,7 +617,7 @@ impl SlhDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        self.fips_approval.finalize();
+        self.fips_approval.update();
 
         Ok(())
     }
@@ -648,7 +656,7 @@ impl SlhDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        self.fips_approval.update();
+        self.fips_approval.finalize();
 
         Ok(())
     }
@@ -671,10 +679,16 @@ impl Sign for SlhDsaOperation {
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
 
+                #[cfg(feature = "fips")]
+                self.fips_approval.clear();
+
                 let siglen = self.sign_hash(data, signature)?;
                 if siglen != signature.len() {
                     return Err(CKR_DEVICE_ERROR)?;
                 }
+
+                #[cfg(feature = "fips")]
+                self.fips_approval.finalize();
 
                 return Ok(());
             }
@@ -758,7 +772,7 @@ impl Sign for SlhDsaOperation {
         }
 
         #[cfg(feature = "fips")]
-        self.fips_approval.update();
+        self.fips_approval.finalize();
 
         Ok(())
     }

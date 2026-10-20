@@ -33,6 +33,7 @@ fn test_slhdsa_generate() {
         &[],
         &[(CKA_SIGN, true), (CKA_TOKEN, true)],
     ));
+    assert_eq!(check_validation(session, 1), true);
 
     let mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_SLH_DSA,
@@ -46,6 +47,7 @@ fn test_slhdsa_generate() {
     .expect("failed to decode test input");
     let signature =
         ret_or_panic!(sig_gen(session, privkey, msg.as_slice(), &mechanism));
+    assert_eq!(check_validation(session, 1), true);
 
     let ret = sig_verify(
         session,
@@ -55,6 +57,7 @@ fn test_slhdsa_generate() {
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 }
 
 #[test]
@@ -937,6 +940,7 @@ fn test_slhdsa_operations() {
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     let out = ret_or_panic!(sig_gen(
         session,
@@ -945,6 +949,7 @@ fn test_slhdsa_operations() {
         &mechanism
     ));
     assert_eq!(out, signature);
+    assert_eq!(check_validation(session, 1), true);
 
     /* re-test but using the C_VerifySignature API */
     let ret = sig_verifysig(
@@ -955,6 +960,7 @@ fn test_slhdsa_operations() {
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     /* Test from:
      * https://github.com/usnistgov/ACVP-Server/blob/master/gen-val/json-files/SLH-DSA-sigGen-FIPS205/internalProjection.json
@@ -3935,9 +3941,11 @@ fn test_slhdsa_operations() {
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     let out = ret_or_panic!(sig_gen(session, priv_handle, &digest, &mechanism));
     assert_eq!(out, signature);
+    assert_eq!(check_validation(session, 1), true);
 
     /* re-test but using the C_VerifySignature API */
     let ret = sig_verifysig(
@@ -3948,6 +3956,7 @@ fn test_slhdsa_operations() {
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     /* Test message digesting variant of HashSLH-DSA */
 
@@ -3989,8 +3998,9 @@ fn test_slhdsa_operations() {
         cursor += size;
     }
 
-    let ret = fn_verify_signature_final(session);
+    let mut ret = fn_verify_signature_final(session);
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     /* test signature code too */
     let out = ret_or_panic!(sig_gen(
@@ -4000,6 +4010,49 @@ fn test_slhdsa_operations() {
         &mechanism
     ));
     assert_eq!(out, signature);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* test multi-part sign and verify for CKM_HASH_SLH_DSA_SHA3_384 */
+    let mut sign_mech = mechanism;
+    ret = fn_sign_init(session, &mut sign_mech, priv_handle);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_sign_update(
+        session,
+        byte_ptr!(msg[..100].as_ptr()),
+        100 as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    ret = fn_sign_update(
+        session,
+        byte_ptr!(msg[100..].as_ptr()),
+        (msg.len() - 100) as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    let mut mp_sig = vec![0u8; signature.len()];
+    let mut mp_sig_len = mp_sig.len() as CK_ULONG;
+    ret = fn_sign_final(session, mp_sig.as_mut_ptr(), &mut mp_sig_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(mp_sig, signature);
+
+    let mut ver_mech = mechanism;
+    ret = fn_verify_init(session, &mut ver_mech, pub_handle);
+    assert_eq!(ret, CKR_OK);
+    ret = fn_verify_update(
+        session,
+        byte_ptr!(msg[..100].as_ptr()),
+        100 as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    ret = fn_verify_update(
+        session,
+        byte_ptr!(msg[100..].as_ptr()),
+        (msg.len() - 100) as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_OK);
+    ret = fn_verify_final(session, mp_sig.as_mut_ptr(), mp_sig_len);
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 }
 
 #[cfg(feature = "slow")]
@@ -4137,10 +4190,12 @@ fn run_test(
             &mechanism,
         );
         assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
 
         let out =
             ret_or_panic!(sig_gen(session, priv_handle, &digest, &mechanism));
         assert_eq!(out, signature);
+        assert_eq!(check_validation(session, 1), true);
 
         /* re-test but using the C_VerifySignature API */
         let ret = sig_verifysig(
@@ -4151,6 +4206,7 @@ fn run_test(
             &mechanism,
         );
         assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
 
         /* Test message digesting variant of HashSLH-DSA */
 
@@ -4194,6 +4250,7 @@ fn run_test(
 
         let ret = fn_verify_signature_final(session);
         assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
 
         /* test signature code too */
         let out = ret_or_panic!(sig_gen(
@@ -4203,6 +4260,7 @@ fn run_test(
             &mechanism
         ));
         assert_eq!(out, signature);
+        assert_eq!(check_validation(session, 1), true);
 
         return;
     }
@@ -4230,6 +4288,7 @@ fn run_test(
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 
     /* Verify we generate the same signature */
     let out = ret_or_panic!(sig_gen(
@@ -4239,6 +4298,7 @@ fn run_test(
         &mechanism
     ));
     assert_eq!(out, signature);
+    assert_eq!(check_validation(session, 1), true);
 
     /* re-test but using the C_VerifySignature API */
     let ret = sig_verifysig(
@@ -4249,6 +4309,7 @@ fn run_test(
         &mechanism,
     );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
 }
 
 #[cfg(feature = "slow")]
