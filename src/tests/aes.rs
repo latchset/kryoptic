@@ -3377,6 +3377,58 @@ fn test_aes_gcm_fips_indicators() {
     assert_eq!(check_validation(session, 1), true);
     assert_eq!(fn_message_encrypt_final(session), CKR_OK);
 
+    // CKG_GENERATE_COUNTER_XOR counter bit length must be exactly 64 bits.
+    // Fixed bits < 32 (counter bits > 64) -> non-approved
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut param_xor_80 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_xor.as_mut_ptr(),
+        ulIvLen: iv_xor.len() as CK_ULONG,
+        ulIvFixedBits: 16, // 16 fixed bits -> 80 counter bits != 64
+        ivGenerator: CKG_GENERATE_COUNTER_XOR,
+        pTag: tag_xor.as_mut_ptr(),
+        ulTagBits: (tag_xor.len() * 8) as CK_ULONG,
+    };
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_xor_80),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut param_xor_96 = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_xor.as_mut_ptr(),
+        ulIvLen: iv_xor.len() as CK_ULONG,
+        ulIvFixedBits: 0, // 0 fixed bits -> 96 counter bits != 64
+        ivGenerator: CKG_GENERATE_COUNTER_XOR,
+        pTag: tag_xor.as_mut_ptr(),
+        ulTagBits: (tag_xor.len() * 8) as CK_ULONG,
+    };
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_xor_96),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        std::ptr::null_mut(),
+        0,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
     // 3. C_DecryptMessage with non-compliant 24-bit tag (3 bytes) -> non-approved (Issue #5)
     let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
     assert_eq!(ret, CKR_OK);
@@ -3434,6 +3486,614 @@ fn test_aes_gcm_fips_indicators() {
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 0), true);
+
+    // 5. C_Decrypt with CKM_AES_GCM and external IV -> approved
+    // Restrictions on the IV generator only apply to encryption, since decryption relies on external IVs.
+    let ret = fn_decrypt_init(session, &mut gcm_mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_ext = vec![0u8; enc_ext_len as usize];
+    let mut dec_ext_len = dec_ext.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc_ext.as_ptr() as *mut CK_BYTE,
+        enc_ext_len,
+        dec_ext.as_mut_ptr(),
+        &mut dec_ext_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_ext[..dec_ext_len as usize], plaintext);
+    assert_eq!(check_validation(session, 1), true);
+
+    // 6. C_DecryptMessage with CKM_AES_GCM and external IV (CKG_NO_GENERATE) -> approved
+    let ret = fn_message_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut iv_msg_dec = [0x42u8; 12];
+    let tag_offset = enc_ext_len as usize - 16;
+    let mut tag_msg_dec = [0u8; 16];
+    tag_msg_dec.copy_from_slice(&enc_ext[tag_offset..]);
+    let mut param_msg_dec = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv_msg_dec.as_mut_ptr(),
+        ulIvLen: iv_msg_dec.len() as CK_ULONG,
+        ulIvFixedBits: 0,
+        ivGenerator: CKG_NO_GENERATE,
+        pTag: tag_msg_dec.as_mut_ptr(),
+        ulTagBits: 128,
+    };
+    let mut dec_msg = vec![0u8; plaintext.len()];
+    let mut dec_msg_len = dec_msg.len() as CK_ULONG;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut param_msg_dec),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc_ext[..tag_offset].as_ptr() as *mut CK_BYTE,
+        tag_offset as CK_ULONG,
+        dec_msg.as_mut_ptr(),
+        &mut dec_msg_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_msg[..dec_msg_len as usize], plaintext);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+    // 7. CKM_AES_GCM with IV size != 12 (e.g. 16 bytes) -> non-approved for both encrypt and decrypt
+    let iv_16 = [0x42u8; 16];
+    let param_iv16 = CK_GCM_PARAMS {
+        pIv: iv_16.as_ptr() as *mut CK_BYTE,
+        ulIvLen: iv_16.len() as CK_ULONG,
+        ulIvBits: (iv_16.len() * 8) as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulTagBits: 128,
+    };
+    let mut gcm_iv16_mech = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: void_ptr!(&param_iv16),
+        ulParameterLen: sizeof!(CK_GCM_PARAMS),
+    };
+    let ret = fn_encrypt_init(session, &mut gcm_iv16_mech, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut enc_iv16 = vec![0u8; plaintext.len() + 16];
+    let mut enc_iv16_len = enc_iv16.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc_iv16.as_mut_ptr(),
+        &mut enc_iv16_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
+    let ret = fn_decrypt_init(session, &mut gcm_iv16_mech, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_iv16 = vec![0u8; enc_iv16_len as usize];
+    let mut dec_iv16_len = dec_iv16.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc_iv16.as_ptr() as *mut CK_BYTE,
+        enc_iv16_len,
+        dec_iv16.as_mut_ptr(),
+        &mut dec_iv16_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_iv16[..dec_iv16_len as usize], plaintext);
+    assert_eq!(check_validation(session, 0), true);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_aes_ccm_fips_indicators() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_ccm_fips_indicators", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    let plaintext = b"Hello world!";
+    let aad = b"AUTH ME CCM";
+
+    // 1. CCM encryption and decryption with external nonce (12 bytes) and compliant tag (16 bytes) -> approved
+    // CCM nonces do not share GCM IV generation restrictions, so external nonce is approved.
+    let nonce_12 = [0x55u8; 12];
+    let tag_len = 16usize;
+    let mut param_12 = CK_CCM_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce_12.as_ptr() as *mut CK_BYTE,
+        ulNonceLen: nonce_12.len() as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mut ccm_mech_12 = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: void_ptr!(&mut param_12),
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+
+    let ret = fn_encrypt_init(session, &mut ccm_mech_12, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut enc_12 = vec![0u8; plaintext.len() + tag_len];
+    let mut enc_12_len = enc_12.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc_12.as_mut_ptr(),
+        &mut enc_12_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    let ret = fn_decrypt_init(session, &mut ccm_mech_12, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_12 = vec![0u8; plaintext.len()];
+    let mut dec_12_len = dec_12.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc_12.as_ptr() as *mut CK_BYTE,
+        enc_12_len,
+        dec_12.as_mut_ptr(),
+        &mut dec_12_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_12[..dec_12_len as usize], plaintext);
+    assert_eq!(check_validation(session, 1), true);
+
+    // 2. CCM with nonce length != 12 (7-byte nonce, allowed by SP 800-38C) -> approved
+    // CCM nonces do not share GCM 12-byte IV restriction.
+    let nonce_7 = [0x77u8; 7];
+    let mut param_7 = CK_CCM_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce_7.as_ptr() as *mut CK_BYTE,
+        ulNonceLen: nonce_7.len() as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mut ccm_mech_7 = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: void_ptr!(&mut param_7),
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+
+    let ret = fn_encrypt_init(session, &mut ccm_mech_7, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut enc_7 = vec![0u8; plaintext.len() + tag_len];
+    let mut enc_7_len = enc_7.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc_7.as_mut_ptr(),
+        &mut enc_7_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+
+    let ret = fn_decrypt_init(session, &mut ccm_mech_7, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_7 = vec![0u8; plaintext.len()];
+    let mut dec_7_len = dec_7.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc_7.as_ptr() as *mut CK_BYTE,
+        enc_7_len,
+        dec_7.as_mut_ptr(),
+        &mut dec_7_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_7[..dec_7_len as usize], plaintext);
+    assert_eq!(check_validation(session, 1), true);
+
+    // 3. CCM in message mode with CKG_NO_GENERATE and compliant tag (16 bytes) -> approved
+    let mut msg_mech = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let ret = fn_message_encrypt_init(session, &mut msg_mech, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut nonce_msg = [0x88u8; 12];
+    let mut tag_msg = [0u8; 16];
+    let mut param_msg = CK_CCM_MESSAGE_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce_msg.as_mut_ptr(),
+        ulNonceLen: nonce_msg.len() as CK_ULONG,
+        ulNonceFixedBits: 0,
+        nonceGenerator: CKG_NO_GENERATE,
+        pMAC: tag_msg.as_mut_ptr(),
+        ulMACLen: tag_msg.len() as CK_ULONG,
+    };
+    let mut enc_msg = vec![0u8; plaintext.len()];
+    let mut enc_msg_len = enc_msg.len() as CK_ULONG;
+    let ret = fn_encrypt_message(
+        session,
+        void_ptr!(&mut param_msg),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc_msg.as_mut_ptr(),
+        &mut enc_msg_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+    let ret = fn_message_decrypt_init(session, &mut msg_mech, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_msg = vec![0u8; plaintext.len()];
+    let mut dec_msg_len = dec_msg.len() as CK_ULONG;
+    let ret = fn_decrypt_message(
+        session,
+        void_ptr!(&mut param_msg),
+        sizeof!(CK_CCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+        enc_msg.as_ptr() as *mut CK_BYTE,
+        enc_msg_len,
+        dec_msg.as_mut_ptr(),
+        &mut dec_msg_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_msg[..dec_msg_len as usize], plaintext);
+    assert_eq!(check_validation(session, 1), true);
+    assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+
+    // 4. CCM with non-compliant tag (< 8 bytes, e.g. 6 bytes) -> non-approved
+    let nonce_short_tag = [0x99u8; 12];
+    let mut param_short_tag = CK_CCM_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce_short_tag.as_ptr() as *mut CK_BYTE,
+        ulNonceLen: nonce_short_tag.len() as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: 6, // 6 bytes < 8 bytes -> non-approved per NIST SP 800-38C
+    };
+    let mut ccm_mech_short = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: void_ptr!(&mut param_short_tag),
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+
+    let ret = fn_encrypt_init(session, &mut ccm_mech_short, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut enc_short =
+        vec![0u8; plaintext.len() + param_short_tag.ulMACLen as usize];
+    let mut enc_short_len = enc_short.len() as CK_ULONG;
+    let ret = fn_encrypt(
+        session,
+        plaintext.as_ptr() as *mut CK_BYTE,
+        plaintext.len() as CK_ULONG,
+        enc_short.as_mut_ptr(),
+        &mut enc_short_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
+    let ret = fn_decrypt_init(session, &mut ccm_mech_short, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_short = vec![0u8; plaintext.len()];
+    let mut dec_short_len = dec_short.len() as CK_ULONG;
+    let ret = fn_decrypt(
+        session,
+        enc_short.as_ptr() as *mut CK_BYTE,
+        enc_short_len,
+        dec_short.as_mut_ptr(),
+        &mut dec_short_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(check_validation(session, 0), true);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_aes_aead_key_wrap() {
+    let mut testtokn = TestToken::initialized("test_aes_aead_key_wrap", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    // Wrapping key: AES-256 with CKA_WRAP and CKA_UNWRAP
+    let wrapping_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    // Target key to wrap: AES-128
+    let key_data = [0x42u8; 16];
+    let target_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &key_data)],
+        &[(CKA_EXTRACTABLE, true)],
+    ));
+
+    // 1. C_WrapKey and C_UnwrapKey with CKM_AES_GCM
+    {
+        let iv = [0x11u8; 12];
+        let aad = b"gcm-key-wrap-aad";
+        let param = CK_GCM_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvBits: (iv.len() * 8) as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulTagBits: 128,
+        };
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_AES_GCM,
+            pParameter: void_ptr!(&param),
+            ulParameterLen: sizeof!(CK_GCM_PARAMS),
+        };
+
+        // Probe length
+        let mut wraplen: CK_ULONG = 0;
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            target_handle,
+            std::ptr::null_mut(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(wraplen, 32); // 16 bytes key + 16 bytes tag
+
+        let mut wrapped = vec![0u8; wraplen as usize];
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            target_handle,
+            wrapped.as_mut_ptr(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        // CKM_AES_GCM wrapping uses external IV (CK_GCM_PARAMS) -> non-approved in FIPS mode
+        assert_eq!(check_validation(session, 0), true);
+
+        // Unwrap key
+        let mut template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 16),
+            ],
+            &[],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+        );
+
+        let mut unwrapped_handle = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            wrapped.as_mut_ptr(),
+            wraplen,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+            &mut unwrapped_handle,
+        );
+        assert_eq!(ret, CKR_OK);
+        // CKM_AES_GCM unwrapping relies on external IV -> approved in FIPS mode
+        assert_eq!(check_validation(session, 1), true);
+        assert_eq!(check_object_validation(session, unwrapped_handle, 1), true);
+
+        // Verify key value
+        let mut extracted = [0u8; 16];
+        let mut extract_template = make_ptrs_template(&[(
+            CKA_VALUE,
+            void_ptr!(extracted.as_mut_ptr()),
+            extracted.len(),
+        )]);
+        let ret = fn_get_attribute_value(
+            session,
+            unwrapped_handle,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(extracted, key_data);
+    }
+
+    // 2. C_WrapKey and C_UnwrapKey with CKM_AES_CCM (12-byte nonce)
+    {
+        let nonce = [0x22u8; 12];
+        let aad = b"ccm-key-wrap-aad";
+        let mut param = CK_CCM_PARAMS {
+            ulDataLen: 16,
+            pNonce: nonce.as_ptr() as *mut CK_BYTE,
+            ulNonceLen: nonce.len() as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulMACLen: 16,
+        };
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_AES_CCM,
+            pParameter: void_ptr!(&mut param),
+            ulParameterLen: sizeof!(CK_CCM_PARAMS),
+        };
+
+        let mut wraplen: CK_ULONG = 0;
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            target_handle,
+            std::ptr::null_mut(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(wraplen, 32);
+
+        let mut wrapped = vec![0u8; wraplen as usize];
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            target_handle,
+            wrapped.as_mut_ptr(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
+
+        let mut template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 16),
+            ],
+            &[],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+        );
+
+        let mut unwrapped_handle = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            wrapped.as_mut_ptr(),
+            wraplen,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+            &mut unwrapped_handle,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
+        assert_eq!(check_object_validation(session, unwrapped_handle, 1), true);
+
+        let mut extracted = [0u8; 16];
+        let mut extract_template = make_ptrs_template(&[(
+            CKA_VALUE,
+            void_ptr!(extracted.as_mut_ptr()),
+            extracted.len(),
+        )]);
+        let ret = fn_get_attribute_value(
+            session,
+            unwrapped_handle,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(extracted, key_data);
+    }
+
+    // 3. C_WrapKey and C_UnwrapKey with CKM_AES_CCM (7-byte nonce, nonce != 12)
+    {
+        let nonce = [0x33u8; 7];
+        let aad = b"ccm-7-key-wrap-aad";
+        let mut param = CK_CCM_PARAMS {
+            ulDataLen: 16,
+            pNonce: nonce.as_ptr() as *mut CK_BYTE,
+            ulNonceLen: nonce.len() as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulMACLen: 16,
+        };
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_AES_CCM,
+            pParameter: void_ptr!(&mut param),
+            ulParameterLen: sizeof!(CK_CCM_PARAMS),
+        };
+
+        let mut wraplen: CK_ULONG = 0;
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            target_handle,
+            std::ptr::null_mut(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(wraplen, 32);
+
+        let mut wrapped = vec![0u8; wraplen as usize];
+        let ret = fn_wrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            target_handle,
+            wrapped.as_mut_ptr(),
+            &mut wraplen,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
+
+        let mut template = make_attr_template(
+            &[
+                (CKA_CLASS, CKO_SECRET_KEY),
+                (CKA_KEY_TYPE, CKK_AES),
+                (CKA_VALUE_LEN, 16),
+            ],
+            &[],
+            &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+        );
+
+        let mut unwrapped_handle = CK_INVALID_HANDLE;
+        let ret = fn_unwrap_key(
+            session,
+            &mut mechanism,
+            wrapping_handle,
+            wrapped.as_mut_ptr(),
+            wraplen,
+            template.as_mut_ptr(),
+            template.len() as CK_ULONG,
+            &mut unwrapped_handle,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(check_validation(session, 1), true);
+        assert_eq!(check_object_validation(session, unwrapped_handle, 1), true);
+
+        let mut extracted = [0u8; 16];
+        let mut extract_template = make_ptrs_template(&[(
+            CKA_VALUE,
+            void_ptr!(extracted.as_mut_ptr()),
+            extracted.len(),
+        )]);
+        let ret = fn_get_attribute_value(
+            session,
+            unwrapped_handle,
+            extract_template.as_mut_ptr(),
+            extract_template.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(extracted, key_data);
+    }
 
     testtokn.finalize();
 }
