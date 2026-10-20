@@ -300,8 +300,8 @@ struct FipsMechanism {
 
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
-    keys: [FipsKeyType; 22],
-    mechs: [FipsMechanism; 109],
+    keys: [FipsKeyType; 24],
+    mechs: [FipsMechanism; 117],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -364,6 +364,16 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             keytype: CKK_SHA512_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
             sizes: step!(512),
+        },
+        FipsKeyType {
+            keytype: CKK_SHA512_224_HMAC,
+            operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+            sizes: step!(224),
+        },
+        FipsKeyType {
+            keytype: CKK_SHA512_256_HMAC,
+            operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+            sizes: step!(256),
         },
         FipsKeyType {
             keytype: CKK_SHA3_224_HMAC,
@@ -615,6 +625,30 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             genflags: 0,
         },
         FipsMechanism {
+            mechanism: CKM_ECDSA_SHA3_224,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_EC), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_ECDSA_SHA3_256,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_EC), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_ECDSA_SHA3_384,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_EC), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_ECDSA_SHA3_512,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_EC), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
             mechanism: CKM_ECDH1_DERIVE,
             operations: CKF_DERIVE,
             restrictions: [restrict!(CKK_EC), restrict!()],
@@ -745,6 +779,18 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         },
         FipsMechanism {
             mechanism: CKM_SHA512,
+            operations: CKF_DIGEST,
+            restrictions: [restrict!(), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_224,
+            operations: CKF_DIGEST,
+            restrictions: [restrict!(), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_256,
             operations: CKF_DIGEST,
             restrictions: [restrict!(), restrict!()],
             genflags: 0,
@@ -897,6 +943,24 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             restrictions: [
                 restrict!(CKK_SHA512_HMAC, range!(112, 512)),
                 restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+            ],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_224_HMAC_GENERAL,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [
+                restrict!(CKK_SHA512_224_HMAC, range!(112, 224)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+            ],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_256_HMAC_GENERAL,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [
+                restrict!(CKK_SHA512_256_HMAC, range!(112, 256)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
             ],
             genflags: 0,
         },
