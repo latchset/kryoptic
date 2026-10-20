@@ -301,7 +301,7 @@ struct FipsMechanism {
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 24],
-    mechs: [FipsMechanism; 117],
+    mechs: [FipsMechanism; 118],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -1305,6 +1305,12 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         },
         FipsMechanism {
             mechanism: CKM_SLH_DSA,
+            operations: CKF_SIGN | CKF_VERIFY,
+            restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
+            genflags: 0,
+        },
+        FipsMechanism {
+            mechanism: CKM_HASH_SLH_DSA,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [restrict!(CKK_SLH_DSA), restrict!()],
             genflags: 0,
