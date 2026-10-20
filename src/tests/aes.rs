@@ -3437,3 +3437,70 @@ fn test_aes_gcm_fips_indicators() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_final_null_len_arguments_bad() {
+    let mut testtokn =
+        TestToken::initialized("test_final_null_len_arguments_bad", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut iv = [0u8; 16];
+    let mut mech = CK_MECHANISM {
+        mechanism: CKM_AES_CBC,
+        pParameter: void_ptr!(iv.as_mut_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    let mut data = [0u8; 16];
+    let mut out = [0u8; 16];
+    let mut outlen: CK_ULONG = out.len() as CK_ULONG;
+
+    /* C_EncryptFinal with a NULL length pointer */
+    assert_eq!(fn_encrypt_init(session, &mut mech, handle), CKR_OK);
+    assert_eq!(
+        fn_encrypt_final(session, out.as_mut_ptr(), std::ptr::null_mut()),
+        CKR_ARGUMENTS_BAD
+    );
+    /* the operation must have been terminated */
+    assert_eq!(
+        fn_encrypt_update(
+            session,
+            data.as_mut_ptr(),
+            data.len() as CK_ULONG,
+            out.as_mut_ptr(),
+            &mut outlen
+        ),
+        CKR_OPERATION_NOT_INITIALIZED
+    );
+
+    /* C_DecryptFinal with a NULL length pointer */
+    assert_eq!(fn_decrypt_init(session, &mut mech, handle), CKR_OK);
+    assert_eq!(
+        fn_decrypt_final(session, out.as_mut_ptr(), std::ptr::null_mut()),
+        CKR_ARGUMENTS_BAD
+    );
+    outlen = out.len() as CK_ULONG;
+    assert_eq!(
+        fn_decrypt_update(
+            session,
+            data.as_mut_ptr(),
+            data.len() as CK_ULONG,
+            out.as_mut_ptr(),
+            &mut outlen
+        ),
+        CKR_OPERATION_NOT_INITIALIZED
+    );
+
+    testtokn.finalize();
+}
