@@ -114,19 +114,6 @@ impl SearchOperation for SessionSearch {
     }
 }
 
-/// Represents the login status requirement for an active operation.
-#[derive(Debug)]
-pub enum OpLoginStatus {
-    /// No operation active.
-    NotInitialized,
-    /// Active operation does not require login.
-    NotRequired,
-    /// Active operation requires login, but user is not logged in.
-    Required,
-    /// Active operation requires login, and user is logged in.
-    LoginOk,
-}
-
 /// Trait defining helper methods for managing specific active operation types
 /// within a `SessionOperations` struct.
 pub trait ManageOperation {
@@ -135,6 +122,38 @@ pub trait ManageOperation {
     fn check_no_op(so: &SessionOperations) -> Result<()>;
     fn get_op(so: &mut SessionOperations) -> Result<Operation<'_, Self>>;
     fn set_op(so: &mut SessionOperations, op: Box<Self>);
+}
+
+impl ManageOperation for dyn SearchOperation {
+    fn cancel_operation(so: &mut SessionOperations) -> Result<()> {
+        so.search = None;
+        Ok(())
+    }
+    fn check_op(so: &SessionOperations) -> Result<()> {
+        if let Some(ref o) = so.search {
+            if !o.finalized() {
+                return Ok(());
+            }
+        }
+        Err(CKR_OPERATION_NOT_INITIALIZED)?
+    }
+    fn check_no_op(so: &SessionOperations) -> Result<()> {
+        if let Some(ref o) = so.search {
+            if !o.finalized() {
+                return Err(CKR_OPERATION_ACTIVE)?;
+            }
+        }
+        Ok(())
+    }
+    fn get_op(so: &mut SessionOperations) -> Result<Operation<'_, Self>> {
+        if so.search.as_ref().map_or(true, |o| o.finalized()) {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        Ok(Operation::new(&mut so.search))
+    }
+    fn set_op(so: &mut SessionOperations, op: Box<Self>) {
+        so.search = Some(op);
+    }
 }
 
 /// Macro to implement the `ManageOperation` trait for a specific operation
@@ -168,12 +187,10 @@ macro_rules! impl_mop {
             fn get_op(
                 so: &mut SessionOperations,
             ) -> Result<Operation<'_, Self>> {
-                match so.$($opname).+ {
-                    Some(ref o) if !o.finalized() => {
-                        Ok(Operation::new(&mut so.$($opname).+))
-                    }
-                    _ => Err(CKR_OPERATION_NOT_INITIALIZED)?,
+                if so.$($opname).+.as_ref().map_or(true, |o| o.finalized()) {
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
                 }
+                Ok(Operation::new(&mut so.$($opname).+))
             }
 
             fn set_op(so: &mut SessionOperations, op: Box<Self>) {
@@ -200,7 +217,6 @@ pub struct SessionOperations {
 
 impl_mop!(MsgEncryption, msg_encryption);
 impl_mop!(MsgDecryption, msg_decryption);
-impl_mop!(SearchOperation, search);
 impl_mop!(Encryption, encryption);
 impl_mop!(Decryption, decryption);
 impl_mop!(Digest, digest);
@@ -355,6 +371,35 @@ impl_mop_state!(Verify, verify);
 impl_mop_state!(VerifySignature, verifysig);
 
 impl SessionOperations {
+    pub fn get_operation<O: ManageOperation + ?Sized>(
+        &mut self,
+    ) -> Result<Operation<'_, O>> {
+        O::get_op(self)
+    }
+
+    pub fn any_requires_login(&self) -> bool {
+        macro_rules! op_requires_login {
+            ($op:expr) => {
+                if let Some(ref o) = $op {
+                    if !o.finalized() && o.requires_login() {
+                        return true;
+                    }
+                }
+            };
+        }
+
+        op_requires_login!(self.msg_encryption);
+        op_requires_login!(self.msg_decryption);
+        op_requires_login!(self.encryption);
+        op_requires_login!(self.decryption);
+        op_requires_login!(self.digest);
+        op_requires_login!(self.sign);
+        op_requires_login!(self.verify);
+        op_requires_login!(self.verifysig);
+
+        false
+    }
+
     /// Creates a new, empty `SessionOperations` object.
     pub fn new() -> SessionOperations {
         SessionOperations {
@@ -379,9 +424,9 @@ pub struct Session {
     //application: CK_VOID_PTR,
     //notify: CK_NOTIFY,
     /// Container for active cryptographic operations.
-    operations: SessionOperations,
-    /// Tracks login requirement status for the current operation.
-    login_status: OpLoginStatus,
+    pub operations: SessionOperations,
+    /// Tracks whether context-specific login requirement has been satisfied.
+    pub login_ok: bool,
     /// Tracks FIPS approval status for the current operation.
     fips_indicator: Option<bool>,
 }
@@ -431,7 +476,7 @@ impl Session {
             //application: std::ptr::null_mut(),
             //notify: unsafe { std::ptr::null_mut() },
             operations: SessionOperations::new(),
-            login_status: OpLoginStatus::NotInitialized,
+            login_ok: false,
             fips_indicator: None,
         })
     }
@@ -561,13 +606,10 @@ impl Session {
         template: &[CK_ATTRIBUTE],
     ) -> Result<()> {
         self.check_no_op::<dyn SearchOperation>()?;
-        self.set_operation::<dyn SearchOperation>(
-            Box::new(SessionSearch {
-                handles: token.search_objects(template)?,
-                in_use: true,
-            }),
-            false,
-        );
+        self.set_operation::<dyn SearchOperation>(Box::new(SessionSearch {
+            handles: token.search_objects(template)?,
+            in_use: true,
+        }));
         Ok(())
     }
 
@@ -575,6 +617,7 @@ impl Session {
     pub fn cancel_operation<O: ManageOperation + ?Sized>(
         &mut self,
     ) -> Result<()> {
+        self.login_ok = false;
         O::cancel_operation(&mut self.operations)
     }
 
@@ -588,54 +631,26 @@ impl Session {
         O::check_no_op(&self.operations)
     }
 
-    /// Checks if the current login state permits the active operation.
-    ///
-    /// Returns `CKR_USER_NOT_LOGGED_IN` if login is required but not satisfied.
-    pub fn check_login_status(&self) -> Result<()> {
-        match self.login_status {
-            OpLoginStatus::NotInitialized => {
-                Err(CKR_OPERATION_NOT_INITIALIZED)?
-            }
-            OpLoginStatus::NotRequired => Ok(()),
-            OpLoginStatus::Required => Err(CKR_USER_NOT_LOGGED_IN)?,
-            OpLoginStatus::LoginOk => Ok(()),
-        }
+    pub fn login_required(&self) -> bool {
+        self.operations.any_requires_login()
     }
 
     /// Gets a wrapper around the currently active operation of type `O`.
-    ///
-    /// Checks login status before returning the operation.
     pub fn get_operation<O: ManageOperation + ?Sized>(
         &mut self,
     ) -> Result<Operation<'_, O>> {
-        let res = self.check_login_status();
-        let op = O::get_op(&mut self.operations)?;
-        res?;
-        Ok(op)
+        O::get_op(&mut self.operations)
     }
 
     /// Sets the active operation of type `O`.
     ///
     /// Also resets the FIPS indicator and sets the login requirement status
     /// based on `needs_login`.
-    pub fn set_operation<O: ManageOperation + ?Sized>(
-        &mut self,
-        op: Box<O>,
-        needs_login: bool,
-    ) {
+    pub fn set_operation<O: ManageOperation + ?Sized>(&mut self, op: Box<O>) {
         self.fips_indicator = None; /* FIXME: per operation ? */
-        self.login_status = if needs_login {
-            OpLoginStatus::Required
-        } else {
-            OpLoginStatus::NotRequired
-        };
+        self.login_ok = false;
 
         O::set_op(&mut self.operations, op);
-    }
-
-    /// Marks the current operation's login requirement as satisfied.
-    pub fn set_login_ok(&mut self) {
-        self.login_status = OpLoginStatus::LoginOk;
     }
 
     pub fn state_size(&mut self) -> Result<usize> {

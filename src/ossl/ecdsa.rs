@@ -159,6 +159,7 @@ pub struct EcdsaOperation {
     finalized: bool,
     /// Flag indicating if the operation is in progress.
     in_use: bool,
+    requires_login: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: OsslSignature,
     /// FIPS approval status for the operation.
@@ -211,6 +212,7 @@ impl EcdsaOperation {
             output_len: output_len,
             finalized: false,
             in_use: false,
+            requires_login: key.always_auth(),
             sigctx: sigctx,
             #[cfg(feature = "fips")]
             fips_approval: fips_approval,
@@ -293,6 +295,14 @@ impl MechOperation for EcdsaOperation {
 
     fn finalized(&self) -> bool {
         self.finalized
+    }
+
+    fn requires_login(&self) -> bool {
+        self.requires_login
+    }
+
+    fn login_fulfilled(&mut self) {
+        self.requires_login = false;
     }
 
     #[cfg(feature = "fips")]

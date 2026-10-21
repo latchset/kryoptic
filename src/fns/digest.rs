@@ -38,7 +38,7 @@ fn digest_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_DIGEST == CKF_DIGEST {
         let operation = mech.digest_new(&mechanism)?;
-        session.set_operation::<dyn Digest>(operation, false);
+        session.set_operation::<dyn Digest>(operation);
 
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_DIGEST, None);
@@ -75,8 +75,8 @@ fn digest(
     pul_digest_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn Digest>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation = session.operations.get_operation::<dyn Digest>()?;
     if pdata.is_null() || pul_digest_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -246,8 +246,8 @@ fn digest_final(
     pul_digest_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn Digest>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation = session.operations.get_operation::<dyn Digest>()?;
     if pul_digest_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }

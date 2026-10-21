@@ -643,7 +643,7 @@ fn test_ec_keys() {
     );
     assert_eq!(ret, CKR_OK);
 
-    /* any other op w/o authentication should fail */
+    /* length probe w/o authentication should succeed and keep op active */
     let mut siglen: CK_ULONG = 0;
     let ret = fn_sign(
         session,
@@ -652,8 +652,21 @@ fn test_ec_keys() {
         std::ptr::null_mut(),
         &mut siglen,
     );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(siglen, 96);
+
+    /* attempt to sign w/o authentication should fail and terminate the operation */
+    let mut dummy_signature: Vec<u8> = vec![0; siglen as usize];
+    let ret = fn_sign(
+        session,
+        byte_ptr!(data),
+        data.len() as CK_ULONG,
+        dummy_signature.as_mut_ptr(),
+        &mut siglen,
+    );
     assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
-    /* The failed C_Sign call terminated the active operation; re-initialize */
+
+    /* re-initialize after terminated operation */
     let ret = fn_sign_init(
         session,
         &CK_MECHANISM {
@@ -664,6 +677,18 @@ fn test_ec_keys() {
         prikey,
     );
     assert_eq!(ret, CKR_OK);
+
+    /* probe length again */
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign(
+        session,
+        byte_ptr!(data),
+        data.len() as CK_ULONG,
+        std::ptr::null_mut(),
+        &mut siglen,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(siglen, 96);
 
     if testtokn.dbtype != "nssdb" {
         /* attempt context specific login (wrong pin) */
@@ -677,8 +702,7 @@ fn test_ec_keys() {
         assert_eq!(ret, CKR_PIN_INCORRECT);
     }
 
-    /* retry op w/o authentication should still fail */
-    let mut siglen: CK_ULONG = 0;
+    /* probe length still succeeds after failed login attempt */
     let ret = fn_sign(
         session,
         byte_ptr!(data),
@@ -686,18 +710,8 @@ fn test_ec_keys() {
         std::ptr::null_mut(),
         &mut siglen,
     );
-    assert_eq!(ret, CKR_USER_NOT_LOGGED_IN);
-    /* Re-initialize the operation before context-specific login */
-    let ret = fn_sign_init(
-        session,
-        &CK_MECHANISM {
-            mechanism: CKM_ECDSA_SHA256,
-            pParameter: std::ptr::null_mut(),
-            ulParameterLen: 0,
-        } as *const _ as CK_MECHANISM_PTR,
-        prikey,
-    );
     assert_eq!(ret, CKR_OK);
+    assert_eq!(siglen, 96);
 
     /* attempt context specific login (right pin) */
     let pin = "12345678";

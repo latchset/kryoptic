@@ -223,6 +223,7 @@ pub struct RsaPKCSOperation {
     finalized: bool,
     /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
+    requires_login: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: Option<OsslSignature>,
     /// The OpenSSL Wrapper Encryption Context
@@ -309,6 +310,7 @@ impl RsaPKCSOperation {
             output_len: keysize,
             finalized: false,
             in_use: false,
+            requires_login: key.always_auth(),
             sigctx: None,
             encctx: Some(encctx),
             #[cfg(feature = "fips")]
@@ -380,6 +382,7 @@ impl RsaPKCSOperation {
             output_len: keysize,
             finalized: false,
             in_use: false,
+            requires_login: key.always_auth(),
             sigctx: Some(sigctx),
             encctx: None,
             #[cfg(feature = "fips")]
@@ -563,6 +566,12 @@ impl MechOperation for RsaPKCSOperation {
 
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn requires_login(&self) -> bool {
+        self.requires_login
+    }
+    fn login_fulfilled(&mut self) {
+        self.requires_login = false;
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
