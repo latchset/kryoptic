@@ -297,13 +297,9 @@ fn login(
     let vpin = bytes_to_slice(pin as *const u8, pin_len as usize);
     let mut token = rstate.get_token_from_slot_mut(slot_id)?;
     if user_type == CKU_CONTEXT_SPECIFIC {
-        let session = rstate.get_session_mut(s_handle)?;
-        match session.check_login_status() {
-            Err(e) => match e.rv() {
-                CKR_USER_NOT_LOGGED_IN => (),
-                _ => return Err(CKR_OPERATION_NOT_INITIALIZED)?,
-            },
-            Ok(()) => return Err(CKR_OPERATION_NOT_INITIALIZED)?,
+        let session = rstate.get_session(s_handle)?;
+        if !session.login_required() {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
     }
 
@@ -313,7 +309,7 @@ fn login(
         match result {
             CKR_OK => {
                 let mut session = rstate.get_session_mut(s_handle)?;
-                session.set_login_ok();
+                session.login_ok = true;
             }
             CKR_PIN_LOCKED => {
                 token.logout();

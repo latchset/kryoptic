@@ -409,7 +409,7 @@ pub(crate) fn init_fips_approval(
 /// Only downgrades an approval status, never upgrades a non-approved status.
 #[cfg(feature = "fips")]
 pub(crate) fn finalize_fips_approval(
-    mut session: RwLockWriteGuard<'_, Session>,
+    session: &mut Session,
     operation_approved: Option<bool>,
 ) {
     let provisional = match session.get_fips_indicator() {

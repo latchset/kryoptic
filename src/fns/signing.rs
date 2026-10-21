@@ -6,8 +6,6 @@
 //! This module contains the implementation of the Signing and Verification functions
 //! as defined in the PKCS#11 specification.
 
-use std::sync::RwLockWriteGuard;
-
 use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
@@ -45,7 +43,7 @@ fn sign_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_SIGN == CKF_SIGN {
         let operation = mech.sign_new(&mechanism, &key)?;
-        session.set_operation::<dyn Sign>(operation, key.always_auth());
+        session.set_operation::<dyn Sign>(operation);
 
         #[cfg(feature = "fips")]
         init_fips_approval(session, mechanism.mechanism, CKF_SIGN, Some(&key));
@@ -88,9 +86,9 @@ fn sign(
     pul_signature_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
-    let mut operation = session.get_operation::<dyn Sign>()?;
+    let mut operation = session.operations.get_operation::<dyn Sign>()?;
     if pdata.is_null() || pul_signature_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -102,6 +100,13 @@ fn sign(
             *pul_signature_len = sig_len;
         }
         return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     unsafe {
         if *pul_signature_len < sig_len {
@@ -170,13 +175,20 @@ pub extern "C" fn fn_sign(
 /// Helper to perform "sign_update" in multiple places,
 
 pub(crate) fn internal_sign_update(
-    session: &mut RwLockWriteGuard<'_, Session>,
+    session: &mut Session,
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let mut operation = session.get_operation::<dyn Sign>()?;
+    let mut operation = session.operations.get_operation::<dyn Sign>()?;
     if part.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
@@ -190,9 +202,11 @@ fn sign_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    internal_sign_update(&mut session, part, part_len)
+    internal_sign_update(
+        &mut *(STATE.rlock()?.get_session_mut(s_handle)?),
+        part,
+        part_len,
+    )
 }
 
 /// Implementation of C_SignUpdate function
@@ -225,9 +239,9 @@ fn sign_final(
     pul_signature_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
-    let mut operation = session.get_operation::<dyn Sign>()?;
+    let mut operation = session.operations.get_operation::<dyn Sign>()?;
     if pul_signature_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -239,6 +253,13 @@ fn sign_final(
             *pul_signature_len = sig_len;
         }
         return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     unsafe {
         if *pul_signature_len < sig_len {
@@ -346,7 +367,7 @@ fn verify_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_VERIFY == CKF_VERIFY {
         let operation = mech.verify_new(&mechanism, &key)?;
-        session.set_operation::<dyn Verify>(operation, false);
+        session.set_operation::<dyn Verify>(operation);
 
         #[cfg(feature = "fips")]
         init_fips_approval(
@@ -394,11 +415,18 @@ fn verify(
     psignature_len: CK_ULONG,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
-    let mut operation = session.get_operation::<dyn Verify>()?;
+    let mut operation = session.operations.get_operation::<dyn Verify>()?;
     if pdata.is_null() || psignature.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let signature_len = operation.signature_len()?;
     let sig_len =
@@ -461,13 +489,20 @@ pub extern "C" fn fn_verify(
 /// Helper to perform "verify_update" in multiple places,
 
 pub(crate) fn internal_verify_update(
-    session: &mut RwLockWriteGuard<'_, Session>,
+    session: &mut Session,
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let mut operation = session.get_operation::<dyn Verify>()?;
+    let mut operation = session.operations.get_operation::<dyn Verify>()?;
     if part.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
@@ -481,9 +516,11 @@ fn verify_update(
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
 ) -> Result<()> {
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    internal_verify_update(&mut session, part, part_len)
+    internal_verify_update(
+        &mut *(STATE.rlock()?.get_session_mut(s_handle)?),
+        part,
+        part_len,
+    )
 }
 
 /// Implementation of C_VerifyUpdate function
@@ -516,11 +553,18 @@ fn verify_final(
     psignature_len: CK_ULONG,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
-    let mut operation = session.get_operation::<dyn Verify>()?;
+    let mut operation = session.operations.get_operation::<dyn Verify>()?;
     if psignature.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let signature_len = operation.signature_len()?;
     let sig_len =
@@ -762,7 +806,7 @@ fn verify_signature_init(
         usize::try_from(psignature_len).map_err(|_| CKR_GENERAL_ERROR)?;
     let signature: &[u8] = bytes_to_slice(psignature, sig_len);
     let operation = mech.verify_signature_new(&mechanism, &key, signature)?;
-    session.set_operation::<dyn VerifySignature>(operation, false);
+    session.set_operation::<dyn VerifySignature>(operation);
 
     #[cfg(feature = "fips")]
     init_fips_approval(session, mechanism.mechanism, CKF_VERIFY, Some(&key));
@@ -810,11 +854,19 @@ fn verify_signature(
     data_len: CK_ULONG,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
-    let mut operation = session.get_operation::<dyn VerifySignature>()?;
+    let mut operation =
+        session.operations.get_operation::<dyn VerifySignature>()?;
     if pdata.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(pdata, dlen);
@@ -869,10 +921,18 @@ fn verify_signature_update(
     part_len: CK_ULONG,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn VerifySignature>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation =
+        session.operations.get_operation::<dyn VerifySignature>()?;
     if part.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(part, plen);
@@ -906,9 +966,17 @@ pub extern "C" fn fn_verify_signature_update(
 #[inline(always)]
 fn verify_signature_final(s_handle: CK_SESSION_HANDLE) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
-    let mut operation = session.get_operation::<dyn VerifySignature>()?;
+    let mut operation =
+        session.operations.get_operation::<dyn VerifySignature>()?;
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
+    }
     operation.verify_final()?;
 
     if let Some((handle, attrs)) = operation.updates_object() {

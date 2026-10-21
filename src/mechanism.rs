@@ -283,6 +283,14 @@ pub trait MechOperation: Debug + Send + Sync {
     /// Report if the operation was finalized
     fn finalized(&self) -> bool;
 
+    /// Returns true if the operation requires context-specific login
+    fn requires_login(&self) -> bool {
+        false
+    }
+
+    /// Marks the context-specific login requirement as fulfilled
+    fn login_fulfilled(&mut self) {}
+
     /// Reset the internal state of an operation
     fn reset(&mut self) -> Result<()> {
         Err(CKR_GENERAL_ERROR)?

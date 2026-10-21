@@ -117,6 +117,7 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 pub struct HmacKey {
     /// A vector containing the raw key in bytes
     pub raw: Vec<u8>,
+    pub always_auth: bool,
 }
 
 impl Drop for HmacKey {
@@ -205,6 +206,7 @@ impl HMACMechanism {
         }
         Ok(HmacKey {
             raw: key.get_attr_as_bytes(CKA_VALUE)?.clone(),
+            always_auth: key.always_auth(),
         })
     }
 

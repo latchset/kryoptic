@@ -267,6 +267,7 @@ pub struct SlhDsaOperation {
     finalized: bool,
     /// Flag indicating if the operation is in progress (update called).
     in_use: bool,
+    requires_login: bool,
     /// Parsed SLH-DSA parameters for this operation instance.
     params: SlhDsaParams,
     /// The ossl signature context.
@@ -289,6 +290,14 @@ impl MechOperation for SlhDsaOperation {
 
     fn finalized(&self) -> bool {
         self.finalized
+    }
+
+    fn requires_login(&self) -> bool {
+        self.requires_login
+    }
+
+    fn login_fulfilled(&mut self) {
+        self.requires_login = false;
     }
 
     #[cfg(feature = "fips")]
@@ -350,6 +359,7 @@ impl SlhDsaOperation {
             mech: mech.mechanism,
             finalized: false,
             in_use: false,
+            requires_login: key.always_auth(),
             params: params,
             sigctx: sigctx,
             hashsize: 0,

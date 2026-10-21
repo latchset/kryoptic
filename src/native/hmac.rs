@@ -80,6 +80,7 @@ pub struct HMACOperation {
     finalized: bool,
     /// Flag that marks that the operation has started
     in_use: bool,
+    requires_login: bool,
     /// Optional signature holding vector
     ///
     /// This is used by the VerifySignature API
@@ -115,6 +116,7 @@ impl HMACOperation {
             inner: hash::internal_hash_op(hash)?,
             finalized: false,
             in_use: false,
+            requires_login: false,
             signature: None,
         };
         hmac.init()?;
@@ -132,7 +134,9 @@ impl HMACOperation {
         if (*kats::HMAC_SELFTEST).result != CKR_OK {
             return Err((*kats::HMAC_SELFTEST).result)?;
         }
+        let requires_login = key.always_auth;
         let mut hmac = HMACOperation::internal(mech, key.take(), outputlen)?;
+        hmac.requires_login = requires_login;
         if let Some(s) = signature {
             if s.len() != outputlen {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
@@ -265,6 +269,12 @@ impl MechOperation for HMACOperation {
 
     fn finalized(&self) -> bool {
         self.finalized
+    }
+    fn requires_login(&self) -> bool {
+        self.requires_login
+    }
+    fn login_fulfilled(&mut self) {
+        self.requires_login = false;
     }
     fn reset(&mut self) -> Result<()> {
         self.reinit()

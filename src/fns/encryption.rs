@@ -6,8 +6,6 @@
 //! This module contains the implementation of the Encryption and Decryption functions
 //! as defined in the PKCS#11 specification.
 
-use std::sync::RwLockWriteGuard;
-
 use crate::check_allowed_mechs;
 use crate::error::Result;
 use crate::log_debug;
@@ -47,7 +45,7 @@ fn encrypt_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_ENCRYPT == CKF_ENCRYPT {
         let operation = mech.encryption_new(&mechanism, &key)?;
-        session.set_operation::<dyn Encryption>(operation, false);
+        session.set_operation::<dyn Encryption>(operation);
 
         #[cfg(feature = "fips")]
         init_fips_approval(
@@ -95,8 +93,8 @@ fn encrypt(
     pul_encrypted_data_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn Encryption>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation = session.operations.get_operation::<dyn Encryption>()?;
     if pdata.is_null() || pul_encrypted_data_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -109,6 +107,13 @@ fn encrypt(
             *pul_encrypted_data_len = encryption_len;
         }
         return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let penclen = unsafe { *pul_encrypted_data_len as CK_ULONG };
     let enclen = parse_len(penclen)?;
@@ -167,13 +172,13 @@ pub extern "C" fn fn_encrypt(
 /// Helper to perform "encrypt_update" in multiple places,
 
 pub(crate) fn internal_encrypt_update(
-    session: &mut RwLockWriteGuard<'_, Session>,
+    session: &mut Session,
     part: CK_BYTE_PTR,
     part_len: CK_ULONG,
     encrypted_part: CK_BYTE_PTR,
     pul_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    let mut operation = session.get_operation::<dyn Encryption>()?;
+    let mut operation = session.operations.get_operation::<dyn Encryption>()?;
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -181,6 +186,13 @@ pub(crate) fn internal_encrypt_update(
     let len = if encrypted_part.is_null() {
         operation.encryption_len(plen, false)?
     } else {
+        if operation.requires_login() {
+            if !session.login_ok {
+                return Err(CKR_USER_NOT_LOGGED_IN)?;
+            }
+            operation.login_fulfilled();
+            session.login_ok = false;
+        }
         let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
         let enclen = parse_len(penclen)?;
         let data: &[u8] = bytes_to_slice(part, plen);
@@ -201,10 +213,8 @@ fn encrypt_update(
     encrypted_part: CK_BYTE_PTR,
     pul_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
     internal_encrypt_update(
-        &mut session,
+        &mut *(STATE.rlock()?.get_session_mut(s_handle)?),
         part,
         part_len,
         encrypted_part,
@@ -252,8 +262,8 @@ fn encrypt_final(
     pul_last_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn Encryption>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation = session.operations.get_operation::<dyn Encryption>()?;
     if pul_last_encrypted_part_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -265,6 +275,13 @@ fn encrypt_final(
             *pul_last_encrypted_part_len = encryption_len;
         }
         return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
     let enclen = parse_len(penclen)?;
@@ -337,7 +354,7 @@ fn decrypt_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_DECRYPT == CKF_DECRYPT {
         let operation = mech.decryption_new(&mechanism, &key)?;
-        session.set_operation::<dyn Decryption>(operation, key.always_auth());
+        session.set_operation::<dyn Decryption>(operation);
 
         #[cfg(feature = "fips")]
         init_fips_approval(
@@ -385,8 +402,8 @@ fn decrypt(
     pul_data_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn Decryption>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation = session.operations.get_operation::<dyn Decryption>()?;
     if encrypted_data.is_null() || pul_data_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -400,6 +417,13 @@ fn decrypt(
             *pul_data_len = decryption_len;
         }
         return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let pdlen = unsafe { *pul_data_len as CK_ULONG };
     let dlen = parse_len(pdlen)?;
@@ -458,13 +482,13 @@ pub extern "C" fn fn_decrypt(
 /// Helper to perform "decrypt_update" in multiple places,
 
 pub(crate) fn internal_decrypt_update(
-    session: &mut RwLockWriteGuard<'_, Session>,
+    session: &mut Session,
     encrypted_part: CK_BYTE_PTR,
     encrypted_part_len: CK_ULONG,
     part: CK_BYTE_PTR,
     pul_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    let mut operation = session.get_operation::<dyn Decryption>()?;
+    let mut operation = session.operations.get_operation::<dyn Decryption>()?;
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -473,6 +497,13 @@ pub(crate) fn internal_decrypt_update(
     let len = if part.is_null() {
         operation.decryption_len(elen, false)?
     } else {
+        if operation.requires_login() {
+            if !session.login_ok {
+                return Err(CKR_USER_NOT_LOGGED_IN)?;
+            }
+            operation.login_fulfilled();
+            session.login_ok = false;
+        }
         let pplen = unsafe { *pul_part_len as CK_ULONG };
         let plen = parse_len(pplen)?;
         let enc: &[u8] = bytes_to_slice(encrypted_part, elen);
@@ -493,10 +524,8 @@ fn decrypt_update(
     part: CK_BYTE_PTR,
     pul_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
-    let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
     internal_decrypt_update(
-        &mut session,
+        &mut *(STATE.rlock()?.get_session_mut(s_handle)?),
         encrypted_part,
         encrypted_part_len,
         part,
@@ -544,8 +573,8 @@ fn decrypt_final(
     pul_last_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn Decryption>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation = session.operations.get_operation::<dyn Decryption>()?;
     if pul_last_part_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
@@ -557,6 +586,13 @@ fn decrypt_final(
             *pul_last_part_len = decryption_len;
         }
         return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
+        operation.login_fulfilled();
+        session.login_ok = false;
     }
     let pplen = unsafe { *pul_last_part_len as CK_ULONG };
     let plen = parse_len(pplen)?;
@@ -625,7 +661,7 @@ fn message_encrypt_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_MESSAGE_ENCRYPT != 0 {
         let operation = mech.msg_encryption_op(&mechanism, &key)?;
-        session.set_operation::<dyn MsgEncryption>(operation, false);
+        session.set_operation::<dyn MsgEncryption>(operation);
         #[cfg(feature = "fips")]
         init_fips_approval(
             session,
@@ -676,12 +712,13 @@ fn encrypt_message(
     pul_ciphertext_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
 
     #[cfg(feature = "fips")]
     session.reset_fips_indicator();
 
-    let mut operation = session.get_operation::<dyn MsgEncryption>()?;
+    let mut operation =
+        session.operations.get_operation::<dyn MsgEncryption>()?;
     if operation.busy() {
         operation.ok()?;
         return Err(CKR_OPERATION_ACTIVE)?;
@@ -877,8 +914,9 @@ fn encrypt_message_next(
     flags: CK_FLAGS,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn MsgEncryption>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation =
+        session.operations.get_operation::<dyn MsgEncryption>()?;
     if !operation.busy() {
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
@@ -1032,7 +1070,7 @@ fn message_decrypt_init(
     let mech = token.get_mechanisms().get(mechanism.mechanism)?;
     if mech.info().flags & CKF_MESSAGE_DECRYPT != 0 {
         let operation = mech.msg_decryption_op(&mechanism, &key)?;
-        session.set_operation::<dyn MsgDecryption>(operation, false);
+        session.set_operation::<dyn MsgDecryption>(operation);
         #[cfg(feature = "fips")]
         init_fips_approval(
             session,
@@ -1083,12 +1121,13 @@ fn decrypt_message(
     pul_plaintext_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
 
     #[cfg(feature = "fips")]
     session.reset_fips_indicator();
 
-    let mut operation = session.get_operation::<dyn MsgDecryption>()?;
+    let mut operation =
+        session.operations.get_operation::<dyn MsgDecryption>()?;
     if operation.busy() {
         operation.ok()?;
         return Err(CKR_OPERATION_ACTIVE)?;
@@ -1282,8 +1321,9 @@ fn decrypt_message_next(
     flags: CK_FLAGS,
 ) -> Result<()> {
     let rstate = STATE.rlock()?;
-    let mut session = rstate.get_session_mut(s_handle)?;
-    let mut operation = session.get_operation::<dyn MsgDecryption>()?;
+    let session = &mut *(rstate.get_session_mut(s_handle)?);
+    let mut operation =
+        session.operations.get_operation::<dyn MsgDecryption>()?;
     if !operation.busy() {
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
