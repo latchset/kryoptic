@@ -77,9 +77,10 @@ fn digest(
     let rstate = STATE.rlock()?;
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let mut operation = session.operations.get_operation::<dyn Digest>()?;
-    if pdata.is_null() || pul_digest_len.is_null() {
+    if pul_digest_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
+
     let digest_len = operation.digest_len()?;
     let dgst_len =
         CK_ULONG::try_from(digest_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -90,12 +91,16 @@ fn digest(
         }
         return operation.ok();
     }
+
     unsafe {
         if *pul_digest_len < dgst_len {
             *pul_digest_len = dgst_len;
             operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
+    }
+    if pdata.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let data: &[u8] = bytes_to_slice(pdata, dlen);
@@ -251,6 +256,7 @@ fn digest_final(
     if pul_digest_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
+
     let digest_len = operation.digest_len()?;
     let dgst_len =
         CK_ULONG::try_from(digest_len).map_err(|_| CKR_GENERAL_ERROR)?;
@@ -261,6 +267,7 @@ fn digest_final(
         }
         return operation.ok();
     }
+
     unsafe {
         if *pul_digest_len < dgst_len {
             *pul_digest_len = dgst_len;

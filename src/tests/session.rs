@@ -239,3 +239,116 @@ fn test_operations() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+#[cfg(all(feature = "aes", feature = "hash"))]
+fn test_null_data_length_probe() {
+    let mut testtokn =
+        TestToken::initialized("test_null_data_length_probe", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    ));
+
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* 1. Test Encrypt: length probe with null input data and null output buffer */
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut enc_len: CK_ULONG = 0;
+    let ret = fn_encrypt(
+        session,
+        std::ptr::null_mut(),
+        16,
+        std::ptr::null_mut(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(enc_len, 16);
+
+    /* Active operation was not terminated; proceed with encryption */
+    let data = [0x55u8; 16];
+    let mut enc = vec![0u8; enc_len as usize];
+    let ret = fn_encrypt(
+        session,
+        byte_ptr!(data.as_slice()),
+        data.len() as CK_ULONG,
+        enc.as_mut_ptr(),
+        &mut enc_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    /* 2. Test Decrypt: length probe with null encrypted data and null output buffer */
+    let ret = fn_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut dec_len: CK_ULONG = 0;
+    let ret = fn_decrypt(
+        session,
+        std::ptr::null_mut(),
+        enc_len,
+        std::ptr::null_mut(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(dec_len, 16);
+
+    /* Active operation was not terminated; proceed with decryption */
+    let mut dec = vec![0u8; dec_len as usize];
+    let ret = fn_decrypt(
+        session,
+        enc.as_mut_ptr(),
+        enc_len,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec[..], &data[..]);
+
+    /* 3. Test Digest: length probe with null data and null output buffer */
+    let mut digest_mech = CK_MECHANISM {
+        mechanism: CKM_SHA256,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_digest_init(session, &mut digest_mech);
+    assert_eq!(ret, CKR_OK);
+
+    let mut dgst_len: CK_ULONG = 0;
+    let ret = fn_digest(
+        session,
+        std::ptr::null_mut(),
+        16,
+        std::ptr::null_mut(),
+        &mut dgst_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(dgst_len, 32);
+
+    /* Active operation was not terminated; proceed with digesting */
+    let mut digest = vec![0u8; dgst_len as usize];
+    let ret = fn_digest(
+        session,
+        byte_ptr!(data.as_slice()),
+        data.len() as CK_ULONG,
+        digest.as_mut_ptr(),
+        &mut dgst_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}

@@ -95,11 +95,8 @@ fn encrypt(
     let rstate = STATE.rlock()?;
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let mut operation = session.operations.get_operation::<dyn Encryption>()?;
-    if pdata.is_null() || pul_encrypted_data_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let dlen = usize::try_from(data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    if encrypted_data.is_null() {
+    if !pul_encrypted_data_len.is_null() && encrypted_data.is_null() {
         let encryption_len =
             CK_ULONG::try_from(operation.encryption_len(dlen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
@@ -107,6 +104,9 @@ fn encrypt(
             *pul_encrypted_data_len = encryption_len;
         }
         return operation.ok();
+    }
+    if pdata.is_null() || pul_encrypted_data_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     if operation.requires_login() {
         if !session.login_ok {
@@ -179,27 +179,32 @@ pub(crate) fn internal_encrypt_update(
     pul_encrypted_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let mut operation = session.operations.get_operation::<dyn Encryption>()?;
+    // On update we need at least the plaintext length to be available in order
+    // to calculate the required output buffer length, therefore to be well
+    // formed we need the whole plain text buffer to be valid.
     if part.is_null() || pul_encrypted_part_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
     let plen = usize::try_from(part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let len = if encrypted_part.is_null() {
-        operation.encryption_len(plen, false)?
-    } else {
-        if operation.requires_login() {
-            if !session.login_ok {
-                return Err(CKR_USER_NOT_LOGGED_IN)?;
-            }
-            operation.login_fulfilled();
-            session.login_ok = false;
+    if !pul_encrypted_part_len.is_null() && encrypted_part.is_null() {
+        let len = operation.encryption_len(plen, false)?;
+        let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
+        unsafe { *pul_encrypted_part_len = cklen };
+        return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
-        let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
-        let enclen = parse_len(penclen)?;
-        let data: &[u8] = bytes_to_slice(part, plen);
-        let encpart: &mut [u8] = bytes_to_slice_mut(encrypted_part, enclen)?;
-        let res = operation.encrypt_update(data, encpart);
-        operation.report_reqsize(res, pul_encrypted_part_len)?
-    };
+        operation.login_fulfilled();
+        session.login_ok = false;
+    }
+    let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
+    let enclen = parse_len(penclen)?;
+    let data: &[u8] = bytes_to_slice(part, plen);
+    let encpart: &mut [u8] = bytes_to_slice_mut(encrypted_part, enclen)?;
+    let res = operation.encrypt_update(data, encpart);
+    let len = operation.report_reqsize(res, pul_encrypted_part_len)?;
     let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     unsafe { *pul_encrypted_part_len = cklen };
     operation.ok()
@@ -264,10 +269,7 @@ fn encrypt_final(
     let rstate = STATE.rlock()?;
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let mut operation = session.operations.get_operation::<dyn Encryption>()?;
-    if pul_last_encrypted_part_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    if last_encrypted_part.is_null() {
+    if !pul_last_encrypted_part_len.is_null() && last_encrypted_part.is_null() {
         let encryption_len =
             CK_ULONG::try_from(operation.encryption_len(0, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
@@ -275,6 +277,9 @@ fn encrypt_final(
             *pul_last_encrypted_part_len = encryption_len;
         }
         return operation.ok();
+    }
+    if pul_last_encrypted_part_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     if operation.requires_login() {
         if !session.login_ok {
@@ -404,12 +409,9 @@ fn decrypt(
     let rstate = STATE.rlock()?;
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let mut operation = session.operations.get_operation::<dyn Decryption>()?;
-    if encrypted_data.is_null() || pul_data_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let elen =
         usize::try_from(encrypted_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    if data.is_null() {
+    if !pul_data_len.is_null() && data.is_null() {
         let decryption_len =
             CK_ULONG::try_from(operation.decryption_len(elen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
@@ -417,6 +419,9 @@ fn decrypt(
             *pul_data_len = decryption_len;
         }
         return operation.ok();
+    }
+    if encrypted_data.is_null() || pul_data_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     if operation.requires_login() {
         if !session.login_ok {
@@ -489,28 +494,33 @@ pub(crate) fn internal_decrypt_update(
     pul_part_len: CK_ULONG_PTR,
 ) -> Result<()> {
     let mut operation = session.operations.get_operation::<dyn Decryption>()?;
+    // On update we need at least the encrypted length to be available in order
+    // to calculate the required output buffer length, therefore to be well
+    // formed we need the whole encrypted buffer to be valid.
     if encrypted_part.is_null() || pul_part_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
     let elen =
         usize::try_from(encrypted_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    let len = if part.is_null() {
-        operation.decryption_len(elen, false)?
-    } else {
-        if operation.requires_login() {
-            if !session.login_ok {
-                return Err(CKR_USER_NOT_LOGGED_IN)?;
-            }
-            operation.login_fulfilled();
-            session.login_ok = false;
+    if !pul_part_len.is_null() && part.is_null() {
+        let len = operation.decryption_len(elen, false)?;
+        let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
+        unsafe { *pul_part_len = cklen };
+        return operation.ok();
+    }
+    if operation.requires_login() {
+        if !session.login_ok {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
         }
-        let pplen = unsafe { *pul_part_len as CK_ULONG };
-        let plen = parse_len(pplen)?;
-        let enc: &[u8] = bytes_to_slice(encrypted_part, elen);
-        let dpart: &mut [u8] = bytes_to_slice_mut(part, plen)?;
-        let res = operation.decrypt_update(enc, dpart);
-        operation.report_reqsize(res, pul_part_len)?
-    };
+        operation.login_fulfilled();
+        session.login_ok = false;
+    }
+    let pplen = unsafe { *pul_part_len as CK_ULONG };
+    let plen = parse_len(pplen)?;
+    let enc: &[u8] = bytes_to_slice(encrypted_part, elen);
+    let dpart: &mut [u8] = bytes_to_slice_mut(part, plen)?;
+    let res = operation.decrypt_update(enc, dpart);
+    let len = operation.report_reqsize(res, pul_part_len)?;
     let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     unsafe { *pul_part_len = cklen };
     operation.ok()
@@ -575,10 +585,7 @@ fn decrypt_final(
     let rstate = STATE.rlock()?;
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let mut operation = session.operations.get_operation::<dyn Decryption>()?;
-    if pul_last_part_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    if last_part.is_null() {
+    if !pul_last_part_len.is_null() && last_part.is_null() {
         let decryption_len =
             CK_ULONG::try_from(operation.decryption_len(0, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
@@ -586,6 +593,9 @@ fn decrypt_final(
             *pul_last_part_len = decryption_len;
         }
         return operation.ok();
+    }
+    if pul_last_part_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     if operation.requires_login() {
         if !session.login_ok {
@@ -724,19 +734,9 @@ fn encrypt_message(
         return Err(CKR_OPERATION_ACTIVE)?;
     }
 
-    if parameter.is_null()
-        || parameter_len == 0
-        || plaintext.is_null()
-        || pul_ciphertext_len.is_null()
-    {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-
-    let alen =
-        usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let plen = usize::try_from(plaintext_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
-    if ciphertext.is_null() {
+    if !pul_ciphertext_len.is_null() && ciphertext.is_null() {
         // A one-step C_EncryptMessage call is, by the msg_encryption_len
         // contract (see MsgEncryption::msg_encryption_len), equivalent to
         // a multi-part finalization -- pass final=true so mechanisms whose
@@ -751,6 +751,16 @@ fn encrypt_message(
         }
         return operation.ok();
     }
+    if parameter.is_null()
+        || parameter_len == 0
+        || plaintext.is_null()
+        || pul_ciphertext_len.is_null()
+    {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
+
+    let alen =
+        usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
     let clen = parse_len(pclen)?;
@@ -921,24 +931,15 @@ fn encrypt_message_next(
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
-    if parameter.is_null()
-        || parameter_len == 0
-        || plaintext_part.is_null()
-        || pul_ciphertext_part_len.is_null()
-    {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-
     let plen =
         usize::try_from(plaintext_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-
     let fin = match flags {
         CKF_END_OF_MESSAGE => true,
         0 => false,
         _ => return Err(CKR_ARGUMENTS_BAD)?,
     };
 
-    if ciphertext_part.is_null() {
+    if !pul_ciphertext_part_len.is_null() && ciphertext_part.is_null() {
         let retlen =
             CK_ULONG::try_from(operation.msg_encryption_len(plen, fin)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
@@ -946,6 +947,13 @@ fn encrypt_message_next(
             *pul_ciphertext_part_len = retlen;
         }
         return operation.ok();
+    }
+    if parameter.is_null()
+        || parameter_len == 0
+        || plaintext_part.is_null()
+        || pul_ciphertext_part_len.is_null()
+    {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
 
     let pclen = unsafe { *pul_ciphertext_part_len as CK_ULONG };
@@ -1133,20 +1141,10 @@ fn decrypt_message(
         return Err(CKR_OPERATION_ACTIVE)?;
     }
 
-    if parameter.is_null()
-        || parameter_len == 0
-        || ciphertext.is_null()
-        || pul_plaintext_len.is_null()
-    {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-
-    let alen =
-        usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
     let clen =
         usize::try_from(ciphertext_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
-    if plaintext.is_null() {
+    if !pul_plaintext_len.is_null() && plaintext.is_null() {
         // See the identical comment in encrypt_message: a one-step
         // C_DecryptMessage call is equivalent to a multi-part
         // finalization for the msg_decryption_len contract.
@@ -1158,6 +1156,16 @@ fn decrypt_message(
         }
         return operation.ok();
     }
+    if parameter.is_null()
+        || parameter_len == 0
+        || ciphertext.is_null()
+        || pul_plaintext_len.is_null()
+    {
+        return Err(CKR_ARGUMENTS_BAD)?;
+    }
+
+    let alen =
+        usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
     let plen = parse_len(pplen)?;
@@ -1328,24 +1336,15 @@ fn decrypt_message_next(
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
-    if parameter.is_null()
-        || parameter_len == 0
-        || ciphertext_part.is_null()
-        || pul_plaintext_part_len.is_null()
-    {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-
     let clen =
         usize::try_from(ciphertext_part_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-
     let fin = match flags {
         CKF_END_OF_MESSAGE => true,
         0 => false,
         _ => return Err(CKR_ARGUMENTS_BAD)?,
     };
 
-    if plaintext_part.is_null() {
+    if !pul_plaintext_part_len.is_null() && plaintext_part.is_null() {
         let retlen =
             CK_ULONG::try_from(operation.msg_decryption_len(clen, fin)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
@@ -1353,6 +1352,13 @@ fn decrypt_message_next(
             *pul_plaintext_part_len = retlen;
         }
         return operation.ok();
+    }
+    if parameter.is_null()
+        || parameter_len == 0
+        || ciphertext_part.is_null()
+        || pul_plaintext_part_len.is_null()
+    {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
 
     let pplen = unsafe { *pul_plaintext_part_len as CK_ULONG };
