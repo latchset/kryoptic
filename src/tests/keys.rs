@@ -643,11 +643,11 @@ fn test_ec_keys() {
     );
     assert_eq!(ret, CKR_OK);
 
-    /* length probe w/o authentication should succeed and keep op active */
+    /* length probe w/ null data & null signature w/o authentication should succeed and keep op active */
     let mut siglen: CK_ULONG = 0;
     let ret = fn_sign(
         session,
-        byte_ptr!(data),
+        std::ptr::null_mut(),
         data.len() as CK_ULONG,
         std::ptr::null_mut(),
         &mut siglen,
@@ -682,7 +682,7 @@ fn test_ec_keys() {
     let mut siglen: CK_ULONG = 0;
     let ret = fn_sign(
         session,
-        byte_ptr!(data),
+        std::ptr::null_mut(),
         data.len() as CK_ULONG,
         std::ptr::null_mut(),
         &mut siglen,

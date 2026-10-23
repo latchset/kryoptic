@@ -89,17 +89,18 @@ fn sign(
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
     let mut operation = session.operations.get_operation::<dyn Sign>()?;
-    if pdata.is_null() || pul_signature_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let signature_len = operation.signature_len()?;
     let sig_len =
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
-    if psignature.is_null() {
+    if !pul_signature_len.is_null() && psignature.is_null() {
         unsafe {
             *pul_signature_len = sig_len;
         }
         return operation.ok();
+    }
+
+    if pdata.is_null() || pul_signature_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     if operation.requires_login() {
         if !session.login_ok {
@@ -242,17 +243,18 @@ fn sign_final(
     let session = &mut *(rstate.get_session_mut(s_handle)?);
     let slot_id = session.get_slot_id();
     let mut operation = session.operations.get_operation::<dyn Sign>()?;
-    if pul_signature_len.is_null() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
     let signature_len = operation.signature_len()?;
     let sig_len =
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
-    if psignature.is_null() {
+    if !pul_signature_len.is_null() && psignature.is_null() {
         unsafe {
             *pul_signature_len = sig_len;
         }
         return operation.ok();
+    }
+
+    if pul_signature_len.is_null() {
+        return Err(CKR_ARGUMENTS_BAD)?;
     }
     if operation.requires_login() {
         if !session.login_ok {
