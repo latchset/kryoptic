@@ -8,6 +8,17 @@ Unreleased changes
 
 ### What Changed
 
+## [1.5.4]
+
+### What Changed
+
+* Added tool to create OTP tokens
+  - [Add kryoptic_otp CLI tool and TOTP
+     tests](https://github.com/latchset/kryoptic/pull/523)
+
+* fixed several correcteness bugs in cornder cases for various
+  AES ciphers and KDF operations
+
 
 ## [1.5.3]
 
@@ -341,3 +352,4 @@ that includes non public interfaces.
 [1.5.1]: https://github.com/latchset/kryoptic/releases/tag/v1.5.1
 [1.5.2]: https://github.com/latchset/kryoptic/releases/tag/v1.5.2
 [1.5.3]: https://github.com/latchset/kryoptic/releases/tag/v1.5.3
+[1.5.4]: https://github.com/latchset/kryoptic/releases/tag/v1.5.4
