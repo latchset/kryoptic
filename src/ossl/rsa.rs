@@ -17,6 +17,7 @@ use crate::ossl::common::{
     mech_type_to_digest_alg, osslctx, privkey_from_object, pubkey_from_object,
 };
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::asymcipher::{
     rsa_enc_params, EncAlg, EncOp, OsslAsymcipher, RsaOaepParams,
@@ -219,10 +220,8 @@ pub struct RsaPKCSOperation {
     max_input: usize,
     /// Expected output length (typically key size in bytes).
     output_len: usize,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     requires_login: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: Option<OsslSignature>,
@@ -308,8 +307,7 @@ impl RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: maxinput,
             output_len: keysize,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             requires_login: key.always_auth(),
             sigctx: None,
             encctx: Some(encctx),
@@ -380,8 +378,7 @@ impl RsaPKCSOperation {
             mech: mech.mechanism,
             max_input: maxinput,
             output_len: keysize,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             requires_login: key.always_auth(),
             sigctx: Some(sigctx),
             encctx: None,
@@ -565,7 +562,7 @@ impl MechOperation for RsaPKCSOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     fn requires_login(&self) -> bool {
         self.requires_login
@@ -581,10 +578,7 @@ impl MechOperation for RsaPKCSOperation {
 
 impl Encryption for RsaPKCSOperation {
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -601,11 +595,11 @@ impl Encryption for RsaPKCSOperation {
                 }
             }
 
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
 
             ctx.encrypt(plain, Some(cipher))?
         } else {
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
             return Err(CKR_GENERAL_ERROR)?;
         };
 
@@ -620,12 +614,12 @@ impl Encryption for RsaPKCSOperation {
         _plain: &[u8],
         _cipher: &mut [u8],
     ) -> Result<usize> {
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
     fn encrypt_final(&mut self, _cipher: &mut [u8]) -> Result<usize> {
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
@@ -639,10 +633,7 @@ impl Encryption for RsaPKCSOperation {
 
 impl Decryption for RsaPKCSOperation {
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -658,7 +649,7 @@ impl Decryption for RsaPKCSOperation {
             if plain.len() < outlen && plain.len() < self.output_len {
                 return Err(Error::buf_too_small(outlen));
             }
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
 
             if outlen > plain.len() {
                 /* the PKCS#11 documentation allows modules to pass
@@ -681,7 +672,7 @@ impl Decryption for RsaPKCSOperation {
             }
             outlen
         } else {
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
             return Err(CKR_GENERAL_ERROR)?;
         };
 
@@ -696,12 +687,12 @@ impl Decryption for RsaPKCSOperation {
         _cipher: &[u8],
         _plain: &mut [u8],
     ) -> Result<usize> {
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
     fn decrypt_final(&mut self, _plain: &mut [u8]) -> Result<usize> {
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
 
@@ -715,10 +706,7 @@ impl Decryption for RsaPKCSOperation {
 
 impl Sign for RsaPKCSOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
@@ -726,7 +714,7 @@ impl Sign for RsaPKCSOperation {
                 #[cfg(feature = "fips")]
                 self.fips_approval.clear();
 
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 if match self.mech {
                     CKM_RSA_X_509 | CKM_RSA_PKCS => data.len() > self.max_input,
                     CKM_RSA_PKCS_PSS => data.len() != self.max_input,
@@ -760,17 +748,21 @@ impl Sign for RsaPKCSOperation {
     }
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
-            match self.mech {
-                CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
-                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-                }
-                _ => (),
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
             }
-            self.in_use = true;
+            OpIntState::Updated => (),
+            OpIntState::Initialized => {
+                match self.mech {
+                    CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                        self.state = OpIntState::Finalized;
+                        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                    }
+                    _ => (),
+                }
+                self.state = OpIntState::Updated;
+            }
         }
 
         #[cfg(feature = "fips")]
@@ -789,13 +781,21 @@ impl Sign for RsaPKCSOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => self.state = OpIntState::Finalized,
+            OpIntState::Initialized => {
+                self.state = OpIntState::Finalized;
+                match self.mech {
+                    CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                    }
+                    _ => (),
+                }
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.finalized = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -827,10 +827,7 @@ impl RsaPKCSOperation {
         data: &[u8],
         signature: Option<&[u8]>,
     ) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -839,7 +836,7 @@ impl RsaPKCSOperation {
                 #[cfg(feature = "fips")]
                 self.fips_approval.clear();
 
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 if data.len() > self.max_input {
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
@@ -868,17 +865,21 @@ impl RsaPKCSOperation {
 
     /// Internal helper for updating a multi-part verification.
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
-            match self.mech {
-                CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
-                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-                }
-                _ => (),
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
             }
-            self.in_use = true;
+            OpIntState::Updated => (),
+            OpIntState::Initialized => {
+                match self.mech {
+                    CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                        self.state = OpIntState::Finalized;
+                        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                    }
+                    _ => (),
+                }
+                self.state = OpIntState::Updated;
+            }
         }
 
         #[cfg(feature = "fips")]
@@ -898,13 +899,21 @@ impl RsaPKCSOperation {
 
     /// Internal helper for the final step of multi-part verification.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => self.state = OpIntState::Finalized,
+            OpIntState::Initialized => {
+                self.state = OpIntState::Finalized;
+                match self.mech {
+                    CKM_RSA_X_509 | CKM_RSA_PKCS | CKM_RSA_PKCS_PSS => {
+                        return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                    }
+                    _ => (),
+                }
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.finalized = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();

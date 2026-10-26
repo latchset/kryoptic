@@ -4164,3 +4164,126 @@ fn test_final_null_len_arguments_bad() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_aes_finalize_without_updates() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_finalize_without_updates", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    // 1. AES CBC_PAD: should allow finalize without update, producing 1 full block of padding
+    let iv = [0u8; 16];
+    let mut mech_cbc_pad = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    assert_eq!(fn_encrypt_init(session, &mut mech_cbc_pad, handle), CKR_OK);
+    let ct = ret_or_panic!(encrypt_final(session));
+    assert_eq!(ct.len(), AES_BLOCK_SIZE);
+    // Decrypting the 16-byte padding block should yield empty plaintext
+    let pt = ret_or_panic!(decrypt(session, handle, &ct, &mech_cbc_pad));
+    assert_eq!(pt.len(), 0);
+
+    // 2. AES GCM: should allow finalize without update, producing the tag
+    let iv_gcm = [0u8; 12];
+    let aad = b"AAD";
+    let tag_len = 16usize;
+    let param_gcm = CK_GCM_PARAMS {
+        pIv: byte_ptr!(iv_gcm.as_ptr()),
+        ulIvLen: iv_gcm.len() as CK_ULONG,
+        ulIvBits: (iv_gcm.len() * 8) as CK_ULONG,
+        pAAD: byte_ptr!(aad.as_ptr()),
+        ulAADLen: aad.len() as CK_ULONG,
+        ulTagBits: (tag_len * 8) as CK_ULONG,
+    };
+    let mut mech_gcm = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: void_ptr!(&param_gcm),
+        ulParameterLen: sizeof!(CK_GCM_PARAMS),
+    };
+    assert_eq!(fn_encrypt_init(session, &mut mech_gcm, handle), CKR_OK);
+    let ct_gcm = ret_or_panic!(encrypt_final(session));
+    assert_eq!(ct_gcm.len(), tag_len);
+    // Decrypting with GCM should succeed and yield empty plaintext
+    let pt_gcm = ret_or_panic!(decrypt(session, handle, &ct_gcm, &mech_gcm));
+    assert_eq!(pt_gcm.len(), 0);
+
+    // 3. AES CCM:
+    // With ulDataLen == 0: should allow finalize without update, producing the MAC tag
+    let nonce_ccm = [0u8; 12];
+    let mut param_ccm_0 = CK_CCM_PARAMS {
+        ulDataLen: 0,
+        pNonce: byte_ptr!(nonce_ccm.as_ptr()),
+        ulNonceLen: nonce_ccm.len() as CK_ULONG,
+        pAAD: byte_ptr!(aad.as_ptr()),
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mut mech_ccm_0 = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: void_ptr!(&mut param_ccm_0),
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+    assert_eq!(fn_encrypt_init(session, &mut mech_ccm_0, handle), CKR_OK);
+    let ct_ccm = ret_or_panic!(encrypt_final(session));
+    assert_eq!(ct_ccm.len(), tag_len);
+    // Decrypting with CCM should succeed and yield empty plaintext
+    let pt_ccm = ret_or_panic!(decrypt(session, handle, &ct_ccm, &mech_ccm_0));
+    assert_eq!(pt_ccm.len(), 0);
+
+    // With ulDataLen > 0: finalize without update must fail with CKR_DATA_LEN_RANGE
+    let mut param_ccm_16 = CK_CCM_PARAMS {
+        ulDataLen: 16,
+        pNonce: byte_ptr!(nonce_ccm.as_ptr()),
+        ulNonceLen: nonce_ccm.len() as CK_ULONG,
+        pAAD: byte_ptr!(aad.as_ptr()),
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mut mech_ccm_16 = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: void_ptr!(&mut param_ccm_16),
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+    assert_eq!(fn_encrypt_init(session, &mut mech_ccm_16, handle), CKR_OK);
+    let mut out = [0u8; 32];
+    let mut out_len: CK_ULONG = out.len() as CK_ULONG;
+    assert_eq!(
+        fn_encrypt_final(session, out.as_mut_ptr(), &mut out_len),
+        CKR_DATA_LEN_RANGE
+    );
+
+    // 4. Other modes (AES-CBC without padding, AES-ECB, AES-CTR) must NOT finalize without updates
+    let mut mech_cbc = CK_MECHANISM {
+        mechanism: CKM_AES_CBC,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    assert_eq!(fn_encrypt_init(session, &mut mech_cbc, handle), CKR_OK);
+    let ret = encrypt_final(session);
+    assert_eq!(ret.unwrap_err().rv(), CKR_OPERATION_NOT_INITIALIZED);
+
+    let mut mech_ecb = CK_MECHANISM {
+        mechanism: CKM_AES_ECB,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    assert_eq!(fn_encrypt_init(session, &mut mech_ecb, handle), CKR_OK);
+    let ret = encrypt_final(session);
+    assert_eq!(ret.unwrap_err().rv(), CKR_OPERATION_NOT_INITIALIZED);
+
+    testtokn.finalize();
+}

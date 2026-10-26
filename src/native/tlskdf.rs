@@ -14,6 +14,8 @@ use crate::misc::{
 };
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
+
 use std::fmt::Debug;
 use std::sync::LazyLock;
 
@@ -163,10 +165,10 @@ pub fn test_tlsprf(
 /// `CKM_TLS12_KEY_AND_MAC_DERIVE`, and `CKM_TLS_KDF`.
 #[derive(Debug)]
 pub struct TLSKDFOperation {
-    /// Tracks if the derive operation has been completed
-    finalized: bool,
     /// The specific PKCS#11 TLS KDF mechanism being used
     mech: CK_MECHANISM_TYPE,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// Client random bytes.
     client_random: Vec<u8>,
     /// Server random bytes.
@@ -273,8 +275,8 @@ impl TLSKDFOperation {
         };
 
         Ok(TLSKDFOperation {
-            finalized: false,
             mech: mech.mechanism,
+            state: OpIntState::Initialized,
             client_random: Vec::new(),
             server_random: Vec::new(),
             session_hash: session_hash,
@@ -334,8 +336,8 @@ impl TLSKDFOperation {
         };
 
         Ok(TLSKDFOperation {
-            finalized: false,
             mech: mech.mechanism,
+            state: OpIntState::Initialized,
             client_random: clirand,
             server_random: srvrand,
             session_hash: Vec::new(),
@@ -399,8 +401,8 @@ impl TLSKDFOperation {
         }
 
         Ok(TLSKDFOperation {
-            finalized: false,
             mech: mech.mechanism,
+            state: OpIntState::Initialized,
             client_random: clirand,
             server_random: srvrand,
             session_hash: Vec::new(),
@@ -454,8 +456,8 @@ impl TLSKDFOperation {
         };
 
         Ok(TLSKDFOperation {
-            finalized: false,
             mech: mech.mechanism,
+            state: OpIntState::Initialized,
             client_random: clirand,
             server_random: srvrand,
             session_hash: Vec::new(),
@@ -870,7 +872,7 @@ impl MechOperation for TLSKDFOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -890,10 +892,10 @@ impl Derive for TLSKDFOperation {
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         match self.mech {
             CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE
@@ -928,8 +930,7 @@ static MAC_MECHANISMS: LazyLock<Mechanisms> = LazyLock::new(|| {
 #[derive(Debug)]
 pub struct TLSMACOperation {
     mech: CK_MECHANISM_TYPE,
-    finalized: bool,
-    in_use: bool,
+    state: OpIntState,
     outputlen: usize,
     seed: Vec<u8>,
     tlsprf: TLSPRF,
@@ -969,8 +970,7 @@ impl TLSMACOperation {
 
         Ok(TLSMACOperation {
             mech: mech.mechanism,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             outputlen: maclen,
             seed: label.to_vec(),
             tlsprf: TLSPRF::init(key, mac, prf)?,
@@ -981,7 +981,7 @@ impl TLSMACOperation {
 
     /// Internal helper to check state before starting/updating
     fn begin(&mut self) -> Result<()> {
-        if self.in_use {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
@@ -989,23 +989,20 @@ impl TLSMACOperation {
 
     /// Internal helper to update the data being MAC'd
     fn update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
         self.seed.extend_from_slice(data);
         Ok(())
     }
 
     /// Internal helper to finalize the MAC calculation
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
-        if self.finalized {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         if output.len() != self.outputlen {
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -1023,7 +1020,7 @@ impl MechOperation for TLSMACOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     #[cfg(feature = "fips")]

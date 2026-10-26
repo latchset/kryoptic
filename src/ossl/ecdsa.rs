@@ -14,6 +14,7 @@ use crate::misc::zeromem;
 use crate::object::Object;
 use crate::ossl::common::*;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 #[cfg(feature = "fips")]
 use crate::fips::FipsApproval;
@@ -155,10 +156,8 @@ pub struct EcdsaOperation {
     mech: CK_MECHANISM_TYPE,
     /// Expected output length of the signature in bytes (2 * field size).
     output_len: usize,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress.
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     requires_login: bool,
     /// The OpenSSL Wrapper Signature Context
     sigctx: OsslSignature,
@@ -210,8 +209,7 @@ impl EcdsaOperation {
         Ok(EcdsaOperation {
             mech: mech.mechanism,
             output_len: output_len,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             requires_login: key.always_auth(),
             sigctx: sigctx,
             #[cfg(feature = "fips")]
@@ -294,7 +292,7 @@ impl MechOperation for EcdsaOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     fn requires_login(&self) -> bool {
@@ -313,14 +311,11 @@ impl MechOperation for EcdsaOperation {
 
 impl Sign for EcdsaOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_ECDSA {
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
             if signature.len() != self.output_len {
                 return Err(CKR_SIGNATURE_LEN_RANGE)?;
             }
@@ -344,13 +339,20 @@ impl Sign for EcdsaOperation {
     }
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.mech == CKM_ECDSA {
-            self.finalized = true;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => (),
+            OpIntState::Initialized => {
+                /* CKM_ECDSA is single-part only */
+                if self.mech == CKM_ECDSA {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                self.state = OpIntState::Updated;
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.in_use = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -366,16 +368,24 @@ impl Sign for EcdsaOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => self.state = OpIntState::Finalized,
+            OpIntState::Initialized => {
+                /* CKM_ECDSA is single-part only */
+                if self.mech == CKM_ECDSA {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                self.state = OpIntState::Finalized;
+            }
         }
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         let mut sig = vec![0u8; signature.len() + 10];
 
@@ -408,14 +418,11 @@ impl EcdsaOperation {
         data: &[u8],
         signature: Option<&[u8]>,
     ) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if self.mech == CKM_ECDSA {
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
             if let Some(s) = &signature {
                 if s.len() != self.output_len {
                     return Err(CKR_SIGNATURE_LEN_RANGE)?;
@@ -456,13 +463,20 @@ impl EcdsaOperation {
 
     /// Internal helper for updating a multi-part verification.
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.mech == CKM_ECDSA {
-            self.finalized = true;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => (),
+            OpIntState::Initialized => {
+                /* CKM_ECDSA is single-part only */
+                if self.mech == CKM_ECDSA {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                self.state = OpIntState::Updated;
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.in_use = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -479,13 +493,20 @@ impl EcdsaOperation {
 
     /// Internal helper for the final step of multi-part verification.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => self.state = OpIntState::Finalized,
+            OpIntState::Initialized => {
+                /* CKM_ECDSA is single-part only */
+                if self.mech == CKM_ECDSA {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                self.state = OpIntState::Finalized;
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.finalized = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();

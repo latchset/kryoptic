@@ -14,6 +14,7 @@ use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::derive::FfdhDerive;
 use ossl::pkey::{EvpPkey, EvpPkeyType, FfdhData, PkeyData};
@@ -83,8 +84,8 @@ pub struct FFDHOperation {
     mech: CK_MECHANISM_TYPE,
     /// Peer's public key point data.
     public: Vec<u8>,
-    /// Flag indicating if the derivation has been finalized.
-    finalized: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
 }
 
 impl FFDHOperation {
@@ -98,7 +99,7 @@ impl FFDHOperation {
         }
 
         Ok(FFDHOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             mech: mechanism,
             public: peerpub,
         })
@@ -149,7 +150,7 @@ impl MechOperation for FFDHOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -161,10 +162,10 @@ impl Derive for FFDHOperation {
         _mechanism: &Mechanisms,
         objectfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         let factory =
             objectfactories.get_obj_factory_from_key_template(template)?;

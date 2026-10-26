@@ -30,6 +30,7 @@ use crate::misc::{bytes_to_vec, common_derive_key_object, zeromem};
 use crate::native::hmac::HMACOperation;
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 /// Object that holds the Mechanism for the IKE-derive family
 static IKE_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
@@ -108,13 +109,13 @@ fn prf(
     hmac.mac_final(out)
 }
 
-/// Shared setup for every IKE derive operation: checks and sets `finalized`,
+/// Shared setup for every IKE derive operation: checks and sets `state`,
 /// validates the input key against the PRF mechanism, and calls
 /// `common_derive_key_object`. If `default_key_type` is `Some`, adds it to
 /// the template as a missing `CKA_KEY_TYPE` default before key object
 /// creation. Returns the partially-constructed output object and key size.
 fn ike_derive_setup(
-    finalized: &mut bool,
+    state: &mut OpIntState,
     prf_mech: CK_MECHANISM_TYPE,
     key: &Object,
     template: &[CK_ATTRIBUTE],
@@ -122,10 +123,10 @@ fn ike_derive_setup(
     default_len: usize,
     default_key_type: Option<CK_KEY_TYPE>,
 ) -> Result<(Object, usize)> {
-    if *finalized {
+    if *state == OpIntState::Finalized {
         return Err(CKR_OPERATION_NOT_INITIALIZED)?;
     }
-    *finalized = true;
+    *state = OpIntState::Finalized;
     if let Some(kt) = default_key_type {
         let default_class = CKO_SECRET_KEY;
         let mut tmpl = CkAttrs::from(template);
@@ -231,7 +232,7 @@ fn check_ni_nr(
 /// exactly one PRF block long, regardless of any requested length.
 #[derive(Debug)]
 struct IkePrfOperation {
-    finalized: bool,
+    state: OpIntState,
     prf: CK_MECHANISM_TYPE,
     prf_len: usize,
     data_as_key: bool,
@@ -257,7 +258,7 @@ impl IkePrfOperation {
             CK_INVALID_HANDLE
         };
         Ok(IkePrfOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             prf: params.prfMechanism,
             prf_len: prf_len(params.prfMechanism)?,
             data_as_key,
@@ -290,7 +291,7 @@ impl MechOperation for IkePrfOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
@@ -334,7 +335,7 @@ impl Derive for IkePrfOperation {
 
         let default_key_type = prf_key_type(self.prf)?;
         let (mut obj, keysize) = ike_derive_setup(
-            &mut self.finalized,
+            &mut self.state,
             self.prf,
             key,
             template,
@@ -383,7 +384,7 @@ impl Derive for IkePrfOperation {
 /// block.
 #[derive(Debug)]
 struct Ike1PrfOperation {
-    finalized: bool,
+    state: OpIntState,
     prf: CK_MECHANISM_TYPE,
     prf_len: usize,
     // handles[0] = hKeygxy; handles[1] = hPrevKey or CK_INVALID_HANDLE
@@ -410,7 +411,7 @@ impl Ike1PrfOperation {
             CK_INVALID_HANDLE
         };
         Ok(Ike1PrfOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             prf: params.prfMechanism,
             prf_len: prf_len(params.prfMechanism)?,
             handles: [params.hKeygxy, prev_handle],
@@ -446,7 +447,7 @@ impl MechOperation for Ike1PrfOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
@@ -494,7 +495,7 @@ impl Derive for Ike1PrfOperation {
         }
 
         let (mut obj, keysize) = ike_derive_setup(
-            &mut self.finalized,
+            &mut self.state,
             self.prf,
             key,
             template,
@@ -542,7 +543,7 @@ impl Derive for Ike1PrfOperation {
 /// there is no PRF-derived default length -- the caller must request one.
 #[derive(Debug)]
 struct Ike1ExtendedOperation {
-    finalized: bool,
+    state: OpIntState,
     prf: CK_MECHANISM_TYPE,
     prf_len: usize,
     keygxy_handle: CK_OBJECT_HANDLE,
@@ -562,7 +563,7 @@ impl Ike1ExtendedOperation {
             CK_INVALID_HANDLE
         };
         Ok(Ike1ExtendedOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             prf: params.prfMechanism,
             prf_len: prf_len(params.prfMechanism)?,
             keygxy_handle,
@@ -589,7 +590,7 @@ impl MechOperation for Ike1ExtendedOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
@@ -624,7 +625,7 @@ impl Derive for Ike1ExtendedOperation {
         // §6.64.6: K must be the specific HMAC type (generic secret excluded).
         require_prf_base_key_type(self.prf, key)?;
         let (mut obj, keysize) = ike_derive_setup(
-            &mut self.finalized,
+            &mut self.state,
             self.prf,
             key,
             template,
@@ -699,7 +700,7 @@ impl Derive for Ike1ExtendedOperation {
 /// Like `CKM_IKE1_EXTENDED_DERIVE` there is no PRF-derived default length.
 #[derive(Debug)]
 struct Ike2PrfPlusOperation {
-    finalized: bool,
+    state: OpIntState,
     prf: CK_MECHANISM_TYPE,
     prf_len: usize,
     seed_key_handle: CK_OBJECT_HANDLE,
@@ -723,7 +724,7 @@ impl Ike2PrfPlusOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(Ike2PrfPlusOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             prf: params.prfMechanism,
             prf_len: prf_len(params.prfMechanism)?,
             seed_key_handle,
@@ -750,7 +751,7 @@ impl MechOperation for Ike2PrfPlusOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     fn requires_objects(&self) -> Result<&[CK_OBJECT_HANDLE]> {
@@ -781,7 +782,7 @@ impl Derive for Ike2PrfPlusOperation {
         // §6.64.7: base key must be the specific HMAC type (generic secret excluded).
         require_prf_base_key_type(self.prf, key)?;
         let (mut obj, keysize) = ike_derive_setup(
-            &mut self.finalized,
+            &mut self.state,
             self.prf,
             key,
             template,

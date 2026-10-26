@@ -20,6 +20,7 @@ use crate::misc::{bytes_to_slice, zeromem};
 use crate::object::*;
 use crate::ossl::aes::*;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 /// Smallest AES Key Size (128 bits)
 pub const MIN_AES_SIZE_BYTES: usize = 16; /* 128 bits */
@@ -536,7 +537,7 @@ impl Mechanism for AesMechanism {
 #[derive(Debug)]
 struct AesKDFOperation<'a> {
     mech: CK_MECHANISM_TYPE,
-    finalized: bool,
+    state: OpIntState,
     iv: Vec<u8>,
     data: &'a [u8],
     #[cfg(feature = "fips")]
@@ -566,7 +567,7 @@ impl AesKDFOperation<'_> {
         }
         Ok(AesKDFOperation {
             mech: CKM_AES_ECB,
-            finalized: false,
+            state: OpIntState::Initialized,
             iv: Vec::new(),
             data: bytes_to_slice(params.pData, usize::try_from(params.ulLen)?),
             #[cfg(feature = "fips")]
@@ -586,7 +587,7 @@ impl AesKDFOperation<'_> {
         }
         Ok(AesKDFOperation {
             mech: CKM_AES_CBC,
-            finalized: false,
+            state: OpIntState::Initialized,
             /* params is a local copy, so the IV must be copied too */
             iv: params.iv.to_vec(),
             data: bytes_to_slice(params.pData, usize::try_from(params.length)?),
@@ -602,7 +603,7 @@ impl MechOperation for AesKDFOperation<'_> {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -615,10 +616,10 @@ impl Derive for AesKDFOperation<'_> {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DERIVE)?;
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;

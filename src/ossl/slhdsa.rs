@@ -15,6 +15,7 @@ use crate::misc::bytes_to_vec;
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use asn1;
 use bitflags::bitflags;
@@ -263,10 +264,8 @@ impl SlhDsaParams {
 pub struct SlhDsaOperation {
     /// The specific SLH-DSA mechanism being used.
     mech: CK_MECHANISM_TYPE,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     requires_login: bool,
     /// Parsed SLH-DSA parameters for this operation instance.
     params: SlhDsaParams,
@@ -289,7 +288,7 @@ impl MechOperation for SlhDsaOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 
     fn requires_login(&self) -> bool {
@@ -357,8 +356,7 @@ impl SlhDsaOperation {
 
         let mut op = SlhDsaOperation {
             mech: mech.mechanism,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             requires_login: key.always_auth(),
             params: params,
             sigctx: sigctx,
@@ -549,15 +547,12 @@ impl SlhDsaOperation {
         data: &[u8],
         signature: Option<&[u8]>,
     ) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
             CKM_HASH_SLH_DSA => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
 
                 /* For CKM_HASH_SLH_DSA the data is the hash! */
                 if data.len() != self.hashsize {
@@ -582,11 +577,19 @@ impl SlhDsaOperation {
     /// Internal helper for updating a multi-part verification.
     /// Handles data buffering.
     fn verify_int_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
-            self.in_use = true;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => (),
+            OpIntState::Initialized => {
+                /* CKM_HASH_SLH_DSA is single-part only */
+                if self.mech == CKM_HASH_SLH_DSA {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                self.state = OpIntState::Updated;
+            }
         }
 
         #[cfg(feature = "fips")]
@@ -596,15 +599,10 @@ impl SlhDsaOperation {
             CKM_SLH_DSA => match self.sigctx.update(data) {
                 Ok(()) => (),
                 Err(e) => {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(e)?;
                 }
             },
-            CKM_HASH_SLH_DSA => {
-                /* CKM_HASH_SLH_DSA is single-part only */
-                self.finalized = true;
-                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-            }
             CKM_HASH_SLH_DSA_SHA224
             | CKM_HASH_SLH_DSA_SHA256
             | CKM_HASH_SLH_DSA_SHA384
@@ -626,14 +624,19 @@ impl SlhDsaOperation {
     /// Computes M' if necessary and performs the final OpenSSL verification
     /// call.
     fn verify_int_final(&mut self, signature: Option<&[u8]>) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => self.state = OpIntState::Finalized,
+            OpIntState::Initialized => {
+                self.state = OpIntState::Finalized;
+                /* CKM_HASH_SLH_DSA is single-part only */
+                if self.mech == CKM_HASH_SLH_DSA {
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-
-        self.finalized = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -664,15 +667,12 @@ impl SlhDsaOperation {
 
 impl Sign for SlhDsaOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
-        if self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
             CKM_HASH_SLH_DSA => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
 
                 /* For CKM_HASH_SLH_DSA the data is the hash! */
                 if data.len() != self.hashsize {
@@ -698,11 +698,19 @@ impl Sign for SlhDsaOperation {
     }
 
     fn sign_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
-            self.in_use = true;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => (),
+            OpIntState::Initialized => {
+                /* CKM_HASH_SLH_DSA is single-part only */
+                if self.mech == CKM_HASH_SLH_DSA {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+                self.state = OpIntState::Updated;
+            }
         }
 
         #[cfg(feature = "fips")]
@@ -712,15 +720,10 @@ impl Sign for SlhDsaOperation {
             CKM_SLH_DSA => match self.sigctx.update(data) {
                 Ok(()) => (),
                 Err(e) => {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(e)?;
                 }
             },
-            CKM_HASH_SLH_DSA => {
-                /* CKM_HASH_SLH_DSA is single-part only */
-                self.finalized = true;
-                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-            }
             CKM_HASH_SLH_DSA_SHA224
             | CKM_HASH_SLH_DSA_SHA256
             | CKM_HASH_SLH_DSA_SHA384
@@ -739,13 +742,19 @@ impl Sign for SlhDsaOperation {
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
+            OpIntState::Updated => self.state = OpIntState::Finalized,
+            OpIntState::Initialized => {
+                self.state = OpIntState::Finalized;
+                /* CKM_HASH_SLH_DSA is single-part only */
+                if self.mech == CKM_HASH_SLH_DSA {
+                    return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+                }
+            }
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.finalized = true;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();

@@ -21,6 +21,7 @@ use crate::object::key::{
 use crate::object::otp::OTPKeyFactory;
 use crate::object::{Object, ObjectType};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 /// Object that holds HOTP Mechanisms
 pub(crate) static HOTP_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> =
@@ -394,7 +395,8 @@ pub struct HOTPOperation {
     key_handle: CK_OBJECT_HANDLE,
     length: usize,
     mac_len: usize,
-    finalized: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     update: Option<bool>,
 }
 
@@ -481,7 +483,7 @@ impl HOTPOperation {
             key_handle: key.get_handle(),
             length,
             mac_len,
-            finalized: false,
+            state: OpIntState::Initialized,
             update: update,
         })
     }
@@ -520,24 +522,32 @@ impl MechOperation for HOTPOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
 impl Sign for HOTPOperation {
     fn sign(&mut self, data: &[u8], signature: &mut [u8]) -> Result<()> {
+        if self.state != OpIntState::Initialized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
         if data.len() != 0 {
+            self.state = OpIntState::Finalized;
             return Err(CKR_DATA_INVALID)?;
         }
         self.sign_final(signature)
     }
 
     fn sign_update(&mut self, _data: &[u8]) -> Result<()> {
+        if self.state == OpIntState::Finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.state = OpIntState::Finalized;
         Err(CKR_DATA_INVALID)?
     }
 
     fn sign_final(&mut self, signature: &mut [u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -549,7 +559,7 @@ impl Sign for HOTPOperation {
             return Err(Error::buf_too_small(total_size));
         }
 
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         let mut otp = vec![0u8; self.length];
         let counter = self.counter;
@@ -618,21 +628,29 @@ impl Sign for HOTPOperation {
 
 impl Verify for HOTPOperation {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> Result<()> {
+        if self.state != OpIntState::Initialized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
         if data.len() != 0 {
+            self.state = OpIntState::Finalized;
             return Err(CKR_DATA_INVALID)?;
         }
         self.verify_final(signature)
     }
 
     fn verify_update(&mut self, _data: &[u8]) -> Result<()> {
+        if self.state == OpIntState::Finalized {
+            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        self.state = OpIntState::Finalized;
         Err(CKR_DATA_INVALID)?
     }
 
     fn verify_final(&mut self, signature: &[u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         if signature.len() != self.length {
             return Err(CKR_SIGNATURE_LEN_RANGE)?;

@@ -14,6 +14,7 @@ use crate::misc::{bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, zeromem};
 use crate::object::Object;
 use crate::ossl::common::osslctx;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::cipher::{AeadParams, EncAlg, OsslCipher};
 use ossl::OsslSecret;
@@ -140,10 +141,8 @@ pub struct ChaChaOperation {
     /// [ChaChaOperation::msg_encrypt_new]/[msg_decrypt_new], each with its
     /// own nonce, while reusing the same key across the whole session.
     key: OsslSecret,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// The underlying ossl cipher context. `None` between
     /// `msg_encrypt_init`/`msg_decrypt_init` and the first
     /// `msg_encrypt_begin`/`msg_decrypt_begin` of a message-mode session.
@@ -210,8 +209,7 @@ impl ChaChaOperation {
             mech: mech.mechanism,
             op: CKF_ENCRYPT,
             key: chachakey,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: Some(ctx),
             buffer: Vec::new(),
         })
@@ -234,8 +232,7 @@ impl ChaChaOperation {
             mech: mech.mechanism,
             op: CKF_DECRYPT,
             key: chachakey,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: Some(ctx),
             buffer: Vec::new(),
         })
@@ -256,8 +253,7 @@ impl ChaChaOperation {
             mech: mech.mechanism,
             op: CKF_MESSAGE_ENCRYPT,
             key: object_to_raw_key(key)?,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: None,
             buffer: Vec::new(),
         })
@@ -276,8 +272,7 @@ impl ChaChaOperation {
             mech: mech.mechanism,
             op: CKF_MESSAGE_DECRYPT,
             key: object_to_raw_key(key)?,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: None,
             buffer: Vec::new(),
         })
@@ -328,7 +323,7 @@ impl ChaChaOperation {
         if self.op != CKF_MESSAGE_ENCRYPT {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if self.in_use {
+        if self.state == OpIntState::Updated {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
@@ -344,8 +339,7 @@ impl ChaChaOperation {
             &self.key,
             true,
         )?);
-        self.finalized = false;
-        self.in_use = true;
+        self.state = OpIntState::Updated;
         Ok(())
     }
 
@@ -360,7 +354,7 @@ impl ChaChaOperation {
         if self.op != CKF_MESSAGE_DECRYPT {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if self.in_use {
+        if self.state == OpIntState::Updated {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
@@ -376,13 +370,12 @@ impl ChaChaOperation {
             &self.key,
             false,
         )?);
-        self.finalized = false;
-        self.in_use = true;
+        self.state = OpIntState::Updated;
         Ok(())
     }
 
     fn op_err(&mut self, err: CK_RV) -> error::Error {
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         error::Error::ck_rv(err)
     }
 }
@@ -393,18 +386,16 @@ impl MechOperation for ChaChaOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
 impl Encryption for ChaChaOperation {
     /// One shot encryption implementation
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
+            self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.in_use {
-            return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
         }
         let outl = self.encrypt_update(plain, cipher)?;
         if outl > cipher.len() {
@@ -420,10 +411,10 @@ impl Encryption for ChaChaOperation {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         let outlen = self.encryption_len(plain.len(), false)?;
         if cipher.len() < outlen {
@@ -447,10 +438,8 @@ impl Encryption for ChaChaOperation {
     /// operation. For `CKM_CHACHA20_POLY1305` this returns the Poly1305
     /// tag; plain `CKM_CHACHA20` has no finalization output.
     fn encrypt_final(&mut self, cipher: &mut [u8]) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
+            self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -467,7 +456,7 @@ impl Encryption for ChaChaOperation {
                 }
                 let outlen = ctx.finalize(cipher)?;
                 if outlen != 0 {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(CKR_DEVICE_ERROR)?;
                 }
                 ctx.get_tag(&mut cipher[..POLY1305_TAG_SIZE])?;
@@ -475,12 +464,12 @@ impl Encryption for ChaChaOperation {
             }
             CKM_CHACHA20 => 0,
             _ => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 return Err(CKR_GENERAL_ERROR)?;
             }
         };
 
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         Ok(outlen)
     }
 
@@ -498,11 +487,9 @@ impl Encryption for ChaChaOperation {
 impl Decryption for ChaChaOperation {
     /// One shot decryption implementation
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
+            self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.in_use {
-            return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
         }
         let outl = self.decrypt_update(cipher, plain)?;
         if outl > plain.len() {
@@ -523,10 +510,10 @@ impl Decryption for ChaChaOperation {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         let outlen = match self.mech {
             CKM_CHACHA20 => cipher.len(),
@@ -564,7 +551,7 @@ impl Decryption for ChaChaOperation {
                         plain_offset = ctx
                             .update(self.buffer.as_slice(), plain)
                             .or_else(|_| {
-                                self.finalized = true;
+                                self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         zeromem(self.buffer.as_mut_slice());
@@ -581,7 +568,7 @@ impl Decryption for ChaChaOperation {
                                     plain,
                                 )
                                 .or_else(|_| {
-                                    self.finalized = true;
+                                    self.state = OpIntState::Finalized;
                                     Err(CKR_DEVICE_ERROR)
                                 })?;
                             zeromem(&mut self.buffer.as_mut_slice()[..buflen]);
@@ -609,7 +596,7 @@ impl Decryption for ChaChaOperation {
                     &mut plain[plain_offset..],
                 )
                 .or_else(|_| {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     Err(CKR_DEVICE_ERROR)
                 })?;
             plain_offset += outlen;
@@ -622,10 +609,8 @@ impl Decryption for ChaChaOperation {
     /// operation. For `CKM_CHACHA20_POLY1305` this verifies the buffered
     /// Poly1305 tag and returns any trailing plaintext.
     fn decrypt_final(&mut self, plain: &mut [u8]) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
+            self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -634,7 +619,7 @@ impl Decryption for ChaChaOperation {
             None => return Err(self.op_err(CKR_GENERAL_ERROR)),
         };
 
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         let outlen = 0;
         match self.mech {
@@ -692,13 +677,13 @@ impl Decryption for ChaChaOperation {
 
 impl MessageOperation for ChaChaOperation {
     fn busy(&self) -> bool {
-        self.in_use
+        self.state == OpIntState::Updated
     }
     fn finalize(&mut self) -> Result<()> {
-        if self.in_use {
+        if self.state == OpIntState::Updated {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         Ok(())
     }
 }
@@ -725,7 +710,7 @@ impl MsgEncryption for ChaChaOperation {
         paramlen: CK_ULONG,
         aad: &[u8],
     ) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.msg_encrypt_new(param, paramlen, aad)
@@ -741,10 +726,7 @@ impl MsgEncryption for ChaChaOperation {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if cipher.len() < plain.len() {
@@ -773,10 +755,7 @@ impl MsgEncryption for ChaChaOperation {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -799,7 +778,7 @@ impl MsgEncryption for ChaChaOperation {
             return Err(self.op_err(CKR_DEVICE_ERROR));
         }
 
-        self.in_use = false;
+        self.state = OpIntState::Initialized;
         Ok(outlen)
     }
 
@@ -810,7 +789,7 @@ impl MsgEncryption for ChaChaOperation {
         data_len: usize,
         _fin: bool,
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(data_len)
@@ -839,7 +818,7 @@ impl MsgDecryption for ChaChaOperation {
         paramlen: CK_ULONG,
         aad: &[u8],
     ) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         self.msg_decrypt_new(param, paramlen, aad)
@@ -855,10 +834,7 @@ impl MsgDecryption for ChaChaOperation {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if plain.len() < cipher.len() {
@@ -887,10 +863,7 @@ impl MsgDecryption for ChaChaOperation {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -905,24 +878,24 @@ impl MsgDecryption for ChaChaOperation {
         };
 
         ctx.set_tag(tag).or_else(|_| {
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
             Err(CKR_DEVICE_ERROR)
         })?;
 
         match ctx.finalize(&mut plain[outlen..]) {
             Ok(len) => {
                 if len != 0 {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(CKR_DEVICE_ERROR)?;
                 }
             }
             Err(_) => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 return Err(CKR_ENCRYPTED_DATA_INVALID)?;
             }
         }
 
-        self.in_use = false;
+        self.state = OpIntState::Initialized;
         Ok(outlen)
     }
 
@@ -933,7 +906,7 @@ impl MsgDecryption for ChaChaOperation {
         data_len: usize,
         _fin: bool,
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(data_len)

@@ -12,6 +12,7 @@ use crate::hmac::*;
 use crate::mechanism::*;
 use crate::misc::zeromem;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use constant_time_eq::constant_time_eq;
 
@@ -69,17 +70,15 @@ pub struct HMACOperation {
     /// The request HMAC output length
     outputlen: usize,
     /// Internal state buffer
-    state: [u8; MAX_BSZ],
+    hstate: [u8; MAX_BSZ],
     /// Inner pad buffer
     ipad: [u8; MAX_BSZ],
     /// Outer pad buffer
     opad: [u8; MAX_BSZ],
     /// The digest 'inner' operation
     inner: Box<dyn Digest>,
-    /// Flag that marks the operation as finalized
-    finalized: bool,
-    /// Flag that marks that the operation has started
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     requires_login: bool,
     /// Optional signature holding vector
     ///
@@ -91,7 +90,7 @@ pub struct HMACOperation {
 impl Drop for HMACOperation {
     fn drop(&mut self) {
         zeromem(self.key.as_mut_slice());
-        zeromem(&mut self.state);
+        zeromem(&mut self.hstate);
         zeromem(&mut self.ipad);
         zeromem(&mut self.opad);
     }
@@ -110,12 +109,11 @@ impl HMACOperation {
             hashlen: hash::hash_size(hash),
             blocklen: hash::block_size(hash),
             outputlen: outputlen,
-            state: [0u8; MAX_BSZ],
+            hstate: [0u8; MAX_BSZ],
             ipad: IPAD_INIT,
             opad: OPAD_INIT,
             inner: hash::internal_hash_op(hash)?,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             requires_login: false,
             signature: None,
         };
@@ -165,7 +163,7 @@ impl HMACOperation {
 
         let hash = hmac_mech_to_hash_mech(mech)?;
         op.inner = hash::internal_hash_restore_op(hash, save_state.dgst_state)?;
-        op.in_use = true;
+        op.state = OpIntState::Updated;
         Ok(op)
     }
 
@@ -177,19 +175,21 @@ impl HMACOperation {
     fn init(&mut self) -> Result<()> {
         /* K0 */
         if self.key.len() <= self.blocklen {
-            self.state[0..self.key.len()].copy_from_slice(self.key.as_slice());
+            self.hstate[0..self.key.len()].copy_from_slice(self.key.as_slice());
         } else {
-            self.inner
-                .digest(self.key.as_slice(), &mut self.state[..self.hashlen])?;
+            self.inner.digest(
+                self.key.as_slice(),
+                &mut self.hstate[..self.hashlen],
+            )?;
         }
         let ipad = &mut self.ipad[..self.blocklen];
         let opad = &mut self.opad[..self.blocklen];
-        let state = &self.state[..self.blocklen];
+        let hstate = &self.hstate[..self.blocklen];
         for i in 0..self.blocklen {
             /* K0 ^ ipad */
-            ipad[i] ^= state[i];
+            ipad[i] ^= hstate[i];
             /* K0 ^ opad */
-            opad[i] ^= state[i];
+            opad[i] ^= hstate[i];
         }
         /* H((K0 ^ ipad) || .. ) */
         self.inner.reset()?;
@@ -200,7 +200,7 @@ impl HMACOperation {
 
     /// Marks that the operation has commenced
     fn begin(&mut self) -> Result<()> {
-        if self.in_use {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
@@ -208,15 +208,15 @@ impl HMACOperation {
 
     /// Feeds data into the HMAC algorithm
     fn update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         /* H( .. || text ..) */
         let ret = self.inner.digest_update(data);
         if ret.is_err() {
-            self.finalized = true;
+            self.state = OpIntState::Finalized;
         }
 
         ret
@@ -224,40 +224,38 @@ impl HMACOperation {
 
     /// Finalizes the HMAC operation and produces the HMAC output
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         /* It is valid to finalize without any update */
-        self.in_use = true;
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         if output.len() != self.outputlen {
             return Err(CKR_GENERAL_ERROR)?;
         }
 
         /* state = H((K0 ^ ipad) || text) */
-        self.inner.digest_final(&mut self.state[..self.hashlen])?;
+        self.inner.digest_final(&mut self.hstate[..self.hashlen])?;
 
         /* state = H((K0 ^ opad) || H((K0 ^ ipad) || text)) */
         self.inner.reset()?;
         self.inner.digest_update(&self.opad[..self.blocklen])?;
-        self.inner.digest_update(&self.state[..self.hashlen])?;
-        self.inner.digest_final(&mut self.state[..self.hashlen])?;
+        self.inner.digest_update(&self.hstate[..self.hashlen])?;
+        self.inner.digest_final(&mut self.hstate[..self.hashlen])?;
 
         /* state -> output */
-        output.copy_from_slice(&self.state[..output.len()]);
+        output.copy_from_slice(&self.hstate[..output.len()]);
 
         Ok(())
     }
 
     /// Reinitializes an HMAC Operation
     fn reinit(&mut self) -> Result<()> {
-        zeromem(&mut self.state);
+        zeromem(&mut self.hstate);
         self.ipad.copy_from_slice(&IPAD_INIT);
         self.opad.copy_from_slice(&OPAD_INIT);
         self.inner.reset()?;
-        self.finalized = false;
-        self.in_use = false;
+        self.state = OpIntState::Initialized;
         self.init()
     }
 }
@@ -268,7 +266,7 @@ impl MechOperation for HMACOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     fn requires_login(&self) -> bool {
         self.requires_login

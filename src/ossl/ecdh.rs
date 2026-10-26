@@ -14,6 +14,7 @@ use crate::misc::{bytes_to_vec, zeromem};
 use crate::object::{default_key_attributes, Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::derive::{EcdhDerive, OneStepKdfDerive, X963KdfDerive};
 use ossl::digest::DigestAlg;
@@ -65,8 +66,8 @@ pub struct ECDHOperation {
     public: Vec<u8>,
     /// Optional shared data for the KDF.
     shared: Option<Vec<u8>>,
-    /// Flag indicating if the derivation has been finalized.
-    finalized: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
 }
 
 impl ECDHOperation {
@@ -101,7 +102,7 @@ impl ECDHOperation {
             };
 
         Ok(ECDHOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             mech: mechanism,
             kdf: params.kdf,
             shared: shared,
@@ -119,7 +120,7 @@ impl MechOperation for ECDHOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -138,10 +139,10 @@ impl Derive for ECDHOperation {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         let mut pkey = privkey_from_object(key)?;
         let mut ecdh = EcdhDerive::new(osslctx(), &mut pkey)?;

@@ -8,6 +8,7 @@ use crate::misc::{bytes_to_slice, struct_to_slice};
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::osslctx;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 use crate::sp800_108::{verify_prf_key, Sp800Params};
 
 use ossl::derive::{KbkdfCounterLen, KbkdfDerive, KbkdfMode};
@@ -242,7 +243,7 @@ fn key_to_segment_size(key: usize, segment: usize) -> usize {
 pub struct Sp800Operation {
     mech: CK_MECHANISM_TYPE,
     prf: CK_MECHANISM_TYPE,
-    finalized: bool,
+    state: OpIntState,
     params: Vec<Sp800Params>,
     iv: Option<&'static [u8]>, /* TODO: 'static -> 'a */
     addl_drv_keys: Vec<CK_DERIVED_KEY>,
@@ -267,7 +268,7 @@ impl Sp800Operation {
         Ok(Sp800Operation {
             mech: CKM_SP800_108_COUNTER_KDF,
             prf: params.prfType,
-            finalized: false,
+            state: OpIntState::Initialized,
             params: Sp800Params::parse_data_params(&data_params)?,
             iv: None,
             addl_drv_keys: addl_drv_keys.to_vec(),
@@ -300,7 +301,7 @@ impl Sp800Operation {
         Ok(Sp800Operation {
             mech: CKM_SP800_108_FEEDBACK_KDF,
             prf: params.prfType,
-            finalized: false,
+            state: OpIntState::Initialized,
             params: Sp800Params::parse_data_params(&data_params)?,
             iv: iv,
             addl_drv_keys: addl_drv_keys.to_vec(),
@@ -316,7 +317,7 @@ impl MechOperation for Sp800Operation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -328,10 +329,10 @@ impl Derive for Sp800Operation {
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         verify_prf_key(self.prf, key)?;
 

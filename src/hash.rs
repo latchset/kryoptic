@@ -13,6 +13,7 @@ use crate::mechanism::*;
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::hash::HashOperation;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 pub const INVALID_HASH_SIZE: usize = CK_UNAVAILABLE_INFORMATION as usize;
 pub const HASH_LEN_SHA1: usize = 20;
@@ -306,9 +307,8 @@ struct HashKDFOperation {
     mech: CK_MECHANISM_TYPE,
     /// The corresponding hash mechanism
     prf: CK_MECHANISM_TYPE,
-    /// Finalization guard, prevents further processing once the
-    /// operation is finalized
-    finalized: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
 }
 
 impl HashKDFOperation {
@@ -320,7 +320,7 @@ impl HashKDFOperation {
         Ok(HashKDFOperation {
             mech: mech,
             prf: prf,
-            finalized: false,
+            state: OpIntState::Initialized,
         })
     }
 }
@@ -331,7 +331,7 @@ impl MechOperation for HashKDFOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -343,10 +343,10 @@ impl Derive for HashKDFOperation {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         key.check_key_ops(
             CKO_SECRET_KEY,

@@ -14,6 +14,7 @@ use crate::misc;
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::vendor::KR_SSHKDF_PARAMS;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 /// Represents an SSH Key Derivation Function (KDF) operation
 /// ([RFC 4253](https://www.rfc-editor.org/rfc/rfc4253) Section 7.2)
@@ -21,8 +22,8 @@ use crate::pkcs11::*;
 pub struct SSHKDFOperation {
     /// The base PKCS#11 mechanism type for this KDF.
     mech: CK_MECHANISM_TYPE,
-    /// Tracks if the derive operation has been completed.
-    finalized: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// The underlying hash mechanism used as the PRF (e.g., CKM_SHA256).
     prf: CK_MECHANISM_TYPE,
     /// The specific key/IV type requested ('A' through 'F').
@@ -59,7 +60,7 @@ impl SSHKDFOperation {
 
         Ok(SSHKDFOperation {
             mech: mech.mechanism,
-            finalized: false,
+            state: OpIntState::Initialized,
             prf: params.prfHashMechanism,
             key_type: params.derivedKeyType,
             exchange_hash: misc::bytes_to_vec(
@@ -81,7 +82,7 @@ impl MechOperation for SSHKDFOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -98,10 +99,10 @@ impl Derive for SSHKDFOperation {
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
 
