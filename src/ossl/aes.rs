@@ -14,6 +14,7 @@ use crate::misc::{
 use crate::object::Object;
 use crate::ossl::common::osslctx;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use constant_time_eq::constant_time_eq;
 use ossl::cipher::{AeadParams, AesCtsMode, AesSize, EncAlg, OsslCipher};
@@ -149,10 +150,8 @@ pub struct AesOperation {
     key: OsslSecret,
     /// Parameters specific to the current operation (IV, AAD, etc.).
     params: AesParams,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// The underlying ossl cipher context.
     ctx: Option<OsslCipher>,
     /// Internal buffer for handling partial blocks or accumulating data.
@@ -634,8 +633,7 @@ impl AesOperation {
             op: op_flag,
             key: aeskey,
             params: params,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: Some(ctx),
             buffer: Vec::new(),
             blockctr: 0,
@@ -731,7 +729,7 @@ impl AesOperation {
 
     /// Internal helper for dealing with fatal errors
     fn op_err(&mut self, err: CK_RV) -> error::Error {
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         error::Error::ck_rv(err)
     }
 
@@ -1000,8 +998,7 @@ impl AesOperation {
                 pParameter: std::ptr::null_mut(),
                 ulParameterLen: 0,
             })?,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: None,
             buffer: Vec::new(),
             blockctr: 0,
@@ -1020,7 +1017,7 @@ impl AesOperation {
         if self.op != CKF_MESSAGE_ENCRYPT {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if self.in_use {
+        if self.state == OpIntState::Updated {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
@@ -1032,8 +1029,7 @@ impl AesOperation {
 
         let iv_ptr = self.init_msg_params(parameter, parameter_len, aad)?;
 
-        self.finalized = false;
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         self.ctx = Some(Self::cipher_initialize(
             self.mech,
@@ -1071,8 +1067,7 @@ impl AesOperation {
                 pParameter: std::ptr::null_mut(),
                 ulParameterLen: 0,
             })?,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: None,
             buffer: Vec::new(),
             blockctr: 0,
@@ -1091,7 +1086,7 @@ impl AesOperation {
         if self.op != CKF_MESSAGE_DECRYPT {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if self.in_use {
+        if self.state == OpIntState::Updated {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
@@ -1103,8 +1098,7 @@ impl AesOperation {
 
         let _ = self.init_msg_params(parameter, parameter_len, aad)?;
 
-        self.finalized = false;
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         self.ctx = Some(Self::cipher_initialize(
             self.mech,
@@ -1214,7 +1208,7 @@ impl MechOperation for AesOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -1228,11 +1222,9 @@ impl Encryption for AesOperation {
     /// Internally calls [AesOperation::encrypt_update] and
     /// [AesOperation::encrypt_final]
     fn encrypt(&mut self, plain: &[u8], cipher: &mut [u8]) -> Result<usize> {
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
+            self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.in_use {
-            return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
         }
         let outl = self.encrypt_update(plain, cipher)?;
         if outl > cipher.len() {
@@ -1248,10 +1240,10 @@ impl Encryption for AesOperation {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         let mut outlen = self.encryption_len(plain.len(), false)?;
         match self.mech {
@@ -1335,7 +1327,7 @@ impl Encryption for AesOperation {
                      * one EVP_EncryptUpdate call, even with zero-length
                      * data, to leave the AAD phase and compute the tag. */
                     cipher_offset = ctx.update(&[], cipher).or_else(|_| {
-                        self.finalized = true;
+                        self.state = OpIntState::Finalized;
                         Err(CKR_DEVICE_ERROR)
                     })?;
                     if cipher_offset != 0 {
@@ -1348,7 +1340,7 @@ impl Encryption for AesOperation {
                         cipher_offset = ctx
                             .update(self.buffer.as_slice(), cipher)
                             .or_else(|_| {
-                                self.finalized = true;
+                                self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         if cipher_offset != self.params.datalen {
@@ -1372,7 +1364,7 @@ impl Encryption for AesOperation {
                         cipher_offset = ctx
                             .update(self.buffer.as_slice(), cipher)
                             .or_else(|_| {
-                                self.finalized = true;
+                                self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         if cipher_offset != AES_BLOCK_SIZE {
@@ -1399,7 +1391,7 @@ impl Encryption for AesOperation {
                     let mut buffer = [0u8; AES_BLOCK_SIZE * 2];
                     cipher_offset =
                         ctx.update(plain, &mut buffer).or_else(|_| {
-                            self.finalized = true;
+                            self.state = OpIntState::Finalized;
                             Err(CKR_DEVICE_ERROR)
                         })?;
                     if cipher_offset != plain.len() {
@@ -1435,11 +1427,15 @@ impl Encryption for AesOperation {
     ///
     /// May return additional data in the cipher buffer
     fn encrypt_final(&mut self, cipher: &mut [u8]) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Updated => (),
+            OpIntState::Initialized => match self.mech {
+                CKM_AES_GCM | CKM_AES_CCM | CKM_AES_CBC_PAD => (),
+                _ => return Err(CKR_OPERATION_NOT_INITIALIZED)?,
+            },
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
         }
 
         let ctx = match &mut self.ctx {
@@ -1452,7 +1448,40 @@ impl Encryption for AesOperation {
 
         let mut outlen = 0;
         match self.mech {
-            CKM_AES_CCM | CKM_AES_GCM => {
+            CKM_AES_CCM => {
+                if self.buffer.len() > 0
+                    || (self.state == OpIntState::Initialized
+                        && self.params.datalen != 0)
+                {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_DATA_LEN_RANGE)?;
+                }
+                if cipher.len() < self.params.taglen {
+                    /* This is the only, non-fatal error */
+                    return Err(error::Error::buf_too_small(
+                        self.params.taglen,
+                    ));
+                }
+
+                if self.state == OpIntState::Initialized {
+                    let offset = ctx.update(&[], cipher).or_else(|_| {
+                        self.state = OpIntState::Finalized;
+                        Err(CKR_DEVICE_ERROR)
+                    })?;
+                    if offset != 0 {
+                        return Err(self.op_err(CKR_DEVICE_ERROR));
+                    }
+                }
+
+                outlen = ctx.finalize(cipher)?;
+                if outlen != 0 {
+                    self.state = OpIntState::Finalized;
+                    return Err(CKR_DEVICE_ERROR)?;
+                }
+                outlen = self.params.taglen;
+                ctx.get_tag(&mut cipher[..outlen])?;
+            }
+            CKM_AES_GCM => {
                 if cipher.len() < self.params.taglen {
                     /* This is the only, non-fatal error */
                     return Err(error::Error::buf_too_small(
@@ -1462,17 +1491,17 @@ impl Encryption for AesOperation {
 
                 outlen = ctx.finalize(cipher)?;
                 if outlen != 0 {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(CKR_DEVICE_ERROR)?;
                 }
                 outlen = self.params.taglen;
                 ctx.get_tag(&mut cipher[..outlen])?;
             }
             CKM_AES_CTR => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 if self.params.maxblocks > 0 {
                     if self.blockctr >= self.params.maxblocks {
-                        self.finalized = true;
+                        self.state = OpIntState::Finalized;
                         return Err(CKR_DATA_LEN_RANGE)?;
                     }
                 }
@@ -1481,15 +1510,15 @@ impl Encryption for AesOperation {
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => (),
             CKM_AES_ECB | CKM_AES_CBC => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 if self.buffer.len() > 0 {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
                 let mut buffer = [0u8; AES_BLOCK_SIZE];
                 outlen = ctx.finalize(&mut buffer)?;
                 if outlen != 0 {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     zeromem(&mut buffer);
                     return Err(CKR_DEVICE_ERROR)?;
                 }
@@ -1499,7 +1528,7 @@ impl Encryption for AesOperation {
                     return Err(error::Error::buf_too_small(AES_BLOCK_SIZE));
                 }
 
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
 
                 if self.buffer.len() > 0 {
                     outlen = ctx.update(self.buffer.as_slice(), cipher)?;
@@ -1508,14 +1537,14 @@ impl Encryption for AesOperation {
                      * algorithm update can't return anything until
                      * final is called, where padding is applied */
                     if outlen != 0 {
-                        self.finalized = true;
+                        self.state = OpIntState::Finalized;
                         return Err(CKR_DEVICE_ERROR)?;
                     }
                 }
 
                 outlen = ctx.finalize(cipher)?;
                 if outlen != AES_BLOCK_SIZE {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     return Err(CKR_DEVICE_ERROR)?;
                 }
             }
@@ -1531,7 +1560,7 @@ impl Encryption for AesOperation {
                     return Err(error::Error::buf_too_small(needed));
                 }
 
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
 
                 self.buffer.resize(self.buffer.len() + pad, pad as u8);
                 outlen = ctx.update(self.buffer.as_slice(), cipher)?;
@@ -1542,7 +1571,7 @@ impl Encryption for AesOperation {
                 }
             }
             _ => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 return Err(CKR_GENERAL_ERROR)?;
             }
         };
@@ -1550,7 +1579,7 @@ impl Encryption for AesOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
 
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         Ok(outlen)
     }
 
@@ -1650,11 +1679,9 @@ impl Decryption for AesOperation {
     /// Internally calls [AesOperation::decrypt_update] and
     /// [AesOperation::decrypt_final]
     fn decrypt(&mut self, cipher: &[u8], plain: &mut [u8]) -> Result<usize> {
-        if self.finalized {
+        if self.state != OpIntState::Initialized {
+            self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if self.in_use {
-            return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
         }
         let outl = self.decrypt_update(cipher, plain)?;
         if outl > plain.len() {
@@ -1670,9 +1697,11 @@ impl Decryption for AesOperation {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+        self.state = OpIntState::Updated;
+
         match self.mech {
             CKM_AES_CTS => {
                 if cipher.len() < AES_BLOCK_SIZE {
@@ -1700,13 +1729,11 @@ impl Decryption for AesOperation {
                 }
             }
             CKM_AES_KEY_WRAP_PKCS7 => {
-                self.in_use = true;
                 self.buffer.extend_from_slice(cipher);
                 return Ok(0);
             }
             _ => (),
         }
-        self.in_use = true;
 
         let outlen = match self.mech {
             CKM_AES_CCM => {
@@ -1790,14 +1817,14 @@ impl Decryption for AesOperation {
                     /* The tag is at the tail of the cipher buffer */
                     cipher_end = self.params.datalen;
                     ctx.set_tag(&cbuf[cipher_end..]).or_else(|_| {
-                        self.finalized = true;
+                        self.state = OpIntState::Finalized;
                         Err(CKR_DEVICE_ERROR)
                     })?;
 
                     plain_offset = ctx
                         .update(&cbuf[..cipher_end], plain)
                         .or_else(|_| {
-                            self.finalized = true;
+                            self.state = OpIntState::Finalized;
                             Err(CKR_DEVICE_ERROR)
                         })?;
 
@@ -1818,7 +1845,7 @@ impl Decryption for AesOperation {
                         plain_offset = ctx
                             .update(self.buffer.as_slice(), plain)
                             .or_else(|_| {
-                                self.finalized = true;
+                                self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         zeromem(self.buffer.as_mut_slice());
@@ -1835,7 +1862,7 @@ impl Decryption for AesOperation {
                                     plain,
                                 )
                                 .or_else(|_| {
-                                    self.finalized = true;
+                                    self.state = OpIntState::Finalized;
                                     Err(CKR_DEVICE_ERROR)
                                 })?;
                             zeromem(&mut self.buffer.as_mut_slice()[..buflen]);
@@ -1865,7 +1892,7 @@ impl Decryption for AesOperation {
                         plain_offset = ctx
                             .update(self.buffer.as_slice(), plain)
                             .or_else(|_| {
-                                self.finalized = true;
+                                self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         if plain_offset != AES_BLOCK_SIZE {
@@ -1892,7 +1919,7 @@ impl Decryption for AesOperation {
                     let mut buffer = [0u8; AES_BLOCK_SIZE * 2];
                     plain_offset =
                         ctx.update(cipher, &mut buffer).or_else(|_| {
-                            self.finalized = true;
+                            self.state = OpIntState::Finalized;
                             Err(CKR_DEVICE_ERROR)
                         })?;
                     if plain_offset != cipher.len() {
@@ -1914,7 +1941,7 @@ impl Decryption for AesOperation {
                     &mut plain[plain_offset..],
                 )
                 .or_else(|_| {
-                    self.finalized = true;
+                    self.state = OpIntState::Finalized;
                     Err(CKR_DEVICE_ERROR)
                 })?;
             plain_offset += outlen;
@@ -1931,10 +1958,7 @@ impl Decryption for AesOperation {
     ///
     /// May return additional data in the plain buffer
     fn decrypt_final(&mut self, plain: &mut [u8]) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -1943,7 +1967,7 @@ impl Decryption for AesOperation {
             None => return Err(self.op_err(CKR_GENERAL_ERROR)),
         };
 
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -2193,13 +2217,13 @@ impl Decryption for AesOperation {
 
 impl MessageOperation for AesOperation {
     fn busy(&self) -> bool {
-        self.in_use
+        self.state == OpIntState::Updated
     }
     fn finalize(&mut self) -> Result<()> {
-        if self.in_use {
+        if self.state == OpIntState::Updated {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         Ok(())
     }
 }
@@ -2228,8 +2252,12 @@ impl MsgEncryption for AesOperation {
         paramlen: CK_ULONG,
         aad: &[u8],
     ) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Initialized => (),
+            OpIntState::Updated => return Err(CKR_OPERATION_ACTIVE)?,
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
         }
         self.msg_encrypt_new(param, paramlen, aad)
     }
@@ -2244,10 +2272,7 @@ impl MsgEncryption for AesOperation {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let _ = self.check_msg_params(param, paramlen)?;
@@ -2302,10 +2327,7 @@ impl MsgEncryption for AesOperation {
         plain: &[u8],
         cipher: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -2337,7 +2359,7 @@ impl MsgEncryption for AesOperation {
                 }
                 if let Some(ctx) = &mut self.ctx {
                     ctx.update(pbuf, cipher).or_else(|_| {
-                        self.finalized = true;
+                        self.state = OpIntState::Finalized;
                         Err(CKR_DEVICE_ERROR)
                     })?
                 } else {
@@ -2371,7 +2393,7 @@ impl MsgEncryption for AesOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
 
-        self.in_use = false;
+        self.state = OpIntState::Initialized;
         Ok(outlen)
     }
 
@@ -2382,7 +2404,7 @@ impl MsgEncryption for AesOperation {
         data_len: usize,
         fin: bool,
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
@@ -2435,8 +2457,12 @@ impl MsgDecryption for AesOperation {
         paramlen: CK_ULONG,
         aad: &[u8],
     ) -> Result<()> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Initialized => (),
+            OpIntState::Updated => return Err(CKR_OPERATION_ACTIVE)?,
+            OpIntState::Finalized => {
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?
+            }
         }
         self.msg_decrypt_new(param, paramlen, aad)
     }
@@ -2451,10 +2477,7 @@ impl MsgDecryption for AesOperation {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let _ = self.check_msg_params(param, paramlen)?;
@@ -2509,10 +2532,7 @@ impl MsgDecryption for AesOperation {
         cipher: &[u8],
         plain: &mut [u8],
     ) -> Result<usize> {
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
 
@@ -2556,7 +2576,7 @@ impl MsgDecryption for AesOperation {
                 }
                 if let Some(ctx) = &mut self.ctx {
                     ctx.update(cbuf, plain).or_else(|_| {
-                        self.finalized = true;
+                        self.state = OpIntState::Finalized;
                         Err(CKR_DEVICE_ERROR)
                     })?
                 } else {
@@ -2592,7 +2612,7 @@ impl MsgDecryption for AesOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
 
-        self.in_use = false;
+        self.state = OpIntState::Initialized;
         Ok(outlen)
     }
 
@@ -2603,7 +2623,7 @@ impl MsgDecryption for AesOperation {
         data_len: usize,
         fin: bool,
     ) -> Result<usize> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         match self.mech {
@@ -2637,10 +2657,8 @@ impl MsgDecryption for AesOperation {
 pub struct AesCmacOperation {
     /// The specific CMAC mechanism being used.
     mech: CK_MECHANISM_TYPE,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// The OsslMac context
     ctx: OsslMac,
     /// The MAC length
@@ -2704,8 +2722,7 @@ impl AesCmacOperation {
 
         Ok(AesCmacOperation {
             mech: mech.mechanism,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             ctx: ctx,
             maclen: maclen,
             #[cfg(feature = "fips")]
@@ -2724,7 +2741,7 @@ impl AesCmacOperation {
 
     /// Begins a CMAC computation
     fn begin(&mut self) -> Result<()> {
-        if self.in_use {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
@@ -2732,10 +2749,10 @@ impl AesCmacOperation {
 
     /// Feeds in the next data buffer into the CMAC computation
     fn update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -2751,12 +2768,11 @@ impl AesCmacOperation {
     /// Finalizes the CMAC computation and returns the output in the
     /// provided buffer
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         /* It is valid to finalize without any update */
-        self.in_use = true;
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
@@ -2817,7 +2833,7 @@ impl MechOperation for AesCmacOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -2929,10 +2945,8 @@ impl VerifySignature for AesCmacOperation {
 pub struct AesMacOperation {
     /// The specific MAC mechanism being used.
     mech: CK_MECHANISM_TYPE,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// Buffer to hold one full block of data, will be padded
     padbuf: [u8; AES_BLOCK_SIZE],
     /// Size of the data stiore in the padbuf at any give time
@@ -2994,8 +3008,7 @@ impl AesMacOperation {
         let iv = [0u8; AES_BLOCK_SIZE];
         Ok(AesMacOperation {
             mech: mech.mechanism,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
             padbuf: [0; AES_BLOCK_SIZE],
             padlen: 0,
             macbuf: [0; AES_BLOCK_SIZE],
@@ -3024,7 +3037,7 @@ impl AesMacOperation {
 
     /// Begins a MAC computation
     fn begin(&mut self) -> Result<()> {
-        if self.in_use {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         Ok(())
@@ -3032,10 +3045,10 @@ impl AesMacOperation {
 
     /// Feeds in the next data buffer into the MAC computation
     fn update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
 
         let mut data_len = self.padlen + data.len();
         let mut cursor = 0;
@@ -3052,7 +3065,7 @@ impl AesMacOperation {
             let outlen =
                 self.op.encrypt_update(&self.padbuf, &mut self.macbuf)?;
             if outlen != AES_BLOCK_SIZE {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 return Err(CKR_GENERAL_ERROR)?;
             }
             data_len -= AES_BLOCK_SIZE;
@@ -3065,7 +3078,7 @@ impl AesMacOperation {
                 &mut self.macbuf,
             )?;
             if outlen != AES_BLOCK_SIZE {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 return Err(CKR_GENERAL_ERROR)?;
             }
             cursor += AES_BLOCK_SIZE;
@@ -3082,13 +3095,10 @@ impl AesMacOperation {
     /// Finalizes the MAC computation and returns the output in the
     /// provided buffer
     fn finalize(&mut self, output: &mut [u8]) -> Result<()> {
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        if self.finalized {
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
-        }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         if output.len() != self.maclen {
             return Err(CKR_GENERAL_ERROR)?;
@@ -3141,7 +3151,7 @@ impl MechOperation for AesMacOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {

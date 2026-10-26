@@ -11,6 +11,7 @@ use crate::mechanism::{Derive, Mac, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_vec, struct_to_slice};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 use crate::sp800_108::*;
 
 /// Helper macro to return the maximum value `size` bits can express,
@@ -45,10 +46,10 @@ macro_rules! maxsize32 {
 pub struct Sp800Operation {
     /// The specific SP800 mechanism
     mech: CK_MECHANISM_TYPE,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// The digest function to be used
     prf: CK_MECHANISM_TYPE,
-    /// Flag that marks the operation as finalized
-    finalized: bool,
     /// A Vector containing the list of SP800 Parameters
     params: Vec<Sp800Params>,
     /// Initialization Vector
@@ -76,8 +77,8 @@ impl Sp800Operation {
         )?;
         Ok(Sp800Operation {
             mech: CKM_SP800_108_COUNTER_KDF,
+            state: OpIntState::Initialized,
             prf: params.prfType,
-            finalized: false,
             params: Sp800Params::parse_data_params(&data_params)?,
             iv: Vec::new(),
             addl_drv_keys: addl_drv_keys.to_vec(),
@@ -107,8 +108,8 @@ impl Sp800Operation {
         };
         Ok(Sp800Operation {
             mech: CKM_SP800_108_FEEDBACK_KDF,
+            state: OpIntState::Initialized,
             prf: params.prfType,
-            finalized: false,
             params: Sp800Params::parse_data_params(&data_params)?,
             iv: iv,
             addl_drv_keys: addl_drv_keys.to_vec(),
@@ -379,7 +380,7 @@ impl MechOperation for Sp800Operation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
 }
 
@@ -391,10 +392,10 @@ impl Derive for Sp800Operation {
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         verify_prf_key(self.prf, key)?;
 

@@ -11,6 +11,7 @@ use crate::mechanism::*;
 use crate::misc::bytes_to_vec;
 use crate::object::{Object, ObjectFactories, ObjectType};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 #[cfg(feature = "fips")]
 use crate::fips::FipsApproval;
@@ -62,10 +63,10 @@ impl KeyInfo {
 /// `CKM_XOR_BASE_AND_DATA`.
 #[derive(Debug)]
 pub struct SimpleKDFOperation {
-    /// Tracks if the derive operation has been completed
-    finalized: bool,
     /// The specific PKCS#11 Simple KDF mechanism being used
     mech: CK_MECHANISM_TYPE,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// The additional key handle in CKM_CONCATENATE_BASE_AND_KEY
     key_handle: Option<[CK_OBJECT_HANDLE; 1]>,
     /// The additional key in CKM_CONCATENATE_BASE_AND_KEY
@@ -91,8 +92,8 @@ impl SimpleKDFOperation {
                 let object_handle =
                     mech.get_parameters::<CK_OBJECT_HANDLE>()?;
                 Ok(SimpleKDFOperation {
-                    finalized: false,
                     mech: mech.mechanism,
+                    state: OpIntState::Initialized,
                     key_handle: Some([object_handle]),
                     key_info: None,
                     data: None,
@@ -112,8 +113,8 @@ impl SimpleKDFOperation {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 Ok(SimpleKDFOperation {
-                    finalized: false,
                     mech: mech.mechanism,
+                    state: OpIntState::Initialized,
                     key_handle: None,
                     key_info: None,
                     data: Some(data),
@@ -125,8 +126,8 @@ impl SimpleKDFOperation {
             CKM_EXTRACT_KEY_FROM_KEY => {
                 let params = mech.get_parameters::<CK_EXTRACT_PARAMS>()?;
                 Ok(SimpleKDFOperation {
-                    finalized: false,
                     mech: mech.mechanism,
+                    state: OpIntState::Initialized,
                     key_handle: None,
                     key_info: None,
 
@@ -147,7 +148,7 @@ impl MechOperation for SimpleKDFOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -181,10 +182,10 @@ impl Derive for SimpleKDFOperation {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         key.check_key_ops(
             CKO_SECRET_KEY,
@@ -437,7 +438,7 @@ const PUBKEY_ATTR_DEFAULTS: &[PubkeyAttrRule] = &[
 /// Represents a public key from private key derivation operation
 #[derive(Debug)]
 pub struct PubFromPrivOperation {
-    finalized: bool,
+    state: OpIntState,
     #[cfg(feature = "fips")]
     fips_approval: FipsApproval,
 }
@@ -457,7 +458,7 @@ impl PubFromPrivOperation {
         }
 
         Ok(PubFromPrivOperation {
-            finalized: false,
+            state: OpIntState::Initialized,
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
         })
@@ -470,7 +471,7 @@ impl MechOperation for PubFromPrivOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -495,10 +496,10 @@ impl Derive for PubFromPrivOperation {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         // key must be a private key
         // It does not need to allow derivation, as this is a pseudo

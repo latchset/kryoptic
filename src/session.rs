@@ -19,6 +19,14 @@ use crate::token::Token;
 #[cfg(feature = "fips")]
 use crate::fips;
 
+/// Internal States an operation can be in
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum OpIntState {
+    Initialized,
+    Updated,
+    Finalized,
+}
+
 /// RAII wrapper around an active session operation that cancels the operation
 /// when dropped, unless marked as valid via `ok()`, `done()`, or a
 /// `CKR_BUFFER_TOO_SMALL` result in `report_reqsize()`.
@@ -91,13 +99,13 @@ pub struct SessionSearch {
     handles: Vec<CK_OBJECT_HANDLE>,
     /// Flag indicating if the search has been initialized and results are
     /// available.
-    in_use: bool,
+    state: OpIntState,
 }
 
 impl SearchOperation for SessionSearch {
     /// Retrieves a subset of the search results.
     fn results(&mut self, max: usize) -> Result<Vec<CK_OBJECT_HANDLE>> {
-        if !self.in_use {
+        if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         let mut amount = self.handles.len();
@@ -608,7 +616,7 @@ impl Session {
         self.check_no_op::<dyn SearchOperation>()?;
         self.set_operation::<dyn SearchOperation>(Box::new(SessionSearch {
             handles: token.search_objects(template)?,
-            in_use: true,
+            state: OpIntState::Updated,
         }));
         Ok(())
     }

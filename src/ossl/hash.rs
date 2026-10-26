@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::mechanism::{Digest, MechOperation};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::digest::OsslDigest;
 
@@ -18,10 +19,8 @@ pub struct HashOperation {
     mech: CK_MECHANISM_TYPE,
     /// The underlying OpenSSL digest (algorithm and context).
     hasher: OsslDigest,
-    /// Flag indicating if the operation has been finalized.
-    finalized: bool,
-    /// Flag indicating if the operation is in progress (update called).
-    in_use: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
 }
 
 impl HashOperation {
@@ -35,8 +34,7 @@ impl HashOperation {
                 mech_type_to_digest_alg(mech)?,
                 None,
             )?,
-            finalized: false,
-            in_use: false,
+            state: OpIntState::Initialized,
         })
     }
 
@@ -46,7 +44,7 @@ impl HashOperation {
     ) -> Result<HashOperation> {
         let mut op = Self::new(mech)?;
         op.hasher.set_state(state)?;
-        op.in_use = true;
+        op.state = OpIntState::Updated;
         Ok(op)
     }
 }
@@ -57,12 +55,11 @@ impl MechOperation for HashOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     fn reset(&mut self) -> Result<()> {
         self.hasher.reset(None)?;
-        self.finalized = false;
-        self.in_use = false;
+        self.state = OpIntState::Initialized;
         Ok(())
     }
     fn state_size(&self) -> Result<usize> {
@@ -85,13 +82,13 @@ impl MechOperation for HashOperation {
 
 impl Digest for HashOperation {
     fn digest(&mut self, data: &[u8], digest: &mut [u8]) -> Result<()> {
-        if self.in_use || self.finalized {
+        if self.state != OpIntState::Initialized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if digest.len() != self.hasher.size() {
             return Err(CKR_GENERAL_ERROR)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         self.hasher.update(data)?;
         let len = self.hasher.finalize(digest)?;
         if len != digest.len() {
@@ -101,27 +98,27 @@ impl Digest for HashOperation {
     }
 
     fn digest_update(&mut self, data: &[u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.in_use = true;
+        self.state = OpIntState::Updated;
         match self.hasher.update(data) {
             Ok(()) => Ok(()),
             Err(_) => {
-                self.finalized = true;
+                self.state = OpIntState::Finalized;
                 Err(CKR_DEVICE_ERROR)?
             }
         }
     }
 
     fn digest_final(&mut self, digest: &mut [u8]) -> Result<()> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
         if digest.len() != self.hasher.size() {
             return Err(CKR_GENERAL_ERROR)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
         let len = self.hasher.finalize(digest)?;
         if len != digest.len() {
             return Err(CKR_GENERAL_ERROR)?;

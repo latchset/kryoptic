@@ -12,6 +12,7 @@ use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 use crate::pkcs11::vendor::KR_SSHKDF_PARAMS;
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::derive::{SshKdfPurpose, SshkdfDerive};
 
@@ -21,7 +22,7 @@ use crate::fips::FipsApproval;
 #[derive(Debug)]
 pub struct SSHKDFOperation {
     mech: CK_MECHANISM_TYPE,
-    finalized: bool,
+    state: OpIntState,
     prf: CK_MECHANISM_TYPE,
     purpose: SshKdfPurpose,
     exchange_hash: &'static [u8], /* TODO: static -> a */
@@ -50,7 +51,7 @@ impl SSHKDFOperation {
 
         Ok(SSHKDFOperation {
             mech: mech.mechanism,
-            finalized: false,
+            state: OpIntState::Initialized,
             prf: params.prfHashMechanism,
             purpose: purpose,
             exchange_hash: bytes_to_slice(
@@ -73,7 +74,7 @@ impl MechOperation for SSHKDFOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -89,10 +90,10 @@ impl Derive for SSHKDFOperation {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         key.check_key_ops(CKO_SECRET_KEY, CKK_GENERIC_SECRET, CKA_DERIVE)?;
 

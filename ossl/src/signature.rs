@@ -1321,11 +1321,8 @@ impl OsslSignature {
             return Err(Error::new(ErrorKind::WrapperError));
         }
         if !self.supports_updates {
-            if let Some(buffer) = self.data.take() {
-                return self.sign(buffer.as_slice(), Some(signature));
-            }
-
-            return Err(Error::new(ErrorKind::WrapperError));
+            let buffer = self.data.take().unwrap_or_default();
+            return self.sign(buffer.as_slice(), Some(signature));
         }
 
         if let Some(ctx) = &mut self.legacy_ctx {
@@ -1420,11 +1417,8 @@ impl OsslSignature {
             return Err(Error::new(ErrorKind::WrapperError));
         }
         if !self.supports_updates {
-            if let Some(buffer) = self.data.take() {
-                return self.verify(buffer.as_slice(), signature);
-            }
-
-            return Err(Error::new(ErrorKind::WrapperError));
+            let buffer = self.data.take().unwrap_or_default();
+            return self.verify(buffer.as_slice(), signature);
         }
 
         if let Some(ctx) = &mut self.legacy_ctx {

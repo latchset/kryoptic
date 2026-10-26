@@ -19,6 +19,7 @@ use crate::misc::{
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
 use crate::pkcs11::*;
+use crate::session::OpIntState;
 
 use ossl::derive::{HkdfDerive, HkdfMode};
 
@@ -30,8 +31,8 @@ use crate::fips::FipsApproval;
 pub struct HKDFOperation {
     /// The specific HKDF mechanism type (CKM_HKDF or CKM_HKDF_DATA).
     mech: CK_MECHANISM_TYPE,
-    /// Flag indicating if the derive operation has been completed.
-    finalized: bool,
+    /// Enum indicating the internal operation state.
+    state: OpIntState,
     /// Selected HKDF mode
     mode: HkdfMode,
     /// The underlying PRF hash mechanism (e.g., CKM_SHA256).
@@ -171,7 +172,7 @@ impl HKDFOperation {
 
         Ok(HKDFOperation {
             mech: mech.mechanism,
-            finalized: false,
+            state: OpIntState::Initialized,
             mode: if params.bExtract == CK_TRUE {
                 if params.bExpand == CK_TRUE {
                     HkdfMode::ExtractAndExpand
@@ -207,7 +208,7 @@ impl MechOperation for HKDFOperation {
     }
 
     fn finalized(&self) -> bool {
-        self.finalized
+        self.state == OpIntState::Finalized
     }
     #[cfg(feature = "fips")]
     fn fips_approved(&self) -> Option<bool> {
@@ -249,10 +250,10 @@ impl Derive for HKDFOperation {
         _mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Vec<Object>> {
-        if self.finalized {
+        if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.finalized = true;
+        self.state = OpIntState::Finalized;
 
         self.verify_key(key, self.prflen)?;
 

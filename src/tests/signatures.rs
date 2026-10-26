@@ -916,3 +916,294 @@ fn test_verify_signature_len_range_terminates_operation() {
 
     testtokn.finalize();
 }
+
+#[allow(dead_code)]
+fn siggen_empty(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    mechanism: &CK_MECHANISM,
+) -> Result<Vec<u8>> {
+    let ret =
+        fn_sign_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut siglen: CK_ULONG = 0;
+    let ret = fn_sign_final(session, std::ptr::null_mut(), &mut siglen);
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+
+    let mut signature: Vec<u8> = vec![0; siglen as usize];
+    let ret = fn_sign_final(session, signature.as_mut_ptr(), &mut siglen);
+    if ret != CKR_OK {
+        return Err(ret)?;
+    }
+    signature.resize(siglen as usize, 0);
+
+    Ok(signature)
+}
+
+#[allow(dead_code)]
+fn sigver_empty(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    signature: &[u8],
+    mechanism: &CK_MECHANISM,
+) -> CK_RV {
+    let ret =
+        fn_verify_init(session, mechanism as *const _ as CK_MECHANISM_PTR, key);
+    if ret != CKR_OK {
+        return ret;
+    }
+
+    fn_verify_final(session, byte_ptr!(signature), signature.len() as CK_ULONG)
+}
+
+#[allow(dead_code)]
+fn versig_empty(
+    session: CK_SESSION_HANDLE,
+    key: CK_OBJECT_HANDLE,
+    signature: &[u8],
+    mechanism: &CK_MECHANISM,
+) -> CK_RV {
+    let ret = fn_verify_signature_init(
+        session,
+        mechanism as *const _ as CK_MECHANISM_PTR,
+        key,
+        byte_ptr!(signature),
+        signature.len() as CK_ULONG,
+    );
+    if ret != CKR_OK {
+        return ret;
+    }
+
+    fn_verify_signature_final(session)
+}
+
+#[cfg(feature = "rsa")]
+#[test]
+#[parallel]
+fn test_rsa_empty_buffer() {
+    let mut testtokn = TestToken::initialized(
+        "test_rsa_empty_buffer",
+        Some("testdata/test_sign_verify_rsa.json"),
+    );
+    let session = testtokn.get_session(false);
+    testtokn.login();
+
+    let pri_key_handle =
+        match get_test_key_handle(session, "SigGen15_186-2", CKO_PRIVATE_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+    let pub_key_handle =
+        match get_test_key_handle(session, "SigGen15_186-2", CKO_PUBLIC_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_SHA256_RSA_PKCS,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let sig = ret_or_panic!(siggen_empty(session, pri_key_handle, &mechanism));
+    assert_eq!(
+        sigver_empty(session, pub_key_handle, &sig, &mechanism),
+        CKR_OK
+    );
+    assert_eq!(
+        versig_empty(session, pub_key_handle, &sig, &mechanism),
+        CKR_OK
+    );
+
+    testtokn.finalize();
+}
+
+#[cfg(feature = "ecdsa")]
+#[test]
+#[parallel]
+fn test_ecc_empty_buffer() {
+    let mut testtokn = TestToken::initialized(
+        "test_ecc_empty_buffer",
+        Some("testdata/test_sign_verify_ecdsa.json"),
+    );
+    let session = testtokn.get_session(false);
+    testtokn.login();
+
+    let pri_key_handle = match get_test_key_handle(
+        session,
+        "FIPS_186-3/SigGen: [P-521,SHA-512]",
+        CKO_PRIVATE_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
+    let pub_key_handle = match get_test_key_handle(
+        session,
+        "FIPS_186-3/SigGen: [P-521,SHA-512]",
+        CKO_PUBLIC_KEY,
+    ) {
+        Ok(k) => k,
+        Err(e) => panic!("{}", e),
+    };
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_ECDSA_SHA512,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let sig = ret_or_panic!(siggen_empty(session, pri_key_handle, &mechanism));
+    assert_eq!(
+        sigver_empty(session, pub_key_handle, &sig, &mechanism),
+        CKR_OK
+    );
+    assert_eq!(
+        versig_empty(session, pub_key_handle, &sig, &mechanism),
+        CKR_OK
+    );
+
+    testtokn.finalize();
+}
+
+#[cfg(feature = "eddsa")]
+#[test]
+#[parallel]
+fn test_eddsa_empty_buffer() {
+    let mut testtokn = TestToken::initialized(
+        "test_eddsa_empty_buffer",
+        Some("testdata/test_eddsa_operations.json"),
+    );
+    let session = testtokn.get_session(false);
+    testtokn.login();
+
+    let pri_key_handle =
+        match get_test_key_handle(session, "\x02", CKO_PRIVATE_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+    let pub_key_handle =
+        match get_test_key_handle(session, "\x02", CKO_PUBLIC_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_EDDSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let sig = ret_or_panic!(siggen_empty(session, pri_key_handle, &mechanism));
+    assert_eq!(
+        sigver_empty(session, pub_key_handle, &sig, &mechanism),
+        CKR_OK
+    );
+    assert_eq!(
+        versig_empty(session, pub_key_handle, &sig, &mechanism),
+        CKR_OK
+    );
+
+    testtokn.finalize();
+}
+
+#[cfg(feature = "mldsa")]
+#[test]
+#[parallel]
+fn test_mldsa_empty_buffer() {
+    let mut testtokn = TestToken::initialized("test_mldsa_empty_buffer", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pubkey, privkey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_DSA_KEY_PAIR_GEN,
+        &[(CKA_PARAMETER_SET, CKP_ML_DSA_44)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+        &[],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+    ));
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_ML_DSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let sig = ret_or_panic!(siggen_empty(session, privkey, &mechanism));
+    assert_eq!(sigver_empty(session, pubkey, &sig, &mechanism), CKR_OK);
+    assert_eq!(versig_empty(session, pubkey, &sig, &mechanism), CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[cfg(all(
+    feature = "slhdsa",
+    any(not(feature = "fips"), feature = "ossl400")
+))]
+#[test]
+#[parallel]
+fn test_slhdsa_empty_buffer() {
+    let mut testtokn = TestToken::initialized("test_slhdsa_empty_buffer", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pubkey, privkey) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_SLH_DSA_KEY_PAIR_GEN,
+        &[(CKA_PARAMETER_SET, CKP_SLH_DSA_SHA2_128S)],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_VERIFY, true)],
+        &[],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_SIGN, true)],
+    ));
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_SLH_DSA,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let sig = ret_or_panic!(siggen_empty(session, privkey, &mechanism));
+    assert_eq!(sigver_empty(session, pubkey, &sig, &mechanism), CKR_OK);
+    assert_eq!(versig_empty(session, pubkey, &sig, &mechanism), CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[cfg(feature = "hmac")]
+#[test]
+#[parallel]
+fn test_hmac_empty_buffer() {
+    let mut testtokn = TestToken::initialized(
+        "test_hmac_empty_buffer",
+        Some("testdata/test_sign_verify.json"),
+    );
+    let session = testtokn.get_session(false);
+    testtokn.login();
+
+    let key_handle =
+        match get_test_key_handle(session, "HMAC Test Key", CKO_SECRET_KEY) {
+            Ok(k) => k,
+            Err(e) => panic!("{}", e),
+        };
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_SHA256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let sig = ret_or_panic!(siggen_empty(session, key_handle, &mechanism));
+    assert_eq!(sigver_empty(session, key_handle, &sig, &mechanism), CKR_OK);
+    assert_eq!(versig_empty(session, key_handle, &sig, &mechanism), CKR_OK);
+
+    testtokn.finalize();
+}
