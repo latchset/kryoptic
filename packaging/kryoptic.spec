@@ -48,7 +48,7 @@ Source4:        https://people.redhat.com/~ssorce/simo_redhat.asc
 BuildRequires:  openssl-devel
 BuildRequires:  pandoc
 %if %{with gpgcheck}
-BuildRequires: gnupg2
+BuildRequires: openpgpverify
 %endif
 
 %if 0%{?bundled_rust_deps}
@@ -76,8 +76,8 @@ Most notably a migration tool for the SoftHSM database.
 
 %prep
 %if %{with gpgcheck}
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE2}' --data='%{SOURCE0}'
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE1}'
+%{openpgpverify} --keyring='%{SOURCE4}' --signature='%{SOURCE2}' --data='%{SOURCE0}'
+%{openpgpverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE1}'
 %endif
 %autosetup -p1 -N %{?bundled_rust_deps:-a1}
 %if 0%{?bundled_rust_deps}
