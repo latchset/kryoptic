@@ -1705,7 +1705,7 @@ impl Decryption for AesOperation {
         match self.mech {
             CKM_AES_CTS => {
                 if cipher.len() < AES_BLOCK_SIZE {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                 }
 
                 /* CTS mode is one shot, and we use blockctr to mark that update
@@ -1720,12 +1720,12 @@ impl Decryption for AesOperation {
                 if cipher.len() + self.buffer.len()
                     > self.params.datalen + self.params.taglen
                 {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                 }
             }
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
                 if cipher.len() % AES_KW_SEMIBLOCK != 0 {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                 }
             }
             CKM_AES_KEY_WRAP_PKCS7 => {
@@ -1745,11 +1745,11 @@ impl Decryption for AesOperation {
                  */
                 if self.params.datalen > MAX_CCM_BUF {
                     if cipher.len() != needlen {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                 }
                 if cipher.len() + self.buffer.len() > needlen {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                 }
                 /* always return the amount we know will be
                  * ultimately needed */
@@ -1761,7 +1761,7 @@ impl Decryption for AesOperation {
                         / AES_BLOCK_SIZE)
                         as u128;
                     if self.blockctr + reqblocks > self.params.maxblocks {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
                     self.blockctr += reqblocks;
                 }
@@ -1967,8 +1967,6 @@ impl Decryption for AesOperation {
             None => return Err(self.op_err(CKR_GENERAL_ERROR)),
         };
 
-        self.state = OpIntState::Finalized;
-
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
@@ -1976,55 +1974,78 @@ impl Decryption for AesOperation {
         match self.mech {
             CKM_AES_CCM => {
                 if self.buffer.len() > 0 {
-                    return Err(CKR_DATA_LEN_RANGE)?;
+                    return Err(self.op_err(CKR_DATA_LEN_RANGE))?;
                 }
             }
             CKM_AES_GCM => {
                 if self.buffer.len() != self.params.taglen {
-                    return Err(CKR_DATA_LEN_RANGE)?;
+                    return Err(self.op_err(CKR_DATA_LEN_RANGE))?;
                 }
                 ctx.set_tag(self.buffer.as_slice())?;
                 match ctx.finalize(plain) {
                     Ok(len) => {
                         if len != 0 {
-                            return Err(CKR_DEVICE_ERROR)?;
+                            return Err(self.op_err(CKR_DEVICE_ERROR))?;
                         }
                     }
-                    Err(_) => return Err(CKR_ENCRYPTED_DATA_INVALID)?,
+                    Err(_) => {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?
+                    }
                 }
             }
             CKM_AES_CTR => {
                 if self.params.maxblocks > 0 {
                     if self.blockctr >= self.params.maxblocks {
-                        return Err(CKR_DATA_LEN_RANGE)?;
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
                     }
                 }
             }
             CKM_AES_CTS => (),
             CKM_AES_ECB | CKM_AES_CBC => {
                 if self.buffer.len() != 0 {
-                    return Err(CKR_DATA_LEN_RANGE)?;
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
                 }
                 self.buffer.resize(AES_BLOCK_SIZE, 0);
                 match ctx.finalize(self.buffer.as_mut_slice()) {
                     Ok(len) => {
                         if len != 0 {
                             zeromem(self.buffer.as_mut_slice());
-                            return Err(CKR_DEVICE_ERROR)?;
+                            return Err(self.op_err(CKR_DEVICE_ERROR))?;
                         }
                     }
-                    Err(_) => return Err(CKR_ENCRYPTED_DATA_INVALID)?,
+                    Err(_) => {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?
+                    }
                 }
                 self.buffer.clear();
             }
             CKM_AES_CBC_PAD => {
-                if self.buffer.len() != 0 {
-                    return Err(CKR_DATA_LEN_RANGE)?;
+                // We use blockctr as a signal that we put the last
+                // decrypted block in self.buffer in a previous call if
+                // the plain buffer was too short
+                if self.blockctr == 1 {
+                    outlen = self.buffer.len();
+                } else {
+                    if self.buffer.len() != 0 {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
+                    }
+
+                    self.buffer.resize(AES_BLOCK_SIZE, 0);
+                    outlen = match ctx.finalize(self.buffer.as_mut_slice()) {
+                        Ok(len) => len,
+                        Err(_) => {
+                            return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?
+                        }
+                    };
+                    self.buffer.resize(outlen, 0);
+                    self.blockctr = 1;
                 }
-                outlen = match ctx.finalize(plain) {
-                    Ok(len) => len,
-                    Err(_) => return Err(CKR_ENCRYPTED_DATA_INVALID)?,
-                };
+                if plain.len() < outlen {
+                    return Err(error::Error::buf_too_small(outlen));
+                }
+                plain[..outlen].copy_from_slice(self.buffer.as_slice());
+                zeromem(self.buffer.as_mut_slice());
+                self.buffer.clear();
             }
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => (),
@@ -2035,7 +2056,7 @@ impl Decryption for AesOperation {
                 {
                     zeromem(self.buffer.as_mut_slice());
                     self.buffer.clear();
-                    return Err(CKR_ENCRYPTED_DATA_LEN_RANGE)?;
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
                 }
 
                 let mut unwrap_buf = vec![0u8; self.buffer.len()];
@@ -2047,7 +2068,7 @@ impl Decryption for AesOperation {
                     Ok(len) => len,
                     Err(_) => {
                         zeromem(unwrap_buf.as_mut_slice());
-                        return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?;
                     }
                 };
                 unwrap_buf.truncate(unwrapped_len);
@@ -2056,7 +2077,7 @@ impl Decryption for AesOperation {
                     || unwrap_buf.len() % AES_KW_SEMIBLOCK != 0
                 {
                     zeromem(unwrap_buf.as_mut_slice());
-                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?;
                 }
 
                 let n = unwrap_buf.len();
@@ -2091,7 +2112,7 @@ impl Decryption for AesOperation {
 
                 if valid != 1 {
                     zeromem(unwrap_buf.as_mut_slice());
-                    return Err(CKR_ENCRYPTED_DATA_INVALID)?;
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?;
                 }
 
                 let plain_len = n - pad_len;
@@ -2104,8 +2125,10 @@ impl Decryption for AesOperation {
                 zeromem(unwrap_buf.as_mut_slice());
                 outlen = plain_len;
             }
-            _ => return Err(CKR_GENERAL_ERROR)?,
+            _ => return Err(self.op_err(CKR_GENERAL_ERROR))?,
         }
+
+        self.state = OpIntState::Finalized;
 
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
@@ -2114,7 +2137,7 @@ impl Decryption for AesOperation {
     }
 
     /// Provides the expected output buffer size for the provided input
-    /// cpihertext length based on the selected mode of operation.
+    /// ciphertext length based on the selected mode of operation.
     ///
     /// May return different values depending on the internal status and the
     /// mode of operation.
@@ -2147,10 +2170,33 @@ impl Decryption for AesOperation {
                     data_len
                 }
                 CKM_AES_CBC_PAD => {
-                    if (self.buffer.len() + data_len) % AES_BLOCK_SIZE != 0 {
-                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                    if self.blockctr == 1 {
+                        /* self.buffer contains the decrypted buffer after we
+                         * returned CKR_BUFFER_TOO_SMALL, just return it's length
+                         * as the required outlen */
+                        self.buffer.len()
+                    } else {
+                        if (self.buffer.len() + data_len) % AES_BLOCK_SIZE != 0
+                        {
+                            return Err(
+                                self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE)
+                            );
+                        }
+                        // Padding ciphers will always hold back one block, as
+                        // they can't know it is the last one until finalization,
+                        // so when there is no data it means there needs to be at
+                        // least a block (-1 byte) to hold the possible data.
+                        // The last block can never be a full AES_BLOCK_SIZE, as
+                        // there must be at least one byte of padding up to
+                        // AES_BLOCK_SIZE bytes of padding (ie 0 bytes of output,
+                        // all padding), so the max actual data that can be
+                        // returned is AES_BLOCK_SIZE - 1
+                        let mut outlen = self.buffer.len() + data_len;
+                        if outlen == 0 {
+                            outlen = AES_BLOCK_SIZE - 1;
+                        }
+                        outlen
                     }
-                    self.buffer.len() + data_len
                 }
                 CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
                     if data_len % AES_KW_SEMIBLOCK != 0 {
@@ -2484,10 +2530,10 @@ impl MsgDecryption for AesOperation {
 
         if self.mech == CKM_AES_CCM {
             if self.params.datalen > MAX_CCM_BUF {
-                return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
             }
             if cipher.len() + self.buffer.len() > self.params.datalen {
-                return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
             }
 
             /* accumulate for CCM case */
@@ -2543,7 +2589,7 @@ impl MsgDecryption for AesOperation {
 
         if self.mech == CKM_AES_CCM {
             if cipher.len() + self.buffer.len() != self.params.datalen {
-                return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
             }
             if plain.len() < self.params.datalen {
                 /* This is the only non-fatal error */
@@ -2572,7 +2618,7 @@ impl MsgDecryption for AesOperation {
                     cipher
                 };
                 if cbuf.len() != self.params.datalen {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                 }
                 if let Some(ctx) = &mut self.ctx {
                     ctx.update(cbuf, plain).or_else(|_| {
