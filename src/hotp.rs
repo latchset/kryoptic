@@ -69,10 +69,10 @@ impl HOTPKeyFactory {
 
         attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
-            | OAFlags::SettableOnlyOnCreate; Attribute::from_bytes;
+            | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
-            CKA_VALUE_LEN; OAFlags::Defval; Attribute::from_ulong;
+            CKA_VALUE_LEN; OAFlags::Defval | OAFlags::Unchangeable; Attribute::from_ulong;
             val 20));
 
         /* default to true CKA_PRIVATE, CKA_SIGN, CKA_VERIFY */
@@ -109,7 +109,7 @@ impl HOTPKeyFactory {
 
         /* override CKA_OTP_FORMAT to be settable only on creation */
         let format = attr_element!(
-            CKA_OTP_FORMAT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong;
+            CKA_OTP_FORMAT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong;
             val CK_OTP_FORMAT_DECIMAL);
         match attributes
             .iter()
@@ -121,7 +121,7 @@ impl HOTPKeyFactory {
 
         /* override CKA_OTP_USER_FRIENDLY_MODE to be true by default */
         let user_friendly = attr_element!(
-            CKA_OTP_USER_FRIENDLY_MODE; OAFlags::Defval; Attribute::from_bool;
+            CKA_OTP_USER_FRIENDLY_MODE; OAFlags::Defval | OAFlags::Unchangeable; Attribute::from_bool;
             val true);
         match attributes
             .iter()
