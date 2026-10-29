@@ -24,13 +24,13 @@ pub trait CertFactory: ObjectFactory {
         self.add_common_storage_attrs(false);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
-            CKA_CERTIFICATE_TYPE; OAFlags::AlwaysRequired;
+            CKA_CERTIFICATE_TYPE; OAFlags::AlwaysRequired | OAFlags::Unchangeable;
             Attribute::from_ulong; val 0));
         attrs.push(attr_element!(
             CKA_TRUSTED; OAFlags::Defval; Attribute::from_bool;
             val false));
         attrs.push(attr_element!(
-            CKA_CERTIFICATE_CATEGORY; OAFlags::Defval;
+            CKA_CERTIFICATE_CATEGORY; OAFlags::Defval | OAFlags::Unchangeable;
             Attribute::from_ulong;
             val CK_CERTIFICATE_CATEGORY_UNSPECIFIED));
         attrs.push(attr_element!(
@@ -43,7 +43,7 @@ pub trait CertFactory: ObjectFactory {
             CKA_END_DATE; OAFlags::Defval; Attribute::from_date_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
-            CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
+            CKA_PUBLIC_KEY_INFO; OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
     }
 
@@ -103,33 +103,33 @@ impl X509Factory {
         let attributes = factory.data.get_attributes_mut();
 
         attributes.push(attr_element!(
-            CKA_SUBJECT; OAFlags::AlwaysRequired; Attribute::from_bytes;
+            CKA_SUBJECT; OAFlags::AlwaysRequired | OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
             CKA_ID; OAFlags::Defval; Attribute::from_bytes; val Vec::new()));
         attributes.push(attr_element!(
-            CKA_ISSUER; OAFlags::Defval; Attribute::from_bytes;
+            CKA_ISSUER; OAFlags::Defval | OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
-            CKA_SERIAL_NUMBER; OAFlags::Defval; Attribute::from_bytes;
+            CKA_SERIAL_NUMBER; OAFlags::Defval | OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
-            CKA_VALUE; OAFlags::AlwaysRequired; Attribute::from_bytes;
+            CKA_VALUE; OAFlags::AlwaysRequired | OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
             CKA_URL; OAFlags::empty(); Attribute::from_string;
             val String::new()));
         attributes.push(attr_element!(
-            CKA_HASH_OF_SUBJECT_PUBLIC_KEY; OAFlags::Defval;
+            CKA_HASH_OF_SUBJECT_PUBLIC_KEY; OAFlags::Defval | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
         attributes.push(attr_element!(
-            CKA_HASH_OF_ISSUER_PUBLIC_KEY; OAFlags::Defval;
+            CKA_HASH_OF_ISSUER_PUBLIC_KEY; OAFlags::Defval | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
         attributes.push(attr_element!(
             CKA_JAVA_MIDP_SECURITY_DOMAIN; OAFlags::Defval;
             Attribute::from_ulong; val CK_SECURITY_DOMAIN_UNSPECIFIED));
         attributes.push(attr_element!(
-            CKA_NAME_HASH_ALGORITHM; OAFlags::empty(); Attribute::from_ulong;
+            CKA_NAME_HASH_ALGORITHM; OAFlags::Unchangeable; Attribute::from_ulong;
             val CKM_SHA_1));
 
         factory.data.finalize();
@@ -231,25 +231,25 @@ impl TrustObject {
 
         attrs.push(attr_element!(
             CKA_ISSUER;
-            OAFlags::RequiredOnCreate;
+            OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes;
             val Vec::new()
         ));
         attrs.push(attr_element!(
             CKA_SERIAL_NUMBER;
-            OAFlags::RequiredOnCreate;
+            OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes;
             val Vec::new()
         ));
         attrs.push(attr_element!(
             CKA_HASH_OF_CERTIFICATE;
-            OAFlags::empty();
+            OAFlags::Unchangeable;
             Attribute::from_bytes;
             val Vec::new()
         ));
         attrs.push(attr_element!(
             CKA_NAME_HASH_ALGORITHM;
-            OAFlags::empty();
+            OAFlags::Unchangeable;
             Attribute::from_ulong;
             val CKM_SHA_1
         ));
@@ -359,13 +359,13 @@ impl NSSTrustObject {
 
         attrs.push(attr_element!(
             CKA_ISSUER;
-            OAFlags::RequiredOnCreate;
+            OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes;
             val Vec::new()
         ));
         attrs.push(attr_element!(
             CKA_SERIAL_NUMBER;
-            OAFlags::RequiredOnCreate;
+            OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes;
             val Vec::new()
         ));
