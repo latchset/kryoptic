@@ -25,7 +25,7 @@ pub trait KeyFactory: ObjectFactory {
         self.add_common_storage_attrs(private);
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
-            CKA_KEY_TYPE; OAFlags::RequiredOnCreate; Attribute::from_ulong;
+            CKA_KEY_TYPE; OAFlags::RequiredOnCreate | OAFlags::Unchangeable; Attribute::from_ulong;
             val CK_UNAVAILABLE_INFORMATION));
         attrs.push(attr_element!(
             CKA_ID; OAFlags::empty(); Attribute::from_bytes;
@@ -39,13 +39,13 @@ pub trait KeyFactory: ObjectFactory {
         attrs.push(attr_element!(
             CKA_DERIVE; OAFlags::Defval; Attribute::from_bool; val false));
         attrs.push(attr_element!(
-            CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable;
+            CKA_LOCAL; OAFlags::Defval | OAFlags::NeverSettable | OAFlags::Unchangeable;
             Attribute::from_bool; val false));
         attrs.push(attr_element!(
-            CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable;
+            CKA_KEY_GEN_MECHANISM; OAFlags::Defval | OAFlags::NeverSettable | OAFlags::Unchangeable;
             Attribute::from_ulong; val CK_UNAVAILABLE_INFORMATION));
         attrs.push(attr_element!(
-            CKA_ALLOWED_MECHANISMS; OAFlags::empty(); Attribute::from_bytes;
+            CKA_ALLOWED_MECHANISMS; OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
             CKA_OBJECT_VALIDATION_FLAGS;
@@ -250,7 +250,7 @@ pub trait PubKeyFactory: KeyFactory {
             CKA_WRAP_TEMPLATE; OAFlags::empty(); Attribute::from_template_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
-            CKA_PUBLIC_KEY_INFO; OAFlags::empty(); Attribute::from_bytes;
+            CKA_PUBLIC_KEY_INFO; OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attrs.push(attr_element!(
             CKA_ENCAPSULATE; OAFlags::Defval; Attribute::from_bool;
@@ -541,10 +541,10 @@ impl GenericSecretKeyFactory {
 
         attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Sensitive | OAFlags::RequiredOnCreate
-            | OAFlags::SettableOnlyOnCreate; Attribute::from_bytes;
+            | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_bytes;
             val Vec::new()));
         attributes.push(attr_element!(
-            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate; Attribute::from_ulong;
+            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate | OAFlags::Unchangeable; Attribute::from_ulong;
             val 0));
 
         /* default to private */
