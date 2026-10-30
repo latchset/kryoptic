@@ -465,3 +465,83 @@ fn test_ecdsa_indicators() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_ec_generate_keypair_unsupported_curves() {
+    let mut testtokn = TestToken::initialized(
+        "test_ec_generate_keypair_unsupported_curves",
+        None,
+    );
+    let session = testtokn.get_session(true);
+
+    /* login */
+    testtokn.login();
+
+    let secp224r1_params = asn1::write_single(&oid::EC_SECP224R1).unwrap();
+    let secp256k1_params = asn1::write_single(&oid::EC_SECP256K1).unwrap();
+    let brainpool_params =
+        asn1::write_single(&oid::EC_BRAINPOOLP256R1).unwrap();
+    let p256_params = asn1::write_single(&oid::EC_SECP256R1).unwrap();
+
+    /* secp224r1 -> CKR_CURVE_NOT_SUPPORTED */
+    err_or_panic!(
+        generate_key_pair(
+            session,
+            CKM_EC_KEY_PAIR_GEN,
+            &[(CKA_KEY_TYPE, CKK_EC)],
+            &[(CKA_EC_PARAMS, &secp224r1_params)],
+            &[],
+            &[],
+            &[],
+            &[],
+        ),
+        CKR_CURVE_NOT_SUPPORTED
+    );
+
+    /* secp256k1 -> CKR_CURVE_NOT_SUPPORTED */
+    err_or_panic!(
+        generate_key_pair(
+            session,
+            CKM_EC_KEY_PAIR_GEN,
+            &[(CKA_KEY_TYPE, CKK_EC)],
+            &[(CKA_EC_PARAMS, &secp256k1_params)],
+            &[],
+            &[],
+            &[],
+            &[],
+        ),
+        CKR_CURVE_NOT_SUPPORTED
+    );
+
+    /* brainpoolP256r1 -> CKR_CURVE_NOT_SUPPORTED */
+    err_or_panic!(
+        generate_key_pair(
+            session,
+            CKM_EC_KEY_PAIR_GEN,
+            &[(CKA_KEY_TYPE, CKK_EC)],
+            &[(CKA_EC_PARAMS, &brainpool_params)],
+            &[],
+            &[],
+            &[],
+            &[],
+        ),
+        CKR_CURVE_NOT_SUPPORTED
+    );
+
+    /* P-256 -> CKR_OK */
+    let (hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_EC_KEY_PAIR_GEN,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[(CKA_EC_PARAMS, &p256_params)],
+        &[],
+        &[],
+        &[],
+        &[],
+    ));
+    assert_ne!(hpub, CK_INVALID_HANDLE);
+    assert_ne!(hpri, CK_INVALID_HANDLE);
+
+    testtokn.finalize();
+}
