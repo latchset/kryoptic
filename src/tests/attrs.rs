@@ -245,3 +245,134 @@ fn test_template_null_ptr() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_template_null_pvalue() {
+    let mut testtokn =
+        TestToken::initialized("test_template_null_pvalue", None);
+    let session = testtokn.get_session(true);
+
+    // 1. C_CreateObject (data object) with CKA_TOKEN {NULL, 1}
+    let cls: CK_OBJECT_CLASS = CKO_DATA;
+    let tmpl = [
+        CK_ATTRIBUTE {
+            type_: CKA_CLASS,
+            pValue: &cls as *const _ as *mut _,
+            ulValueLen: sizeof!(CK_OBJECT_CLASS),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_TOKEN,
+            pValue: std::ptr::null_mut(),
+            ulValueLen: sizeof!(CK_BBOOL),
+        },
+    ];
+    let mut handle = CK_INVALID_HANDLE;
+    let ret =
+        fn_create_object(session, tmpl.as_ptr() as *mut _, 2, &mut handle);
+    assert_eq!(ret, CKR_ATTRIBUTE_VALUE_INVALID);
+
+    // 2. C_CreateObject (data object) with CKA_VALUE {NULL, 16}
+    let tmpl = [
+        CK_ATTRIBUTE {
+            type_: CKA_CLASS,
+            pValue: &cls as *const _ as *mut _,
+            ulValueLen: sizeof!(CK_OBJECT_CLASS),
+        },
+        CK_ATTRIBUTE {
+            type_: CKA_VALUE,
+            pValue: std::ptr::null_mut(),
+            ulValueLen: 16,
+        },
+    ];
+    let ret =
+        fn_create_object(session, tmpl.as_ptr() as *mut _, 2, &mut handle);
+    assert_eq!(ret, CKR_ATTRIBUTE_VALUE_INVALID);
+
+    // 3. C_FindObjectsInit with CKA_TOKEN {NULL, 1}
+    let tmpl = [CK_ATTRIBUTE {
+        type_: CKA_TOKEN,
+        pValue: std::ptr::null_mut(),
+        ulValueLen: sizeof!(CK_BBOOL),
+    }];
+    let ret = fn_find_objects_init(session, tmpl.as_ptr() as *mut _, 1);
+    assert_eq!(ret, CKR_ATTRIBUTE_VALUE_INVALID);
+
+    #[cfg(feature = "aes")]
+    {
+        // 4. C_GenerateKey(CKM_AES_KEY_GEN) with CKA_VALUE_LEN {NULL, sizeof(CK_ULONG)}
+        let mut mech = CK_MECHANISM {
+            mechanism: CKM_AES_KEY_GEN,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+        let tmpl = [CK_ATTRIBUTE {
+            type_: CKA_VALUE_LEN,
+            pValue: std::ptr::null_mut(),
+            ulValueLen: sizeof!(CK_ULONG),
+        }];
+        let mut key_handle = CK_INVALID_HANDLE;
+        let ret = fn_generate_key(
+            session,
+            &mut mech,
+            tmpl.as_ptr() as *mut _,
+            1,
+            &mut key_handle,
+        );
+        assert_eq!(ret, CKR_ATTRIBUTE_VALUE_INVALID);
+
+        // 5. C_GenerateKey(CKM_AES_KEY_GEN) with CKA_ENCRYPT {NULL, 1}
+        let mut val_len: CK_ULONG = 32;
+        let tmpl = [
+            CK_ATTRIBUTE {
+                type_: CKA_VALUE_LEN,
+                pValue: &mut val_len as *mut _ as *mut _,
+                ulValueLen: sizeof!(CK_ULONG),
+            },
+            CK_ATTRIBUTE {
+                type_: CKA_ENCRYPT,
+                pValue: std::ptr::null_mut(),
+                ulValueLen: sizeof!(CK_BBOOL),
+            },
+        ];
+        let ret = fn_generate_key(
+            session,
+            &mut mech,
+            tmpl.as_ptr() as *mut _,
+            2,
+            &mut key_handle,
+        );
+        assert_eq!(ret, CKR_ATTRIBUTE_VALUE_INVALID);
+
+        // Generate a valid AES key to test C_SetAttributeValue
+        let tmpl = [CK_ATTRIBUTE {
+            type_: CKA_VALUE_LEN,
+            pValue: &mut val_len as *mut _ as *mut _,
+            ulValueLen: sizeof!(CK_ULONG),
+        }];
+        let ret = fn_generate_key(
+            session,
+            &mut mech,
+            tmpl.as_ptr() as *mut _,
+            1,
+            &mut key_handle,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        // 6. C_SetAttributeValue with CKA_DECRYPT {NULL, 1}
+        let tmpl = [CK_ATTRIBUTE {
+            type_: CKA_DECRYPT,
+            pValue: std::ptr::null_mut(),
+            ulValueLen: sizeof!(CK_BBOOL),
+        }];
+        let ret = fn_set_attribute_value(
+            session,
+            key_handle,
+            tmpl.as_ptr() as *mut _,
+            1,
+        );
+        assert_eq!(ret, CKR_ATTRIBUTE_VALUE_INVALID);
+    }
+
+    testtokn.finalize();
+}
