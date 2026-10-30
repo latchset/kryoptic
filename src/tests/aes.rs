@@ -4287,3 +4287,202 @@ fn test_aes_finalize_without_updates() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_aes_cbc_pad_multipart_length_probe() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_cbc_pad_multipart_length_probe", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let iv = [0x55u8; 16];
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+
+    for size in 0..=31 {
+        let plaintext: Vec<u8> = (0..size).map(|i| (i * 7 + 3) as u8).collect();
+
+        // Multi-shot encryption
+        assert_eq!(fn_encrypt_init(session, &mut mechanism, handle), CKR_OK);
+
+        // Probe length for EncryptUpdate
+        let mut probed_len: CK_ULONG = 0;
+        assert_eq!(
+            fn_encrypt_update(
+                session,
+                plaintext.as_ptr() as *mut u8,
+                plaintext.len() as CK_ULONG,
+                std::ptr::null_mut(),
+                &mut probed_len,
+            ),
+            CKR_OK
+        );
+
+        // Always provide 1-byte buffer on first attempt and handle CKR_BUFFER_TOO_SMALL
+        let mut enc_part = vec![0u8; 1];
+        let mut enc_part_len: CK_ULONG = 1;
+        let ret = fn_encrypt_update(
+            session,
+            plaintext.as_ptr() as *mut u8,
+            plaintext.len() as CK_ULONG,
+            enc_part.as_mut_ptr(),
+            &mut enc_part_len,
+        );
+        if ret == CKR_BUFFER_TOO_SMALL {
+            enc_part.resize(enc_part_len as usize, 0);
+            assert_eq!(
+                fn_encrypt_update(
+                    session,
+                    plaintext.as_ptr() as *mut u8,
+                    plaintext.len() as CK_ULONG,
+                    enc_part.as_mut_ptr(),
+                    &mut enc_part_len,
+                ),
+                CKR_OK
+            );
+        } else {
+            assert_eq!(ret, CKR_OK);
+        }
+        enc_part.truncate(enc_part_len as usize);
+
+        // Probe length for EncryptFinal
+        let mut probed_len: CK_ULONG = 0;
+        assert_eq!(
+            fn_encrypt_final(session, std::ptr::null_mut(), &mut probed_len),
+            CKR_OK
+        );
+
+        // Always provide 1-byte buffer on first attempt and handle CKR_BUFFER_TOO_SMALL
+        let mut enc_final = vec![0u8; 1];
+        let mut enc_final_len: CK_ULONG = 1;
+        let ret = fn_encrypt_final(
+            session,
+            enc_final.as_mut_ptr(),
+            &mut enc_final_len,
+        );
+        if ret == CKR_BUFFER_TOO_SMALL {
+            enc_final.resize(enc_final_len as usize, 0);
+            assert_eq!(
+                fn_encrypt_final(
+                    session,
+                    enc_final.as_mut_ptr(),
+                    &mut enc_final_len,
+                ),
+                CKR_OK
+            );
+        } else {
+            assert_eq!(ret, CKR_OK);
+        }
+        enc_final.truncate(enc_final_len as usize);
+
+        let ciphertext = [enc_part, enc_final].concat();
+
+        // Multi-shot decryption
+        assert_eq!(fn_decrypt_init(session, &mut mechanism, handle), CKR_OK);
+
+        // Probe length for DecryptUpdate
+        let mut probed_update_len: CK_ULONG = 0;
+        assert_eq!(
+            fn_decrypt_update(
+                session,
+                ciphertext.as_ptr() as *mut u8,
+                ciphertext.len() as CK_ULONG,
+                std::ptr::null_mut(),
+                &mut probed_update_len,
+            ),
+            CKR_OK
+        );
+
+        // Always provide 1-byte buffer on first attempt and handle CKR_BUFFER_TOO_SMALL
+        let mut dec_part = vec![0u8; 1];
+        let mut dec_part_len: CK_ULONG = 1;
+        let ret = fn_decrypt_update(
+            session,
+            ciphertext.as_ptr() as *mut u8,
+            ciphertext.len() as CK_ULONG,
+            dec_part.as_mut_ptr(),
+            &mut dec_part_len,
+        );
+        if ret == CKR_BUFFER_TOO_SMALL {
+            dec_part.resize(dec_part_len as usize, 0);
+            assert_eq!(
+                fn_decrypt_update(
+                    session,
+                    ciphertext.as_ptr() as *mut u8,
+                    ciphertext.len() as CK_ULONG,
+                    dec_part.as_mut_ptr(),
+                    &mut dec_part_len,
+                ),
+                CKR_OK
+            );
+        } else {
+            assert_eq!(ret, CKR_OK);
+        }
+        dec_part.truncate(dec_part_len as usize);
+        assert!(probed_update_len >= dec_part.len() as CK_ULONG);
+
+        // Probe length for DecryptFinal
+        let mut probed_final_len: CK_ULONG = 0;
+        assert_eq!(
+            fn_decrypt_final(
+                session,
+                std::ptr::null_mut(),
+                &mut probed_final_len
+            ),
+            CKR_OK
+        );
+
+        // Always provide 1-byte buffer on first attempt and handle CKR_BUFFER_TOO_SMALL
+        let mut dec_final = vec![0u8; 1];
+        let mut dec_final_len: CK_ULONG = 1;
+        let ret = fn_decrypt_final(
+            session,
+            dec_final.as_mut_ptr(),
+            &mut dec_final_len,
+        );
+        if ret == CKR_BUFFER_TOO_SMALL {
+            dec_final.resize(dec_final_len as usize, 0);
+            assert_eq!(
+                fn_decrypt_final(
+                    session,
+                    dec_final.as_mut_ptr(),
+                    &mut dec_final_len,
+                ),
+                CKR_OK
+            );
+        } else {
+            assert_eq!(ret, CKR_OK);
+        }
+        dec_final.truncate(dec_final_len as usize);
+
+        assert!(
+            probed_final_len >= dec_final.len() as CK_ULONG,
+            "length query under-reported: probed {} < actual {}",
+            probed_final_len,
+            dec_final.len()
+        );
+
+        let decrypted = [dec_part, dec_final].concat();
+        assert_eq!(
+            decrypted, plaintext,
+            "decrypted data mismatch for size {}",
+            size
+        );
+    }
+
+    testtokn.finalize();
+}
