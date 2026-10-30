@@ -1526,3 +1526,159 @@ fn test_wrap_unwrap_template() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_generic_secret_key_size_limits() {
+    let mut testtokn =
+        TestToken::initialized("test_generic_secret_key_size_limits", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    // 1. Check C_GetMechanismInfo
+    let mut info: CK_MECHANISM_INFO = Default::default();
+    let ret = fn_get_mechanism_info(
+        testtokn.get_slot(),
+        CKM_GENERIC_SECRET_KEY_GEN,
+        &mut info,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.ulMinKeySize, 8); // 1 byte = 8 bits
+    assert_eq!(info.ulMaxKeySize, 128 * 1024 * 8); // 128 KiB = 1,048,576 bits
+    assert_ne!(info.flags & CKF_GENERATE, 0);
+
+    // 2. Generate key with CKA_VALUE_LEN = 0 -> CKR_KEY_SIZE_RANGE
+    err_or_panic!(
+        generate_key(
+            session,
+            CKM_GENERIC_SECRET_KEY_GEN,
+            std::ptr::null_mut(),
+            0,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 0)],
+            &[],
+            &[],
+        ),
+        CKR_KEY_SIZE_RANGE
+    );
+
+    // 3. Generate key with min size (1 byte) -> CKR_OK
+    let h1 = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 1)],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    ));
+    let val1 = ret_or_panic!(extract_key_value(session, h1));
+    assert_eq!(val1.len(), 1);
+
+    // 4. Generate key with max size (128 KiB = 131,072 bytes) -> CKR_OK
+    let h_max = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 128 * 1024)
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    ));
+    let val_max = ret_or_panic!(extract_key_value(session, h_max));
+    assert_eq!(val_max.len(), 128 * 1024);
+
+    // 5. Generate key with 128 KiB + 1 byte (131,073) -> CKR_KEY_SIZE_RANGE
+    err_or_panic!(
+        generate_key(
+            session,
+            CKM_GENERIC_SECRET_KEY_GEN,
+            std::ptr::null_mut(),
+            0,
+            &[
+                (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                (CKA_VALUE_LEN, 128 * 1024 + 1)
+            ],
+            &[],
+            &[],
+        ),
+        CKR_KEY_SIZE_RANGE
+    );
+
+    // 6. Generate key with 256 MiB (from bug report) -> CKR_KEY_SIZE_RANGE
+    err_or_panic!(
+        generate_key(
+            session,
+            CKM_GENERIC_SECRET_KEY_GEN,
+            std::ptr::null_mut(),
+            0,
+            &[
+                (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                (CKA_VALUE_LEN, 268435456)
+            ],
+            &[],
+            &[],
+        ),
+        CKR_KEY_SIZE_RANGE
+    );
+
+    // 7. Generate key with 2^32 + 16 (from bug report) on 64-bit -> CKR_KEY_SIZE_RANGE
+    #[cfg(target_pointer_width = "64")]
+    err_or_panic!(
+        generate_key(
+            session,
+            CKM_GENERIC_SECRET_KEY_GEN,
+            std::ptr::null_mut(),
+            0,
+            &[
+                (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                (CKA_VALUE_LEN, (1u64 << 32) + 16)
+            ],
+            &[],
+            &[],
+        ),
+        CKR_KEY_SIZE_RANGE
+    );
+
+    // 8. Create object: 128 KiB + 1 byte -> CKR_KEY_SIZE_RANGE
+    let oversized_key = vec![0x42u8; 128 * 1024 + 1];
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[(CKA_VALUE, &oversized_key)],
+            &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        ),
+        CKR_KEY_SIZE_RANGE
+    );
+
+    // 9. Create object: 0 bytes -> CKR_ATTRIBUTE_VALUE_INVALID
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[(CKA_VALUE, &[])],
+            &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        ),
+        CKR_ATTRIBUTE_VALUE_INVALID
+    );
+
+    // 10. Create object: exactly 128 KiB -> CKR_OK
+    let valid_max_key = vec![0x42u8; 128 * 1024];
+    let h_imported = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, &valid_max_key)],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    ));
+    let val_imported = ret_or_panic!(extract_key_value(session, h_imported));
+    assert_eq!(val_imported.len(), 128 * 1024);
+
+    testtokn.finalize();
+}

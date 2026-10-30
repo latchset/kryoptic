@@ -31,6 +31,7 @@ pub use key::{
     default_key_attributes, default_secret_key_generate,
     GenericSecretKeyFactory, GenericSecretKeyMechanism, KeyFactory,
     PrivKeyFactory, PubKeyFactory, SecretKeyFactory,
+    MAX_GENERIC_SECRET_KEY_SIZE, MIN_GENERIC_SECRET_KEY_SIZE,
 };
 
 /// Helper macro that generates methods to check specific boolean

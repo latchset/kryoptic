@@ -17,7 +17,8 @@ use crate::pkcs11::vendor::nss::*;
 use super::certs::{TrustObject, X509Factory};
 use super::key::{
     GenericSecretKeyFactory, GenericSecretKeyMechanism, KeyFactory,
-    PubKeyFactory, SecretKeyFactory,
+    PubKeyFactory, SecretKeyFactory, MAX_GENERIC_SECRET_KEY_SIZE,
+    MIN_GENERIC_SECRET_KEY_SIZE,
 };
 use super::Object;
 
@@ -1220,7 +1221,11 @@ static MECHANISM_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Object that holds Mechanisms for Generic Secrets
 static GENERIC_SECRET: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
-    Box::new(GenericSecretKeyMechanism::new(CKK_GENERIC_SECRET))
+    Box::new(GenericSecretKeyMechanism::new(
+        CKK_GENERIC_SECRET,
+        MIN_GENERIC_SECRET_KEY_SIZE * 8,
+        MAX_GENERIC_SECRET_KEY_SIZE * 8,
+    ))
 });
 
 /// The static Generic Secret factory

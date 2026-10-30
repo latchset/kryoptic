@@ -13,6 +13,11 @@ use crate::CSPRNG;
 use super::factory::*;
 use super::Object;
 
+/// Minimum generic secret key size in bytes (1 byte / 8 bits)
+pub const MIN_GENERIC_SECRET_KEY_SIZE: usize = 1;
+/// Maximum generic secret key size in bytes (128 KiB / 1,048,576 bits)
+pub const MAX_GENERIC_SECRET_KEY_SIZE: usize = 128 * 1024;
+
 /// This is a common trait to define factories for objects that
 /// are keys, this trait defines attribute common to all key classes.
 ///
@@ -480,7 +485,6 @@ pub trait SecretKeyFactory: KeyFactory {
 /// attribute.
 pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
     let value_len = usize::try_from(key.get_attr_as_ulong(CKA_VALUE_LEN)?)?;
-
     let mut value: Vec<u8> = vec![0; value_len];
     match CSPRNG
         .with(|rng| rng.borrow_mut().generate_random(value.as_mut_slice()))
@@ -585,6 +589,9 @@ impl ObjectFactory for GenericSecretKeyFactory {
         if self.keysize != 0 && len != self.keysize {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
+        if len > MAX_GENERIC_SECRET_KEY_SIZE {
+            return Err(CKR_KEY_SIZE_RANGE)?;
+        }
         obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)?;
 
         Ok(obj)
@@ -622,10 +629,29 @@ impl KeyFactory for GenericSecretKeyFactory {
 }
 
 impl SecretKeyFactory for GenericSecretKeyFactory {
+    fn set_key(&self, obj: &mut Object, mut key: Vec<u8>) -> Result<()> {
+        let keylen = key.len();
+        if keylen < MIN_GENERIC_SECRET_KEY_SIZE
+            || keylen > MAX_GENERIC_SECRET_KEY_SIZE
+        {
+            zeromem(key.as_mut_slice());
+            return Err(CKR_KEY_SIZE_RANGE)?;
+        }
+        if self.keysize != 0 && keylen != self.keysize {
+            zeromem(key.as_mut_slice());
+            return Err(CKR_KEY_SIZE_RANGE)?;
+        }
+        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        self.set_key_len(obj, keylen)?;
+        Ok(())
+    }
+
     /// Provides the recommended key size for this object if available,
     /// otherwise reflects back the provided default
     fn recommend_key_size(&self, default: usize) -> Result<usize> {
-        if self.keysize != 0 {
+        if default > MAX_GENERIC_SECRET_KEY_SIZE {
+            Err(CKR_KEY_SIZE_RANGE)?
+        } else if self.keysize != 0 {
             Ok(self.keysize)
         } else {
             Ok(default)
@@ -647,11 +673,15 @@ pub struct GenericSecretKeyMechanism {
 
 impl GenericSecretKeyMechanism {
     /// Instantiates a mechanism info for a specified symmetric key type
-    pub fn new(keytype: CK_KEY_TYPE) -> GenericSecretKeyMechanism {
+    pub fn new(
+        keytype: CK_KEY_TYPE,
+        min: usize,
+        max: usize,
+    ) -> GenericSecretKeyMechanism {
         GenericSecretKeyMechanism {
             info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_EFFECTIVELY_INFINITE,
-                ulMaxKeySize: CK_EFFECTIVELY_INFINITE,
+                ulMinKeySize: CK_ULONG::try_from(min).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(max).unwrap(),
                 flags: CKF_GENERATE,
             },
             keytype: keytype,
@@ -688,7 +718,16 @@ impl Mechanism for GenericSecretKeyMechanism {
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         key.ensure_ulong(CKA_KEY_TYPE, self.keytype())
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
-
+        let mut key_len = key.get_attr_as_ulong(CKA_VALUE_LEN)?;
+        if self.keytype == CKK_GENERIC_SECRET {
+            /* CKM_GENERIC_SECRET_KEY_GEN uses bits */
+            key_len *= 8;
+        }
+        if key_len < self.info.ulMinKeySize as CK_ULONG
+            || key_len > self.info.ulMaxKeySize as CK_ULONG
+        {
+            return Err(CKR_KEY_SIZE_RANGE)?;
+        }
         default_secret_key_generate(&mut key)?;
         default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
