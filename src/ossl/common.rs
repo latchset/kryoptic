@@ -185,7 +185,7 @@ fn oid_to_evp_key_type(oid: &asn1::ObjectIdentifier) -> Result<EvpPkeyType> {
         &oid::ED448_OID => Ok(EvpPkeyType::Ed448),
         &oid::X25519_OID => Ok(EvpPkeyType::X25519),
         &oid::X448_OID => Ok(EvpPkeyType::X448),
-        _ => Err(CKR_GENERAL_ERROR)?,
+        _ => Err(CKR_CURVE_NOT_SUPPORTED)?,
     }
 }
 

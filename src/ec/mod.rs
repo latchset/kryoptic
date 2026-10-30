@@ -91,7 +91,7 @@ pub fn ec_point_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
         &ED448_OID => Ok(EC_POINT_BYTES_ED448),
         &X25519_OID => Ok(EC_POINT_BYTES_X25519),
         &X448_OID => Ok(EC_POINT_BYTES_X448),
-        _ => Err(CKR_GENERAL_ERROR)?,
+        _ => Err(CKR_CURVE_NOT_SUPPORTED)?,
     }
 }
 
@@ -105,7 +105,7 @@ pub fn ec_key_size(oid: &asn1::ObjectIdentifier) -> Result<usize> {
         &ED448_OID => Ok(EC_KEY_BYTES_ED448),
         &X25519_OID => Ok(EC_KEY_BYTES_X25519),
         &X448_OID => Ok(EC_KEY_BYTES_X448),
-        _ => Err(CKR_GENERAL_ERROR)?,
+        _ => Err(CKR_CURVE_NOT_SUPPORTED)?,
     }
 }
 
@@ -120,7 +120,7 @@ pub fn oid_to_bits(oid: asn1::ObjectIdentifier) -> Result<usize> {
         ED448_OID => Ok(BITS_ED448),
         X25519_OID => Ok(BITS_X25519),
         X448_OID => Ok(BITS_X448),
-        _ => Err(CKR_GENERAL_ERROR)?,
+        _ => Err(CKR_CURVE_NOT_SUPPORTED)?,
     }
 }
 
@@ -134,7 +134,7 @@ fn curvename_to_oid(name: &str) -> Result<asn1::ObjectIdentifier> {
         EDWARDS448 => Ok(ED448_OID),
         CURVE25519 => Ok(X25519_OID),
         CURVE448 => Ok(X448_OID),
-        _ => Err(CKR_GENERAL_ERROR)?,
+        _ => Err(CKR_CURVE_NOT_SUPPORTED)?,
     }
 }
 
@@ -228,7 +228,7 @@ pub fn check_ec_point_from_obj(
             octet = point.as_slice();
             compat = true;
         }
-        _ => return Err(CKR_GENERAL_ERROR)?,
+        _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
     }
 
     if octet.len() == size {
@@ -260,10 +260,7 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
         _ => return Err(CKR_KEY_TYPE_INCONSISTENT)?,
     };
 
-    let oid = match get_oid_from_obj(key) {
-        Ok(o) => o,
-        _ => return Err(CKR_GENERAL_ERROR)?,
-    };
+    let oid = get_oid_from_obj(key)?;
 
     let mut asn1_vec = {
         let val = key.get_attr_as_bytes(CKA_VALUE)?;
@@ -295,7 +292,7 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
             ED448_OID => ED448_ALG,
             X25519_OID => X25519_ALG,
             X448_OID => X448_ALG,
-            _ => return Err(CKR_GENERAL_ERROR)?,
+            _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
         },
     )?;
     let ret = match asn1::write_single(&pkeyinfo) {
