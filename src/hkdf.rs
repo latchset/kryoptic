@@ -12,7 +12,8 @@ use crate::error::Result;
 use crate::mechanism::{Derive, Mechanism, Mechanisms};
 use crate::object::{
     GenericSecretKeyFactory, GenericSecretKeyMechanism, ObjectFactories,
-    ObjectFactory, ObjectType,
+    ObjectFactory, ObjectType, MAX_GENERIC_SECRET_KEY_SIZE,
+    MIN_GENERIC_SECRET_KEY_SIZE,
 };
 use crate::ossl::hkdf::HKDFOperation;
 use crate::pkcs11::*;
@@ -27,7 +28,11 @@ static HKDF_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
                 flags: CKF_DERIVE,
             },
         }),
-        Box::new(GenericSecretKeyMechanism::new(CKK_HKDF)),
+        Box::new(GenericSecretKeyMechanism::new(
+            CKK_HKDF,
+            MIN_GENERIC_SECRET_KEY_SIZE * 8,
+            MAX_GENERIC_SECRET_KEY_SIZE * 8,
+        )),
     ]
 });
 
