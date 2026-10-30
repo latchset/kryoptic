@@ -4287,3 +4287,51 @@ fn test_aes_finalize_without_updates() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_aes_wrap_key_non_aes_wrapping_key() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_wrap_key_non_aes_wrapping_key", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    // Target key to wrap: AES-128
+    let key_data = [0x42u8; 16];
+    let target_key = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &key_data)],
+        &[(CKA_EXTRACTABLE, true)],
+    ));
+
+    // Non-AES key with CKA_WRAP = true
+    let generic_key = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, b"0123456789abcdef")],
+        &[(CKA_WRAP, true)],
+    ));
+
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut wrapped = [0u8; 64];
+    let mut wraplen: CK_ULONG = wrapped.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut mechanism,
+        generic_key,
+        target_key,
+        wrapped.as_mut_ptr(),
+        &mut wraplen,
+    );
+    assert_eq!(ret, CKR_WRAPPING_KEY_TYPE_INCONSISTENT);
+
+    testtokn.finalize();
+}
