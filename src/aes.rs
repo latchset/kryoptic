@@ -110,10 +110,10 @@ impl AesKeyFactory {
 
         attributes.push(attr_element!(
             CKA_VALUE; OAFlags::Defval | OAFlags::Sensitive
-            | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate;
+            | OAFlags::RequiredOnCreate | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable;
             Attribute::from_bytes; val Vec::new()));
         attributes.push(attr_element!(
-            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate;
+            CKA_VALUE_LEN; OAFlags::RequiredOnGenerate | OAFlags::Unchangeable;
             Attribute::from_ulong; val 0));
 
         factory.data.finalize();

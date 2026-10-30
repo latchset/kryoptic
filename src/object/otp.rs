@@ -17,23 +17,23 @@ pub trait OTPKeyFactory: SecretKeyFactory {
         self.add_common_secret_key_attrs();
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
-            CKA_OTP_FORMAT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong; val CK_OTP_FORMAT_DECIMAL));
+            CKA_OTP_FORMAT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong; val CK_OTP_FORMAT_DECIMAL));
         attrs.push(attr_element!(
-            CKA_OTP_LENGTH; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong; val 6));
+            CKA_OTP_LENGTH; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong; val 6));
         attrs.push(attr_element!(
-            CKA_OTP_USER_FRIENDLY_MODE; OAFlags::Defval; Attribute::from_bool; val false));
+            CKA_OTP_USER_FRIENDLY_MODE; OAFlags::Defval | OAFlags::Unchangeable; Attribute::from_bool; val false));
         attrs.push(attr_element!(
-            CKA_OTP_CHALLENGE_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
+            CKA_OTP_CHALLENGE_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
         attrs.push(attr_element!(
-            CKA_OTP_TIME_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
+            CKA_OTP_TIME_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
         attrs.push(attr_element!(
-            CKA_OTP_COUNTER_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
+            CKA_OTP_COUNTER_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
         attrs.push(attr_element!(
-            CKA_OTP_PIN_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
+            CKA_OTP_PIN_REQUIREMENT; OAFlags::Defval | OAFlags::SettableOnlyOnCreate | OAFlags::Unchangeable; Attribute::from_ulong; val CK_OTP_PARAM_IGNORED));
         attrs.push(attr_element!(
             CKA_OTP_COUNTER; OAFlags::Defval; Attribute::from_bytes; val vec![0u8; 8]));
         attrs.push(attr_element!(
-            CKA_OTP_TIME; OAFlags::Defval; Attribute::from_string; val String::new()));
+            CKA_OTP_TIME; OAFlags::Defval | OAFlags::Unchangeable; Attribute::from_string; val String::new()));
         attrs.push(attr_element!(
             CKA_OTP_USER_IDENTIFIER; OAFlags::empty(); Attribute::from_string; val String::new()));
         attrs.push(attr_element!(

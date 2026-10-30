@@ -264,7 +264,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     fn add_common_object_attrs(&mut self) {
         let attrs = self.get_data_mut().get_attributes_mut();
         attrs.push(attr_element!(
-            CKA_CLASS; OAFlags::RequiredOnCreate;
+            CKA_CLASS; OAFlags::RequiredOnCreate | OAFlags::Unchangeable;
             Attribute::from_ulong; val 0));
         attrs.push(attr_element!(
             CKA_UNIQUE_ID; OAFlags::NeverSettable | OAFlags::Unchangeable;
@@ -291,7 +291,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
             CKA_COPYABLE; OAFlags::Defval | OAFlags::ChangeToFalse;
             Attribute::from_bool; val true));
         attrs.push(attr_element!(
-            CKA_DESTROYABLE; OAFlags::Defval; Attribute::from_bool;
+            CKA_DESTROYABLE; OAFlags::Defval | OAFlags::ChangeToFalse; Attribute::from_bool;
             val true));
     }
 
@@ -407,23 +407,21 @@ pub trait ObjectFactory: Debug + Send + Sync {
         for ck_attr in template {
             match attributes.iter().find(|a| a.get_type() == ck_attr.type_) {
                 Some(attr) => {
+                    if attr.is(OAFlags::NeverSettable) {
+                        return Err(CKR_ATTRIBUTE_READ_ONLY)?;
+                    }
                     if attr.is(OAFlags::Unchangeable) {
                         if attr
                             .is(OAFlags::ChangeToFalse | OAFlags::ChangeToTrue)
                         {
-                            let val =
-                                match origin.get_attr_as_bool(ck_attr.type_) {
-                                    Ok(a) => a,
-                                    Err(_) => false,
-                                };
-                            if val && !attr.is(OAFlags::ChangeToFalse) {
+                            let new_val = ck_attr.to_bool()?;
+                            if new_val && !attr.is(OAFlags::ChangeToTrue) {
                                 return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                             }
-                            if !val && !attr.is(OAFlags::ChangeToTrue) {
+                            if !new_val && !attr.is(OAFlags::ChangeToFalse) {
                                 return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                             }
-                        }
-                        if !attr.is(OAFlags::ChangeOnCopy) {
+                        } else if !attr.is(OAFlags::ChangeOnCopy) {
                             return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                         }
                     }
@@ -487,7 +485,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
                 None => return Err(CKR_ATTRIBUTE_TYPE_INVALID)?,
                 Some(attr) => {
                     if attr.is(OAFlags::NeverSettable) {
-                        return Err(CKR_ACTION_PROHIBITED)?;
+                        return Err(CKR_ATTRIBUTE_READ_ONLY)?;
                     }
                     if attr.is(OAFlags::Unchangeable) {
                         if attr.attribute.get_attrtype() == AttrType::BoolType {
