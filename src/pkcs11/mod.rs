@@ -919,6 +919,9 @@ impl CK_ATTRIBUTE {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
         Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
     }
 
@@ -927,6 +930,9 @@ impl CK_ATTRIBUTE {
     /// Errors out if the data size does not match the size of a CK_BBOOL
     pub fn to_bool(self) -> Result<bool> {
         if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
+        if self.pValue.is_null() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
@@ -976,8 +982,14 @@ impl CK_ATTRIBUTE {
 
     /// Returns a copy of the internal buffer as an vector
     ///
-    /// Returns an empty vector if the internal buffer pointer is null
+    /// Errors out if the internal data pointer is null
     pub fn to_buf(&self) -> Result<Vec<u8>> {
+        if self.ulValueLen == 0 {
+            return Ok(Vec::new());
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
+        }
         Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
 
@@ -1019,6 +1031,9 @@ impl CK_MECHANISM {
         if len != std::mem::size_of::<T>() {
             return Err(CKR_ARGUMENTS_BAD)?;
         }
+        if self.pParameter.is_null() {
+            return Err(CKR_ARGUMENTS_BAD)?;
+        }
         Ok(unsafe { std::ptr::read_unaligned(self.pParameter as *const T) })
     }
 
@@ -1035,6 +1050,9 @@ impl CK_OTP_PARAM {
         if self.ulValueLen != std::mem::size_of::<CK_ULONG>() as CK_ULONG {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
+        if self.pValue.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
         Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
     }
 
@@ -1043,6 +1061,9 @@ impl CK_OTP_PARAM {
     /// Errors out if the data size does not match the size of a CK_BBOOL
     pub fn to_bool(self) -> Result<bool> {
         if self.ulValueLen != std::mem::size_of::<CK_BBOOL>() as CK_ULONG {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        if self.pValue.is_null() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         let val: CK_BBOOL = unsafe { *(self.pValue as CK_BBOOL_PTR) };
@@ -1071,8 +1092,14 @@ impl CK_OTP_PARAM {
 
     /// Returns a copy of the internal buffer as an vector
     ///
-    /// Returns an empty vector if the internal buffer pointer is null
+    /// Errors out if the internal data pointer is null
     pub fn to_buf(&self) -> Result<Vec<u8>> {
+        if self.ulValueLen == 0 {
+            return Ok(Vec::new());
+        }
+        if self.pValue.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
         Ok(bytes_to_vec!(self.pValue, self.ulValueLen))
     }
 }
