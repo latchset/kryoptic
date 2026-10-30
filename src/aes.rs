@@ -335,6 +335,14 @@ impl Mechanism for AesMechanism {
         if self.info.flags & CKF_WRAP != CKF_WRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
+        match wrapping_key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_WRAP) {
+            Ok(_) => (),
+            Err(e) if e.rv() == CKR_KEY_TYPE_INCONSISTENT => {
+                return Err(CKR_WRAPPING_KEY_TYPE_INCONSISTENT)?;
+            }
+            Err(e) => return Err(e),
+        }
+
         AesOperation::wrap(
             mech,
             wrapping_key,
@@ -359,6 +367,14 @@ impl Mechanism for AesMechanism {
         if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
+        match wrapping_key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_UNWRAP) {
+            Ok(_) => (),
+            Err(e) if e.rv() == CKR_KEY_TYPE_INCONSISTENT => {
+                return Err(CKR_UNWRAPPING_KEY_TYPE_INCONSISTENT)?;
+            }
+            Err(e) => return Err(e),
+        }
+
         let keydata = AesOperation::unwrap(mech, wrapping_key, data)?;
         key_template
             .as_key_factory()?
