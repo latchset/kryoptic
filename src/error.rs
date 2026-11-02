@@ -284,6 +284,9 @@ impl From<ossl::Error> for Error {
             ossl::ErrorKind::VerifyFailed => {
                 Error::ck_rv(CKR_SIGNATURE_INVALID)
             }
+            ossl::ErrorKind::DecryptFailed => {
+                Error::ck_rv(CKR_ENCRYPTED_DATA_INVALID)
+            }
             _ => Error::ck_rv(CKR_DEVICE_ERROR),
         }
     }

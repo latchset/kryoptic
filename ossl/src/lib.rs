@@ -115,6 +115,8 @@ pub enum ErrorKind {
     /// signature did not match — distinct from OsslError, which indicates
     /// the verification operation itself could not be completed
     VerifyFailed,
+    /// A decryption operation failed
+    DecryptFailed,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -129,6 +131,7 @@ impl std::fmt::Display for ErrorKind {
                 "An optional argument is required or has a bad value"
             }
             ErrorKind::VerifyFailed => "The signature or MAC did not verify",
+            ErrorKind::DecryptFailed => "A decryption operation failed",
         })
     }
 }

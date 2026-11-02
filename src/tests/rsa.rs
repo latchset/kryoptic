@@ -53,13 +53,13 @@ fn test_rsa_operations() {
         assert_eq!(ret, CKR_OPERATION_ACTIVE);
 
         let data = "plaintext";
-        let enc: [u8; 512] = [0; 512];
+        let mut enc: [u8; 512] = [0; 512];
         let mut enc_len: CK_ULONG = 512;
         ret = fn_encrypt(
             session,
             CString::new(data).unwrap().into_raw() as *mut u8,
             data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
+            enc.as_mut_ptr(),
             &mut enc_len,
         );
         assert_eq!(ret, CKR_OK);
@@ -70,7 +70,7 @@ fn test_rsa_operations() {
             session,
             CString::new(data).unwrap().into_raw() as *mut u8,
             data.len() as CK_ULONG,
-            enc.as_ptr() as *mut _,
+            enc.as_mut_ptr(),
             &mut enc_len,
         );
         assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
@@ -95,13 +95,13 @@ fn test_rsa_operations() {
         ret = fn_decrypt_init(session, &mut mechanism, handle);
         assert_eq!(ret, CKR_OK);
 
-        let dec: [u8; 512] = [0; 512];
+        let mut dec: [u8; 512] = [0; 512];
         let mut dec_len: CK_ULONG = 512;
         ret = fn_decrypt(
             session,
-            enc.as_ptr() as *mut u8,
+            enc.as_mut_ptr(),
             enc_len,
-            dec.as_ptr() as *mut u8,
+            dec.as_mut_ptr(),
             &mut dec_len,
         );
         assert_eq!(ret, CKR_OK);
@@ -362,6 +362,23 @@ fn test_rsa_operations() {
     let result =
         ret_or_panic!(decrypt(session, pri_key_handle, &encrypted, &mechanism));
     assert_eq!(msg, result);
+
+    /* break the ciphertext and ensure the proper error is returned */
+    let mut bad_enc = encrypted.clone();
+    bad_enc[5] ^= 0xFF;
+    let mut mechanism = mechanism;
+    let ret = fn_decrypt_init(session, &mut mechanism, pri_key_handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec: [u8; 512] = [0; 512];
+    let mut dec_len: CK_ULONG = 512;
+    let ret = fn_decrypt(
+        session,
+        bad_enc.as_mut_ptr(),
+        bad_enc.len() as CK_ULONG,
+        dec.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_ENCRYPTED_DATA_INVALID);
 
     /* RSA PKCS Wrap */
     /* RSA PKCS OAEP Wrap */

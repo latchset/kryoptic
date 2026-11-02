@@ -203,7 +203,7 @@ impl OsslAsymcipher {
         };
         if ret != 1 {
             trace_ossl!("EVP_PKEY_decrypt()");
-            return Err(Error::new(ErrorKind::OsslError));
+            return Err(Error::new(ErrorKind::DecryptFailed));
         }
         Ok(outlen)
     }
