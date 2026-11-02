@@ -54,10 +54,10 @@ docs-fips:
 	cargo doc --no-default-features --features fips --document-private-items
 
 manpages:
-	pandoc -s -t man doc/kryoptic.conf.man.md -o kryoptic.conf.5
-	pandoc -s -t man doc/kryoptic.man.md -o kryoptic.7
-	pandoc -s -t man tools/softhsm/softhsm_migrate.man.md -o softhsm_migrate.1
-	pandoc -s -t man tools/otp/kryoptic_otp.man.md -o kryoptic_otp.1
+	go-md2man -in doc/kryoptic.conf.man.md -out kryoptic.conf.5
+	go-md2man -in doc/kryoptic.man.md -out kryoptic.7
+	go-md2man -in tools/softhsm/softhsm_migrate.man.md -out softhsm_migrate.1
+	go-md2man -in tools/otp/kryoptic_otp.man.md -out kryoptic_otp.1
 
 .ONESHELL:
 SHELL = /bin/bash

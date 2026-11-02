@@ -4,6 +4,10 @@
 # Enable gpg signature verification by default
 %bcond gpgcheck 1
 
+%ifnarch %{ix86}
+%bcond manpages 1
+%endif
+
 %global soname libkryoptic_pkcs11
 
 %global features kryoptic-lib/nssdb,kryoptic-lib/pqc,kryoptic-lib/standard,kryoptic-lib/dynamic,profiles
@@ -46,7 +50,9 @@ Source4:        https://people.redhat.com/~ssorce/simo_redhat.asc
 %endif
 
 BuildRequires:  openssl-devel
-BuildRequires:  pandoc
+%if %{with manpages}
+BuildRequires:  go-md2man
+%endif
 %if %{with gpgcheck}
 BuildRequires: openpgpverify
 %endif
@@ -98,9 +104,11 @@ export CONFDIR=%{_sysconfdir}
 %{cargo_license_summary -f %{features}}
 %{cargo_license -f %{features}} > LICENSE.dependencies
 
-pandoc -s -t man doc/kryoptic.conf.man.md -o kryoptic.conf.5
-pandoc -s -t man doc/kryoptic.man.md -o kryoptic.7
-pandoc -s -t man tools/softhsm/softhsm_migrate.man.md -o softhsm_migrate.1
+%if %{with manpages}
+go-md2man -in doc/kryoptic.conf.man.md -out kryoptic.conf.5
+go-md2man -in doc/kryoptic.man.md -out kryoptic.7
+go-md2man -in tools/softhsm/softhsm_migrate.man.md -out softhsm_migrate.1
+%endif
 
 %install
 install -Dp target/rpm/softhsm_migrate $RPM_BUILD_ROOT%{_bindir}/softhsm_migrate
@@ -109,9 +117,11 @@ install -Dp target/rpm/%{soname}.so $RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.s
 mkdir -p $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/
 echo "module: %{soname}.so" > $RPM_BUILD_ROOT%{_datadir}/p11-kit/modules/kryoptic.module
 
+%if %{with manpages}
 install -Dp -m 0644 kryoptic.conf.5 $RPM_BUILD_ROOT%{_mandir}/man5/kryoptic.conf.5
 install -Dp -m 0644 kryoptic.7 $RPM_BUILD_ROOT%{_mandir}/man7/kryoptic.7
 install -Dp -m 0644 softhsm_migrate.1 $RPM_BUILD_ROOT%{_mandir}/man1/softhsm_migrate.1
+%endif
 
 %if %{with check}
 %check
@@ -129,13 +139,17 @@ export TEST_PKCS11_MODULE=$RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 %dir %{_datadir}/p11-kit
 %dir %{_datadir}/p11-kit/modules
 %{_datadir}/p11-kit/modules/kryoptic.module
+%if %{with manpages}
 %{_mandir}/man5/kryoptic.conf.5*
 %{_mandir}/man7/kryoptic.7*
+%endif
 
 
 %files tools
 %{_bindir}/softhsm_migrate
+%if %{with manpages}
 %{_mandir}/man1/softhsm_migrate.1*
+%endif
 
 %changelog
 %autochangelog
