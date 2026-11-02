@@ -1683,11 +1683,25 @@ impl Decryption for AesOperation {
             self.state = OpIntState::Finalized;
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        let outl = self.decrypt_update(cipher, plain)?;
+        let outl = match self.decrypt_update(cipher, plain) {
+            Ok(len) => len,
+            Err(e) => {
+                zeromem(plain);
+                return Err(e);
+            }
+        };
         if outl > plain.len() {
+            zeromem(plain);
             return Err(self.op_err(CKR_GENERAL_ERROR));
         }
-        Ok(outl + self.decrypt_final(&mut plain[outl..])?)
+        let fin = match self.decrypt_final(&mut plain[outl..]) {
+            Ok(len) => len,
+            Err(e) => {
+                zeromem(plain);
+                return Err(e);
+            }
+        };
+        Ok(outl + fin)
     }
 
     /// Calls the underlying OpenSSL function to decrypt the ciphertext buffer
@@ -1816,17 +1830,18 @@ impl Decryption for AesOperation {
                      * openssl requires this order of operations for CCM */
                     /* The tag is at the tail of the cipher buffer */
                     cipher_end = self.params.datalen;
-                    ctx.set_tag(&cbuf[cipher_end..]).or_else(|_| {
-                        self.state = OpIntState::Finalized;
-                        Err(CKR_DEVICE_ERROR)
-                    })?;
+                    if ctx.set_tag(&cbuf[cipher_end..]).is_err() {
+                        return Err(self.op_err(CKR_DEVICE_ERROR));
+                    }
 
-                    plain_offset = ctx
-                        .update(&cbuf[..cipher_end], plain)
-                        .or_else(|_| {
-                            self.state = OpIntState::Finalized;
-                            Err(CKR_DEVICE_ERROR)
-                        })?;
+                    plain_offset = match ctx.update(&cbuf[..cipher_end], plain)
+                    {
+                        Ok(offset) => offset,
+                        Err(_) => {
+                            zeromem(plain);
+                            return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
+                        }
+                    };
 
                     zeromem(self.buffer.as_mut_slice());
                     self.buffer.clear();
@@ -1985,11 +2000,13 @@ impl Decryption for AesOperation {
                 match ctx.finalize(plain) {
                     Ok(len) => {
                         if len != 0 {
-                            return Err(self.op_err(CKR_DEVICE_ERROR))?;
+                            zeromem(plain);
+                            return Err(self.op_err(CKR_DEVICE_ERROR));
                         }
                     }
                     Err(_) => {
-                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?
+                        zeromem(plain);
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
                     }
                 }
             }
@@ -2622,10 +2639,11 @@ impl MsgDecryption for AesOperation {
                 }
                 if let Some(ctx) = &mut self.ctx {
                     ctx.update(cbuf, plain).or_else(|_| {
-                        self.state = OpIntState::Finalized;
-                        Err(CKR_DEVICE_ERROR)
+                        zeromem(plain);
+                        Err(self.op_err(CKR_AEAD_DECRYPT_FAILED))
                     })?
                 } else {
+                    zeromem(plain);
                     return Err(self.op_err(CKR_GENERAL_ERROR));
                 }
             }
@@ -2643,7 +2661,8 @@ impl MsgDecryption for AesOperation {
                             }
                         }
                         Err(_) => {
-                            return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))
+                            zeromem(plain);
+                            return Err(self.op_err(CKR_AEAD_DECRYPT_FAILED));
                         }
                     }
                 } else {
