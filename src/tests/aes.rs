@@ -4532,3 +4532,410 @@ fn test_aes_cbc_pad_multipart_length_probe() {
 
     testtokn.finalize();
 }
+
+/// Regression test: When an AEAD decryption (AES-CCM or AES-GCM) fails authentication
+/// (wrong tag, modified ciphertext, or wrong AAD), C_Decrypt and C_DecryptMessage
+/// must return CKR_AEAD_DECRYPT_FAILED (not CKR_DEVICE_ERROR), and the output
+/// plaintext buffer must be zeroized.
+#[test]
+#[parallel]
+fn test_aes_aead_decrypt_tampered() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_aead_decrypt_tampered", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32)],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    ));
+
+    let plaintext = b"0123456789abcdef0123456789abcdef"; // 32 bytes
+    let iv = b"123456789012"; // 12 bytes
+    let aad = b"16 bytes of aad!"; // 16 bytes
+    let tag_len = 16usize;
+
+    for &mech in &[CKM_AES_GCM, CKM_AES_CCM] {
+        // --- 1. Classic API (C_Encrypt / C_Decrypt) ---
+        let mut gcm_param = CK_GCM_PARAMS {
+            pIv: iv.as_ptr() as *mut CK_BYTE,
+            ulIvLen: iv.len() as CK_ULONG,
+            ulIvBits: (iv.len() * 8) as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulTagBits: (tag_len * 8) as CK_ULONG,
+        };
+        let mut ccm_param = CK_CCM_PARAMS {
+            ulDataLen: plaintext.len() as CK_ULONG,
+            pNonce: iv.as_ptr() as *mut CK_BYTE,
+            ulNonceLen: iv.len() as CK_ULONG,
+            pAAD: aad.as_ptr() as *mut CK_BYTE,
+            ulAADLen: aad.len() as CK_ULONG,
+            ulMACLen: tag_len as CK_ULONG,
+        };
+
+        let mut mechanism = CK_MECHANISM {
+            mechanism: mech,
+            pParameter: if mech == CKM_AES_GCM {
+                void_ptr!(&mut gcm_param)
+            } else {
+                void_ptr!(&mut ccm_param)
+            },
+            ulParameterLen: if mech == CKM_AES_GCM {
+                sizeof!(CK_GCM_PARAMS)
+            } else {
+                sizeof!(CK_CCM_PARAMS)
+            },
+        };
+
+        let ct = ret_or_panic!(encrypt(session, handle, plaintext, &mechanism));
+        assert_eq!(ct.len(), plaintext.len() + tag_len);
+
+        // Normal decrypt recovers plaintext
+        let dec = ret_or_panic!(decrypt(session, handle, &ct, &mechanism));
+        assert_eq!(dec, plaintext);
+
+        // 1a. Classic: Tampered tag (flip one bit in the tag at the end of ciphertext)
+        {
+            let mut ct_bad_tag = ct.clone();
+            let last = ct_bad_tag.len() - 1;
+            ct_bad_tag[last] ^= 0x01;
+
+            let ret = fn_decrypt_init(session, &mut mechanism, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut dec_len: CK_ULONG = 0;
+            let ret = fn_decrypt(
+                session,
+                ct_bad_tag.as_ptr() as *mut CK_BYTE,
+                ct_bad_tag.len() as CK_ULONG,
+                std::ptr::null_mut(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert!(dec_len as usize >= plaintext.len());
+
+            let mut dec_buf = vec![0xAAu8; dec_len as usize];
+            let ret = fn_decrypt(
+                session,
+                ct_bad_tag.as_ptr() as *mut CK_BYTE,
+                ct_bad_tag.len() as CK_ULONG,
+                dec_buf.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_ENCRYPTED_DATA_INVALID);
+            assert_eq!(dec_buf, vec![0u8; dec_buf.len()]);
+
+            // Operation must be terminated
+            let mut dummy = [0u8; 16];
+            let mut dummy_len = dummy.len() as CK_ULONG;
+            assert_eq!(
+                fn_decrypt_update(
+                    session,
+                    dummy.as_mut_ptr(),
+                    dummy.len() as CK_ULONG,
+                    dummy.as_mut_ptr(),
+                    &mut dummy_len,
+                ),
+                CKR_OPERATION_NOT_INITIALIZED
+            );
+        }
+
+        // 1b. Classic: Tampered AAD
+        {
+            let mut bad_aad = aad.to_vec();
+            bad_aad[0] ^= 0x01;
+
+            let mut bad_gcm_param = CK_GCM_PARAMS {
+                pIv: iv.as_ptr() as *mut CK_BYTE,
+                ulIvLen: iv.len() as CK_ULONG,
+                ulIvBits: (iv.len() * 8) as CK_ULONG,
+                pAAD: bad_aad.as_ptr() as *mut CK_BYTE,
+                ulAADLen: bad_aad.len() as CK_ULONG,
+                ulTagBits: (tag_len * 8) as CK_ULONG,
+            };
+            let mut bad_ccm_param = CK_CCM_PARAMS {
+                ulDataLen: plaintext.len() as CK_ULONG,
+                pNonce: iv.as_ptr() as *mut CK_BYTE,
+                ulNonceLen: iv.len() as CK_ULONG,
+                pAAD: bad_aad.as_ptr() as *mut CK_BYTE,
+                ulAADLen: bad_aad.len() as CK_ULONG,
+                ulMACLen: tag_len as CK_ULONG,
+            };
+            let mut bad_mechanism = CK_MECHANISM {
+                mechanism: mech,
+                pParameter: if mech == CKM_AES_GCM {
+                    void_ptr!(&mut bad_gcm_param)
+                } else {
+                    void_ptr!(&mut bad_ccm_param)
+                },
+                ulParameterLen: if mech == CKM_AES_GCM {
+                    sizeof!(CK_GCM_PARAMS)
+                } else {
+                    sizeof!(CK_CCM_PARAMS)
+                },
+            };
+
+            let ret = fn_decrypt_init(session, &mut bad_mechanism, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut dec_len: CK_ULONG = 0;
+            let ret = fn_decrypt(
+                session,
+                ct.as_ptr() as *mut CK_BYTE,
+                ct.len() as CK_ULONG,
+                std::ptr::null_mut(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut dec_buf = vec![0xAAu8; dec_len as usize];
+            let ret = fn_decrypt(
+                session,
+                ct.as_ptr() as *mut CK_BYTE,
+                ct.len() as CK_ULONG,
+                dec_buf.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_ENCRYPTED_DATA_INVALID);
+            assert_eq!(dec_buf, vec![0u8; dec_buf.len()]);
+        }
+
+        // 1c. Classic: Tampered ciphertext payload
+        {
+            let mut ct_bad_payload = ct.clone();
+            ct_bad_payload[0] ^= 0x01;
+
+            let ret = fn_decrypt_init(session, &mut mechanism, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut dec_len: CK_ULONG = 0;
+            let ret = fn_decrypt(
+                session,
+                ct_bad_payload.as_ptr() as *mut CK_BYTE,
+                ct_bad_payload.len() as CK_ULONG,
+                std::ptr::null_mut(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let mut dec_buf = vec![0xAAu8; dec_len as usize];
+            let ret = fn_decrypt(
+                session,
+                ct_bad_payload.as_ptr() as *mut CK_BYTE,
+                ct_bad_payload.len() as CK_ULONG,
+                dec_buf.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_ENCRYPTED_DATA_INVALID);
+            assert_eq!(dec_buf, vec![0u8; dec_buf.len()]);
+        }
+
+        // --- 2. Message API (C_MessageEncryptInit / C_EncryptMessage / C_DecryptMessage) ---
+        let mut msg_mech = CK_MECHANISM {
+            mechanism: mech,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        let ret = fn_message_encrypt_init(session, &mut msg_mech, handle);
+        assert_eq!(ret, CKR_OK);
+
+        let mut iv_msg = iv.to_vec();
+        let mut tag_msg = [0u8; 16];
+
+        let mut gcm_msg_param = CK_GCM_MESSAGE_PARAMS {
+            pIv: iv_msg.as_mut_ptr(),
+            ulIvLen: iv_msg.len() as CK_ULONG,
+            ulIvFixedBits: 0,
+            ivGenerator: CKG_NO_GENERATE,
+            pTag: tag_msg.as_mut_ptr(),
+            ulTagBits: (tag_len * 8) as CK_ULONG,
+        };
+        let mut ccm_msg_param = CK_CCM_MESSAGE_PARAMS {
+            ulDataLen: plaintext.len() as CK_ULONG,
+            pNonce: iv_msg.as_mut_ptr(),
+            ulNonceLen: iv_msg.len() as CK_ULONG,
+            ulNonceFixedBits: 0,
+            nonceGenerator: CKG_NO_GENERATE,
+            pMAC: tag_msg.as_mut_ptr(),
+            ulMACLen: tag_len as CK_ULONG,
+        };
+
+        let (param_ptr, param_size) = if mech == CKM_AES_GCM {
+            (
+                void_ptr!(&mut gcm_msg_param),
+                sizeof!(CK_GCM_MESSAGE_PARAMS),
+            )
+        } else {
+            (
+                void_ptr!(&mut ccm_msg_param),
+                sizeof!(CK_CCM_MESSAGE_PARAMS),
+            )
+        };
+
+        let mut ct_msg = vec![0u8; plaintext.len()];
+        let mut ct_msg_len = ct_msg.len() as CK_ULONG;
+        let ret = fn_encrypt_message(
+            session,
+            param_ptr,
+            param_size,
+            byte_ptr!(aad.as_ptr()),
+            aad.len() as CK_ULONG,
+            plaintext.as_ptr() as *mut CK_BYTE,
+            plaintext.len() as CK_ULONG,
+            ct_msg.as_mut_ptr(),
+            &mut ct_msg_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(ct_msg_len as usize, plaintext.len());
+        assert_eq!(fn_message_encrypt_final(session), CKR_OK);
+
+        // Normal message decrypt recovers plaintext
+        {
+            let ret = fn_message_decrypt_init(session, &mut msg_mech, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut dec_msg = vec![0u8; plaintext.len()];
+            let mut dec_msg_len = dec_msg.len() as CK_ULONG;
+            let ret = fn_decrypt_message(
+                session,
+                param_ptr,
+                param_size,
+                byte_ptr!(aad.as_ptr()),
+                aad.len() as CK_ULONG,
+                ct_msg.as_ptr() as *mut CK_BYTE,
+                ct_msg.len() as CK_ULONG,
+                dec_msg.as_mut_ptr(),
+                &mut dec_msg_len,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(dec_msg, plaintext);
+            assert_eq!(fn_message_decrypt_final(session), CKR_OK);
+        }
+
+        // 2a. Message: Tampered tag
+        {
+            let ret = fn_message_decrypt_init(session, &mut msg_mech, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut bad_tag = tag_msg;
+            bad_tag[15] ^= 0x01;
+
+            let mut bad_gcm_msg = CK_GCM_MESSAGE_PARAMS {
+                pIv: iv_msg.as_mut_ptr(),
+                ulIvLen: iv_msg.len() as CK_ULONG,
+                ulIvFixedBits: 0,
+                ivGenerator: CKG_NO_GENERATE,
+                pTag: bad_tag.as_mut_ptr(),
+                ulTagBits: (tag_len * 8) as CK_ULONG,
+            };
+            let mut bad_ccm_msg = CK_CCM_MESSAGE_PARAMS {
+                ulDataLen: plaintext.len() as CK_ULONG,
+                pNonce: iv_msg.as_mut_ptr(),
+                ulNonceLen: iv_msg.len() as CK_ULONG,
+                ulNonceFixedBits: 0,
+                nonceGenerator: CKG_NO_GENERATE,
+                pMAC: bad_tag.as_mut_ptr(),
+                ulMACLen: tag_len as CK_ULONG,
+            };
+            let (bad_param_ptr, bad_param_size) = if mech == CKM_AES_GCM {
+                (void_ptr!(&mut bad_gcm_msg), sizeof!(CK_GCM_MESSAGE_PARAMS))
+            } else {
+                (void_ptr!(&mut bad_ccm_msg), sizeof!(CK_CCM_MESSAGE_PARAMS))
+            };
+
+            let mut dec_buf = vec![0xAAu8; plaintext.len()];
+            let mut dec_len = dec_buf.len() as CK_ULONG;
+            let ret = fn_decrypt_message(
+                session,
+                bad_param_ptr,
+                bad_param_size,
+                byte_ptr!(aad.as_ptr()),
+                aad.len() as CK_ULONG,
+                ct_msg.as_ptr() as *mut CK_BYTE,
+                ct_msg.len() as CK_ULONG,
+                dec_buf.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_AEAD_DECRYPT_FAILED);
+            assert_eq!(dec_buf, vec![0u8; plaintext.len()]);
+
+            // Further message decrypt calls without re-init must fail
+            assert_eq!(
+                fn_decrypt_message(
+                    session,
+                    bad_param_ptr,
+                    bad_param_size,
+                    byte_ptr!(aad.as_ptr()),
+                    aad.len() as CK_ULONG,
+                    ct_msg.as_ptr() as *mut CK_BYTE,
+                    ct_msg.len() as CK_ULONG,
+                    dec_buf.as_mut_ptr(),
+                    &mut dec_len,
+                ),
+                CKR_OPERATION_NOT_INITIALIZED
+            );
+            let _ = fn_message_decrypt_final(session);
+        }
+
+        // 2b. Message: Tampered AAD
+        {
+            let ret = fn_message_decrypt_init(session, &mut msg_mech, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut bad_aad = aad.to_vec();
+            bad_aad[0] ^= 0x01;
+
+            let mut dec_buf = vec![0xAAu8; plaintext.len()];
+            let mut dec_len = dec_buf.len() as CK_ULONG;
+            let ret = fn_decrypt_message(
+                session,
+                param_ptr,
+                param_size,
+                byte_ptr!(bad_aad.as_ptr()),
+                bad_aad.len() as CK_ULONG,
+                ct_msg.as_ptr() as *mut CK_BYTE,
+                ct_msg.len() as CK_ULONG,
+                dec_buf.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_AEAD_DECRYPT_FAILED);
+            assert_eq!(dec_buf, vec![0u8; plaintext.len()]);
+            let _ = fn_message_decrypt_final(session);
+        }
+
+        // 2c. Message: Tampered ciphertext payload
+        {
+            let ret = fn_message_decrypt_init(session, &mut msg_mech, handle);
+            assert_eq!(ret, CKR_OK);
+
+            let mut bad_ct = ct_msg.clone();
+            bad_ct[0] ^= 0x01;
+
+            let mut dec_buf = vec![0xAAu8; plaintext.len()];
+            let mut dec_len = dec_buf.len() as CK_ULONG;
+            let ret = fn_decrypt_message(
+                session,
+                param_ptr,
+                param_size,
+                byte_ptr!(aad.as_ptr()),
+                aad.len() as CK_ULONG,
+                bad_ct.as_ptr() as *mut CK_BYTE,
+                bad_ct.len() as CK_ULONG,
+                dec_buf.as_mut_ptr(),
+                &mut dec_len,
+            );
+            assert_eq!(ret, CKR_AEAD_DECRYPT_FAILED);
+            assert_eq!(dec_buf, vec![0u8; plaintext.len()]);
+            let _ = fn_message_decrypt_final(session);
+        }
+    }
+
+    testtokn.finalize();
+}
