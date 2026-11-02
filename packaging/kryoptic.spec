@@ -103,6 +103,9 @@ export CONFDIR=%{_sysconfdir}
 %cargo_build -f %{features} -- --all
 %{cargo_license_summary -f %{features}}
 %{cargo_license -f %{features}} > LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%cargo_vendor_manifest
+%endif
 
 %if %{with manpages}
 go-md2man -in doc/kryoptic.conf.man.md -out kryoptic.conf.5
@@ -132,6 +135,9 @@ export TEST_PKCS11_MODULE=$RPM_BUILD_ROOT%{_libdir}/pkcs11/%{soname}.so
 %files
 %license LICENSE.txt
 %license LICENSE.dependencies
+%if 0%{?bundled_rust_deps}
+%license cargo-vendor.txt
+%endif
 %doc README.md
 %dir %{_libdir}/pkcs11
 %{_libdir}/pkcs11/%{soname}.so
