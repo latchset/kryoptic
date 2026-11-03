@@ -128,7 +128,7 @@ fn decrypt_digest_update(
         return Ok(());
     }
 
-    let part_len: CK_ULONG = unsafe { *pul_part_len };
+    let part_len: CK_ULONG = unsafe { std::ptr::read_unaligned(pul_part_len) };
     if let Err(e) = internal_digest_update(&mut session, part, part_len) {
         let _ = session.cancel_operation::<dyn Decryption>();
         return Err(e);
@@ -277,7 +277,7 @@ fn decrypt_verify_update(
         return Ok(());
     }
 
-    let part_len: CK_ULONG = unsafe { *pul_part_len };
+    let part_len: CK_ULONG = unsafe { std::ptr::read_unaligned(pul_part_len) };
     if let Err(e) = internal_verify_update(&mut session, part, part_len) {
         let _ = session.cancel_operation::<dyn Decryption>();
         return Err(e);

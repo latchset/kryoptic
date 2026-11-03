@@ -351,6 +351,147 @@ fn test_sp800_kdf_dkm_length_is_in_bits() {
     testtokn.finalize();
 }
 
+#[cfg(feature = "sp800_108")]
+#[test]
+#[parallel]
+fn test_sp800_kdf_params_unaligned_and_null() {
+    let mut testtokn = TestToken::initialized(
+        "test_sp800_kdf_params_unaligned_and_null",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_GENERIC_SECRET_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET), (CKA_VALUE_LEN, 16)],
+        &[],
+        &[(CKA_DERIVE, true)],
+    ));
+
+    let derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    );
+
+    // 1. null pValue with non-zero ulValueLen for CK_SP800_108_COUNTER_FORMAT -> CKR_MECHANISM_PARAM_INVALID
+    let mut data_params_null_cf = [CK_PRF_DATA_PARAM {
+        type_: CK_SP800_108_ITERATION_VARIABLE,
+        pValue: std::ptr::null_mut(),
+        ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
+    }];
+    let mut params_null_cf = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: data_params_null_cf.len() as CK_ULONG,
+        pDataParams: data_params_null_cf.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+    let mut derive_mech_null_cf = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params_null_cf as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+    let mut derived = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech_null_cf,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut derived,
+    );
+    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+
+    // 2. null pValue with non-zero ulValueLen for CK_SP800_108_DKM_LENGTH -> CKR_MECHANISM_PARAM_INVALID
+    let mut data_params_null_dkm = [CK_PRF_DATA_PARAM {
+        type_: CK_SP800_108_DKM_LENGTH,
+        pValue: std::ptr::null_mut(),
+        ulValueLen: sizeof!(CK_SP800_108_DKM_LENGTH_FORMAT),
+    }];
+    let mut params_null_dkm = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: data_params_null_dkm.len() as CK_ULONG,
+        pDataParams: data_params_null_dkm.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+    let mut derive_mech_null_dkm = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params_null_dkm as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech_null_dkm,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut derived,
+    );
+    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+
+    // 3. unaligned pValue for CK_SP800_108_COUNTER_FORMAT -> CKR_OK
+    #[repr(align(8))]
+    struct AlignedBuf([u8; 32]);
+    let mut unaligned_cf_buf = AlignedBuf([0u8; 32]);
+    let cf = CK_SP800_108_COUNTER_FORMAT {
+        bLittleEndian: 0,
+        ulWidthInBits: 8,
+    };
+    let cf_size = std::mem::size_of::<CK_SP800_108_COUNTER_FORMAT>();
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            &cf as *const _ as *const u8,
+            unaligned_cf_buf.0.as_mut_ptr().add(1),
+            cf_size,
+        );
+    }
+    let unaligned_cf_ptr = unsafe { unaligned_cf_buf.0.as_mut_ptr().add(1) };
+    assert_ne!(
+        (unaligned_cf_ptr as usize)
+            % std::mem::align_of::<CK_SP800_108_COUNTER_FORMAT>(),
+        0
+    );
+
+    let mut data_params_unaligned_cf = [CK_PRF_DATA_PARAM {
+        type_: CK_SP800_108_ITERATION_VARIABLE,
+        pValue: unaligned_cf_ptr as CK_VOID_PTR,
+        ulValueLen: sizeof!(CK_SP800_108_COUNTER_FORMAT),
+    }];
+    let mut params_unaligned_cf = CK_SP800_108_KDF_PARAMS {
+        prfType: CKM_SHA256_HMAC,
+        ulNumberOfDataParams: data_params_unaligned_cf.len() as CK_ULONG,
+        pDataParams: data_params_unaligned_cf.as_mut_ptr(),
+        ulAdditionalDerivedKeys: 0,
+        pAdditionalDerivedKeys: std::ptr::null_mut(),
+    };
+    let mut derive_mech_unaligned_cf = CK_MECHANISM {
+        mechanism: CKM_SP800_108_COUNTER_KDF,
+        pParameter: &mut params_unaligned_cf as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_SP800_108_KDF_PARAMS),
+    };
+    let ret = fn_derive_key(
+        session,
+        &mut derive_mech_unaligned_cf,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut derived,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
 #[cfg(feature = "aes")]
 #[test]
 #[parallel]

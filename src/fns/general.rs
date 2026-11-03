@@ -22,7 +22,9 @@ fn initialize(init_args: CK_VOID_PTR) -> Result<()> {
     /* Before loading the default config see if there is a cutsom config
      * provided via reserved arg pointer */
     if !init_args.is_null() {
-        let args = unsafe { *(init_args as *const CK_C_INITIALIZE_ARGS) };
+        let args = unsafe {
+            std::ptr::read_unaligned(init_args as *const CK_C_INITIALIZE_ARGS)
+        };
 
         if !args.pReserved.is_null() {
             let reserved =
@@ -126,7 +128,7 @@ fn get_info(info: CK_INFO_PTR) -> Result<()> {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
     unsafe {
-        *info = crate::MODULE_INFO;
+        std::ptr::write_unaligned(info, crate::MODULE_INFO);
     }
     Ok(())
 }
@@ -151,7 +153,10 @@ fn get_function_list(fnlist: CK_FUNCTION_LIST_PTR_PTR) -> Result<()> {
         return Err(CKR_ARGUMENTS_BAD)?;
     }
     unsafe {
-        *fnlist = &crate::FNLIST_240 as *const _ as *mut _;
+        std::ptr::write_unaligned(
+            fnlist,
+            &crate::FNLIST_240 as *const _ as *mut _,
+        );
     };
     Ok(())
 }
@@ -196,27 +201,27 @@ fn get_interface_list(
 
     if interfaces_list.is_null() {
         unsafe {
-            *count = iflen;
+            std::ptr::write_unaligned(count, iflen);
         }
         return Ok(());
     }
     unsafe {
-        if *count < iflen {
-            *count = iflen;
+        if std::ptr::read_unaligned(count) < iflen {
+            std::ptr::write_unaligned(count, iflen);
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
     for i in 0..(*crate::INTERFACE_SET).len() {
         let offset = isize::try_from(i).map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            core::ptr::write(
+            std::ptr::write_unaligned(
                 interfaces_list.offset(offset) as *mut CK_INTERFACE,
                 *((*crate::INTERFACE_SET)[i].interface),
             );
         }
     }
     unsafe {
-        *count = iflen;
+        std::ptr::write_unaligned(count, iflen);
     }
     Ok(())
 }
@@ -266,7 +271,7 @@ fn get_interface(
     let ver: CK_VERSION = if version.is_null() {
         crate::IMPLEMENTED_VERSION
     } else {
-        unsafe { *version }
+        unsafe { std::ptr::read_unaligned(version) }
     };
 
     let request_name: *const CK_UTF8CHAR = if interface_name.is_null() {
@@ -288,7 +293,9 @@ fn get_interface(
             if ver.minor != intf.version.minor {
                 continue;
             }
-            unsafe { *interface = intf.interface as *mut _ }
+            unsafe {
+                std::ptr::write_unaligned(interface, intf.interface as *mut _)
+            }
             return Ok(());
         }
     }

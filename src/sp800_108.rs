@@ -110,7 +110,14 @@ impl Sp800Params {
         if p.ulValueLen != sizeof!(CK_SP800_108_COUNTER_FORMAT) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        let cf = unsafe { *(p.pValue as *const CK_SP800_108_COUNTER_FORMAT) };
+        if p.pValue.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        let cf = unsafe {
+            std::ptr::read_unaligned(
+                p.pValue as *const CK_SP800_108_COUNTER_FORMAT,
+            )
+        };
         Ok(Sp800CounterFormat {
             defined: true,
             le: match cf.bLittleEndian {
@@ -129,15 +136,23 @@ impl Sp800Params {
         if p.ulValueLen == 0 || p.pValue == std::ptr::null_mut() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        Ok(bytes_to_vec(p.pValue, p.ulValueLen as usize))
+        let len = usize::try_from(p.ulValueLen)
+            .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
+        Ok(bytes_to_vec(p.pValue, len))
     }
 
     fn parse_dkm_length(p: &CK_PRF_DATA_PARAM) -> Result<Sp800DKMLengthFormat> {
         if p.ulValueLen != sizeof!(CK_SP800_108_DKM_LENGTH_FORMAT) {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        let dkm =
-            unsafe { *(p.pValue as *const CK_SP800_108_DKM_LENGTH_FORMAT) };
+        if p.pValue.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        let dkm = unsafe {
+            std::ptr::read_unaligned(
+                p.pValue as *const CK_SP800_108_DKM_LENGTH_FORMAT,
+            )
+        };
         Ok(Sp800DKMLengthFormat {
             method: match dkm.dkmLengthMethod {
                 CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS

@@ -819,8 +819,16 @@ impl TLSKDFOperation {
                 Some(mo) => mo,
                 None => return Err(CKR_GENERAL_ERROR)?,
             };
-            let (cli_ptr, srv_ptr) =
-                unsafe { ((*mat_out).pIVClient, (*mat_out).pIVServer) };
+            let (cli_ptr, srv_ptr) = unsafe {
+                (
+                    std::ptr::read_unaligned(std::ptr::addr_of!(
+                        (*mat_out).pIVClient
+                    )),
+                    std::ptr::read_unaligned(std::ptr::addr_of!(
+                        (*mat_out).pIVServer
+                    )),
+                )
+            };
             let cliiv = bytes_to_slice_mut(cli_ptr, ivlen)?;
             cliiv.copy_from_slice(&dkm[i..(i + ivlen)]);
             i += ivlen;

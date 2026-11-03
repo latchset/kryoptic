@@ -87,14 +87,14 @@ fn digest(
 
     if pdigest.is_null() {
         unsafe {
-            *pul_digest_len = dgst_len;
+            std::ptr::write_unaligned(pul_digest_len, dgst_len);
         }
         return operation.ok();
     }
 
     unsafe {
-        if *pul_digest_len < dgst_len {
-            *pul_digest_len = dgst_len;
+        if std::ptr::read_unaligned(pul_digest_len) < dgst_len {
+            std::ptr::write_unaligned(pul_digest_len, dgst_len);
             operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
@@ -108,7 +108,7 @@ fn digest(
     operation.digest(data, digest)?;
 
     unsafe {
-        *pul_digest_len = dgst_len;
+        std::ptr::write_unaligned(pul_digest_len, dgst_len);
     }
 
     operation.done();
@@ -263,14 +263,14 @@ fn digest_final(
 
     if pdigest.is_null() {
         unsafe {
-            *pul_digest_len = dgst_len;
+            std::ptr::write_unaligned(pul_digest_len, dgst_len);
         }
         return operation.ok();
     }
 
     unsafe {
-        if *pul_digest_len < dgst_len {
-            *pul_digest_len = dgst_len;
+        if std::ptr::read_unaligned(pul_digest_len) < dgst_len {
+            std::ptr::write_unaligned(pul_digest_len, dgst_len);
             operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
@@ -279,7 +279,7 @@ fn digest_final(
     operation.digest_final(digest)?;
 
     unsafe {
-        *pul_digest_len = dgst_len;
+        std::ptr::write_unaligned(pul_digest_len, dgst_len);
     }
 
     operation.done();

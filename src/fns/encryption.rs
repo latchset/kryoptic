@@ -101,7 +101,7 @@ fn encrypt(
             CK_ULONG::try_from(operation.encryption_len(dlen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_encrypted_data_len = encryption_len;
+            std::ptr::write_unaligned(pul_encrypted_data_len, encryption_len);
         }
         return operation.ok();
     }
@@ -115,14 +115,14 @@ fn encrypt(
         operation.login_fulfilled();
         session.login_ok = false;
     }
-    let penclen = unsafe { *pul_encrypted_data_len as CK_ULONG };
+    let penclen = unsafe { std::ptr::read_unaligned(pul_encrypted_data_len) };
     let enclen = parse_len(penclen)?;
     let data: &[u8] = bytes_to_slice(pdata, dlen);
     let encdata: &mut [u8] = bytes_to_slice_mut(encrypted_data, enclen)?;
     let res = operation.encrypt(data, encdata);
     let outlen = operation.report_reqsize(res, pul_encrypted_data_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_encrypted_data_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_encrypted_data_len, retlen) };
 
     operation.done();
 
@@ -189,7 +189,7 @@ pub(crate) fn internal_encrypt_update(
     if !pul_encrypted_part_len.is_null() && encrypted_part.is_null() {
         let len = operation.encryption_len(plen, false)?;
         let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-        unsafe { *pul_encrypted_part_len = cklen };
+        unsafe { std::ptr::write_unaligned(pul_encrypted_part_len, cklen) };
         return operation.ok();
     }
     if operation.requires_login() {
@@ -199,14 +199,14 @@ pub(crate) fn internal_encrypt_update(
         operation.login_fulfilled();
         session.login_ok = false;
     }
-    let penclen = unsafe { *pul_encrypted_part_len as CK_ULONG };
+    let penclen = unsafe { std::ptr::read_unaligned(pul_encrypted_part_len) };
     let enclen = parse_len(penclen)?;
     let data: &[u8] = bytes_to_slice(part, plen);
     let encpart: &mut [u8] = bytes_to_slice_mut(encrypted_part, enclen)?;
     let res = operation.encrypt_update(data, encpart);
     let len = operation.report_reqsize(res, pul_encrypted_part_len)?;
     let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    unsafe { *pul_encrypted_part_len = cklen };
+    unsafe { std::ptr::write_unaligned(pul_encrypted_part_len, cklen) };
     operation.ok()
 }
 
@@ -274,7 +274,10 @@ fn encrypt_final(
             CK_ULONG::try_from(operation.encryption_len(0, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_last_encrypted_part_len = encryption_len;
+            std::ptr::write_unaligned(
+                pul_last_encrypted_part_len,
+                encryption_len,
+            );
         }
         return operation.ok();
     }
@@ -288,13 +291,14 @@ fn encrypt_final(
         operation.login_fulfilled();
         session.login_ok = false;
     }
-    let penclen = unsafe { *pul_last_encrypted_part_len as CK_ULONG };
+    let penclen =
+        unsafe { std::ptr::read_unaligned(pul_last_encrypted_part_len) };
     let enclen = parse_len(penclen)?;
     let enclast: &mut [u8] = bytes_to_slice_mut(last_encrypted_part, enclen)?;
     let res = operation.encrypt_final(enclast);
     let outlen = operation.report_reqsize(res, pul_last_encrypted_part_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_last_encrypted_part_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_last_encrypted_part_len, retlen) };
 
     operation.done();
 
@@ -416,7 +420,7 @@ fn decrypt(
             CK_ULONG::try_from(operation.decryption_len(elen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_data_len = decryption_len;
+            std::ptr::write_unaligned(pul_data_len, decryption_len);
         }
         return operation.ok();
     }
@@ -430,14 +434,14 @@ fn decrypt(
         operation.login_fulfilled();
         session.login_ok = false;
     }
-    let pdlen = unsafe { *pul_data_len as CK_ULONG };
+    let pdlen = unsafe { std::ptr::read_unaligned(pul_data_len) };
     let dlen = parse_len(pdlen)?;
     let enc: &[u8] = bytes_to_slice(encrypted_data, elen);
     let ddata: &mut [u8] = bytes_to_slice_mut(data, dlen)?;
     let res = operation.decrypt(enc, ddata);
     let outlen = operation.report_reqsize(res, pul_data_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_data_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_data_len, retlen) };
 
     operation.done();
 
@@ -505,7 +509,7 @@ pub(crate) fn internal_decrypt_update(
     if !pul_part_len.is_null() && part.is_null() {
         let len = operation.decryption_len(elen, false)?;
         let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-        unsafe { *pul_part_len = cklen };
+        unsafe { std::ptr::write_unaligned(pul_part_len, cklen) };
         return operation.ok();
     }
     if operation.requires_login() {
@@ -515,14 +519,14 @@ pub(crate) fn internal_decrypt_update(
         operation.login_fulfilled();
         session.login_ok = false;
     }
-    let pplen = unsafe { *pul_part_len as CK_ULONG };
+    let pplen = unsafe { std::ptr::read_unaligned(pul_part_len) };
     let plen = parse_len(pplen)?;
     let enc: &[u8] = bytes_to_slice(encrypted_part, elen);
     let dpart: &mut [u8] = bytes_to_slice_mut(part, plen)?;
     let res = operation.decrypt_update(enc, dpart);
     let len = operation.report_reqsize(res, pul_part_len)?;
     let cklen = CK_ULONG::try_from(len).map_err(|_| CKR_ARGUMENTS_BAD)?;
-    unsafe { *pul_part_len = cklen };
+    unsafe { std::ptr::write_unaligned(pul_part_len, cklen) };
     operation.ok()
 }
 
@@ -590,7 +594,7 @@ fn decrypt_final(
             CK_ULONG::try_from(operation.decryption_len(0, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_last_part_len = decryption_len;
+            std::ptr::write_unaligned(pul_last_part_len, decryption_len);
         }
         return operation.ok();
     }
@@ -604,13 +608,13 @@ fn decrypt_final(
         operation.login_fulfilled();
         session.login_ok = false;
     }
-    let pplen = unsafe { *pul_last_part_len as CK_ULONG };
+    let pplen = unsafe { std::ptr::read_unaligned(pul_last_part_len) };
     let plen = parse_len(pplen)?;
     let dlast: &mut [u8] = bytes_to_slice_mut(last_part, plen)?;
     let res = operation.decrypt_final(dlast);
     let outlen = operation.report_reqsize(res, pul_last_part_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_last_part_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_last_part_len, retlen) };
 
     operation.done();
 
@@ -747,7 +751,7 @@ fn encrypt_message(
             CK_ULONG::try_from(operation.msg_encryption_len(plen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_ciphertext_len = retlen;
+            std::ptr::write_unaligned(pul_ciphertext_len, retlen);
         }
         return operation.ok();
     }
@@ -762,7 +766,7 @@ fn encrypt_message(
     let alen =
         usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
-    let pclen = unsafe { *pul_ciphertext_len as CK_ULONG };
+    let pclen = unsafe { std::ptr::read_unaligned(pul_ciphertext_len) };
     let clen = parse_len(pclen)?;
     let adata: &[u8] = if associated_data.is_null() {
         &[]
@@ -776,7 +780,7 @@ fn encrypt_message(
         operation.msg_encrypt(parameter, parameter_len, adata, plain, cipher);
     let outlen = operation.report_reqsize(res, pul_ciphertext_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_ciphertext_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_ciphertext_len, retlen) };
 
     operation.ok()?;
 
@@ -944,7 +948,7 @@ fn encrypt_message_next(
             CK_ULONG::try_from(operation.msg_encryption_len(plen, fin)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_ciphertext_part_len = retlen;
+            std::ptr::write_unaligned(pul_ciphertext_part_len, retlen);
         }
         return operation.ok();
     }
@@ -956,7 +960,7 @@ fn encrypt_message_next(
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
-    let pclen = unsafe { *pul_ciphertext_part_len as CK_ULONG };
+    let pclen = unsafe { std::ptr::read_unaligned(pul_ciphertext_part_len) };
     let clen = parse_len(pclen)?;
     let plain: &[u8] = bytes_to_slice(plaintext_part, plen);
     let cipher: &mut [u8] = bytes_to_slice_mut(ciphertext_part, clen)?;
@@ -971,7 +975,7 @@ fn encrypt_message_next(
     };
     let outlen = operation.report_reqsize(res, pul_ciphertext_part_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_ciphertext_part_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_ciphertext_part_len, retlen) };
 
     operation.ok()?;
 
@@ -1152,7 +1156,7 @@ fn decrypt_message(
             CK_ULONG::try_from(operation.msg_decryption_len(clen, true)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_plaintext_len = retlen;
+            std::ptr::write_unaligned(pul_plaintext_len, retlen);
         }
         return operation.ok();
     }
@@ -1167,7 +1171,7 @@ fn decrypt_message(
     let alen =
         usize::try_from(associated_data_len).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
-    let pplen = unsafe { *pul_plaintext_len as CK_ULONG };
+    let pplen = unsafe { std::ptr::read_unaligned(pul_plaintext_len) };
     let plen = parse_len(pplen)?;
     let adata: &[u8] = if associated_data.is_null() {
         &[]
@@ -1181,7 +1185,7 @@ fn decrypt_message(
         operation.msg_decrypt(parameter, parameter_len, adata, cipher, plain);
     let outlen = operation.report_reqsize(res, pul_plaintext_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_plaintext_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_plaintext_len, retlen) };
 
     operation.ok()?;
 
@@ -1349,7 +1353,7 @@ fn decrypt_message_next(
             CK_ULONG::try_from(operation.msg_decryption_len(clen, fin)?)
                 .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_plaintext_part_len = retlen;
+            std::ptr::write_unaligned(pul_plaintext_part_len, retlen);
         }
         return operation.ok();
     }
@@ -1361,7 +1365,7 @@ fn decrypt_message_next(
         return Err(CKR_ARGUMENTS_BAD)?;
     }
 
-    let pplen = unsafe { *pul_plaintext_part_len as CK_ULONG };
+    let pplen = unsafe { std::ptr::read_unaligned(pul_plaintext_part_len) };
     let plen = parse_len(pplen)?;
     let cipher: &[u8] = bytes_to_slice(ciphertext_part, clen);
     let plain: &mut [u8] = bytes_to_slice_mut(plaintext_part, plen)?;
@@ -1376,7 +1380,7 @@ fn decrypt_message_next(
     };
     let outlen = operation.report_reqsize(res, pul_plaintext_part_len)?;
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_plaintext_part_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_plaintext_part_len, retlen) };
 
     operation.ok()?;
 

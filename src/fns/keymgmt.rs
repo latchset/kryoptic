@@ -15,6 +15,7 @@ use crate::misc::{
 };
 use crate::object;
 use crate::pkcs11::*;
+use crate::token::Token;
 use crate::{fail_if_cka_token_true, report_reqsize, STATE};
 
 #[cfg(feature = "fips")]
@@ -83,7 +84,7 @@ fn generate_key(
 
     let kh = token.insert_object(s_handle, key)?;
     unsafe {
-        core::ptr::write(key_handle as *mut _, kh);
+        std::ptr::write_unaligned(key_handle as *mut _, kh);
     }
     Ok(())
 }
@@ -190,8 +191,8 @@ fn generate_key_pair(
             match token.insert_object(s_handle, privkey) {
                 Ok(privh) => {
                     unsafe {
-                        core::ptr::write(public_key as *mut _, pubh);
-                        core::ptr::write(private_key as *mut _, privh);
+                        std::ptr::write_unaligned(public_key as *mut _, pubh);
+                        std::ptr::write_unaligned(private_key as *mut _, privh);
                     }
                     Ok(())
                 }
@@ -317,7 +318,7 @@ fn wrap_key(
     let wrapped: &mut [u8] = if wrapped_key.is_null() {
         &mut []
     } else {
-        let pwraplen = unsafe { *pul_wrapped_key_len as CK_ULONG };
+        let pwraplen = unsafe { std::ptr::read_unaligned(pul_wrapped_key_len) };
         let wraplen = parse_len(pwraplen)?;
         bytes_to_slice_mut(wrapped_key, wraplen)?
     };
@@ -338,7 +339,7 @@ fn wrap_key(
         Err(e) => return Err(e)?,
     };
     let retlen = CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *pul_wrapped_key_len = retlen };
+    unsafe { std::ptr::write_unaligned(pul_wrapped_key_len, retlen) };
     Ok(())
 }
 
@@ -463,7 +464,7 @@ fn unwrap_key(
             ));
             let kh = token.insert_object(s_handle, obj)?;
             unsafe {
-                core::ptr::write(key_handle as *mut _, kh);
+                std::ptr::write_unaligned(key_handle as *mut _, kh);
             }
             Ok(())
         }
@@ -510,6 +511,19 @@ pub extern "C" fn fn_unwrap_key(
     };
     log_debug!("C_UnwrapKey: ret={}", rv);
     rv
+}
+
+struct DerivedHandles<'a> {
+    pub token: &'a mut Token,
+    pub handles: Vec<CK_OBJECT_HANDLE>,
+}
+
+impl Drop for DerivedHandles<'_> {
+    fn drop(&mut self) {
+        for &h in &self.handles {
+            let _ = self.token.destroy_object(h);
+        }
+    }
 }
 
 #[inline(always)]
@@ -671,60 +685,51 @@ fn derive_key(
         CKM_SP800_108_COUNTER_KDF
         | CKM_SP800_108_FEEDBACK_KDF
         | CKM_SP800_108_DOUBLE_PIPELINE_KDF => {
-            let kh = token.insert_object(s_handle, result.remove(0))?;
-            if result.len() > 0 {
-                let adk = match mechanism.mechanism {
-                    CKM_SP800_108_COUNTER_KDF => {
-                        let params = mechanism
-                            .get_parameters::<CK_SP800_108_KDF_PARAMS>()?;
-                        struct_to_slice(
-                            params.pAdditionalDerivedKeys
-                                as *const CK_DERIVED_KEY,
-                            params.ulAdditionalDerivedKeys as usize,
-                        )?
-                    }
-                    CKM_SP800_108_FEEDBACK_KDF => {
-                        let params = mechanism
-                            .get_parameters::<CK_SP800_108_FEEDBACK_KDF_PARAMS>(
-                        )?;
-                        struct_to_slice(
-                            params.pAdditionalDerivedKeys
-                                as *const CK_DERIVED_KEY,
-                            params.ulAdditionalDerivedKeys as usize,
-                        )?
-                    }
-
-                    _ => return Err(CKR_MECHANISM_INVALID)?,
-                };
-                if adk.len() != result.len() {
-                    return Err(CKR_GENERAL_ERROR)?;
-                }
-                let mut ah = Vec::<CK_OBJECT_HANDLE>::with_capacity(adk.len());
-                let mut iter_result = result.into_iter();
-                while let Some(obj) = iter_result.next() {
-                    match token.insert_object(s_handle, obj) {
-                        Ok(h) => ah.push(h),
-                        Err(e) => {
-                            for h in ah {
-                                let _ = token.destroy_object(h);
-                            }
-                            let _ = token.destroy_object(kh);
-                            return Err(e)?;
-                        }
-                    }
-                }
-                for i in 0..adk.len() {
-                    unsafe {
-                        core::ptr::write(adk[i].phKey, ah[i]);
-                    }
-                }
+            if key_handle.is_null() {
+                return Err(CKR_ARGUMENTS_BAD)?;
             }
+            let adk = match mechanism.mechanism {
+                CKM_SP800_108_COUNTER_KDF => {
+                    let params = mechanism
+                        .get_parameters::<CK_SP800_108_KDF_PARAMS>()?;
+                    struct_to_slice(
+                        params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
+                        params.ulAdditionalDerivedKeys as usize,
+                    )?
+                }
+                CKM_SP800_108_FEEDBACK_KDF => {
+                    let params = mechanism
+                        .get_parameters::<CK_SP800_108_FEEDBACK_KDF_PARAMS>()?;
+                    struct_to_slice(
+                        params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
+                        params.ulAdditionalDerivedKeys as usize,
+                    )?
+                }
 
-            if !key_handle.is_null() {
+                _ => return Err(CKR_MECHANISM_INVALID)?,
+            };
+            for dkey in adk.iter() {
+                dkey.validate()?;
+            }
+            if adk.len() != result.len() - 1 {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+            let mut dh = DerivedHandles {
+                token: &mut token,
+                handles: Vec::with_capacity(result.len()),
+            };
+            let mut iter_result = result.into_iter();
+            while let Some(obj) = iter_result.next() {
+                dh.handles.push(dh.token.insert_object(s_handle, obj)?);
+            }
+            for i in 0..dh.handles.len() {
+                let ptr: CK_OBJECT_HANDLE_PTR =
+                    if i == 0 { key_handle } else { adk[i - 1].phKey };
                 unsafe {
-                    core::ptr::write(key_handle, kh);
+                    std::ptr::write_unaligned(ptr, dh.handles[i]);
                 }
             }
+            dh.handles.clear();
             Ok(())
         }
         CKM_TLS12_KEY_AND_MAC_DERIVE | CKM_TLS12_KEY_SAFE_DERIVE => {
@@ -732,46 +737,57 @@ fn derive_key(
             let params =
                 mechanism.get_parameters::<CK_TLS12_KEY_MAT_PARAMS>()?;
             let mat_out = params.pReturnedKeyMaterial;
+            if mat_out.is_null() {
+                return Err(CKR_MECHANISM_PARAM_INVALID)?;
+            }
 
             match result.len() {
                 2 | 4 => (),
                 _ => return Err(CKR_GENERAL_ERROR)?,
             }
 
-            let mut ah = Vec::<CK_OBJECT_HANDLE>::with_capacity(result.len());
+            let mut dh = DerivedHandles {
+                token: &mut token,
+                handles: Vec::with_capacity(result.len()),
+            };
             let mut iter_result = result.into_iter();
             while let Some(obj) = iter_result.next() {
-                match token.insert_object(s_handle, obj) {
-                    Ok(h) => ah.push(h),
-                    Err(e) => {
-                        for h in ah {
-                            let _ = token.destroy_object(h);
-                        }
-                        return Err(e)?;
-                    }
-                }
+                dh.handles.push(dh.token.insert_object(s_handle, obj)?);
             }
-            if ah.len() == 4 {
+            if dh.handles.len() == 4 {
                 unsafe {
-                    (*mat_out).hClientMacSecret = ah.remove(0);
-                    (*mat_out).hServerMacSecret = ah.remove(0);
+                    std::ptr::write_unaligned(
+                        std::ptr::addr_of_mut!((*mat_out).hClientMacSecret),
+                        dh.handles.remove(0),
+                    );
+                    std::ptr::write_unaligned(
+                        std::ptr::addr_of_mut!((*mat_out).hServerMacSecret),
+                        dh.handles.remove(0),
+                    );
                 }
             }
             unsafe {
-                (*mat_out).hClientKey = ah.remove(0);
-                (*mat_out).hServerKey = ah.remove(0);
+                std::ptr::write_unaligned(
+                    std::ptr::addr_of_mut!((*mat_out).hClientKey),
+                    dh.handles.remove(0),
+                );
+                std::ptr::write_unaligned(
+                    std::ptr::addr_of_mut!((*mat_out).hServerKey),
+                    dh.handles.remove(0),
+                );
             }
             Ok(())
         }
         _ => {
+            if key_handle.is_null() {
+                return Err(CKR_ARGUMENTS_BAD)?;
+            }
             if result.len() != 1 {
                 return Err(CKR_GENERAL_ERROR)?;
             }
             let kh = token.insert_object(s_handle, result.remove(0))?;
-            if !key_handle.is_null() {
-                unsafe {
-                    core::ptr::write(key_handle, kh);
-                }
+            unsafe {
+                std::ptr::write_unaligned(key_handle, kh);
             }
             Ok(())
         }
@@ -837,7 +853,7 @@ fn encapsulate_key(
         usize::try_from(attribute_count).map_err(|_| CKR_GENERAL_ERROR)?;
     let raw_tmpl = struct_to_slice(template as *const CK_ATTRIBUTE, cnt)?;
 
-    let penclen = unsafe { *encrypted_part_len as CK_ULONG };
+    let penclen = unsafe { std::ptr::read_unaligned(encrypted_part_len) };
     let enclen = usize::try_from(penclen).map_err(|_| CKR_ARGUMENTS_BAD)?;
 
     let slot_id = session.get_slot_id();
@@ -876,13 +892,13 @@ fn encapsulate_key(
         CK_ULONG::try_from(ciphertext_len).map_err(|_| CKR_GENERAL_ERROR)?;
     if encrypted_part.is_null() {
         unsafe {
-            *encrypted_part_len = ctext_len;
+            std::ptr::write_unaligned(encrypted_part_len, ctext_len);
         }
         return Ok(());
     }
     if ciphertext_len > enclen {
         unsafe {
-            *encrypted_part_len = ctext_len;
+            std::ptr::write_unaligned(encrypted_part_len, ctext_len);
         }
         return Err(CKR_BUFFER_TOO_SMALL)?;
     }
@@ -914,8 +930,8 @@ fn encapsulate_key(
 
     let kh = token.insert_object(s_handle, obj)?;
     unsafe {
-        *key_handle = kh;
-        *encrypted_part_len = retlen;
+        std::ptr::write_unaligned(key_handle, kh);
+        std::ptr::write_unaligned(encrypted_part_len, retlen);
     }
     Ok(())
 }
@@ -1042,7 +1058,7 @@ fn decapsulate_key(
 
     let kh = token.insert_object(s_handle, obj)?;
     unsafe {
-        *key_handle = kh;
+        std::ptr::write_unaligned(key_handle, kh);
     }
     Ok(())
 }

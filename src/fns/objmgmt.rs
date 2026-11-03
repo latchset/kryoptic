@@ -88,7 +88,7 @@ fn create_object(
     }
 
     unsafe {
-        core::ptr::write(object_handle as *mut _, key_handle);
+        std::ptr::write_unaligned(object_handle as *mut _, key_handle);
     }
 
     Ok(())
@@ -144,7 +144,7 @@ fn copy_object(
     let oh = token.copy_object(s_handle, o_handle, &tmpl)?;
 
     unsafe {
-        *ph_new_object = oh;
+        std::ptr::write_unaligned(ph_new_object, oh);
     }
 
     Ok(())
@@ -228,7 +228,7 @@ fn get_object_size(
     let token = rstate.get_token_from_session(s_handle)?;
     let len = CK_ULONG::try_from(token.get_object_size(o_handle)?)
         .map_err(|_| CKR_GENERAL_ERROR)?;
-    unsafe { *size = len }
+    unsafe { std::ptr::write_unaligned(size, len) }
     Ok(())
 }
 
@@ -485,14 +485,17 @@ fn find_objects(
         while idx < hlen {
             let offset = isize::try_from(idx).map_err(|_| CKR_GENERAL_ERROR)?;
             unsafe {
-                *ph_object.offset(offset) = handles[idx];
+                std::ptr::write_unaligned(
+                    ph_object.offset(offset),
+                    handles[idx],
+                );
             }
             idx += 1;
         }
     }
     let poc = CK_ULONG::try_from(hlen).map_err(|_| CKR_GENERAL_ERROR)?;
     unsafe {
-        *pul_object_count = poc;
+        std::ptr::write_unaligned(pul_object_count, poc);
     }
     operation.ok()
 }
