@@ -30,6 +30,8 @@ const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 const MIN_RANDOM_IV_BITS: usize = 64;
 
 const AES_KW_SEMIBLOCK: usize = AES_BLOCK_SIZE / 2;
+// 32-bit target compatible max
+const MAX_AES_KW_DATA: usize = u32::MAX as usize - AES_BLOCK_SIZE;
 
 /// Convenience function to cast aead parameters passed as separate
 /// pointer/length variables into the structure they represent.
@@ -696,6 +698,19 @@ impl AesOperation {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
             }
+            CKM_AES_KEY_WRAP => {
+                let mut pad =
+                    AES_KW_SEMIBLOCK - (keydata.len() % AES_KW_SEMIBLOCK);
+                if pad == AES_KW_SEMIBLOCK {
+                    pad = 0;
+                }
+                if keydata.len() <= AES_KW_SEMIBLOCK {
+                    pad += AES_KW_SEMIBLOCK;
+                }
+                if pad > 0 {
+                    keydata.resize(keydata.len() + pad, 0);
+                }
+            }
             _ => (),
         }
 
@@ -722,7 +737,18 @@ impl AesOperation {
     ) -> Result<Vec<u8>> {
         let mut op = Self::cipher_new(mech, wrapping_key, CKF_UNWRAP)?;
         let mut result = vec![0u8; data.len()];
-        let outlen = op.decrypt(data, result.as_mut_slice())?;
+        let outlen = match op.decrypt(data, result.as_mut_slice()) {
+            Ok(n) => n,
+            Err(e) => match e.rv() {
+                CKR_ENCRYPTED_DATA_LEN_RANGE => {
+                    return Err(CKR_WRAPPED_KEY_LEN_RANGE)?
+                }
+                CKR_ENCRYPTED_DATA_INVALID => {
+                    return Err(CKR_WRAPPED_KEY_INVALID)?
+                }
+                _ => return Err(e),
+            },
+        };
         result.resize(outlen, 0);
         Ok(result)
     }
@@ -1243,7 +1269,6 @@ impl Encryption for AesOperation {
         if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.state = OpIntState::Updated;
 
         let mut outlen = self.encryption_len(plain.len(), false)?;
         match self.mech {
@@ -1288,14 +1313,15 @@ impl Encryption for AesOperation {
                     self.blockctr += reqblocks;
                 }
             }
-            CKM_AES_KEY_WRAP => {
-                if plain.len() % AES_KW_SEMIBLOCK != 0 {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
+            CKM_AES_KEY_WRAP
+            | CKM_AES_KEY_WRAP_KWP
+            | CKM_AES_KEY_WRAP_PKCS7 => {
+                /* These functions are defined as single-shot in PKCS#11
+                 * so we do it all in one shot and fail otherwise */
+                if self.state == OpIntState::Updated {
+                    return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
                 }
-            }
-            CKM_AES_KEY_WRAP_PKCS7 => {
-                self.buffer.extend_from_slice(plain);
-                return Ok(0);
+                outlen = self.encryption_len(plain.len(), true)?;
             }
             _ => (),
         }
@@ -1303,6 +1329,8 @@ impl Encryption for AesOperation {
             /* This is the only, non-fatal error */
             return Err(error::Error::buf_too_small(outlen));
         }
+
+        self.state = OpIntState::Updated;
 
         let ctx = match &mut self.ctx {
             Some(c) => c,
@@ -1312,6 +1340,7 @@ impl Encryption for AesOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
+        let mut plain_buf = plain;
         let mut cipher_offset = 0;
         let mut plain_offset = 0;
         let mut plain_end = plain.len();
@@ -1403,13 +1432,25 @@ impl Encryption for AesOperation {
                     plain_offset = plain_end;
                 }
             }
+            CKM_AES_KEY_WRAP_PKCS7 => {
+                let mut pad =
+                    AES_KW_SEMIBLOCK - (plain.len() % AES_KW_SEMIBLOCK);
+                if plain.len() < AES_KW_SEMIBLOCK {
+                    pad += AES_KW_SEMIBLOCK;
+                }
+
+                self.buffer.extend_from_slice(plain);
+                self.buffer.resize(plain.len() + pad, pad as u8);
+                plain_buf = self.buffer.as_slice();
+                plain_end = self.buffer.len();
+            }
             _ => (),
         }
 
         if plain_end - plain_offset > 0 {
             let outlen = ctx
                 .update(
-                    &plain[plain_offset..plain_end],
+                    &plain_buf[plain_offset..plain_end],
                     &mut cipher[cipher_offset..],
                 )
                 .or_else(|_| Err(self.op_err(CKR_DEVICE_ERROR)))?;
@@ -1548,26 +1589,15 @@ impl Encryption for AesOperation {
                     return Err(CKR_DEVICE_ERROR)?;
                 }
             }
-            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
-            CKM_AES_KEY_WRAP_PKCS7 => {
-                if self.buffer.len() < AES_KW_SEMIBLOCK {
-                    return Err(self.op_err(CKR_DATA_LEN_RANGE));
-                }
-                let pad =
-                    AES_KW_SEMIBLOCK - (self.buffer.len() % AES_KW_SEMIBLOCK);
-                let needed = self.buffer.len() + pad + AES_KW_SEMIBLOCK;
-                if cipher.len() < needed {
-                    return Err(error::Error::buf_too_small(needed));
-                }
-
-                self.state = OpIntState::Finalized;
-
-                self.buffer.resize(self.buffer.len() + pad, pad as u8);
-                outlen = ctx.update(self.buffer.as_slice(), cipher)?;
-                zeromem(self.buffer.as_mut_slice());
-                self.buffer.clear();
-                if outlen != needed {
-                    return Err(self.op_err(CKR_DEVICE_ERROR));
+            CKM_AES_KEY_WRAP
+            | CKM_AES_KEY_WRAP_KWP
+            | CKM_AES_KEY_WRAP_PKCS7 => {
+                /* no need to zeroize this, openssl does not even read
+                 * the buffer in aes_wrap_final() */
+                let mut dummy = [0; AES_BLOCK_SIZE];
+                outlen = ctx.finalize(&mut dummy)?;
+                if outlen != 0 {
+                    return Err(self.op_err(CKR_DEVICE_ERROR))?;
                 }
             }
             _ => {
@@ -1615,29 +1645,46 @@ impl Encryption for AesOperation {
                         / AES_BLOCK_SIZE)
                         * AES_BLOCK_SIZE
                 }
-                CKM_AES_KEY_WRAP => {
-                    if data_len % AES_KW_SEMIBLOCK != 0 {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
-                    } else {
-                        data_len + AES_KW_SEMIBLOCK
-                    }
-                }
-                CKM_AES_KEY_WRAP_KWP => {
-                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KW_SEMIBLOCK)
-                        * AES_KW_SEMIBLOCK
-                }
-                CKM_AES_KEY_WRAP_PKCS7 => {
-                    let tot = self.buffer.len() + data_len;
-                    if tot < AES_KW_SEMIBLOCK {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
-                    }
-                    ((tot + AES_KW_SEMIBLOCK) / AES_KW_SEMIBLOCK)
-                        * AES_KW_SEMIBLOCK
-                        + AES_KW_SEMIBLOCK
-                }
                 #[cfg(not(feature = "fips"))]
                 CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                     data_len
+                }
+                CKM_AES_KEY_WRAP => {
+                    /* we impose a maximum length of 2^32 */
+                    if data_len < 2 * AES_KW_SEMIBLOCK
+                        || data_len % AES_KW_SEMIBLOCK != 0
+                        || data_len > MAX_AES_KW_DATA
+                    {
+                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    }
+                    data_len + AES_KW_SEMIBLOCK
+                }
+                CKM_AES_KEY_WRAP_KWP => {
+                    /* we impose a maximum length of 2^32  - 1 semiblock */
+                    if data_len == 0 || data_len > MAX_AES_KW_DATA {
+                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    }
+                    /* input can be any length, the input is padded to a
+                     * semiblock and there is always an additional semiblock
+                     * emitted, for a minimum of 16 bytes */
+                    ((data_len + AES_KW_SEMIBLOCK - 1) / AES_KW_SEMIBLOCK)
+                        * AES_KW_SEMIBLOCK
+                        + AES_KW_SEMIBLOCK
+                }
+                CKM_AES_KEY_WRAP_PKCS7 => {
+                    /* we impose a maximum length of 2^32 */
+                    if data_len == 0 || data_len > MAX_AES_KW_DATA {
+                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
+                    }
+                    /* input can be any length and is always padded even when
+                     * it is a multiple of a semiblock, then it is encrypted
+                     * with the same rules adopted for CKM_AES_KEY_WRAP */
+                    let mut sbs =
+                        (data_len + AES_KW_SEMIBLOCK) / AES_KW_SEMIBLOCK;
+                    if sbs < 2 {
+                        sbs = 2;
+                    }
+                    sbs * AES_KW_SEMIBLOCK + AES_KW_SEMIBLOCK
                 }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
@@ -1654,18 +1701,9 @@ impl Encryption for AesOperation {
                 CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                     data_len
                 }
-                CKM_AES_KEY_WRAP => {
-                    if data_len % AES_KW_SEMIBLOCK != 0 {
-                        return Err(self.op_err(CKR_DATA_LEN_RANGE));
-                    } else {
-                        data_len + AES_KW_SEMIBLOCK
-                    }
-                }
-                CKM_AES_KEY_WRAP_KWP => {
-                    ((data_len + AES_BLOCK_SIZE - 1) / AES_KW_SEMIBLOCK)
-                        * AES_KW_SEMIBLOCK
-                }
-                CKM_AES_KEY_WRAP_PKCS7 => 0,
+                CKM_AES_KEY_WRAP
+                | CKM_AES_KEY_WRAP_KWP
+                | CKM_AES_KEY_WRAP_PKCS7 => 0,
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };
@@ -1714,7 +1752,6 @@ impl Decryption for AesOperation {
         if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
-        self.state = OpIntState::Updated;
 
         match self.mech {
             CKM_AES_CTS => {
@@ -1737,14 +1774,14 @@ impl Decryption for AesOperation {
                     return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                 }
             }
-            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                if cipher.len() % AES_KW_SEMIBLOCK != 0 {
-                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+            CKM_AES_KEY_WRAP
+            | CKM_AES_KEY_WRAP_KWP
+            | CKM_AES_KEY_WRAP_PKCS7 => {
+                /* These functions are defined as single-shot in PKCS#11
+                 * so we do it all in one shot and fail otherwise */
+                if self.state == OpIntState::Updated {
+                    return Err(self.op_err(CKR_OPERATION_NOT_INITIALIZED));
                 }
-            }
-            CKM_AES_KEY_WRAP_PKCS7 => {
-                self.buffer.extend_from_slice(cipher);
-                return Ok(0);
             }
             _ => (),
         }
@@ -1793,13 +1830,19 @@ impl Decryption for AesOperation {
                 ((self.buffer.len() + cipher.len()) / AES_BLOCK_SIZE)
                     * AES_BLOCK_SIZE
             }
-            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => cipher.len(),
+            CKM_AES_KEY_WRAP
+            | CKM_AES_KEY_WRAP_KWP
+            | CKM_AES_KEY_WRAP_PKCS7 => {
+                self.decryption_len(cipher.len(), true)?
+            }
             _ => cipher.len(),
         };
         if plain.len() < outlen {
             /* This is the only, non-fatal error */
             return Err(error::Error::buf_too_small(outlen));
         }
+
+        self.state = OpIntState::Updated;
 
         let ctx = match &mut self.ctx {
             Some(c) => c,
@@ -1946,6 +1989,30 @@ impl Decryption for AesOperation {
                     cipher_offset = cipher_end;
                 }
             }
+            CKM_AES_KEY_WRAP_KWP | CKM_AES_KEY_WRAP_PKCS7 => {
+                /* For KWP OpenSSL's unwrap function (CRYPTO_128_unwrap_pad)
+                 * up to OpenSSL 4.1 zeroizes outputs by calling
+                 * OPENSSL_cleanse(out, inlen). So the output buffer
+                 * needs to be always at least as large as the input
+                 * buffer regardless of the actual final length, and
+                 * needs to be a multiple of 8.
+                 * For PKCS7 we have to handle unpadding internally so we
+                 * need a larger internal buffer than the plaintext we
+                 * return to the application */
+                if cipher.len() > plain.len() {
+                    self.buffer.resize(cipher.len(), 0);
+                    plain_offset = match ctx
+                        .update(cipher, self.buffer.as_mut_slice())
+                    {
+                        Ok(n) => n,
+                        Err(_) => {
+                            return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))
+                        }
+                    };
+                    /* input fully consumed */
+                    cipher_offset = cipher_end;
+                }
+            }
             _ => (),
         }
 
@@ -1955,11 +2022,74 @@ impl Decryption for AesOperation {
                     &cipher[cipher_offset..cipher_end],
                     &mut plain[plain_offset..],
                 )
-                .or_else(|_| {
-                    self.state = OpIntState::Finalized;
-                    Err(CKR_DEVICE_ERROR)
+                .or_else(|_| match self.mech {
+                    CKM_AES_KEY_WRAP
+                    | CKM_AES_KEY_WRAP_KWP
+                    | CKM_AES_KEY_WRAP_PKCS7 => {
+                        Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))
+                    }
+                    _ => Err(self.op_err(CKR_DEVICE_ERROR)),
                 })?;
             plain_offset += outlen;
+        }
+
+        match self.mech {
+            CKM_AES_KEY_WRAP_KWP => {
+                if cipher.len() > plain.len() {
+                    if plain_offset > plain.len() {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
+                    }
+                    plain[..plain_offset]
+                        .copy_from_slice(&self.buffer[..plain_offset]);
+                }
+            }
+            CKM_AES_KEY_WRAP_PKCS7 => {
+                if plain_offset < 16 || plain_offset % AES_KW_SEMIBLOCK != 0 {
+                    zeromem(plain);
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
+                }
+
+                // Constant-time candidate suffix matching: Evaluates all
+                // max_pad valid padding patterns unconditionally.
+                let max_pad = if plain_offset <= 16 {
+                    2 * AES_KW_SEMIBLOCK - 1
+                } else {
+                    AES_KW_SEMIBLOCK
+                };
+                let tail = if cipher.len() > plain.len() {
+                    &self.buffer[(plain_offset - max_pad)..plain_offset]
+                } else {
+                    &plain[(plain_offset - max_pad)..plain_offset]
+                };
+                let mut pad_len = 0usize;
+                let mut valid = 0usize;
+
+                for k in 1..=max_pad {
+                    let expected = [k as u8; 2 * AES_KW_SEMIBLOCK - 1];
+                    let matches =
+                        constant_time_eq(&tail[max_pad - k..], &expected[..k])
+                            as usize;
+                    pad_len |= k * matches;
+                    valid |= matches;
+                }
+
+                if valid != 1 {
+                    zeromem(plain);
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
+                }
+
+                plain_offset -= pad_len;
+                if plain.len() < plain_offset {
+                    zeromem(plain);
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID));
+                }
+
+                if cipher.len() > plain.len() {
+                    plain[..plain_offset]
+                        .copy_from_slice(&self.buffer[..plain_offset]);
+                }
+            }
+            _ => (),
         }
 
         #[cfg(feature = "fips")]
@@ -2066,81 +2196,16 @@ impl Decryption for AesOperation {
             }
             #[cfg(not(feature = "fips"))]
             CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => (),
-            CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => (),
-            CKM_AES_KEY_WRAP_PKCS7 => {
-                if self.buffer.len() < 24
-                    || self.buffer.len() % AES_KW_SEMIBLOCK != 0
-                {
-                    zeromem(self.buffer.as_mut_slice());
-                    self.buffer.clear();
-                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
+            CKM_AES_KEY_WRAP
+            | CKM_AES_KEY_WRAP_KWP
+            | CKM_AES_KEY_WRAP_PKCS7 => {
+                /* no need to zeroize this, openssl does not even read
+                 * the buffer in aes_wrap_final() */
+                let mut dummy = [0; AES_BLOCK_SIZE];
+                outlen = ctx.finalize(&mut dummy)?;
+                if outlen != 0 {
+                    return Err(self.op_err(CKR_DEVICE_ERROR))?;
                 }
-
-                let mut unwrap_buf = vec![0u8; self.buffer.len()];
-                let res = ctx
-                    .update(self.buffer.as_slice(), unwrap_buf.as_mut_slice());
-                zeromem(self.buffer.as_mut_slice());
-                self.buffer.clear();
-                let unwrapped_len = match res {
-                    Ok(len) => len,
-                    Err(_) => {
-                        zeromem(unwrap_buf.as_mut_slice());
-                        return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?;
-                    }
-                };
-                unwrap_buf.truncate(unwrapped_len);
-
-                if unwrap_buf.len() < 16
-                    || unwrap_buf.len() % AES_KW_SEMIBLOCK != 0
-                {
-                    zeromem(unwrap_buf.as_mut_slice());
-                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?;
-                }
-
-                let n = unwrap_buf.len();
-
-                // Upfront public buffer length check:
-                // Valid PKCS#7 padding is at most AES_KW_SEMIBLOCK (8 bytes),
-                // so the plaintext length is at least n - AES_KW_SEMIBLOCK.
-                // If plain is smaller than this minimum, it cannot hold any
-                // valid plaintext regardless of padding.
-                if plain.len() < n - AES_KW_SEMIBLOCK {
-                    zeromem(unwrap_buf.as_mut_slice());
-                    return Err(error::Error::buf_too_small(
-                        n - AES_KW_SEMIBLOCK,
-                    ));
-                }
-
-                // Constant-time candidate suffix matching:
-                // Evaluates all 8 valid padding patterns unconditionally.
-                let tail = &unwrap_buf[n - AES_KW_SEMIBLOCK..];
-                let mut pad_len = 0usize;
-                let mut valid = 0usize;
-
-                for k in 1..=AES_KW_SEMIBLOCK {
-                    let expected = [k as u8; AES_KW_SEMIBLOCK];
-                    let matches = constant_time_eq(
-                        &tail[AES_KW_SEMIBLOCK - k..],
-                        &expected[..k],
-                    ) as usize;
-                    pad_len |= k * matches;
-                    valid |= matches;
-                }
-
-                if valid != 1 {
-                    zeromem(unwrap_buf.as_mut_slice());
-                    return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?;
-                }
-
-                let plain_len = n - pad_len;
-                if plain.len() < plain_len {
-                    zeromem(unwrap_buf.as_mut_slice());
-                    return Err(error::Error::buf_too_small(plain_len));
-                }
-
-                plain[..plain_len].copy_from_slice(&unwrap_buf[..plain_len]);
-                zeromem(unwrap_buf.as_mut_slice());
-                outlen = plain_len;
             }
             _ => return Err(self.op_err(CKR_GENERAL_ERROR))?,
         }
@@ -2215,18 +2280,17 @@ impl Decryption for AesOperation {
                         outlen
                     }
                 }
-                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                    if data_len % AES_KW_SEMIBLOCK != 0 {
+                CKM_AES_KEY_WRAP_KWP => {
+                    if data_len % AES_KW_SEMIBLOCK != 0 || data_len < 16 {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
-                    self.buffer.len() + data_len
+                    data_len - AES_KW_SEMIBLOCK
                 }
-                CKM_AES_KEY_WRAP_PKCS7 => {
-                    let tot = self.buffer.len() + data_len;
-                    if tot < 24 || tot % AES_KW_SEMIBLOCK != 0 {
+                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PKCS7 => {
+                    if data_len % AES_KW_SEMIBLOCK != 0 || data_len < 24 {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
-                    tot - AES_KW_SEMIBLOCK
+                    data_len - AES_KW_SEMIBLOCK
                 }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
@@ -2254,23 +2318,9 @@ impl Decryption for AesOperation {
                 CKM_AES_CFB8 | CKM_AES_CFB1 | CKM_AES_CFB128 | CKM_AES_OFB => {
                     data_len
                 }
-                CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP => {
-                    if data_len % AES_KW_SEMIBLOCK != 0 {
-                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
-                    } else {
-                        /* Originally this was ((data_len / 8) * 8) - 8
-                         * however this caused stack corruption on decryption
-                         * failures as in case of errors as OpenSSL's unwrap
-                         * function (CRYPTO_128_unwrap_pad) zeroizes outputs
-                         * by calling OPENSSL_cleanse(out, inlen). So the
-                         * output buffer needs to be always at least as large
-                         * as the input buffer regardless of the actual final
-                         * length, and needs to be a multiple of 8.
-                         */
-                        (data_len / AES_KW_SEMIBLOCK) * AES_KW_SEMIBLOCK
-                    }
-                }
-                CKM_AES_KEY_WRAP_PKCS7 => 0,
+                CKM_AES_KEY_WRAP
+                | CKM_AES_KEY_WRAP_KWP
+                | CKM_AES_KEY_WRAP_PKCS7 => 0,
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };
