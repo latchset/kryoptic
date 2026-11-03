@@ -574,9 +574,9 @@ impl Decryption for ChaChaOperation {
                             zeromem(&mut self.buffer.as_mut_slice()[..buflen]);
                             let _ = self.buffer.drain(..buflen);
                         }
+                        /* The cipher buffer has been utilized */
+                        cipher_offset = cipher_end;
                     }
-                    /* The cipher buffer has been utilized */
-                    cipher_offset = cipher_end;
                 } else if cipher_end > POLY1305_TAG_SIZE {
                     cipher_end -= POLY1305_TAG_SIZE;
                     self.buffer.extend_from_slice(&cipher[cipher_end..]);

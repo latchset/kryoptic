@@ -242,6 +242,17 @@ fn test_chacha20_poly1305_multipart() {
     recovered.append(&mut ret_or_panic!(decrypt_final(session)));
     assert_eq!(recovered, plaintext);
 
+    /* Multi-part decrypt in chunks larger than the 16-byte tag must
+     * recover the plaintext as well */
+    let ret = fn_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut recovered = Vec::new();
+    for chunk in ciphertext.chunks(20) {
+        recovered.append(&mut ret_or_panic!(decrypt_update(session, chunk)));
+    }
+    recovered.append(&mut ret_or_panic!(decrypt_final(session)));
+    assert_eq!(recovered, plaintext);
+
     testtokn.finalize();
 }
 
