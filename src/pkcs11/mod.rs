@@ -980,7 +980,7 @@ impl CK_ATTRIBUTE {
         ))
     }
 
-    /// Returns a copy of the internal buffer as an vector
+    /// Returns a copy of the internal buffer as a vector
     ///
     /// Errors out if the internal data pointer is null
     pub fn to_buf(&self) -> Result<Vec<u8>> {
@@ -1090,7 +1090,7 @@ impl CK_OTP_PARAM {
         ))
     }
 
-    /// Returns a copy of the internal buffer as an vector
+    /// Returns a copy of the internal buffer as a vector
     ///
     /// Errors out if the internal data pointer is null
     pub fn to_buf(&self) -> Result<Vec<u8>> {
