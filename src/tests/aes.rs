@@ -823,6 +823,52 @@ fn test_aes_operations() {
         );
         assert_eq!(ret, CKR_OK);
         assert_eq!(value, data);
+
+        if mech == CKM_AES_KEY_WRAP {
+            // C_Encrypt must reject inputs that are not multiple of 8 or < 16
+            let short_data = [0x55u8; 7];
+            err_or_panic!(
+                encrypt(session, handle, &short_data, &mechanism),
+                CKR_DATA_LEN_RANGE
+            );
+            let unaligned_data = [0x55u8; 17];
+            err_or_panic!(
+                encrypt(session, handle, &unaligned_data, &mechanism),
+                CKR_DATA_LEN_RANGE
+            );
+
+            // C_WrapKey accepts keys of any length; C_Decrypt returns 0-padded data
+            let short_key_data = [0x33u8; 7];
+            let short_key = ret_or_panic!(import_object(
+                session,
+                CKO_SECRET_KEY,
+                &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+                &[(CKA_VALUE, &short_key_data)],
+                &[(CKA_EXTRACTABLE, true)],
+            ));
+            let mut short_wrapped = [0u8; 32];
+            let mut short_wraplen = short_wrapped.len() as CK_ULONG;
+            let ret = fn_wrap_key(
+                session,
+                &mut mechanism,
+                handle,
+                short_key,
+                short_wrapped.as_mut_ptr(),
+                &mut short_wraplen,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(short_wraplen, 24);
+
+            let short_dec = ret_or_panic!(decrypt(
+                session,
+                handle,
+                &short_wrapped[..short_wraplen as usize],
+                &mechanism
+            ));
+            assert_eq!(short_dec.len(), 16);
+            assert_eq!(&short_dec[..7], &short_key_data);
+            assert_eq!(&short_dec[7..], &[0u8; 9]);
+        }
     }
 
     {
@@ -3016,7 +3062,7 @@ fn test_aes_wrap_key_buffer_too_small_reports_required_len() {
         &mut wrapped_len,
     );
     assert_eq!(ret, CKR_BUFFER_TOO_SMALL);
-    /* AES-KWP wraps a 32-byte key into 40 bytes (two 8-byte overhead blocks). */
+    /* AES-KWP wraps a 32-byte key into 40 bytes. */
     assert_eq!(
         wrapped_len, 40,
         "CKR_BUFFER_TOO_SMALL must report the real required length (40 \
@@ -3065,10 +3111,13 @@ fn test_aes_key_wrap_pkcs7() {
 
     let custom_iv = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
 
-    // 1. Test round-trip across various payload lengths (>= 8 bytes) with default and custom IVs
-    // Note: PKCS#7 pads to semiblock (8 bytes), and AES Key Wrap requires at least 2 semiblocks (16 bytes).
-    let test_lengths =
-        [8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 24, 31, 32, 48, 64];
+    // 1. Test round-trip across various payload lengths (>= 8 bytes) with
+    // default and custom IVs.
+    // Note: PKCS#7 pads to semiblock (8 bytes), but 16 bytes is always the
+    // minimum paddedlength to match AES KW input requirements.
+    let test_lengths = [
+        1, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 24, 31, 32, 48, 64,
+    ];
     for &len in &test_lengths {
         let plaintext: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
 
@@ -3087,8 +3136,14 @@ fn test_aes_key_wrap_pkcs7() {
                 }
             };
 
-            // Expected ciphertext length: padded to multiple of 8 (semiblock) + 8 bytes (IV)
-            let expected_padded = ((len + 8) / 8) * 8;
+            // Expected ciphertext length: padded to multiple of 8 (semiblock)
+            // + 8 bytes (IV)
+            let expected_padded = if len < 8 {
+                ((len + 16) / 8) * 8
+            } else {
+                ((len + 8) / 8) * 8
+            };
+
             let expected_ct_len = expected_padded + 8;
 
             // One-shot Encrypt
@@ -3108,57 +3163,10 @@ fn test_aes_key_wrap_pkcs7() {
                 &mechanism
             ));
             assert_eq!(pt, plaintext);
-
-            // Multi-part streaming Encrypt
-            let mut mech_clone = mechanism.clone();
-            let ret =
-                fn_encrypt_init(session, &mut mech_clone, wrapping_handle);
-            assert_eq!(ret, CKR_OK);
-
-            let half = len / 2;
-            let enc_part1 =
-                ret_or_panic!(encrypt_update(session, &plaintext[..half]));
-            assert_eq!(enc_part1.len(), 0);
-            let enc_part2 =
-                ret_or_panic!(encrypt_update(session, &plaintext[half..]));
-            assert_eq!(enc_part2.len(), 0);
-
-            let ct_multi = ret_or_panic!(encrypt_final(session));
-            assert_eq!(ct_multi.len(), expected_ct_len);
-            assert_eq!(ct_multi, ct);
-
-            // Multi-part streaming Decrypt
-            let ret =
-                fn_decrypt_init(session, &mut mech_clone, wrapping_handle);
-            assert_eq!(ret, CKR_OK);
-
-            let ct_half = ct.len() / 2;
-            let dec_part1 =
-                ret_or_panic!(decrypt_update(session, &ct[..ct_half]));
-            assert_eq!(dec_part1.len(), 0);
-            let dec_part2 =
-                ret_or_panic!(decrypt_update(session, &ct[ct_half..]));
-            assert_eq!(dec_part2.len(), 0);
-
-            let pt_multi = ret_or_panic!(decrypt_final(session));
-            assert_eq!(pt_multi, plaintext);
         }
     }
 
-    // 2. Test payload length < 8 bytes (must fail with CKR_DATA_LEN_RANGE)
-    let default_mech = CK_MECHANISM {
-        mechanism: CKM_AES_KEY_WRAP_PKCS7,
-        pParameter: std::ptr::null_mut(),
-        ulParameterLen: 0,
-    };
-    for short_len in [0, 1, 4, 7] {
-        let short_pt = vec![0x55u8; short_len];
-        let res = encrypt(session, wrapping_handle, &short_pt, &default_mech);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err().rv(), CKR_DATA_LEN_RANGE);
-    }
-
-    // 3. Test invalid parameter lengths (must be 0 or 8)
+    // 2. Test invalid parameter lengths (must be 0 or 8)
     for bad_len in [1, 4, 7, 9, 16] {
         let bad_iv = vec![0xAAu8; bad_len];
         let mut mechanism = CK_MECHANISM {
@@ -3173,7 +3181,12 @@ fn test_aes_key_wrap_pkcs7() {
         assert_eq!(ret, CKR_ARGUMENTS_BAD);
     }
 
-    // 4. Test invalid ciphertext lengths (< 24 bytes, or not multiple of 8)
+    // 3. Test invalid ciphertext lengths (< 24 bytes, or not multiple of 8)
+    let default_mech = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP_PKCS7,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
     for bad_ct_len in [0, 7, 8, 15, 16, 20, 23, 25, 27, 31] {
         let bad_ct = vec![0x42u8; bad_ct_len];
         let res = decrypt(session, wrapping_handle, &bad_ct, &default_mech);
@@ -3229,6 +3242,624 @@ fn test_aes_key_wrap_pkcs7() {
     #[cfg(feature = "fips")]
     {
         assert_eq!(check_validation(session, 0), true);
+    }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_aes_key_wrap() {
+    let mut testtokn = TestToken::initialized("test_aes_key_wrap", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let wrapping_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    let custom_iv = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+
+    // 1. C_Encrypt with CKM_AES_KEY_WRAP only accepts inputs that are
+    // multiples of AES_KW_SEMIBLOCK (8 bytes) with a minimum of 2 blocks (16 bytes).
+    // Test invalid plaintext lengths:
+    // a) Lengths < 16 bytes: 0, 1, 4, 7, 8, 9, 15 bytes
+    // b) Lengths >= 16 bytes but not a multiple of 8: 17, 19, 21, 23, 25, 31, 33 bytes
+    for bad_len in [0, 1, 4, 7, 8, 9, 15, 17, 19, 21, 23, 25, 31, 33] {
+        let bad_pt = vec![0x42u8; bad_len];
+        for use_custom_iv in [false, true] {
+            let mut mechanism = if use_custom_iv {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: void_ptr!(custom_iv.as_ptr()),
+                    ulParameterLen: custom_iv.len() as CK_ULONG,
+                }
+            } else {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            };
+
+            // One-shot encrypt must fail with CKR_DATA_LEN_RANGE
+            let res = encrypt(session, wrapping_handle, &bad_pt, &mechanism);
+            assert!(res.is_err());
+            assert_eq!(res.unwrap_err().rv(), CKR_DATA_LEN_RANGE);
+
+            // C_EncryptUpdate must also fail with CKR_DATA_LEN_RANGE
+            assert_eq!(
+                fn_encrypt_init(session, &mut mechanism, wrapping_handle),
+                CKR_OK
+            );
+            let mut enc_buf = [0u8; 64];
+            let mut enc_len = enc_buf.len() as CK_ULONG;
+            let ret = fn_encrypt_update(
+                session,
+                bad_pt.as_ptr() as *mut u8,
+                bad_pt.len() as CK_ULONG,
+                enc_buf.as_mut_ptr(),
+                &mut enc_len,
+            );
+            assert_eq!(ret, CKR_DATA_LEN_RANGE);
+        }
+    }
+
+    // 2. C_Encrypt with CKM_AES_KEY_WRAP accepts inputs that are
+    // multiples of 8 bytes with a minimum of 16 bytes.
+    let valid_lengths = [16, 24, 32, 40, 48, 64];
+    for &len in &valid_lengths {
+        let plaintext: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+        for use_custom_iv in [false, true] {
+            let mechanism = if use_custom_iv {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: void_ptr!(custom_iv.as_ptr()),
+                    ulParameterLen: custom_iv.len() as CK_ULONG,
+                }
+            } else {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            };
+
+            let ct = ret_or_panic!(encrypt(
+                session,
+                wrapping_handle,
+                &plaintext,
+                &mechanism
+            ));
+            assert_eq!(ct.len(), len + 8);
+
+            let pt = ret_or_panic!(decrypt(
+                session,
+                wrapping_handle,
+                &ct,
+                &mechanism
+            ));
+            assert_eq!(pt, plaintext);
+        }
+    }
+
+    // 3. Test C_WrapKey accepts keys of any length, and test interop between
+    // C_WrapKey + C_Decrypt.
+    // Keys of any length are accepted by C_WrapKey.
+    // If key length <= 8: 0-padded to 16 bytes (2 semiblocks).
+    // If key length > 8: 0-padded to the next multiple of 8 (semiblock).
+    // In both cases, C_Decrypt recovers the 0-padded plaintext.
+    let any_key_lengths =
+        [1, 2, 4, 7, 8, 9, 12, 15, 16, 17, 20, 23, 24, 31, 32, 48, 64];
+    for &key_len in &any_key_lengths {
+        let key_data: Vec<u8> =
+            (0..key_len).map(|i| (i * 11 + 5) as u8).collect();
+        let key_handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+            &[(CKA_VALUE, &key_data)],
+            &[(CKA_EXTRACTABLE, true)],
+        ));
+
+        let pad = if key_len <= 8 {
+            16 - key_len
+        } else {
+            (8 - (key_len % 8)) % 8
+        };
+        let expected_padded_len = key_len + pad;
+        let expected_wrapped_len = expected_padded_len + 8;
+
+        for use_custom_iv in [false, true] {
+            let mut mechanism = if use_custom_iv {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: void_ptr!(custom_iv.as_ptr()),
+                    ulParameterLen: custom_iv.len() as CK_ULONG,
+                }
+            } else {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            };
+
+            // Probe wrapped key length
+            let mut wraplen: CK_ULONG = 0;
+            let ret = fn_wrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                key_handle,
+                std::ptr::null_mut(),
+                &mut wraplen,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(wraplen as usize, expected_wrapped_len);
+
+            // Wrap key
+            let mut wrapped = vec![0u8; wraplen as usize];
+            let ret = fn_wrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                key_handle,
+                wrapped.as_mut_ptr(),
+                &mut wraplen,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(wraplen as usize, expected_wrapped_len);
+
+            // Interop: C_WrapKey + C_Decrypt
+            // Decrypt the wrapped key using C_Decrypt with CKM_AES_KEY_WRAP
+            let decrypted = ret_or_panic!(decrypt(
+                session,
+                wrapping_handle,
+                &wrapped,
+                &mechanism
+            ));
+            assert_eq!(decrypted.len(), expected_padded_len);
+            assert_eq!(&decrypted[..key_len], &key_data);
+            assert!(
+                decrypted[key_len..].iter().all(|&b| b == 0),
+                "padding bytes must be zero"
+            );
+        }
+    }
+
+    // 4. Test interop between C_Encrypt + C_UnwrapKey.
+    // C_Encrypt encrypts valid inputs (multiples of 8, >= 16 bytes), and C_UnwrapKey
+    // unwraps the resulting ciphertext into key objects.
+    // 4a. Unwrap as CKK_AES (16, 24, 32 bytes)
+    for &aes_len in &[16, 24, 32] {
+        let key_bytes: Vec<u8> =
+            (0..aes_len).map(|i| (i * 13 + 1) as u8).collect();
+
+        for use_custom_iv in [false, true] {
+            let mut mechanism = if use_custom_iv {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: void_ptr!(custom_iv.as_ptr()),
+                    ulParameterLen: custom_iv.len() as CK_ULONG,
+                }
+            } else {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            };
+
+            // Encrypt raw key bytes with C_Encrypt
+            let ct = ret_or_panic!(encrypt(
+                session,
+                wrapping_handle,
+                &key_bytes,
+                &mechanism
+            ));
+            assert_eq!(ct.len(), aes_len + 8);
+
+            // Unwrap ciphertext with C_UnwrapKey
+            let mut template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_AES),
+                    (CKA_VALUE_LEN, aes_len as CK_ULONG),
+                ],
+                &[],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+            );
+            let mut unwrapped_handle = CK_INVALID_HANDLE;
+            let ret = fn_unwrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                ct.as_ptr() as *mut u8,
+                ct.len() as CK_ULONG,
+                template.as_mut_ptr(),
+                template.len() as CK_ULONG,
+                &mut unwrapped_handle,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let val =
+                ret_or_panic!(extract_key_value(session, unwrapped_handle));
+            assert_eq!(val, key_bytes);
+
+            // Cross-check: C_WrapKey of the imported key produces identical ciphertext to C_Encrypt
+            let imported_handle = ret_or_panic!(import_object(
+                session,
+                CKO_SECRET_KEY,
+                &[(CKA_KEY_TYPE, CKK_AES)],
+                &[(CKA_VALUE, &key_bytes)],
+                &[(CKA_EXTRACTABLE, true)],
+            ));
+            let mut wrapped = vec![0u8; ct.len()];
+            let mut wrapped_len = wrapped.len() as CK_ULONG;
+            let ret = fn_wrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                imported_handle,
+                wrapped.as_mut_ptr(),
+                &mut wrapped_len,
+            );
+            assert_eq!(ret, CKR_OK);
+            assert_eq!(wrapped, ct);
+        }
+    }
+
+    // 4b. Unwrap as CKK_GENERIC_SECRET for various block-aligned lengths (16, 24, 32, 48, 64)
+    for &gen_len in &[16, 24, 32, 48, 64] {
+        let key_bytes: Vec<u8> =
+            (0..gen_len).map(|i| (i * 17 + 2) as u8).collect();
+
+        for use_custom_iv in [false, true] {
+            let mut mechanism = if use_custom_iv {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: void_ptr!(custom_iv.as_ptr()),
+                    ulParameterLen: custom_iv.len() as CK_ULONG,
+                }
+            } else {
+                CK_MECHANISM {
+                    mechanism: CKM_AES_KEY_WRAP,
+                    pParameter: std::ptr::null_mut(),
+                    ulParameterLen: 0,
+                }
+            };
+
+            let ct = ret_or_panic!(encrypt(
+                session,
+                wrapping_handle,
+                &key_bytes,
+                &mechanism
+            ));
+
+            let mut template = make_attr_template(
+                &[
+                    (CKA_CLASS, CKO_SECRET_KEY),
+                    (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+                    (CKA_VALUE_LEN, gen_len as CK_ULONG),
+                ],
+                &[],
+                &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+            );
+            let mut unwrapped_handle = CK_INVALID_HANDLE;
+            let ret = fn_unwrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                ct.as_ptr() as *mut u8,
+                ct.len() as CK_ULONG,
+                template.as_mut_ptr(),
+                template.len() as CK_ULONG,
+                &mut unwrapped_handle,
+            );
+            assert_eq!(ret, CKR_OK);
+
+            let val =
+                ret_or_panic!(extract_key_value(session, unwrapped_handle));
+            assert_eq!(val, key_bytes);
+        }
+    }
+
+    // 5. Test invalid parameter lengths (must be 0 or 8)
+    for bad_len in [1, 4, 7, 9, 16] {
+        let bad_iv = vec![0xAAu8; bad_len];
+        let mut mechanism = CK_MECHANISM {
+            mechanism: CKM_AES_KEY_WRAP,
+            pParameter: void_ptr!(bad_iv.as_ptr()),
+            ulParameterLen: bad_len as CK_ULONG,
+        };
+        let ret = fn_encrypt_init(session, &mut mechanism, wrapping_handle);
+        assert_eq!(ret, CKR_ARGUMENTS_BAD);
+
+        let ret = fn_decrypt_init(session, &mut mechanism, wrapping_handle);
+        assert_eq!(ret, CKR_ARGUMENTS_BAD);
+    }
+
+    // 6. Test invalid ciphertext lengths (< 24 bytes, or not multiple of 8)
+    let default_mech = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    for bad_ct_len in [0, 7, 8, 15, 16, 20, 23, 25, 27, 31] {
+        let bad_ct = vec![0x42u8; bad_ct_len];
+        let res = decrypt(session, wrapping_handle, &bad_ct, &default_mech);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().rv(), CKR_ENCRYPTED_DATA_LEN_RANGE);
+    }
+
+    // 7. Test corrupted ciphertext (RFC 3394 integrity failure)
+    let valid_pt = [0x55u8; 16];
+    let mut ct = ret_or_panic!(encrypt(
+        session,
+        wrapping_handle,
+        &valid_pt,
+        &default_mech
+    ));
+    ct[0] ^= 0x01;
+    let res = decrypt(session, wrapping_handle, &ct, &default_mech);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().rv(), CKR_ENCRYPTED_DATA_INVALID);
+
+    // Also C_UnwrapKey with corrupted ciphertext must fail
+    let mut template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+    let mut fail_handle = CK_INVALID_HANDLE;
+    let mut default_mech_clone = default_mech;
+    let ret = fn_unwrap_key(
+        session,
+        &mut default_mech_clone,
+        wrapping_handle,
+        ct.as_mut_ptr(),
+        ct.len() as CK_ULONG,
+        template.as_mut_ptr(),
+        template.len() as CK_ULONG,
+        &mut fail_handle,
+    );
+    assert_eq!(ret, CKR_WRAPPED_KEY_INVALID);
+
+    // 8. Test with RFC 3394 §4.1 test vector:
+    // KEK = 000102030405060708090a0b0c0d0e0f
+    // Key Data = 00112233445566778899aabbccddeeff
+    // Ciphertext = 1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5
+    let rfc_kek = hex::decode("000102030405060708090a0b0c0d0e0f").unwrap();
+    let rfc_key_data = hex::decode("00112233445566778899aabbccddeeff").unwrap();
+    let expected_ct =
+        hex::decode("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5")
+            .unwrap();
+
+    let rfc_kek_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &rfc_kek)],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+    let rfc_target_handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_AES)],
+        &[(CKA_VALUE, &rfc_key_data)],
+        &[(CKA_EXTRACTABLE, true)],
+    ));
+
+    // C_Encrypt produces expected RFC 3394 ciphertext
+    let rfc_enc_ct = ret_or_panic!(encrypt(
+        session,
+        rfc_kek_handle,
+        &rfc_key_data,
+        &default_mech
+    ));
+    assert_eq!(rfc_enc_ct, expected_ct);
+
+    // C_WrapKey produces expected RFC 3394 ciphertext
+    let mut rfc_wrapped = vec![0u8; 24];
+    let mut rfc_wrapped_len = rfc_wrapped.len() as CK_ULONG;
+    let mut mech_wrap = default_mech;
+    let ret = fn_wrap_key(
+        session,
+        &mut mech_wrap,
+        rfc_kek_handle,
+        rfc_target_handle,
+        rfc_wrapped.as_mut_ptr(),
+        &mut rfc_wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(rfc_wrapped, expected_ct);
+
+    // C_Decrypt recovers original key data from ciphertext
+    let rfc_dec = ret_or_panic!(decrypt(
+        session,
+        rfc_kek_handle,
+        &expected_ct,
+        &default_mech
+    ));
+    assert_eq!(rfc_dec, rfc_key_data);
+
+    // C_UnwrapKey recovers original key object from ciphertext
+    let mut rfc_unwrap_mech = default_mech;
+    let mut rfc_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+    let mut rfc_unwrapped_handle = CK_INVALID_HANDLE;
+    let mut ct_copy = expected_ct.clone();
+    let ret = fn_unwrap_key(
+        session,
+        &mut rfc_unwrap_mech,
+        rfc_kek_handle,
+        ct_copy.as_mut_ptr(),
+        ct_copy.len() as CK_ULONG,
+        rfc_template.as_mut_ptr(),
+        rfc_template.len() as CK_ULONG,
+        &mut rfc_unwrapped_handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    let val = ret_or_panic!(extract_key_value(session, rfc_unwrapped_handle));
+    assert_eq!(val, rfc_key_data);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_aes_key_wrap_kwp() {
+    let mut testtokn = TestToken::initialized("test_aes_key_wrap_kwp", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let wrapping_handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    let custom_iv = [0x11u8, 0x22, 0x33, 0x44];
+
+    let mut unwrap_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+
+    for use_custom_iv in [false, true] {
+        let mut mechanism = if use_custom_iv {
+            CK_MECHANISM {
+                mechanism: CKM_AES_KEY_WRAP_KWP,
+                pParameter: void_ptr!(custom_iv.as_ptr()),
+                ulParameterLen: custom_iv.len() as CK_ULONG,
+            }
+        } else {
+            CK_MECHANISM {
+                mechanism: CKM_AES_KEY_WRAP_KWP,
+                pParameter: std::ptr::null_mut(),
+                ulParameterLen: 0,
+            }
+        };
+
+        // 1. Test invalid ciphertext lengths:
+        // C_Decrypt must return CKR_ENCRYPTED_DATA_LEN_RANGE,
+        // C_UnwrapKey must return CKR_WRAPPED_KEY_LEN_RANGE.
+        // For CKM_AES_KEY_WRAP_KWP, ciphertext must be >= 16 bytes and a multiple of 8.
+        let bad_lengths = [0, 1, 4, 7, 8, 9, 15, 17, 19, 21, 23, 25, 31, 33];
+        for bad_len in bad_lengths {
+            let mut dummy = [0x42u8; 1];
+            let mut bad_ct = vec![0x42u8; bad_len];
+            let bad_ptr = if bad_len == 0 {
+                dummy.as_mut_ptr()
+            } else {
+                bad_ct.as_mut_ptr()
+            };
+
+            // C_Decrypt returns CKR_ENCRYPTED_DATA_LEN_RANGE
+            let dec_res =
+                decrypt(session, wrapping_handle, &bad_ct, &mechanism);
+            assert!(dec_res.is_err());
+            assert_eq!(dec_res.unwrap_err().rv(), CKR_ENCRYPTED_DATA_LEN_RANGE);
+
+            // C_UnwrapKey returns CKR_WRAPPED_KEY_LEN_RANGE
+            let mut unwrapped_handle = CK_INVALID_HANDLE;
+            let ret = fn_unwrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                bad_ptr,
+                bad_len as CK_ULONG,
+                unwrap_template.as_mut_ptr(),
+                unwrap_template.len() as CK_ULONG,
+                &mut unwrapped_handle,
+            );
+            assert_eq!(ret, CKR_WRAPPED_KEY_LEN_RANGE);
+        }
+
+        // 2. Test corrupted ciphertext (integrity verification / padding failure):
+        // C_Decrypt must return CKR_ENCRYPTED_DATA_INVALID,
+        // C_UnwrapKey must return CKR_WRAPPED_KEY_INVALID.
+        let valid_pt = [0x55u8; 16];
+        let ct = ret_or_panic!(encrypt(
+            session,
+            wrapping_handle,
+            &valid_pt,
+            &mechanism
+        ));
+        assert_eq!(ct.len(), 24);
+
+        // Sanity check: valid ciphertext can be decrypted and unwrapped
+        let pt =
+            ret_or_panic!(decrypt(session, wrapping_handle, &ct, &mechanism));
+        assert_eq!(pt, valid_pt);
+
+        // Test corruption of first byte and last byte
+        for &corrupt_idx in &[0, ct.len() - 1] {
+            let mut bad_ct = ct.clone();
+            bad_ct[corrupt_idx] ^= 0x01;
+
+            // C_Decrypt returns CKR_ENCRYPTED_DATA_INVALID
+            let dec_res =
+                decrypt(session, wrapping_handle, &bad_ct, &mechanism);
+            assert!(dec_res.is_err());
+            assert_eq!(dec_res.unwrap_err().rv(), CKR_ENCRYPTED_DATA_INVALID);
+
+            // C_UnwrapKey returns CKR_WRAPPED_KEY_INVALID
+            let mut unwrapped_handle = CK_INVALID_HANDLE;
+            let ret = fn_unwrap_key(
+                session,
+                &mut mechanism,
+                wrapping_handle,
+                bad_ct.as_mut_ptr(),
+                bad_ct.len() as CK_ULONG,
+                unwrap_template.as_mut_ptr(),
+                unwrap_template.len() as CK_ULONG,
+                &mut unwrapped_handle,
+            );
+            assert_eq!(ret, CKR_WRAPPED_KEY_INVALID);
+        }
     }
 
     testtokn.finalize();
@@ -4935,6 +5566,157 @@ fn test_aes_aead_decrypt_tampered() {
             assert_eq!(dec_buf, vec![0u8; plaintext.len()]);
             let _ = fn_message_decrypt_final(session);
         }
+    }
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_aes_key_wrap_multipart_fails() {
+    let mut testtokn =
+        TestToken::initialized("test_aes_key_wrap_multipart_fails", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32)],
+        &[],
+        &[
+            (CKA_ENCRYPT, true),
+            (CKA_DECRYPT, true),
+            (CKA_WRAP, true),
+            (CKA_UNWRAP, true),
+        ],
+    ));
+
+    let plaintext = [0x55u8; 32];
+
+    for mech in [
+        CKM_AES_KEY_WRAP,
+        CKM_AES_KEY_WRAP_KWP,
+        CKM_AES_KEY_WRAP_PKCS7,
+    ] {
+        let mut mechanism = CK_MECHANISM {
+            mechanism: mech,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: 0,
+        };
+
+        // 1. Calling C_EncryptFinal or C_DecryptFinal directly after Init (without updates) must fail
+        assert_eq!(fn_encrypt_init(session, &mut mechanism, handle), CKR_OK);
+        let mut out = [0u8; 64];
+        let mut out_len: CK_ULONG = out.len() as CK_ULONG;
+        assert_eq!(
+            fn_encrypt_final(session, out.as_mut_ptr(), &mut out_len),
+            CKR_OPERATION_NOT_INITIALIZED
+        );
+
+        assert_eq!(fn_decrypt_init(session, &mut mechanism, handle), CKR_OK);
+        let mut out_len: CK_ULONG = out.len() as CK_ULONG;
+        assert_eq!(
+            fn_decrypt_final(session, out.as_mut_ptr(), &mut out_len),
+            CKR_OPERATION_NOT_INITIALIZED
+        );
+
+        // 2. Multi-part streaming encryption:
+        // Since AES KEY WRAP mechanisms are single-shot only, streaming updates must fail.
+        // When feeding data in multiple parts via C_EncryptUpdate:
+        // The first update call processes the first chunk in a single-shot manner.
+        // Any subsequent C_EncryptUpdate call must fail with CKR_OPERATION_NOT_INITIALIZED.
+        assert_eq!(fn_encrypt_init(session, &mut mechanism, handle), CKR_OK);
+        let half = plaintext.len() / 2;
+        let mut enc_buf = [0u8; 64];
+        let mut enc_len: CK_ULONG = enc_buf.len() as CK_ULONG;
+        let ret = fn_encrypt_update(
+            session,
+            plaintext.as_ptr() as *mut u8,
+            half as CK_ULONG,
+            enc_buf.as_mut_ptr(),
+            &mut enc_len,
+        );
+        assert_eq!(ret, CKR_OK);
+
+        // Second update call must fail
+        let mut enc_len2: CK_ULONG = enc_buf.len() as CK_ULONG;
+        let ret = fn_encrypt_update(
+            session,
+            plaintext[half..].as_ptr() as *mut u8,
+            (plaintext.len() - half) as CK_ULONG,
+            enc_buf.as_mut_ptr(),
+            &mut enc_len2,
+        );
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+        // Once an operation fails, it must be terminated; subsequent C_EncryptFinal must fail
+        let ret = fn_encrypt_final(session, enc_buf.as_mut_ptr(), &mut enc_len);
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+        // 3. Multi-part streaming decryption:
+        // First get a valid ciphertext using one-shot encryption
+        let ct =
+            ret_or_panic!(encrypt(session, handle, &plaintext, &mechanism));
+
+        // 3a. Splitting ciphertext into chunks fails
+        assert_eq!(fn_decrypt_init(session, &mut mechanism, handle), CKR_OK);
+        let ct_half = ct.len() / 2;
+        let mut dec_buf = [0u8; 64];
+        let mut dec_len: CK_ULONG = dec_buf.len() as CK_ULONG;
+        let ret = fn_decrypt_update(
+            session,
+            ct.as_ptr() as *mut u8,
+            ct_half as CK_ULONG,
+            dec_buf.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert!(
+            ret == CKR_ENCRYPTED_DATA_LEN_RANGE
+                || ret == CKR_ENCRYPTED_DATA_INVALID
+        );
+
+        // Once failed, subsequent C_DecryptUpdate and C_DecryptFinal must fail
+        let ret = fn_decrypt_update(
+            session,
+            ct[ct_half..].as_ptr() as *mut u8,
+            (ct.len() - ct_half) as CK_ULONG,
+            dec_buf.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+        let ret = fn_decrypt_final(session, dec_buf.as_mut_ptr(), &mut dec_len);
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+        // 3b. Calling C_DecryptUpdate a second time after a first update call
+        assert_eq!(fn_decrypt_init(session, &mut mechanism, handle), CKR_OK);
+        let mut dec_len: CK_ULONG = dec_buf.len() as CK_ULONG;
+        let ret = fn_decrypt_update(
+            session,
+            ct.as_ptr() as *mut u8,
+            ct.len() as CK_ULONG,
+            dec_buf.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(&dec_buf[..dec_len as usize], &plaintext);
+
+        // Second update call must fail because key wrap mechanisms are single-shot only
+        let ret = fn_decrypt_update(
+            session,
+            ct.as_ptr() as *mut u8,
+            ct.len() as CK_ULONG,
+            dec_buf.as_mut_ptr(),
+            &mut dec_len,
+        );
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
+
+        // Finalizing after failed second update must fail
+        let ret = fn_decrypt_final(session, dec_buf.as_mut_ptr(), &mut dec_len);
+        assert_eq!(ret, CKR_OPERATION_NOT_INITIALIZED);
     }
 
     testtokn.finalize();
