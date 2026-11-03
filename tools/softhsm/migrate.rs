@@ -781,7 +781,9 @@ fn find_ulong(
     let mut val = CK_UNAVAILABLE_INFORMATION;
     for a in attrs {
         if a.attr.type_ == typ {
-            val = unsafe { *(a.attr.pValue as CK_ULONG_PTR) };
+            val = unsafe {
+                std::ptr::read_unaligned(a.attr.pValue as CK_ULONG_PTR)
+            };
             break;
         }
     }

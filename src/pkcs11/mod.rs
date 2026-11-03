@@ -922,7 +922,7 @@ impl CK_ATTRIBUTE {
         if self.pValue.is_null() {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
-        Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
+        Ok(unsafe { std::ptr::read_unaligned(self.pValue as CK_ULONG_PTR) })
     }
 
     /// Returns the internal data memory buffer as a bool
@@ -1015,6 +1015,29 @@ impl CK_ATTRIBUTE {
     }
 }
 
+/// Convenience function to cast parameters passed as separate
+/// pointer/length variables into the structure they represent.
+///
+/// A length check on len is performed to validate that the correct
+/// parameter structure is being casted.
+///
+/// No other validation is performed
+pub(crate) fn cast_params<T: Copy + Clone>(
+    ptr: CK_VOID_PTR,
+    len: CK_ULONG,
+) -> Result<T> {
+    let Ok(len) = usize::try_from(len) else {
+        return Err(CKR_MECHANISM_PARAM_INVALID)?;
+    };
+    if len != std::mem::size_of::<T>() {
+        return Err(CKR_MECHANISM_PARAM_INVALID)?;
+    }
+    if ptr.is_null() {
+        return Err(CKR_MECHANISM_PARAM_INVALID)?;
+    }
+    Ok(unsafe { std::ptr::read_unaligned(ptr as *const T) })
+}
+
 impl CK_MECHANISM {
     /// Convenience function to cast mechanism parameters passed as a
     /// pointer/length into the structure they represent.
@@ -1025,16 +1048,7 @@ impl CK_MECHANISM {
     /// No other validation is performed, this is an UNSAFE operation
     /// that requires further content validation.
     pub fn get_parameters<T: Copy + Clone>(&self) -> Result<T> {
-        let Ok(len) = usize::try_from(self.ulParameterLen) else {
-            return Err(CKR_MECHANISM_PARAM_INVALID)?;
-        };
-        if len != std::mem::size_of::<T>() {
-            return Err(CKR_MECHANISM_PARAM_INVALID)?;
-        }
-        if self.pParameter.is_null() {
-            return Err(CKR_MECHANISM_PARAM_INVALID)?;
-        }
-        Ok(unsafe { std::ptr::read_unaligned(self.pParameter as *const T) })
+        cast_params(self.pParameter, self.ulParameterLen)
     }
 
     pub fn from_ptr(mechptr: CK_MECHANISM_PTR) -> CK_MECHANISM {
@@ -1053,7 +1067,7 @@ impl CK_OTP_PARAM {
         if self.pValue.is_null() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
-        Ok(unsafe { *(self.pValue as CK_ULONG_PTR) })
+        Ok(unsafe { std::ptr::read_unaligned(self.pValue as CK_ULONG_PTR) })
     }
 
     /// Returns the internal data memory buffer as a bool
@@ -1116,5 +1130,19 @@ impl CK_OTP_PARAMS {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         struct_to_slice(self.pParams, usize::try_from(self.ulCount)?)
+    }
+}
+
+impl CK_DERIVED_KEY {
+    /// Validates that CK_DERIVED_KEY is well formed, and has no null
+    /// pointers
+    pub fn validate(&self) -> Result<()> {
+        if self.ulAttributeCount != 0 && self.pTemplate.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        if self.phKey.is_null() {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
+        }
+        Ok(())
     }
 }

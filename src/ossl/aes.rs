@@ -33,27 +33,6 @@ const AES_KW_SEMIBLOCK: usize = AES_BLOCK_SIZE / 2;
 // 32-bit target compatible max
 const MAX_AES_KW_DATA: usize = u32::MAX as usize - AES_BLOCK_SIZE;
 
-/// Convenience function to cast aead parameters passed as separate
-/// pointer/length variables into the structure they represent.
-///
-/// A length check on len is performed to validate that the correct
-/// parameter structure is being casted.
-///
-/// No other validation is performed, this is an UNSAFE operation
-/// that requires further content validation
-unsafe fn cast_params<T: Copy + Clone>(
-    ptr: CK_VOID_PTR,
-    len: CK_ULONG,
-) -> Result<T> {
-    let Ok(len) = usize::try_from(len) else {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    };
-    if len != std::mem::size_of::<T>() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    Ok(unsafe { std::ptr::read_unaligned(ptr as *const T) })
-}
-
 /// Extracts the raw key bytes from a PKCS#11 `Object` into an `AesKey`.
 /// Validates the key length.
 fn object_to_raw_key(key: &Object) -> Result<OsslSecret> {
@@ -775,12 +754,10 @@ impl AesOperation {
         }
         match self.mech {
             CKM_AES_CCM => {
-                let params = unsafe {
-                    cast_params::<CK_CCM_MESSAGE_PARAMS>(
-                        parameter,
-                        parameter_len,
-                    )
-                }?;
+                let params = cast_params::<CK_CCM_MESSAGE_PARAMS>(
+                    parameter,
+                    parameter_len,
+                )?;
                 if params.ulNonceLen < 7 || params.ulNonceLen > 13 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
@@ -858,12 +835,10 @@ impl AesOperation {
                 Ok(params.pNonce)
             }
             CKM_AES_GCM => {
-                let params = unsafe {
-                    cast_params::<CK_GCM_MESSAGE_PARAMS>(
-                        parameter,
-                        parameter_len,
-                    )
-                }?;
+                let params = cast_params::<CK_GCM_MESSAGE_PARAMS>(
+                    parameter,
+                    parameter_len,
+                )?;
                 if params.ulIvLen == 0
                     || params.ulIvLen > CK_ULONG::try_from(u32::MAX)?
                 {
@@ -940,12 +915,10 @@ impl AesOperation {
     ) -> Result<CK_BYTE_PTR> {
         match self.mech {
             CKM_AES_CCM => {
-                let params = unsafe {
-                    cast_params::<CK_CCM_MESSAGE_PARAMS>(
-                        parameter,
-                        parameter_len,
-                    )
-                }?;
+                let params = cast_params::<CK_CCM_MESSAGE_PARAMS>(
+                    parameter,
+                    parameter_len,
+                )?;
                 if params.pNonce == std::ptr::null_mut() {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }
@@ -974,12 +947,10 @@ impl AesOperation {
                 Ok(params.pMAC)
             }
             CKM_AES_GCM => {
-                let params = unsafe {
-                    cast_params::<CK_GCM_MESSAGE_PARAMS>(
-                        parameter,
-                        parameter_len,
-                    )
-                }?;
+                let params = cast_params::<CK_GCM_MESSAGE_PARAMS>(
+                    parameter,
+                    parameter_len,
+                )?;
                 if params.pIv == std::ptr::null_mut() {
                     return Err(self.op_err(CKR_ARGUMENTS_BAD));
                 }

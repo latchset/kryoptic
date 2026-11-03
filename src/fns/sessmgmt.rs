@@ -42,7 +42,7 @@ fn open_session(
     drop(token);
     let handle = wstate.new_session(slot_id, user_type, flags)?;
     unsafe {
-        core::ptr::write(ph_session as *mut _, handle);
+        std::ptr::write_unaligned(ph_session as *mut _, handle);
     }
     Ok(())
 }
@@ -134,7 +134,7 @@ fn get_session_info(
     let rstate = STATE.rlock()?;
     let session = rstate.get_session(s_handle)?;
     unsafe {
-        core::ptr::write(info as *mut _, *session.get_session_info());
+        std::ptr::write_unaligned(info as *mut _, *session.get_session_info());
     }
     Ok(())
 }
@@ -170,15 +170,17 @@ fn get_operation_state(
         let state_len = CK_ULONG::try_from(session.state_size()?)
             .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *pul_operation_state_len = state_len;
+            std::ptr::write_unaligned(pul_operation_state_len, state_len);
         }
         return Ok(());
     }
     let state_len = if pul_operation_state_len.is_null() {
         return Err(CKR_ARGUMENTS_BAD)?;
     } else {
-        usize::try_from(unsafe { *pul_operation_state_len })
-            .map_err(|_| CKR_ARGUMENTS_BAD)?
+        usize::try_from(unsafe {
+            std::ptr::read_unaligned(pul_operation_state_len)
+        })
+        .map_err(|_| CKR_ARGUMENTS_BAD)?
     };
 
     let state: &mut [u8] = bytes_to_slice_mut(operation_state, state_len)?;
@@ -186,8 +188,10 @@ fn get_operation_state(
     let token = rstate.get_token_from_slot(slot_id)?;
     let outlen = session.state_save(token.get_mechanisms(), state)?;
     unsafe {
-        *pul_operation_state_len =
-            CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?
+        std::ptr::write_unaligned(
+            pul_operation_state_len,
+            CK_ULONG::try_from(outlen).map_err(|_| CKR_GENERAL_ERROR)?,
+        )
     };
     Ok(())
 }
@@ -531,7 +535,7 @@ fn get_session_validation_flags(
 
         session.get_last_validation_flags()
     };
-    unsafe { *pflags = flags };
+    unsafe { std::ptr::write_unaligned(pflags, flags) };
     Ok(())
 }
 

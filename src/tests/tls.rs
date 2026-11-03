@@ -852,7 +852,7 @@ fn test_tls_ems_mechanisms() {
         handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
-        std::ptr::null_mut(),
+        &mut dk_handle,
     );
     assert_eq!(ret, CKR_OK);
     assert_eq!(check_validation(session, 1), true);

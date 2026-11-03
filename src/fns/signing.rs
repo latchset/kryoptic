@@ -94,7 +94,7 @@ fn sign(
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
     if !pul_signature_len.is_null() && psignature.is_null() {
         unsafe {
-            *pul_signature_len = sig_len;
+            std::ptr::write_unaligned(pul_signature_len, sig_len);
         }
         return operation.ok();
     }
@@ -110,8 +110,8 @@ fn sign(
         session.login_ok = false;
     }
     unsafe {
-        if *pul_signature_len < sig_len {
-            *pul_signature_len = sig_len;
+        if std::ptr::read_unaligned(pul_signature_len) < sig_len {
+            std::ptr::write_unaligned(pul_signature_len, sig_len);
             operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
@@ -130,7 +130,7 @@ fn sign(
     }
 
     unsafe {
-        *pul_signature_len = sig_len;
+        std::ptr::write_unaligned(pul_signature_len, sig_len);
     }
 
     operation.done();
@@ -248,7 +248,7 @@ fn sign_final(
         CK_ULONG::try_from(signature_len).map_err(|_| CKR_GENERAL_ERROR)?;
     if !pul_signature_len.is_null() && psignature.is_null() {
         unsafe {
-            *pul_signature_len = sig_len;
+            std::ptr::write_unaligned(pul_signature_len, sig_len);
         }
         return operation.ok();
     }
@@ -264,8 +264,8 @@ fn sign_final(
         session.login_ok = false;
     }
     unsafe {
-        if *pul_signature_len < sig_len {
-            *pul_signature_len = sig_len;
+        if std::ptr::read_unaligned(pul_signature_len) < sig_len {
+            std::ptr::write_unaligned(pul_signature_len, sig_len);
             operation.ok()?;
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
@@ -281,7 +281,7 @@ fn sign_final(
     }
 
     unsafe {
-        *pul_signature_len = sig_len;
+        std::ptr::write_unaligned(pul_signature_len, sig_len);
     }
 
     operation.done();

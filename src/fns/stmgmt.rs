@@ -29,25 +29,25 @@ fn get_slot_list(
 
     if slot_list.is_null() {
         unsafe {
-            *count = silen;
+            std::ptr::write_unaligned(count, silen);
         }
         return Ok(());
     }
     unsafe {
-        let num: CK_ULONG = *count;
+        let num: CK_ULONG = std::ptr::read_unaligned(count);
         if num < silen {
-            *count = silen;
+            std::ptr::write_unaligned(count, silen);
             return Err(CKR_BUFFER_TOO_SMALL)?;
         }
     }
     for (udx, slotid) in slotids.iter().enumerate() {
         let idx = isize::try_from(udx).map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            core::ptr::write(slot_list.offset(idx), *slotid);
+            std::ptr::write_unaligned(slot_list.offset(idx), *slotid);
         }
     }
     unsafe {
-        *count = silen;
+        std::ptr::write_unaligned(count, silen);
     }
     Ok(())
 }
@@ -84,7 +84,7 @@ fn get_slot_info(slot_id: CK_SLOT_ID, info: CK_SLOT_INFO_PTR) -> Result<()> {
     let slot = rstate.get_slot(slot_id)?;
     let slotinfo = slot.get_slot_info();
     unsafe {
-        core::ptr::write(info as *mut _, *slotinfo);
+        std::ptr::write_unaligned(info as *mut _, *slotinfo);
     }
     Ok(())
 }
@@ -115,7 +115,7 @@ fn get_token_info(slot_id: CK_SLOT_ID, info: CK_TOKEN_INFO_PTR) -> Result<()> {
     let slot = rstate.get_slot(slot_id)?;
     let tokinfo = slot.get_token_info();
     unsafe {
-        core::ptr::write(info as *mut _, tokinfo);
+        std::ptr::write_unaligned(info as *mut _, tokinfo);
     }
     Ok(())
 }
@@ -151,28 +151,31 @@ fn get_mechanism_list(
         let cnt = CK_ULONG::try_from(token.get_mechs_num())
             .map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            *count = cnt;
+            std::ptr::write_unaligned(count, cnt);
         }
         return Ok(());
     }
     let mechs = token.get_mechs_list();
-    let num = unsafe { *count };
+    let num = unsafe { std::ptr::read_unaligned(count) };
     if (num as usize) < mechs.len() {
         unsafe {
-            *count = CK_ULONG::try_from(mechs.len())
-                .map_err(|_| CKR_GENERAL_ERROR)?;
+            std::ptr::write_unaligned(
+                count,
+                CK_ULONG::try_from(mechs.len())
+                    .map_err(|_| CKR_GENERAL_ERROR)?,
+            );
         }
         return Err(CKR_BUFFER_TOO_SMALL)?;
     }
     for (udx, mech) in mechs.iter().enumerate() {
         let idx = isize::try_from(udx).map_err(|_| CKR_GENERAL_ERROR)?;
         unsafe {
-            core::ptr::write(mechanism_list.offset(idx), *mech);
+            std::ptr::write_unaligned(mechanism_list.offset(idx), *mech);
         }
     }
     let cnt = CK_ULONG::try_from(mechs.len()).map_err(|_| CKR_GENERAL_ERROR)?;
     unsafe {
-        *count = cnt;
+        std::ptr::write_unaligned(count, cnt);
     }
     Ok(())
 }
@@ -212,7 +215,7 @@ fn get_mechanism_info(
     let token = rstate.get_token_from_slot(slot_id)?;
     let mech = token.get_mech_info(typ)?;
     unsafe {
-        core::ptr::write(info as *mut _, *mech);
+        std::ptr::write_unaligned(info as *mut _, *mech);
     }
     Ok(())
 }

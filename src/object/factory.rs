@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use crate::attribute::{AttrType, Attribute};
 use crate::error::{Error, Result};
 use crate::mechanism::{Mechanism, Mechanisms};
-use crate::misc::{sizeof, void_ptr};
+use crate::misc::{sizeof, struct_to_slice_mut, void_ptr};
 use crate::pkcs11::*;
 
 #[cfg(feature = "nssdb")]
@@ -939,12 +939,10 @@ impl ObjectFactories {
             return Ok(());
         }
 
-        let app_attrs: &mut [CK_ATTRIBUTE] = unsafe {
-            std::slice::from_raw_parts_mut(
-                ck_attr.pValue as *mut CK_ATTRIBUTE,
-                app_count,
-            )
-        };
+        let mut app_attrs = struct_to_slice_mut(
+            ck_attr.pValue as *mut CK_ATTRIBUTE,
+            app_count,
+        )?;
 
         let unavail_count = app_attrs
             .iter()

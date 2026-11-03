@@ -53,7 +53,7 @@ pub(crate) fn report_reqsize<T>(
             if !out_len.is_null() {
                 if let Ok(reqsize) = CK_ULONG::try_from(e.reqsize()) {
                     unsafe {
-                        *out_len = reqsize;
+                        std::ptr::write_unaligned(out_len, reqsize);
                     }
                 }
             }

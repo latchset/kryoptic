@@ -75,6 +75,9 @@ impl Sp800Operation {
             params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
             params.ulAdditionalDerivedKeys as usize,
         )?;
+        for dkey in addl_drv_keys.iter() {
+            dkey.validate()?;
+        }
         Ok(Sp800Operation {
             mech: CKM_SP800_108_COUNTER_KDF,
             state: OpIntState::Initialized,
@@ -99,6 +102,9 @@ impl Sp800Operation {
             params.pAdditionalDerivedKeys as *const CK_DERIVED_KEY,
             params.ulAdditionalDerivedKeys as usize,
         )?;
+        for dkey in addl_drv_keys.iter() {
+            dkey.validate()?;
+        }
         let iv = if params.pIV != std::ptr::null_mut() && params.ulIVLen != 0 {
             bytes_to_vec(params.pIV, params.ulIVLen as usize)
         } else if params.pIV == std::ptr::null_mut() && params.ulIVLen == 0 {
@@ -444,7 +450,7 @@ impl Derive for Sp800Operation {
                 Err(e) => {
                     /* mark the handle as invalid */
                     unsafe {
-                        core::ptr::write(ak.phKey, CK_INVALID_HANDLE);
+                        std::ptr::write_unaligned(ak.phKey, CK_INVALID_HANDLE);
                     }
                     return Err(e);
                 }

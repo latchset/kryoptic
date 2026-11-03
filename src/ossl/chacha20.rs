@@ -28,25 +28,6 @@ const CHACHA20_COUNTER_SIZE: usize = 4;
 /// Poly1305 tag size (128 bits), fixed by RFC 8439.
 const POLY1305_TAG_SIZE: usize = 16;
 
-/// Convenience function to cast mechanism parameters passed as separate
-/// pointer/length variables into the structure they represent.
-///
-/// A length check on len is performed to validate that the correct
-/// parameter structure is being casted. No other validation is performed,
-/// this is an UNSAFE operation that requires further content validation.
-unsafe fn cast_params<T: Copy + Clone>(
-    ptr: CK_VOID_PTR,
-    len: CK_ULONG,
-) -> Result<T> {
-    let Ok(len) = usize::try_from(len) else {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    };
-    if len != std::mem::size_of::<T>() {
-        return Err(CKR_ARGUMENTS_BAD)?;
-    }
-    Ok(unsafe { std::ptr::read_unaligned(ptr as *const T) })
-}
-
 /// Extracts the raw key bytes from a PKCS#11 `Object` into a ChaCha20 key.
 /// Validates the key length.
 fn object_to_raw_key(key: &Object) -> Result<OsslSecret> {
@@ -295,12 +276,10 @@ impl ChaChaOperation {
         parameter: CK_VOID_PTR,
         parameter_len: CK_ULONG,
     ) -> Result<CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS> {
-        let params = unsafe {
-            cast_params::<CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS>(
-                parameter,
-                parameter_len,
-            )
-        }?;
+        let params = cast_params::<CK_SALSA20_CHACHA20_POLY1305_MSG_PARAMS>(
+            parameter,
+            parameter_len,
+        )?;
         if params.pNonce.is_null()
             || usize::try_from(params.ulNonceLen)? != CHACHA20_NONCE_SIZE
         {
