@@ -1026,13 +1026,13 @@ impl CK_MECHANISM {
     /// that requires further content validation.
     pub fn get_parameters<T: Copy + Clone>(&self) -> Result<T> {
         let Ok(len) = usize::try_from(self.ulParameterLen) else {
-            return Err(CKR_ARGUMENTS_BAD)?;
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         };
         if len != std::mem::size_of::<T>() {
-            return Err(CKR_ARGUMENTS_BAD)?;
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         if self.pParameter.is_null() {
-            return Err(CKR_ARGUMENTS_BAD)?;
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         Ok(unsafe { std::ptr::read_unaligned(self.pParameter as *const T) })
     }
