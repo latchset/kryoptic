@@ -980,3 +980,119 @@ fn test_mlkem_encap_decap_indicators() {
 
     testtokn.finalize();
 }
+
+/// CKM_ML_KEM has no mechanism parameter (PKCS#11 3.2, 6.68.5), so
+/// C_EncapsulateKey and C_DecapsulateKey must reject any non-zero
+/// ulParameterLen with CKR_MECHANISM_PARAM_INVALID.
+#[test]
+#[parallel]
+fn test_mlkem_rejects_mechanism_parameter() {
+    let mut testtokn =
+        TestToken::initialized("test_mlkem_rejects_mechanism_parameter", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pub_handle, priv_handle) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_KEM_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+        ],
+        &[],
+        &[(CKA_ENCAPSULATE, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM)],
+        &[],
+        &[(CKA_DECAPSULATE, true)],
+    ));
+
+    let key_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    );
+    let mut param: CK_ULONG = 0;
+    let mut bad_mechs = [
+        CK_MECHANISM {
+            mechanism: CKM_ML_KEM,
+            pParameter: void_ptr!(&mut param),
+            ulParameterLen: sizeof!(CK_ULONG),
+        },
+        CK_MECHANISM {
+            mechanism: CKM_ML_KEM,
+            pParameter: std::ptr::null_mut(),
+            ulParameterLen: sizeof!(CK_ULONG),
+        },
+    ];
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_KEM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut ciphertext = [0u8; 800];
+    let mut outlen: CK_ULONG = 800;
+    let mut handle_enc = CK_INVALID_HANDLE;
+    for bad in bad_mechs.iter_mut() {
+        let ret = fn_encapsulate_key(
+            session,
+            bad,
+            pub_handle,
+            key_template.as_ptr() as *mut _,
+            key_template.len() as CK_ULONG,
+            ciphertext.as_mut_ptr(),
+            &mut outlen,
+            &mut handle_enc,
+        );
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    }
+
+    /* Control: no parameter succeeds */
+    outlen = 800;
+    let ret = fn_encapsulate_key(
+        session,
+        &mut mechanism,
+        pub_handle,
+        key_template.as_ptr() as *mut _,
+        key_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        &mut outlen,
+        &mut handle_enc,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut handle_dec = CK_INVALID_HANDLE;
+    for bad in bad_mechs.iter_mut() {
+        let ret = fn_decapsulate_key(
+            session,
+            bad,
+            priv_handle,
+            key_template.as_ptr() as *mut _,
+            key_template.len() as CK_ULONG,
+            ciphertext.as_mut_ptr(),
+            outlen,
+            &mut handle_dec,
+        );
+        assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    }
+
+    /* Control: no parameter succeeds */
+    let ret = fn_decapsulate_key(
+        session,
+        &mut mechanism,
+        priv_handle,
+        key_template.as_ptr() as *mut _,
+        key_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        outlen,
+        &mut handle_dec,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
