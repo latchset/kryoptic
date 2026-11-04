@@ -12,6 +12,8 @@ use crate::{
     OsslParamBuilder, OsslSecret,
 };
 
+const AES_WP_SEMIBLOCK: usize = 8;
+
 /// Wrapper around OpenSSL's `EVP_CIPHER`, managing its lifecycle.
 #[derive(Debug)]
 struct EvpCipher {
@@ -73,6 +75,22 @@ impl EvpCipherCtx {
     /// Returns a mutable pointer to the underlying `EVP_CIPHER_CTX`.
     unsafe fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER_CTX {
         self.ptr
+    }
+
+    /// Returns the cipher
+    fn algorithm(&self) -> Result<EncAlg, Error> {
+        let cipher = unsafe { EVP_CIPHER_CTX_get0_cipher(self.as_ptr()) };
+        if cipher.is_null() {
+            trace_ossl!("EVP_CIPHER_CTX_get0_cipher()");
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let name_ptr = unsafe { EVP_CIPHER_get0_name(cipher) };
+        if name_ptr.is_null() {
+            trace_ossl!("EVP_CIPHER_get0_name()");
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let name = unsafe { CStr::from_ptr(name_ptr) };
+        name_to_cipher(name)
     }
 }
 
@@ -279,6 +297,161 @@ fn cipher_to_name(alg: EncAlg) -> &'static CStr {
         EncAlg::IdeaCbc => c"IDEA-CBC",
         #[cfg(feature = "rfc9580")]
         EncAlg::IdeaEcb => c"IDEA-ECB",
+    }
+}
+
+/// Returns the cipher for the requested Ossl name
+fn name_to_cipher(name: &CStr) -> Result<EncAlg, Error> {
+    match name.to_bytes() {
+        b"AES-128-CCM" | b"aes-128-ccm" => Ok(EncAlg::AesCcm(AesSize::Aes128)),
+        b"AES-192-CCM" | b"aes-192-ccm" => Ok(EncAlg::AesCcm(AesSize::Aes192)),
+        b"AES-256-CCM" | b"aes-256-ccm" => Ok(EncAlg::AesCcm(AesSize::Aes256)),
+        b"AES-128-GCM" | b"aes-128-gcm" => Ok(EncAlg::AesGcm(AesSize::Aes128)),
+        b"AES-192-GCM" | b"aes-192-gcm" => Ok(EncAlg::AesGcm(AesSize::Aes192)),
+        b"AES-256-GCM" | b"aes-256-gcm" => Ok(EncAlg::AesGcm(AesSize::Aes256)),
+        b"AES-128-GCM-SIV" | b"aes-128-gcm-siv" => {
+            Ok(EncAlg::AesGcmSiv(AesSize::Aes128))
+        }
+        b"AES-192-GCM-SIV" | b"aes-192-gcm-siv" => {
+            Ok(EncAlg::AesGcmSiv(AesSize::Aes192))
+        }
+        b"AES-256-GCM-SIV" | b"aes-256-gcm-siv" => {
+            Ok(EncAlg::AesGcmSiv(AesSize::Aes256))
+        }
+        b"AES-128-CTR" | b"aes-128-ctr" => Ok(EncAlg::AesCtr(AesSize::Aes128)),
+        b"AES-192-CTR" | b"aes-192-ctr" => Ok(EncAlg::AesCtr(AesSize::Aes192)),
+        b"AES-256-CTR" | b"aes-256-ctr" => Ok(EncAlg::AesCtr(AesSize::Aes256)),
+        b"AES-128-CBC-CTS" | b"aes-128-cbc-cts" => {
+            Ok(EncAlg::AesCts(AesSize::Aes128, AesCtsMode::CtsModeCS1))
+        }
+        b"AES-192-CBC-CTS" | b"aes-192-cbc-cts" => {
+            Ok(EncAlg::AesCts(AesSize::Aes192, AesCtsMode::CtsModeCS1))
+        }
+        b"AES-256-CBC-CTS" | b"aes-256-cbc-cts" => {
+            Ok(EncAlg::AesCts(AesSize::Aes256, AesCtsMode::CtsModeCS1))
+        }
+        b"AES-128-CBC" | b"aes-128-cbc" => Ok(EncAlg::AesCbc(AesSize::Aes128)),
+        b"AES-192-CBC" | b"aes-192-cbc" => Ok(EncAlg::AesCbc(AesSize::Aes192)),
+        b"AES-256-CBC" | b"aes-256-cbc" => Ok(EncAlg::AesCbc(AesSize::Aes256)),
+        b"AES-128-ECB" | b"aes-128-ecb" => Ok(EncAlg::AesEcb(AesSize::Aes128)),
+        b"AES-192-ECB" | b"aes-192-ecb" => Ok(EncAlg::AesEcb(AesSize::Aes192)),
+        b"AES-256-ECB" | b"aes-256-ecb" => Ok(EncAlg::AesEcb(AesSize::Aes256)),
+        b"AES-128-CFB8" | b"aes-128-cfb8" => {
+            Ok(EncAlg::AesCfb8(AesSize::Aes128))
+        }
+        b"AES-192-CFB8" | b"aes-192-cfb8" => {
+            Ok(EncAlg::AesCfb8(AesSize::Aes192))
+        }
+        b"AES-256-CFB8" | b"aes-256-cfb8" => {
+            Ok(EncAlg::AesCfb8(AesSize::Aes256))
+        }
+        b"AES-128-CFB1" | b"aes-128-cfb1" => {
+            Ok(EncAlg::AesCfb1(AesSize::Aes128))
+        }
+        b"AES-192-CFB1" | b"aes-192-cfb1" => {
+            Ok(EncAlg::AesCfb1(AesSize::Aes192))
+        }
+        b"AES-256-CFB1" | b"aes-256-cfb1" => {
+            Ok(EncAlg::AesCfb1(AesSize::Aes256))
+        }
+        b"AES-128-CFB" | b"aes-128-cfb" | b"AES-128-CFB128"
+        | b"aes-128-cfb128" => Ok(EncAlg::AesCfb128(AesSize::Aes128)),
+        b"AES-192-CFB" | b"aes-192-cfb" | b"AES-192-CFB128"
+        | b"aes-192-cfb128" => Ok(EncAlg::AesCfb128(AesSize::Aes192)),
+        b"AES-256-CFB" | b"aes-256-cfb" | b"AES-256-CFB128"
+        | b"aes-256-cfb128" => Ok(EncAlg::AesCfb128(AesSize::Aes256)),
+        b"AES-128-OCB" | b"aes-128-ocb" => Ok(EncAlg::AesOcb(AesSize::Aes128)),
+        b"AES-192-OCB" | b"aes-192-ocb" => Ok(EncAlg::AesOcb(AesSize::Aes192)),
+        b"AES-256-OCB" | b"aes-256-ocb" => Ok(EncAlg::AesOcb(AesSize::Aes256)),
+        b"AES-128-OFB" | b"aes-128-ofb" | b"AES-128-OFB128"
+        | b"aes-128-ofb128" => Ok(EncAlg::AesOfb(AesSize::Aes128)),
+        b"AES-192-OFB" | b"aes-192-ofb" | b"AES-192-OFB128"
+        | b"aes-192-ofb128" => Ok(EncAlg::AesOfb(AesSize::Aes192)),
+        b"AES-256-OFB" | b"aes-256-ofb" | b"AES-256-OFB128"
+        | b"aes-256-ofb128" => Ok(EncAlg::AesOfb(AesSize::Aes256)),
+        b"AES-128-WRAP" | b"aes-128-wrap" | b"id-aes128-wrap" => {
+            Ok(EncAlg::AesWrap(AesSize::Aes128))
+        }
+        b"AES-192-WRAP" | b"aes-192-wrap" | b"id-aes192-wrap" => {
+            Ok(EncAlg::AesWrap(AesSize::Aes192))
+        }
+        b"AES-256-WRAP" | b"aes-256-wrap" | b"id-aes256-wrap" => {
+            Ok(EncAlg::AesWrap(AesSize::Aes256))
+        }
+        b"AES-128-WRAP-PAD" | b"aes-128-wrap-pad" | b"id-aes128-wrap-pad" => {
+            Ok(EncAlg::AesWrapPad(AesSize::Aes128))
+        }
+        b"AES-192-WRAP-PAD" | b"aes-192-wrap-pad" | b"id-aes192-wrap-pad" => {
+            Ok(EncAlg::AesWrapPad(AesSize::Aes192))
+        }
+        b"AES-256-WRAP-PAD" | b"aes-256-wrap-pad" | b"id-aes256-wrap-pad" => {
+            Ok(EncAlg::AesWrapPad(AesSize::Aes256))
+        }
+        b"ChaCha20" | b"chacha20" | b"CHACHA20" => Ok(EncAlg::ChaCha20),
+        b"ChaCha20-Poly1305" | b"chacha20-poly1305" | b"CHACHA20-POLY1305" => {
+            Ok(EncAlg::ChaCha20Poly1305)
+        }
+        #[cfg(feature = "rfc9580")]
+        b"DES-EDE3-CFB" | b"des-ede3-cfb" => Ok(EncAlg::TripleDesCfb),
+        #[cfg(feature = "rfc9580")]
+        b"DES-EDE3-CBC" | b"des-ede3-cbc" => Ok(EncAlg::TripleDesCbc),
+        #[cfg(feature = "rfc9580")]
+        b"DES-EDE3-ECB" | b"des-ede3-ecb" => Ok(EncAlg::TripleDesEcb),
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-128-CFB" | b"camellia-128-cfb" => {
+            Ok(EncAlg::CamelliaCfb(CamelliaSize::Camellia128))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-192-CFB" | b"camellia-192-cfb" => {
+            Ok(EncAlg::CamelliaCfb(CamelliaSize::Camellia192))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-256-CFB" | b"camellia-256-cfb" => {
+            Ok(EncAlg::CamelliaCfb(CamelliaSize::Camellia256))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-128-CBC" | b"camellia-128-cbc" => {
+            Ok(EncAlg::CamelliaCbc(CamelliaSize::Camellia128))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-192-CBC" | b"camellia-192-cbc" => {
+            Ok(EncAlg::CamelliaCbc(CamelliaSize::Camellia192))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-256-CBC" | b"camellia-256-cbc" => {
+            Ok(EncAlg::CamelliaCbc(CamelliaSize::Camellia256))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-128-ECB" | b"camellia-128-ecb" => {
+            Ok(EncAlg::CamelliaEcb(CamelliaSize::Camellia128))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-192-ECB" | b"camellia-192-ecb" => {
+            Ok(EncAlg::CamelliaEcb(CamelliaSize::Camellia192))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"CAMELLIA-256-ECB" | b"camellia-256-ecb" => {
+            Ok(EncAlg::CamelliaEcb(CamelliaSize::Camellia256))
+        }
+        #[cfg(feature = "rfc9580")]
+        b"BF-CFB" | b"bf-cfb" => Ok(EncAlg::BlowfishCfb),
+        #[cfg(feature = "rfc9580")]
+        b"BF-CBC" | b"bf-cbc" => Ok(EncAlg::BlowfishCbc),
+        #[cfg(feature = "rfc9580")]
+        b"BF-ECB" | b"bf-ecb" => Ok(EncAlg::BlowfishEcb),
+        #[cfg(feature = "rfc9580")]
+        b"CAST5-CFB" | b"cast5-cfb" => Ok(EncAlg::Cast5Cfb),
+        #[cfg(feature = "rfc9580")]
+        b"CAST5-CBC" | b"cast5-cbc" => Ok(EncAlg::Cast5Cbc),
+        #[cfg(feature = "rfc9580")]
+        b"CAST5-ECB" | b"cast5-ecb" => Ok(EncAlg::Cast5Ecb),
+        #[cfg(feature = "rfc9580")]
+        b"IDEA-CFB" | b"idea-cfb" => Ok(EncAlg::IdeaCfb),
+        #[cfg(feature = "rfc9580")]
+        b"IDEA-CBC" | b"idea-cbc" => Ok(EncAlg::IdeaCbc),
+        #[cfg(feature = "rfc9580")]
+        b"IDEA-ECB" | b"idea-ecb" => Ok(EncAlg::IdeaEcb),
+        _ => Err(Error::new(ErrorKind::WrapperError)),
     }
 }
 
@@ -602,7 +775,37 @@ impl OsslCipher {
         input: &[u8],
         output: &mut [u8],
     ) -> Result<usize, Error> {
-        if output.len() < self.buffer_size(input.len()) {
+        let (inlen, outlen) = match self.ctx.algorithm()? {
+            EncAlg::AesWrap(_) => {
+                if self.enc == 1 {
+                    (input.len() + AES_WP_SEMIBLOCK, output.len())
+                } else {
+                    (input.len(), output.len() + AES_WP_SEMIBLOCK)
+                }
+            }
+            EncAlg::AesWrapPad(_) => {
+                // For AesWrapPad OpenSSL's unwrap function up to
+                // OpenSSL 4.1 zeroizes outputs by calling
+                // OPENSSL_cleanse(out, inlen). So the output buffer
+                // needs to be always at least as large as the input
+                // buffer regardless of the actual final length, and
+                // needs to be a multiple of 8.
+                #[cfg(not(ossl_v410))]
+                if self.enc == 1 {
+                    (input.len() + AES_WP_SEMIBLOCK, output.len())
+                } else {
+                    (input.len(), output.len())
+                }
+                #[cfg(ossl_v410)]
+                if self.enc == 1 {
+                    (input.len() + AES_WP_SEMIBLOCK, output.len())
+                } else {
+                    (input.len(), output.len() + AES_WP_SEMIBLOCK)
+                }
+            }
+            _ => (self.buffer_size(input.len()), output.len()),
+        };
+        if outlen < inlen {
             return Err(Error::new(ErrorKind::BufferSize));
         }
 
@@ -652,8 +855,13 @@ impl OsslCipher {
     /// Finalizes this encryption operation.
     /// May return a final block of output.
     pub fn finalize(&mut self, output: &mut [u8]) -> Result<usize, Error> {
-        if output.len() < self.buffer_size(0) {
-            return Err(Error::new(ErrorKind::BufferSize));
+        match self.ctx.algorithm()? {
+            EncAlg::AesWrap(_) | EncAlg::AesWrapPad(_) => (),
+            _ => {
+                if output.len() < self.buffer_size(0) {
+                    return Err(Error::new(ErrorKind::BufferSize));
+                }
+            }
         }
 
         let mut outlen = c_int::try_from(output.len())?;
