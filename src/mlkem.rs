@@ -383,7 +383,7 @@ impl Mechanism for MlKemMechanism {
 
     fn encapsulate(
         &self,
-        _mech: &CK_MECHANISM,
+        mech: &CK_MECHANISM,
         key: &Object,
         key_factory: &Box<dyn ObjectFactory>,
         template: &[CK_ATTRIBUTE],
@@ -391,6 +391,9 @@ impl Mechanism for MlKemMechanism {
     ) -> Result<(Object, usize)> {
         if self.info.flags & CKF_ENCAPSULATE != CKF_ENCAPSULATE {
             return Err(CKR_MECHANISM_INVALID)?;
+        }
+        if mech.ulParameterLen != 0 {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_ML_KEM, CKA_ENCAPSULATE) {
             Ok(_) => (),
@@ -407,7 +410,7 @@ impl Mechanism for MlKemMechanism {
 
     fn decapsulate(
         &self,
-        _mech: &CK_MECHANISM,
+        mech: &CK_MECHANISM,
         key: &Object,
         key_factory: &Box<dyn ObjectFactory>,
         template: &[CK_ATTRIBUTE],
@@ -415,6 +418,9 @@ impl Mechanism for MlKemMechanism {
     ) -> Result<Object> {
         if self.info.flags & CKF_DECAPSULATE != CKF_DECAPSULATE {
             return Err(CKR_MECHANISM_INVALID)?;
+        }
+        if mech.ulParameterLen != 0 {
+            return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_ML_KEM, CKA_DECAPSULATE) {
             Ok(_) => (),
