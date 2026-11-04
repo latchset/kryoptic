@@ -8,6 +8,7 @@ const OPENSSL_3_0_7: i64 = 0x30000070;
 const OPENSSL_3_2_0: i64 = 0x30200000;
 const OPENSSL_3_5_0: i64 = 0x30500000;
 const OPENSSL_4_0_0: i64 = 0x40000000;
+const OPENSSL_4_1_0: i64 = 0x40100000;
 
 fn check_ossl_version(v: String) {
     // Proxy the version for the api_level() API
@@ -44,6 +45,9 @@ fn check_ossl_version(v: String) {
     }
     if version >= OPENSSL_4_0_0 {
         println!("cargo::rustc-cfg=ossl_v400");
+    }
+    if version >= OPENSSL_4_1_0 {
+        println!("cargo::rustc-cfg=ossl_v410");
     }
 
     // backward compatible OPENSSL_FULL_VERSION_STR
@@ -90,7 +94,7 @@ fn main() {
 
     /* Always emit known configs */
     println!(
-        "cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_v400)"
+        "cargo::rustc-check-cfg=cfg(ossl_v307,ossl_v320,ossl_v350,ossl_v400,ossl_v410)"
     );
 
     /* OpenSSL Cryptography */
