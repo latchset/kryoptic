@@ -1028,6 +1028,11 @@ fn test_mlkem_rejects_mechanism_parameter() {
             pParameter: std::ptr::null_mut(),
             ulParameterLen: sizeof!(CK_ULONG),
         },
+        CK_MECHANISM {
+            mechanism: CKM_ML_KEM,
+            pParameter: void_ptr!(&mut param),
+            ulParameterLen: 0,
+        },
     ];
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ML_KEM,

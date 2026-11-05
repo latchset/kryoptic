@@ -392,7 +392,7 @@ impl Mechanism for MlKemMechanism {
         if self.info.flags & CKF_ENCAPSULATE != CKF_ENCAPSULATE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-        if mech.ulParameterLen != 0 {
+        if mech.ulParameterLen != 0 || !mech.pParameter.is_null() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_ML_KEM, CKA_ENCAPSULATE) {
@@ -419,7 +419,7 @@ impl Mechanism for MlKemMechanism {
         if self.info.flags & CKF_DECAPSULATE != CKF_DECAPSULATE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-        if mech.ulParameterLen != 0 {
+        if mech.ulParameterLen != 0 || !mech.pParameter.is_null() {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_ML_KEM, CKA_DECAPSULATE) {
