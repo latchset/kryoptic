@@ -16,9 +16,12 @@ use crate::session::OpIntState;
 
 #[cfg(feature = "fips")]
 use crate::fips::FipsApproval;
-use ossl::pkey::{EccData, EvpPkey, PkeyData};
+use ossl::pkey::{EccData, EvpPkey, EvpPkeyType, PkeyData};
 use ossl::signature::{eddsa_params, OsslSignature, SigAlg, SigOp};
 use ossl::{ErrorKind, OsslSecret};
+
+const VALID_PKEY_TYPES: &[EvpPkeyType] =
+    &[EvpPkeyType::Ed25519, EvpPkeyType::Ed448];
 
 /// Expected signature length for Ed25519 in bytes.
 pub const OUTLEN_ED25519: usize = 64;
@@ -88,7 +91,7 @@ pub fn eddsa_object_to_pkey(
     match kclass {
         CKO_PUBLIC_KEY => Ok(EvpPkey::import(
             osslctx(),
-            get_evp_pkey_type_from_obj(key)?,
+            get_evp_pkey_type_from_obj(key, VALID_PKEY_TYPES)?,
             PkeyData::Ecc(EccData {
                 pubkey: Some(get_ec_point_from_obj(key)?),
                 prikey: None,
@@ -96,7 +99,7 @@ pub fn eddsa_object_to_pkey(
         )?),
         CKO_PRIVATE_KEY => Ok(EvpPkey::import(
             osslctx(),
-            get_evp_pkey_type_from_obj(key)?,
+            get_evp_pkey_type_from_obj(key, VALID_PKEY_TYPES)?,
             PkeyData::Ecc(EccData {
                 pubkey: None,
                 prikey: Some(OsslSecret::from_vec(
@@ -207,8 +210,10 @@ impl EddsaOperation {
         pubkey: &mut Object,
         privkey: &mut Object,
     ) -> Result<()> {
-        let pkey =
-            EvpPkey::generate(osslctx(), get_evp_pkey_type_from_obj(pubkey)?)?;
+        let pkey = EvpPkey::generate(
+            osslctx(),
+            get_evp_pkey_type_from_obj(pubkey, VALID_PKEY_TYPES)?,
+        )?;
         let mut ecc = match pkey.export()? {
             PkeyData::Ecc(e) => e,
             _ => return Err(CKR_GENERAL_ERROR)?,

@@ -72,7 +72,7 @@ impl Drop for EvpPkeyCtx {
 unsafe impl Send for EvpPkeyCtx {}
 unsafe impl Sync for EvpPkeyCtx {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EvpPkeyType {
     /* DH */
     Ffdhe2048,

@@ -482,6 +482,8 @@ fn test_ec_generate_keypair_unsupported_curves() {
     let secp256k1_params = asn1::write_single(&oid::EC_SECP256K1).unwrap();
     let brainpool_params =
         asn1::write_single(&oid::EC_BRAINPOOLP256R1).unwrap();
+    let ed25519_params = asn1::write_single(&oid::ED25519_OID).unwrap();
+    let x25519_params = asn1::write_single(&oid::X25519_OID).unwrap();
     let p256_params = asn1::write_single(&oid::EC_SECP256R1).unwrap();
 
     /* secp224r1 -> CKR_CURVE_NOT_SUPPORTED */
@@ -521,6 +523,36 @@ fn test_ec_generate_keypair_unsupported_curves() {
             CKM_EC_KEY_PAIR_GEN,
             &[(CKA_KEY_TYPE, CKK_EC)],
             &[(CKA_EC_PARAMS, &brainpool_params)],
+            &[],
+            &[],
+            &[],
+            &[],
+        ),
+        CKR_CURVE_NOT_SUPPORTED
+    );
+
+    /* ed25519 -> CKR_CURVE_NOT_SUPPORTED */
+    err_or_panic!(
+        generate_key_pair(
+            session,
+            CKM_EC_KEY_PAIR_GEN,
+            &[(CKA_KEY_TYPE, CKK_EC)],
+            &[(CKA_EC_PARAMS, &ed25519_params)],
+            &[],
+            &[],
+            &[],
+            &[],
+        ),
+        CKR_CURVE_NOT_SUPPORTED
+    );
+
+    /* x25519 -> CKR_CURVE_NOT_SUPPORTED */
+    err_or_panic!(
+        generate_key_pair(
+            session,
+            CKM_EC_KEY_PAIR_GEN,
+            &[(CKA_KEY_TYPE, CKK_EC)],
+            &[(CKA_EC_PARAMS, &x25519_params)],
             &[],
             &[],
             &[],
