@@ -192,11 +192,15 @@ impl Derive for ECDHOperation {
             }
         };
 
+        /* A peer point that OpenSSL cannot import (not on the curve,
+         * wrong length, bad compressed encoding) is an invalid public
+         * key, not a device failure */
+        let mut peer = pkey
+            .make_peer(osslctx(), &ec_point)
+            .map_err(|_| CKR_PUBLIC_KEY_INVALID)?;
+
         let mut secret = vec![0u8; raw_max];
-        let outlen = ecdh.derive(
-            &mut pkey.make_peer(osslctx(), &ec_point)?,
-            secret.as_mut_slice(),
-        )?;
+        let outlen = ecdh.derive(&mut peer, secret.as_mut_slice())?;
         secret.resize(outlen, 0);
 
         if self.kdf == CKD_NULL {
