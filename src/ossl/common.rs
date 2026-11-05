@@ -189,10 +189,19 @@ fn oid_to_evp_key_type(oid: &asn1::ObjectIdentifier) -> Result<EvpPkeyType> {
     }
 }
 
-/// Gets the EvpPkeyType associated with a PKCS#11 EC key `Object`.
+/// Gets the EvpPkeyType associated with a PKCS#11 EC key `Object`, and checks
+/// that it is a of a valid type as provided via valid_types.
+/// Returns CKR_CURVE_NOT_SUPPORTED if the type is not valid.
 #[cfg(feature = "ecc")]
-pub fn get_evp_pkey_type_from_obj(key: &Object) -> Result<EvpPkeyType> {
-    oid_to_evp_key_type(&get_oid_from_obj(key)?)
+pub fn get_evp_pkey_type_from_obj(
+    key: &Object,
+    valid_types: &[EvpPkeyType],
+) -> Result<EvpPkeyType> {
+    let key_type = oid_to_evp_key_type(&get_oid_from_obj(key)?)?;
+    if !valid_types.is_empty() && !valid_types.contains(&key_type) {
+        return Err(CKR_CURVE_NOT_SUPPORTED)?;
+    }
+    Ok(key_type)
 }
 
 /// Extracts the public key point from a private key object.
