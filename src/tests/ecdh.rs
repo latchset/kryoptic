@@ -206,6 +206,28 @@ fn test_ecc_derive_plain() {
     assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
     params.kdf = CKD_NULL;
 
+    /* Invalid public key: peer point is not on the curve */
+    let last = peer_point.len() - 1;
+    peer_point[last] ^= 0x01;
+
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
+    let mut s_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut s_handle,
+    );
+    assert_eq!(ret, CKR_PUBLIC_KEY_INVALID);
+    peer_point[last] ^= 0x01;
+
     let mut mechanism: CK_MECHANISM = CK_MECHANISM {
         mechanism: CKM_ECDH1_DERIVE,
         pParameter: &mut params as *mut _ as CK_VOID_PTR,
