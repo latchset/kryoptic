@@ -27,12 +27,14 @@ static HMAC_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =
             v.push((
                 hs.mac,
                 Box::new(HMACMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: 0,
-                        flags: CKF_SIGN | CKF_VERIFY,
-                    },
-                    keytype: hs.key_type,
+                    minfo: MechanismInfo::new(
+                        hs.mac,
+                        0,
+                        0,
+                        CKF_SIGN | CKF_VERIFY,
+                        KeySizeKind::Unused,
+                        Some(hs.key_type),
+                    ),
                     minlen: hs.hash_size,
                     maxlen: hs.hash_size,
                 }),
@@ -40,12 +42,14 @@ static HMAC_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =
             v.push((
                 hs.mac_general,
                 Box::new(HMACMechanism {
-                    info: CK_MECHANISM_INFO {
-                        ulMinKeySize: 0,
-                        ulMaxKeySize: 0,
-                        flags: CKF_SIGN | CKF_VERIFY,
-                    },
-                    keytype: hs.key_type,
+                    minfo: MechanismInfo::new(
+                        hs.mac_general,
+                        0,
+                        0,
+                        CKF_SIGN | CKF_VERIFY,
+                        KeySizeKind::Unused,
+                        Some(hs.key_type),
+                    ),
                     minlen: 1,
                     maxlen: hs.hash_size,
                 }),
@@ -66,9 +70,11 @@ static HMAC_KEY_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =
             v.push((
                 hs.key_gen,
                 Box::new(GenericSecretKeyMechanism::new(
+                    hs.key_gen,
                     hs.key_type,
                     hs.hash_size,
                     hs.hash_size,
+                    KeySizeKind::Bytes,
                 )),
             ));
         }
@@ -174,9 +180,7 @@ pub fn hash_to_hmac_mech(mech: CK_MECHANISM_TYPE) -> Result<CK_MECHANISM_TYPE> {
 #[derive(Debug)]
 struct HMACMechanism {
     /// General mechanism information
-    info: CK_MECHANISM_INFO,
-    /// Associated Key Type
-    keytype: CK_KEY_TYPE,
+    minfo: MechanismInfo,
     /// Minimum output length
     minlen: usize,
     /// Maximum output length
@@ -202,7 +206,7 @@ impl HMACMechanism {
             return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
         let t = key.get_attr_as_ulong(CKA_KEY_TYPE)?;
-        if t != CKK_GENERIC_SECRET && t != self.keytype {
+        if t != CKK_GENERIC_SECRET && t != self.minfo.key_type().unwrap() {
             return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
         if !key.get_attr_as_bool(op).or::<Error>(Ok(false))? {
@@ -249,13 +253,13 @@ impl HMACMechanism {
     ) -> Result<HMACOperation> {
         let op_attr = match op_type {
             CKF_SIGN => {
-                if self.info.flags & CKF_SIGN != CKF_SIGN {
+                if self.info().flags & CKF_SIGN != CKF_SIGN {
                     return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_SIGN
             }
             CKF_VERIFY => {
-                if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+                if self.info().flags & CKF_VERIFY != CKF_VERIFY {
                     return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_VERIFY
@@ -281,13 +285,13 @@ impl HMACMechanism {
     ) -> Result<HMACOperation> {
         let op_attr = match op_type {
             CKF_SIGN => {
-                if self.info.flags & CKF_SIGN != CKF_SIGN {
+                if self.info().flags & CKF_SIGN != CKF_SIGN {
                     return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_SIGN
             }
             CKF_VERIFY => {
-                if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+                if self.info().flags & CKF_VERIFY != CKF_VERIFY {
                     return Err(CKR_MECHANISM_INVALID)?;
                 }
                 CKA_VERIFY
@@ -306,8 +310,8 @@ impl HMACMechanism {
 
 impl Mechanism for HMACMechanism {
     /// Returns a reference to the mechanism info
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes a pure MAC operation, used internally only
@@ -384,12 +388,14 @@ pub fn test_get_hmac(mech: CK_MECHANISM_TYPE) -> Box<dyn Mechanism> {
     for hs in &hash::HASH_MECH_SET {
         if hs.mac == mech {
             return Box::new(HMACMechanism {
-                info: CK_MECHANISM_INFO {
-                    ulMinKeySize: 0,
-                    ulMaxKeySize: 0,
-                    flags: CKF_SIGN | CKF_VERIFY,
-                },
-                keytype: hs.key_type,
+                minfo: MechanismInfo::new(
+                    mech,
+                    0,
+                    0,
+                    CKF_SIGN | CKF_VERIFY,
+                    KeySizeKind::Unused,
+                    Some(hs.key_type),
+                ),
                 minlen: hs.hash_size,
                 maxlen: hs.hash_size,
             });

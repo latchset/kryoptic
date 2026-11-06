@@ -20,7 +20,11 @@ use crate::pkcs11::*;
 
 pub trait Mechanism: Debug + Send + Sync {
     /// Returns a reference to the mechanism info
-    fn info(&self) -> &CK_MECHANISM_INFO;
+    fn info(&self) -> &CK_MECHANISM_INFO {
+        self.mechinfo().info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo;
 
     /// Initializes an Encryption Operation
     fn encryption_new(

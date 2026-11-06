@@ -22,34 +22,51 @@ use crate::native::sp800_108::*;
 use crate::ossl::kbkdf::*;
 
 /// Object that holds Mechanisms for Sp800KDF
-static SP800_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
-    Box::new(Sp800KDFMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: 0,
-            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-            flags: CKF_DERIVE,
-        },
-    })
-});
+static SP800_KDF_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> =
+    LazyLock::new(|| {
+        [
+            Box::new(Sp800KDFMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SP800_108_COUNTER_KDF,
+                    0,
+                    0,
+                    CKF_DERIVE,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(Sp800KDFMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SP800_108_FEEDBACK_KDF,
+                    0,
+                    0,
+                    CKF_DERIVE,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+        ]
+    });
 
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for ckm in &[CKM_SP800_108_COUNTER_KDF, CKM_SP800_108_FEEDBACK_KDF] {
-        mechs.add_mechanism(*ckm, &SP800_KDF_MECH);
+    for mbox in &(*SP800_KDF_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
     }
 }
 
 #[derive(Debug)]
 struct Sp800KDFMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for Sp800KDFMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 

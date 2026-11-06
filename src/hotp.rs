@@ -273,32 +273,35 @@ impl SecretKeyFactory for HOTPKeyFactory {
 
 impl OTPKeyFactory for HOTPKeyFactory {}
 
-const HOTP_MIN_KEY_SIZE: CK_ULONG = HASH_LEN_SHA1 as CK_ULONG;
-const HOTP_MAX_KEY_SIZE: CK_ULONG = HASH_LEN_SHA512 as CK_ULONG;
+const HOTP_MIN_KEY_SIZE: usize = HASH_LEN_SHA1;
+const HOTP_MAX_KEY_SIZE: usize = HASH_LEN_SHA512;
 
 /// Generic reusable object to represent mechanisms associated
 /// with HOTP key objects
 #[derive(Debug)]
 pub struct HOTPKeyMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl HOTPKeyMechanism {
     /// Instantiates a mechanism info for HOTP key type
     pub fn new() -> HOTPKeyMechanism {
         HOTPKeyMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: HOTP_MIN_KEY_SIZE,
-                ulMaxKeySize: HOTP_MAX_KEY_SIZE,
-                flags: CKF_GENERATE,
-            },
+            minfo: MechanismInfo::new(
+                CKM_HOTP_KEY_GEN,
+                HOTP_MIN_KEY_SIZE,
+                HOTP_MAX_KEY_SIZE,
+                CKF_GENERATE,
+                KeySizeKind::Bytes,
+                Some(CKK_HOTP),
+            ),
         }
     }
 }
 
 impl Mechanism for HOTPKeyMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn generate_key(
@@ -327,25 +330,28 @@ impl Mechanism for HOTPKeyMechanism {
 /// Generic reusable object to represent HOTP signature and verification mechanism
 #[derive(Debug)]
 pub struct HOTPMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl HOTPMechanism {
     /// Instantiates a mechanism info for HOTP mechanism
     pub fn new() -> HOTPMechanism {
         HOTPMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: HOTP_MIN_KEY_SIZE,
-                ulMaxKeySize: HOTP_MAX_KEY_SIZE,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
+            minfo: MechanismInfo::new(
+                CKM_HOTP,
+                0,
+                0,
+                CKF_SIGN | CKF_VERIFY,
+                KeySizeKind::Unused,
+                Some(CKK_HOTP),
+            ),
         }
     }
 }
 
 impl Mechanism for HOTPMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn sign_new(

@@ -1230,9 +1230,11 @@ static MECHANISM_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 /// Object that holds Mechanisms for Generic Secrets
 static GENERIC_SECRET: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
     Box::new(GenericSecretKeyMechanism::new(
+        CKM_GENERIC_SECRET_KEY_GEN,
         CKK_GENERIC_SECRET,
         MIN_GENERIC_SECRET_KEY_SIZE * 8,
         MAX_GENERIC_SECRET_KEY_SIZE * 8,
+        KeySizeKind::Bits,
     ))
 });
 

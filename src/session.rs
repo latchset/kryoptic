@@ -322,7 +322,7 @@ static OPSTATE_AAD: &str = "Kryoptic_State";
 
 // This is an ephemeral key that changes every time the process is started
 static OPSTATE_AES_KEY: LazyLock<Object> =
-    LazyLock::new(|| encryption::ephemeral_key());
+    LazyLock::new(|| encryption::ephemeral_aes_key());
 
 trait ManageOperationState {
     fn op_state_size(so: &mut SessionOperations) -> Result<usize>;

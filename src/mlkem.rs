@@ -69,18 +69,24 @@ fn mlkem_public_key_info(
 static MLKEM_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     [
         Box::new(MlKemMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(ML_KEM_512_EK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(ML_KEM_1024_EK_SIZE).unwrap(),
-                flags: CKF_ENCAPSULATE | CKF_DECAPSULATE,
-            },
+            minfo: MechanismInfo::new(
+                CKM_ML_KEM,
+                ML_KEM_512_EK_SIZE,
+                ML_KEM_1024_EK_SIZE,
+                CKF_ENCAPSULATE | CKF_DECAPSULATE,
+                KeySizeKind::Bytes,
+                Some(CKK_ML_KEM),
+            ),
         }),
         Box::new(MlKemMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(ML_KEM_512_EK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(ML_KEM_1024_EK_SIZE).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
-            },
+            minfo: MechanismInfo::new(
+                CKM_ML_KEM_KEY_PAIR_GEN,
+                ML_KEM_512_EK_SIZE,
+                ML_KEM_1024_EK_SIZE,
+                CKF_GENERATE_KEY_PAIR,
+                KeySizeKind::Bytes,
+                Some(CKK_ML_KEM),
+            ),
         }),
     ]
 });
@@ -95,8 +101,10 @@ static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all ML-KEM related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    mechs.add_mechanism(CKM_ML_KEM, &(*MLKEM_MECHS)[0]);
-    mechs.add_mechanism(CKM_ML_KEM_KEY_PAIR_GEN, &(*MLKEM_MECHS)[1]);
+    for mbox in &(*MLKEM_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
+    }
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_ML_KEM),
@@ -354,12 +362,12 @@ impl PrivKeyFactory for MlKemPrivFactory {}
 #[derive(Debug)]
 
 struct MlKemMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for MlKemMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Get expected length of the encapsulated ciphertext for given key
@@ -389,7 +397,7 @@ impl Mechanism for MlKemMechanism {
         template: &[CK_ATTRIBUTE],
         ciphertext: &mut [u8],
     ) -> Result<(Object, usize)> {
-        if self.info.flags & CKF_ENCAPSULATE != CKF_ENCAPSULATE {
+        if self.info().flags & CKF_ENCAPSULATE != CKF_ENCAPSULATE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         if mech.ulParameterLen != 0 || !mech.pParameter.is_null() {
@@ -416,7 +424,7 @@ impl Mechanism for MlKemMechanism {
         template: &[CK_ATTRIBUTE],
         ciphertext: &[u8],
     ) -> Result<Object> {
-        if self.info.flags & CKF_DECAPSULATE != CKF_DECAPSULATE {
+        if self.info().flags & CKF_DECAPSULATE != CKF_DECAPSULATE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         if mech.ulParameterLen != 0 || !mech.pParameter.is_null() {

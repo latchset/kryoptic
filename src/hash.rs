@@ -187,30 +187,239 @@ pub static HASH_MECH_SET: [HashBasedOp; HASH_MECH_SET_LEN] = [
 ];
 
 /// Object that holds Mechanisms for Hash
-static HASH_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
-    [
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DIGEST,
-            },
-        }),
-        Box::new(HashMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: 0,
-                flags: CKF_DERIVE,
-            },
-        }),
-    ]
-});
+static HASH_MECHS: LazyLock<[Box<dyn Mechanism>; HASH_MECH_SET_LEN * 2]> =
+    LazyLock::new(|| {
+        [
+            #[cfg(not(feature = "no_sha1"))]
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA_1,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            #[cfg(not(feature = "no_sha1"))]
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA1_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA1,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA224,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA224_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA224,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA256,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA256_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA256,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA384,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA384_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA384,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA512,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA512_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA512,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_224,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_224_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA3_224,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_256,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_256_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA3_256,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_384,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_384_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA3_384,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_512,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA3_512_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA3_512,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA512_224,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA512_224_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA512_224,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA512_256,
+                    0,
+                    0,
+                    CKF_DIGEST,
+                    KeySizeKind::Unused,
+                    None,
+                ),
+            }),
+            Box::new(HashMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_SHA512_256_KEY_DERIVATION,
+                    1,
+                    HASH_LEN_SHA512_256,
+                    CKF_DERIVE,
+                    KeySizeKind::Bytes,
+                    None,
+                ),
+            }),
+        ]
+    });
 
 /// Registers all Hash related mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for hs in &HASH_MECH_SET {
-        mechs.add_mechanism(hs.hash, &HASH_MECHS[0]);
-        mechs.add_mechanism(hs.key_derive, &HASH_MECHS[1]);
+    for mbox in &(*HASH_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
     }
 }
 
@@ -253,18 +462,18 @@ pub fn block_size(hash: CK_MECHANISM_TYPE) -> usize {
 /// Object that represents a Hash mechanism
 #[derive(Debug)]
 struct HashMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for HashMechanism {
     /// Returns a reference to the mechanism info
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes a Digest operation
     fn digest_new(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Digest>> {
-        if self.info.flags & CKF_DIGEST != CKF_DIGEST {
+        if self.info().flags & CKF_DIGEST != CKF_DIGEST {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         Ok(Box::new(HashOperation::new(mech.mechanism)?))
@@ -275,7 +484,7 @@ impl Mechanism for HashMechanism {
         mechtype: CK_MECHANISM_TYPE,
         state: &[u8],
     ) -> Result<Box<dyn Digest>> {
-        if self.info.flags & CKF_DIGEST != CKF_DIGEST {
+        if self.info().flags & CKF_DIGEST != CKF_DIGEST {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         Ok(Box::new(HashOperation::restore(mechtype, state)?))
@@ -283,7 +492,7 @@ impl Mechanism for HashMechanism {
 
     /// Initializes a Hash based Key Derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 

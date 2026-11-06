@@ -142,12 +142,8 @@ impl Drop for ChaChaOperation {
 }
 
 impl ChaChaOperation {
-    /// Helper function to register the ChaCha20 mechanisms
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        mechs.add_mechanism(CKM_CHACHA20, &(*CHACHA20_MECHS)[0]);
-        mechs.add_mechanism(CKM_CHACHA20_POLY1305, &(*CHACHA20_MECHS)[1]);
-        mechs.add_mechanism(CKM_CHACHA20_KEY_GEN, &(*CHACHA20_MECHS)[2]);
-    }
+    pub const IMPL_MECHS: [CK_MECHANISM_TYPE; 3] =
+        [CKM_CHACHA20, CKM_CHACHA20_POLY1305, CKM_CHACHA20_KEY_GEN];
 
     /// Encryption/Decryption Initialization helper
     fn cipher_initialize(

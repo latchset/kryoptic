@@ -19,26 +19,32 @@ use crate::pkcs11::*;
 use asn1;
 
 /// Minimum FFDH key size
-pub const MIN_DH_SIZE_BITS: CK_ULONG = 2048;
+pub const MIN_DH_SIZE_BITS: usize = 2048;
 /// Maximum FFDH key size
-pub const MAX_DH_SIZE_BITS: CK_ULONG = 8192;
+pub const MAX_DH_SIZE_BITS: usize = 8192;
 
 /// Object that holds Mechanisms for FFDH
 static FFDH_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     [
         Box::new(FFDHMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_DH_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_DH_SIZE_BITS).unwrap(),
-                flags: CKF_DERIVE,
-            },
+            minfo: MechanismInfo::new(
+                CKM_DH_PKCS_DERIVE,
+                MIN_DH_SIZE_BITS,
+                MAX_DH_SIZE_BITS,
+                CKF_DERIVE,
+                KeySizeKind::Bits,
+                Some(CKK_DH),
+            ),
         }),
         Box::new(FFDHMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_DH_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_DH_SIZE_BITS).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
-            },
+            minfo: MechanismInfo::new(
+                CKM_DH_PKCS_KEY_PAIR_GEN,
+                MIN_DH_SIZE_BITS,
+                MAX_DH_SIZE_BITS,
+                CKF_GENERATE_KEY_PAIR,
+                KeySizeKind::Bits,
+                Some(CKK_DH),
+            ),
         }),
     ]
 });
@@ -53,9 +59,10 @@ static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Public entry to register the FFDH Mechanisms
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    mechs.add_mechanism(CKM_DH_PKCS_DERIVE, &(*FFDH_MECHS)[0]);
-    mechs.add_mechanism(CKM_DH_PKCS_KEY_PAIR_GEN, &(*FFDH_MECHS)[1]);
-
+    for mbox in &(*FFDH_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
+    }
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_DH),
         &(*PUBLIC_KEY_FACTORY),
@@ -239,18 +246,18 @@ impl PrivKeyFactory for FFDHPrivFactory {}
 /// Object that represents an FFDH Mechanism
 #[derive(Debug)]
 pub struct FFDHMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for FFDHMechanism {
-    /// Returns a reference to the mechanism info (CK_MECHANISM_INFO)
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    /// Returns a reference to the mechanism info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes an FFDH derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         let kdf = match mech.mechanism {

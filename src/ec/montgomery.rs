@@ -20,13 +20,14 @@ use crate::ossl::montgomery::ECMontgomeryOperation;
 /// Object that holds Mechanisms for Montgomery Ecc
 static MONTGOMERY_MECHS: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
     Box::new(ECMontgomeryMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: CK_ULONG::try_from(MIN_EC_MONTGOMERY_SIZE_BITS)
-                .unwrap(),
-            ulMaxKeySize: CK_ULONG::try_from(MAX_EC_MONTGOMERY_SIZE_BITS)
-                .unwrap(),
-            flags: CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
-        },
+        minfo: MechanismInfo::new(
+            CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+            MIN_EC_MONTGOMERY_SIZE_BITS,
+            MAX_EC_MONTGOMERY_SIZE_BITS,
+            CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
+            KeySizeKind::Bits,
+            Some(CKK_EC_MONTGOMERY),
+        ),
     })
 });
 
@@ -309,12 +310,12 @@ impl PrivKeyFactory for ECMontgomeryPrivFactory {}
 
 #[derive(Debug)]
 struct ECMontgomeryMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for ECMontgomeryMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn generate_keypair(
