@@ -22,11 +22,14 @@ use crate::ossl::sshkdf::*;
 /// Object that holds the Mechanism for SSHKDF
 static SSH_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
     Box::new(SSHKDFMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: 0,
-            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-            flags: CKF_DERIVE,
-        },
+        minfo: MechanismInfo::new(
+            KRM_SSHKDF_DERIVE,
+            0,
+            0,
+            CKF_DERIVE,
+            KeySizeKind::Unused,
+            None,
+        ),
     })
 });
 
@@ -37,16 +40,16 @@ pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
 
 #[derive(Debug)]
 struct SSHKDFMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for SSHKDFMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 

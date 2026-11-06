@@ -19,25 +19,127 @@ use crate::ossl::ecdsa::EcdsaOperation;
 
 use asn1;
 
+#[cfg(feature = "no_sha1")]
+const ECDSA_MECHS_LEN: usize = 10;
+#[cfg(not(feature = "no_sha1"))]
+const ECDSA_MECHS_LEN: usize = 11;
 /// Object that holds Mechanisms for ECDSA
-static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
-    [
-        Box::new(EcdsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
-            },
-        }),
-        Box::new(EcdsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
-            },
-        }),
-    ]
-});
+static ECDSA_MECHS: LazyLock<[Box<dyn Mechanism>; ECDSA_MECHS_LEN]> =
+    LazyLock::new(|| {
+        [
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            #[cfg(not(feature = "no_sha1"))]
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA1,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA224,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA256,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA384,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA512,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA3_224,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA3_256,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA3_384,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_ECDSA_SHA3_512,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+            Box::new(EcdsaMechanism {
+                minfo: MechanismInfo::new(
+                    CKM_EC_KEY_PAIR_GEN,
+                    MIN_EC_SIZE_BITS,
+                    MAX_EC_SIZE_BITS,
+                    CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
+                    KeySizeKind::Bits,
+                    Some(CKK_EC),
+                ),
+            }),
+        ]
+    });
 
 fn ecdsa_public_key_info(obj: &mut Object, point: Option<&[u8]>) -> Result<()> {
     let ec_point_raw = match point {
@@ -82,23 +184,10 @@ static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all CKK_EC related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    for ckm in &[
-        CKM_ECDSA,
-        #[cfg(not(feature = "no_sha1"))]
-        CKM_ECDSA_SHA1,
-        CKM_ECDSA_SHA224,
-        CKM_ECDSA_SHA256,
-        CKM_ECDSA_SHA384,
-        CKM_ECDSA_SHA512,
-        CKM_ECDSA_SHA3_224,
-        CKM_ECDSA_SHA3_256,
-        CKM_ECDSA_SHA3_384,
-        CKM_ECDSA_SHA3_512,
-    ] {
-        mechs.add_mechanism(*ckm, &(*ECDSA_MECHS)[0]);
+    for mbox in &(*ECDSA_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
     }
-    mechs.add_mechanism(CKM_EC_KEY_PAIR_GEN, &(*ECDSA_MECHS)[1]);
-
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC),
         &(*PUBLIC_KEY_FACTORY),
@@ -349,12 +438,12 @@ impl PrivKeyFactory for ECDSAPrivFactory {}
 /// Object that represents CKK_EC related mechanisms
 #[derive(Debug)]
 pub struct EcdsaMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for EcdsaMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes a signing operation using CKK_EC keys
@@ -363,14 +452,14 @@ impl Mechanism for EcdsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC, CKA_SIGN) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EcdsaOperation::sign_new(mech, key, &self.info)?))
+        Ok(Box::new(EcdsaOperation::sign_new(mech, key, &self.info())?))
     }
 
     /// Initializes a verification operation using CKK_EC keys
@@ -379,14 +468,18 @@ impl Mechanism for EcdsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC, CKA_VERIFY) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EcdsaOperation::verify_new(mech, key, &self.info)?))
+        Ok(Box::new(EcdsaOperation::verify_new(
+            mech,
+            key,
+            &self.info(),
+        )?))
     }
 
     /// Initializes a PKCS#11 3.2 signature verification operation using
@@ -397,7 +490,7 @@ impl Mechanism for EcdsaMechanism {
         key: &Object,
         signature: &[u8],
     ) -> Result<Box<dyn VerifySignature>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC, CKA_VERIFY) {
@@ -405,7 +498,10 @@ impl Mechanism for EcdsaMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(EcdsaOperation::verify_signature_new(
-            mech, key, &self.info, signature,
+            mech,
+            key,
+            &self.info(),
+            signature,
         )?))
     }
 

@@ -19,19 +19,34 @@ use crate::ossl::hkdf::HKDFOperation;
 use crate::pkcs11::*;
 
 /// Object that holds Mechanisms for HKDF
-static HKDF_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+static HKDF_MECHS: LazyLock<[Box<dyn Mechanism>; 3]> = LazyLock::new(|| {
     [
         Box::new(HKDFMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-                flags: CKF_DERIVE,
-            },
+            minfo: MechanismInfo::new(
+                CKM_HKDF_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                Some(CKK_HKDF),
+            ),
+        }),
+        Box::new(HKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_HKDF_DATA,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                Some(CKK_HKDF),
+            ),
         }),
         Box::new(GenericSecretKeyMechanism::new(
+            CKM_HKDF_KEY_GEN,
             CKK_HKDF,
-            MIN_GENERIC_SECRET_KEY_SIZE * 8,
-            MAX_GENERIC_SECRET_KEY_SIZE * 8,
+            MIN_GENERIC_SECRET_KEY_SIZE,
+            MAX_GENERIC_SECRET_KEY_SIZE,
+            KeySizeKind::Bytes,
         )),
     ]
 });
@@ -41,10 +56,10 @@ static HKDF_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all HKDF related mechanisms
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    for ckm in &[CKM_HKDF_DERIVE, CKM_HKDF_DATA] {
-        mechs.add_mechanism(*ckm, &(*HKDF_MECHS)[0]);
+    for mbox in &(*HKDF_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
     }
-    mechs.add_mechanism(CKM_HKDF_KEY_GEN, &(*HKDF_MECHS)[1]);
     ot.add_factory(
         ObjectType::new(CKO_SECRET_KEY, CKK_HKDF),
         &(*HKDF_KEY_FACTORY),
@@ -54,18 +69,18 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 /// Object that represents the HKDF mechanism
 #[derive(Debug)]
 struct HKDFMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for HKDFMechanism {
     /// Returns a reference to the mechanism info
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes a HKDF Derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 

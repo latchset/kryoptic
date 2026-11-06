@@ -14,38 +14,54 @@ use crate::object::ObjectFactories;
 use crate::ossl::ecdh::ECDHOperation;
 
 /// Object that holds Mechanisms for ECDH
-static ECDH_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
-    Box::new(ECDHMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: CK_ULONG::try_from(MIN_EC_SIZE_BITS).unwrap(),
-            ulMaxKeySize: CK_ULONG::try_from(MAX_EC_SIZE_BITS).unwrap(),
-            flags: CKF_DERIVE | COMMON_CKF_EC_FLAGS,
-        },
-    })
+static ECDH_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
+    [
+        Box::new(ECDHMechanism {
+            minfo: MechanismInfo::new(
+                CKM_ECDH1_DERIVE,
+                MIN_EC_SIZE_BITS,
+                MAX_EC_SIZE_BITS,
+                CKF_DERIVE | COMMON_CKF_EC_FLAGS,
+                KeySizeKind::Bits,
+                Some(CKK_EC),
+            ),
+        }),
+        Box::new(ECDHMechanism {
+            minfo: MechanismInfo::new(
+                CKM_ECDH1_COFACTOR_DERIVE,
+                MIN_EC_SIZE_BITS,
+                MAX_EC_SIZE_BITS,
+                CKF_DERIVE | COMMON_CKF_EC_FLAGS,
+                KeySizeKind::Bits,
+                Some(CKK_EC),
+            ),
+        }),
+    ]
 });
 
 /// Public entry to register the ECDH Mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for ckm in &[CKM_ECDH1_DERIVE, CKM_ECDH1_COFACTOR_DERIVE] {
-        mechs.add_mechanism(*ckm, &ECDH_MECH);
+    for mbox in &(*ECDH_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
     }
 }
 
 /// Object that represents an ECDH Mechanism
 #[derive(Debug)]
 struct ECDHMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for ECDHMechanism {
-    /// Returns a reference to the mechanism info (CK_MECHANISM_INFO)
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    /// Returns a reference to the mechanism info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes an ECDH derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         let kdf = match mech.mechanism {

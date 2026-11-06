@@ -59,25 +59,84 @@ fn mldsa_public_key_info(
     Ok(())
 }
 
+fn mldsa_mech_info(mtype: CK_MECHANISM_TYPE, flags: CK_FLAGS) -> MechanismInfo {
+    MechanismInfo::new(
+        mtype,
+        ML_DSA_44_PK_SIZE,
+        ML_DSA_87_PK_SIZE,
+        flags,
+        KeySizeKind::Bytes,
+        Some(CKK_ML_DSA),
+    )
+}
+
+const MLDSA_MECHS_LEN: usize = 11;
 /// Object that holds Mechanisms for MLDSA
-static MLDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
-    [
-        Box::new(MlDsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(ML_DSA_44_PK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(ML_DSA_87_PK_SIZE).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-        }),
-        Box::new(MlDsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(ML_DSA_44_PK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(ML_DSA_87_PK_SIZE).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
-            },
-        }),
-    ]
-});
+static MLDSA_MECHS: LazyLock<[Box<dyn Mechanism>; MLDSA_MECHS_LEN]> =
+    LazyLock::new(|| {
+        [
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(CKM_ML_DSA, CKF_SIGN | CKF_VERIFY),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(CKM_HASH_ML_DSA, CKF_SIGN | CKF_VERIFY),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA224,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA256,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA384,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA512,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA3_224,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA3_256,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA3_384,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_HASH_ML_DSA_SHA3_512,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(MlDsaMechanism {
+                minfo: mldsa_mech_info(
+                    CKM_ML_DSA_KEY_PAIR_GEN,
+                    CKF_GENERATE_KEY_PAIR,
+                ),
+            }),
+        ]
+    });
 
 /// The static Private Key factory
 static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
@@ -89,21 +148,10 @@ static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all ML-DSA related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    for ckm in &[
-        CKM_ML_DSA,
-        CKM_HASH_ML_DSA,
-        CKM_HASH_ML_DSA_SHA224,
-        CKM_HASH_ML_DSA_SHA256,
-        CKM_HASH_ML_DSA_SHA384,
-        CKM_HASH_ML_DSA_SHA512,
-        CKM_HASH_ML_DSA_SHA3_224,
-        CKM_HASH_ML_DSA_SHA3_256,
-        CKM_HASH_ML_DSA_SHA3_384,
-        CKM_HASH_ML_DSA_SHA3_512,
-    ] {
-        mechs.add_mechanism(*ckm, &(*MLDSA_MECHS)[0]);
+    for mbox in &(*MLDSA_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, mbox);
     }
-    mechs.add_mechanism(CKM_ML_DSA_KEY_PAIR_GEN, &(*MLDSA_MECHS)[1]);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_ML_DSA),
@@ -351,12 +399,12 @@ impl KeyFactory for MlDsaPrivFactory {}
 /// Object that represents ML-DSA related mechanisms
 #[derive(Debug)]
 struct MlDsaMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for MlDsaMechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn sign_new(
@@ -364,7 +412,7 @@ impl Mechanism for MlDsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_ML_DSA, CKA_SIGN) {
@@ -381,7 +429,7 @@ impl Mechanism for MlDsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_ML_DSA, CKA_VERIFY) {
@@ -399,7 +447,7 @@ impl Mechanism for MlDsaMechanism {
         key: &Object,
         signature: &[u8],
     ) -> Result<Box<dyn VerifySignature>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_ML_DSA, CKA_VERIFY) {

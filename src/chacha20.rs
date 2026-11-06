@@ -50,18 +50,47 @@ pub const CHACHA20_KEY_SIZE: usize = 32;
 /// `CKM_AES_GCM`/`CKM_AES_CCM` get a separate, message-flagged entry from
 /// AES's other, non-AEAD modes. Plain `CKM_CHACHA20` has no such use case
 /// and keeps classic `CKF_ENCRYPT`/`CKF_DECRYPT` only.
+/// Note that key generation mechanism uses bytes while the other mechanisms
+/// use bits to report accepted key sizes, this is to conform to PKCS#11
+/// spec which define length in bits (256) but explicitly says that the
+/// range is in bytes in "6.58.4 ChaCha20 key generation"
 pub(crate) static CHACHA20_MECHS: LazyLock<[Box<dyn Mechanism>; 3]> =
     LazyLock::new(|| {
         [
-            Box::new(ChaCha20Mechanism::new(CKF_ENCRYPT | CKF_DECRYPT)),
-            Box::new(ChaCha20Mechanism::new(
-                CKF_ENCRYPT
-                    | CKF_DECRYPT
-                    | CKF_MESSAGE_ENCRYPT
-                    | CKF_MESSAGE_DECRYPT
-                    | CKF_MULTI_MESSAGE,
-            )),
-            Box::new(ChaCha20Mechanism::new(CKF_GENERATE)),
+            Box::new(ChaCha20Mechanism {
+                minfo: MechanismInfo::new(
+                    CKM_CHACHA20,
+                    CHACHA20_KEY_SIZE * 8,
+                    CHACHA20_KEY_SIZE * 8,
+                    CKF_ENCRYPT | CKF_DECRYPT,
+                    KeySizeKind::Bits,
+                    Some(CKK_CHACHA20),
+                ),
+            }),
+            Box::new(ChaCha20Mechanism {
+                minfo: MechanismInfo::new(
+                    CKM_CHACHA20_POLY1305,
+                    CHACHA20_KEY_SIZE * 8,
+                    CHACHA20_KEY_SIZE * 8,
+                    CKF_ENCRYPT
+                        | CKF_DECRYPT
+                        | CKF_MESSAGE_ENCRYPT
+                        | CKF_MESSAGE_DECRYPT
+                        | CKF_MULTI_MESSAGE,
+                    KeySizeKind::Bits,
+                    Some(CKK_CHACHA20),
+                ),
+            }),
+            Box::new(ChaCha20Mechanism {
+                minfo: MechanismInfo::new(
+                    CKM_CHACHA20_KEY_GEN,
+                    CHACHA20_KEY_SIZE,
+                    CHACHA20_KEY_SIZE,
+                    CKF_GENERATE,
+                    KeySizeKind::Bytes,
+                    Some(CKK_CHACHA20),
+                ),
+            }),
         ]
     });
 
@@ -71,7 +100,12 @@ static CHACHA20_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all implemented ChaCha20 Mechanisms and Factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    ChaChaOperation::register_mechanisms(mechs);
+    for mbox in &(*CHACHA20_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        if ChaChaOperation::IMPL_MECHS.contains(&mtype) {
+            mechs.add_mechanism(mtype, mbox);
+        }
+    }
 
     ot.add_factory(
         ObjectType::new(CKO_SECRET_KEY, CKK_CHACHA20),
@@ -193,24 +227,12 @@ impl SecretKeyFactory for ChaCha20KeyFactory {
 /// until they complete.
 #[derive(Debug)]
 pub(crate) struct ChaCha20Mechanism {
-    info: CK_MECHANISM_INFO,
-}
-
-impl ChaCha20Mechanism {
-    pub fn new(flags: CK_FLAGS) -> ChaCha20Mechanism {
-        ChaCha20Mechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(CHACHA20_KEY_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(CHACHA20_KEY_SIZE).unwrap(),
-                flags: flags,
-            },
-        }
-    }
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for ChaCha20Mechanism {
-    fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn encryption_new(
@@ -218,7 +240,7 @@ impl Mechanism for ChaCha20Mechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Encryption>> {
-        if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
+        if self.info().flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         key.check_key_ops(CKO_SECRET_KEY, CKK_CHACHA20, CKA_ENCRYPT)?;
@@ -230,7 +252,7 @@ impl Mechanism for ChaCha20Mechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Decryption>> {
-        if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
+        if self.info().flags & CKF_DECRYPT != CKF_DECRYPT {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         key.check_key_ops(CKO_SECRET_KEY, CKK_CHACHA20, CKA_DECRYPT)?;
@@ -266,7 +288,7 @@ impl Mechanism for ChaCha20Mechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn MsgEncryption>> {
-        if self.info.flags & CKF_MESSAGE_ENCRYPT == 0 {
+        if self.info().flags & CKF_MESSAGE_ENCRYPT == 0 {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         key.check_key_ops(CKO_SECRET_KEY, CKK_CHACHA20, CKA_ENCRYPT)?;
@@ -278,7 +300,7 @@ impl Mechanism for ChaCha20Mechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn MsgDecryption>> {
-        if self.info.flags & CKF_MESSAGE_DECRYPT == 0 {
+        if self.info().flags & CKF_MESSAGE_DECRYPT == 0 {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         key.check_key_ops(CKO_SECRET_KEY, CKK_CHACHA20, CKA_DECRYPT)?;
