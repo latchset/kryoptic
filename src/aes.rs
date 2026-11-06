@@ -29,26 +29,59 @@ pub const MID_AES_SIZE_BYTES: usize = 24; /* 192 bits */
 /// Largest AES Key Size (256 bits)
 pub const MAX_AES_SIZE_BYTES: usize = 32; /* 256 bits */
 
+const AES_CIPHER_FLAGS: CK_FLAGS =
+    CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP;
+
+const AES_CIPHER_ONLY: CK_FLAGS = CKF_ENCRYPT | CKF_DECRYPT;
+
+const AES_AEAD_CIPHER_FLAGS: CK_FLAGS = CKF_ENCRYPT
+    | CKF_DECRYPT
+    | CKF_WRAP
+    | CKF_UNWRAP
+    | CKF_MESSAGE_ENCRYPT
+    | CKF_MESSAGE_DECRYPT
+    | CKF_MULTI_MESSAGE;
+
+const AES_MAC_FLAGS: CK_FLAGS = CKF_SIGN | CKF_VERIFY;
+
+#[cfg(feature = "fips")]
+const AES_MECHS_LEN: usize = 15;
+#[cfg(not(feature = "fips"))]
+const AES_MECHS_LEN: usize = 21;
 /// Object that holds AES Mechanisms
-pub(crate) static AES_MECHS: LazyLock<[Box<dyn Mechanism>; 6]> =
+pub(crate) static AES_MECHS: LazyLock<[Box<dyn Mechanism>; AES_MECHS_LEN]> =
     LazyLock::new(|| {
         [
+            Box::new(AesMechanism::new(CKM_AES_ECB, AES_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_CBC, AES_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_CBC_PAD, AES_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_CTR, AES_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_CTS, AES_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_KEY_WRAP, AES_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_KEY_WRAP_KWP, AES_CIPHER_FLAGS)),
             Box::new(AesMechanism::new(
-                CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+                CKM_AES_KEY_WRAP_PKCS7,
+                AES_CIPHER_FLAGS,
             )),
-            Box::new(AesMechanism::new(
-                CKF_ENCRYPT
-                    | CKF_DECRYPT
-                    | CKF_WRAP
-                    | CKF_UNWRAP
-                    | CKF_MESSAGE_ENCRYPT
-                    | CKF_MESSAGE_DECRYPT
-                    | CKF_MULTI_MESSAGE,
-            )),
-            Box::new(AesMechanism::new(CKF_ENCRYPT | CKF_DECRYPT)),
-            Box::new(AesMechanism::new(CKF_GENERATE)),
-            Box::new(AesMechanism::new(CKF_SIGN | CKF_VERIFY)),
-            Box::new(AesMechanism::new(CKF_DERIVE)),
+            Box::new(AesMechanism::new(CKM_AES_GCM, AES_AEAD_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_CCM, AES_AEAD_CIPHER_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_KEY_GEN, CKF_GENERATE)),
+            Box::new(AesMechanism::new(CKM_AES_ECB_ENCRYPT_DATA, CKF_DERIVE)),
+            Box::new(AesMechanism::new(CKM_AES_CBC_ENCRYPT_DATA, CKF_DERIVE)),
+            Box::new(AesMechanism::new(CKM_AES_CMAC, AES_MAC_FLAGS)),
+            Box::new(AesMechanism::new(CKM_AES_CMAC_GENERAL, AES_MAC_FLAGS)),
+            #[cfg(not(feature = "fips"))]
+            Box::new(AesMechanism::new(CKM_AES_MAC, AES_MAC_FLAGS)),
+            #[cfg(not(feature = "fips"))]
+            Box::new(AesMechanism::new(CKM_AES_MAC_GENERAL, AES_MAC_FLAGS)),
+            #[cfg(not(feature = "fips"))]
+            Box::new(AesMechanism::new(CKM_AES_OFB, AES_CIPHER_ONLY)),
+            #[cfg(not(feature = "fips"))]
+            Box::new(AesMechanism::new(CKM_AES_CFB128, AES_CIPHER_ONLY)),
+            #[cfg(not(feature = "fips"))]
+            Box::new(AesMechanism::new(CKM_AES_CFB1, AES_CIPHER_ONLY)),
+            #[cfg(not(feature = "fips"))]
+            Box::new(AesMechanism::new(CKM_AES_CFB8, AES_CIPHER_ONLY)),
         ]
     });
 
@@ -58,12 +91,17 @@ static AES_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all implemented AES Mechanisms and Factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    AesOperation::register_mechanisms(mechs);
-    AesKDFOperation::register_mechanisms(mechs);
-    #[cfg(not(feature = "fips"))]
-    AesMacOperation::register_mechanisms(mechs);
-    AesCmacOperation::register_mechanisms(mechs);
-
+    let kdf_mechs = AesKDFOperation::available_mechanisms(mechs);
+    for mbox in &(*AES_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        if AesOperation::IMPL_MECHS.contains(&mtype)
+            || AesMacOperation::IMPL_MECHS.contains(&mtype)
+            || AesCmacOperation::IMPL_MECHS.contains(&mtype)
+            || kdf_mechs.contains(&mtype)
+        {
+            mechs.add_mechanism(mtype, &(*mbox));
+        }
+    }
     ot.add_factory(
         ObjectType::new(CKO_SECRET_KEY, CKK_AES),
         &(*AES_KEY_FACTORY),
@@ -242,24 +280,37 @@ impl SecretKeyFactory for AesKeyFactory {
 
 #[derive(Debug)]
 pub(crate) struct AesMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl AesMechanism {
-    pub fn new(flags: CK_FLAGS) -> AesMechanism {
+    pub fn new(mech: CK_MECHANISM_TYPE, flags: CK_FLAGS) -> AesMechanism {
+        let (min, max, kt) =
+            if mech == CKM_AES_XTS || mech == CKM_AES_XTS_KEY_GEN {
+                (MIN_AES_SIZE_BYTES * 2, MAX_AES_SIZE_BYTES * 2, CKK_AES_XTS)
+            } else {
+                (MIN_AES_SIZE_BYTES, MAX_AES_SIZE_BYTES, CKK_AES)
+            };
         AesMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_AES_SIZE_BYTES).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_AES_SIZE_BYTES).unwrap(),
-                flags: flags,
-            },
+            minfo: MechanismInfo::new(
+                mech,
+                min,
+                max,
+                flags,
+                KeySizeKind::Bytes,
+                Some(kt),
+            ),
         }
     }
 }
 
 impl Mechanism for AesMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn encryption_new(
@@ -267,7 +318,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Encryption>> {
-        if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
+        if self.info().flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_ENCRYPT) {
@@ -282,7 +333,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Decryption>> {
-        if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
+        if self.info().flags & CKF_DECRYPT != CKF_DECRYPT {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DECRYPT) {
@@ -314,6 +365,8 @@ impl Mechanism for AesMechanism {
         key.ensure_ulong(CKA_KEY_TYPE, CKK_AES)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
+        check_key_len(key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize)?;
+
         default_secret_key_generate(&mut key)?;
         default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
@@ -332,7 +385,7 @@ impl Mechanism for AesMechanism {
         data: &mut [u8],
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<usize> {
-        if self.info.flags & CKF_WRAP != CKF_WRAP {
+        if self.info().flags & CKF_WRAP != CKF_WRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match wrapping_key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_WRAP) {
@@ -364,7 +417,7 @@ impl Mechanism for AesMechanism {
         template: &[CK_ATTRIBUTE],
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<Object> {
-        if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
+        if self.info().flags & CKF_UNWRAP != CKF_UNWRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match wrapping_key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_UNWRAP) {
@@ -387,7 +440,7 @@ impl Mechanism for AesMechanism {
     /// (Version 3.1)
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 
@@ -416,7 +469,7 @@ impl Mechanism for AesMechanism {
     ) -> Result<Box<dyn Mac>> {
         /* the mechanism advertises only SIGN/VERIFY to the callers
          * DERIVE is a mediated operation so it is not advertised
-         * and we do not check it against self.info nor the key */
+         * and we do not check it against self.minfo.info nor the key */
         if op_type != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
@@ -439,7 +492,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_SIGN) {
@@ -469,7 +522,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_VERIFY) {
@@ -494,7 +547,7 @@ impl Mechanism for AesMechanism {
         key: &Object,
         signature: &[u8],
     ) -> Result<Box<dyn VerifySignature>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_VERIFY) {
@@ -518,7 +571,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn MsgEncryption>> {
-        if self.info.flags & CKF_MESSAGE_ENCRYPT == 0 {
+        if self.info().flags & CKF_MESSAGE_ENCRYPT == 0 {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_ENCRYPT) {
@@ -533,7 +586,7 @@ impl Mechanism for AesMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn MsgDecryption>> {
-        if self.info.flags & CKF_MESSAGE_DECRYPT == 0 {
+        if self.info().flags & CKF_MESSAGE_DECRYPT == 0 {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DECRYPT) {
@@ -562,13 +615,15 @@ struct AesKDFOperation<'a> {
 
 impl AesKDFOperation<'_> {
     /// Helper function to register the AES KDF Mechanisms
-    fn register_mechanisms(mechs: &mut Mechanisms) {
-        if mechs.get(CKM_AES_ECB).is_ok() {
-            mechs.add_mechanism(CKM_AES_ECB_ENCRYPT_DATA, &(*AES_MECHS)[5]);
+    fn available_mechanisms(mechs: &mut Mechanisms) -> Vec<CK_MECHANISM_TYPE> {
+        let mut ret = Vec::<CK_MECHANISM_TYPE>::with_capacity(2);
+        if AesOperation::IMPL_MECHS.contains(&CKM_AES_ECB) {
+            ret.push(CKM_AES_ECB_ENCRYPT_DATA);
         }
-        if mechs.get(CKM_AES_CBC).is_ok() {
-            mechs.add_mechanism(CKM_AES_CBC_ENCRYPT_DATA, &(*AES_MECHS)[5]);
+        if AesOperation::IMPL_MECHS.contains(&CKM_AES_CBC) {
+            ret.push(CKM_AES_CBC_ENCRYPT_DATA);
         }
+        ret
     }
 
     /// Instantiates a new CKM_AES_ECB based KDF operation

@@ -68,25 +68,93 @@ fn slhdsa_public_key_info(
     Ok(())
 }
 
+fn slhdsa_mech_info(
+    mtype: CK_MECHANISM_TYPE,
+    flags: CK_FLAGS,
+) -> MechanismInfo {
+    MechanismInfo::new(
+        mtype,
+        SLH_DSA_128_PK_SIZE,
+        SLH_DSA_256_PK_SIZE,
+        flags,
+        KeySizeKind::Bytes,
+        Some(CKK_SLH_DSA),
+    )
+}
+
+const SLHDSA_MECHS_LEN: usize = 11;
 /// Object that holds Mechanisms for SLH-DSA
-static SLHDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
-    [
-        Box::new(SlhDsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(SLH_DSA_128_PK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(SLH_DSA_256_PK_SIZE).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-        }),
-        Box::new(SlhDsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(SLH_DSA_128_PK_SIZE).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(SLH_DSA_256_PK_SIZE).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
-            },
-        }),
-    ]
-});
+static SLHDSA_MECHS: LazyLock<[Box<dyn Mechanism>; SLHDSA_MECHS_LEN]> =
+    LazyLock::new(|| {
+        [
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(CKM_SLH_DSA, CKF_SIGN | CKF_VERIFY),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA224,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA256,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA384,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA512,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA3_224,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA3_256,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA3_384,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_HASH_SLH_DSA_SHA3_512,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            // TODO SHAKE variants
+            // CKM_HASH_SLH_DSA_SHAKE128,
+            // CKM_HASH_SLH_DSA_SHAKE256,
+            Box::new(SlhDsaMechanism {
+                minfo: slhdsa_mech_info(
+                    CKM_SLH_DSA_KEY_PAIR_GEN,
+                    CKF_GENERATE_KEY_PAIR,
+                ),
+            }),
+        ]
+    });
 
 /// The static Private Key factory
 static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
@@ -98,25 +166,10 @@ static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all SLH-DSA related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    for ckm in &[
-        CKM_SLH_DSA,
-        CKM_HASH_SLH_DSA,
-        CKM_HASH_SLH_DSA_SHA224,
-        CKM_HASH_SLH_DSA_SHA256,
-        CKM_HASH_SLH_DSA_SHA384,
-        CKM_HASH_SLH_DSA_SHA512,
-        CKM_HASH_SLH_DSA_SHA3_224,
-        CKM_HASH_SLH_DSA_SHA3_256,
-        CKM_HASH_SLH_DSA_SHA3_384,
-        CKM_HASH_SLH_DSA_SHA3_512,
-        // TODO SHAKE variants
-        // CKM_HASH_SLH_DSA_SHAKE128,
-        // CKM_HASH_SLH_DSA_SHAKE256,
-    ] {
-        mechs.add_mechanism(*ckm, &(*SLHDSA_MECHS)[0]);
+    for mbox in &(*SLHDSA_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, &(*mbox));
     }
-
-    mechs.add_mechanism(CKM_SLH_DSA_KEY_PAIR_GEN, &(*SLHDSA_MECHS)[1]);
 
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_SLH_DSA),
@@ -355,12 +408,16 @@ impl PrivKeyFactory for SlhDsaPrivFactory {}
 /// Object that represents SLH-DSA related mechanisms
 #[derive(Debug)]
 struct SlhDsaMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for SlhDsaMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn sign_new(
@@ -368,7 +425,7 @@ impl Mechanism for SlhDsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_SLH_DSA, CKA_SIGN) {
@@ -385,7 +442,7 @@ impl Mechanism for SlhDsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_SLH_DSA, CKA_VERIFY) {
@@ -403,7 +460,7 @@ impl Mechanism for SlhDsaMechanism {
         key: &Object,
         signature: &[u8],
     ) -> Result<Box<dyn VerifySignature>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_SLH_DSA, CKA_VERIFY) {

@@ -23,11 +23,14 @@ use crate::ossl::pbkdf2::pbkdf2_derive;
 /// Object that holds Mechanisms for PBKDF2
 static PBKDF2_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
     Box::new(PBKDF2Mechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: 0,
-            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-            flags: CKF_GENERATE,
-        },
+        minfo: MechanismInfo::new(
+            CKM_PKCS5_PBKD2,
+            0,
+            0,
+            CKF_GENERATE,
+            KeySizeKind::Unused,
+            None,
+        ),
     })
 });
 
@@ -40,7 +43,7 @@ pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
 #[derive(Debug)]
 struct PBKDF2Mechanism {
     /// Mechanism information (flags, key size limits).
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl PBKDF2Mechanism {
@@ -71,7 +74,11 @@ impl PBKDF2Mechanism {
  * files for FIPS/non-FIPS */
 impl Mechanism for PBKDF2Mechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn generate_key(
@@ -81,7 +88,7 @@ impl Mechanism for PBKDF2Mechanism {
         mechanisms: &Mechanisms,
         objfactories: &ObjectFactories,
     ) -> Result<Object> {
-        if self.info.flags & CKF_GENERATE != CKF_GENERATE {
+        if self.info().flags & CKF_GENERATE != CKF_GENERATE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         if mech.mechanism != CKM_PKCS5_PBKD2 {

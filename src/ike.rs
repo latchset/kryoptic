@@ -33,25 +33,56 @@ use crate::pkcs11::*;
 use crate::session::OpIntState;
 
 /// Object that holds the Mechanism for the IKE-derive family
-static IKE_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
-    Box::new(IkeMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: 0,
-            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-            flags: CKF_DERIVE,
-        },
-    })
+static IKE_MECH: LazyLock<[Box<dyn Mechanism>; 4]> = LazyLock::new(|| {
+    [
+        Box::new(IkeMechanism {
+            minfo: MechanismInfo::new(
+                CKM_IKE_PRF_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(IkeMechanism {
+            minfo: MechanismInfo::new(
+                CKM_IKE1_PRF_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(IkeMechanism {
+            minfo: MechanismInfo::new(
+                CKM_IKE1_EXTENDED_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(IkeMechanism {
+            minfo: MechanismInfo::new(
+                CKM_IKE2_PRF_PLUS_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+    ]
 });
 
 /// Registers all IKE-derive-family mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for ckm in &[
-        CKM_IKE_PRF_DERIVE,
-        CKM_IKE1_PRF_DERIVE,
-        CKM_IKE1_EXTENDED_DERIVE,
-        CKM_IKE2_PRF_PLUS_DERIVE,
-    ] {
-        mechs.add_mechanism(*ckm, &IKE_MECH);
+    for mbox in &(*IKE_MECH) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, &(*mbox));
     }
 }
 
@@ -156,16 +187,20 @@ fn ike_derive_setup(
 /// Object that represents the IKE-derive-family mechanism
 #[derive(Debug)]
 struct IkeMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for IkeMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match mech.mechanism {

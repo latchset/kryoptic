@@ -13,56 +13,100 @@ use crate::native::simplekdf::{PubFromPrivOperation, SimpleKDFOperation};
 use crate::object::ObjectFactories;
 use crate::pkcs11::*;
 
-/// Object that holds Mechanisms for SimpleKDF
-static SIMPLE_KDF_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
-    Box::new(SimpleKDFMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: 0,
-            ulMaxKeySize: CK_ULONG::try_from(u32::MAX).unwrap(),
-            flags: CKF_DERIVE,
-        },
-    })
-});
-
-static PUB_FROM_PRIV_MECH: LazyLock<Box<dyn Mechanism>> = LazyLock::new(|| {
-    Box::new(SimpleKDFMechanism {
-        info: CK_MECHANISM_INFO {
-            ulMinKeySize: 0,
-            ulMaxKeySize: 0,
-            flags: CKF_DERIVE,
-        },
-    })
+/// Object that holds Mechanisms for SimpleKDF mechasnisms
+static KDF_MECHS: LazyLock<[Box<dyn Mechanism>; 6]> = LazyLock::new(|| {
+    [
+        Box::new(SimpleKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_CONCATENATE_BASE_AND_KEY,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(SimpleKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_CONCATENATE_BASE_AND_DATA,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(SimpleKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_CONCATENATE_DATA_AND_BASE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(SimpleKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_XOR_BASE_AND_DATA,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(SimpleKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_EXTRACT_KEY_FROM_KEY,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(SimpleKDFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_PUB_KEY_FROM_PRIV_KEY,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+    ]
 });
 
 /// Registers all Simple KDF mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for ckm in &[
-        CKM_CONCATENATE_BASE_AND_KEY,
-        CKM_CONCATENATE_BASE_AND_DATA,
-        CKM_CONCATENATE_DATA_AND_BASE,
-        CKM_XOR_BASE_AND_DATA,
-        CKM_EXTRACT_KEY_FROM_KEY,
-    ] {
-        mechs.add_mechanism(*ckm, &(*SIMPLE_KDF_MECH));
+    for mbox in &(*KDF_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, &(*mbox));
     }
-    mechs.add_mechanism(CKM_PUB_KEY_FROM_PRIV_KEY, &(*PUB_FROM_PRIV_MECH));
 }
 
 /// Object that represents the Simple KDF mechanism
 #[derive(Debug)]
 struct SimpleKDFMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for SimpleKDFMechanism {
-    /// Returns a reference to the mechanism info
+    /// Returns a reference to the PKCS#11 mechanism info
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    /// Returns a reference to the mechanism info
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes a SimpleKDF Derive operation
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 

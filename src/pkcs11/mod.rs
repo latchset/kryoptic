@@ -1146,3 +1146,63 @@ impl CK_DERIVED_KEY {
         Ok(())
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeySizeKind {
+    /// Key Sizes are unused for this mechanism
+    Unused,
+    /// Key Sizes are expressed in bytes
+    Bytes,
+    /// Key Sizes are expressed in bits
+    Bits,
+}
+
+#[derive(Debug)]
+pub struct MechanismInfo {
+    /// The Mechanism Type
+    mech_type: CK_MECHANISM_TYPE,
+    /// The standard PKCS#11 mechanism info
+    info: CK_MECHANISM_INFO,
+    /// How to interpret the std Min|MaxKeySize in the info field
+    key_sizes_kind: KeySizeKind,
+    /// Key type associated with this mechanism, if any
+    key_type: Option<CK_KEY_TYPE>,
+}
+
+impl MechanismInfo {
+    pub fn new(
+        mechanism: CK_MECHANISM_TYPE,
+        min_key_size: usize,
+        max_key_size: usize,
+        flags: CK_FLAGS,
+        ks_kind: KeySizeKind,
+        key_type: Option<CK_KEY_TYPE>,
+    ) -> MechanismInfo {
+        MechanismInfo {
+            mech_type: mechanism,
+            info: CK_MECHANISM_INFO {
+                ulMinKeySize: CK_ULONG::try_from(min_key_size).unwrap(),
+                ulMaxKeySize: CK_ULONG::try_from(max_key_size).unwrap(),
+                flags: flags,
+            },
+            key_sizes_kind: ks_kind,
+            key_type: key_type,
+        }
+    }
+
+    pub fn mech_type(&self) -> CK_MECHANISM_TYPE {
+        self.mech_type
+    }
+
+    pub fn info(&self) -> &CK_MECHANISM_INFO {
+        &self.info
+    }
+
+    pub fn key_type(&self) -> Option<CK_KEY_TYPE> {
+        self.key_type
+    }
+
+    pub fn key_sizes_kind(&self) -> KeySizeKind {
+        self.key_sizes_kind
+    }
+}

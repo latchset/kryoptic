@@ -151,38 +151,24 @@ impl Drop for AesOperation {
 }
 
 impl AesOperation {
-    /// Helper function to register all AES Mechanisms
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[
-            CKM_AES_ECB,
-            CKM_AES_CBC,
-            CKM_AES_CBC_PAD,
-            CKM_AES_CTR,
-            CKM_AES_CTS,
-            CKM_AES_KEY_WRAP,
-            CKM_AES_KEY_WRAP_KWP,
-            CKM_AES_KEY_WRAP_PKCS7,
-        ] {
-            mechs.add_mechanism(*ckm, &(*AES_MECHS)[0]);
-        }
-
-        for ckm in &[CKM_AES_GCM, CKM_AES_CCM] {
-            mechs.add_mechanism(*ckm, &(*AES_MECHS)[1]);
-        }
-
-        #[cfg(not(feature = "fips"))]
-        for ckm in &[
-            CKM_AES_OFB,
-            CKM_AES_CFB128,
-            CKM_AES_CFB1,
-            CKM_AES_CFB8,
-            /* OpenSSL does not implement AES CFB-64 */
-        ] {
-            mechs.add_mechanism(*ckm, &(*AES_MECHS)[2]);
-        }
-
-        mechs.add_mechanism(CKM_AES_KEY_GEN, &(*AES_MECHS)[3]);
-    }
+    pub const IMPL_MECHS: [CK_MECHANISM_TYPE; 15] = [
+        CKM_AES_KEY_GEN,
+        CKM_AES_ECB,
+        CKM_AES_CBC,
+        CKM_AES_CBC_PAD,
+        CKM_AES_CTR,
+        CKM_AES_CTS,
+        CKM_AES_KEY_WRAP,
+        CKM_AES_KEY_WRAP_KWP,
+        CKM_AES_KEY_WRAP_PKCS7,
+        CKM_AES_GCM,
+        CKM_AES_CCM,
+        CKM_AES_OFB,
+        CKM_AES_CFB128,
+        CKM_AES_CFB1,
+        CKM_AES_CFB8,
+        /* OpenSSL does not implement AES CFB-64 */
+    ];
 
     /// Parses the PKCS#11 mechanism parameters (`CK_MECHANISM`) and initializes
     /// an `AesParams` struct based on the specific AES mechanism type.
@@ -2758,12 +2744,8 @@ pub struct AesCmacOperation {
 }
 
 impl AesCmacOperation {
-    /// Helper to register the CMAC mechanisms
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[CKM_AES_CMAC, CKM_AES_CMAC_GENERAL] {
-            mechs.add_mechanism(*ckm, &(*AES_MECHS)[4]);
-        }
-    }
+    pub const IMPL_MECHS: [CK_MECHANISM_TYPE; 2] =
+        [CKM_AES_CMAC, CKM_AES_CMAC_GENERAL];
 
     /// Initializes and returns a CMAC operation
     pub fn init(
@@ -3060,12 +3042,8 @@ impl Drop for AesMacOperation {
 
 #[allow(dead_code)]
 impl AesMacOperation {
-    /// Helper to register the MAC mechanisms
-    pub fn register_mechanisms(mechs: &mut Mechanisms) {
-        for ckm in &[CKM_AES_MAC, CKM_AES_MAC_GENERAL] {
-            mechs.add_mechanism(*ckm, &(*AES_MECHS)[4]);
-        }
-    }
+    pub const IMPL_MECHS: [CK_MECHANISM_TYPE; 2] =
+        [CKM_AES_MAC, CKM_AES_MAC_GENERAL];
 
     /// Initializes and returns a MAC operation
     pub fn init(
