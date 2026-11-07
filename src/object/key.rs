@@ -664,39 +664,43 @@ impl SecretKeyFactory for GenericSecretKeyFactory {
 #[derive(Debug)]
 pub struct GenericSecretKeyMechanism {
     /// Generic mechanism info
-    info: CK_MECHANISM_INFO,
-    /// The actual key type for this mechanism
-    ///
-    /// Must be a key type of class CKO_SECRET_KEY
-    keytype: CK_KEY_TYPE,
+    minfo: MechanismInfo,
 }
 
 impl GenericSecretKeyMechanism {
     /// Instantiates a mechanism info for a specified symmetric key type
     pub fn new(
+        mechanism: CK_MECHANISM_TYPE,
         keytype: CK_KEY_TYPE,
         min: usize,
         max: usize,
+        kind: KeySizeKind,
     ) -> GenericSecretKeyMechanism {
         GenericSecretKeyMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(min).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(max).unwrap(),
-                flags: CKF_GENERATE,
-            },
-            keytype: keytype,
+            minfo: MechanismInfo::new(
+                mechanism,
+                min,
+                max,
+                CKF_GENERATE,
+                kind,
+                Some(keytype),
+            ),
         }
     }
 
     /// Returns the keytype associated with this mechanism
     fn keytype(&self) -> CK_KEY_TYPE {
-        self.keytype
+        self.minfo.key_type().unwrap()
     }
 }
 
 impl Mechanism for GenericSecretKeyMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Implements the Generic Secret Key Generation
@@ -711,6 +715,9 @@ impl Mechanism for GenericSecretKeyMechanism {
         _: &Mechanisms,
         _: &ObjectFactories,
     ) -> Result<Object> {
+        if mech.mechanism != self.minfo.mech_type() {
+            return Err(CKR_MECHANISM_INVALID)?;
+        }
         let mut key = GENERIC_SECRET_FACTORY
             .as_key_factory()?
             .key_generate(template)?;
@@ -719,12 +726,11 @@ impl Mechanism for GenericSecretKeyMechanism {
         key.ensure_ulong(CKA_KEY_TYPE, self.keytype())
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         let mut key_len = key.get_attr_as_ulong(CKA_VALUE_LEN)?;
-        if self.keytype == CKK_GENERIC_SECRET {
-            /* CKM_GENERIC_SECRET_KEY_GEN uses bits */
+        if self.minfo.key_sizes_kind() == KeySizeKind::Bits {
             key_len *= 8;
         }
-        if key_len < self.info.ulMinKeySize as CK_ULONG
-            || key_len > self.info.ulMaxKeySize as CK_ULONG
+        if key_len < self.info().ulMinKeySize as CK_ULONG
+            || key_len > self.info().ulMaxKeySize as CK_ULONG
         {
             return Err(CKR_KEY_SIZE_RANGE)?;
         }

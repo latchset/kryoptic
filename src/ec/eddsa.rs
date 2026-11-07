@@ -22,18 +22,24 @@ use crate::ossl::eddsa::EddsaOperation;
 static EDDSA_MECHS: LazyLock<[Box<dyn Mechanism>; 2]> = LazyLock::new(|| {
     [
         Box::new(EddsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: MIN_EC_EDWARDS_SIZE_BITS as CK_ULONG,
-                ulMaxKeySize: MAX_EC_EDWARDS_SIZE_BITS as CK_ULONG,
-                flags: CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
-            },
+            minfo: MechanismInfo::new(
+                CKM_EDDSA,
+                MIN_EC_EDWARDS_SIZE_BITS,
+                MAX_EC_EDWARDS_SIZE_BITS,
+                CKF_SIGN | CKF_VERIFY | COMMON_CKF_EC_FLAGS,
+                KeySizeKind::Bits,
+                Some(CKK_EC_EDWARDS),
+            ),
         }),
         Box::new(EddsaMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: MIN_EC_EDWARDS_SIZE_BITS as CK_ULONG,
-                ulMaxKeySize: MAX_EC_EDWARDS_SIZE_BITS as CK_ULONG,
-                flags: CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
-            },
+            minfo: MechanismInfo::new(
+                CKM_EC_EDWARDS_KEY_PAIR_GEN,
+                MIN_EC_EDWARDS_SIZE_BITS,
+                MAX_EC_EDWARDS_SIZE_BITS,
+                CKF_GENERATE_KEY_PAIR | COMMON_CKF_EC_FLAGS,
+                KeySizeKind::Bits,
+                Some(CKK_EC_EDWARDS),
+            ),
         }),
     ]
 });
@@ -77,9 +83,10 @@ static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all EdDSA related mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    mechs.add_mechanism(CKM_EDDSA, &(*EDDSA_MECHS)[0]);
-    mechs.add_mechanism(CKM_EC_EDWARDS_KEY_PAIR_GEN, &(*EDDSA_MECHS)[1]);
-
+    for mbox in &(*EDDSA_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, &(*mbox));
+    }
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_EC_EDWARDS),
         &(*PUBLIC_KEY_FACTORY),
@@ -323,12 +330,16 @@ impl PrivKeyFactory for EDDSAPrivFactory {}
 /// Object that represents EdDSA related mechanisms
 #[derive(Debug)]
 struct EddsaMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for EddsaMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn sign_new(
@@ -336,14 +347,14 @@ impl Mechanism for EddsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_EC_EDWARDS, CKA_SIGN) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EddsaOperation::sign_new(mech, key, &self.info)?))
+        Ok(Box::new(EddsaOperation::sign_new(mech, key, &self.info())?))
     }
 
     fn verify_new(
@@ -351,14 +362,18 @@ impl Mechanism for EddsaMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC_EDWARDS, CKA_VERIFY) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(EddsaOperation::verify_new(mech, key, &self.info)?))
+        Ok(Box::new(EddsaOperation::verify_new(
+            mech,
+            key,
+            &self.info(),
+        )?))
     }
 
     fn verify_signature_new(
@@ -367,7 +382,7 @@ impl Mechanism for EddsaMechanism {
         key: &Object,
         signature: &[u8],
     ) -> Result<Box<dyn VerifySignature>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_EC_EDWARDS, CKA_VERIFY) {
@@ -375,7 +390,10 @@ impl Mechanism for EddsaMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(EddsaOperation::verify_signature_new(
-            mech, key, &self.info, signature,
+            mech,
+            key,
+            &self.info(),
+            signature,
         )?))
     }
 

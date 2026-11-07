@@ -18,60 +18,141 @@ use crate::pkcs11::*;
 use crate::fips::check_fips_state_ok;
 
 /// Object that holds Mechanisms for TLS
-static TLS_MECHS: LazyLock<[Box<dyn Mechanism>; 3]> = LazyLock::new(|| {
+static TLS_MECHS: LazyLock<[Box<dyn Mechanism>; 11]> = LazyLock::new(|| {
     [
         Box::new(TLSPRFMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: TLS_MASTER_SECRET_SIZE,
-                ulMaxKeySize: TLS_MASTER_SECRET_SIZE,
-                flags: CKF_DERIVE,
-            },
+            minfo: MechanismInfo::new(
+                CKM_TLS_KDF,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
         }),
         Box::new(TLSPRFMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: u32::MAX as CK_ULONG,
-                flags: CKF_DERIVE,
-            },
+            minfo: MechanismInfo::new(
+                CKM_TLS12_KDF,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
         }),
         Box::new(TLSPRFMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: 0,
-                ulMaxKeySize: u32::MAX as CK_ULONG,
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
+            minfo: MechanismInfo::new(
+                CKM_TLS12_MASTER_KEY_DERIVE,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_MASTER_KEY_DERIVE_DH,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_KDF,
+                TLS_MASTER_SECRET_SIZE as usize,
+                TLS_MASTER_SECRET_SIZE as usize,
+                CKF_DERIVE,
+                KeySizeKind::Bytes,
+                Some(CKK_GENERIC_SECRET),
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_KEY_AND_MAC_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_KEY_SAFE_DERIVE,
+                0,
+                0,
+                CKF_DERIVE,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS_MAC,
+                0,
+                0,
+                CKF_SIGN | CKF_VERIFY,
+                KeySizeKind::Unused,
+                None,
+            ),
+        }),
+        Box::new(TLSPRFMechanism {
+            minfo: MechanismInfo::new(
+                CKM_TLS12_MAC,
+                0,
+                0,
+                CKF_SIGN | CKF_VERIFY,
+                KeySizeKind::Unused,
+                None,
+            ),
         }),
     ]
 });
 
 /// Registers all TLS mechanisms
 pub fn register(mechs: &mut Mechanisms, _: &mut ObjectFactories) {
-    for ckm in &[
-        CKM_TLS_KDF,
-        CKM_TLS12_KDF,
-        CKM_TLS12_MASTER_KEY_DERIVE,
-        CKM_TLS12_MASTER_KEY_DERIVE_DH,
-        CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE,
-        CKM_TLS12_EXTENDED_MASTER_KEY_DERIVE_DH,
-    ] {
-        mechs.add_mechanism(*ckm, &TLS_MECHS[0]);
-    }
-    for ckm in &[CKM_TLS12_KEY_AND_MAC_DERIVE, CKM_TLS12_KEY_SAFE_DERIVE] {
-        mechs.add_mechanism(*ckm, &TLS_MECHS[1]);
-    }
-    for ckm in &[CKM_TLS_MAC, CKM_TLS12_MAC] {
-        mechs.add_mechanism(*ckm, &TLS_MECHS[2]);
+    for mbox in &(*TLS_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, &(*mbox));
     }
 }
 
 #[derive(Debug)]
 struct TLSPRFMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for TLSPRFMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     fn derive_operation(&self, mech: &CK_MECHANISM) -> Result<Box<dyn Derive>> {
@@ -80,7 +161,7 @@ impl Mechanism for TLSPRFMechanism {
             return Err(CKR_FIPS_SELF_TEST_FAILED)?;
         }
 
-        if self.info.flags & CKF_DERIVE != CKF_DERIVE {
+        if self.info().flags & CKF_DERIVE != CKF_DERIVE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
 
@@ -108,7 +189,7 @@ impl Mechanism for TLSPRFMechanism {
             return Err(CKR_FIPS_SELF_TEST_FAILED)?;
         }
 
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match mech.mechanism {
@@ -128,7 +209,7 @@ impl Mechanism for TLSPRFMechanism {
             return Err(CKR_FIPS_SELF_TEST_FAILED)?;
         }
 
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match mech.mechanism {

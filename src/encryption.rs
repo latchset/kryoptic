@@ -13,12 +13,12 @@ use crate::misc::{byte_ptr, sizeof, void_ptr};
 use crate::object::{Object, ObjectFactories};
 use crate::pkcs11::*;
 
-pub(crate) fn ephemeral_key() -> Object {
+pub(crate) fn ephemeral_key(mtype: CK_MECHANISM_TYPE) -> Object {
     let mut attrs = CkAttrs::with_capacity(3);
     attrs.add_owned_ulong(CKA_VALUE_LEN, 32).unwrap();
     attrs.add_owned_bool(CKA_ENCRYPT, CK_TRUE).unwrap();
     attrs.add_owned_bool(CKA_DECRYPT, CK_TRUE).unwrap();
-    aes::AesMechanism::new(CKF_ENCRYPT | CKF_DECRYPT)
+    aes::AesMechanism::new(mtype, CKF_ENCRYPT | CKF_DECRYPT)
         .generate_key(
             &CK_MECHANISM {
                 mechanism: CKM_AES_KEY_GEN,

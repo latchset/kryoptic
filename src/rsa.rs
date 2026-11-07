@@ -18,44 +18,171 @@ use crate::pkcs11::*;
 
 use asn1;
 
+fn rsa_raw_mech_info(mtype: CK_MECHANISM_TYPE) -> MechanismInfo {
+    MechanismInfo::new(
+        mtype,
+        MIN_RSA_SIZE_BITS,
+        MAX_RSA_SIZE_BITS,
+        CKF_ENCRYPT
+            | CKF_DECRYPT
+            | CKF_SIGN
+            | CKF_VERIFY
+            | CKF_WRAP
+            | CKF_UNWRAP,
+        KeySizeKind::Bits,
+        Some(CKK_RSA),
+    )
+}
+
+fn rsa_mech_info(mtype: CK_MECHANISM_TYPE, flags: CK_FLAGS) -> MechanismInfo {
+    MechanismInfo::new(
+        mtype,
+        MIN_RSA_SIZE_BITS,
+        MAX_RSA_SIZE_BITS,
+        flags,
+        KeySizeKind::Bits,
+        Some(CKK_RSA),
+    )
+}
+
+#[cfg(feature = "no_sha1")]
+const RSA_MECHS_LEN: usize = 21;
+#[cfg(not(feature = "no_sha1"))]
+const RSA_MECHS_LEN: usize = 23;
 /// Object that holds Mechanisms for RSA
-static RSA_MECHS: LazyLock<[Box<dyn Mechanism>; 4]> = LazyLock::new(|| {
-    [
-        Box::new(RsaPKCSMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
-                flags: CKF_ENCRYPT
-                    | CKF_DECRYPT
-                    | CKF_SIGN
-                    | CKF_VERIFY
-                    | CKF_WRAP
-                    | CKF_UNWRAP,
-            },
-        }),
-        Box::new(RsaPKCSMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
-                flags: CKF_SIGN | CKF_VERIFY,
-            },
-        }),
-        Box::new(RsaPKCSMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
-                flags: CKF_GENERATE_KEY_PAIR,
-            },
-        }),
-        Box::new(RsaPKCSMechanism {
-            info: CK_MECHANISM_INFO {
-                ulMinKeySize: CK_ULONG::try_from(MIN_RSA_SIZE_BITS).unwrap(),
-                ulMaxKeySize: CK_ULONG::try_from(MAX_RSA_SIZE_BITS).unwrap(),
-                flags: CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
-            },
-        }),
-    ]
-});
+static RSA_MECHS: LazyLock<[Box<dyn Mechanism>; RSA_MECHS_LEN]> =
+    LazyLock::new(|| {
+        [
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_raw_mech_info(CKM_RSA_X_509),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_raw_mech_info(CKM_RSA_PKCS),
+            }),
+            #[cfg(not(feature = "no_sha1"))]
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(CKM_SHA1_RSA_PKCS, CKF_SIGN | CKF_VERIFY),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA224_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA256_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA384_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA512_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_224_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_256_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_384_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_512_RSA_PKCS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(CKM_RSA_PKCS_PSS, CKF_SIGN | CKF_VERIFY),
+            }),
+            #[cfg(not(feature = "no_sha1"))]
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA1_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA224_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA256_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA384_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA512_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_224_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_256_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_384_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_SHA3_512_RSA_PKCS_PSS,
+                    CKF_SIGN | CKF_VERIFY,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_RSA_PKCS_KEY_PAIR_GEN,
+                    CKF_GENERATE_KEY_PAIR,
+                ),
+            }),
+            Box::new(RsaPKCSMechanism {
+                minfo: rsa_mech_info(
+                    CKM_RSA_PKCS_OAEP,
+                    CKF_ENCRYPT | CKF_DECRYPT | CKF_WRAP | CKF_UNWRAP,
+                ),
+            }),
+        ]
+    });
 
 /// The static RSA Public Key factory.
 static PUBLIC_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
@@ -67,37 +194,10 @@ static PRIVATE_KEY_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
 
 /// Registers all RSA mechanisms and key factories
 pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
-    for ckm in &[CKM_RSA_X_509, CKM_RSA_PKCS] {
-        mechs.add_mechanism(*ckm, &RSA_MECHS[0]);
+    for mbox in &(*RSA_MECHS) {
+        let mtype = (*mbox).mechinfo().mech_type();
+        mechs.add_mechanism(mtype, &(*mbox));
     }
-    for ckm in &[
-        #[cfg(not(feature = "no_sha1"))]
-        CKM_SHA1_RSA_PKCS,
-        CKM_SHA224_RSA_PKCS,
-        CKM_SHA256_RSA_PKCS,
-        CKM_SHA384_RSA_PKCS,
-        CKM_SHA512_RSA_PKCS,
-        CKM_SHA3_224_RSA_PKCS,
-        CKM_SHA3_256_RSA_PKCS,
-        CKM_SHA3_384_RSA_PKCS,
-        CKM_SHA3_512_RSA_PKCS,
-        CKM_RSA_PKCS_PSS,
-        #[cfg(not(feature = "no_sha1"))]
-        CKM_SHA1_RSA_PKCS_PSS,
-        CKM_SHA224_RSA_PKCS_PSS,
-        CKM_SHA256_RSA_PKCS_PSS,
-        CKM_SHA384_RSA_PKCS_PSS,
-        CKM_SHA512_RSA_PKCS_PSS,
-        CKM_SHA3_224_RSA_PKCS_PSS,
-        CKM_SHA3_256_RSA_PKCS_PSS,
-        CKM_SHA3_384_RSA_PKCS_PSS,
-        CKM_SHA3_512_RSA_PKCS_PSS,
-    ] {
-        mechs.add_mechanism(*ckm, &RSA_MECHS[1]);
-    }
-    mechs.add_mechanism(CKM_RSA_PKCS_KEY_PAIR_GEN, &RSA_MECHS[2]);
-    mechs.add_mechanism(CKM_RSA_PKCS_OAEP, &RSA_MECHS[3]);
-
     ot.add_factory(
         ObjectType::new(CKO_PUBLIC_KEY, CKK_RSA),
         &PUBLIC_KEY_FACTORY,
@@ -544,12 +644,16 @@ impl PrivKeyFactory for RSAPrivFactory {}
 /// Object representing various RSA mechanisms (PKCS#1 v1.5, PSS, OAEP).
 #[derive(Debug)]
 struct RsaPKCSMechanism {
-    info: CK_MECHANISM_INFO,
+    minfo: MechanismInfo,
 }
 
 impl Mechanism for RsaPKCSMechanism {
     fn info(&self) -> &CK_MECHANISM_INFO {
-        &self.info
+        &self.minfo.info()
+    }
+
+    fn mechinfo(&self) -> &MechanismInfo {
+        &self.minfo
     }
 
     /// Initializes an RSA encryption operation.
@@ -561,7 +665,7 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Encryption>> {
-        if self.info.flags & CKF_ENCRYPT != CKF_ENCRYPT {
+        if self.info().flags & CKF_ENCRYPT != CKF_ENCRYPT {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_ENCRYPT) {
@@ -569,7 +673,9 @@ impl Mechanism for RsaPKCSMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(RsaPKCSOperation::encrypt_new(
-            mech, key, &self.info,
+            mech,
+            key,
+            &self.info(),
         )?))
     }
 
@@ -582,7 +688,7 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Decryption>> {
-        if self.info.flags & CKF_DECRYPT != CKF_DECRYPT {
+        if self.info().flags & CKF_DECRYPT != CKF_DECRYPT {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_DECRYPT) {
@@ -590,7 +696,9 @@ impl Mechanism for RsaPKCSMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(RsaPKCSOperation::decrypt_new(
-            mech, key, &self.info,
+            mech,
+            key,
+            &self.info(),
         )?))
     }
 
@@ -603,14 +711,18 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Sign>> {
-        if self.info.flags & CKF_SIGN != CKF_SIGN {
+        if self.info().flags & CKF_SIGN != CKF_SIGN {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_SIGN) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
-        Ok(Box::new(RsaPKCSOperation::sign_new(mech, key, &self.info)?))
+        Ok(Box::new(RsaPKCSOperation::sign_new(
+            mech,
+            key,
+            &self.info(),
+        )?))
     }
 
     /// Initializes an RSA verification operation.
@@ -622,7 +734,7 @@ impl Mechanism for RsaPKCSMechanism {
         mech: &CK_MECHANISM,
         key: &Object,
     ) -> Result<Box<dyn Verify>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_VERIFY) {
@@ -630,7 +742,9 @@ impl Mechanism for RsaPKCSMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(RsaPKCSOperation::verify_new(
-            mech, key, &self.info,
+            mech,
+            key,
+            &self.info(),
         )?))
     }
 
@@ -645,7 +759,7 @@ impl Mechanism for RsaPKCSMechanism {
         key: &Object,
         signature: &[u8],
     ) -> Result<Box<dyn VerifySignature>> {
-        if self.info.flags & CKF_VERIFY != CKF_VERIFY {
+        if self.info().flags & CKF_VERIFY != CKF_VERIFY {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         match key.check_key_ops(CKO_PUBLIC_KEY, CKK_RSA, CKA_VERIFY) {
@@ -653,7 +767,10 @@ impl Mechanism for RsaPKCSMechanism {
             Err(e) => return Err(e),
         }
         Ok(Box::new(RsaPKCSOperation::verify_signature_new(
-            mech, key, &self.info, signature,
+            mech,
+            key,
+            &self.info(),
+            signature,
         )?))
     }
 
@@ -742,7 +859,7 @@ impl Mechanism for RsaPKCSMechanism {
         data: &mut [u8],
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<usize> {
-        if self.info.flags & CKF_WRAP != CKF_WRAP {
+        if self.info().flags & CKF_WRAP != CKF_WRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         RsaPKCSOperation::wrap(
@@ -750,7 +867,7 @@ impl Mechanism for RsaPKCSMechanism {
             wrapping_key,
             key_template.as_key_factory()?.export_for_wrapping(key)?,
             data,
-            &self.info,
+            &self.info(),
         )
     }
 
@@ -771,11 +888,11 @@ impl Mechanism for RsaPKCSMechanism {
         template: &[CK_ATTRIBUTE],
         key_template: &Box<dyn ObjectFactory>,
     ) -> Result<Object> {
-        if self.info.flags & CKF_UNWRAP != CKF_UNWRAP {
+        if self.info().flags & CKF_UNWRAP != CKF_UNWRAP {
             return Err(CKR_MECHANISM_INVALID)?;
         }
         let keydata =
-            RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info)?;
+            RsaPKCSOperation::unwrap(mech, wrapping_key, data, &self.info())?;
         key_template
             .as_key_factory()?
             .import_from_wrapped(keydata, template)
