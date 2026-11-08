@@ -217,6 +217,15 @@ fn test_eddsa_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
+    /* The VerifySignature API must reject a signature of the wrong length
+     * up front, as ECDSA/RSA/ML-DSA/SLH-DSA already do. */
+    let mut wrong_sig = sign.to_vec();
+    wrong_sig.pop();
+    assert_eq!(
+        sig_verifysig(session, handle, data.as_bytes(), &wrong_sig, &mechanism),
+        CKR_SIGNATURE_LEN_RANGE
+    );
+
     /* Ed448 */
     let mut handle: CK_ULONG = CK_INVALID_HANDLE;
     let template = make_attr_template(
@@ -325,6 +334,14 @@ fn test_eddsa_operations() {
     let ret =
         sig_verifysig(session, handle, data.as_bytes(), &sign, &mechanism);
     assert_eq!(ret, CKR_OK);
+
+    /* ...and the same up-front wrong-length check for Ed448. */
+    let mut wrong_sig = sign.to_vec();
+    wrong_sig.pop();
+    assert_eq!(
+        sig_verifysig(session, handle, data.as_bytes(), &wrong_sig, &mechanism),
+        CKR_SIGNATURE_LEN_RANGE
+    );
 }
 
 #[derive(Debug)]

@@ -154,6 +154,9 @@ impl EddsaOperation {
         let mut sigctx =
             OsslSignature::new(osslctx(), op, alg, &mut pkey, params.as_ref())?;
         if let Some(sig) = &signature {
+            if sig.len() != output_len {
+                return Err(CKR_SIGNATURE_LEN_RANGE)?;
+            }
             sigctx.set_signature(sig)?;
         }
 
