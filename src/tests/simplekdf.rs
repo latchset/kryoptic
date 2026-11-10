@@ -624,16 +624,71 @@ fn test_concatenate_kdf_attributes() {
         ulParameterLen: paramslen,
     };
 
+    let inconsistent_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        // fails as one of the keys is sensitive + non-extractable
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        inconsistent_template.as_ptr() as *mut _,
+        inconsistent_template.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    // Verify individual inconsistent attributes also fail
+    let sens_inconsistent_tmpl = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false)],
+    );
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        sens_inconsistent_tmpl.as_ptr() as *mut _,
+        sens_inconsistent_tmpl.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    let ext_inconsistent_tmpl = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        ext_inconsistent_tmpl.as_ptr() as *mut _,
+        ext_inconsistent_tmpl.len() as CK_ULONG,
+        &mut dk_handle,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
     let derive_template = make_attr_template(
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
         ],
         &[],
-        // ignored as one of the keys is sensitive + non-extractable
-        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        &[(CKA_EXTRACTABLE, false), (CKA_SENSITIVE, true)],
     );
-    let mut dk_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
         &derive_mech as *const _ as CK_MECHANISM_PTR,
@@ -644,7 +699,7 @@ fn test_concatenate_kdf_attributes() {
     );
     assert_eq!(ret, CKR_OK);
     // make sure the non-extractable and sensitive attributes are propagated
-    // to derived key, regardless the derive template
+    // to derived key
     // Do not check the value as it is not extractable
     if let Some(err) = check_attributes(
         session,
@@ -665,8 +720,8 @@ fn test_concatenate_kdf_attributes() {
     assert_eq!(check_validation(session, 0), true);
     assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
-    // Verify that single-base mechanisms also propagate sensitive and non-extractable attributes
-    // and ignore template attempts to downgrade to non-sensitive and extractable:
+    // Verify that single-base mechanisms return CKR_TEMPLATE_INCONSISTENT
+    // on template attempts to downgrade to non-sensitive and extractable:
 
     // 1. CKM_XOR_BASE_AND_DATA with sensitive/unextractable base key
     let zero_data = vec![0u8; 4];
@@ -680,6 +735,16 @@ fn test_concatenate_kdf_attributes() {
         ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
     };
     let mut dk_xor = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &xor_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
+        inconsistent_template.as_ptr() as *mut _,
+        inconsistent_template.len() as CK_ULONG,
+        &mut dk_xor,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
     let ret = fn_derive_key(
         session,
         &xor_mech as *const _ as CK_MECHANISM_PTR,
@@ -722,6 +787,16 @@ fn test_concatenate_kdf_attributes() {
         session,
         &concat_mech as *const _ as CK_MECHANISM_PTR,
         another_key_handle,
+        inconsistent_template.as_ptr() as *mut _,
+        inconsistent_template.len() as CK_ULONG,
+        &mut dk_concat_bd,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    let ret = fn_derive_key(
+        session,
+        &concat_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut dk_concat_bd,
@@ -755,6 +830,16 @@ fn test_concatenate_kdf_attributes() {
         session,
         &concat_db_mech as *const _ as CK_MECHANISM_PTR,
         another_key_handle,
+        inconsistent_template.as_ptr() as *mut _,
+        inconsistent_template.len() as CK_ULONG,
+        &mut dk_concat_db,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    let ret = fn_derive_key(
+        session,
+        &concat_db_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
         derive_template.as_ptr() as *mut _,
         derive_template.len() as CK_ULONG,
         &mut dk_concat_db,
@@ -784,7 +869,7 @@ fn test_concatenate_kdf_attributes() {
         pParameter: void_ptr!(&extract_params),
         ulParameterLen: sizeof!(CK_EXTRACT_PARAMS),
     };
-    let extract_derive_template = make_attr_template(
+    let extract_inconsistent_template = make_attr_template(
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
@@ -794,6 +879,25 @@ fn test_concatenate_kdf_attributes() {
         &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
     );
     let mut dk_extract = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &extract_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
+        extract_inconsistent_template.as_ptr() as *mut _,
+        extract_inconsistent_template.len() as CK_ULONG,
+        &mut dk_extract,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    let extract_derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 2),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, false), (CKA_SENSITIVE, true)],
+    );
     let ret = fn_derive_key(
         session,
         &extract_mech as *const _ as CK_MECHANISM_PTR,
@@ -819,6 +923,44 @@ fn test_concatenate_kdf_attributes() {
         panic!("CKM_EXTRACT_KEY_FROM_KEY: {}", err);
     }
     assert!(extract_key_value(session, dk_extract).is_err());
+
+    // 5. Default secret key protections: non-sensitive and extractable base key,
+    // but derive template does NOT specify CKA_SENSITIVE or CKA_EXTRACTABLE.
+    // The derived key must default to CKA_SENSITIVE = true and CKA_EXTRACTABLE = false.
+    let silent_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 4),
+        ],
+        &[],
+        &[],
+    );
+    let mut dk_silent = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &xor_mech as *const _ as CK_MECHANISM_PTR,
+        base_key_handle,
+        silent_template.as_ptr() as *mut _,
+        silent_template.len() as CK_ULONG,
+        &mut dk_silent,
+    );
+    assert_eq!(ret, CKR_OK);
+    if let Some(err) = check_attributes(
+        session,
+        dk_silent,
+        &[(CKA_VALUE_LEN, 4)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, false),
+            (CKA_ALWAYS_SENSITIVE, false),
+        ],
+    ) {
+        panic!("default secret key protections: {}", err);
+    }
 
     testtokn.finalize();
 }

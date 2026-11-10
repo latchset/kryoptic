@@ -7,11 +7,12 @@
 
 use std::fmt::Debug;
 
-use crate::attribute::{Attribute, CkAttrs};
+use crate::attribute::Attribute;
 use crate::error::{Error, Result};
 use crate::ffdh_groups::{get_group_name, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::object::{default_key_attributes, Object, ObjectFactories};
+use crate::misc::common_derive_key_object;
+use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
 use crate::pkcs11::*;
 use crate::session::OpIntState;
@@ -229,12 +230,15 @@ impl Derive for FFDHOperation {
             }
         }
 
-        let mut tmpl = CkAttrs::from(template);
-        tmpl.add_vec(CKA_VALUE, secret.to_vec())?;
-        tmpl.zeroize = true;
-        let mut obj = factory.create(tmpl.as_slice())?;
-
-        default_key_attributes(&mut obj, self.mech)?;
+        let (mut obj, _) = common_derive_key_object(
+            key,
+            template,
+            objectfactories,
+            secret.len(),
+        )?;
+        factory
+            .as_secret_key_factory()?
+            .set_key(&mut obj, secret.to_vec())?;
         Ok(vec![obj])
     }
 }

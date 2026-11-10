@@ -255,11 +255,11 @@ impl SlhDsaPubFactory {
 impl ObjectFactory for SlhDsaPubFactory {
     /// Creates a SLH-DSA public key object
     ///
-    /// Uses [KeyFactory::key_create()]
+    /// Uses [KeyFactory::create_key_object()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
 
         slhdsa_pub_check_import(&mut obj)?;
 
@@ -376,11 +376,11 @@ impl SlhDsaPrivFactory {
 impl ObjectFactory for SlhDsaPrivFactory {
     /// Creates a SLH-DSA private key object
     ///
-    /// Uses [KeyFactory::key_create()]
+    /// Uses [KeyFactory::create_key_object()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
 
         slhdsa_priv_check_import(&mut obj)?;
 
@@ -477,9 +477,11 @@ impl Mechanism for SlhDsaMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey = PUBLIC_KEY_FACTORY
-            .as_key_factory()?
-            .key_generate(pubkey_template)?;
+        let mut pubkey =
+            PUBLIC_KEY_FACTORY.as_key_factory()?.create_key_object(
+                pubkey_template,
+                KeyOrigin::Generate(mech.mechanism),
+            )?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -506,9 +508,11 @@ impl Mechanism for SlhDsaMechanism {
             Err(_) => return Err(CKR_TEMPLATE_INCONSISTENT)?,
         };
 
-        let mut privkey = PRIVATE_KEY_FACTORY
-            .as_key_factory()?
-            .key_generate(prikey_template)?;
+        let mut privkey =
+            PRIVATE_KEY_FACTORY.as_key_factory()?.create_key_object(
+                prikey_template,
+                KeyOrigin::Generate(mech.mechanism),
+            )?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -520,8 +524,6 @@ impl Mechanism for SlhDsaMechanism {
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
         slhdsa::generate_keypair(param_set, &mut pubkey, &mut privkey)?;
-        default_key_attributes(&mut privkey, mech.mechanism)?;
-        default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         slhdsa_public_key_info(&mut pubkey, None)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */

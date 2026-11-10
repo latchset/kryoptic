@@ -355,6 +355,58 @@ fn test_ecc_derive_plain() {
     );
     assert_eq!(ret, CKR_OK);
 
+    // Verify template contradictory to sensitive/unextractable base key fails
+    let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
+    let unextractable_pri = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[(CKA_VALUE, &_peer_value), (CKA_EC_PARAMS, &secp256r1_oid),],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_EXTRACTABLE, false),
+        ],
+    ));
+    let conflict_ext_tmpl = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
+    let mut fail_handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        unextractable_pri,
+        conflict_ext_tmpl.as_ptr() as *mut _,
+        conflict_ext_tmpl.len() as CK_ULONG,
+        &mut fail_handle,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
+    let conflict_sens_tmpl = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false)],
+    );
+    let ret = fn_derive_key(
+        session,
+        &mut mechanism,
+        unextractable_pri,
+        conflict_sens_tmpl.as_ptr() as *mut _,
+        conflict_sens_tmpl.len() as CK_ULONG,
+        &mut fail_handle,
+    );
+    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+
     testtokn.finalize();
 }
 

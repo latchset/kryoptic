@@ -21,7 +21,11 @@ fn import_generic_secret(
         CKO_SECRET_KEY,
         &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
         &[(CKA_VALUE, value)],
-        &[(CKA_DERIVE, derive)],
+        &[
+            (CKA_DERIVE, derive),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ))
 }
 
@@ -35,7 +39,11 @@ fn import_hmac_sha256_key(
         CKO_SECRET_KEY,
         &[(CKA_KEY_TYPE, CKK_SHA256_HMAC)],
         &[(CKA_VALUE, value)],
-        &[(CKA_DERIVE, derive)],
+        &[
+            (CKA_DERIVE, derive),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ))
 }
 

@@ -256,7 +256,11 @@ fn test_sp800_kdf_dkm_length_is_in_bits() {
         CKO_SECRET_KEY,
         &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
         &[(CKA_VALUE, &ki)],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let mut counter_format = CK_SP800_108_COUNTER_FORMAT {
@@ -583,7 +587,11 @@ fn test_aes_enc_kdf_vectors() {
         CKO_SECRET_KEY,
         &[(CKA_KEY_TYPE, CKK_AES)],
         &[(CKA_VALUE, key.as_slice())],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let derive_template = make_attr_template(
@@ -676,7 +684,11 @@ fn test_hash_kdf() {
             0,
             &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
             &[],
-            &[(CKA_DERIVE, true),],
+            &[
+                (CKA_DERIVE, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
         ));
 
         /* Test Hash based derivation iwith multiple hashes */
@@ -901,7 +913,11 @@ fn test_hkdf() {
             0,
             &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
             &[],
-            &[(CKA_DERIVE, true),],
+            &[
+                (CKA_DERIVE, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
         ));
 
         /* Salt Key */
@@ -912,7 +928,11 @@ fn test_hkdf() {
             0,
             &[(CKA_KEY_TYPE, kopt.1), (CKA_VALUE_LEN, kopt.2),],
             &[],
-            &[(CKA_DERIVE, true),],
+            &[
+                (CKA_DERIVE, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
         ));
 
         let salt_data = "SALT";
@@ -1548,7 +1568,11 @@ fn test_sshkdf() {
             CKO_SECRET_KEY,
             &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
             &[(CKA_VALUE, test.1.as_slice())],
-            &[(CKA_DERIVE, true)],
+            &[
+                (CKA_DERIVE, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
         ));
 
         for kt in [

@@ -141,7 +141,11 @@ fn test_ec_montgomery_derive(t: TestUnit) {
             (CKA_VALUE, alice_value.as_slice()),
             (CKA_EC_PARAMS, params.as_slice()),
         ],
-        &[(CKA_DERIVE, true)]
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     /* Bob's Private key */
@@ -158,7 +162,11 @@ fn test_ec_montgomery_derive(t: TestUnit) {
             (CKA_VALUE, bob_value.as_slice()),
             (CKA_EC_PARAMS, params.as_slice()),
         ],
-        &[(CKA_DERIVE, true)]
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     /* derive plain key without shared data */
@@ -451,7 +459,11 @@ fn test_ec_motgomery_key() {
             (CKA_KEY_TYPE, CKK_EC_MONTGOMERY),
         ],
         &[],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let ret = fn_get_attribute_value(
@@ -477,7 +489,11 @@ fn test_ec_motgomery_key() {
             (CKA_KEY_TYPE, CKK_EC_MONTGOMERY),
         ],
         &[],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let ret = fn_get_attribute_value(

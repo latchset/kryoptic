@@ -164,33 +164,9 @@ pub trait KeyFactory: ObjectFactory {
         Ok(obj)
     }
 
-    /// Default object creation function
-    ///
-    /// Uses `create_key_object()` with `KeyOrigin::Create`.
-    fn key_create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        self.create_key_object(template, KeyOrigin::Create)
-    }
-
-    /// Default key object generation function
-    ///
-    /// Uses `create_key_object()` with `KeyOrigin::Generate`.
-    fn key_generate(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        self.create_key_object(
-            template,
-            KeyOrigin::Generate(CK_UNAVAILABLE_INFORMATION),
-        )
-    }
-
-    /// Default key object unwrapping function
-    ///
-    /// Uses `create_key_object()` with `KeyOrigin::Unwrap`.
-    fn key_unwrap(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        self.create_key_object(template, KeyOrigin::Unwrap)
-    }
-
     /// The internal key object derivation function
     ///
-    /// Uses `internal_key_create()` with appropriate flags.
+    /// Uses `create_key_object()` with `KeyOrigin::Derive`.
     ///
     /// Sets appropriate default values for [CKA_LOCAL],
     /// [CKA_ALWAYS_SENSITIVE], [CKA_NEVER_EXTRACTABLE] as
@@ -422,7 +398,8 @@ pub trait SecretKeyFactory: KeyFactory {
         mut data: Vec<u8>,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut obj = match self.key_unwrap(template) {
+        let mut obj = match self.create_key_object(template, KeyOrigin::Unwrap)
+        {
             Ok(o) => o,
             Err(e) => {
                 /* ensure we do not leave around sensitive data on error */
@@ -514,29 +491,6 @@ pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
     Ok(())
 }
 
-/// Helper function to set generic attributes applicable to all keys
-/// to their defaults based on the mechanism that generated the key
-pub fn default_key_attributes(
-    key: &mut Object,
-    mech: CK_MECHANISM_TYPE,
-) -> Result<()> {
-    key.set_attr(Attribute::from_bool(CKA_LOCAL, true))?;
-    key.set_attr(Attribute::from_ulong(CKA_KEY_GEN_MECHANISM, mech))?;
-
-    let extractable = match key.get_attr_as_bool(CKA_EXTRACTABLE) {
-        Ok(b) => b,
-        _ => true,
-    };
-    key.set_attr(Attribute::from_bool(CKA_NEVER_EXTRACTABLE, !extractable))?;
-    let sensitive = match key.get_attr_as_bool(CKA_SENSITIVE) {
-        Ok(b) => b,
-        _ => false,
-    };
-    key.set_attr(Attribute::from_bool(CKA_ALWAYS_SENSITIVE, sensitive))?;
-
-    Ok(())
-}
-
 /// This is a specialized factory for objects of class CKO_SECRET_KEY
 /// and CKA_KEY_TYPE of value CKK_GENERIC_SECRET
 ///
@@ -599,7 +553,7 @@ impl ObjectFactory for GenericSecretKeyFactory {
     ///
     /// Sets the CKA_VALUE_LEN attribute from the key length, if missing.
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
@@ -734,7 +688,7 @@ impl Mechanism for GenericSecretKeyMechanism {
         }
         let mut key = GENERIC_SECRET_FACTORY
             .as_key_factory()?
-            .key_generate(template)?;
+            .create_key_object(template, KeyOrigin::Generate(mech.mechanism))?;
         key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         key.ensure_ulong(CKA_KEY_TYPE, self.keytype())
@@ -749,7 +703,6 @@ impl Mechanism for GenericSecretKeyMechanism {
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
         default_secret_key_generate(&mut key)?;
-        default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
     }
 }

@@ -238,7 +238,11 @@ fn test_ecdh_units(session: CK_SESSION_HANDLE, test_data: Vec<EcdhTestUnit>) {
                     .as_bytes()
                 )
             ],
-            &[(CKA_DERIVE, true)],
+            &[
+                (CKA_DERIVE, true),
+                (CKA_SENSITIVE, false),
+                (CKA_EXTRACTABLE, true),
+            ],
         ));
 
         /* import also public counterpart -- not used for anything now */

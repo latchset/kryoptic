@@ -331,7 +331,11 @@ fn test_kdf_units(session: CK_SESSION_HANDLE, test_data: Vec<KdfTestSection>) {
                         .as_bytes()
                     )
                 ],
-                &[(CKA_DERIVE, true)],
+                &[
+                    (CKA_DERIVE, true),
+                    (CKA_SENSITIVE, false),
+                    (CKA_EXTRACTABLE, true),
+                ],
             ));
 
             let derive_template = make_attr_template(

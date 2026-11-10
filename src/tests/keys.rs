@@ -859,7 +859,7 @@ fn test_curve_key_wrap_rfc8410() {
             &[],
             &[
                 (CKA_TOKEN, false),
-                (CKA_SENSITIVE, true),
+                (CKA_SENSITIVE, false),
                 (CKA_EXTRACTABLE, true),
                 (t.op_flag, true),
             ],

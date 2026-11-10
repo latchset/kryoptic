@@ -26,7 +26,11 @@ fn test_ffdh_generate() {
         &[(CKA_DERIVE, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
         &[],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let (pubkey2, privkey2) = ret_or_panic!(generate_key_pair(
@@ -37,7 +41,11 @@ fn test_ffdh_generate() {
         &[(CKA_DERIVE, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
         &[],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let derive_template = make_attr_template(
@@ -193,7 +201,11 @@ fn test_ffdh_derive() {
             (CKA_VALUE, &privkey),
             (CKA_LABEL, format!("FFDHE2048 private key").as_bytes()),
         ],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let peerpub = hex::decode(
@@ -376,7 +388,11 @@ fn test_ffdh_indicators() {
         &[(CKA_DERIVE, true)],
         &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_DH),],
         &[],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     assert_eq!(check_validation(session, 1), true);
