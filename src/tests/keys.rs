@@ -1505,6 +1505,22 @@ fn test_wrap_unwrap_template() {
     assert_eq!(ret, CKR_OK);
     assert_eq!(is_dec, CK_TRUE);
 
+    // Check default attributes on unwrapped key (Section 5.18.4)
+    let exp_unwrapped_bools = [
+        (CKA_LOCAL, false),
+        (CKA_ALWAYS_SENSITIVE, false),
+        (CKA_NEVER_EXTRACTABLE, false),
+    ];
+    if let Some(err) = check_attributes(
+        session,
+        unwrapped_handle,
+        &[(CKA_KEY_GEN_MECHANISM, CK_UNAVAILABLE_INFORMATION)],
+        &[],
+        &exp_unwrapped_bools,
+    ) {
+        panic!("unwrapped_handle attributes check failed: {}", err);
+    }
+
     // 4b. Unwrap with conflicting template (CKA_DECRYPT = false) -> CKR_TEMPLATE_INCONSISTENT
     let conflict_template = make_attr_template(
         &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_AES)],

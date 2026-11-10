@@ -665,6 +665,161 @@ fn test_concatenate_kdf_attributes() {
     assert_eq!(check_validation(session, 0), true);
     assert_eq!(check_object_validation(session, dk_handle, 0), true);
 
+    // Verify that single-base mechanisms also propagate sensitive and non-extractable attributes
+    // and ignore template attempts to downgrade to non-sensitive and extractable:
+
+    // 1. CKM_XOR_BASE_AND_DATA with sensitive/unextractable base key
+    let zero_data = vec![0u8; 4];
+    let xor_params = CK_KEY_DERIVATION_STRING_DATA {
+        pData: zero_data.as_ptr() as *mut _,
+        ulLen: zero_data.len() as CK_ULONG,
+    };
+    let xor_mech = CK_MECHANISM {
+        mechanism: CKM_XOR_BASE_AND_DATA,
+        pParameter: void_ptr!(&xor_params),
+        ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
+    };
+    let mut dk_xor = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &xor_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_xor,
+    );
+    assert_eq!(ret, CKR_OK);
+    if let Some(err) = check_attributes(
+        session,
+        dk_xor,
+        &[(CKA_VALUE_LEN, 4)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, true),
+            (CKA_ALWAYS_SENSITIVE, true),
+        ],
+    ) {
+        panic!("CKM_XOR_BASE_AND_DATA: {}", err);
+    }
+    assert!(extract_key_value(session, dk_xor).is_err());
+
+    // 2. CKM_CONCATENATE_BASE_AND_DATA with sensitive/unextractable base key
+    let concat_data = vec![0x11u8; 2];
+    let concat_params = CK_KEY_DERIVATION_STRING_DATA {
+        pData: concat_data.as_ptr() as *mut _,
+        ulLen: concat_data.len() as CK_ULONG,
+    };
+    let concat_mech = CK_MECHANISM {
+        mechanism: CKM_CONCATENATE_BASE_AND_DATA,
+        pParameter: void_ptr!(&concat_params),
+        ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
+    };
+    let mut dk_concat_bd = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &concat_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_concat_bd,
+    );
+    assert_eq!(ret, CKR_OK);
+    if let Some(err) = check_attributes(
+        session,
+        dk_concat_bd,
+        &[(CKA_VALUE_LEN, 6)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, true),
+            (CKA_ALWAYS_SENSITIVE, true),
+        ],
+    ) {
+        panic!("CKM_CONCATENATE_BASE_AND_DATA: {}", err);
+    }
+    assert!(extract_key_value(session, dk_concat_bd).is_err());
+
+    // 3. CKM_CONCATENATE_DATA_AND_BASE with sensitive/unextractable base key
+    let concat_db_mech = CK_MECHANISM {
+        mechanism: CKM_CONCATENATE_DATA_AND_BASE,
+        pParameter: void_ptr!(&concat_params),
+        ulParameterLen: sizeof!(CK_KEY_DERIVATION_STRING_DATA),
+    };
+    let mut dk_concat_db = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &concat_db_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
+        derive_template.as_ptr() as *mut _,
+        derive_template.len() as CK_ULONG,
+        &mut dk_concat_db,
+    );
+    assert_eq!(ret, CKR_OK);
+    if let Some(err) = check_attributes(
+        session,
+        dk_concat_db,
+        &[(CKA_VALUE_LEN, 6)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, true),
+            (CKA_ALWAYS_SENSITIVE, true),
+        ],
+    ) {
+        panic!("CKM_CONCATENATE_DATA_AND_BASE: {}", err);
+    }
+    assert!(extract_key_value(session, dk_concat_db).is_err());
+
+    // 4. CKM_EXTRACT_KEY_FROM_KEY with sensitive/unextractable base key
+    let extract_params: CK_EXTRACT_PARAMS = 0;
+    let extract_mech = CK_MECHANISM {
+        mechanism: CKM_EXTRACT_KEY_FROM_KEY,
+        pParameter: void_ptr!(&extract_params),
+        ulParameterLen: sizeof!(CK_EXTRACT_PARAMS),
+    };
+    let extract_derive_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 2),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+    );
+    let mut dk_extract = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &extract_mech as *const _ as CK_MECHANISM_PTR,
+        another_key_handle,
+        extract_derive_template.as_ptr() as *mut _,
+        extract_derive_template.len() as CK_ULONG,
+        &mut dk_extract,
+    );
+    assert_eq!(ret, CKR_OK);
+    if let Some(err) = check_attributes(
+        session,
+        dk_extract,
+        &[(CKA_VALUE_LEN, 2)],
+        &[],
+        &[
+            (CKA_LOCAL, false),
+            (CKA_EXTRACTABLE, false),
+            (CKA_SENSITIVE, true),
+            (CKA_NEVER_EXTRACTABLE, true),
+            (CKA_ALWAYS_SENSITIVE, true),
+        ],
+    ) {
+        panic!("CKM_EXTRACT_KEY_FROM_KEY: {}", err);
+    }
+    assert!(extract_key_value(session, dk_extract).is_err());
+
     testtokn.finalize();
 }
 

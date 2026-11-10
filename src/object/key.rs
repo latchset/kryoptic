@@ -18,6 +18,17 @@ pub const MIN_GENERIC_SECRET_KEY_SIZE: usize = 1;
 /// Maximum generic secret key size in bytes (128 KiB / 1,048,576 bits)
 pub const MAX_GENERIC_SECRET_KEY_SIZE: usize = 128 * 1024;
 
+/// Indicates how a key object is being created, determining how its
+/// default attributes (`CKA_LOCAL`, `CKA_KEY_GEN_MECHANISM`,
+/// `CKA_ALWAYS_SENSITIVE`, and `CKA_NEVER_EXTRACTABLE`) are initialized.
+#[derive(Debug, Clone, Copy)]
+pub enum KeyOrigin<'a> {
+    Create,
+    Generate(CK_MECHANISM_TYPE),
+    Unwrap,
+    Derive(&'a Object),
+}
+
 /// This is a common trait to define factories for objects that
 /// are keys, this trait defines attribute common to all key classes.
 ///
@@ -73,72 +84,115 @@ pub trait KeyFactory: ObjectFactory {
         Ok(obj)
     }
 
-    /// Default object creation function
+    /// Base function to create a key object from a template and key origin.
     ///
-    /// Uses `internal_key_create()` with appropriate flags.
-    fn key_create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.internal_key_create(
-            template,
-            OAFlags::NeverSettable,
-            OAFlags::RequiredOnCreate,
-        )?;
+    /// Handles acceptable flags, zeroization marking, and correctly sets
+    /// [CKA_LOCAL], [CKA_KEY_GEN_MECHANISM], [CKA_ALWAYS_SENSITIVE],
+    /// and [CKA_NEVER_EXTRACTABLE] in accordance with the PKCS#11 specification.
+    fn create_key_object(
+        &self,
+        template: &[CK_ATTRIBUTE],
+        origin: KeyOrigin,
+    ) -> Result<Object> {
+        let (unacceptable, required) = match origin {
+            KeyOrigin::Create => {
+                (OAFlags::NeverSettable, OAFlags::RequiredOnCreate)
+            }
+            KeyOrigin::Generate(_) => (
+                OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
+                OAFlags::RequiredOnGenerate,
+            ),
+            KeyOrigin::Unwrap | KeyOrigin::Derive(_) => (
+                OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
+                OAFlags::AlwaysRequired,
+            ),
+        };
+
+        let mut obj =
+            self.internal_key_create(template, unacceptable, required)?;
+
+        let (local, gen_mech) = match origin {
+            KeyOrigin::Generate(m) => (true, m),
+            _ => (false, CK_UNAVAILABLE_INFORMATION),
+        };
 
         match obj.get_class() {
             CKO_PUBLIC_KEY | CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
-                // default key attributes on CreateObject
-                obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
+                obj.set_attr(Attribute::from_bool(CKA_LOCAL, local))?;
+                obj.set_attr(Attribute::from_ulong(
+                    CKA_KEY_GEN_MECHANISM,
+                    gen_mech,
+                ))?;
             }
             _ => (),
         }
 
         match obj.get_class() {
             CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
-                // default key attributes on CreateObject for PRIVATE/SECRET/OTP keys
+                if let KeyOrigin::Derive(origin) = origin {
+                    if origin.is_sensitive() && !obj.is_sensitive() {
+                        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                    }
+                    if !origin.is_extractable() && obj.is_extractable() {
+                        return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                    }
+                }
+
+                let (always_sens, never_ext) = match origin {
+                    KeyOrigin::Create | KeyOrigin::Unwrap => (false, false),
+                    KeyOrigin::Generate(_) => {
+                        (obj.is_sensitive(), !obj.is_extractable())
+                    }
+                    KeyOrigin::Derive(origin) => (
+                        origin.is_always_sensitive() && obj.is_sensitive(),
+                        origin.is_never_extractable() && !obj.is_extractable(),
+                    ),
+                };
                 obj.set_attr(Attribute::from_bool(
                     CKA_ALWAYS_SENSITIVE,
-                    false,
+                    always_sens,
                 ))?;
                 obj.set_attr(Attribute::from_bool(
                     CKA_NEVER_EXTRACTABLE,
-                    false,
+                    never_ext,
                 ))?;
+                obj.set_zeroize();
             }
             _ => (),
         }
+
         Ok(obj)
+    }
+
+    /// Default object creation function
+    ///
+    /// Uses `create_key_object()` with `KeyOrigin::Create`.
+    fn key_create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
+        self.create_key_object(template, KeyOrigin::Create)
     }
 
     /// Default key object generation function
     ///
-    /// Uses `internal_key_create()` with appropriate flags.
-    ///
-    /// Marks the object for zeroization.
+    /// Uses `create_key_object()` with `KeyOrigin::Generate`.
     fn key_generate(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut key = self.internal_key_create(
+        self.create_key_object(
             template,
-            OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
-            OAFlags::RequiredOnGenerate,
-        )?;
-        key.set_zeroize();
-        Ok(key)
+            KeyOrigin::Generate(CK_UNAVAILABLE_INFORMATION),
+        )
     }
 
     /// Default key object unwrapping function
     ///
-    /// Uses `internal_key_create()` with appropriate flags.
+    /// Uses `create_key_object()` with `KeyOrigin::Unwrap`.
     fn key_unwrap(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        self.internal_key_create(
-            template,
-            OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
-            OAFlags::AlwaysRequired,
-        )
+        self.create_key_object(template, KeyOrigin::Unwrap)
     }
 
     /// The internal key object derivation function
     ///
     /// Uses `internal_key_create()` with appropriate flags.
     ///
-    /// Sets appropate default values for [CKA_LOCAL],
+    /// Sets appropriate default values for [CKA_LOCAL],
     /// [CKA_ALWAYS_SENSITIVE], [CKA_NEVER_EXTRACTABLE] as
     /// required by spec.
     fn internal_key_derive(
@@ -155,43 +209,7 @@ pub trait KeyFactory: ObjectFactory {
                 template
             };
 
-        let mut obj = self.internal_key_create(
-            final_template,
-            OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
-            OAFlags::AlwaysRequired,
-        )?;
-        /* overrides */
-        obj.set_attr(Attribute::from_bool(CKA_LOCAL, false))?;
-        match origin.get_attr_as_bool(CKA_ALWAYS_SENSITIVE) {
-            Ok(b) => match b {
-                false => obj.set_attr(Attribute::from_bool(
-                    CKA_ALWAYS_SENSITIVE,
-                    false,
-                ))?,
-                true => obj.set_attr(Attribute::from_bool(
-                    CKA_ALWAYS_SENSITIVE,
-                    obj.is_sensitive(),
-                ))?,
-            },
-            Err(_) => {
-                obj.set_attr(Attribute::from_bool(CKA_ALWAYS_SENSITIVE, false))?
-            }
-        };
-        match origin.get_attr_as_bool(CKA_NEVER_EXTRACTABLE) {
-            Ok(b) => match b {
-                false => obj.set_attr(Attribute::from_bool(
-                    CKA_NEVER_EXTRACTABLE,
-                    false,
-                ))?,
-                true => obj.set_attr(Attribute::from_bool(
-                    CKA_NEVER_EXTRACTABLE,
-                    !obj.is_extractable(),
-                ))?,
-            },
-            Err(_) => obj
-                .set_attr(Attribute::from_bool(CKA_NEVER_EXTRACTABLE, false))?,
-        };
-        Ok(obj)
+        self.create_key_object(final_template, KeyOrigin::Derive(origin))
     }
 
     /// Default key object derivation function
