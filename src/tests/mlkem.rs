@@ -213,6 +213,31 @@ fn test_mlkem_operations() {
 
     assert_eq!(value_enc, value_dec);
 
+    // Check default attributes on KEM outputs (Sections 5.18.8 and 5.18.9)
+    let exp_kem_bools = [
+        (CKA_LOCAL, false),
+        (CKA_ALWAYS_SENSITIVE, false),
+        (CKA_NEVER_EXTRACTABLE, false),
+    ];
+    if let Some(err) = check_attributes(
+        session,
+        handle_enc,
+        &[(CKA_KEY_GEN_MECHANISM, CK_UNAVAILABLE_INFORMATION)],
+        &[],
+        &exp_kem_bools,
+    ) {
+        panic!("handle_enc attributes check failed: {}", err);
+    }
+    if let Some(err) = check_attributes(
+        session,
+        handle_dec,
+        &[(CKA_KEY_GEN_MECHANISM, CK_UNAVAILABLE_INFORMATION)],
+        &[],
+        &exp_kem_bools,
+    ) {
+        panic!("handle_dec attributes check failed: {}", err);
+    }
+
     /* try operation with wrong key */
     let ret = fn_encapsulate_key(
         session,

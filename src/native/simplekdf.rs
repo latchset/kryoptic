@@ -208,40 +208,6 @@ impl Derive for SimpleKDFOperation {
                     Some(k) => k,
                     None => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 };
-
-                let mut sensitive =
-                    base_key_info.sensitive || another_key_info.sensitive;
-                if !sensitive {
-                    match tmpl.find_attr(CKA_SENSITIVE) {
-                        Some(b) => sensitive = b.to_bool()?,
-                        None => (),
-                    };
-                }
-                dkey.set_attr(Attribute::from_bool(CKA_SENSITIVE, sensitive))?;
-                let mut extractable =
-                    base_key_info.extractable && another_key_info.extractable;
-                if extractable {
-                    match tmpl.find_attr(CKA_EXTRACTABLE) {
-                        Some(b) => extractable = b.to_bool()?,
-                        None => (),
-                    };
-                }
-                dkey.set_attr(Attribute::from_bool(
-                    CKA_EXTRACTABLE,
-                    extractable,
-                ))?;
-                let always_sensitive = base_key_info.always_sensitive
-                    && another_key_info.always_sensitive;
-                dkey.set_attr(Attribute::from_bool(
-                    CKA_ALWAYS_SENSITIVE,
-                    always_sensitive,
-                ))?;
-                let never_extractable = base_key_info.never_extractable
-                    && another_key_info.never_extractable;
-                dkey.set_attr(Attribute::from_bool(
-                    CKA_NEVER_EXTRACTABLE,
-                    never_extractable,
-                ))?;
                 another_key_info.value.len()
             }
             CKM_CONCATENATE_BASE_AND_DATA
@@ -253,6 +219,44 @@ impl Derive for SimpleKDFOperation {
             CKM_EXTRACT_KEY_FROM_KEY => 0,
             _ => return Err(CKR_MECHANISM_INVALID)?,
         };
+
+        let key_sensitive = base_key_info.sensitive
+            || self.key_info.as_ref().map_or(false, |k| k.sensitive);
+        let key_extractable = base_key_info.extractable
+            && self.key_info.as_ref().map_or(true, |k| k.extractable);
+        let key_always_sensitive = base_key_info.always_sensitive
+            && self.key_info.as_ref().map_or(true, |k| k.always_sensitive);
+        let key_never_extractable = base_key_info.never_extractable
+            && self.key_info.as_ref().map_or(true, |k| k.never_extractable);
+
+        let mut sensitive = key_sensitive;
+        if !sensitive {
+            match tmpl.find_attr(CKA_SENSITIVE) {
+                Some(b) => sensitive = b.to_bool()?,
+                None => (),
+            };
+        }
+        dkey.set_attr(Attribute::from_bool(CKA_SENSITIVE, sensitive))?;
+
+        let mut extractable = key_extractable;
+        if extractable {
+            match tmpl.find_attr(CKA_EXTRACTABLE) {
+                Some(b) => extractable = b.to_bool()?,
+                None => (),
+            };
+        }
+        dkey.set_attr(Attribute::from_bool(CKA_EXTRACTABLE, extractable))?;
+
+        let always_sensitive = key_always_sensitive && sensitive;
+        dkey.set_attr(Attribute::from_bool(
+            CKA_ALWAYS_SENSITIVE,
+            always_sensitive,
+        ))?;
+        let never_extractable = key_never_extractable && !extractable;
+        dkey.set_attr(Attribute::from_bool(
+            CKA_NEVER_EXTRACTABLE,
+            never_extractable,
+        ))?;
 
         let outlen = match self.mech {
             CKM_XOR_BASE_AND_DATA => {
