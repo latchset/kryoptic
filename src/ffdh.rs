@@ -147,12 +147,12 @@ impl ObjectFactory for FFDHPubFactory {
     /// Creates an FFDH Public-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [KeyFactory::key_create()]
+    /// factory via [KeyFactory::create_key_object()]
     ///
     /// Additionally validates that the key is based on a well known
     /// group based on safe primes
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
         let group = ffdh_groups::get_group_name(&obj)?;
         ffdh_public_key_info(group, &mut obj)?;
         Ok(obj)
@@ -215,12 +215,12 @@ impl ObjectFactory for FFDHPrivFactory {
     /// Creates an FFDH Private-Key Object from a template
     ///
     /// Validates that the provided attributes are consistent with the
-    /// factory via [KeyFactory::key_create()]
+    /// factory via [KeyFactory::create_key_object()]
     ///
     /// Additionally validates that the key is based on a well known
     /// group based on safe primes
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let obj = self.key_create(template)?;
+        let obj = self.create_key_object(template, KeyOrigin::Create)?;
 
         let _ = ffdh_groups::get_group_name(&obj)?;
 
@@ -280,9 +280,11 @@ impl Mechanism for FFDHMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey = PUBLIC_KEY_FACTORY
-            .as_key_factory()?
-            .key_generate(pubkey_template)?;
+        let mut pubkey =
+            PUBLIC_KEY_FACTORY.as_key_factory()?.create_key_object(
+                pubkey_template,
+                KeyOrigin::Generate(mech.mechanism),
+            )?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -290,9 +292,11 @@ impl Mechanism for FFDHMechanism {
             .ensure_ulong(CKA_KEY_TYPE, CKK_DH)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
 
-        let mut privkey = PRIVATE_KEY_FACTORY
-            .as_key_factory()?
-            .key_generate(prikey_template)?;
+        let mut privkey =
+            PRIVATE_KEY_FACTORY.as_key_factory()?.create_key_object(
+                prikey_template,
+                KeyOrigin::Generate(mech.mechanism),
+            )?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -311,8 +315,6 @@ impl Mechanism for FFDHMechanism {
         let group = ffdh_groups::get_group_name(&privkey)?;
 
         FFDHOperation::generate_keypair(group, &mut pubkey, &mut privkey)?;
-        default_key_attributes(&mut privkey, mech.mechanism)?;
-        default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         ffdh_public_key_info(group, &mut pubkey)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */

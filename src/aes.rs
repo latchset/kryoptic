@@ -166,7 +166,7 @@ impl ObjectFactory for AesKeyFactory {
     /// code and additionally ensures the key size is one of the AES allowed
     /// sizes (currently 128, 192 or 256 bits).
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
         let len = self.get_key_buffer_len(&obj)?;
         check_key_len(len)?;
         obj.ensure_ulong(CKA_VALUE_LEN, CK_ULONG::try_from(len)?)?;
@@ -357,8 +357,9 @@ impl Mechanism for AesMechanism {
         if self.info().flags & CKF_GENERATE != CKF_GENERATE {
             return Err(CKR_MECHANISM_INVALID)?;
         }
-        let mut key =
-            AES_KEY_FACTORY.as_key_factory()?.key_generate(template)?;
+        let mut key = AES_KEY_FACTORY
+            .as_key_factory()?
+            .create_key_object(template, KeyOrigin::Generate(mech.mechanism))?;
         key.ensure_ulong(CKA_CLASS, CKO_SECRET_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
         key.ensure_ulong(CKA_KEY_TYPE, CKK_AES)
@@ -367,7 +368,6 @@ impl Mechanism for AesMechanism {
         check_key_len(key.get_attr_as_ulong(CKA_VALUE_LEN)? as usize)?;
 
         default_secret_key_generate(&mut key)?;
-        default_key_attributes(&mut key, mech.mechanism)?;
         Ok(key)
     }
 

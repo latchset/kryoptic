@@ -229,22 +229,32 @@ impl Derive for SimpleKDFOperation {
         let key_never_extractable = base_key_info.never_extractable
             && self.key_info.as_ref().map_or(true, |k| k.never_extractable);
 
-        let mut sensitive = key_sensitive;
-        if !sensitive {
-            match tmpl.find_attr(CKA_SENSITIVE) {
-                Some(b) => sensitive = b.to_bool()?,
-                None => (),
-            };
-        }
+        /* We need an additional test for sensitivity/extractability because
+         * for CKM_CONCATENATE_BASE_AND_KEY the result depends on both keys
+         * but KeyOrigin only includes the base key, so this takes into
+         * account the contribution of the "other" key (self.key_info) */
+        let sensitive = match tmpl.find_attr(CKA_SENSITIVE) {
+            Some(attr) => {
+                let s = attr.to_bool()?;
+                if key_sensitive && !s {
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                }
+                s
+            }
+            None => key_sensitive || dkey.is_sensitive(),
+        };
         dkey.set_attr(Attribute::from_bool(CKA_SENSITIVE, sensitive))?;
 
-        let mut extractable = key_extractable;
-        if extractable {
-            match tmpl.find_attr(CKA_EXTRACTABLE) {
-                Some(b) => extractable = b.to_bool()?,
-                None => (),
-            };
-        }
+        let extractable = match tmpl.find_attr(CKA_EXTRACTABLE) {
+            Some(attr) => {
+                let e = attr.to_bool()?;
+                if !key_extractable && e {
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                }
+                e
+            }
+            None => key_extractable && dkey.is_extractable(),
+        };
         dkey.set_attr(Attribute::from_bool(CKA_EXTRACTABLE, extractable))?;
 
         let always_sensitive = key_always_sensitive && sensitive;

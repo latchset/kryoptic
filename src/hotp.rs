@@ -15,8 +15,7 @@ use crate::object::factory::{
     attr_element, OAFlags, ObjectFactories, ObjectFactory, ObjectFactoryData,
 };
 use crate::object::key::{
-    default_key_attributes, default_secret_key_generate, KeyFactory,
-    SecretKeyFactory,
+    default_secret_key_generate, KeyFactory, KeyOrigin, SecretKeyFactory,
 };
 use crate::object::otp::OTPKeyFactory;
 use crate::object::{Object, ObjectType};
@@ -221,7 +220,7 @@ impl HOTPKeyFactory {
 
 impl ObjectFactory for HOTPKeyFactory {
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
@@ -312,12 +311,12 @@ impl Mechanism for HOTPKeyMechanism {
         _: &ObjectFactories,
     ) -> Result<Object> {
         let factory = HOTPKeyFactory::new();
-        let mut key = factory.key_generate(template)?;
+        let mut key = factory
+            .create_key_object(template, KeyOrigin::Generate(mech.mechanism))?;
 
         factory.validate_object(&mut key)?;
 
         default_secret_key_generate(&mut key)?;
-        default_key_attributes(&mut key, mech.mechanism)?;
 
         if key.get_attr_as_bytes(CKA_OTP_COUNTER).is_err() {
             key.set_attr(Attribute::from_bytes(CKA_OTP_COUNTER, vec![0; 8]))?;

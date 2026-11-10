@@ -303,7 +303,11 @@ fn test_tlskdf_units(
                         .as_bytes()
                     )
                 ],
-                &[(CKA_DERIVE, true)],
+                &[
+                    (CKA_DERIVE, true),
+                    (CKA_SENSITIVE, false),
+                    (CKA_EXTRACTABLE, true),
+                ],
             ));
 
             /* Master key Derivation */
@@ -884,7 +888,11 @@ fn test_tls_ems_vector() {
         CKO_SECRET_KEY,
         &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
         &[(CKA_VALUE, pms.as_slice()),],
-        &[(CKA_DERIVE, true)],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true),
+        ],
     ));
 
     let hash = hex::decode(

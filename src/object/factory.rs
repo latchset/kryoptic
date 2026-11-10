@@ -615,7 +615,7 @@ impl DataFactory {
 impl ObjectFactory for DataFactory {
     /// Creates a new Data Object from the template
     ///
-    /// Uses `key_create()`
+    /// Uses `default_object_create()`
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         self.default_object_create(template)
     }

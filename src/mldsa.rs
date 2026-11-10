@@ -228,11 +228,11 @@ impl MlDsaPubFactory {
 impl ObjectFactory for MlDsaPubFactory {
     /// Creates a ML-DSA public key object
     ///
-    /// Uses [KeyFactory::key_create()]
+    /// Uses [KeyFactory::create_key_object()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
 
         mldsa_pub_check_import(&mut obj)?;
 
@@ -366,11 +366,11 @@ impl MlDsaPrivFactory {
 impl ObjectFactory for MlDsaPrivFactory {
     /// Creates a ML-DSA private key object
     ///
-    /// Uses [KeyFactory::key_create()]
+    /// Uses [KeyFactory::create_key_object()]
     ///
     /// Checks the import is consistent via helper function
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
-        let mut obj = self.key_create(template)?;
+        let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
 
         mldsa_priv_check_import(&mut obj)?;
 
@@ -468,9 +468,11 @@ impl Mechanism for MlDsaMechanism {
         pubkey_template: &[CK_ATTRIBUTE],
         prikey_template: &[CK_ATTRIBUTE],
     ) -> Result<(Object, Object)> {
-        let mut pubkey = PUBLIC_KEY_FACTORY
-            .as_key_factory()?
-            .key_generate(pubkey_template)?;
+        let mut pubkey =
+            PUBLIC_KEY_FACTORY.as_key_factory()?.create_key_object(
+                pubkey_template,
+                KeyOrigin::Generate(mech.mechanism),
+            )?;
         pubkey
             .ensure_ulong(CKA_CLASS, CKO_PUBLIC_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -486,9 +488,11 @@ impl Mechanism for MlDsaMechanism {
             Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
         };
 
-        let mut privkey = PRIVATE_KEY_FACTORY
-            .as_key_factory()?
-            .key_generate(prikey_template)?;
+        let mut privkey =
+            PRIVATE_KEY_FACTORY.as_key_factory()?.create_key_object(
+                prikey_template,
+                KeyOrigin::Generate(mech.mechanism),
+            )?;
         privkey
             .ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)
             .map_err(|_| CKR_TEMPLATE_INCONSISTENT)?;
@@ -498,8 +502,6 @@ impl Mechanism for MlDsaMechanism {
         privkey.ensure_ulong(CKA_PARAMETER_SET, param_set)?;
 
         mldsa::generate_keypair(param_set, &mut pubkey, &mut privkey)?;
-        default_key_attributes(&mut privkey, mech.mechanism)?;
-        default_key_attributes(&mut pubkey, mech.mechanism)?;
 
         mldsa_public_key_info(&mut pubkey, None)?;
         /* copy the calculated CKA_PUBLIC_KEY_INFO to the private key */

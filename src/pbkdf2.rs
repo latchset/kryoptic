@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::misc::bytes_to_vec;
-use crate::object::{default_key_attributes, Object, ObjectFactories};
+use crate::object::{KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
 use std::fmt::Debug;
 use std::sync::LazyLock;
@@ -153,14 +153,21 @@ impl Mechanism for PBKDF2Mechanism {
             }
         };
 
-        let dkm = pbkdf2_derive(mechanisms, prf, &pass, &salt, iter, keylen)?;
+        let default_vlen = CK_ULONG::try_from(keylen)?;
 
         let mut tmpl = CkAttrs::from(template);
-        tmpl.add_vec(CKA_VALUE, dkm)?;
-        tmpl.zeroize = true;
+        tmpl.add_missing_ulong(CKA_VALUE_LEN, &default_vlen);
 
-        let mut key = factory.create(tmpl.as_slice())?;
-        default_key_attributes(&mut key, mech.mechanism)?;
+        let mut key = factory.as_key_factory()?.create_key_object(
+            tmpl.as_slice(),
+            KeyOrigin::Generate(mech.mechanism),
+        )?;
+
+        let dkm = pbkdf2_derive(mechanisms, prf, &pass, &salt, iter, keylen)?;
+        if let Err(e) = factory.as_secret_key_factory()?.set_key(&mut key, dkm)
+        {
+            return Err(e);
+        }
         Ok(key)
     }
 }
