@@ -39,6 +39,8 @@ pub enum KeyOrigin<'a> {
     Generate(CK_MECHANISM_TYPE),
     Unwrap,
     Derive(CK_MECHANISM_TYPE, &'a Object, DerivePolicy),
+    #[allow(unused)]
+    Kem,
 }
 
 /// This is a common trait to define factories for objects that
@@ -114,7 +116,7 @@ pub trait KeyFactory: ObjectFactory {
                 OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
                 OAFlags::RequiredOnGenerate,
             ),
-            KeyOrigin::Unwrap | KeyOrigin::Derive(_, _, _) => {
+            KeyOrigin::Unwrap | KeyOrigin::Derive(_, _, _) | KeyOrigin::Kem => {
                 (
                     OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
                     OAFlags::AlwaysRequired,
@@ -156,7 +158,9 @@ pub trait KeyFactory: ObjectFactory {
                 }
 
                 let (always_sens, never_ext) = match origin {
-                    KeyOrigin::Create | KeyOrigin::Unwrap => (false, false),
+                    KeyOrigin::Create | KeyOrigin::Unwrap | KeyOrigin::Kem => {
+                        (false, false)
+                    }
                     KeyOrigin::Generate(_) => {
                         (obj.is_sensitive(), !obj.is_extractable())
                     }

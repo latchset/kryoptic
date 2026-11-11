@@ -33,6 +33,8 @@ pub const ML_KEM_512_CIPHERTEXT_BYTES: usize = 768;
 pub const ML_KEM_768_CIPHERTEXT_BYTES: usize = 1088;
 pub const ML_KEM_1024_CIPHERTEXT_BYTES: usize = 1568;
 
+const ML_KEM_SHARED_SECRET_BYTES: CK_ULONG = 32;
+
 fn mlkem_public_key_info(
     obj: &mut Object,
     pubkey: Option<&[u8]>,
@@ -407,13 +409,22 @@ impl Mechanism for MlKemMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
+        if let Some(idx) =
+            template.iter().position(|x| x.type_ == CKA_VALUE_LEN)
+        {
+            if template[idx].to_ulong()? != ML_KEM_SHARED_SECRET_BYTES {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        }
+
         let (keydata, ctlen) = mlkem::encapsulate(key, ciphertext)?;
-        Ok((
-            key_factory
-                .as_key_factory()?
-                .import_from_wrapped(keydata, template)?,
-            ctlen,
-        ))
+        let mut ss = key_factory
+            .as_key_factory()?
+            .create_key_object(template, KeyOrigin::Kem)?;
+        key_factory
+            .as_secret_key_factory()?
+            .set_key(&mut ss, keydata)?;
+        Ok((ss, ctlen))
     }
 
     fn decapsulate(
@@ -434,10 +445,22 @@ impl Mechanism for MlKemMechanism {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
+        if let Some(idx) =
+            template.iter().position(|x| x.type_ == CKA_VALUE_LEN)
+        {
+            if template[idx].to_ulong()? != ML_KEM_SHARED_SECRET_BYTES {
+                return Err(CKR_TEMPLATE_INCONSISTENT)?;
+            }
+        }
+
         let keydata = mlkem::decapsulate(key, ciphertext)?;
-        key_factory
+        let mut ss = key_factory
             .as_key_factory()?
-            .import_from_wrapped(keydata, template)
+            .create_key_object(template, KeyOrigin::Kem)?;
+        key_factory
+            .as_secret_key_factory()?
+            .set_key(&mut ss, keydata)?;
+        Ok(ss)
     }
 
     fn generate_keypair(
