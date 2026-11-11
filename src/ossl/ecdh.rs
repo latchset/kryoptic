@@ -234,8 +234,13 @@ impl Derive for ECDHOperation {
             secret = output;
         }
 
-        let (mut obj, _) =
-            common_derive_key_object(key, template, objfactories, keylen)?;
+        let (mut obj, _) = common_derive_key_object(
+            self.mech,
+            key,
+            template,
+            objfactories,
+            keylen,
+        )?;
         factory.as_secret_key_factory()?.set_key(&mut obj, secret)?;
         Ok(vec![obj])
     }

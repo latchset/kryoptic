@@ -16,7 +16,7 @@ use crate::pkcs11::vendor::nss::*;
 
 use super::certs::{TrustObject, X509Factory};
 use super::key::{
-    GenericSecretKeyFactory, GenericSecretKeyMechanism, KeyFactory,
+    GenericSecretKeyFactory, GenericSecretKeyMechanism, KeyFactory, KeyOrigin,
     PubKeyFactory, SecretKeyFactory, MAX_GENERIC_SECRET_KEY_SIZE,
     MIN_GENERIC_SECRET_KEY_SIZE,
 };
@@ -1193,11 +1193,11 @@ impl ObjectFactories {
     /// provided and attempts a key derivation operation.
     pub fn derive_key_from_template(
         &self,
-        key: &Object,
+        origin: KeyOrigin,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         let factory = self.get_obj_factory_from_key_template(template)?;
-        factory.as_key_factory()?.key_derive(template, key)
+        factory.as_key_factory()?.key_derive(template, origin)
     }
 }
 

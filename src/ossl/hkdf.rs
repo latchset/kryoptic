@@ -267,7 +267,13 @@ impl Derive for HKDFOperation {
         let (mut obj, keysize) = if self.emit_data_obj {
             common_derive_data_object(template, objfactories, self.prflen)
         } else {
-            common_derive_key_object(key, template, objfactories, self.prflen)
+            common_derive_key_object(
+                self.mech,
+                key,
+                template,
+                objfactories,
+                self.prflen,
+            )
         }?;
 
         if self.mode == HkdfMode::ExtractOnly && keysize != self.prflen {

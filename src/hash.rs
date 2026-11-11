@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::object::{Object, ObjectFactories};
+use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::ossl::hash::HashOperation;
 use crate::pkcs11::*;
 use crate::session::OpIntState;
@@ -597,8 +597,10 @@ impl Derive for HashKDFOperation {
             }
         }
 
-        let mut obj =
-            factory.as_key_factory()?.key_derive(tmpl.as_slice(), key)?;
+        let mut obj = factory.as_key_factory()?.key_derive(
+            tmpl.as_slice(),
+            KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+        )?;
 
         let mut dkm = vec![0u8; hashsize];
         op.digest(

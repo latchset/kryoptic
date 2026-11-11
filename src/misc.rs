@@ -8,7 +8,9 @@ use std::borrow::Cow;
 
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
-use crate::object::{Object, ObjectFactories, ObjectType};
+use crate::object::{
+    DerivePolicy, KeyOrigin, Object, ObjectFactories, ObjectType,
+};
 use crate::pkcs11::*;
 
 /// Constant containing the size of a CK_ULONG on this architecture
@@ -277,6 +279,7 @@ pub fn common_derive_data_object(
 /// Adds other potentially missing required attributes like CKA_CLASS
 #[allow(dead_code)]
 pub fn common_derive_key_object(
+    mech: CK_MECHANISM_TYPE,
     key: &Object,
     template: &[CK_ATTRIBUTE],
     objfactories: &ObjectFactories,
@@ -285,8 +288,10 @@ pub fn common_derive_key_object(
     let default_class = CKO_SECRET_KEY;
     let mut tmpl = CkAttrs::from(template);
     tmpl.add_missing_ulong(CKA_CLASS, &default_class);
-    let mut obj =
-        objfactories.derive_key_from_template(key, tmpl.as_slice())?;
+    let mut obj = objfactories.derive_key_from_template(
+        KeyOrigin::Derive(mech, key, DerivePolicy::Independent),
+        tmpl.as_slice(),
+    )?;
     let value_len = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
         Ok(val) => usize::try_from(val)?,
         Err(_) => {

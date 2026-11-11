@@ -18,6 +18,18 @@ pub const MIN_GENERIC_SECRET_KEY_SIZE: usize = 1;
 /// Maximum generic secret key size in bytes (128 KiB / 1,048,576 bits)
 pub const MAX_GENERIC_SECRET_KEY_SIZE: usize = 128 * 1024;
 
+/// Indicates the policy for key sensitivity and extractability during derivation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DerivePolicy {
+    /// Standard key derivation (ECDH, DH, HKDF, SP800-108, TLS, IKE, etc.):
+    /// The template can freely specify CKA_SENSITIVE and CKA_EXTRACTABLE.
+    /// CKA_ALWAYS_SENSITIVE and CKA_NEVER_EXTRACTABLE are propagated from the base key.
+    Independent,
+    /// Direct symmetric key manipulation (Simple KDFs like concatenate, extract, XOR):
+    /// The derived key cannot downgrade sensitivity or upgrade extractability relative to the base key.
+    Inherited,
+}
+
 /// Indicates how a key object is being created, determining how its
 /// default attributes (`CKA_LOCAL`, `CKA_KEY_GEN_MECHANISM`,
 /// `CKA_ALWAYS_SENSITIVE`, and `CKA_NEVER_EXTRACTABLE`) are initialized.
@@ -26,7 +38,7 @@ pub enum KeyOrigin<'a> {
     Create,
     Generate(CK_MECHANISM_TYPE),
     Unwrap,
-    Derive(&'a Object),
+    Derive(CK_MECHANISM_TYPE, &'a Object, DerivePolicy),
 }
 
 /// This is a common trait to define factories for objects that
@@ -102,10 +114,12 @@ pub trait KeyFactory: ObjectFactory {
                 OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
                 OAFlags::RequiredOnGenerate,
             ),
-            KeyOrigin::Unwrap | KeyOrigin::Derive(_) => (
-                OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
-                OAFlags::AlwaysRequired,
-            ),
+            KeyOrigin::Unwrap | KeyOrigin::Derive(_, _, _) => {
+                (
+                    OAFlags::SettableOnlyOnCreate | OAFlags::NeverSettable,
+                    OAFlags::AlwaysRequired,
+                )
+            }
         };
 
         let mut obj =
@@ -113,6 +127,7 @@ pub trait KeyFactory: ObjectFactory {
 
         let (local, gen_mech) = match origin {
             KeyOrigin::Generate(m) => (true, m),
+            KeyOrigin::Derive(m, _, _) => (false, m),
             _ => (false, CK_UNAVAILABLE_INFORMATION),
         };
 
@@ -129,7 +144,9 @@ pub trait KeyFactory: ObjectFactory {
 
         match obj.get_class() {
             CKO_PRIVATE_KEY | CKO_SECRET_KEY | CKO_OTP_KEY => {
-                if let KeyOrigin::Derive(origin) = origin {
+                if let KeyOrigin::Derive(_, origin, DerivePolicy::Inherited) =
+                    origin
+                {
                     if origin.is_sensitive() && !obj.is_sensitive() {
                         return Err(CKR_TEMPLATE_INCONSISTENT)?;
                     }
@@ -143,7 +160,7 @@ pub trait KeyFactory: ObjectFactory {
                     KeyOrigin::Generate(_) => {
                         (obj.is_sensitive(), !obj.is_extractable())
                     }
-                    KeyOrigin::Derive(origin) => (
+                    KeyOrigin::Derive(_, origin, _) => (
                         origin.is_always_sensitive() && obj.is_sensitive(),
                         origin.is_never_extractable() && !obj.is_extractable(),
                     ),
@@ -174,8 +191,12 @@ pub trait KeyFactory: ObjectFactory {
     fn internal_key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
-        origin: &Object,
+        key_origin: KeyOrigin,
     ) -> Result<Object> {
+        let origin = match key_origin {
+            KeyOrigin::Derive(_, o, _) => o,
+            _ => return Err(CKR_GENERAL_ERROR)?,
+        };
         let merged_attrs: CkAttrs<'_>;
         let final_template: &[CK_ATTRIBUTE] =
             if let Some(dt) = origin.get_attr(CKA_DERIVE_TEMPLATE) {
@@ -185,7 +206,7 @@ pub trait KeyFactory: ObjectFactory {
                 template
             };
 
-        self.create_key_object(final_template, KeyOrigin::Derive(origin))
+        self.create_key_object(final_template, key_origin)
     }
 
     /// Default key object derivation function
@@ -194,7 +215,7 @@ pub trait KeyFactory: ObjectFactory {
     fn key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
-        origin: &Object,
+        origin: KeyOrigin,
     ) -> Result<Object> {
         self.internal_key_derive(template, origin)
     }

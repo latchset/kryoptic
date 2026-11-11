@@ -196,7 +196,7 @@ impl KeyFactory for AesKeyFactory {
     fn key_derive(
         &self,
         template: &[CK_ATTRIBUTE],
-        origin: &Object,
+        origin: KeyOrigin,
     ) -> Result<Object> {
         let obj = self.internal_key_derive(template, origin)?;
 
@@ -693,7 +693,10 @@ impl Derive for AesKDFOperation<'_> {
         key.check_key_ops(CKO_SECRET_KEY, CKK_AES, CKA_DERIVE)?;
         let factory =
             objfactories.get_obj_factory_from_key_template(template)?;
-        let mut obj = factory.as_key_factory()?.key_derive(template, key)?;
+        let mut obj = factory.as_key_factory()?.key_derive(
+            template,
+            KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+        )?;
 
         let mechanism = CK_MECHANISM {
             mechanism: self.mech,
