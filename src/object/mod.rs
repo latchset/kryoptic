@@ -28,7 +28,7 @@ pub use factory::{
 };
 
 pub use key::{
-    default_secret_key_generate, GenericSecretKeyFactory,
+    default_secret_key_generate, DerivePolicy, GenericSecretKeyFactory,
     GenericSecretKeyMechanism, KeyFactory, KeyOrigin, PrivKeyFactory,
     PubKeyFactory, SecretKeyFactory, MAX_GENERIC_SECRET_KEY_SIZE,
     MIN_GENERIC_SECRET_KEY_SIZE,

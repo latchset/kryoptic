@@ -28,7 +28,7 @@ use crate::hmac::hmac_size;
 use crate::mechanism::{Derive, Mac, MechOperation, Mechanism, Mechanisms};
 use crate::misc::{bytes_to_vec, common_derive_key_object, zeromem};
 use crate::native::hmac::HMACOperation;
-use crate::object::{Object, ObjectFactories};
+use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
 use crate::session::OpIntState;
 
@@ -147,7 +147,7 @@ fn prf(
 /// creation. Returns the partially-constructed output object and key size.
 fn ike_derive_setup(
     state: &mut OpIntState,
-    prf_mech: CK_MECHANISM_TYPE,
+    mech: CK_MECHANISM_TYPE,
     key: &Object,
     template: &[CK_ATTRIBUTE],
     objfactories: &ObjectFactories,
@@ -163,8 +163,10 @@ fn ike_derive_setup(
         let mut tmpl = CkAttrs::from(template);
         tmpl.add_missing_ulong(CKA_CLASS, &default_class);
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &kt);
-        let mut obj =
-            objfactories.derive_key_from_template(key, tmpl.as_slice())?;
+        let mut obj = objfactories.derive_key_from_template(
+            KeyOrigin::Derive(mech, key, DerivePolicy::Independent),
+            tmpl.as_slice(),
+        )?;
         let value_len = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(val) => usize::try_from(val)?,
             Err(_) => {
@@ -180,7 +182,7 @@ fn ike_derive_setup(
         };
         Ok((obj, value_len))
     } else {
-        common_derive_key_object(key, template, objfactories, default_len)
+        common_derive_key_object(mech, key, template, objfactories, default_len)
     }
 }
 
@@ -367,7 +369,7 @@ impl Derive for IkePrfOperation {
         let default_key_type = prf_key_type(self.prf)?;
         let (mut obj, keysize) = ike_derive_setup(
             &mut self.state,
-            self.prf,
+            CKM_IKE_PRF_DERIVE,
             key,
             template,
             objfactories,
@@ -527,7 +529,7 @@ impl Derive for Ike1PrfOperation {
 
         let (mut obj, keysize) = ike_derive_setup(
             &mut self.state,
-            self.prf,
+            CKM_IKE1_PRF_DERIVE,
             key,
             template,
             objfactories,
@@ -657,7 +659,7 @@ impl Derive for Ike1ExtendedOperation {
         require_prf_base_key_type(self.prf, key)?;
         let (mut obj, keysize) = ike_derive_setup(
             &mut self.state,
-            self.prf,
+            CKM_IKE1_EXTENDED_DERIVE,
             key,
             template,
             objfactories,
@@ -814,7 +816,7 @@ impl Derive for Ike2PrfPlusOperation {
         require_prf_base_key_type(self.prf, key)?;
         let (mut obj, keysize) = ike_derive_setup(
             &mut self.state,
-            self.prf,
+            CKM_IKE2_PRF_PLUS_DERIVE,
             key,
             template,
             objfactories,

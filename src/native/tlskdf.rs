@@ -12,7 +12,7 @@ use crate::mechanism::*;
 use crate::misc::{
     bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, zeromem, CK_ULONG_SIZE,
 };
-use crate::object::{Object, ObjectFactories};
+use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
 use crate::session::OpIntState;
 
@@ -623,8 +623,10 @@ impl TLSKDFOperation {
         let tmpl = self.verify_mk_template(template)?;
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey =
-            factory.as_key_factory()?.key_derive(tmpl.as_slice(), key)?;
+        let mut dkey = factory.as_key_factory()?.key_derive(
+            tmpl.as_slice(),
+            KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+        )?;
 
         let mech = mechanisms.get(self.prf)?;
         let seed = match self.mech {
@@ -771,18 +773,20 @@ impl TLSKDFOperation {
             mac_tmpl.add_bool(CKA_EXTRACTABLE, &is_extractable);
             let factory = objfactories
                 .get_obj_factory_from_key_template(mac_tmpl.as_slice())?;
-            let mut climac = factory
-                .as_key_factory()?
-                .key_derive(mac_tmpl.as_slice(), key)?;
+            let mut climac = factory.as_key_factory()?.key_derive(
+                mac_tmpl.as_slice(),
+                KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+            )?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut climac, dkm[i..(i + maclen)].to_vec())?;
 
             i += maclen;
             keys.push(climac);
-            let mut srvmac = factory
-                .as_key_factory()?
-                .key_derive(mac_tmpl.as_slice(), key)?;
+            let mut srvmac = factory.as_key_factory()?.key_derive(
+                mac_tmpl.as_slice(),
+                KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+            )?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut srvmac, dkm[i..(i + maclen)].to_vec())?;
@@ -794,18 +798,20 @@ impl TLSKDFOperation {
             let keylen = self.keylen as usize;
             let factory = objfactories
                 .get_obj_factory_from_key_template(key_tmpl.as_slice())?;
-            let mut clikey = factory
-                .as_key_factory()?
-                .key_derive(key_tmpl.as_slice(), key)?;
+            let mut clikey = factory.as_key_factory()?.key_derive(
+                key_tmpl.as_slice(),
+                KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+            )?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut clikey, dkm[i..(i + keylen)].to_vec())?;
 
             i += keylen;
             keys.push(clikey);
-            let mut srvkey = factory
-                .as_key_factory()?
-                .key_derive(key_tmpl.as_slice(), key)?;
+            let mut srvkey = factory.as_key_factory()?.key_derive(
+                key_tmpl.as_slice(),
+                KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+            )?;
             factory
                 .as_secret_key_factory()?
                 .set_key(&mut srvkey, dkm[i..(i + keylen)].to_vec())?;
@@ -857,8 +863,10 @@ impl TLSKDFOperation {
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey =
-            factory.as_key_factory()?.key_derive(tmpl.as_slice(), key)?;
+        let mut dkey = factory.as_key_factory()?.key_derive(
+            tmpl.as_slice(),
+            KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+        )?;
         let dkmlen = match dkey.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(n) => n as usize,
             Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,

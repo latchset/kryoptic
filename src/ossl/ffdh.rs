@@ -231,6 +231,7 @@ impl Derive for FFDHOperation {
         }
 
         let (mut obj, _) = common_derive_key_object(
+            self.mech,
             key,
             template,
             objectfactories,

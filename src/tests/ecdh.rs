@@ -355,7 +355,7 @@ fn test_ecc_derive_plain() {
     );
     assert_eq!(ret, CKR_OK);
 
-    // Verify template contradictory to sensitive/unextractable base key fails
+    // Verify template with explicit extractable/sensitive setting succeeds on ECDH
     let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
     let unextractable_pri = ret_or_panic!(import_object(
         session,
@@ -377,16 +377,41 @@ fn test_ecc_derive_plain() {
         &[],
         &[(CKA_EXTRACTABLE, true)],
     );
-    let mut fail_handle = CK_INVALID_HANDLE;
+    let mut ext_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
         &mut mechanism,
         unextractable_pri,
         conflict_ext_tmpl.as_ptr() as *mut _,
         conflict_ext_tmpl.len() as CK_ULONG,
-        &mut fail_handle,
+        &mut ext_handle,
     );
-    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+    assert_eq!(ret, CKR_OK);
+    let mut ext_val: CK_BBOOL = CK_FALSE;
+    let mut never_ext_val: CK_BBOOL = CK_TRUE;
+    let mut check_ext = make_ptrs_template(&[
+        (
+            CKA_EXTRACTABLE,
+            void_ptr!(&mut ext_val),
+            std::mem::size_of::<CK_BBOOL>(),
+        ),
+        (
+            CKA_NEVER_EXTRACTABLE,
+            void_ptr!(&mut never_ext_val),
+            std::mem::size_of::<CK_BBOOL>(),
+        ),
+    ]);
+    assert_eq!(
+        fn_get_attribute_value(
+            session,
+            ext_handle,
+            check_ext.as_mut_ptr(),
+            check_ext.len() as CK_ULONG,
+        ),
+        CKR_OK
+    );
+    assert_eq!(ext_val, CK_TRUE);
+    assert_eq!(never_ext_val, CK_FALSE);
 
     let conflict_sens_tmpl = make_attr_template(
         &[
@@ -397,15 +422,41 @@ fn test_ecc_derive_plain() {
         &[],
         &[(CKA_SENSITIVE, false)],
     );
+    let mut sens_handle = CK_INVALID_HANDLE;
     let ret = fn_derive_key(
         session,
         &mut mechanism,
         unextractable_pri,
         conflict_sens_tmpl.as_ptr() as *mut _,
         conflict_sens_tmpl.len() as CK_ULONG,
-        &mut fail_handle,
+        &mut sens_handle,
     );
-    assert_eq!(ret, CKR_TEMPLATE_INCONSISTENT);
+    assert_eq!(ret, CKR_OK);
+    let mut sens_val: CK_BBOOL = CK_TRUE;
+    let mut always_sens_val: CK_BBOOL = CK_TRUE;
+    let mut check_sens = make_ptrs_template(&[
+        (
+            CKA_SENSITIVE,
+            void_ptr!(&mut sens_val),
+            std::mem::size_of::<CK_BBOOL>(),
+        ),
+        (
+            CKA_ALWAYS_SENSITIVE,
+            void_ptr!(&mut always_sens_val),
+            std::mem::size_of::<CK_BBOOL>(),
+        ),
+    ]);
+    assert_eq!(
+        fn_get_attribute_value(
+            session,
+            sens_handle,
+            check_sens.as_mut_ptr(),
+            check_sens.len() as CK_ULONG,
+        ),
+        CKR_OK
+    );
+    assert_eq!(sens_val, CK_FALSE);
+    assert_eq!(always_sens_val, CK_FALSE);
 
     testtokn.finalize();
 }
@@ -572,6 +623,241 @@ fn test_ecc_derive_nist() {
         &mut s_handle,
     );
     assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+#[test]
+#[parallel]
+fn test_ecc_derive_sensitivity_rules() {
+    let mut testtokn =
+        TestToken::initialized("test_ecc_derive_sensitivity_rules", None);
+    let session = testtokn.get_session(true);
+    let peer_value = hex::decode(
+        "d40b07b1ea7b86d4709ef9dc634c61229feb71abd63dc7fc85ef46711a87b2\
+         10",
+    )
+    .expect("Failed to decode peer value");
+
+    testtokn.login();
+
+    let peer_point = hex::decode(
+        "04fbcea7c2827e0e8085d7707b23a3728823ea6f4878b24747fb4fd2842d40\
+         6c732393c85f1f710c5afc115a39ba7e18abe03f19c9d4bb3d47d19468b818\
+         efa535",
+    )
+    .expect("Failed to decode peer point");
+    let mut peer_point_copy = peer_point.clone();
+
+    let mut params = CK_ECDH1_DERIVE_PARAMS {
+        kdf: CKD_NULL,
+        ulSharedDataLen: 0,
+        pSharedData: std::ptr::null_mut(),
+        ulPublicDataLen: peer_point_copy.len() as CK_ULONG,
+        pPublicData: peer_point_copy.as_mut_ptr(),
+    };
+    let mut mechanism = CK_MECHANISM {
+        mechanism: CKM_ECDH1_DERIVE,
+        pParameter: &mut params as *mut _ as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_ECDH1_DERIVE_PARAMS),
+    };
+
+    let ec_params = asn1::write_single(&kasn1::oid::EC_SECP256R1).unwrap();
+
+    // 1. Base key generated on-token: ALWAYS_SENSITIVE = true, NEVER_EXTRACTABLE = true
+    let (_hpub, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_EC_KEY_PAIR_GEN,
+        &[],
+        &[(CKA_EC_PARAMS, &ec_params)],
+        &[(CKA_TOKEN, false), (CKA_DERIVE, true)],
+        &[],
+        &[(CKA_EC_PARAMS, &ec_params)],
+        &[
+            (CKA_TOKEN, false),
+            (CKA_PRIVATE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_EXTRACTABLE, false),
+            (CKA_DERIVE, true),
+        ],
+    ));
+
+    let check_derived = |h: CK_OBJECT_HANDLE,
+                         exp_sens: bool,
+                         exp_always_sens: bool,
+                         exp_ext: bool,
+                         exp_never_ext: bool| {
+        let mut sens: CK_BBOOL = CK_FALSE;
+        let mut always_sens: CK_BBOOL = CK_FALSE;
+        let mut ext: CK_BBOOL = CK_FALSE;
+        let mut never_ext: CK_BBOOL = CK_FALSE;
+        let mut tmpl = make_ptrs_template(&[
+            (
+                CKA_SENSITIVE,
+                void_ptr!(&mut sens),
+                std::mem::size_of::<CK_BBOOL>(),
+            ),
+            (
+                CKA_ALWAYS_SENSITIVE,
+                void_ptr!(&mut always_sens),
+                std::mem::size_of::<CK_BBOOL>(),
+            ),
+            (
+                CKA_EXTRACTABLE,
+                void_ptr!(&mut ext),
+                std::mem::size_of::<CK_BBOOL>(),
+            ),
+            (
+                CKA_NEVER_EXTRACTABLE,
+                void_ptr!(&mut never_ext),
+                std::mem::size_of::<CK_BBOOL>(),
+            ),
+        ]);
+        assert_eq!(
+            fn_get_attribute_value(
+                session,
+                h,
+                tmpl.as_mut_ptr(),
+                tmpl.len() as CK_ULONG
+            ),
+            CKR_OK
+        );
+        assert_eq!(sens != CK_FALSE, exp_sens);
+        assert_eq!(always_sens != CK_FALSE, exp_always_sens);
+        assert_eq!(ext != CK_FALSE, exp_ext);
+        assert_eq!(never_ext != CK_FALSE, exp_never_ext);
+    };
+
+    // Case A: derived sensitive = true, extractable = false
+    // Expected: ALWAYS_SENSITIVE = true, NEVER_EXTRACTABLE = true
+    let tmpl_a = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, true), (CKA_EXTRACTABLE, false)],
+    );
+    let mut h_a = CK_INVALID_HANDLE;
+    assert_eq!(
+        fn_derive_key(
+            session,
+            &mut mechanism,
+            hpri,
+            tmpl_a.as_ptr() as *mut _,
+            tmpl_a.len() as CK_ULONG,
+            &mut h_a
+        ),
+        CKR_OK
+    );
+    check_derived(h_a, true, true, false, true);
+
+    // Case B: derived sensitive = false, extractable = true
+    // Expected: ALWAYS_SENSITIVE = false, NEVER_EXTRACTABLE = false
+    let tmpl_b = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, true)],
+    );
+    let mut h_b = CK_INVALID_HANDLE;
+    assert_eq!(
+        fn_derive_key(
+            session,
+            &mut mechanism,
+            hpri,
+            tmpl_b.as_ptr() as *mut _,
+            tmpl_b.len() as CK_ULONG,
+            &mut h_b
+        ),
+        CKR_OK
+    );
+    check_derived(h_b, false, false, true, false);
+
+    // Case C: derived sensitive = true, extractable = true
+    // Expected: ALWAYS_SENSITIVE = true, NEVER_EXTRACTABLE = false
+    let tmpl_c = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, true), (CKA_EXTRACTABLE, true)],
+    );
+    let mut h_c = CK_INVALID_HANDLE;
+    assert_eq!(
+        fn_derive_key(
+            session,
+            &mut mechanism,
+            hpri,
+            tmpl_c.as_ptr() as *mut _,
+            tmpl_c.len() as CK_ULONG,
+            &mut h_c
+        ),
+        CKR_OK
+    );
+    check_derived(h_c, true, true, true, false);
+
+    // Case D: derived sensitive = false, extractable = false
+    // Expected: ALWAYS_SENSITIVE = false, NEVER_EXTRACTABLE = true
+    let tmpl_d = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 16),
+        ],
+        &[],
+        &[(CKA_SENSITIVE, false), (CKA_EXTRACTABLE, false)],
+    );
+    let mut h_d = CK_INVALID_HANDLE;
+    assert_eq!(
+        fn_derive_key(
+            session,
+            &mut mechanism,
+            hpri,
+            tmpl_d.as_ptr() as *mut _,
+            tmpl_d.len() as CK_ULONG,
+            &mut h_d
+        ),
+        CKR_OK
+    );
+    check_derived(h_d, false, false, false, true);
+
+    // 2. Base key imported: ALWAYS_SENSITIVE = false, NEVER_EXTRACTABLE = false
+    let secp256r1_oid = hex::decode("06082A8648CE3D030107").unwrap();
+    let imported_pri = ret_or_panic!(import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[(CKA_KEY_TYPE, CKK_EC)],
+        &[(CKA_VALUE, &peer_value), (CKA_EC_PARAMS, &secp256r1_oid),],
+        &[
+            (CKA_DERIVE, true),
+            (CKA_SENSITIVE, true),
+            (CKA_EXTRACTABLE, false),
+        ],
+    ));
+
+    // When base key has ALWAYS_SENSITIVE = false and NEVER_EXTRACTABLE = false,
+    // derived key must ALWAYS have ALWAYS_SENSITIVE = false and NEVER_EXTRACTABLE = false,
+    // even if derived key is sensitive = true and extractable = false.
+    let mut h_imp = CK_INVALID_HANDLE;
+    assert_eq!(
+        fn_derive_key(
+            session,
+            &mut mechanism,
+            imported_pri,
+            tmpl_a.as_ptr() as *mut _,
+            tmpl_a.len() as CK_ULONG,
+            &mut h_imp
+        ),
+        CKR_OK
+    );
+    check_derived(h_imp, true, false, false, false);
 
     testtokn.finalize();
 }

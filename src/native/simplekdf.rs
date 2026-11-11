@@ -9,7 +9,9 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::*;
 use crate::misc::bytes_to_vec;
-use crate::object::{Object, ObjectFactories, ObjectType};
+use crate::object::{
+    DerivePolicy, KeyOrigin, Object, ObjectFactories, ObjectType,
+};
 use crate::pkcs11::*;
 use crate::session::OpIntState;
 
@@ -199,8 +201,10 @@ impl Derive for SimpleKDFOperation {
         tmpl.add_missing_ulong(CKA_KEY_TYPE, &CKK_GENERIC_SECRET);
         let factory =
             objfactories.get_obj_factory_from_key_template(tmpl.as_slice())?;
-        let mut dkey =
-            factory.as_key_factory()?.key_derive(tmpl.as_slice(), key)?;
+        let mut dkey = factory.as_key_factory()?.key_derive(
+            tmpl.as_slice(),
+            KeyOrigin::Derive(self.mech, key, DerivePolicy::Inherited),
+        )?;
 
         let other_data_len = match self.mech {
             CKM_CONCATENATE_BASE_AND_KEY => {

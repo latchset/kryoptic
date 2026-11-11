@@ -102,7 +102,13 @@ impl Derive for SSHKDFOperation {
             | SshKdfPurpose::InitialIVServerToClient => {
                 common_derive_data_object(template, objfactories, 0)?
             }
-            _ => common_derive_key_object(key, template, objfactories, 0)?,
+            _ => common_derive_key_object(
+                self.mech,
+                key,
+                template,
+                objfactories,
+                0,
+            )?,
         };
         if value_len == 0 || value_len > usize::try_from(u32::MAX)? {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;

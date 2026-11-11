@@ -9,7 +9,7 @@ use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::{Derive, Mac, MechOperation, Mechanisms};
 use crate::misc::{bytes_to_vec, struct_to_slice};
-use crate::object::{Object, ObjectFactories};
+use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
 use crate::session::OpIntState;
 use crate::sp800_108::*;
@@ -422,7 +422,10 @@ impl Derive for Sp800Operation {
         let mut op = mech.mac_new(&mechanism, key, CKF_DERIVE)?;
         let segment = op.mac_len()?;
 
-        let obj = objfactories.derive_key_from_template(key, template)?;
+        let obj = objfactories.derive_key_from_template(
+            KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+            template,
+        )?;
         let keysize = match obj.get_attr_as_ulong(CKA_VALUE_LEN) {
             Ok(size) => usize::try_from(size)?,
             Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
@@ -445,7 +448,10 @@ impl Derive for Sp800Operation {
                 usize::try_from(ak.ulAttributeCount)
                     .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
             )?;
-            let obj = match objfactories.derive_key_from_template(key, &tmpl) {
+            let obj = match objfactories.derive_key_from_template(
+                KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
+                &tmpl,
+            ) {
                 Ok(o) => o,
                 Err(e) => {
                     /* mark the handle as invalid */
