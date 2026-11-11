@@ -137,7 +137,7 @@ fn test_mlkem_operations() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[
@@ -181,7 +181,7 @@ fn test_mlkem_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
-    let mut value_enc = vec![0u8; 16];
+    let mut value_enc = vec![0u8; 32];
     let mut extract_template_enc = make_ptrs_template(&[(
         CKA_VALUE,
         void_ptr!(value_enc.as_mut_ptr()),
@@ -196,7 +196,7 @@ fn test_mlkem_operations() {
     );
     assert_eq!(ret, CKR_OK);
 
-    let mut value_dec = vec![0u8; 16];
+    let mut value_dec = vec![0u8; 32];
     let mut extract_template_dec = make_ptrs_template(&[(
         CKA_VALUE,
         void_ptr!(value_dec.as_mut_ptr()),
@@ -510,7 +510,7 @@ fn test_mlkem_encapsulate_buffer_too_small_reports_required_len() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[
@@ -809,7 +809,7 @@ fn test_mlkem_template_attributes() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[(CKA_DECRYPT, true)],
@@ -845,7 +845,7 @@ fn test_mlkem_template_attributes() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[(CKA_ENCRYPT, false)],
@@ -867,7 +867,7 @@ fn test_mlkem_template_attributes() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[(CKA_ENCRYPT, true)],
@@ -901,7 +901,7 @@ fn test_mlkem_template_attributes() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[(CKA_DECRYPT, false)],
@@ -1036,7 +1036,7 @@ fn test_mlkem_rejects_mechanism_parameter() {
         &[
             (CKA_CLASS, CKO_SECRET_KEY),
             (CKA_KEY_TYPE, CKK_AES),
-            (CKA_VALUE_LEN, 16),
+            (CKA_VALUE_LEN, 32),
         ],
         &[],
         &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
@@ -1123,6 +1123,122 @@ fn test_mlkem_rejects_mechanism_parameter() {
         &mut handle_dec,
     );
     assert_eq!(ret, CKR_OK);
+
+    testtokn.finalize();
+}
+
+/// When C_EncapsulateKey and C_DecapsulateKey are called with a template that
+/// does not specify CKA_SENSITIVE or CKA_EXTRACTABLE, the resulting objects
+/// must have CKA_ALWAYS_SENSITIVE == false and CKA_NEVER_EXTRACTABLE == false
+/// (PKCS#11 v3.2 Sections 5.18.8 and 5.18.9).
+#[test]
+#[parallel]
+fn test_mlkem_encap_decap_default_sensitivity() {
+    let mut testtokn = TestToken::initialized(
+        "test_mlkem_encap_decap_default_sensitivity",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pub_handle, priv_handle) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_KEM_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+        ],
+        &[],
+        &[(CKA_ENCAPSULATE, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM)],
+        &[],
+        &[(CKA_DECAPSULATE, true)],
+    ));
+
+    let key_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_AES),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    );
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_KEM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    let mut ciphertext = [0u8; 800];
+    let mut outlen: CK_ULONG = 800;
+    let mut handle_enc = CK_INVALID_HANDLE;
+    let ret = fn_encapsulate_key(
+        session,
+        &mut mechanism,
+        pub_handle,
+        key_template.as_ptr() as *mut _,
+        key_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        &mut outlen,
+        &mut handle_enc,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut handle_dec = CK_INVALID_HANDLE;
+    let ret = fn_decapsulate_key(
+        session,
+        &mut mechanism,
+        priv_handle,
+        key_template.as_ptr() as *mut _,
+        key_template.len() as CK_ULONG,
+        ciphertext.as_mut_ptr(),
+        outlen,
+        &mut handle_dec,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    for handle in [handle_enc, handle_dec] {
+        let mut always_sens: CK_BBOOL = CK_TRUE;
+        let mut never_ext: CK_BBOOL = CK_TRUE;
+        let mut check_tmpl = make_ptrs_template(&[
+            (
+                CKA_ALWAYS_SENSITIVE,
+                void_ptr!(&mut always_sens),
+                std::mem::size_of::<CK_BBOOL>(),
+            ),
+            (
+                CKA_NEVER_EXTRACTABLE,
+                void_ptr!(&mut never_ext),
+                std::mem::size_of::<CK_BBOOL>(),
+            ),
+        ]);
+        let ret = fn_get_attribute_value(
+            session,
+            handle,
+            check_tmpl.as_mut_ptr(),
+            check_tmpl.len() as CK_ULONG,
+        );
+        assert_eq!(ret, CKR_OK);
+        assert_eq!(always_sens, CK_FALSE);
+        assert_eq!(never_ext, CK_FALSE);
+    }
+
+    let exp_kem_bools = [
+        (CKA_ALWAYS_SENSITIVE, false),
+        (CKA_NEVER_EXTRACTABLE, false),
+    ];
+    if let Some(err) =
+        check_attributes(session, handle_enc, &[], &[], &exp_kem_bools)
+    {
+        panic!("handle_enc attributes check failed: {}", err);
+    }
+    if let Some(err) =
+        check_attributes(session, handle_dec, &[], &[], &exp_kem_bools)
+    {
+        panic!("handle_dec attributes check failed: {}", err);
+    }
 
     testtokn.finalize();
 }
