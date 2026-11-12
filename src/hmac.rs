@@ -72,8 +72,8 @@ static HMAC_KEY_MECHS: LazyLock<Vec<(CK_MECHANISM_TYPE, Box<dyn Mechanism>)>> =
                 Box::new(GenericSecretKeyMechanism::new(
                     hs.key_gen,
                     hs.key_type,
-                    hs.hash_size,
-                    hs.hash_size,
+                    MIN_GENERIC_SECRET_KEY_SIZE,
+                    MAX_GENERIC_SECRET_KEY_SIZE,
                     KeySizeKind::Bytes,
                 )),
             ));

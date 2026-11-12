@@ -1698,3 +1698,78 @@ fn test_generic_secret_key_size_limits() {
 
     testtokn.finalize();
 }
+
+#[cfg(all(feature = "hmac", feature = "aes"))]
+#[test]
+#[parallel]
+fn test_hmac_key_sizes() {
+    let mut testtokn = TestToken::initialized("test_hmac_key_sizes", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    /* PKCS#11 3.2: HMAC keys have arbitrary length, ulMinKeySize and
+     * ulMaxKeySize specify the supported range of HMAC key sizes, in
+     * bytes, not just the hash output size */
+    let mut info: CK_MECHANISM_INFO = Default::default();
+    let ret = fn_get_mechanism_info(
+        testtokn.get_slot(),
+        CKM_SHA256_KEY_GEN,
+        &mut info,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.ulMinKeySize, 1);
+    assert_eq!(info.ulMaxKeySize, 128 * 1024);
+    assert_ne!(info.flags & CKF_GENERATE, 0);
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_SHA256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let data = b"HMAC key size test";
+
+    // 1. Generate keys shorter and longer than the hash output size
+    for len in [1, 13, 14, 16, 32, 64, 255 * 64, 128 * 1024] {
+        let handle = ret_or_panic!(generate_key(
+            session,
+            CKM_SHA256_KEY_GEN,
+            std::ptr::null_mut(),
+            0,
+            &[(CKA_VALUE_LEN, len as CK_ULONG)],
+            &[],
+            &[
+                (CKA_SIGN, true),
+                (CKA_VERIFY, true),
+                (CKA_EXTRACTABLE, true),
+                (CKA_SENSITIVE, false),
+            ],
+        ));
+
+        let value = ret_or_panic!(extract_key_value(session, handle));
+        assert_eq!(value.len(), len);
+
+        let sig = ret_or_panic!(sig_gen(session, handle, data, &mechanism));
+        assert_eq!(sig.len(), 32);
+        let ret = sig_verify(session, handle, data, &sig, &mechanism);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    // 2. Generate keys out of the allowed range
+    for len in [0, 128 * 1024 + 1] {
+        err_or_panic!(
+            generate_key(
+                session,
+                CKM_SHA256_KEY_GEN,
+                std::ptr::null_mut(),
+                0,
+                &[(CKA_VALUE_LEN, len)],
+                &[],
+                &[],
+            ),
+            CKR_KEY_SIZE_RANGE
+        );
+    }
+
+    testtokn.finalize();
+}
