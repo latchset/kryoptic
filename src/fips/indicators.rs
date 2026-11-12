@@ -170,6 +170,12 @@ impl ObjectFactory for ValidationFactory {
 pub(crate) static VALIDATION_FACTORY: LazyLock<Box<dyn ObjectFactory>> =
     LazyLock::new(|| Box::new(ValidationFactory::new()));
 
+/// Maximum size of approved secret keys, in bits
+///
+/// This is the maximum output length of HKDF (255 * HashLen) with the
+/// largest supported hash output size (64 bytes)
+const MAX_SECRET_BITS: usize = 255 * 64 * 8;
+
 /// Helper to convert bits to bytes
 macro_rules! btb {
     ($val:expr) => {
@@ -301,7 +307,7 @@ struct FipsMechanism {
 /// Struct that holds FIPS properties for keys and mechanisms
 struct FipsChecks {
     keys: [FipsKeyType; 24],
-    mechs: [FipsMechanism; 118],
+    mechs: [FipsMechanism; 128],
 }
 
 /// A constant instantiation of FIPS properties with a list
@@ -343,57 +349,57 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
         FipsKeyType {
             keytype: CKK_GENERIC_SECRET,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: range!(112, 255 * 64 * 8),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA224_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(224),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA256_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(256),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA384_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(384),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA512_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(512),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA512_224_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(224),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA512_256_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(256),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA3_224_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(224),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA3_256_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(256),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA3_384_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(384),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_SHA3_512_HMAC,
             operations: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
-            sizes: step!(512),
+            sizes: range!(112, MAX_SECRET_BITS),
         },
         FipsKeyType {
             keytype: CKK_EC_EDWARDS,
@@ -824,8 +830,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA224_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA224_HMAC, range!(112, 224)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+                restrict!(CKK_SHA224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -833,8 +839,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA256_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA256_HMAC, range!(112, 256)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_SHA256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -842,8 +848,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA384_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA384_HMAC, range!(112, 384)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 384)),
+                restrict!(CKK_SHA384_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -851,8 +857,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA512_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA512_HMAC, range!(112, 512)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+                restrict!(CKK_SHA512_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -860,8 +866,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA512_224_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA512_224_HMAC, range!(112, 224)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+                restrict!(CKK_SHA512_224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -869,8 +875,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA512_256_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA512_256_HMAC, range!(112, 256)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_SHA512_256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -878,8 +884,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_224_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_224_HMAC, range!(112, 224)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+                restrict!(CKK_SHA3_224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -887,8 +893,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_256_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_256_HMAC, range!(112, 256)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_SHA3_256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -896,8 +902,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_384_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_384_HMAC, range!(112, 384)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 384)),
+                restrict!(CKK_SHA3_384_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -905,8 +911,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_512_HMAC,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_512_HMAC, range!(112, 512)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+                restrict!(CKK_SHA3_512_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -914,8 +920,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA224_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA224_HMAC, range!(112, 224)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+                restrict!(CKK_SHA224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -923,8 +929,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA256_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA256_HMAC, range!(112, 256)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_SHA256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -932,8 +938,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA384_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA384_HMAC, range!(112, 384)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 384)),
+                restrict!(CKK_SHA384_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -941,8 +947,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA512_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA512_HMAC, range!(112, 512)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+                restrict!(CKK_SHA512_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -950,8 +956,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA512_224_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA512_224_HMAC, range!(112, 224)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+                restrict!(CKK_SHA512_224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -959,8 +965,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA512_256_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA512_256_HMAC, range!(112, 256)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_SHA512_256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -968,8 +974,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_224_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_224_HMAC, range!(112, 224)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 224)),
+                restrict!(CKK_SHA3_224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -977,8 +983,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_256_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_256_HMAC, range!(112, 256)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 256)),
+                restrict!(CKK_SHA3_256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -986,8 +992,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_384_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_384_HMAC, range!(112, 384)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 384)),
+                restrict!(CKK_SHA3_384_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -995,8 +1001,8 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_SHA3_512_HMAC_GENERAL,
             operations: CKF_SIGN | CKF_VERIFY,
             restrictions: [
-                restrict!(CKK_SHA3_512_HMAC, range!(112, 512)),
-                restrict!(CKK_GENERIC_SECRET, range!(112, 512)),
+                restrict!(CKK_SHA3_512_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: 0,
         },
@@ -1023,7 +1029,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_GENERIC_SECRET_KEY_GEN,
             operations: CKF_GENERATE,
             restrictions: [
-                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
@@ -1037,13 +1043,103 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             ],
             genflags: CKF_DERIVE,
         },
+        FipsMechanism {
+            mechanism: CKM_SHA224_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA256_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA384_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA384_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA512_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_224_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA512_224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA512_256_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA512_256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA3_224_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA3_224_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA3_256_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA3_256_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA3_384_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA3_384_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
+        FipsMechanism {
+            mechanism: CKM_SHA3_512_KEY_GEN,
+            operations: CKF_GENERATE,
+            restrictions: [
+                restrict!(CKK_SHA3_512_HMAC, range!(112, MAX_SECRET_BITS)),
+                restrict!(),
+            ],
+            genflags: CKF_SIGN | CKF_VERIFY | CKF_DERIVE,
+        },
         /* KDFs */
         FipsMechanism {
             mechanism: CKM_HKDF_DERIVE,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
-                restrict!(CKK_HKDF, range!(112, 255 * 64 * 8)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
+                restrict!(CKK_HKDF, range!(112, MAX_SECRET_BITS)),
             ],
             genflags: CKF_SIGN
                 | CKF_VERIFY
@@ -1057,7 +1153,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_HKDF_DATA,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(KRY_UNSPEC, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN
@@ -1098,7 +1194,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_TLS12_KEY_AND_MAC_DERIVE,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN
@@ -1111,7 +1207,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_TLS12_KEY_SAFE_DERIVE,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(CKK_GENERIC_SECRET, range!(112, 255 * 64 * 8)),
+                restrict!(CKK_GENERIC_SECRET, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN
@@ -1154,7 +1250,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_CONCATENATE_BASE_AND_KEY,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(KRY_UNSPEC, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN
@@ -1169,7 +1265,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_CONCATENATE_BASE_AND_DATA,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(KRY_UNSPEC, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN
@@ -1184,7 +1280,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_CONCATENATE_DATA_AND_BASE,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(KRY_UNSPEC, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN
@@ -1199,7 +1295,7 @@ const FIPS_CHECKS: FipsChecks = FipsChecks {
             mechanism: CKM_XOR_BASE_AND_DATA,
             operations: CKF_DERIVE,
             restrictions: [
-                restrict!(KRY_UNSPEC, range!(112, 255 * 64 * 8)),
+                restrict!(KRY_UNSPEC, range!(112, MAX_SECRET_BITS)),
                 restrict!(),
             ],
             genflags: CKF_SIGN

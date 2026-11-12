@@ -525,7 +525,8 @@ pub fn default_secret_key_generate(key: &mut Object) -> Result<()> {
 #[derive(Debug)]
 pub struct GenericSecretKeyFactory {
     data: ObjectFactoryData,
-    keysize: usize,
+    /// Default key size, used when no key length is specified
+    default_size: usize,
 }
 
 impl GenericSecretKeyFactory {
@@ -533,7 +534,7 @@ impl GenericSecretKeyFactory {
     pub fn new() -> GenericSecretKeyFactory {
         let mut factory: GenericSecretKeyFactory = GenericSecretKeyFactory {
             data: ObjectFactoryData::new(CKO_SECRET_KEY),
-            keysize: 0,
+            default_size: 0,
         };
 
         factory.add_common_secret_key_attrs();
@@ -561,11 +562,12 @@ impl GenericSecretKeyFactory {
         factory
     }
 
-    /// Initializes a new GenericSecretKeyFactory object that enforces
-    /// a defined key size
-    pub fn with_key_size(size: usize) -> GenericSecretKeyFactory {
+    /// Initializes a new GenericSecretKeyFactory object with a default
+    /// key size, recommended when no key length is specified (for example
+    /// on derivation)
+    pub fn with_default_key_size(size: usize) -> GenericSecretKeyFactory {
         let mut factory = Self::new();
-        factory.keysize = size;
+        factory.default_size = size;
         factory
     }
 }
@@ -573,17 +575,14 @@ impl GenericSecretKeyFactory {
 impl ObjectFactory for GenericSecretKeyFactory {
     /// Creates a new secret key from the template
     ///
-    /// Ensures that the key length matches the defined size if any
-    /// and is not 0 otherwise
+    /// Ensures that the key length is not 0 and does not exceed the
+    /// maximum allowed key size
     ///
     /// Sets the CKA_VALUE_LEN attribute from the key length, if missing.
     fn create(&self, template: &[CK_ATTRIBUTE]) -> Result<Object> {
         let mut obj = self.create_key_object(template, KeyOrigin::Create)?;
         let len = self.get_key_buffer_len(&obj)?;
         if len == 0 {
-            return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
-        }
-        if self.keysize != 0 && len != self.keysize {
             return Err(CKR_ATTRIBUTE_VALUE_INVALID)?;
         }
         if len > MAX_GENERIC_SECRET_KEY_SIZE {
@@ -634,10 +633,6 @@ impl SecretKeyFactory for GenericSecretKeyFactory {
             zeromem(key.as_mut_slice());
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
-        if self.keysize != 0 && keylen != self.keysize {
-            zeromem(key.as_mut_slice());
-            return Err(CKR_KEY_SIZE_RANGE)?;
-        }
         obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
@@ -648,8 +643,8 @@ impl SecretKeyFactory for GenericSecretKeyFactory {
     fn recommend_key_size(&self, default: usize) -> Result<usize> {
         if default > MAX_GENERIC_SECRET_KEY_SIZE {
             Err(CKR_KEY_SIZE_RANGE)?
-        } else if self.keysize != 0 {
-            Ok(self.keysize)
+        } else if self.default_size != 0 {
+            Ok(self.default_size)
         } else {
             Ok(default)
         }

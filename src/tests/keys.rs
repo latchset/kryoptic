@@ -1698,3 +1698,225 @@ fn test_generic_secret_key_size_limits() {
 
     testtokn.finalize();
 }
+
+#[cfg(all(feature = "hmac", feature = "aes"))]
+#[test]
+#[parallel]
+fn test_hmac_key_sizes() {
+    let mut testtokn = TestToken::initialized("test_hmac_key_sizes", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    /* PKCS#11 3.2: HMAC keys have arbitrary length, ulMinKeySize and
+     * ulMaxKeySize specify the supported range of HMAC key sizes, in
+     * bytes, not just the hash output size */
+    let mut info: CK_MECHANISM_INFO = Default::default();
+    let ret = fn_get_mechanism_info(
+        testtokn.get_slot(),
+        CKM_SHA256_KEY_GEN,
+        &mut info,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(info.ulMinKeySize, 1);
+    assert_eq!(info.ulMaxKeySize, 128 * 1024);
+    assert_ne!(info.flags & CKF_GENERATE, 0);
+
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_SHA256_HMAC,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let data = b"HMAC key size test";
+
+    /* FIPS approved HMAC keys are at least 112 bits, shorter keys are
+     * allowed but flagged as not approved; there is no cap at the hash
+     * output size (longer keys are hashed). The maximum matches the
+     * MAX_SECRET_BITS limit of the FIPS indicators */
+    const FIPS_MIN_KEY_SIZE: usize = 112 / 8;
+    const FIPS_MAX_KEY_SIZE: usize = 255 * 64;
+    let fips_flag = |len: usize| -> CK_FLAGS {
+        if len >= FIPS_MIN_KEY_SIZE && len <= FIPS_MAX_KEY_SIZE {
+            1
+        } else {
+            0
+        }
+    };
+
+    // 1. Generate keys shorter and longer than the hash output size
+    for len in [1, 13, 14, 16, 32, 64, FIPS_MAX_KEY_SIZE, 128 * 1024] {
+        let handle = ret_or_panic!(generate_key(
+            session,
+            CKM_SHA256_KEY_GEN,
+            std::ptr::null_mut(),
+            0,
+            &[(CKA_VALUE_LEN, len as CK_ULONG)],
+            &[],
+            &[
+                (CKA_SIGN, true),
+                (CKA_VERIFY, true),
+                (CKA_EXTRACTABLE, true),
+                (CKA_SENSITIVE, false),
+            ],
+        ));
+        assert_eq!(check_validation(session, fips_flag(len)), true);
+
+        let value = ret_or_panic!(extract_key_value(session, handle));
+        assert_eq!(value.len(), len);
+
+        let sig = ret_or_panic!(sig_gen(session, handle, data, &mechanism));
+        assert_eq!(sig.len(), 32);
+        assert_eq!(check_validation(session, fips_flag(len)), true);
+        let ret = sig_verify(session, handle, data, &sig, &mechanism);
+        assert_eq!(ret, CKR_OK);
+    }
+
+    // 2. Generate keys out of the allowed range
+    for len in [0, 128 * 1024 + 1] {
+        err_or_panic!(
+            generate_key(
+                session,
+                CKM_SHA256_KEY_GEN,
+                std::ptr::null_mut(),
+                0,
+                &[(CKA_VALUE_LEN, len)],
+                &[],
+                &[],
+            ),
+            CKR_KEY_SIZE_RANGE
+        );
+    }
+
+    // 3. Import a key of a size different from the hash output size
+    let genkey = ret_or_panic!(generate_key(
+        session,
+        CKM_SHA256_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_SIGN, true),
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+        ],
+    ));
+    let genval = ret_or_panic!(extract_key_value(session, genkey));
+    let gensig = ret_or_panic!(sig_gen(session, genkey, data, &mechanism));
+
+    let imported = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_SHA256_HMAC)],
+        &[(CKA_VALUE, &genval)],
+        &[(CKA_SIGN, true)],
+    ));
+    let sig = ret_or_panic!(sig_gen(session, imported, data, &mechanism));
+    assert_eq!(sig, gensig);
+    assert_eq!(check_validation(session, 1), true);
+
+    /* imported keys are checked against the FIPS key size limits */
+    for len in [13, 100] {
+        let value = vec![0x42u8; len];
+        let handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_SHA256_HMAC)],
+            &[(CKA_VALUE, &value)],
+            &[(CKA_SIGN, true)],
+        ));
+        ret_or_panic!(sig_gen(session, handle, data, &mechanism));
+        assert_eq!(check_validation(session, fips_flag(len)), true);
+    }
+
+    // 4. Wrap and unwrap a key of a size different from the hash size
+    let wrapping_key = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 32)],
+        &[],
+        &[(CKA_WRAP, true), (CKA_UNWRAP, true)],
+    ));
+    let iv = [0xCCu8; 4];
+    let mut wrap_mech = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP_KWP,
+        pParameter: void_ptr!(&iv),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    let mut wrapped = vec![0u8; 256];
+    let mut wrapped_len = wrapped.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut wrap_mech,
+        wrapping_key,
+        genkey,
+        wrapped.as_mut_ptr(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let unwrap_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_SHA256_HMAC)],
+        &[],
+        &[(CKA_SIGN, true)],
+    );
+    let mut unwrapped = CK_INVALID_HANDLE;
+    let ret = fn_unwrap_key(
+        session,
+        &mut wrap_mech,
+        wrapping_key,
+        wrapped.as_mut_ptr(),
+        wrapped_len,
+        unwrap_template.as_ptr() as *mut _,
+        unwrap_template.len() as CK_ULONG,
+        &mut unwrapped,
+    );
+    assert_eq!(ret, CKR_OK);
+    let sig = ret_or_panic!(sig_gen(session, unwrapped, data, &mechanism));
+    assert_eq!(sig, gensig);
+
+    // 5. Derive keys of a size different from the hash size
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SHA256_KEY_DERIVATION,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    for (keytype, len, rv, outlen) in [
+        /* explicit length shorter than the hash size */
+        (CKK_SHA256_HMAC, Some(16), CKR_OK, 16),
+        /* no length: the default for the key type is the hash size */
+        (CKK_SHA256_HMAC, None, CKR_OK, 32),
+        /* the default length is longer than the hash output */
+        (CKK_SHA512_HMAC, None, CKR_TEMPLATE_INCONSISTENT, 0),
+    ] {
+        let mut ulongs =
+            vec![(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, keytype)];
+        if let Some(l) = len {
+            ulongs.push((CKA_VALUE_LEN, l));
+        }
+        let derive_template = make_attr_template(
+            ulongs.as_slice(),
+            &[],
+            &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        );
+        let mut derived = CK_INVALID_HANDLE;
+        let ret = fn_derive_key(
+            session,
+            &mut derive_mech,
+            genkey,
+            derive_template.as_ptr() as *mut _,
+            derive_template.len() as CK_ULONG,
+            &mut derived,
+        );
+        assert_eq!(ret, rv);
+        if rv == CKR_OK {
+            let value = ret_or_panic!(extract_key_value(session, derived));
+            assert_eq!(value.len(), outlen);
+        }
+    }
+
+    testtokn.finalize();
+}
