@@ -1729,8 +1729,22 @@ fn test_hmac_key_sizes() {
     };
     let data = b"HMAC key size test";
 
+    /* FIPS approved HMAC keys are at least 112 bits, shorter keys are
+     * allowed but flagged as not approved; there is no cap at the hash
+     * output size (longer keys are hashed). The maximum matches the
+     * MAX_SECRET_BITS limit of the FIPS indicators */
+    const FIPS_MIN_KEY_SIZE: usize = 112 / 8;
+    const FIPS_MAX_KEY_SIZE: usize = 255 * 64;
+    let fips_flag = |len: usize| -> CK_FLAGS {
+        if len >= FIPS_MIN_KEY_SIZE && len <= FIPS_MAX_KEY_SIZE {
+            1
+        } else {
+            0
+        }
+    };
+
     // 1. Generate keys shorter and longer than the hash output size
-    for len in [1, 13, 14, 16, 32, 64, 255 * 64, 128 * 1024] {
+    for len in [1, 13, 14, 16, 32, 64, FIPS_MAX_KEY_SIZE, 128 * 1024] {
         let handle = ret_or_panic!(generate_key(
             session,
             CKM_SHA256_KEY_GEN,
@@ -1745,12 +1759,14 @@ fn test_hmac_key_sizes() {
                 (CKA_SENSITIVE, false),
             ],
         ));
+        assert_eq!(check_validation(session, fips_flag(len)), true);
 
         let value = ret_or_panic!(extract_key_value(session, handle));
         assert_eq!(value.len(), len);
 
         let sig = ret_or_panic!(sig_gen(session, handle, data, &mechanism));
         assert_eq!(sig.len(), 32);
+        assert_eq!(check_validation(session, fips_flag(len)), true);
         let ret = sig_verify(session, handle, data, &sig, &mechanism);
         assert_eq!(ret, CKR_OK);
     }
@@ -1798,6 +1814,7 @@ fn test_hmac_key_sizes() {
     ));
     let sig = ret_or_panic!(sig_gen(session, imported, data, &mechanism));
     assert_eq!(sig, gensig);
+    assert_eq!(check_validation(session, 1), true);
 
     /* imported keys are checked against the FIPS key size limits */
     for len in [13, 100] {
@@ -1810,6 +1827,7 @@ fn test_hmac_key_sizes() {
             &[(CKA_SIGN, true)],
         ));
         ret_or_panic!(sig_gen(session, handle, data, &mechanism));
+        assert_eq!(check_validation(session, fips_flag(len)), true);
     }
 
     // 4. Wrap and unwrap a key of a size different from the hash size
