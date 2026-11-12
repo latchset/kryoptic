@@ -9,9 +9,7 @@ use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::hmac::{hash_to_hmac_mech, register_mechs_only};
 use crate::mechanism::*;
-use crate::misc::{
-    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, zeromem, CK_ULONG_SIZE,
-};
+use crate::misc::{bytes_to_slice, bytes_to_slice_mut, SecVec, CK_ULONG_SIZE};
 use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
 use crate::session::OpIntState;
@@ -105,21 +103,21 @@ impl TLSPRF {
         &mut self,
         seed: &Vec<u8>,
         reqlen: usize,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<SecVec> {
         let maclen = self.op.mac_len()?;
 
-        let mut ax = vec![0u8; maclen];
+        let mut ax = SecVec::sized(maclen);
         self.op.mac_update(seed.as_slice())?;
-        self.op.mac_final(ax.as_mut_slice())?;
+        self.op.mac_final(&mut ax)?;
         /* ax = A(1) */
 
         /* use a buffer length that is a multiple of maclen,
          * then truncate to actual reqlen before returning */
-        let mut out = vec![0u8; ((reqlen + maclen - 1) / maclen) * maclen];
+        let mut out = SecVec::sized(((reqlen + maclen - 1) / maclen) * maclen);
         let mut outlen = 0;
         while outlen < reqlen {
             self.op.reset()?;
-            self.op.mac_update(ax.as_slice())?;
+            self.op.mac_update(&ax)?;
             self.op.mac_update(seed.as_slice())?;
             self.op.mac_final(&mut out[outlen..(outlen + maclen)])?;
 
@@ -128,11 +126,11 @@ impl TLSPRF {
             if outlen < reqlen {
                 /* ax = A(x + 1) */
                 self.op.reset()?;
-                self.op.mac_update(ax.as_slice())?;
-                self.op.mac_final(ax.as_mut_slice())?;
+                self.op.mac_update(&ax)?;
+                self.op.mac_final(&mut ax)?;
             }
         }
-        out.resize(reqlen, 0);
+        out.reduce(reqlen)?;
         Ok(out)
     }
 }
@@ -154,7 +152,7 @@ pub fn test_tlsprf(
     prf: CK_MECHANISM_TYPE,
     seed: &Vec<u8>,
     reqlen: usize,
-) -> Result<Vec<u8>> {
+) -> Result<SecVec> {
     let mut tlsprf = TLSPRF::init(key, mech, prf)?;
     tlsprf.finish(seed, reqlen)
 }
@@ -170,11 +168,11 @@ pub struct TLSKDFOperation {
     /// Enum indicating the internal operation state.
     state: OpIntState,
     /// Client random bytes.
-    client_random: Vec<u8>,
+    client_random: SecVec,
     /// Server random bytes.
-    server_random: Vec<u8>,
+    server_random: SecVec,
     /// Full session hash for EMS.
-    session_hash: Vec<u8>,
+    session_hash: SecVec,
     /// Optional pointer to store the negotiated TLS version (used by
     /// CKM_TLS12_MASTER_KEY_DERIVE)
     version: Option<*mut CK_VERSION>,
@@ -199,14 +197,6 @@ pub struct TLSKDFOperation {
     /// - None = undetermined
     #[cfg(feature = "fips")]
     fips_approved: Option<bool>,
-}
-
-impl Drop for TLSKDFOperation {
-    fn drop(&mut self) {
-        zeromem(self.client_random.as_mut_slice());
-        zeromem(self.server_random.as_mut_slice());
-        zeromem(self.session_hash.as_mut_slice());
-    }
 }
 
 unsafe impl Send for TLSKDFOperation {}
@@ -257,8 +247,11 @@ impl TLSKDFOperation {
             Err(_) => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
 
-        let session_hash =
-            bytes_to_vec(params.pSessionHash, params.ulSessionHashLen as usize);
+        let session_hash = SecVec::from_raw_bytes(
+            params.pSessionHash,
+            params.ulSessionHashLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
 
         // The pVersion field of the structure must be set to NULL_PTR since the version
         // number is not embedded in the "pre_master" key as it is for RSA-like cipher suites.
@@ -277,8 +270,8 @@ impl TLSKDFOperation {
         Ok(TLSKDFOperation {
             mech: mech.mechanism,
             state: OpIntState::Initialized,
-            client_random: Vec::new(),
-            server_random: Vec::new(),
+            client_random: SecVec::new(),
+            server_random: SecVec::new(),
             session_hash: session_hash,
             version: version,
             prf: prf,
@@ -301,14 +294,16 @@ impl TLSKDFOperation {
         let params =
             mech.get_parameters::<CK_TLS12_MASTER_KEY_DERIVE_PARAMS>()?;
 
-        let clirand = bytes_to_vec(
+        let clirand = SecVec::from_raw_bytes(
             params.RandomInfo.pClientRandom,
-            params.RandomInfo.ulClientRandomLen as usize,
-        );
-        let srvrand = bytes_to_vec(
+            params.RandomInfo.ulClientRandomLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
+        let srvrand = SecVec::from_raw_bytes(
             params.RandomInfo.pServerRandom,
-            params.RandomInfo.ulServerRandomLen as usize,
-        );
+            params.RandomInfo.ulServerRandomLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
 
         if clirand.len() != TLS_RANDOM_SEED_SIZE
             || srvrand.len() != TLS_RANDOM_SEED_SIZE
@@ -340,7 +335,7 @@ impl TLSKDFOperation {
             state: OpIntState::Initialized,
             client_random: clirand,
             server_random: srvrand,
-            session_hash: Vec::new(),
+            session_hash: SecVec::new(),
             version: version,
             prf: prf,
             label: TLS_MASTER_SECRET_LABEL,
@@ -376,14 +371,16 @@ impl TLSKDFOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let clirand = bytes_to_vec(
+        let clirand = SecVec::from_raw_bytes(
             params.RandomInfo.pClientRandom,
-            params.RandomInfo.ulClientRandomLen as usize,
-        );
-        let srvrand = bytes_to_vec(
+            params.RandomInfo.ulClientRandomLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
+        let srvrand = SecVec::from_raw_bytes(
             params.RandomInfo.pServerRandom,
-            params.RandomInfo.ulServerRandomLen as usize,
-        );
+            params.RandomInfo.ulServerRandomLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
 
         if clirand.len() != TLS_RANDOM_SEED_SIZE
             || srvrand.len() != TLS_RANDOM_SEED_SIZE
@@ -405,7 +402,7 @@ impl TLSKDFOperation {
             state: OpIntState::Initialized,
             client_random: clirand,
             server_random: srvrand,
-            session_hash: Vec::new(),
+            session_hash: SecVec::new(),
             version: None,
             prf: prf,
             label: TLS_KEY_EXPANSION_LABEL,
@@ -435,14 +432,16 @@ impl TLSKDFOperation {
             return Err(CKR_MECHANISM_PARAM_INVALID)?;
         }
 
-        let clirand = bytes_to_vec(
+        let clirand = SecVec::from_raw_bytes(
             params.RandomInfo.pClientRandom,
-            params.RandomInfo.ulClientRandomLen as usize,
-        );
-        let srvrand = bytes_to_vec(
+            params.RandomInfo.ulClientRandomLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
+        let srvrand = SecVec::from_raw_bytes(
             params.RandomInfo.pServerRandom,
-            params.RandomInfo.ulServerRandomLen as usize,
-        );
+            params.RandomInfo.ulServerRandomLen,
+        )
+        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
 
         if clirand.len() != TLS_RANDOM_SEED_SIZE
             || srvrand.len() != TLS_RANDOM_SEED_SIZE
@@ -460,7 +459,7 @@ impl TLSKDFOperation {
             state: OpIntState::Initialized,
             client_random: clirand,
             server_random: srvrand,
-            session_hash: Vec::new(),
+            session_hash: SecVec::new(),
             version: None,
             prf: prf,
             label: bytes_to_slice(
@@ -576,11 +575,11 @@ impl TLSKDFOperation {
         );
         seed.extend_from_slice(self.label);
         if cli_first {
-            seed.extend_from_slice(self.client_random.as_slice());
-            seed.extend_from_slice(self.server_random.as_slice());
+            seed.extend_from_slice(&self.client_random);
+            seed.extend_from_slice(&self.server_random);
         } else {
-            seed.extend_from_slice(self.server_random.as_slice());
-            seed.extend_from_slice(self.client_random.as_slice());
+            seed.extend_from_slice(&self.server_random);
+            seed.extend_from_slice(&self.client_random);
         }
         if self.context.len() > 0 {
             seed.extend_from_slice(self.context);
@@ -596,7 +595,7 @@ impl TLSKDFOperation {
             self.label.len() + self.session_hash.len(),
         );
         seed.extend_from_slice(self.label);
-        seed.extend_from_slice(self.session_hash.as_slice());
+        seed.extend_from_slice(&self.session_hash);
         seed
     }
 
@@ -754,7 +753,7 @@ impl TLSKDFOperation {
         let seed = self.tls_prf_seed(false);
         let dkmlen = (2 * (self.maclen + self.keylen + self.ivlen)) as usize;
         let mut tlsprf = TLSPRF::init(key, mech, self.prf)?;
-        let mut dkm = tlsprf.finish(&seed, dkmlen)?;
+        let dkm = tlsprf.finish(&seed, dkmlen)?;
 
         let mut keys = Vec::<Object>::with_capacity(4);
         let mut i = 0;
@@ -779,7 +778,7 @@ impl TLSKDFOperation {
             )?;
             factory
                 .as_secret_key_factory()?
-                .set_key(&mut climac, dkm[i..(i + maclen)].to_vec())?;
+                .set_key(&mut climac, dkm[i..(i + maclen)].into())?;
 
             i += maclen;
             keys.push(climac);
@@ -789,7 +788,7 @@ impl TLSKDFOperation {
             )?;
             factory
                 .as_secret_key_factory()?
-                .set_key(&mut srvmac, dkm[i..(i + maclen)].to_vec())?;
+                .set_key(&mut srvmac, dkm[i..(i + maclen)].into())?;
             i += maclen;
             keys.push(srvmac);
         }
@@ -804,7 +803,7 @@ impl TLSKDFOperation {
             )?;
             factory
                 .as_secret_key_factory()?
-                .set_key(&mut clikey, dkm[i..(i + keylen)].to_vec())?;
+                .set_key(&mut clikey, dkm[i..(i + keylen)].into())?;
 
             i += keylen;
             keys.push(clikey);
@@ -814,7 +813,7 @@ impl TLSKDFOperation {
             )?;
             factory
                 .as_secret_key_factory()?
-                .set_key(&mut srvkey, dkm[i..(i + keylen)].to_vec())?;
+                .set_key(&mut srvkey, dkm[i..(i + keylen)].into())?;
             i += keylen;
             keys.push(srvkey);
         }
@@ -842,7 +841,6 @@ impl TLSKDFOperation {
             srviv.copy_from_slice(&dkm[i..(i + ivlen)]);
         }
 
-        zeromem(&mut dkm);
         Ok(keys)
     }
 
@@ -1024,7 +1022,7 @@ impl TLSMACOperation {
         }
 
         let out = self.tlsprf.finish(&self.seed, self.outputlen)?;
-        output.copy_from_slice(out.as_slice());
+        output.copy_from_slice(&out);
 
         Ok(())
     }

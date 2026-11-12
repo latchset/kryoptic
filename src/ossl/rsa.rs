@@ -11,7 +11,7 @@ use crate::hash::{hash_size, INVALID_HASH_SIZE};
 use crate::mechanism::{
     Decryption, Encryption, MechOperation, Sign, Verify, VerifySignature,
 };
-use crate::misc::{bytes_to_vec, zeromem};
+use crate::misc::{bytes_to_vec, zeromem, SecVec};
 use crate::object::Object;
 use crate::ossl::common::{
     mech_type_to_digest_alg, osslctx, privkey_from_object, pubkey_from_object,
@@ -510,29 +510,19 @@ impl RsaPKCSOperation {
     pub fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
-        mut keydata: Vec<u8>,
+        keydata: SecVec,
         output: &mut [u8],
         info: &CK_MECHANISM_INFO,
     ) -> Result<usize> {
-        let mut op = match Self::encrypt_new(mech, wrapping_key, info) {
-            Ok(o) => o,
-            Err(e) => {
-                zeromem(keydata.as_mut_slice());
-                return Err(e);
-            }
-        };
+        let mut op = Self::encrypt_new(mech, wrapping_key, info)?;
         let needed_len = op.encryption_len(keydata.len(), true)?;
         if output.len() == 0 {
-            zeromem(keydata.as_mut_slice());
             return Ok(needed_len);
         }
         if output.len() < needed_len {
-            zeromem(keydata.as_mut_slice());
             return Err(Error::buf_too_small(needed_len));
         }
-        let result = op.encrypt(&keydata, output);
-        zeromem(keydata.as_mut_slice());
-        result
+        op.encrypt(&keydata, output)
     }
 
     /// Performs a one-shot RSA key unwrapping operation (PKCS#1 v1.5 or OAEP).
@@ -546,12 +536,12 @@ impl RsaPKCSOperation {
         wrapping_key: &Object,
         data: &[u8],
         info: &CK_MECHANISM_INFO,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<SecVec> {
         let mut op = Self::decrypt_new(mech, wrapping_key, info)?;
         let outlen = op.decrypt(data, &mut [])?;
-        let mut result = vec![0u8; outlen];
-        let outlen = op.decrypt(data, result.as_mut_slice())?;
-        result.resize(outlen, 0);
+        let mut result = SecVec::sized(outlen);
+        let outlen = op.decrypt(data, &mut result)?;
+        result.reduce(outlen)?;
         Ok(result)
     }
 }

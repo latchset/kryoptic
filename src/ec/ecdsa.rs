@@ -420,13 +420,13 @@ impl ObjectFactory for ECDSAPrivFactory {
 }
 
 impl KeyFactory for ECDSAPrivFactory {
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         export_for_wrapping(key)
     }
 
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         import_from_wrapped(

@@ -32,6 +32,7 @@ use std::sync::LazyLock;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::*;
+use crate::misc::SecVec;
 use crate::object::*;
 use crate::ossl::chacha20::*;
 use crate::pkcs11::*;
@@ -181,13 +182,13 @@ impl ObjectFactory for ChaCha20KeyFactory {
 }
 
 impl KeyFactory for ChaCha20KeyFactory {
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         SecretKeyFactory::default_export_for_wrapping(self, key)
     }
 
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         if data.len() != CHACHA20_KEY_SIZE {
@@ -200,11 +201,11 @@ impl KeyFactory for ChaCha20KeyFactory {
 impl SecretKeyFactory for ChaCha20KeyFactory {
     /// Helper that checks the key is correctly formed for a ChaCha20 key
     /// object (exactly 256 bits).
-    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
+    fn set_key(&self, obj: &mut Object, key: SecVec) -> Result<()> {
         if key.len() != CHACHA20_KEY_SIZE {
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_sec_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, CHACHA20_KEY_SIZE)?;
         Ok(())
     }

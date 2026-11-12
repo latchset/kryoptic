@@ -13,6 +13,7 @@ use crate::ec::*;
 use crate::error::{Error, Result};
 use crate::kasn1::{oid, pkcs};
 use crate::mechanism::*;
+use crate::misc::SecVec;
 use crate::object::*;
 use crate::ossl::common::extract_public_key;
 use crate::ossl::montgomery::ECMontgomeryOperation;
@@ -291,13 +292,13 @@ impl ObjectFactory for ECMontgomeryPrivFactory {
 }
 
 impl KeyFactory for ECMontgomeryPrivFactory {
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         export_for_wrapping(key)
     }
 
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         import_from_wrapped(

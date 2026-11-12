@@ -14,7 +14,7 @@ use crate::hmac::hmac_size;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
 use crate::misc::{
     bytes_to_slice, bytes_to_vec, common_derive_data_object,
-    common_derive_key_object,
+    common_derive_key_object, SecVec,
 };
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{mech_type_to_digest_alg, osslctx};
@@ -297,13 +297,13 @@ impl Derive for HKDFOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut dkm = vec![0u8; keysize];
+        let mut dkm = SecVec::sized(keysize);
         kdf.derive(&mut dkm)?;
 
         #[cfg(feature = "fips")]
         self.fips_approval.finalize();
 
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
+        obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm.extract()))?;
 
         Ok(vec![obj])
     }
