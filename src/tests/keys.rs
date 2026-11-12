@@ -1871,6 +1871,8 @@ fn test_hmac_key_sizes() {
         (CKK_SHA256_HMAC, Some(16), CKR_OK, 16),
         /* no length: the default for the key type is the hash size */
         (CKK_SHA256_HMAC, None, CKR_OK, 32),
+        /* the default length is longer than the hash output */
+        (CKK_SHA512_HMAC, None, CKR_TEMPLATE_INCONSISTENT, 0),
     ] {
         let mut ulongs =
             vec![(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, keytype)];
