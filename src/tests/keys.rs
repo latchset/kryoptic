@@ -1771,5 +1771,132 @@ fn test_hmac_key_sizes() {
         );
     }
 
+    // 3. Import a key of a size different from the hash output size
+    let genkey = ret_or_panic!(generate_key(
+        session,
+        CKM_SHA256_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16)],
+        &[],
+        &[
+            (CKA_SIGN, true),
+            (CKA_DERIVE, true),
+            (CKA_EXTRACTABLE, true),
+            (CKA_SENSITIVE, false),
+        ],
+    ));
+    let genval = ret_or_panic!(extract_key_value(session, genkey));
+    let gensig = ret_or_panic!(sig_gen(session, genkey, data, &mechanism));
+
+    let imported = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_SHA256_HMAC)],
+        &[(CKA_VALUE, &genval)],
+        &[(CKA_SIGN, true)],
+    ));
+    let sig = ret_or_panic!(sig_gen(session, imported, data, &mechanism));
+    assert_eq!(sig, gensig);
+
+    /* imported keys are checked against the FIPS key size limits */
+    for len in [13, 100] {
+        let value = vec![0x42u8; len];
+        let handle = ret_or_panic!(import_object(
+            session,
+            CKO_SECRET_KEY,
+            &[(CKA_KEY_TYPE, CKK_SHA256_HMAC)],
+            &[(CKA_VALUE, &value)],
+            &[(CKA_SIGN, true)],
+        ));
+        ret_or_panic!(sig_gen(session, handle, data, &mechanism));
+    }
+
+    // 4. Wrap and unwrap a key of a size different from the hash size
+    let wrapping_key = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_KEY_TYPE, CKK_AES), (CKA_VALUE_LEN, 32)],
+        &[],
+        &[(CKA_WRAP, true), (CKA_UNWRAP, true)],
+    ));
+    let iv = [0xCCu8; 4];
+    let mut wrap_mech = CK_MECHANISM {
+        mechanism: CKM_AES_KEY_WRAP_KWP,
+        pParameter: void_ptr!(&iv),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+    let mut wrapped = vec![0u8; 256];
+    let mut wrapped_len = wrapped.len() as CK_ULONG;
+    let ret = fn_wrap_key(
+        session,
+        &mut wrap_mech,
+        wrapping_key,
+        genkey,
+        wrapped.as_mut_ptr(),
+        &mut wrapped_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let unwrap_template = make_attr_template(
+        &[(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, CKK_SHA256_HMAC)],
+        &[],
+        &[(CKA_SIGN, true)],
+    );
+    let mut unwrapped = CK_INVALID_HANDLE;
+    let ret = fn_unwrap_key(
+        session,
+        &mut wrap_mech,
+        wrapping_key,
+        wrapped.as_mut_ptr(),
+        wrapped_len,
+        unwrap_template.as_ptr() as *mut _,
+        unwrap_template.len() as CK_ULONG,
+        &mut unwrapped,
+    );
+    assert_eq!(ret, CKR_OK);
+    let sig = ret_or_panic!(sig_gen(session, unwrapped, data, &mechanism));
+    assert_eq!(sig, gensig);
+
+    // 5. Derive keys of a size different from the hash size
+    let mut derive_mech = CK_MECHANISM {
+        mechanism: CKM_SHA256_KEY_DERIVATION,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    for (keytype, len, rv, outlen) in [
+        /* explicit length shorter than the hash size */
+        (CKK_SHA256_HMAC, Some(16), CKR_OK, 16),
+        /* no length: the default for the key type is the hash size */
+        (CKK_SHA256_HMAC, None, CKR_OK, 32),
+    ] {
+        let mut ulongs =
+            vec![(CKA_CLASS, CKO_SECRET_KEY), (CKA_KEY_TYPE, keytype)];
+        if let Some(l) = len {
+            ulongs.push((CKA_VALUE_LEN, l));
+        }
+        let derive_template = make_attr_template(
+            ulongs.as_slice(),
+            &[],
+            &[(CKA_EXTRACTABLE, true), (CKA_SENSITIVE, false)],
+        );
+        let mut derived = CK_INVALID_HANDLE;
+        let ret = fn_derive_key(
+            session,
+            &mut derive_mech,
+            genkey,
+            derive_template.as_ptr() as *mut _,
+            derive_template.len() as CK_ULONG,
+            &mut derived,
+        );
+        assert_eq!(ret, rv);
+        if rv == CKR_OK {
+            let value = ret_or_panic!(extract_key_value(session, derived));
+            assert_eq!(value.len(), outlen);
+        }
+    }
+
     testtokn.finalize();
 }
