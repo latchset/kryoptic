@@ -92,7 +92,9 @@ static HMAC_SECRET_KEY_FACTORIES: LazyLock<
     for hs in &hash::HASH_MECH_SET {
         v.push((
             hs.key_type,
-            Box::new(GenericSecretKeyFactory::with_key_size(hs.hash_size)),
+            Box::new(GenericSecretKeyFactory::with_default_key_size(
+                hs.hash_size,
+            )),
         ));
     }
     v
