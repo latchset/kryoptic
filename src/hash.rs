@@ -588,11 +588,16 @@ impl Derive for HashKDFOperation {
                 keysize = size;
             }
             None => {
-                keysize = CK_ULONG::try_from(
+                let size = CK_ULONG::try_from(
                     factory
                         .as_secret_key_factory()?
                         .recommend_key_size(hashsize)?,
                 )?;
+                /* the key type may require more than the hash provides */
+                if size > keysize {
+                    return Err(CKR_TEMPLATE_INCONSISTENT)?;
+                }
+                keysize = size;
                 tmpl.add_ulong(CKA_VALUE_LEN, &keysize);
             }
         }
