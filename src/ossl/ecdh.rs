@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use crate::error::Result;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::{bytes_to_vec, common_derive_key_object, zeromem};
+use crate::misc::{bytes_to_vec, common_derive_key_object, SecVec};
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
 use crate::pkcs11::*;
@@ -198,39 +198,37 @@ impl Derive for ECDHOperation {
             .make_peer(osslctx(), &ec_point)
             .map_err(|_| CKR_PUBLIC_KEY_INVALID)?;
 
-        let mut secret = vec![0u8; raw_max];
-        let outlen = ecdh.derive(&mut peer, secret.as_mut_slice())?;
-        secret.resize(outlen, 0);
+        let mut secret = SecVec::sized(raw_max);
+        let outlen = ecdh.derive(&mut peer, &mut secret)?;
+        secret.reduce(outlen)?;
 
         if self.kdf == CKD_NULL {
             if outlen < keylen {
                 return Err(CKR_TEMPLATE_INCONSISTENT)?;
             }
             /* We need to take the tail of the raw output */
-            secret.drain(..(outlen - keylen));
+            secret.subset((outlen - keylen)..)?;
         } else {
             /* Handle KDFs in token as OpenSSL does not support all cases */
             let digest = kdf_type_to_digest_alg(self.kdf)?;
-            let mut output = vec![0u8; keylen];
+            let mut output = SecVec::sized(keylen);
 
             if kdf_type_is_x963(self.kdf)? {
                 let mut kdf = X963KdfDerive::new(osslctx(), digest)?;
-                kdf.set_key(secret.as_slice());
+                kdf.set_key(&secret);
                 if let Some(ukm) = &self.shared {
                     kdf.set_info(ukm.as_slice());
                 }
-                kdf.derive(output.as_mut_slice())?;
+                kdf.derive(&mut output)?;
             } else {
                 let mut kdf =
                     OneStepKdfDerive::new(osslctx(), None, Some(digest))?;
-                kdf.set_key(secret.as_slice());
+                kdf.set_key(&secret);
                 if let Some(ukm) = &self.shared {
                     kdf.set_info(ukm.as_slice());
                 }
-                kdf.derive(output.as_mut_slice())?;
+                kdf.derive(&mut output)?;
             }
-
-            zeromem(secret.as_mut_slice());
             secret = output;
         }
 

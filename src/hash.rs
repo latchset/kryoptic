@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 use crate::attribute::CkAttrs;
 use crate::error::Result;
 use crate::mechanism::*;
+use crate::misc::SecVec;
 use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::ossl::hash::HashOperation;
 use crate::pkcs11::*;
@@ -596,21 +597,20 @@ impl Derive for HashKDFOperation {
                 tmpl.add_ulong(CKA_VALUE_LEN, &keysize);
             }
         }
+        if keysize > hashsize as CK_ULONG {
+            return Err(CKR_TEMPLATE_INCONSISTENT)?;
+        }
 
         let mut obj = factory.as_key_factory()?.key_derive(
             tmpl.as_slice(),
             KeyOrigin::Derive(self.mech, key, DerivePolicy::Independent),
         )?;
 
-        let mut dkm = vec![0u8; hashsize];
-        op.digest(
-            key.get_attr_as_bytes(CKA_VALUE)?.as_slice(),
-            dkm.as_mut_slice(),
-        )?;
+        let mut dkm = SecVec::sized(hashsize);
+        op.digest(key.get_attr_as_bytes(CKA_VALUE)?.as_slice(), &mut dkm)?;
 
-        factory
-            .as_secret_key_factory()?
-            .set_key(&mut obj, dkm[..(usize::try_from(keysize)?)].to_vec())?;
+        dkm.reduce(usize::try_from(keysize)?)?;
+        factory.as_secret_key_factory()?.set_key(&mut obj, dkm)?;
 
         Ok(vec![obj])
     }

@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::error::{Error, Result};
-use crate::misc::{sizeof, struct_to_slice, void_ptr, zeromem};
+use crate::misc::{sizeof, struct_to_slice, void_ptr, zeromem, SecVec};
 use crate::pkcs11::vendor::{KRA_LOGIN_ATTEMPTS, KRA_MAX_LOGIN_ATTEMPTS};
 use crate::pkcs11::*;
 
@@ -745,6 +745,17 @@ impl Attribute {
             ck_type: t,
             attrtype: AttrType::BytesType,
             value: val,
+        }
+    }
+
+    /// Creates an attribute of type AttrType::BytesType from a `SecVec`
+    ///
+    /// Note: Does not verify that the attribute id type is correct
+    pub fn from_sec_bytes(t: CK_ULONG, val: SecVec) -> Attribute {
+        Attribute {
+            ck_type: t,
+            attrtype: AttrType::BytesType,
+            value: val.extract(),
         }
     }
 

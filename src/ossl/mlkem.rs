@@ -7,6 +7,7 @@
 
 use crate::attribute::Attribute;
 use crate::error::Result;
+use crate::misc::SecVec;
 use crate::object::Object;
 use crate::ossl::common::{osslctx, privkey_from_object, pubkey_from_object};
 use crate::pkcs11::*;
@@ -80,12 +81,12 @@ pub fn mlkem_object_to_pkey(
 pub fn encapsulate(
     key: &Object,
     ciphertext: &mut [u8],
-) -> Result<(Vec<u8>, usize)> {
+) -> Result<(SecVec, usize)> {
     let mut pubkey = pubkey_from_object(key)?;
     let mut ctx =
         OsslAsymcipher::new(osslctx(), EncOp::Encapsulate, &mut pubkey, None)?;
     match ctx.encapsulate(ciphertext) {
-        Ok(ret) => Ok(ret),
+        Ok((v, u)) => Ok((v.into(), u)),
         Err(e) => match e.kind() {
             ErrorKind::BufferSize => Err(CKR_BUFFER_TOO_SMALL)?,
             _ => Err(CKR_DEVICE_ERROR)?,
@@ -99,11 +100,11 @@ pub fn encapsulate(
 /// Uses the `OsslEncapsulation` API.
 ///
 /// Returns the derived shared secret (`Vec<u8>`).
-pub fn decapsulate(key: &Object, ciphertext: &[u8]) -> Result<Vec<u8>> {
+pub fn decapsulate(key: &Object, ciphertext: &[u8]) -> Result<SecVec> {
     let mut prikey = privkey_from_object(key)?;
     let mut ctx =
         OsslAsymcipher::new(osslctx(), EncOp::Decapsulate, &mut prikey, None)?;
-    Ok(ctx.decapsulate(ciphertext)?)
+    Ok(ctx.decapsulate(ciphertext)?.into())
 }
 
 /// Generates an ML-KEM key pair for the specified parameter set.

@@ -10,6 +10,7 @@ use crate::hash::{HASH_LEN_SHA1, HASH_LEN_SHA256, HASH_LEN_SHA512};
 use crate::mechanism::{
     Mac, MechOperation, Mechanism, Mechanisms, Sign, Verify,
 };
+use crate::misc::SecVec;
 use crate::native::hmac::HMACOperation;
 use crate::object::factory::{
     attr_element, OAFlags, ObjectFactories, ObjectFactory, ObjectFactoryData,
@@ -251,13 +252,13 @@ impl ObjectFactory for HOTPKeyFactory {
 }
 
 impl KeyFactory for HOTPKeyFactory {
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         SecretKeyFactory::default_export_for_wrapping(self, key)
     }
 
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         SecretKeyFactory::default_import_from_wrapped(self, data, template)
