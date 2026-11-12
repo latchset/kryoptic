@@ -10,6 +10,7 @@ use std::mem::swap;
 use crate::error::Result;
 use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
+use crate::misc::SecVec;
 use crate::object::Object;
 use crate::pkcs11::*;
 
@@ -42,7 +43,7 @@ pub fn pbkdf2_derive(
     salt: &Vec<u8>,
     iter: usize,
     dklen: usize,
-) -> Result<Vec<u8>> {
+) -> Result<SecVec> {
     let hlen = hmac::hmac_size(prf);
     if hlen == usize::try_from(CK_UNAVAILABLE_INFORMATION)? {
         return Err(CKR_MECHANISM_INVALID)?;
@@ -54,7 +55,7 @@ pub fn pbkdf2_derive(
 
     let l = (dklen + hlen - 1) / hlen;
 
-    let mut dkm = vec![0u8; dklen];
+    let mut dkm = SecVec::sized(dklen);
 
     let mech = mechanisms.get(prf)?;
 

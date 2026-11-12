@@ -113,7 +113,7 @@ fn test_tlsprf_vectors() {
         let out =
             tlskdf::test_tlsprf(&key, &mech, mechtype, seed, output.len())
                 .unwrap();
-        if &out != output {
+        if out.as_ref() != output {
             panic!("Failed tls prf vector named {}", name);
         }
     }

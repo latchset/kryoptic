@@ -12,6 +12,7 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::kasn1::{pkcs, DerEncBigUint, PrivateKeyInfo};
 use crate::mechanism::*;
+use crate::misc::SecVec;
 use crate::object::*;
 use crate::ossl::rsa::*;
 use crate::pkcs11::*;
@@ -535,10 +536,10 @@ impl KeyFactory for RSAPrivFactory {
     /// Wraps the `RSAPrivateKey` bytes inside a PKCS#8 `PrivateKeyInfo` structure.
     ///
     /// Returns the DER-encoded `PrivateKeyInfo`.
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         key.check_key_ops(CKO_PRIVATE_KEY, CKK_RSA, CKA_EXTRACTABLE)?;
 
-        let pkey = match asn1::write_single(&RSAPrivateKey::new_owned(
+        let pkey: SecVec = match asn1::write_single(&RSAPrivateKey::new_owned(
             key.get_attr_as_bytes(CKA_MODULUS)?,
             key.get_attr_as_bytes(CKA_PUBLIC_EXPONENT)?,
             key.get_attr_as_bytes(CKA_PRIVATE_EXPONENT)?,
@@ -548,13 +549,13 @@ impl KeyFactory for RSAPrivFactory {
             key.get_attr_as_bytes(CKA_EXPONENT_2)?,
             key.get_attr_as_bytes(CKA_COEFFICIENT)?,
         )?) {
-            Ok(p) => p,
+            Ok(p) => p.into(),
             _ => return Err(CKR_GENERAL_ERROR)?,
         };
-        let pkeyinfo = PrivateKeyInfo::new(&pkey.as_slice(), pkcs::RSA_ALG)?;
+        let pkeyinfo = PrivateKeyInfo::new(&pkey, pkcs::RSA_ALG)?;
 
         match asn1::write_single(&pkeyinfo) {
-            Ok(x) => Ok(x),
+            Ok(x) => Ok(x.into()),
             Err(_) => Err(CKR_GENERAL_ERROR)?,
         }
     }
@@ -569,7 +570,7 @@ impl KeyFactory for RSAPrivFactory {
     /// Returns the newly created key object.
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         let mut key = self.create_key_object(template, KeyOrigin::Unwrap)?;

@@ -8,7 +8,7 @@ use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::hmac;
 use crate::mechanism::{Mechanism, Mechanisms};
-use crate::misc::bytes_to_vec;
+use crate::misc::{bytes_to_vec, SecVec};
 use crate::object::{KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
 use std::fmt::Debug;
@@ -51,7 +51,7 @@ impl PBKDF2Mechanism {
     ///
     /// This is needed because the underlying PBKDF2 implementation (native or
     /// OpenSSL) expects a key object as input for the PRF (HMAC).
-    fn mock_password_object(&self, key: Vec<u8>) -> Result<Object> {
+    fn mock_password_object(&self, key: SecVec) -> Result<Object> {
         let mut obj = Object::new(CKO_SECRET_KEY);
         obj.set_zeroize();
         obj.set_attr(Attribute::from_ulong(CKA_KEY_TYPE, CKK_GENERIC_SECRET))?;
@@ -59,7 +59,7 @@ impl PBKDF2Mechanism {
             CKA_VALUE_LEN,
             CK_ULONG::try_from(key.len())?,
         ))?;
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_sec_bytes(CKA_VALUE, key))?;
         obj.set_attr(Attribute::from_bool(CKA_DERIVE, true))?;
         Ok(obj)
     }
@@ -115,10 +115,10 @@ impl Mechanism for PBKDF2Mechanism {
             CKP_PKCS5_PBKD2_HMAC_SHA512_256 => CKM_SHA512_256_HMAC,
             _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
         };
-        let pass = self.mock_password_object(bytes_to_vec(
-            params.pPassword,
-            params.ulPasswordLen as usize,
-        ))?;
+        let pass = self.mock_password_object(
+            SecVec::from_raw_bytes(params.pPassword, params.ulPasswordLen)
+                .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+        )?;
         let salt = match params.saltSource {
             CKZ_SALT_SPECIFIED => {
                 if params.pSaltSourceData == std::ptr::null_mut()

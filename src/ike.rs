@@ -26,7 +26,7 @@ use crate::error::Result;
 use crate::hash::INVALID_HASH_SIZE;
 use crate::hmac::hmac_size;
 use crate::mechanism::{Derive, Mac, MechOperation, Mechanism, Mechanisms};
-use crate::misc::{bytes_to_vec, common_derive_key_object, zeromem};
+use crate::misc::{bytes_to_vec, common_derive_key_object, zeromem, SecVec};
 use crate::native::hmac::HMACOperation;
 use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::pkcs11::*;
@@ -685,7 +685,7 @@ impl Derive for Ike1ExtendedOperation {
             self.prf_len,
         )?;
         // Single reusable output buffer; kn tracks the previous block.
-        let mut block = vec![0u8; self.prf_len];
+        let mut block = SecVec::sized(self.prf_len);
 
         // K1 = prf(K, [gxy][extra]) or prf(K, 0x00) when both absent.
         {
@@ -702,9 +702,12 @@ impl Derive for Ike1ExtendedOperation {
             prf(&mut hmac, &parts, &mut block)?;
         }
 
-        let mut dkm = Vec::with_capacity(keysize);
+        /* allocate a whole additional block.len() so there is no
+         * reallocation while extending from block, if keysize is
+         * not an exact multiple */
+        let mut dkm = SecVec::with_capacity(keysize + block.len());
         dkm.extend_from_slice(&block);
-        let mut kn = block.clone(); // kn = K1
+        let mut kn = SecVec::from(block.as_ref()); // kn = K1
 
         // Kn = prf(K, K(n-1)[gxy][extra])
         while dkm.len() < keysize {
@@ -720,9 +723,9 @@ impl Derive for Ike1ExtendedOperation {
             dkm.extend_from_slice(&block);
             kn.copy_from_slice(&block);
         }
-        dkm.truncate(keysize);
+        dkm.reduce(keysize)?;
 
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm))?;
+        obj.set_attr(Attribute::from_bytes(CKA_VALUE, dkm.extract()))?;
         Ok(vec![obj])
     }
 }

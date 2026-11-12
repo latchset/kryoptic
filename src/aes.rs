@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::{bytes_to_slice, zeromem};
+use crate::misc::{bytes_to_slice, SecVec};
 use crate::object::*;
 use crate::ossl::aes::*;
 use crate::pkcs11::*;
@@ -209,13 +209,13 @@ impl KeyFactory for AesKeyFactory {
         Ok(obj)
     }
 
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         SecretKeyFactory::default_export_for_wrapping(self, key)
     }
 
     fn import_from_wrapped(
         &self,
-        mut data: Vec<u8>,
+        mut data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         /* AES keys can only be 16, 24, 32 bytes long,
@@ -223,23 +223,13 @@ impl KeyFactory for AesKeyFactory {
         match template.iter().position(|x| x.type_ == CKA_VALUE_LEN) {
             Some(idx) => {
                 let len = usize::try_from(template[idx].to_ulong()?)?;
-                if len > data.len() {
-                    zeromem(data.as_mut_slice());
+                if data.reduce(len).is_err() {
                     return Err(CKR_KEY_SIZE_RANGE)?;
-                }
-                if len < data.len() {
-                    unsafe { data.set_len(len) };
                 }
             }
             None => (),
         }
-        match check_key_len(data.len()) {
-            Ok(_) => (),
-            Err(e) => {
-                zeromem(data.as_mut_slice());
-                return Err(e);
-            }
-        }
+        check_key_len(data.len())?;
         SecretKeyFactory::default_import_from_wrapped(self, data, template)
     }
 }
@@ -247,10 +237,10 @@ impl KeyFactory for AesKeyFactory {
 impl SecretKeyFactory for AesKeyFactory {
     /// Helper to set key that check the key is correctly formed for an
     /// AES key object
-    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
+    fn set_key(&self, obj: &mut Object, key: SecVec) -> Result<()> {
         let keylen = key.len();
         check_key_len(keylen)?;
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_sec_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
     }
@@ -711,8 +701,8 @@ impl Derive for AesKDFOperation<'_> {
 
         let keysize = op.encryption_len(self.data.len(), false)?;
 
-        let mut dkm = vec![0u8; keysize];
-        let outsize = op.encrypt(self.data, &mut dkm)?;
+        let mut dkm = SecVec::sized(keysize);
+        let outsize = op.encrypt(self.data, dkm.as_mut())?;
         if outsize != keysize {
             return Err(CKR_GENERAL_ERROR)?;
         }

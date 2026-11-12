@@ -4,7 +4,7 @@
 use crate::attribute::Attribute;
 use crate::error::Result;
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::{bytes_to_slice, struct_to_slice};
+use crate::misc::{bytes_to_slice, struct_to_slice, SecVec};
 use crate::object::{DerivePolicy, KeyOrigin, Object, ObjectFactories};
 use crate::ossl::common::osslctx;
 use crate::pkcs11::*;
@@ -464,7 +464,7 @@ impl Derive for Sp800Operation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut dkm = vec![0u8; slen];
+        let mut dkm = SecVec::sized(slen);
         kdf.derive(&mut dkm)?;
 
         #[cfg(feature = "fips")]
