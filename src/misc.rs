@@ -7,7 +7,7 @@
 use std::borrow::Cow;
 
 use crate::attribute::{Attribute, CkAttrs};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::object::{
     DerivePolicy, KeyOrigin, Object, ObjectFactories, ObjectType,
 };
@@ -348,6 +348,223 @@ pub fn zeromem(mem: &mut [u8]) {
     ossl::zeromem(mem);
 }
 
+/// A thin wrapper around a [`Vec<u8>`] that securely zeroizes its memory
+/// using [`zeromem`] when dropped.
+#[derive(Default)]
+pub struct SecVec(Vec<u8>);
+
+impl std::fmt::Debug for SecVec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecVec").field("len", &self.len()).finish()
+    }
+}
+
+impl SecVec {
+    /// Creates a new, empty `SecVec`.
+    pub fn new() -> Self {
+        SecVec(Vec::new())
+    }
+
+    /// Creates a new zero-filled Vector of the specified size
+    pub fn sized(size: usize) -> Self {
+        SecVec(vec![0u8; size])
+    }
+
+    /// Creates a new, empty `SecVec` with the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        SecVec(Vec::with_capacity(capacity))
+    }
+
+    /// Copies a pointer and length obtained via FFI into a new `SecVec`.
+    pub fn from_raw_bytes<T, U>(ptr: *const T, plen: U) -> Result<SecVec>
+    where
+        usize: TryFrom<U>,
+        Error: From<<usize as TryFrom<U>>::Error>,
+    {
+        let len = usize::try_from(plen)?;
+        if ptr.is_null() && len != 0 {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        Ok(SecVec(bytes_to_vec(ptr, len)))
+    }
+
+    /// Extracts and hands off the inner [`Vec<u8>`].
+    /// Note that the returned Vector is no longer zeroized, and the
+    /// receiving owner must handle it appropriately from here on.
+    pub fn extract(mut self) -> Vec<u8> {
+        std::mem::take(&mut self.0)
+    }
+
+    /// Clears the vector, zeroizing its contents before clearing.
+    pub fn clear(&mut self) {
+        zeromem(self.0.as_mut_slice());
+        self.0.clear();
+    }
+
+    /// Resizes the `SecVec` in-place.
+    ///
+    /// When expanding the vector, a brand new vector of the requested size is
+    /// created, data is copied into it, and the original vector is zeroized
+    /// before dropping it.
+    /// When reducing the vector, the excess elements are zeroized with
+    /// [`zeromem`] and the vector's length is reduced using `set_len`.
+    pub fn resize(&mut self, new_len: usize, value: u8) {
+        if new_len > self.0.capacity() {
+            let mut new_vec = vec![value; new_len];
+            new_vec[..self.0.len()].copy_from_slice(&self.0);
+            zeromem(self.0.as_mut_slice());
+            self.0 = new_vec;
+        } else if new_len > self.0.len() {
+            self.0.resize(new_len, value);
+        } else if new_len < self.0.len() {
+            zeromem(&mut self.0[new_len..]);
+            self.0.truncate(new_len);
+        }
+    }
+
+    /// Reduces the length of the `SecVec` to `new_len`.
+    ///
+    /// Invokes [`resize`] internally. Returns an error if the new length
+    /// is greater than the current vector length (the current buffer is
+    /// smaller than the requested length).
+    pub fn reduce(&mut self, new_len: usize) -> Result<()> {
+        if new_len > self.0.len() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        self.resize(new_len, 0);
+        Ok(())
+    }
+
+    /// Modifies the `SecVec` to contain only the subset specified by `index`,
+    /// copying the data to the start of the vector, zeroizing the discarded
+    /// memory, setting the length to the size of the range.
+    pub fn subset<R: std::ops::RangeBounds<usize>>(
+        &mut self,
+        index: R,
+    ) -> Result<()> {
+        let start = match index.start_bound() {
+            std::ops::Bound::Included(&n) => n,
+            std::ops::Bound::Excluded(&n) => {
+                n.checked_add(1).ok_or(CKR_GENERAL_ERROR)?
+            }
+            std::ops::Bound::Unbounded => 0,
+        };
+        let end = match index.end_bound() {
+            std::ops::Bound::Included(&n) => {
+                n.checked_add(1).ok_or(CKR_GENERAL_ERROR)?
+            }
+            std::ops::Bound::Excluded(&n) => n,
+            std::ops::Bound::Unbounded => self.0.len(),
+        };
+        if start > end || end > self.0.len() {
+            return Err(CKR_GENERAL_ERROR)?;
+        }
+        let size = end - start;
+        self.0.copy_within(start..end, 0);
+        zeromem(&mut self.0[size..]);
+        unsafe {
+            self.0.set_len(size);
+        }
+        Ok(())
+    }
+
+    /// Clones and appends all elements in a slice to the `SecVec`.
+    pub fn extend_from_slice(&mut self, other: &[u8]) {
+        let new_len = self.0.len() + other.len();
+        if new_len > self.0.capacity() {
+            let mut new_vec = Vec::with_capacity(self.0.len() + other.len());
+            new_vec.extend_from_slice(&self.0);
+            new_vec.extend_from_slice(other);
+            zeromem(self.0.as_mut_slice());
+            self.0 = new_vec;
+        } else {
+            self.0.extend_from_slice(other);
+        }
+    }
+}
+
+impl Drop for SecVec {
+    fn drop(&mut self) {
+        zeromem(self.0.as_mut_slice());
+    }
+}
+
+impl std::ops::Deref for SecVec {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_slice()
+    }
+}
+
+impl std::ops::DerefMut for SecVec {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut_slice()
+    }
+}
+
+impl AsRef<[u8]> for SecVec {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+impl AsMut<[u8]> for SecVec {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut_slice()
+    }
+}
+
+impl std::borrow::Borrow<[u8]> for SecVec {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+impl std::borrow::BorrowMut<[u8]> for SecVec {
+    fn borrow_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut_slice()
+    }
+}
+
+impl<I: std::slice::SliceIndex<[u8]>> std::ops::Index<I> for SecVec {
+    type Output = I::Output;
+
+    fn index(&self, index: I) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<I: std::slice::SliceIndex<[u8]>> std::ops::IndexMut<I> for SecVec {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+impl From<Vec<u8>> for SecVec {
+    fn from(v: Vec<u8>) -> Self {
+        SecVec(v)
+    }
+}
+
+impl From<&Vec<u8>> for SecVec {
+    fn from(v: &Vec<u8>) -> Self {
+        SecVec(v.clone())
+    }
+}
+
+impl From<&[u8]> for SecVec {
+    fn from(s: &[u8]) -> Self {
+        SecVec(s.to_vec())
+    }
+}
+
+impl<const N: usize> From<[u8; N]> for SecVec {
+    fn from(arr: [u8; N]) -> Self {
+        SecVec(arr.to_vec())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +689,73 @@ mod tests {
         let val: CK_ULONG = 10;
         let l = parse_len(val).unwrap();
         assert_eq!(l, 10);
+    }
+
+    #[test]
+    fn test_zeromem() {
+        let mut data = vec![1u8, 2, 3, 4, 5];
+        zeromem(data.as_mut_slice());
+        assert_eq!(data, vec![0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_sec_vec() {
+        let mut sv = SecVec::new();
+        assert!(sv.is_empty());
+        assert_eq!(sv.len(), 0);
+
+        sv.extend_from_slice(&[1, 2, 3]);
+        assert_eq!(sv.len(), 3);
+        assert_eq!(sv[1], 2);
+        sv[1] = 42;
+        assert_eq!(sv[1], 42);
+        assert_eq!(sv.as_ref(), &[1, 42, 3]);
+
+        let sv2 = SecVec::from(&[10u8, 20, 30][..]);
+        assert_eq!(sv2.as_ref(), &[10, 20, 30]);
+
+        let mut sv4: SecVec = [5u8, 6, 7].into();
+        sv4.extend_from_slice(&[8u8, 9]);
+        assert_eq!(sv4.as_ref(), &[5, 6, 7, 8, 9]);
+
+        let data = [99u8, 100, 101];
+        let sv6 = SecVec::from_raw_bytes(data.as_ptr(), data.len()).unwrap();
+        assert_eq!(sv6.as_ref(), &[99, 100, 101]);
+
+        let mut sv_resize = SecVec::from(&[1u8, 2, 3, 4][..]);
+        sv_resize.resize(2, 0);
+        assert_eq!(sv_resize.as_ref(), &[1, 2]);
+
+        sv_resize.resize(5, 9);
+        assert_eq!(sv_resize.as_ref(), &[1, 2, 9, 9, 9]);
+
+        sv_resize.resize(0, 0);
+        assert!(sv_resize.is_empty());
+
+        let mut sv_reduce = SecVec::from(&[1u8, 2, 3, 4, 5][..]);
+        assert!(sv_reduce.reduce(6).is_err());
+        assert_eq!(sv_reduce.as_ref(), &[1, 2, 3, 4, 5]);
+        sv_reduce.reduce(3).unwrap();
+        assert_eq!(sv_reduce.as_ref(), &[1, 2, 3]);
+        sv_reduce.reduce(0).unwrap();
+        assert!(sv_reduce.is_empty());
+
+        let mut sub = SecVec::from(&[10u8, 20, 30, 40, 50][..]);
+        sub.subset(1..4).unwrap();
+        assert_eq!(sub.as_ref(), &[20, 30, 40]);
+        assert_eq!(sub.len(), 3);
+        assert!(sub.subset(0..10).is_err());
+        sub.subset(1..1).unwrap();
+        assert!(sub.is_empty());
+
+        let empty_sv = SecVec::new();
+        assert_eq!(format!("{:?}", empty_sv), "SecVec { len: 0 }");
+
+        let sv_debug = SecVec::from(&[10u8, 20, 30][..]);
+        let debug_str = format!("{:?}", sv_debug);
+        assert_eq!(debug_str, "SecVec { len: 3 }");
+        assert!(!debug_str.contains("10"));
+        assert!(!debug_str.contains("20"));
+        assert!(!debug_str.contains("30"));
     }
 }

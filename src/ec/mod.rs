@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::kasn1::oid::*;
 use crate::kasn1::pkcs::*;
 use crate::kasn1::PrivateKeyInfo;
-use crate::misc::zeromem;
+use crate::misc::SecVec;
 use crate::object::Object;
 use crate::pkcs11::*;
 
@@ -247,7 +247,7 @@ pub fn check_ec_point_from_obj(
 }
 
 /// Common function to format a private EC key using PKCS#8 encoding
-pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
+pub fn export_for_wrapping(key: &Object) -> Result<SecVec> {
     key.check_key_ops(
         CKO_PRIVATE_KEY,
         CK_UNAVAILABLE_INFORMATION,
@@ -262,12 +262,12 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
 
     let oid = get_oid_from_obj(key)?;
 
-    let mut asn1_vec = {
+    let asn1_vec: SecVec = {
         let val = key.get_attr_as_bytes(CKA_VALUE)?;
         match key_type {
             CKK_EC => {
                 match asn1::write_single(&ECPrivateKey::new_owned(val)?) {
-                    Ok(p) => p,
+                    Ok(p) => p.into(),
                     _ => return Err(CKR_GENERAL_ERROR)?,
                 }
             }
@@ -275,7 +275,7 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
              * itself an OCTET STRING */
             CKK_EC_EDWARDS | CKK_EC_MONTGOMERY => {
                 match asn1::write_single(&val.as_slice()) {
-                    Ok(p) => p,
+                    Ok(p) => p.into(),
                     _ => return Err(CKR_GENERAL_ERROR)?,
                 }
             }
@@ -283,7 +283,7 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
         }
     };
     let pkeyinfo = PrivateKeyInfo::new(
-        &asn1_vec.as_slice(),
+        &asn1_vec,
         match oid {
             EC_SECP256R1 => EC_SECP256R1_ALG,
             EC_SECP384R1 => EC_SECP384R1_ALG,
@@ -295,13 +295,10 @@ pub fn export_for_wrapping(key: &Object) -> Result<Vec<u8>> {
             _ => return Err(CKR_CURVE_NOT_SUPPORTED)?,
         },
     )?;
-    let ret = match asn1::write_single(&pkeyinfo) {
-        Ok(x) => Ok(x),
+    match asn1::write_single(&pkeyinfo) {
+        Ok(x) => Ok(x.into()),
         Err(_) => Err(CKR_GENERAL_ERROR)?,
-    };
-    drop(pkeyinfo);
-    zeromem(asn1_vec.as_mut_slice());
-    ret
+    }
 }
 
 /// Extracts the raw key from an RFC 8410 CurvePrivateKey, the OCTET STRING
@@ -316,7 +313,7 @@ fn parse_curve_private_key(pkeyval: &[u8]) -> Result<&[u8]> {
 /// Common function to parse a private EC key from PKCS#8 encoded data
 pub fn import_from_wrapped(
     key_type: CK_KEY_TYPE,
-    data: Vec<u8>,
+    data: SecVec,
     mut key: Object,
 ) -> Result<Object> {
     key.ensure_ulong(CKA_CLASS, CKO_PRIVATE_KEY)

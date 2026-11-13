@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::get_random_data;
 use crate::mechanism::*;
 use crate::misc::{
-    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, void_ptr, zeromem,
+    bytes_to_slice, bytes_to_slice_mut, bytes_to_vec, void_ptr, zeromem, SecVec,
 };
 use crate::object::Object;
 use crate::ossl::common::osslctx;
@@ -48,7 +48,7 @@ fn object_to_raw_key(key: &Object) -> Result<OsslSecret> {
 #[derive(Debug)]
 struct AesIvData {
     /// The IV buffer. May hold the initial value or be updated by a generator.
-    buf: Vec<u8>,
+    buf: SecVec,
     /// Number of fixed bits at the start of the IV (for counter modes).
     fixedbits: usize,
     /// IV generation method (e.g., `CKG_GENERATE_COUNTER`).
@@ -63,7 +63,7 @@ impl AesIvData {
     /// Returns an empty IV container
     fn none() -> Result<AesIvData> {
         Ok(AesIvData {
-            buf: Vec::new(),
+            buf: SecVec::new(),
             fixedbits: 0,
             generator: CKG_NO_GENERATE,
             counter: 0,
@@ -72,7 +72,7 @@ impl AesIvData {
     }
 
     /// Returns an IV container with the specified IV
-    fn simple(iv: Vec<u8>) -> Result<AesIvData> {
+    fn simple(iv: SecVec) -> Result<AesIvData> {
         Ok(AesIvData {
             buf: iv,
             fixedbits: 0,
@@ -80,12 +80,6 @@ impl AesIvData {
             counter: 0,
             maxcount: 0,
         })
-    }
-}
-
-impl Drop for AesIvData {
-    fn drop(&mut self) {
-        zeromem(self.buf.as_mut_slice());
     }
 }
 
@@ -136,18 +130,12 @@ pub struct AesOperation {
     /// The underlying ossl cipher context.
     ctx: Option<OsslCipher>,
     /// Internal buffer for handling partial blocks or accumulating data.
-    buffer: Vec<u8>,
+    buffer: SecVec,
     /// Counter for blocks processed (used for CTR mode limits).
     blockctr: u128,
     /// Option to report fips indicator status
     #[cfg(feature = "fips")]
     fips_approval: FipsApproval,
-}
-
-impl Drop for AesOperation {
-    fn drop(&mut self) {
-        zeromem(self.buffer.as_mut_slice());
-    }
 }
 
 #[cfg(feature = "fips")]
@@ -215,10 +203,13 @@ impl AesOperation {
                     _ => return Err(CKR_MECHANISM_PARAM_INVALID)?,
                 }
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec(
-                        params.pNonce,
-                        usize::try_from(params.ulNonceLen)?,
-                    ))?,
+                    iv: AesIvData::simple(
+                        SecVec::from_raw_bytes(
+                            params.pNonce,
+                            params.ulNonceLen,
+                        )
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+                    )?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: usize::try_from(params.ulDataLen)
@@ -255,10 +246,10 @@ impl AesOperation {
                 let tagbits = usize::try_from(params.ulTagBits)
                     .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?;
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec(
-                        params.pIv,
-                        usize::try_from(params.ulIvLen)?,
-                    ))?,
+                    iv: AesIvData::simple(
+                        SecVec::from_raw_bytes(params.pIv, params.ulIvLen)
+                            .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+                    )?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
@@ -308,7 +299,7 @@ impl AesOperation {
                 }
 
                 Ok(AesParams {
-                    iv: AesIvData::simple(iv)?,
+                    iv: AesIvData::simple(iv.into())?,
                     maxblocks: maxblocks,
                     ctsmode: 0,
                     datalen: 0,
@@ -325,10 +316,13 @@ impl AesOperation {
                     ctsmode = 1u8;
                 }
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec(
-                        mech.pParameter,
-                        usize::try_from(mech.ulParameterLen)?,
-                    ))?,
+                    iv: AesIvData::simple(
+                        SecVec::from_raw_bytes(
+                            mech.pParameter,
+                            mech.ulParameterLen,
+                        )
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+                    )?,
                     maxblocks: 0,
                     ctsmode: ctsmode,
                     datalen: 0,
@@ -350,10 +344,13 @@ impl AesOperation {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 Ok(AesParams {
-                    iv: AesIvData::simple(bytes_to_vec(
-                        mech.pParameter,
-                        usize::try_from(mech.ulParameterLen)?,
-                    ))?,
+                    iv: AesIvData::simple(
+                        SecVec::from_raw_bytes(
+                            mech.pParameter,
+                            mech.ulParameterLen,
+                        )
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+                    )?,
                     maxblocks: 0,
                     ctsmode: 0,
                     datalen: 0,
@@ -364,10 +361,13 @@ impl AesOperation {
             CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_PKCS7 => {
                 let iv = match mech.ulParameterLen {
                     0 => AesIvData::none()?,
-                    8 => AesIvData::simple(bytes_to_vec(
-                        mech.pParameter,
-                        usize::try_from(mech.ulParameterLen)?,
-                    ))?,
+                    8 => AesIvData::simple(
+                        SecVec::from_raw_bytes(
+                            mech.pParameter,
+                            mech.ulParameterLen,
+                        )
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+                    )?,
                     _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
                 Ok(AesParams {
@@ -382,10 +382,13 @@ impl AesOperation {
             CKM_AES_KEY_WRAP_KWP => {
                 let iv = match mech.ulParameterLen {
                     0 => AesIvData::none()?,
-                    4 => AesIvData::simple(bytes_to_vec(
-                        mech.pParameter,
-                        usize::try_from(mech.ulParameterLen)?,
-                    ))?,
+                    4 => AesIvData::simple(
+                        SecVec::from_raw_bytes(
+                            mech.pParameter,
+                            mech.ulParameterLen,
+                        )
+                        .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
+                    )?,
                     _ => return Err(CKR_ARGUMENTS_BAD)?,
                 };
                 Ok(AesParams {
@@ -548,7 +551,7 @@ impl AesOperation {
             enc,
             OsslSecret::from_slice(key),
             if params.iv.buf.len() > 0 {
-                Some(params.iv.buf.clone())
+                Some(params.iv.buf.to_vec())
             } else {
                 None
             },
@@ -611,7 +614,7 @@ impl AesOperation {
             params: params,
             state: OpIntState::Initialized,
             ctx: Some(ctx),
-            buffer: Vec::new(),
+            buffer: SecVec::new(),
             blockctr: 0,
             #[cfg(feature = "fips")]
             fips_approval: fips_approval,
@@ -645,16 +648,10 @@ impl AesOperation {
     pub fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
-        mut keydata: Vec<u8>,
+        mut keydata: SecVec,
         output: &mut [u8],
     ) -> Result<usize> {
-        let mut op = match Self::cipher_new(mech, wrapping_key, CKF_WRAP) {
-            Ok(o) => o,
-            Err(e) => {
-                zeromem(keydata.as_mut_slice());
-                return Err(e);
-            }
-        };
+        let mut op = Self::cipher_new(mech, wrapping_key, CKF_WRAP)?;
 
         match mech.mechanism {
             CKM_AES_CBC | CKM_AES_ECB => {
@@ -668,7 +665,6 @@ impl AesOperation {
                 /* Check the data length in CCM matches the provided data -- this is one-shot
                  * operation only */
                 if op.params.datalen != keydata.len() {
-                    zeromem(keydata.as_mut_slice());
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
             }
@@ -690,17 +686,13 @@ impl AesOperation {
 
         let needed_len = op.encryption_len(keydata.len(), true)?;
         if output.len() == 0 {
-            zeromem(keydata.as_mut_slice());
             return Ok(needed_len);
         }
         if output.len() < needed_len {
-            zeromem(keydata.as_mut_slice());
             return Err(error::Error::buf_too_small(needed_len));
         }
 
-        let result = op.encrypt(&keydata, output);
-        zeromem(keydata.as_mut_slice());
-        result
+        op.encrypt(&keydata, output)
     }
 
     /// Instantiates a new AES Key-Unwrap Operation
@@ -708,10 +700,10 @@ impl AesOperation {
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         data: &[u8],
-    ) -> Result<Vec<u8>> {
+    ) -> Result<SecVec> {
         let mut op = Self::cipher_new(mech, wrapping_key, CKF_UNWRAP)?;
-        let mut result = vec![0u8; data.len()];
-        let outlen = match op.decrypt(data, result.as_mut_slice()) {
+        let mut result = SecVec::sized(data.len());
+        let outlen = match op.decrypt(data, &mut result) {
             Ok(n) => n,
             Err(e) => match e.rv() {
                 CKR_ENCRYPTED_DATA_LEN_RANGE => {
@@ -723,7 +715,7 @@ impl AesOperation {
                 _ => return Err(e),
             },
         };
-        result.resize(outlen, 0);
+        result.reduce(outlen)?;
         Ok(result)
     }
 
@@ -744,7 +736,7 @@ impl AesOperation {
     ) -> Result<CK_BYTE_PTR> {
         #[cfg(feature = "fips")]
         {
-            zeromem(self.params.iv.buf.as_mut_slice());
+            zeromem(&mut self.params.iv.buf);
             zeromem(self.params.aad.as_mut_slice());
         }
         match self.mech {
@@ -805,7 +797,8 @@ impl AesOperation {
                         }
                     }
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec(params.pNonce, noncelen),
+                        buf: SecVec::from_raw_bytes(params.pNonce, noncelen)
+                            .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                         fixedbits: noncefixedbits,
                         generator: params.nonceGenerator,
                         counter: self.params.iv.counter,
@@ -813,7 +806,8 @@ impl AesOperation {
                     };
                 } else {
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec(params.pNonce, noncelen),
+                        buf: SecVec::from_raw_bytes(params.pNonce, noncelen)
+                            .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                         fixedbits: 0,
                         generator: CKG_NO_GENERATE,
                         counter: 0,
@@ -874,7 +868,8 @@ impl AesOperation {
                         }
                     }
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec(params.pIv, ivlen),
+                        buf: SecVec::from_raw_bytes(params.pIv, ivlen)
+                            .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                         fixedbits: ivfixedbits,
                         generator: params.ivGenerator,
                         counter: self.params.iv.counter,
@@ -882,7 +877,8 @@ impl AesOperation {
                     };
                 } else {
                     self.params.iv = AesIvData {
-                        buf: bytes_to_vec(params.pIv, ivlen),
+                        buf: SecVec::from_raw_bytes(params.pIv, ivlen)
+                            .map_err(|_| CKR_MECHANISM_PARAM_INVALID)?,
                         fixedbits: 0,
                         generator: CKG_NO_GENERATE,
                         counter: 0,
@@ -992,7 +988,7 @@ impl AesOperation {
             })?,
             state: OpIntState::Initialized,
             ctx: None,
-            buffer: Vec::new(),
+            buffer: SecVec::new(),
             blockctr: 0,
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
@@ -1013,11 +1009,10 @@ impl AesOperation {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
+        self.buffer.clear();
+
         #[cfg(feature = "fips")]
-        {
-            zeromem(self.buffer.as_mut_slice());
-            self.fips_approval.reset();
-        }
+        self.fips_approval.reset();
 
         let iv_ptr = self.init_msg_params(parameter, parameter_len, aad)?;
 
@@ -1061,7 +1056,7 @@ impl AesOperation {
             })?,
             state: OpIntState::Initialized,
             ctx: None,
-            buffer: Vec::new(),
+            buffer: SecVec::new(),
             blockctr: 0,
             #[cfg(feature = "fips")]
             fips_approval: FipsApproval::init(),
@@ -1082,11 +1077,10 @@ impl AesOperation {
             return Err(CKR_OPERATION_ACTIVE)?;
         }
 
+        self.buffer.clear();
+
         #[cfg(feature = "fips")]
-        {
-            zeromem(self.buffer.as_mut_slice());
-            self.fips_approval.reset();
-        }
+        self.fips_approval.reset();
 
         let _ = self.init_msg_params(parameter, parameter_len, aad)?;
 
@@ -1332,16 +1326,14 @@ impl Encryption for AesOperation {
                 } else if plain.len() < self.params.datalen {
                     self.buffer.extend_from_slice(plain);
                     if self.buffer.len() == self.params.datalen {
-                        cipher_offset = ctx
-                            .update(self.buffer.as_slice(), cipher)
-                            .or_else(|_| {
+                        cipher_offset =
+                            ctx.update(&self.buffer, cipher).or_else(|_| {
                                 self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         if cipher_offset != self.params.datalen {
                             return Err(self.op_err(CKR_DEVICE_ERROR));
                         }
-                        zeromem(self.buffer.as_mut_slice());
                         self.buffer.clear();
                     }
                     plain_offset = plain_end;
@@ -1356,16 +1348,14 @@ impl Encryption for AesOperation {
                     if self.buffer.len() + plain_end >= AES_BLOCK_SIZE {
                         plain_offset = AES_BLOCK_SIZE - self.buffer.len();
                         self.buffer.extend_from_slice(&plain[..plain_offset]);
-                        cipher_offset = ctx
-                            .update(self.buffer.as_slice(), cipher)
-                            .or_else(|_| {
+                        cipher_offset =
+                            ctx.update(&self.buffer, cipher).or_else(|_| {
                                 self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         if cipher_offset != AES_BLOCK_SIZE {
                             return Err(self.op_err(CKR_DEVICE_ERROR));
                         }
-                        zeromem(self.buffer.as_mut_slice());
                         self.buffer.clear();
                     }
                 }
@@ -1407,7 +1397,7 @@ impl Encryption for AesOperation {
 
                 self.buffer.extend_from_slice(plain);
                 self.buffer.resize(plain.len() + pad, pad as u8);
-                plain_buf = self.buffer.as_slice();
+                plain_buf = &self.buffer;
                 plain_end = self.buffer.len();
             }
             _ => (),
@@ -1522,11 +1512,10 @@ impl Encryption for AesOperation {
                     self.state = OpIntState::Finalized;
                     return Err(CKR_DATA_LEN_RANGE)?;
                 }
-                let mut buffer = [0u8; AES_BLOCK_SIZE];
+                let mut buffer = SecVec::sized(AES_BLOCK_SIZE);
                 outlen = ctx.finalize(&mut buffer)?;
                 if outlen != 0 {
                     self.state = OpIntState::Finalized;
-                    zeromem(&mut buffer);
                     return Err(CKR_DEVICE_ERROR)?;
                 }
             }
@@ -1538,7 +1527,7 @@ impl Encryption for AesOperation {
                 self.state = OpIntState::Finalized;
 
                 if self.buffer.len() > 0 {
-                    outlen = ctx.update(self.buffer.as_slice(), cipher)?;
+                    outlen = ctx.update(&self.buffer, cipher)?;
                     /* we do not expect anything in output because
                      * this is a partial block, so the CBC PAD
                      * algorithm update can't return anything until
@@ -1826,7 +1815,7 @@ impl Decryption for AesOperation {
                 let needlen = self.params.datalen + self.params.taglen;
                 let cbuf = if cipher_end < needlen {
                     self.buffer.extend_from_slice(cipher);
-                    self.buffer.as_slice()
+                    &self.buffer
                 } else {
                     if cipher.len() != needlen {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
@@ -1852,7 +1841,6 @@ impl Decryption for AesOperation {
                         }
                     };
 
-                    zeromem(self.buffer.as_mut_slice());
                     self.buffer.clear();
                 }
 
@@ -1866,13 +1854,11 @@ impl Decryption for AesOperation {
                     if cipher_end > self.params.taglen {
                         /* consume the saved buffer now,
                          * so we avoid unnecessary data copy */
-                        plain_offset = ctx
-                            .update(self.buffer.as_slice(), plain)
-                            .or_else(|_| {
+                        plain_offset =
+                            ctx.update(&self.buffer, plain).or_else(|_| {
                                 self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
-                        zeromem(self.buffer.as_mut_slice());
                         self.buffer.clear();
                         cipher_end -= self.params.taglen;
                         self.buffer.extend_from_slice(&cipher[cipher_end..]);
@@ -1881,16 +1867,15 @@ impl Decryption for AesOperation {
                         if self.buffer.len() > self.params.taglen {
                             let buflen = self.buffer.len() - self.params.taglen;
                             plain_offset = ctx
-                                .update(
-                                    &self.buffer.as_slice()[..buflen],
-                                    plain,
-                                )
+                                .update(&self.buffer[..buflen], plain)
                                 .or_else(|_| {
                                     self.state = OpIntState::Finalized;
                                     Err(CKR_DEVICE_ERROR)
                                 })?;
-                            zeromem(&mut self.buffer.as_mut_slice()[..buflen]);
-                            let _ = self.buffer.drain(..buflen);
+                            self.buffer.subset(buflen..).or_else(|_| {
+                                self.state = OpIntState::Finalized;
+                                Err(CKR_DEVICE_ERROR)
+                            })?;
                         }
                         /* The cipher buffer has been utilized */
                         cipher_offset = cipher_end;
@@ -1913,16 +1898,14 @@ impl Decryption for AesOperation {
                     if self.buffer.len() + cipher_end >= AES_BLOCK_SIZE {
                         cipher_offset = AES_BLOCK_SIZE - self.buffer.len();
                         self.buffer.extend_from_slice(&cipher[..cipher_offset]);
-                        plain_offset = ctx
-                            .update(self.buffer.as_slice(), plain)
-                            .or_else(|_| {
+                        plain_offset =
+                            ctx.update(&self.buffer, plain).or_else(|_| {
                                 self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
                         if plain_offset != AES_BLOCK_SIZE {
                             return Err(self.op_err(CKR_DEVICE_ERROR));
                         }
-                        zeromem(self.buffer.as_mut_slice());
                         self.buffer.clear();
                     }
                 }
@@ -1940,7 +1923,7 @@ impl Decryption for AesOperation {
                  * so if the output is smaller we need to use a support buffer
                  * to call into OpenSSL */
                 if plain.len() < AES_BLOCK_SIZE * 2 {
-                    let mut buffer = [0u8; AES_BLOCK_SIZE * 2];
+                    let mut buffer = SecVec::sized(AES_BLOCK_SIZE * 2);
                     plain_offset =
                         ctx.update(cipher, &mut buffer).or_else(|_| {
                             self.state = OpIntState::Finalized;
@@ -1950,7 +1933,6 @@ impl Decryption for AesOperation {
                         return Err(self.op_err(CKR_DEVICE_ERROR));
                     }
                     plain.copy_from_slice(&buffer[..plain_offset]);
-                    zeromem(&mut buffer);
                     /* input fully consumed */
                     cipher_offset = cipher_end;
                 }
@@ -1967,9 +1949,7 @@ impl Decryption for AesOperation {
                  * return to the application */
                 if cipher.len() > plain.len() {
                     self.buffer.resize(cipher.len(), 0);
-                    plain_offset = match ctx
-                        .update(cipher, self.buffer.as_mut_slice())
-                    {
+                    plain_offset = match ctx.update(cipher, &mut self.buffer) {
                         Ok(n) => n,
                         Err(_) => {
                             return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))
@@ -2092,7 +2072,7 @@ impl Decryption for AesOperation {
                 if self.buffer.len() != self.params.taglen {
                     return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
                 }
-                ctx.set_tag(self.buffer.as_slice())?;
+                ctx.set_tag(&self.buffer)?;
                 match ctx.finalize(plain) {
                     Ok(len) => {
                         if len != 0 {
@@ -2119,10 +2099,9 @@ impl Decryption for AesOperation {
                     return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
                 }
                 self.buffer.resize(AES_BLOCK_SIZE, 0);
-                match ctx.finalize(self.buffer.as_mut_slice()) {
+                match ctx.finalize(&mut self.buffer) {
                     Ok(len) => {
                         if len != 0 {
-                            zeromem(self.buffer.as_mut_slice());
                             return Err(self.op_err(CKR_DEVICE_ERROR))?;
                         }
                     }
@@ -2144,20 +2123,19 @@ impl Decryption for AesOperation {
                     }
 
                     self.buffer.resize(AES_BLOCK_SIZE, 0);
-                    outlen = match ctx.finalize(self.buffer.as_mut_slice()) {
+                    outlen = match ctx.finalize(&mut self.buffer) {
                         Ok(len) => len,
                         Err(_) => {
                             return Err(self.op_err(CKR_ENCRYPTED_DATA_INVALID))?
                         }
                     };
-                    self.buffer.resize(outlen, 0);
+                    self.buffer.reduce(outlen)?;
                     self.blockctr = 1;
                 }
                 if plain.len() < outlen {
                     return Err(error::Error::buf_too_small(outlen));
                 }
-                plain[..outlen].copy_from_slice(self.buffer.as_slice());
-                zeromem(self.buffer.as_mut_slice());
+                plain[..outlen].copy_from_slice(&self.buffer);
                 self.buffer.clear();
             }
             #[cfg(not(feature = "fips"))]
@@ -2429,7 +2407,7 @@ impl MsgEncryption for AesOperation {
             CKM_AES_CCM => {
                 let pbuf = if plain.len() < self.params.datalen {
                     self.buffer.extend_from_slice(plain);
-                    self.buffer.as_slice()
+                    &self.buffer
                 } else {
                     plain
                 };
@@ -2646,7 +2624,7 @@ impl MsgDecryption for AesOperation {
             CKM_AES_CCM => {
                 let cbuf = if cipher.len() < self.params.datalen {
                     self.buffer.extend_from_slice(cipher);
-                    self.buffer.as_slice()
+                    &self.buffer
                 } else {
                     cipher
                 };
@@ -2854,14 +2832,13 @@ impl AesCmacOperation {
         #[cfg(feature = "fips")]
         self.fips_approval.clear();
 
-        let mut buf = [0u8; AES_BLOCK_SIZE];
+        let mut buf = SecVec::sized(AES_BLOCK_SIZE);
         let outlen = self.ctx.finalize(&mut buf)?;
         if outlen != AES_BLOCK_SIZE {
             return Err(CKR_GENERAL_ERROR)?;
         }
 
         output.copy_from_slice(&buf[..output.len()]);
-        zeromem(&mut buf);
 
         #[cfg(feature = "fips")]
         self.fips_approval_cmac();

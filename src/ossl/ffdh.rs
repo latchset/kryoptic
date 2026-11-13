@@ -11,7 +11,7 @@ use crate::attribute::Attribute;
 use crate::error::{Error, Result};
 use crate::ffdh_groups::{get_group_name, DHGroupName};
 use crate::mechanism::{Derive, MechOperation, Mechanisms};
-use crate::misc::common_derive_key_object;
+use crate::misc::{common_derive_key_object, SecVec};
 use crate::object::{Object, ObjectFactories};
 use crate::ossl::common::{osslctx, privkey_from_object};
 use crate::pkcs11::*;
@@ -194,7 +194,7 @@ impl Derive for FFDHOperation {
         };
 
         ffdh.set_outlen(req_len)?;
-        let mut secret = OsslSecret::new(req_len);
+        let mut secret = SecVec::sized(req_len);
 
         let outlen = ffdh.derive(&mut peer, &mut secret)?;
         if outlen != req_len {
@@ -222,7 +222,7 @@ impl Derive for FFDHOperation {
             };
             match ret {
                 Ok(()) => {
-                    secret.reduce(outlen, 0)?;
+                    secret.reduce(outlen)?;
                 }
                 Err(e) => {
                     return Err(e);
@@ -237,9 +237,7 @@ impl Derive for FFDHOperation {
             objectfactories,
             secret.len(),
         )?;
-        factory
-            .as_secret_key_factory()?
-            .set_key(&mut obj, secret.to_vec())?;
+        factory.as_secret_key_factory()?.set_key(&mut obj, secret)?;
         Ok(vec![obj])
     }
 }

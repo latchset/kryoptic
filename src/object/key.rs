@@ -6,7 +6,7 @@ use std::fmt::Debug;
 use crate::attribute::{merge_template_attribute, Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::{Mechanism, Mechanisms};
-use crate::misc::zeromem;
+use crate::misc::SecVec;
 use crate::pkcs11::*;
 use crate::CSPRNG;
 
@@ -227,7 +227,7 @@ pub trait KeyFactory: ObjectFactory {
     /// Helper to allow serialization to export key material.
     /// A key type factory should implement this function only if a
     /// standardized serialization format specified in PKCS#11 exists.
-    fn export_for_wrapping(&self, _obj: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, _obj: &Object) -> Result<SecVec> {
         return Err(CKR_FUNCTION_NOT_SUPPORTED)?;
     }
 
@@ -236,7 +236,7 @@ pub trait KeyFactory: ObjectFactory {
     /// standard serialization format is specified.
     fn import_from_wrapped(
         &self,
-        mut _data: Vec<u8>,
+        _data: SecVec,
         _template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         return Err(CKR_FUNCTION_NOT_SUPPORTED)?;
@@ -408,30 +408,22 @@ pub trait SecretKeyFactory: KeyFactory {
             val Vec::new()));
     }
 
-    fn default_export_for_wrapping(&self, obj: &Object) -> Result<Vec<u8>> {
+    fn default_export_for_wrapping(&self, obj: &Object) -> Result<SecVec> {
         if !obj.is_extractable() {
             return Err(CKR_KEY_UNEXTRACTABLE)?;
         }
         match obj.get_attr_as_bytes(CKA_VALUE) {
-            Ok(v) => Ok(v.clone()),
+            Ok(v) => Ok(v.into()),
             Err(_) => return Err(CKR_DEVICE_ERROR)?,
         }
     }
 
     fn default_import_from_wrapped(
         &self,
-        mut data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
-        let mut obj = match self.create_key_object(template, KeyOrigin::Unwrap)
-        {
-            Ok(o) => o,
-            Err(e) => {
-                /* ensure we do not leave around sensitive data on error */
-                zeromem(data.as_mut_slice());
-                return Err(e);
-            }
-        };
+        let mut obj = self.create_key_object(template, KeyOrigin::Unwrap)?;
         self.set_key(&mut obj, data)?;
         Ok(obj)
     }
@@ -476,9 +468,9 @@ pub trait SecretKeyFactory: KeyFactory {
     /// Helper to set a key on a key object, individual factories can override
     /// this function to ensure the key is appropriately formed for the type.
     /// For example by checking the buffer length.
-    fn set_key(&self, obj: &mut Object, key: Vec<u8>) -> Result<()> {
+    fn set_key(&self, obj: &mut Object, key: SecVec) -> Result<()> {
         let keylen = key.len();
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_sec_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
     }
@@ -612,13 +604,13 @@ impl ObjectFactory for GenericSecretKeyFactory {
 }
 
 impl KeyFactory for GenericSecretKeyFactory {
-    fn export_for_wrapping(&self, key: &Object) -> Result<Vec<u8>> {
+    fn export_for_wrapping(&self, key: &Object) -> Result<SecVec> {
         SecretKeyFactory::default_export_for_wrapping(self, key)
     }
 
     fn import_from_wrapped(
         &self,
-        data: Vec<u8>,
+        data: SecVec,
         template: &[CK_ATTRIBUTE],
     ) -> Result<Object> {
         SecretKeyFactory::default_import_from_wrapped(self, data, template)
@@ -626,19 +618,17 @@ impl KeyFactory for GenericSecretKeyFactory {
 }
 
 impl SecretKeyFactory for GenericSecretKeyFactory {
-    fn set_key(&self, obj: &mut Object, mut key: Vec<u8>) -> Result<()> {
+    fn set_key(&self, obj: &mut Object, key: SecVec) -> Result<()> {
         let keylen = key.len();
         if keylen < MIN_GENERIC_SECRET_KEY_SIZE
             || keylen > MAX_GENERIC_SECRET_KEY_SIZE
         {
-            zeromem(key.as_mut_slice());
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
         if self.keysize != 0 && keylen != self.keysize {
-            zeromem(key.as_mut_slice());
             return Err(CKR_KEY_SIZE_RANGE)?;
         }
-        obj.set_attr(Attribute::from_bytes(CKA_VALUE, key))?;
+        obj.set_attr(Attribute::from_sec_bytes(CKA_VALUE, key))?;
         self.set_key_len(obj, keylen)?;
         Ok(())
     }

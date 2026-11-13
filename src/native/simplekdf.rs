@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use crate::attribute::{Attribute, CkAttrs};
 use crate::error::Result;
 use crate::mechanism::*;
-use crate::misc::bytes_to_vec;
+use crate::misc::{bytes_to_vec, SecVec};
 use crate::object::{
     DerivePolicy, KeyOrigin, Object, ObjectFactories, ObjectType,
 };
@@ -37,13 +37,7 @@ struct KeyInfo {
     /// Value of the key `CKA_NEVER_EXTRACTABLE` attribute
     never_extractable: bool,
     /// Value of the key itself (`CKA_VALUE` attribute)
-    value: Vec<u8>,
-}
-
-impl Drop for KeyInfo {
-    fn drop(&mut self) {
-        ossl::zeromem(self.value.as_mut_slice());
-    }
+    value: SecVec,
 }
 
 impl KeyInfo {
@@ -54,7 +48,7 @@ impl KeyInfo {
             extractable: obj.is_extractable(),
             always_sensitive: obj.is_always_sensitive(),
             never_extractable: obj.is_never_extractable(),
-            value: obj.get_attr_as_bytes(CKA_VALUE)?.clone(),
+            value: obj.get_attr_as_bytes(CKA_VALUE)?.into(),
         })
     }
 }
@@ -308,7 +302,7 @@ impl Derive for SimpleKDFOperation {
             return Err(CKR_TEMPLATE_INCONSISTENT)?;
         }
 
-        let mut secret = Vec::with_capacity(outlen);
+        let mut secret = SecVec::with_capacity(outlen);
         match self.mech {
             CKM_CONCATENATE_BASE_AND_KEY => {
                 secret.extend_from_slice(&base_key_info.value);
@@ -317,7 +311,7 @@ impl Derive for SimpleKDFOperation {
                 } else {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                secret.resize(keylen, 0);
+                secret.reduce(keylen)?;
             }
             CKM_CONCATENATE_BASE_AND_DATA => {
                 secret.extend_from_slice(&base_key_info.value);
@@ -326,7 +320,7 @@ impl Derive for SimpleKDFOperation {
                 } else {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                secret.resize(keylen, 0);
+                secret.reduce(keylen)?;
             }
             CKM_CONCATENATE_DATA_AND_BASE => {
                 if let Some(d) = &self.data {
@@ -335,7 +329,7 @@ impl Derive for SimpleKDFOperation {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 secret.extend_from_slice(&base_key_info.value);
-                secret.resize(keylen, 0);
+                secret.reduce(keylen)?;
             }
             CKM_XOR_BASE_AND_DATA => {
                 if let Some(d) = &self.data {
@@ -347,7 +341,7 @@ impl Derive for SimpleKDFOperation {
                     .iter_mut()
                     .zip(base_key_info.value.iter())
                     .for_each(|(k, b)| *k ^= *b);
-                secret.resize(keylen, 0);
+                secret.reduce(keylen)?;
             }
             CKM_EXTRACT_KEY_FROM_KEY => {
                 let bit_offset =
