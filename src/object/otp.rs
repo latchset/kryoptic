@@ -11,7 +11,8 @@ use crate::pkcs11::*;
 ///
 /// [OTP key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/pkcs11-spec-v3.2.html#_Toc195693644)
 /// (Version 3.2)
-pub trait OTPKeyFactory: SecretKeyFactory {
+#[allow(dead_code)]
+pub(crate) trait OTPKeyFactory: SecretKeyFactory {
     /// Adds the OTP key attributes defined in the spec
     fn add_common_otp_key_attrs(&mut self) {
         self.add_common_secret_key_attrs();

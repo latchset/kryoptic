@@ -386,7 +386,7 @@ impl Mechanism for HMACMechanism {
 /// having to go through a registry. This is used for unit tests and
 /// for the FIPS self-test in the native tlskdf implementation.
 #[cfg(any(feature = "fips", test))]
-pub fn test_get_hmac(mech: CK_MECHANISM_TYPE) -> Box<dyn Mechanism> {
+pub(crate) fn test_get_hmac(mech: CK_MECHANISM_TYPE) -> Box<dyn Mechanism> {
     for hs in &hash::HASH_MECH_SET {
         if hs.mac == mech {
             return Box::new(HMACMechanism {

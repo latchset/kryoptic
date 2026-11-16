@@ -238,7 +238,7 @@ impl ObjectFactoryData {
 /// [Storage Objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203216)
 /// (Version 3.1)
 
-pub trait ObjectFactory: Debug + Send + Sync {
+pub(crate) trait ObjectFactory: Debug + Send + Sync {
     /// Creates a new object from the template
     ///
     /// Mechanism implementations that can create objects must implement
@@ -563,6 +563,7 @@ pub trait ObjectFactory: Debug + Send + Sync {
     /// class CKO_PUPBLIC_KEY. Other key type factories should not
 
     /// implement this method.
+    #[allow(dead_code)]
     fn as_public_key_factory(&self) -> Result<&dyn PubKeyFactory> {
         Err(CKR_GENERAL_ERROR)?
     }
@@ -816,7 +817,7 @@ impl ObjectFactories {
     }
 
     /// Adds a factory to the registry
-    pub fn add_factory(
+    pub(crate) fn add_factory(
         &mut self,
         otype: ObjectType,
         templ: &'static Box<dyn ObjectFactory>,
@@ -825,7 +826,7 @@ impl ObjectFactories {
     }
 
     /// Retrieves a factory for the specified object type from the registry
-    pub fn get_factory(
+    pub(crate) fn get_factory(
         &self,
         otype: ObjectType,
     ) -> Result<&Box<dyn ObjectFactory>> {
@@ -884,7 +885,7 @@ impl ObjectFactories {
     }
 
     /// Returns the object factory associated to the specified object
-    pub fn get_object_factory(
+    pub(crate) fn get_object_factory(
         &self,
         obj: &Object,
     ) -> Result<&Box<dyn ObjectFactory>> {
@@ -1173,7 +1174,7 @@ impl ObjectFactories {
 
     /// Finds the appropriate object factory to operate on the object
     /// defined by the template
-    pub fn get_obj_factory_from_key_template(
+    pub(crate) fn get_obj_factory_from_key_template(
         &self,
         template: &[CK_ATTRIBUTE],
     ) -> Result<&Box<dyn ObjectFactory>> {

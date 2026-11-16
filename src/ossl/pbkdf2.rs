@@ -10,7 +10,7 @@ use crate::pkcs11::*;
 
 use ossl::derive::Pbkdf2Derive;
 
-pub fn pbkdf2_derive(
+pub(crate) fn pbkdf2_derive(
     _: &Mechanisms,
     prf: CK_MECHANISM_TYPE,
     pass: &Object,

@@ -146,7 +146,7 @@ fn is_hmac_fips_approved(prf: CK_MECHANISM_TYPE) -> Option<bool> {
 
 /// Test helper function to directly invoke the TLS PRF logic.
 #[cfg(test)]
-pub fn test_tlsprf(
+pub(crate) fn test_tlsprf(
     key: &Object,
     mech: &Box<dyn Mechanism>,
     prf: CK_MECHANISM_TYPE,

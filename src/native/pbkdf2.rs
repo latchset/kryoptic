@@ -36,7 +36,7 @@ fn prf_fn(
 }
 
 /// Computes the Password Based Key Derivation Function v2
-pub fn pbkdf2_derive(
+pub(crate) fn pbkdf2_derive(
     mechanisms: &Mechanisms,
     prf: CK_MECHANISM_TYPE,
     pass: &Object,

@@ -641,7 +641,7 @@ impl AesOperation {
     }
 
     /// Instantiates a new AES Key-Wrap Operation
-    pub fn wrap(
+    pub(crate) fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         mut keydata: SecVec,
@@ -692,7 +692,7 @@ impl AesOperation {
     }
 
     /// Instantiates a new AES Key-Unwrap Operation
-    pub fn unwrap(
+    pub(crate) fn unwrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         data: &[u8],

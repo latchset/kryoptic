@@ -507,7 +507,7 @@ impl RsaPKCSOperation {
     /// Initializes an encryption operation internally using the `wrapping_key`.
     /// Encrypts the `keydata` (which should be the DER-encoded key to wrap)
     /// and writes the result to `output`. Zeroizes `keydata` afterwards.
-    pub fn wrap(
+    pub(crate) fn wrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         keydata: SecVec,
@@ -531,7 +531,7 @@ impl RsaPKCSOperation {
     /// Decrypts the wrapped `data` and returns the raw key bytes (expected to
     /// be in a format like DER-encoded PKCS#8 for the target key factory to
     /// parse).
-    pub fn unwrap(
+    pub(crate) fn unwrap(
         mech: &CK_MECHANISM,
         wrapping_key: &Object,
         data: &[u8],
