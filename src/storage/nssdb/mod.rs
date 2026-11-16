@@ -25,7 +25,7 @@ use crate::token::TokenFacilities;
 use crate::CSPRNG;
 
 use itertools::Itertools;
-use rusqlite::types::{FromSqlError, Value, ValueRef};
+use rusqlite::types::Value;
 use rusqlite::{params, Connection, OpenFlags, Rows, Transaction};
 
 mod attrs;
@@ -38,13 +38,6 @@ use config::*;
 /// Helper to convert `std::fmt::Error` to `crate::error::Error`.
 impl From<std::fmt::Error> for Error {
     fn from(_: std::fmt::Error) -> Error {
-        Error::ck_rv(CKR_GENERAL_ERROR)
-    }
-}
-
-/// Helper to convert `rusqlite::types::FromSqlError` to `crate::error::Error`.
-impl From<FromSqlError> for Error {
-    fn from(_: FromSqlError) -> Error {
         Error::ck_rv(CKR_GENERAL_ERROR)
     }
 }
@@ -731,8 +724,9 @@ impl NSSStorage {
             /* NSS Encodes explicitly empty attributes with a weird 3 bytes value,
              * so we have to account for that when searching */
             if template[idx].ulValueLen == 0 {
-                let val: &[u8] = &NSS_SPECIAL_NULL_VALUE;
-                query.params.push(ValueRef::from(val).into());
+                query
+                    .params
+                    .push(Value::from(NSS_SPECIAL_NULL_VALUE.to_vec()));
             } else {
                 query.params.push(match atype {
                     AttrType::NumType => num_to_val(template[idx].to_ulong()?)?,
@@ -945,17 +939,17 @@ impl NSSStorage {
 
             let a_val = a.get_value();
             params.push(if a_val.len() == 0 {
-                ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                Value::from(NSS_SPECIAL_NULL_VALUE.to_vec())
             } else {
                 match a.get_attrtype() {
                     AttrType::NumType => num_to_val(a.to_ulong()?)?,
                     AttrType::DenyType | AttrType::IgnoreType => {
-                        ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                        Value::from(NSS_SPECIAL_NULL_VALUE.to_vec())
                     }
                     AttrType::TemplateType => {
                         return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
-                    _ => ValueRef::from(a_val.as_slice()).into(),
+                    _ => Value::from(a_val.clone()),
                 }
             });
         }
@@ -1019,17 +1013,17 @@ impl NSSStorage {
 
             let a_val = attr.get_value();
             params.push(if a_val.len() == 0 {
-                ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                Value::from(NSS_SPECIAL_NULL_VALUE.to_vec())
             } else {
                 match attr.get_attrtype() {
                     AttrType::NumType => num_to_val(attr.to_ulong()?)?,
                     AttrType::DenyType | AttrType::IgnoreType => {
-                        ValueRef::from(&NSS_SPECIAL_NULL_VALUE as &[u8]).into()
+                        Value::from(NSS_SPECIAL_NULL_VALUE.to_vec())
                     }
                     AttrType::TemplateType => {
                         return Err(CKR_ATTRIBUTE_TYPE_INVALID)?;
                     }
-                    _ => ValueRef::from(a_val.as_slice()).into(),
+                    _ => Value::from(a_val.clone()),
                 }
             });
         }

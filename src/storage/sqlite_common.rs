@@ -10,6 +10,7 @@ use crate::error::{Error, Result};
 use crate::pkcs11::*;
 
 use rusqlite;
+use rusqlite::types::FromSqlError;
 use rusqlite::{Error as rlError, ErrorCode};
 
 /// Converts `rusqlite::Error` into the crate's custom `Error` type, mapping
@@ -54,6 +55,12 @@ impl From<rlError> for Error {
             },
             _ => Error::ck_rv_from_error(CKR_GENERAL_ERROR, error),
         }
+    }
+}
+
+impl From<FromSqlError> for Error {
+    fn from(error: FromSqlError) -> Error {
+        Error::ck_rv_from_error(CKR_GENERAL_ERROR, error)
     }
 }
 
