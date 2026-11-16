@@ -251,7 +251,7 @@ impl SqliteStorage {
         let mut sql = String::from("INSERT OR REPLACE INTO meta (name");
         let mut params = Vec::<Value>::with_capacity(4);
 
-        params.push(Value::from(ValueRef::from(name)));
+        params.push(Value::from(name.to_string()));
 
         if let Some(i) = id {
             sql.push_str(", id");
@@ -259,11 +259,11 @@ impl SqliteStorage {
         }
         if let Some(v) = value {
             sql.push_str(", value");
-            params.push(Value::from(ValueRef::from(v)));
+            params.push(Value::Text(v.to_string()));
         }
         if let Some(d) = data {
             sql.push_str(", data");
-            params.push(Value::from(ValueRef::from(d)));
+            params.push(Value::Blob(d.to_vec()));
         }
         sql.push_str(") VALUES(?");
 
@@ -564,8 +564,7 @@ impl StorageRaw for SqliteStorage {
         let conn = self.conn.lock()?;
         let mut stmt =
             conn.prepare("SELECT value, data from meta WHERE name=?")?;
-        let mut rows =
-            stmt.query(params![Value::from(ValueRef::from(TOKEN_INFO_META))])?;
+        let mut rows = stmt.query(params![TOKEN_INFO_META])?;
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
             let value: Vec<u8> = row.get(1)?;
@@ -644,12 +643,8 @@ impl StorageRaw for SqliteStorage {
         let mut stmt = conn.prepare(
             "SELECT name, data from meta WHERE (name in (?, ?, ?) AND value=?)",
         )?;
-        let mut rows = stmt.query(params![
-            Value::from(ValueRef::from(USER_FLAGS)),
-            Value::from(ValueRef::from(USER_COUNTER)),
-            Value::from(ValueRef::from(USER_DATA)),
-            Value::from(ValueRef::from(uid))
-        ])?;
+        let mut rows =
+            stmt.query(params![USER_FLAGS, USER_COUNTER, USER_DATA, uid])?;
         let mut info = StorageAuthInfo::default();
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
