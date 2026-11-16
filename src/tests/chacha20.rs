@@ -253,6 +253,15 @@ fn test_chacha20_poly1305_multipart() {
     recovered.append(&mut ret_or_panic!(decrypt_final(session)));
     assert_eq!(recovered, plaintext);
 
+    /* With an empty plaintext, C_EncryptFinal may directly follow
+     * C_EncryptInit and must return just the tag over the AAD */
+    let expected = ret_or_panic!(encrypt(session, handle, &[], &mechanism));
+    assert_eq!(expected.len(), 16);
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+    let tag = ret_or_panic!(encrypt_final(session));
+    assert_eq!(tag, expected);
+
     testtokn.finalize();
 }
 

@@ -413,9 +413,15 @@ impl Encryption for ChaChaOperation {
     /// operation. For `CKM_CHACHA20_POLY1305` this returns the Poly1305
     /// tag; plain `CKM_CHACHA20` has no finalization output.
     fn encrypt_final(&mut self, cipher: &mut [u8]) -> Result<usize> {
-        if self.state != OpIntState::Updated {
-            self.state = OpIntState::Finalized;
-            return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        match self.state {
+            OpIntState::Updated => (),
+            /* An empty message is valid for an AEAD: the tag over the
+             * AAD alone can be requested right after C_EncryptInit */
+            OpIntState::Initialized if self.mech == CKM_CHACHA20_POLY1305 => (),
+            _ => {
+                self.state = OpIntState::Finalized;
+                return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+            }
         }
 
         let ctx = match &mut self.ctx {
