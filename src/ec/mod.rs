@@ -247,7 +247,7 @@ pub fn check_ec_point_from_obj(
 }
 
 /// Common function to format a private EC key using PKCS#8 encoding
-pub fn export_for_wrapping(key: &Object) -> Result<SecVec> {
+pub(crate) fn export_for_wrapping(key: &Object) -> Result<SecVec> {
     key.check_key_ops(
         CKO_PRIVATE_KEY,
         CK_UNAVAILABLE_INFORMATION,
@@ -311,7 +311,7 @@ fn parse_curve_private_key(pkeyval: &[u8]) -> Result<&[u8]> {
 }
 
 /// Common function to parse a private EC key from PKCS#8 encoded data
-pub fn import_from_wrapped(
+pub(crate) fn import_from_wrapped(
     key_type: CK_KEY_TYPE,
     data: SecVec,
     mut key: Object,

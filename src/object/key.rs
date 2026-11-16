@@ -49,7 +49,7 @@ pub enum KeyOrigin<'a> {
 /// [Key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203227)
 /// (Version 3.1)
 
-pub trait KeyFactory: ObjectFactory {
+pub(crate) trait KeyFactory: ObjectFactory {
     /// Adds the key objects attributes defined for all keys in the spec
     fn add_common_key_attrs(&mut self, private: bool) {
         self.add_common_storage_attrs(private);
@@ -250,7 +250,7 @@ pub trait KeyFactory: ObjectFactory {
 /// (Version 3.1)
 
 #[allow(dead_code)]
-pub trait PubKeyFactory: KeyFactory {
+pub(crate) trait PubKeyFactory: KeyFactory {
     /// Adds the public key attributes defined in the spec
     fn add_common_public_key_attrs(&mut self) {
         self.add_common_key_attrs(false);
@@ -300,7 +300,7 @@ pub trait PubKeyFactory: KeyFactory {
 /// (Version 3.1)
 
 #[allow(dead_code)]
-pub trait PrivKeyFactory: KeyFactory {
+pub(crate) trait PrivKeyFactory: KeyFactory {
     /// Adds the private key attributes defined in the spec
     fn add_common_private_key_attrs(&mut self) {
         self.add_common_key_attrs(true);
@@ -359,7 +359,7 @@ pub trait PrivKeyFactory: KeyFactory {
 /// [Secret key objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203232)
 /// (Version 3.1)
 
-pub trait SecretKeyFactory: KeyFactory {
+pub(crate) trait SecretKeyFactory: KeyFactory {
     /// Adds the secret key attributes defined in the spec
     fn add_common_secret_key_attrs(&mut self) {
         self.add_common_key_attrs(true);

@@ -751,7 +751,7 @@ impl Attribute {
     /// Creates an attribute of type AttrType::BytesType from a `SecVec`
     ///
     /// Note: Does not verify that the attribute id type is correct
-    pub fn from_sec_bytes(t: CK_ULONG, val: SecVec) -> Attribute {
+    pub(crate) fn from_sec_bytes(t: CK_ULONG, val: SecVec) -> Attribute {
         Attribute {
             ck_type: t,
             attrtype: AttrType::BytesType,

@@ -351,7 +351,7 @@ pub fn zeromem(mem: &mut [u8]) {
 /// A thin wrapper around a [`Vec<u8>`] that securely zeroizes its memory
 /// using [`zeromem`] when dropped.
 #[derive(Default)]
-pub struct SecVec(Vec<u8>);
+pub(crate) struct SecVec(Vec<u8>);
 
 impl std::fmt::Debug for SecVec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -361,22 +361,23 @@ impl std::fmt::Debug for SecVec {
 
 impl SecVec {
     /// Creates a new, empty `SecVec`.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         SecVec(Vec::new())
     }
 
     /// Creates a new zero-filled Vector of the specified size
-    pub fn sized(size: usize) -> Self {
+    pub(crate) fn sized(size: usize) -> Self {
         SecVec(vec![0u8; size])
     }
 
     /// Creates a new, empty `SecVec` with the specified capacity.
-    pub fn with_capacity(capacity: usize) -> Self {
+    #[allow(dead_code)]
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         SecVec(Vec::with_capacity(capacity))
     }
 
     /// Copies a pointer and length obtained via FFI into a new `SecVec`.
-    pub fn from_raw_bytes<T, U>(ptr: *const T, plen: U) -> Result<SecVec>
+    pub(crate) fn from_raw_bytes<T, U>(ptr: *const T, plen: U) -> Result<SecVec>
     where
         usize: TryFrom<U>,
         Error: From<<usize as TryFrom<U>>::Error>,
@@ -391,12 +392,12 @@ impl SecVec {
     /// Extracts and hands off the inner [`Vec<u8>`].
     /// Note that the returned Vector is no longer zeroized, and the
     /// receiving owner must handle it appropriately from here on.
-    pub fn extract(mut self) -> Vec<u8> {
+    pub(crate) fn extract(mut self) -> Vec<u8> {
         std::mem::take(&mut self.0)
     }
 
     /// Clears the vector, zeroizing its contents before clearing.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         zeromem(self.0.as_mut_slice());
         self.0.clear();
     }
@@ -408,7 +409,7 @@ impl SecVec {
     /// before dropping it.
     /// When reducing the vector, the excess elements are zeroized with
     /// [`zeromem`] and the vector's length is reduced accordingly.
-    pub fn resize(&mut self, new_len: usize, value: u8) {
+    pub(crate) fn resize(&mut self, new_len: usize, value: u8) {
         if new_len > self.0.capacity() {
             let mut new_vec = vec![value; new_len];
             new_vec[..self.0.len()].copy_from_slice(&self.0);
@@ -427,7 +428,7 @@ impl SecVec {
     /// Invokes [`resize`] internally. Returns an error if the new length
     /// is greater than the current vector length (the current buffer is
     /// smaller than the requested length).
-    pub fn reduce(&mut self, new_len: usize) -> Result<()> {
+    pub(crate) fn reduce(&mut self, new_len: usize) -> Result<()> {
         if new_len > self.0.len() {
             return Err(CKR_GENERAL_ERROR)?;
         }
@@ -438,7 +439,7 @@ impl SecVec {
     /// Modifies the `SecVec` to contain only the subset specified by `range`,
     /// copying the data to the start of the vector, zeroizing the discarded
     /// memory, and truncating the length to the size of the range.
-    pub fn retain_range<R: std::ops::RangeBounds<usize>>(
+    pub(crate) fn retain_range<R: std::ops::RangeBounds<usize>>(
         &mut self,
         range: R,
     ) -> Result<()> {
@@ -467,7 +468,7 @@ impl SecVec {
     }
 
     /// Clones and appends all elements in a slice to the `SecVec`.
-    pub fn extend_from_slice(&mut self, other: &[u8]) {
+    pub(crate) fn extend_from_slice(&mut self, other: &[u8]) {
         let new_len = self.0.len() + other.len();
         if new_len > self.0.capacity() {
             let mut new_vec = Vec::with_capacity(self.0.len() + other.len());

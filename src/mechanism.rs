@@ -18,7 +18,7 @@ use crate::error::Result;
 use crate::object::{Object, ObjectFactories, ObjectFactory};
 use crate::pkcs11::*;
 
-pub trait Mechanism: Debug + Send + Sync {
+pub(crate) trait Mechanism: Debug + Send + Sync {
     /// Returns a reference to the mechanism info
     fn info(&self) -> &CK_MECHANISM_INFO {
         self.mechinfo().info()
@@ -248,7 +248,7 @@ impl Mechanisms {
     }
 
     /// Add a mechanism to the mechanism register
-    pub fn add_mechanism(
+    pub(crate) fn add_mechanism(
         &mut self,
         typ: CK_MECHANISM_TYPE,
         info: &'static Box<dyn Mechanism>,
@@ -275,7 +275,10 @@ impl Mechanisms {
     }
 
     /// Gets a reference to a mechanism registry entry by mechanism type
-    pub fn get(&self, typ: CK_MECHANISM_TYPE) -> Result<&Box<dyn Mechanism>> {
+    pub(crate) fn get(
+        &self,
+        typ: CK_MECHANISM_TYPE,
+    ) -> Result<&Box<dyn Mechanism>> {
         match self.tree.get(&typ) {
             Some(m) => Ok(m),
             None => Err(CKR_MECHANISM_INVALID)?,

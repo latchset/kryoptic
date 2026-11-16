@@ -22,16 +22,18 @@ pub mod factory;
 pub mod key;
 pub mod otp;
 
+pub(crate) use factory::ObjectFactory;
 pub use factory::{
-    attr_element, OAFlags, ObjectFactories, ObjectFactory, ObjectFactoryData,
-    ObjectType,
+    attr_element, OAFlags, ObjectFactories, ObjectFactoryData, ObjectType,
 };
 
 pub use key::{
     default_secret_key_generate, DerivePolicy, GenericSecretKeyFactory,
-    GenericSecretKeyMechanism, KeyFactory, KeyOrigin, PrivKeyFactory,
-    PubKeyFactory, SecretKeyFactory, MAX_GENERIC_SECRET_KEY_SIZE,
+    GenericSecretKeyMechanism, KeyOrigin, MAX_GENERIC_SECRET_KEY_SIZE,
     MIN_GENERIC_SECRET_KEY_SIZE,
+};
+pub(crate) use key::{
+    KeyFactory, PrivKeyFactory, PubKeyFactory, SecretKeyFactory,
 };
 
 /// Helper macro that generates methods to check specific boolean

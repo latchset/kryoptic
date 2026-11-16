@@ -78,7 +78,7 @@ pub fn mlkem_object_to_pkey(
 /// Returns a tuple containing the derived shared secret (`Vec<u8>`) and
 /// the actual length of the generated ciphertext written to the `ciphertext`
 /// buffer.
-pub fn encapsulate(
+pub(crate) fn encapsulate(
     key: &Object,
     ciphertext: &mut [u8],
 ) -> Result<(SecVec, usize)> {
@@ -100,7 +100,7 @@ pub fn encapsulate(
 /// Uses the `OsslEncapsulation` API.
 ///
 /// Returns the derived shared secret (`Vec<u8>`).
-pub fn decapsulate(key: &Object, ciphertext: &[u8]) -> Result<SecVec> {
+pub(crate) fn decapsulate(key: &Object, ciphertext: &[u8]) -> Result<SecVec> {
     let mut prikey = privkey_from_object(key)?;
     let mut ctx =
         OsslAsymcipher::new(osslctx(), EncOp::Decapsulate, &mut prikey, None)?;

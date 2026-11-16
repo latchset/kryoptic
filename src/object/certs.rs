@@ -18,7 +18,7 @@ use super::Object;
 /// [Certificate objects](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.1/os/pkcs11-spec-v3.1-os.html#_Toc111203221)
 /// (Version 3.1)
 
-pub trait CertFactory: ObjectFactory {
+pub(crate) trait CertFactory: ObjectFactory {
     /// Adds the certificate object attributes defined in the spec
     fn add_common_certificate_attrs(&mut self) {
         self.add_common_storage_attrs(false);
