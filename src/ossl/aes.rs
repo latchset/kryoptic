@@ -1900,7 +1900,13 @@ impl Decryption for AesOperation {
                                 self.state = OpIntState::Finalized;
                                 Err(CKR_DEVICE_ERROR)
                             })?;
-                        if plain_offset != AES_BLOCK_SIZE {
+                        /* With padding OpenSSL holds back the last full
+                         * block it was given, so the first block may not
+                         * produce any output yet */
+                        if plain_offset != AES_BLOCK_SIZE
+                            && !(self.mech == CKM_AES_CBC_PAD
+                                && plain_offset == 0)
+                        {
                             return Err(self.op_err(CKR_DEVICE_ERROR));
                         }
                         self.buffer.clear();

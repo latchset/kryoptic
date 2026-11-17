@@ -5792,3 +5792,58 @@ fn test_aes_gcm_iv_too_long() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_aes_cbc_pad_multipart_decrypt_short_first_part() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_cbc_pad_multipart_decrypt_short_first_part",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let iv = [0x55u8; 16];
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_CBC_PAD,
+        pParameter: void_ptr!(iv.as_ptr()),
+        ulParameterLen: iv.len() as CK_ULONG,
+    };
+
+    let plaintext: Vec<u8> = (0..40).map(|i| (i * 7 + 3) as u8).collect();
+    let ciphertext =
+        ret_or_panic!(encrypt(session, handle, &plaintext, &mechanism));
+
+    /* The first part is shorter than a block, so it is held back until
+     * the second part completes the block */
+    for first in 1..AES_BLOCK_SIZE {
+        assert_eq!(
+            fn_decrypt_init(
+                session,
+                &mechanism as *const _ as CK_MECHANISM_PTR,
+                handle
+            ),
+            CKR_OK
+        );
+        let mut decrypted =
+            ret_or_panic!(decrypt_update(session, &ciphertext[..first]));
+        decrypted.extend(ret_or_panic!(decrypt_update(
+            session,
+            &ciphertext[first..]
+        )));
+        decrypted.extend(ret_or_panic!(decrypt_final(session)));
+        assert_eq!(decrypted, plaintext, "first part of {} bytes", first);
+    }
+
+    testtokn.finalize();
+}
