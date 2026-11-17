@@ -45,6 +45,10 @@ impl Prf for OsslPrf {
         prf.add_seed(seed);
         prf.derive(output).expect("TLS1 PRF derivation failed");
     }
+
+    fn fips(&self) -> bool {
+        self.0.fips()
+    }
 }
 
 #[cfg(feature = "tls12")]
@@ -102,6 +106,10 @@ impl Hkdf for OsslHkdf {
         message: &[u8],
     ) -> rustls::crypto::hmac::Tag {
         hmac::from_digest_key(self.0 .0, key.as_ref()).sign(&[message])
+    }
+
+    fn fips(&self) -> bool {
+        self.0.fips()
     }
 }
 

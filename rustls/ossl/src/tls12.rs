@@ -1,4 +1,4 @@
-use ossl::cipher::{AesSize, EncAlg};
+use ossl::cipher::{AesSize, EncAlg, OsslCipher};
 use rustls::crypto::cipher::{
     make_tls12_aad, AeadKey, InboundOpaqueMessage, InboundPlainMessage, Iv,
     KeyBlockShape, MessageDecrypter, MessageEncrypter, Nonce,
@@ -8,6 +8,7 @@ use rustls::crypto::cipher::{
 use rustls::{ConnectionTrafficSecrets, Error};
 
 use crate::cipher::{AeadAlgorithm, TAG_LEN};
+use crate::osslctx;
 
 const GCM_EXPLICIT_NONCE_LEN: usize = 8;
 
@@ -101,7 +102,7 @@ impl Tls12AeadAlgorithm for AeadAlgorithm {
     }
 
     fn fips(&self) -> bool {
-        crate::fips()
+        crate::fips() && OsslCipher::available(osslctx(), self.alg)
     }
 }
 

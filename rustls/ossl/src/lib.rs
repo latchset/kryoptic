@@ -219,3 +219,74 @@ fn supported_cipher_suites() -> Vec<SupportedCipherSuite> {
 pub(crate) fn fips() -> bool {
     osslctx().fips_is_enabled()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_aead_fips() {
+        use rustls::crypto::cipher::Tls13AeadAlgorithm;
+        assert_eq!(Tls13AeadAlgorithm::fips(&cipher::AES_128_GCM), fips());
+        assert_eq!(Tls13AeadAlgorithm::fips(&cipher::AES_256_GCM), fips());
+        assert!(!Tls13AeadAlgorithm::fips(&cipher::CHACHA20_POLY1305));
+        #[cfg(feature = "tls12")]
+        {
+            use rustls::crypto::cipher::Tls12AeadAlgorithm;
+            assert_eq!(Tls12AeadAlgorithm::fips(&cipher::AES_128_GCM), fips());
+            assert_eq!(Tls12AeadAlgorithm::fips(&cipher::AES_256_GCM), fips());
+            assert!(!Tls12AeadAlgorithm::fips(&cipher::CHACHA20_POLY1305));
+        }
+    }
+
+    #[test]
+    fn test_crypto_traits_fips() {
+        use rustls::crypto::hash::Hash;
+        assert_eq!(Hash::fips(&hash::SHA256), fips());
+        assert_eq!(Hash::fips(&hash::SHA384), fips());
+
+        use rustls::crypto::hmac::Hmac;
+        assert_eq!(Hmac::fips(&hmac::HMAC_SHA256), fips());
+        assert_eq!(Hmac::fips(&hmac::HMAC_SHA384), fips());
+
+        use rustls::crypto::tls13::Hkdf;
+        assert_eq!(Hkdf::fips(&kdf::HKDF_SHA256), fips());
+        assert_eq!(Hkdf::fips(&kdf::HKDF_SHA384), fips());
+
+        #[cfg(feature = "tls12")]
+        {
+            use rustls::crypto::tls12::Prf;
+            assert_eq!(Prf::fips(&kdf::PRF_SHA256), fips());
+            assert_eq!(Prf::fips(&kdf::PRF_SHA384), fips());
+        }
+
+        use rustls::crypto::SupportedKxGroup;
+        assert_eq!(SupportedKxGroup::fips(&keyex::SECP256R1), fips());
+        assert_eq!(SupportedKxGroup::fips(&keyex::SECP384R1), fips());
+        assert_eq!(SupportedKxGroup::fips(&keyex::SECP521R1), fips());
+        assert_eq!(
+            SupportedKxGroup::fips(&keyex::X25519),
+            fips()
+                && ossl::pkey::EvpPkey::available(
+                    osslctx(),
+                    ossl::pkey::EvpPkeyType::X25519
+                )
+        );
+        assert_eq!(
+            SupportedKxGroup::fips(&keyex::MLKEM768),
+            fips()
+                && ossl::pkey::EvpPkey::available(
+                    osslctx(),
+                    ossl::pkey::EvpPkeyType::MlKem768
+                )
+        );
+        assert_eq!(
+            SupportedKxGroup::fips(&keyex::MLKEM1024),
+            fips()
+                && ossl::pkey::EvpPkey::available(
+                    osslctx(),
+                    ossl::pkey::EvpPkeyType::MlKem1024
+                )
+        );
+    }
+}

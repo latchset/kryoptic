@@ -1435,7 +1435,10 @@ impl EvpPkey {
         let propq = ctx.pkey_type_propq_ptr(&pkey_type);
         let name = pkey_type_to_name(pkey_type);
         let ptr = unsafe {
-            EVP_PKEY_CTX_new_from_name(ctx.ptr(), name.as_ptr(), propq)
+            ERR_set_mark();
+            let p = EVP_PKEY_CTX_new_from_name(ctx.ptr(), name.as_ptr(), propq);
+            ERR_pop_to_mark();
+            p
         };
         if !ptr.is_null() {
             unsafe {
@@ -2026,5 +2029,29 @@ mod tests {
         let (e, _data) = crate::pkey::RsaData::from_dpq(d, p, q)?;
         assert_eq!(e, expect_e);
         Ok(())
+    }
+
+    #[cfg(not(feature = "fips"))]
+    #[test]
+    fn test_evp_pkey_available() {
+        let ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
+        assert!(super::EvpPkey::available(&ctx, super::EvpPkeyType::P256));
+        assert_eq!(unsafe { crate::bindings::ERR_get_error() }, 0);
+
+        let null_ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
+        let null_prov = unsafe {
+            crate::bindings::OSSL_PROVIDER_load(
+                null_ctx.ptr(),
+                c"null".as_ptr(),
+            )
+        };
+        if !null_prov.is_null() {
+            assert!(!super::EvpPkey::available(
+                &null_ctx,
+                super::EvpPkeyType::P256
+            ));
+            assert_eq!(unsafe { crate::bindings::ERR_get_error() }, 0);
+            unsafe { crate::bindings::OSSL_PROVIDER_unload(null_prov) };
+        }
     }
 }

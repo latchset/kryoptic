@@ -1,6 +1,7 @@
 // Copyright 2026 Simo Sorce
 // See LICENSE.txt file for terms
 
+use crate::bindings::{ERR_clear_error, ERR_get_error};
 use hex;
 use serial_test::parallel;
 
@@ -223,4 +224,47 @@ fn test_aes_256_gcm_siv() {
         "0eaccb",
         "93da9bb81333aee0c785b240d319719d",
     );
+}
+
+#[test]
+#[parallel]
+fn test_aes_available() {
+    unsafe { ERR_clear_error() };
+    let context = test_ossl_context();
+    assert!(OsslCipher::available(
+        context,
+        EncAlg::AesGcm(AesSize::Aes128)
+    ));
+    assert!(OsslCipher::available(
+        context,
+        EncAlg::AesGcm(AesSize::Aes256)
+    ));
+    assert!(OsslCipher::available(
+        context,
+        EncAlg::AesCbc(AesSize::Aes128)
+    ));
+    assert_eq!(unsafe { ERR_get_error() }, 0);
+
+    #[cfg(feature = "rfc9580")]
+    {
+        assert!(!OsslCipher::available(context, EncAlg::BlowfishCbc));
+        assert_eq!(unsafe { ERR_get_error() }, 0);
+        assert!(!OsslCipher::available(context, EncAlg::Cast5Cbc));
+        assert_eq!(unsafe { ERR_get_error() }, 0);
+    }
+
+    // When the null provider is loaded, default provider is not activated,
+    // so even standard ciphers are unavailable.
+    let null_ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
+    let null_prov = unsafe {
+        crate::bindings::OSSL_PROVIDER_load(null_ctx.ptr(), c"null".as_ptr())
+    };
+    if !null_prov.is_null() {
+        assert!(!OsslCipher::available(
+            &null_ctx,
+            EncAlg::AesGcm(AesSize::Aes128)
+        ));
+        assert_eq!(unsafe { ERR_get_error() }, 0);
+        unsafe { crate::bindings::OSSL_PROVIDER_unload(null_prov) };
+    }
 }

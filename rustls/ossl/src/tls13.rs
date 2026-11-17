@@ -1,4 +1,4 @@
-use ossl::cipher::{AesSize, EncAlg};
+use ossl::cipher::{AesSize, EncAlg, OsslCipher};
 use rustls::crypto::cipher::{
     make_tls13_aad, AeadKey, InboundOpaqueMessage, InboundPlainMessage, Iv,
     MessageDecrypter, MessageEncrypter, Nonce, OutboundOpaqueMessage,
@@ -8,6 +8,7 @@ use rustls::crypto::cipher::{
 use rustls::{ConnectionTrafficSecrets, Error};
 
 use crate::cipher::{AeadAlgorithm, TAG_LEN};
+use crate::osslctx;
 
 impl Tls13AeadAlgorithm for AeadAlgorithm {
     fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
@@ -50,7 +51,7 @@ impl Tls13AeadAlgorithm for AeadAlgorithm {
     }
 
     fn fips(&self) -> bool {
-        crate::fips()
+        crate::fips() && OsslCipher::available(osslctx(), self.alg)
     }
 }
 
