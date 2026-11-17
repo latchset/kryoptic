@@ -5721,3 +5721,74 @@ fn test_aes_key_wrap_multipart_fails() {
 
     testtokn.finalize();
 }
+
+/// OpenSSL does not accept GCM IVs longer than 128 bytes, so such an IV
+/// must be refused as an invalid mechanism parameter rather than end up
+/// as a device error from the cipher setup.
+#[test]
+#[parallel]
+fn test_aes_gcm_iv_too_long() {
+    let mut testtokn = TestToken::initialized("test_aes_gcm_iv_too_long", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 32),],
+        &[],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let mut iv = [0u8; 129];
+    let aad = b"AUTH ME";
+
+    let param = CK_GCM_PARAMS {
+        pIv: iv.as_mut_ptr(),
+        ulIvLen: iv.len() as CK_ULONG,
+        ulIvBits: (iv.len() * 8) as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulTagBits: 128,
+    };
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: void_ptr!(&param),
+        ulParameterLen: sizeof!(CK_GCM_PARAMS),
+    };
+    let ret = fn_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+    let ret = fn_decrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_MECHANISM_PARAM_INVALID);
+
+    /* The message-based API has the same limit */
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_AES_GCM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+    let ret = fn_message_encrypt_init(session, &mut mechanism, handle);
+    assert_eq!(ret, CKR_OK);
+
+    let mut tag = [0u8; 16];
+    let mut params = CK_GCM_MESSAGE_PARAMS {
+        pIv: iv.as_mut_ptr(),
+        ulIvLen: iv.len() as CK_ULONG,
+        ulIvFixedBits: 0,
+        ivGenerator: CKG_NO_GENERATE,
+        pTag: tag.as_mut_ptr(),
+        ulTagBits: (tag.len() * 8) as CK_ULONG,
+    };
+    let ret = fn_encrypt_message_begin(
+        session,
+        void_ptr!(&mut params),
+        sizeof!(CK_GCM_MESSAGE_PARAMS),
+        byte_ptr!(aad.as_ptr()),
+        aad.len() as CK_ULONG,
+    );
+    assert_eq!(ret, CKR_ARGUMENTS_BAD);
+
+    testtokn.finalize();
+}
