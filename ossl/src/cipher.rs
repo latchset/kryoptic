@@ -664,15 +664,33 @@ impl OsslCipher {
         Ok(ctx)
     }
 
-    /// Check if the cipher is supported in the given context
+    /// Check if the cipher is supported in the given context.
     ///
-    /// Note, that some ciphers are not supported in default
+    /// This is an alias for [`OsslCipher::available`].
+    /// Note that some ciphers are not supported in the default
     /// provider and need a legacy provider loaded.
     pub fn is_supported(libctx: &OsslContext, alg: EncAlg) -> bool {
-        match EvpCipher::new(libctx, cipher_to_name(alg)) {
-            Ok(_) => true,
-            Err(_) => false,
+        Self::available(libctx, alg)
+    }
+
+    /// Checks if a cipher algorithm is available (fetchable) within the given
+    /// context and its configured property query.
+    ///
+    /// Note that some ciphers are not supported in the default provider and need
+    /// a legacy provider loaded.
+    pub fn available(ctx: &OsslContext, cipher: EncAlg) -> bool {
+        let name = cipher_to_name(cipher);
+        let cipher_ptr = unsafe {
+            ERR_set_mark();
+            let c = EVP_CIPHER_fetch(ctx.ptr(), name.as_ptr(), ctx.propq_ptr());
+            ERR_pop_to_mark();
+            c
+        };
+        if !cipher_ptr.is_null() {
+            unsafe { EVP_CIPHER_free(cipher_ptr) };
+            return true;
         }
+        false
     }
 
     /// Helper to set context parameters for AEAD modes

@@ -35,7 +35,7 @@ impl Hash for OsslHash {
     }
 
     fn fips(&self) -> bool {
-        OsslDigest::available(osslctx(), self.0)
+        crate::fips() && OsslDigest::available(osslctx(), self.0)
     }
 }
 

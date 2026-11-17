@@ -270,6 +270,8 @@ impl OsslDigest {
         Ok(dctx)
     }
 
+    /// Checks if the digest algorithm is available (fetchable) within the given
+    /// context and its configured property query.
     pub fn available(ctx: &OsslContext, digest: DigestAlg) -> bool {
         let name = digest_to_string(digest);
         let arg = unsafe {

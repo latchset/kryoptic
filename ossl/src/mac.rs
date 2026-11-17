@@ -264,6 +264,8 @@ impl OsslMac {
         Ok(mctx)
     }
 
+    /// Checks if the MAC algorithm is available (fetchable) within the given
+    /// context and its configured property query.
     pub fn available(ctx: &OsslContext, alg: MacAlg) -> bool {
         let (digest, name) = mac_to_digest_and_type(alg);
         let arg = unsafe {

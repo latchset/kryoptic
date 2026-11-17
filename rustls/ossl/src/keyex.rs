@@ -51,6 +51,9 @@ impl SupportedKxGroup for OsslEcKxGroup {
     }
 
     fn fips(&self) -> bool {
+        if !crate::fips() {
+            return false;
+        }
         match self.0 {
             NamedGroup::X25519 => {
                 EvpPkey::available(osslctx(), EvpPkeyType::X25519)
@@ -165,6 +168,21 @@ impl SupportedKxGroup for OsslKemKxGroup {
 
     fn name(&self) -> NamedGroup {
         self.0
+    }
+
+    fn fips(&self) -> bool {
+        if !crate::fips() {
+            return false;
+        }
+        match self.0 {
+            NamedGroup::MLKEM768 => {
+                EvpPkey::available(osslctx(), EvpPkeyType::MlKem768)
+            }
+            NamedGroup::MLKEM1024 => {
+                EvpPkey::available(osslctx(), EvpPkeyType::MlKem1024)
+            }
+            _ => false,
+        }
     }
 }
 

@@ -42,7 +42,7 @@ impl Hmac for OsslHmac {
     }
 
     fn fips(&self) -> bool {
-        OsslMac::available(osslctx(), self.alg)
+        crate::fips() && OsslMac::available(osslctx(), self.alg)
     }
 }
 
