@@ -4967,6 +4967,8 @@ fn test_aes_wrap_key_non_aes_wrapping_key() {
     testtokn.finalize();
 }
 
+#[test]
+#[parallel]
 fn test_aes_cbc_pad_multipart_length_probe() {
     let mut testtokn =
         TestToken::initialized("test_aes_cbc_pad_multipart_length_probe", None);
