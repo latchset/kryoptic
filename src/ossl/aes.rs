@@ -28,6 +28,8 @@ use crate::fips::FipsApproval;
 const MAX_CCM_BUF: usize = 1 << 20; /* 1MiB */
 /// Minimum number of bits required for random IV generation.
 const MIN_RANDOM_IV_BITS: usize = 64;
+/// Maximum GCM IV length in bytes accepted by OpenSSL (1024 bits).
+const MAX_GCM_IV_LEN: CK_ULONG = 128;
 
 const AES_KW_SEMIBLOCK: usize = AES_BLOCK_SIZE / 2;
 // 32-bit target compatible max
@@ -249,7 +251,11 @@ impl AesOperation {
                 if params.ulTagBits < 8 {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
-                if params.ulIvLen < 1 || params.pIv == std::ptr::null_mut() {
+                // OpenSSL does not accept IVs longer than MAX_GCM_IV_LEN
+                if params.ulIvLen < 1
+                    || params.ulIvLen > MAX_GCM_IV_LEN
+                    || params.pIv == std::ptr::null_mut()
+                {
                     return Err(CKR_MECHANISM_PARAM_INVALID)?;
                 }
                 let tagbits = usize::try_from(params.ulTagBits)
@@ -834,9 +840,8 @@ impl AesOperation {
                     parameter,
                     parameter_len,
                 )?;
-                if params.ulIvLen == 0
-                    || params.ulIvLen > CK_ULONG::try_from(u32::MAX)?
-                {
+                // OpenSSL does not accept IVs longer than MAX_GCM_IV_LEN
+                if params.ulIvLen == 0 || params.ulIvLen > MAX_GCM_IV_LEN {
                     return Err(CKR_ARGUMENTS_BAD)?;
                 }
                 if params.pIv == std::ptr::null_mut() {
