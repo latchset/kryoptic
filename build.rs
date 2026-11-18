@@ -62,4 +62,8 @@ fn main() {
         .expect("Couldn't write bindings!");
 
     println!("cargo:rerun-if-changed=build.rs");
+
+    println!("cargo:rerun-if-env-changed=KRYOPTIC_MANUFACTURER_ID");
+    println!("cargo:rerun-if-env-changed=KRYOPTIC_TOKEN_LABEL");
+    println!("cargo:rerun-if-env-changed=CONFDIR");
 }

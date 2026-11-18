@@ -754,3 +754,92 @@ pub(crate) fn get_libctx() -> OsslContext {
         (*FIPS_PROVIDER).provider as *mut c_void,
     )
 }
+
+#[derive(Clone, Debug, Default)]
+#[allow(dead_code)]
+pub struct FipsProvInfo {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub buildinfo: Option<String>,
+}
+
+pub fn get_fips_provider_info() -> Result<FipsProvInfo> {
+    let dispatch = (*FIPS_PROVIDER).dispatch;
+    let provctx = (*FIPS_PROVIDER).provider;
+    if dispatch.is_null() || provctx.is_null() {
+        return Err(crate::pkcs11::CKR_GENERAL_ERROR.into());
+    }
+
+    let mut get_params: OSSL_FUNC_provider_get_params_fn = None;
+    let mut cur = dispatch;
+    unsafe {
+        while (*cur).function_id != 0 {
+            if (*cur).function_id == OSSL_FUNC_PROVIDER_GET_PARAMS as i32 {
+                get_params = std::mem::transmute((*cur).function);
+                break;
+            }
+            cur = cur.add(1);
+        }
+    }
+
+    let Some(get_params_fn) = get_params else {
+        return Err(crate::pkcs11::CKR_GENERAL_ERROR.into());
+    };
+
+    let name_key = CStr::from_bytes_with_nul(OSSL_PROV_PARAM_NAME).unwrap();
+    let version_key =
+        CStr::from_bytes_with_nul(OSSL_PROV_PARAM_VERSION).unwrap();
+    let buildinfo_key =
+        CStr::from_bytes_with_nul(OSSL_PROV_PARAM_BUILDINFO).unwrap();
+
+    let mut pb = ossl::OsslParamBuilder::with_capacity(3);
+    pb.add_empty_utf8_ptr(name_key)?;
+    pb.add_empty_utf8_ptr(version_key)?;
+    pb.add_empty_utf8_ptr(buildinfo_key)?;
+    let mut params = pb.finalize();
+
+    let ret =
+        unsafe { get_params_fn(provctx as *mut c_void, params.as_mut_ptr()) };
+    if ret != 1 {
+        return Err(crate::pkcs11::CKR_DEVICE_ERROR.into());
+    }
+
+    let name = params
+        .get_utf8_string(name_key)
+        .ok()
+        .map(|s| s.to_string_lossy().into_owned());
+    let version = params
+        .get_utf8_string(version_key)
+        .ok()
+        .map(|s| s.to_string_lossy().into_owned());
+    let buildinfo = params
+        .get_utf8_string(buildinfo_key)
+        .ok()
+        .map(|s| s.to_string_lossy().into_owned());
+
+    Ok(FipsProvInfo {
+        name,
+        version,
+        buildinfo,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fips_provider_info() {
+        let info =
+            get_fips_provider_info().expect("failed to get fips provider info");
+        assert!(info.name.is_some());
+        let name = info.name.unwrap();
+        assert!(!name.is_empty());
+        assert!(info.version.is_some());
+        let ver = info.version.unwrap();
+        assert!(!ver.is_empty());
+        assert!(info.buildinfo.is_some());
+        let buildinfo = info.buildinfo.unwrap();
+        assert!(!buildinfo.is_empty());
+    }
+}

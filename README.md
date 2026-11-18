@@ -60,6 +60,15 @@ Note that you can set `OSSL_BINDGEN_CLANG_ARGS` (whitespace delimited)
 to pass additional arguments into bindgen, in case that is important
 for your build.
 
+## Build Environment Variables
+
+* `CONFDIR`: The directory where to search the default configuration. Defaults to `/usr/local/etc` if not provided.
+* `KRYOPTIC_OPENSSL_SOURCES`: Path where OpenSSL sources are unpacked, used to statically link OpenSSL instead of using the system's dynamic libraries.
+* `OSSL_BINDGEN_CLANG_ARGS`: Additional arguments passed into bindgen.
+* `KRYOPTIC_MANUFACTURER_ID`: Sets the default manufacturer ID string reported by slots and tokens (maximum length of 32 bytes). Defaults to `"Kryoptic Project"`.
+* `KRYOPTIC_TOKEN_LABEL`: Sets the default token label (maximum length of 32 bytes). Defaults to `"Kryoptic FIPS Token"` for FIPS builds and `"Kryoptic Soft Token"` otherwise.
+* `KRYOPTIC_FIPS_VENDOR`, `KRYOPTIC_FIPS_VERSION`, `KRYOPTIC_FIPS_BUILD`: Specifies the name, version, and additional build information returned by the embedded OpenSSL FIPS provider (requires FIPS build).
+
 # FIPS Builds
 
 The `--feature fips` builds create a token linking just to OpenSSL libfips.a

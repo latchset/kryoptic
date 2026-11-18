@@ -210,3 +210,14 @@ fn test_ossl_param_copy_params_from_ptr_unaligned() {
     let ossl_param = builder.finalize();
     assert_eq!(ossl_param.get_int(key).unwrap(), val);
 }
+
+#[test]
+fn test_get_utf8_string_null() {
+    let mut pb = crate::OsslParamBuilder::with_capacity(1);
+    let key = c"test_null_str";
+    pb.add_empty_utf8_ptr(key).unwrap();
+    let params = pb.finalize();
+    let res = params.get_utf8_string(key);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().kind(), crate::ErrorKind::NullPtr);
+}
