@@ -1250,9 +1250,20 @@ unsafe extern "C" fn export_params_callback(
                 break;
             }
             total_size += std::mem::size_of::<OSSL_PARAM>();
-            total_size += p.data_size;
+            let size = match p.data_type {
+                OSSL_PARAM_UTF8_STRING => p.data_size + 1,
+                OSSL_PARAM_UTF8_PTR | OSSL_PARAM_OCTET_PTR => {
+                    std::mem::size_of::<*const c_void>()
+                }
+                _ => p.data_size,
+            };
+            total_size += size.next_multiple_of(crate::OSSL_PARAM_ALIGN_SIZE);
             counter = counter.offset(1);
         }
+        // Include the terminating entry and align the parameter array;
+        // the data sizes added above are already aligned.
+        total_size += std::mem::size_of::<OSSL_PARAM>();
+        total_size = total_size.next_multiple_of(crate::OSSL_PARAM_ALIGN_SIZE);
         let max_ptr =
             (params as *const u8).wrapping_add(total_size) as *const c_void;
         let base_ptr = params as *const c_void;
@@ -1262,7 +1273,10 @@ unsafe extern "C" fn export_params_callback(
             if p.key.is_null() {
                 break;
             }
-            if !p.data.is_null() {
+            if !p.data.is_null()
+                && p.data_type != OSSL_PARAM_UTF8_PTR
+                && p.data_type != OSSL_PARAM_OCTET_PTR
+            {
                 let pdata = p.data as *const c_void;
                 if pdata > base_ptr && pdata < max_ptr {
                     OPENSSL_cleanse(p.data, p.data_size);

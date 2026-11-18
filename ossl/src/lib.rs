@@ -686,6 +686,19 @@ pub enum BorrowedReference<'a> {
     Usize(&'a usize),
 }
 
+// Mirrors OSSL_PARAM_ALIGNED_BLOCK in OpenSSL's internal/param_build_set.h.
+#[repr(C)]
+union OsslParamAlignedBlock {
+    align: libc::c_double,
+    align_int: libc::uintmax_t,
+    align_ptr: *mut c_void,
+}
+
+// Mirrors OSSL_PARAM_ALIGN_SIZE in OpenSSL's internal/param_build_set.h.
+#[allow(dead_code)]
+pub(crate) const OSSL_PARAM_ALIGN_SIZE: usize =
+    std::mem::size_of::<OsslParamAlignedBlock>();
+
 /// A safe builder and manager for OpenSSL `OSSL_PARAM` arrays.
 ///
 /// `OSSL_PARAM` is the primary way to pass detailed parameters (like key
