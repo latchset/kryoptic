@@ -1,7 +1,7 @@
 /* The following code is copied from:
  * https://github.com/pyca/cryptography/
  * File path: src/rust/cryptography-x509/src/oid.rs
-*/
+ */
 
 // This file is dual licensed under the terms of the Apache License, Version
 // 2.0, and the BSD License. See the LICENSE file in the root of this repository
