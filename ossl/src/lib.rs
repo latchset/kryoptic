@@ -1095,9 +1095,16 @@ impl<'a> OsslParamBuilder<'a> {
     /// This method performs a deep copy of each parameter, including its key
     /// and data. This is useful for persisting parameters that may have been
     /// returned by OpenSSL and point to temporary internal buffers.
+    /// Pointer parameters (`UTF8_PTR` and `OCTET_PTR`) are not supported
+    /// and return [`ErrorKind::BadArg`].
     #[allow(dead_code)]
     pub fn copy_params(&mut self, params: &[OSSL_PARAM]) -> Result<(), Error> {
         for p in params {
+            if p.data_type == OSSL_PARAM_UTF8_PTR
+                || p.data_type == OSSL_PARAM_OCTET_PTR
+            {
+                return Err(Error::new(ErrorKind::BadArg));
+            }
             if p.data.is_null() {
                 return Err(Error::new(ErrorKind::NullPtr));
             }
@@ -1134,6 +1141,8 @@ impl<'a> OsslParamBuilder<'a> {
     ///
     /// This method performs a deep copy of each parameter, including its key
     /// and data, until a terminating null parameter is encountered.
+    /// Pointer parameters (`UTF8_PTR` and `OCTET_PTR`) are not supported
+    /// and return [`ErrorKind::BadArg`].
     pub fn copy_params_from_ptr(
         &mut self,
         ptr: *const OSSL_PARAM,
@@ -1147,6 +1156,11 @@ impl<'a> OsslParamBuilder<'a> {
                 let p = std::ptr::read_unaligned(counter);
                 if p.key.is_null() {
                     break;
+                }
+                if p.data_type == OSSL_PARAM_UTF8_PTR
+                    || p.data_type == OSSL_PARAM_OCTET_PTR
+                {
+                    return Err(Error::new(ErrorKind::BadArg));
                 }
                 if p.data.is_null() {
                     return Err(Error::new(ErrorKind::NullPtr));
