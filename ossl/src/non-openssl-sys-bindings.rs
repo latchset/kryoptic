@@ -1,6 +1,8 @@
 // handwritten OpenSSL constants
 
 pub const OSSL_PARAM_UTF8_STRING: u32 = 4;
+pub const OSSL_PARAM_UTF8_PTR: u32 = 6;
+pub const OSSL_PARAM_OCTET_PTR: u32 = 7;
 
 // Provider
 pub const OSSL_PROV_PARAM_VERSION: &[u8; 8] = b"version\0";
