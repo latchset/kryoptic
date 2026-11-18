@@ -1416,6 +1416,9 @@ impl<'a> OsslParam<'a> {
             trace_ossl!("OSSL_PARAM_get_utf8_string_ptr()");
             return Err(Error::new(ErrorKind::OsslError));
         }
+        if ptr.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
         Ok(unsafe { CStr::from_ptr(ptr) })
     }
 

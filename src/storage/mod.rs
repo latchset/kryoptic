@@ -40,7 +40,7 @@ impl Default for StorageTokenInfo {
             defaults::MANUFACTURER_ID.as_bytes(),
             &mut def.manufacturer,
         );
-        copy_sized_string(defaults::TOKEN_MODEL.as_bytes(), &mut def.model);
+        copy_sized_string(defaults::token_model().as_bytes(), &mut def.model);
         def
     }
 }
