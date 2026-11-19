@@ -221,3 +221,34 @@ fn test_get_utf8_string_null() {
     assert!(res.is_err());
     assert_eq!(res.unwrap_err().kind(), crate::ErrorKind::NullPtr);
 }
+
+#[test]
+fn test_get_octet_string_empty() {
+    let mut pb = crate::OsslParamBuilder::with_capacity(1);
+    let key = c"test_empty_octet";
+    pb.add_octet_slice(key, &[]).unwrap();
+    let params = pb.finalize();
+    let res = params.get_octet_string(key);
+    assert!(res.is_ok());
+    assert_eq!(res.unwrap(), &[]);
+}
+
+#[test]
+fn test_get_octet_string_null() {
+    let key = c"test_null_octet";
+    let param = unsafe {
+        crate::bindings::OSSL_PARAM_construct_octet_string(
+            key.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    let end = unsafe { crate::bindings::OSSL_PARAM_construct_end() };
+    let mut params = [param, end];
+    let mut ossl_param =
+        crate::OsslParam::from_ptr(params.as_mut_ptr()).unwrap();
+    ossl_param.0.freeptr = None;
+    let res = ossl_param.get_octet_string(key);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err().kind(), crate::ErrorKind::NullPtr);
+}
