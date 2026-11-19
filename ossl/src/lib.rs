@@ -1398,8 +1398,14 @@ impl<'a> OsslParam<'a> {
             trace_ossl!("OSSL_PARAM_get_octet_string_ptr()");
             return Err(Error::new(ErrorKind::OsslError));
         }
-        let octet =
-            unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) };
+        if buf.is_null() {
+            return Err(Error::new(ErrorKind::NullPtr));
+        }
+        let octet = if buf_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(buf as *const u8, buf_len) }
+        };
         Ok(octet)
     }
 
