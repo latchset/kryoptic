@@ -624,3 +624,186 @@ fn test_chacha20_poly1305_message_mode_multipart() {
 
     testtokn.finalize();
 }
+
+/// RFC 8439 §2.4: ChaCha20 block counter is 32 bits, allowing block counter
+/// 0xFFFFFFFF as the last valid block. Any data beyond block 0xFFFFFFFF must
+/// be refused (Wycheproof ChaCha20 counter test vectors tcId 39-41).
+#[test]
+#[parallel]
+fn test_chacha20_counter_overflow() {
+    let mut testtokn =
+        TestToken::initialized("test_chacha20_counter_overflow", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let key = vec![0u8; 32];
+    let mut nonce = vec![0u8; 12];
+    let mut block_counter_max = vec![0xff, 0xff, 0xff, 0xff];
+
+    let handle = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_CHACHA20)],
+        &[(CKA_VALUE, key.as_slice())],
+        &[(CKA_ENCRYPT, true), (CKA_DECRYPT, true)],
+    ));
+
+    let mut params_max = CK_CHACHA20_PARAMS {
+        pBlockCounter: block_counter_max.as_mut_ptr(),
+        blockCounterBits: 32,
+        pNonce: nonce.as_mut_ptr(),
+        ulNonceBits: 96,
+    };
+    let mechanism_max = CK_MECHANISM {
+        mechanism: CKM_CHACHA20,
+        pParameter: void_ptr!(&mut params_max),
+        ulParameterLen: sizeof!(CK_CHACHA20_PARAMS),
+    };
+
+    // tcId 39: exactly the last block (64 bytes) from counter 0xFFFFFFFF is valid.
+    let exp_last_block = hex::decode(
+        "ace4cd09e294d1912d4ad205d06f95d9c2f2bfcf453e8753f128765b62215f4d\
+         92c74f2f626c6a640c0b1284d839ec81f1696281dafc3e684593937023b58b1d",
+    )
+    .unwrap();
+    let plain_64 = vec![0u8; 64];
+
+    let ciphertext_64 =
+        ret_or_panic!(encrypt(session, handle, &plain_64, &mechanism_max));
+    assert_eq!(ciphertext_64, exp_last_block);
+
+    let recovered_64 =
+        ret_or_panic!(decrypt(session, handle, &ciphertext_64, &mechanism_max));
+    assert_eq!(recovered_64, plain_64);
+
+    // tcId 40: 65 bytes from counter 0xFFFFFFFF must be refused with CKR_DATA_LEN_RANGE.
+    let plain_65 = vec![0u8; 65];
+    err_or_panic!(
+        encrypt(session, handle, &plain_65, &mechanism_max),
+        CKR_DATA_LEN_RANGE
+    );
+    let cipher_65 = vec![0u8; 65];
+    err_or_panic!(
+        decrypt(session, handle, &cipher_65, &mechanism_max),
+        CKR_ENCRYPTED_DATA_LEN_RANGE
+    );
+
+    // tcId 41: 128 bytes from counter 0xFFFFFFFF must be refused.
+    let plain_128 = vec![0u8; 128];
+    err_or_panic!(
+        encrypt(session, handle, &plain_128, &mechanism_max),
+        CKR_DATA_LEN_RANGE
+    );
+    let cipher_128 = vec![0u8; 128];
+    err_or_panic!(
+        decrypt(session, handle, &cipher_128, &mechanism_max),
+        CKR_ENCRYPTED_DATA_LEN_RANGE
+    );
+
+    // Multi-part encryption from counter 0xFFFFFFFF:
+    // First update of 64 bytes succeeds; any subsequent data must be refused.
+    let mut mut_mech = mechanism_max;
+    let ret = fn_encrypt_init(session, &mut mut_mech, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut out_len: CK_ULONG = 64;
+    let mut out_buf = vec![0u8; 64];
+    let ret = fn_encrypt_update(
+        session,
+        plain_64.as_ptr() as *mut u8,
+        64,
+        out_buf.as_mut_ptr(),
+        &mut out_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&out_buf[..out_len as usize], exp_last_block.as_slice());
+
+    // Subsequent update must be refused
+    let mut extra_out = vec![0u8; 64];
+    let mut extra_len: CK_ULONG = 64;
+    let mut one_byte = [0u8; 1];
+    let ret = fn_encrypt_update(
+        session,
+        one_byte.as_mut_ptr(),
+        1,
+        extra_out.as_mut_ptr(),
+        &mut extra_len,
+    );
+    assert_eq!(ret, CKR_DATA_LEN_RANGE);
+
+    // Multi-part decryption from counter 0xFFFFFFFF:
+    let mut mut_mech = mechanism_max;
+    let ret = fn_decrypt_init(session, &mut mut_mech, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut dec_out = vec![0u8; 64];
+    let mut dec_len: CK_ULONG = 64;
+    let mut cipher_input = exp_last_block.clone();
+    let ret = fn_decrypt_update(
+        session,
+        cipher_input.as_mut_ptr(),
+        64,
+        dec_out.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_eq!(&dec_out[..dec_len as usize], plain_64.as_slice());
+
+    let ret = fn_decrypt_update(
+        session,
+        one_byte.as_mut_ptr(),
+        1,
+        dec_out.as_mut_ptr(),
+        &mut dec_len,
+    );
+    assert_eq!(ret, CKR_ENCRYPTED_DATA_LEN_RANGE);
+
+    // Multi-part near boundary: counter 0xFFFFFFFE allows exactly 2 blocks (128 bytes).
+    let mut block_counter_boundary = vec![0xfe, 0xff, 0xff, 0xff];
+    let mut params_boundary = CK_CHACHA20_PARAMS {
+        pBlockCounter: block_counter_boundary.as_mut_ptr(),
+        blockCounterBits: 32,
+        pNonce: nonce.as_mut_ptr(),
+        ulNonceBits: 96,
+    };
+    let mut mech_boundary = CK_MECHANISM {
+        mechanism: CKM_CHACHA20,
+        pParameter: void_ptr!(&mut params_boundary),
+        ulParameterLen: sizeof!(CK_CHACHA20_PARAMS),
+    };
+    let ret = fn_encrypt_init(session, &mut mech_boundary, handle);
+    assert_eq!(ret, CKR_OK);
+    let mut chunk1 = vec![0u8; 70];
+    let mut chunk1_out = vec![0u8; 70];
+    let mut chunk1_len: CK_ULONG = 70;
+    let ret = fn_encrypt_update(
+        session,
+        chunk1.as_mut_ptr(),
+        70,
+        chunk1_out.as_mut_ptr(),
+        &mut chunk1_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    let mut chunk2 = vec![0u8; 58];
+    let mut chunk2_out = vec![0u8; 58];
+    let mut chunk2_len: CK_ULONG = 58;
+    let ret = fn_encrypt_update(
+        session,
+        chunk2.as_mut_ptr(),
+        58,
+        chunk2_out.as_mut_ptr(),
+        &mut chunk2_len,
+    );
+    assert_eq!(ret, CKR_OK);
+
+    // 70 + 58 = 128 bytes consumed. Next byte must be refused.
+    let ret = fn_encrypt_update(
+        session,
+        one_byte.as_mut_ptr(),
+        1,
+        chunk2_out.as_mut_ptr(),
+        &mut chunk2_len,
+    );
+    assert_eq!(ret, CKR_DATA_LEN_RANGE);
+
+    testtokn.finalize();
+}

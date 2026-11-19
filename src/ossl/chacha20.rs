@@ -27,6 +27,13 @@ const CHACHA20_NONCE_SIZE: usize = 12;
 const CHACHA20_COUNTER_SIZE: usize = 4;
 /// Poly1305 tag size (128 bits), fixed by RFC 8439.
 const POLY1305_TAG_SIZE: usize = 16;
+/// ChaCha20 block size (64 bytes / 512 bits), fixed by RFC 8439.
+const CHACHA20_BLOCK_SIZE: usize = 64;
+/// Initial block counter for ChaCha20-Poly1305 payload encryption (RFC 8439 §2.8).
+const CHACHA20_POLY1305_INITIAL_COUNTER: u64 = 1;
+const CHACHA20_POLY1305_MAX_BYTES: u64 = ((1u64 << 32)
+    - CHACHA20_POLY1305_INITIAL_COUNTER)
+    * (CHACHA20_BLOCK_SIZE as u64);
 
 /// Extracts the raw key bytes from a PKCS#11 `Object` into a ChaCha20 key.
 /// Validates the key length.
@@ -97,6 +104,30 @@ fn init_params(mech: &CK_MECHANISM) -> Result<ChaChaParams> {
     }
 }
 
+/// Calculates the remaining keystream bytes budget for a new ChaCha20 or
+/// ChaCha20-Poly1305 operation before the 32-bit counter overflows.
+fn calc_rem_bytes(
+    mech: CK_MECHANISM_TYPE,
+    params: &ChaChaParams,
+) -> Result<u64> {
+    match mech {
+        CKM_CHACHA20 => {
+            if params.iv.len() < CHACHA20_COUNTER_SIZE {
+                return Err(CKR_GENERAL_ERROR)?;
+            }
+            let counter_bytes: [u8; CHACHA20_COUNTER_SIZE] = params.iv
+                [..CHACHA20_COUNTER_SIZE]
+                .try_into()
+                .map_err(|_| CKR_GENERAL_ERROR)?;
+            let counter = u32::from_le_bytes(counter_bytes);
+            let rem_blocks = (1u64 << 32) - (counter as u64);
+            Ok(rem_blocks * (CHACHA20_BLOCK_SIZE as u64))
+        }
+        CKM_CHACHA20_POLY1305 => Ok(CHACHA20_POLY1305_MAX_BYTES),
+        _ => Err(CKR_MECHANISM_INVALID)?,
+    }
+}
+
 /// Maps a PKCS#11 mechanism type to the `ossl` crate's cipher selector.
 fn get_cipher(mech: CK_MECHANISM_TYPE) -> Result<EncAlg> {
     match mech {
@@ -133,6 +164,9 @@ pub struct ChaChaOperation {
     /// position is only known once no more data follows, since it is
     /// appended to the end of the ciphertext.
     buffer: Vec<u8>,
+    /// Remaining keystream bytes budget before the 32-bit block counter
+    /// overflows (RFC 8439 §2.4).
+    rem_bytes: u64,
 }
 
 impl Drop for ChaChaOperation {
@@ -189,6 +223,7 @@ impl ChaChaOperation {
             state: OpIntState::Initialized,
             ctx: Some(ctx),
             buffer: Vec::new(),
+            rem_bytes: calc_rem_bytes(mech.mechanism, &params)?,
         })
     }
 
@@ -212,6 +247,7 @@ impl ChaChaOperation {
             state: OpIntState::Initialized,
             ctx: Some(ctx),
             buffer: Vec::new(),
+            rem_bytes: calc_rem_bytes(mech.mechanism, &params)?,
         })
     }
 
@@ -233,6 +269,7 @@ impl ChaChaOperation {
             state: OpIntState::Initialized,
             ctx: None,
             buffer: Vec::new(),
+            rem_bytes: CHACHA20_POLY1305_MAX_BYTES,
         })
     }
 
@@ -252,6 +289,7 @@ impl ChaChaOperation {
             state: OpIntState::Initialized,
             ctx: None,
             buffer: Vec::new(),
+            rem_bytes: CHACHA20_POLY1305_MAX_BYTES,
         })
     }
 
@@ -314,6 +352,7 @@ impl ChaChaOperation {
             &self.key,
             true,
         )?);
+        self.rem_bytes = CHACHA20_POLY1305_MAX_BYTES;
         self.state = OpIntState::Updated;
         Ok(())
     }
@@ -345,6 +384,7 @@ impl ChaChaOperation {
             &self.key,
             false,
         )?);
+        self.rem_bytes = CHACHA20_POLY1305_MAX_BYTES;
         self.state = OpIntState::Updated;
         Ok(())
     }
@@ -405,6 +445,7 @@ impl Encryption for ChaChaOperation {
         if plain.len() == 0 {
             return Ok(0);
         }
+        self.rem_bytes -= plain.len() as u64;
         ctx.update(plain, cipher)
             .or_else(|_| Err(self.op_err(CKR_DEVICE_ERROR)))
     }
@@ -457,9 +498,14 @@ impl Encryption for ChaChaOperation {
     /// Provides the expected output buffer size for the provided input
     /// plaintext length.
     fn encryption_len(&mut self, data_len: usize, _fin: bool) -> Result<usize> {
+        if (data_len as u64) > self.rem_bytes {
+            return Err(self.op_err(CKR_DATA_LEN_RANGE));
+        }
         match self.mech {
             CKM_CHACHA20 => Ok(data_len),
-            CKM_CHACHA20_POLY1305 => Ok(data_len + POLY1305_TAG_SIZE),
+            CKM_CHACHA20_POLY1305 => data_len
+                .checked_add(POLY1305_TAG_SIZE)
+                .ok_or_else(|| self.op_err(CKR_DATA_LEN_RANGE)),
             _ => Err(self.op_err(CKR_GENERAL_ERROR)),
         }
     }
@@ -497,9 +543,22 @@ impl Decryption for ChaChaOperation {
         self.state = OpIntState::Updated;
 
         let outlen = match self.mech {
-            CKM_CHACHA20 => cipher.len(),
+            CKM_CHACHA20 => {
+                if (cipher.len() as u64) > self.rem_bytes {
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                }
+                cipher.len()
+            }
             CKM_CHACHA20_POLY1305 => {
-                let tlen = cipher.len() + self.buffer.len();
+                let tlen = cipher
+                    .len()
+                    .checked_add(self.buffer.len())
+                    .ok_or_else(|| self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE))?;
+                let payload_len = tlen.saturating_sub(POLY1305_TAG_SIZE);
+                if (payload_len as u64) > self.rem_bytes {
+                    return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                }
+
                 if tlen > POLY1305_TAG_SIZE {
                     tlen - POLY1305_TAG_SIZE
                 } else {
@@ -583,6 +642,7 @@ impl Decryption for ChaChaOperation {
             plain_offset += outlen;
         }
 
+        self.rem_bytes -= plain_offset as u64;
         Ok(plain_offset)
     }
 
@@ -631,24 +691,51 @@ impl Decryption for ChaChaOperation {
         let outlen = if fin {
             match self.mech {
                 CKM_CHACHA20_POLY1305 => {
-                    if self.buffer.len() + data_len < POLY1305_TAG_SIZE {
+                    let total_len =
+                        self.buffer.len().checked_add(data_len).ok_or_else(
+                            || self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE),
+                        )?;
+                    if total_len < POLY1305_TAG_SIZE {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
-                    self.buffer.len() + data_len - POLY1305_TAG_SIZE
+                    let payload_len = total_len - POLY1305_TAG_SIZE;
+                    if (payload_len as u64) > self.rem_bytes {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                    }
+                    payload_len
                 }
-                CKM_CHACHA20 => data_len,
+                CKM_CHACHA20 => {
+                    if (data_len as u64) > self.rem_bytes {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                    }
+                    data_len
+                }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         } else {
             match self.mech {
                 CKM_CHACHA20_POLY1305 => {
-                    if self.buffer.len() + data_len < POLY1305_TAG_SIZE {
+                    let total_len =
+                        self.buffer.len().checked_add(data_len).ok_or_else(
+                            || self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE),
+                        )?;
+                    let payload_len =
+                        total_len.saturating_sub(POLY1305_TAG_SIZE);
+                    if (payload_len as u64) > self.rem_bytes {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                    }
+                    if total_len < POLY1305_TAG_SIZE {
                         0
                     } else {
-                        self.buffer.len() + data_len
+                        total_len
                     }
                 }
-                CKM_CHACHA20 => data_len,
+                CKM_CHACHA20 => {
+                    if (data_len as u64) > self.rem_bytes {
+                        return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+                    }
+                    data_len
+                }
                 _ => return Err(self.op_err(CKR_GENERAL_ERROR)),
             }
         };
@@ -710,6 +797,9 @@ impl MsgEncryption for ChaChaOperation {
         if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+        if (plain.len() as u64) > self.rem_bytes {
+            return Err(self.op_err(CKR_DATA_LEN_RANGE));
+        }
         if cipher.len() < plain.len() {
             /* This is the only non-fatal error */
             return Err(error::Error::buf_too_small(plain.len()));
@@ -723,6 +813,7 @@ impl MsgEncryption for ChaChaOperation {
         if plain.len() == 0 {
             return Ok(0);
         }
+        self.rem_bytes -= plain.len() as u64;
         ctx.update(plain, cipher)
             .or_else(|_| Err(self.op_err(CKR_DEVICE_ERROR)))
     }
@@ -760,6 +851,7 @@ impl MsgEncryption for ChaChaOperation {
         }
 
         self.state = OpIntState::Initialized;
+        self.rem_bytes = CHACHA20_POLY1305_MAX_BYTES;
         Ok(outlen)
     }
 
@@ -772,6 +864,9 @@ impl MsgEncryption for ChaChaOperation {
     ) -> Result<usize> {
         if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if (data_len as u64) > self.rem_bytes {
+            return Err(self.op_err(CKR_DATA_LEN_RANGE));
         }
         Ok(data_len)
     }
@@ -818,6 +913,9 @@ impl MsgDecryption for ChaChaOperation {
         if self.state != OpIntState::Updated {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
         }
+        if (cipher.len() as u64) > self.rem_bytes {
+            return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
+        }
         if plain.len() < cipher.len() {
             /* This is the only non-fatal error */
             return Err(error::Error::buf_too_small(cipher.len()));
@@ -831,6 +929,7 @@ impl MsgDecryption for ChaChaOperation {
         if cipher.len() == 0 {
             return Ok(0);
         }
+        self.rem_bytes -= cipher.len() as u64;
         ctx.update(cipher, plain)
             .or_else(|_| Err(self.op_err(CKR_DEVICE_ERROR)))
     }
@@ -877,6 +976,7 @@ impl MsgDecryption for ChaChaOperation {
         }
 
         self.state = OpIntState::Initialized;
+        self.rem_bytes = CHACHA20_POLY1305_MAX_BYTES;
         Ok(outlen)
     }
 
@@ -889,6 +989,9 @@ impl MsgDecryption for ChaChaOperation {
     ) -> Result<usize> {
         if self.state == OpIntState::Finalized {
             return Err(CKR_OPERATION_NOT_INITIALIZED)?;
+        }
+        if (data_len as u64) > self.rem_bytes {
+            return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
         }
         Ok(data_len)
     }
