@@ -374,7 +374,10 @@ impl ObjectFactory for MlDsaPrivFactory {
 
         mldsa_priv_check_import(&mut obj)?;
 
-        let pubkey_raw = extract_public_key(&obj)?;
+        /* A private key that the backend refuses to load (for example
+         * s1 or s2 coefficients out of range) is an invalid CKA_VALUE */
+        let pubkey_raw = extract_public_key(&obj)
+            .map_err(|_| CKR_ATTRIBUTE_VALUE_INVALID)?;
         mldsa_public_key_info(&mut obj, Some(&pubkey_raw))?;
 
         Ok(obj)

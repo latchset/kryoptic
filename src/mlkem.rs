@@ -16,7 +16,7 @@ use crate::error::Result;
 use crate::kasn1::pkcs;
 use crate::mechanism::{Mechanism, Mechanisms};
 use crate::object::*;
-use crate::ossl::common::extract_public_key;
+use crate::ossl::common::{extract_public_key, pubkey_from_object};
 use crate::ossl::mlkem;
 use crate::pkcs11::*;
 
@@ -119,7 +119,8 @@ pub fn register(mechs: &mut Mechanisms, ot: &mut ObjectFactories) {
 }
 
 /// Helper to check that the public key value size matches the
-/// declared ML-KEM parameter set
+/// declared ML-KEM parameter set and that the value is a valid
+/// encapsulation key
 fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
     let paramset = match obj.get_attr_as_ulong(CKA_PARAMETER_SET) {
         Ok(p) => p,
@@ -146,6 +147,11 @@ fn mlkem_pub_check_import(obj: &Object) -> Result<()> {
         },
         Err(_) => return Err(CKR_TEMPLATE_INCOMPLETE)?,
     }
+
+    /* FIPS 203 7.2: an encapsulation key with a coefficient that is not
+     * reduced modulo q is not a valid ek. Reject it here instead of
+     * letting every later C_EncapsulateKey() fail with CKR_DEVICE_ERROR */
+    pubkey_from_object(obj).map_err(|_| CKR_ATTRIBUTE_VALUE_INVALID)?;
 
     Ok(())
 }
@@ -338,7 +344,11 @@ impl ObjectFactory for MlKemPrivFactory {
 
         mlkem_priv_check_import(&mut obj)?;
 
-        let pubkey_raw = extract_public_key(&obj)?;
+        /* A decapsulation key that fails the FIPS 203 7.3 hash check
+         * (H(ek) stored in dk does not match ek) is an invalid
+         * CKA_VALUE */
+        let pubkey_raw = extract_public_key(&obj)
+            .map_err(|_| CKR_ATTRIBUTE_VALUE_INVALID)?;
         mlkem_public_key_info(&mut obj, Some(&pubkey_raw))?;
 
         Ok(obj)
@@ -451,6 +461,13 @@ impl Mechanism for MlKemMechanism {
             if template[idx].to_ulong()? != ML_KEM_SHARED_SECRET_BYTES {
                 return Err(CKR_TEMPLATE_INCONSISTENT)?;
             }
+        }
+
+        /* PKCS#11 3.2 lists CKR_WRAPPED_KEY_LEN_RANGE for
+         * C_DecapsulateKey: a ciphertext of the wrong size for the
+         * parameter set is invalid on its length alone */
+        if ciphertext.len() != self.encapsulate_ciphertext_len(key)? {
+            return Err(CKR_WRAPPED_KEY_LEN_RANGE)?;
         }
 
         let keydata = mlkem::decapsulate(key, ciphertext)?;

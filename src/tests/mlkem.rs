@@ -1242,3 +1242,101 @@ fn test_mlkem_encap_decap_default_sensitivity() {
 
     testtokn.finalize();
 }
+
+/// Invalid ML-KEM inputs must get PKCS#11 error codes, not
+/// CKR_DEVICE_ERROR: an unreduced encapsulation key and a decapsulation
+/// key with a bad H(ek) are rejected on import (FIPS 203 7.2 and 7.3), and
+/// a ciphertext of the wrong length is rejected by C_DecapsulateKey.
+#[test]
+#[parallel]
+fn test_mlkem_invalid_input_errors() {
+    let mut testtokn =
+        TestToken::initialized("test_mlkem_invalid_input_errors", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (pub_handle, priv_handle) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_KEM_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512)
+        ],
+        &[],
+        &[(CKA_ENCAPSULATE, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_KEM),],
+        &[],
+        &[
+            (CKA_DECAPSULATE, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true)
+        ],
+    ));
+
+    /* The first 12-bit coefficient of ek becomes 4095, which is >= q */
+    let mut ek = ret_or_panic!(extract_key_value(session, pub_handle));
+    ek[0] = 0xff;
+    ek[1] |= 0x0f;
+    let ret = import_object(
+        session,
+        CKO_PUBLIC_KEY,
+        &[
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+        ],
+        &[(CKA_VALUE, ek.as_slice())],
+        &[(CKA_ENCAPSULATE, true)],
+    );
+    assert_eq!(ret.map_err(|e| e.rv()), Err(CKR_ATTRIBUTE_VALUE_INVALID));
+
+    /* dk ends with H(ek) || z; corrupt H(ek) */
+    let mut dk = ret_or_panic!(extract_key_value(session, priv_handle));
+    let h = dk.len() - 64;
+    dk[h] ^= 0x01;
+    let ret = import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[
+            (CKA_KEY_TYPE, CKK_ML_KEM),
+            (CKA_PARAMETER_SET, CKP_ML_KEM_512),
+        ],
+        &[(CKA_VALUE, dk.as_slice())],
+        &[(CKA_DECAPSULATE, true)],
+    );
+    assert_eq!(ret.map_err(|e| e.rv()), Err(CKR_ATTRIBUTE_VALUE_INVALID));
+
+    let key_template = make_attr_template(
+        &[
+            (CKA_CLASS, CKO_SECRET_KEY),
+            (CKA_KEY_TYPE, CKK_GENERIC_SECRET),
+            (CKA_VALUE_LEN, 32),
+        ],
+        &[],
+        &[(CKA_EXTRACTABLE, true)],
+    );
+    let mut mechanism: CK_MECHANISM = CK_MECHANISM {
+        mechanism: CKM_ML_KEM,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* ML-KEM-512 ciphertexts are 768 bytes */
+    for len in [767, 769] {
+        let mut ciphertext = vec![0u8; len];
+        let mut handle = CK_INVALID_HANDLE;
+        let ret = fn_decapsulate_key(
+            session,
+            &mut mechanism,
+            priv_handle,
+            key_template.as_ptr() as *mut _,
+            key_template.len() as CK_ULONG,
+            ciphertext.as_mut_ptr(),
+            ciphertext.len() as CK_ULONG,
+            &mut handle,
+        );
+        assert_eq!(ret, CKR_WRAPPED_KEY_LEN_RANGE);
+    }
+
+    testtokn.finalize();
+}
