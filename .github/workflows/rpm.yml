@@ -4,9 +4,6 @@ on:
   pull_request:
     branches: ["main"]
 
-env:
-  VERSION: 1.5.4
-
 jobs:
   rpmbuild:
     name: Release tarball and run RPM Build
@@ -65,6 +62,19 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
+      - name: Source Version
+        run: |
+          cargo generate-lockfile
+          PKGID=$(cargo pkgid)
+          PKG="${PKGID#*#}"
+          NAME="${PKG%@*}"
+          VERSION="${PKG#*@}"
+          if [ "$NAME" != "kryoptic-lib" ]; then
+            echo "Expected package kryoptic-lib, got $NAME"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
       - name: RPM Build
         run: |
           git config --global --add safe.directory /__w/kryoptic/kryoptic
@@ -72,4 +82,4 @@ jobs:
           mkdir -p rpmbuild/SOURCES
           cp kryoptic-${VERSION}.tar.gz kryoptic-vendor-${VERSION}.tar.gz rpmbuild/SOURCES/
           rpmbuild --define "_topdir $PWD/rpmbuild" -ba --without=gpgcheck \
-              packaging/kryoptic.spec
+              --define "version $VERSION" packaging/kryoptic.spec
