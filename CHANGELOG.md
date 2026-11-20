@@ -8,6 +8,20 @@ Unreleased changes
 
 ### What Changed
 
+## [1.5.5]
+
+### What Changed
+
+* Several PRs were merged to fix correctness issues for returned PKCS#11
+  error codes and misbehaviors in corner cases across several mechanism
+  implementations
+
+* Changed how key material is handled in mechanism implementations to
+  improve key material safe handling:
+  - [Introduce SecVec a wrapper to keep key material
+    safe](https://github.com/latchset/kryoptic/pull/583)
+
+
 ## [1.5.4]
 
 ### What Changed
@@ -353,3 +367,4 @@ that includes non public interfaces.
 [1.5.2]: https://github.com/latchset/kryoptic/releases/tag/v1.5.2
 [1.5.3]: https://github.com/latchset/kryoptic/releases/tag/v1.5.3
 [1.5.4]: https://github.com/latchset/kryoptic/releases/tag/v1.5.4
+[1.5.5]: https://github.com/latchset/kryoptic/releases/tag/v1.5.5
