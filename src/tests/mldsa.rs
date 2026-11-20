@@ -1304,3 +1304,52 @@ fn test_mldsa_public_key_info() {
 
     testtokn.finalize();
 }
+
+/// A private key with an out-of-range s1 coefficient must be rejected on
+/// import with CKR_ATTRIBUTE_VALUE_INVALID, not CKR_DEVICE_ERROR.
+#[test]
+#[parallel]
+fn test_mldsa_invalid_private_key_import() {
+    let mut testtokn =
+        TestToken::initialized("test_mldsa_invalid_private_key_import", None);
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let (_pub_handle, priv_handle) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_ML_DSA_KEY_PAIR_GEN,
+        &[
+            (CKA_CLASS, CKO_PUBLIC_KEY),
+            (CKA_PARAMETER_SET, CKP_ML_DSA_44),
+            (CKA_KEY_TYPE, CKK_ML_DSA),
+        ],
+        &[],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_ML_DSA),],
+        &[],
+        &[
+            (CKA_SIGN, true),
+            (CKA_SENSITIVE, false),
+            (CKA_EXTRACTABLE, true)
+        ],
+    ));
+
+    /* sk is rho || K || tr || s1 || s2 || t0. For ML-DSA-44 (eta = 2) each
+     * s1 coefficient is 3 bits holding eta - c, so 0xff decodes to
+     * c = -5, outside [-eta, eta] */
+    let mut sk = ret_or_panic!(extract_key_value(session, priv_handle));
+    sk[32 + 32 + 64] = 0xff;
+    let ret = import_object(
+        session,
+        CKO_PRIVATE_KEY,
+        &[
+            (CKA_KEY_TYPE, CKK_ML_DSA),
+            (CKA_PARAMETER_SET, CKP_ML_DSA_44),
+        ],
+        &[(CKA_VALUE, sk.as_slice())],
+        &[(CKA_SIGN, true)],
+    );
+    assert_eq!(ret.map_err(|e| e.rv()), Err(CKR_ATTRIBUTE_VALUE_INVALID));
+
+    testtokn.finalize();
+}
