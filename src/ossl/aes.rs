@@ -2244,10 +2244,15 @@ impl Decryption for AesOperation {
         } else {
             match self.mech {
                 CKM_AES_CCM => {
-                    if self.buffer.len() + data_len < self.params.taglen {
+                    /* Match decrypt_update(), which asks for the whole
+                     * plaintext on every call and returns it only once
+                     * the last part, with the tag, has arrived. */
+                    if self.buffer.len() + data_len
+                        > self.params.datalen + self.params.taglen
+                    {
                         return Err(self.op_err(CKR_ENCRYPTED_DATA_LEN_RANGE));
                     }
-                    self.buffer.len() + data_len - self.params.taglen
+                    self.params.datalen
                 }
                 CKM_AES_GCM => {
                     if self.buffer.len() + data_len < self.params.taglen {

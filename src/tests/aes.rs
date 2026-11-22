@@ -5849,3 +5849,70 @@ fn test_aes_cbc_pad_multipart_decrypt_short_first_part() {
 
     testtokn.finalize();
 }
+
+#[test]
+#[parallel]
+fn test_aes_ccm_multipart_decrypt_length_query() {
+    let mut testtokn = TestToken::initialized(
+        "test_aes_ccm_multipart_decrypt_length_query",
+        None,
+    );
+    let session = testtokn.get_session(true);
+    testtokn.login();
+
+    let handle = ret_or_panic!(generate_key(
+        session,
+        CKM_AES_KEY_GEN,
+        std::ptr::null_mut(),
+        0,
+        &[(CKA_VALUE_LEN, 16),],
+        &[],
+        &[(CKA_TOKEN, false), (CKA_ENCRYPT, true), (CKA_DECRYPT, true),],
+    ));
+
+    let plaintext: Vec<u8> = (0..24).map(|i| (i * 5 + 1) as u8).collect();
+    let nonce = [0x33u8; 12];
+    let aad = [0x44u8; 8];
+    let tag_len = 16usize;
+    let mut param = CK_CCM_PARAMS {
+        ulDataLen: plaintext.len() as CK_ULONG,
+        pNonce: nonce.as_ptr() as *mut CK_BYTE,
+        ulNonceLen: nonce.len() as CK_ULONG,
+        pAAD: aad.as_ptr() as *mut CK_BYTE,
+        ulAADLen: aad.len() as CK_ULONG,
+        ulMACLen: tag_len as CK_ULONG,
+    };
+    let mechanism = CK_MECHANISM {
+        mechanism: CKM_AES_CCM,
+        pParameter: &mut param as *mut CK_CCM_PARAMS as CK_VOID_PTR,
+        ulParameterLen: sizeof!(CK_CCM_PARAMS),
+    };
+
+    let ciphertext =
+        ret_or_panic!(encrypt(session, handle, &plaintext, &mechanism));
+    assert_eq!(ciphertext.len(), plaintext.len() + tag_len);
+
+    /* decrypt_update() wants room for the whole plaintext on every call,
+     * so the length query must ask for that much, including when the
+     * first part is shorter than the tag */
+    for first in [1, 5, tag_len, plaintext.len(), ciphertext.len() - 1] {
+        assert_eq!(
+            fn_decrypt_init(
+                session,
+                &mechanism as *const _ as CK_MECHANISM_PTR,
+                handle
+            ),
+            CKR_OK
+        );
+        let mut decrypted =
+            ret_or_panic!(decrypt_update(session, &ciphertext[..first]));
+        decrypted.extend(ret_or_panic!(decrypt_update(
+            session,
+            &ciphertext[first..]
+        )));
+        decrypted.extend(ret_or_panic!(decrypt_final(session)));
+        assert_eq!(decrypted, plaintext, "first part of {} bytes", first);
+    }
+
+    testtokn.finalize();
+}
