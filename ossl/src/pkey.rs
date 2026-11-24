@@ -1430,6 +1430,36 @@ impl EvpPkey {
         Ok(())
     }
 
+    /// Sets the EC point conversion format (compressed or uncompressed).
+    #[cfg(not(feature = "fips"))]
+    pub fn set_point_compression(
+        &mut self,
+        compressed: bool,
+    ) -> Result<(), Error> {
+        if unsafe { EVP_PKEY_is_a(self.as_ptr(), c"EC".as_ptr()) } != 1 {
+            return Err(Error::new(ErrorKind::KeyError));
+        }
+
+        let param_name = cstr!(OSSL_PKEY_PARAM_EC_POINT_CONVERSION_FORMAT);
+        let format = if compressed {
+            cstr!(OSSL_PKEY_EC_POINT_CONVERSION_FORMAT_COMPRESSED)
+        } else {
+            cstr!(OSSL_PKEY_EC_POINT_CONVERSION_FORMAT_UNCOMPRESSED)
+        };
+        let res = unsafe {
+            EVP_PKEY_set_utf8_string_param(
+                self.ptr,
+                param_name.as_ptr(),
+                format.as_ptr(),
+            )
+        };
+        if res != 1 {
+            trace_ossl!("EVP_PKEY_set_utf8_string_param()");
+            return Err(Error::new(ErrorKind::OsslError));
+        }
+        Ok(())
+    }
+
     /// Checks if the specific key type is available in the current context.
     pub fn available(ctx: &OsslContext, pkey_type: EvpPkeyType) -> bool {
         let propq = ctx.pkey_type_propq_ptr(&pkey_type);
@@ -1984,6 +2014,8 @@ unsafe impl Sync for EvpPkey {}
 
 #[cfg(test)]
 mod tests {
+    use super::{EvpPkey, EvpPkeyType, PkeyData};
+
     /// Tests importing a key from d, p, and q, and the computation of
     /// the inverse of p mod q.
     ///
@@ -2053,5 +2085,60 @@ mod tests {
             assert_eq!(unsafe { crate::bindings::ERR_get_error() }, 0);
             unsafe { crate::bindings::OSSL_PROVIDER_unload(null_prov) };
         }
+    }
+
+    #[cfg(not(feature = "fips"))]
+    #[test]
+    fn test_point_compression() {
+        use super::ErrorKind;
+
+        let ctx = crate::OsslContext::new_lib_ctx_checked().unwrap();
+
+        for (curve, comp_len, uncomp_len) in [
+            (EvpPkeyType::P256, 33, 65),
+            (EvpPkeyType::P384, 49, 97),
+            (EvpPkeyType::P521, 67, 133),
+        ] {
+            let mut ec_key = EvpPkey::generate(&ctx, curve).unwrap();
+
+            ec_key.set_point_compression(true).unwrap();
+            let exp1 = match ec_key.export_public().unwrap() {
+                PkeyData::Ecc(mut ecc) => ecc.pubkey.take().unwrap(),
+                _ => panic!("Expected ECC key data"),
+            };
+            assert_eq!(exp1.len(), comp_len);
+            assert!(exp1[0] == 0x02 || exp1[0] == 0x03);
+
+            ec_key.set_point_compression(false).unwrap();
+            let exp2 = match ec_key.export_public().unwrap() {
+                PkeyData::Ecc(mut ecc) => ecc.pubkey.take().unwrap(),
+                _ => panic!("Expected ECC key data"),
+            };
+            assert_eq!(exp2.len(), uncomp_len);
+            assert_eq!(exp2[0], 0x04);
+            assert_eq!(&exp1[1..], &exp2[1..comp_len]);
+        }
+
+        let mut rsa_key =
+            EvpPkey::generate(&ctx, EvpPkeyType::Rsa(2048, vec![1, 0, 1]))
+                .unwrap();
+        assert!(matches!(
+            rsa_key.set_point_compression(false),
+            Err(e) if e.kind() == ErrorKind::KeyError
+        ));
+        assert!(matches!(
+            rsa_key.set_point_compression(true),
+            Err(e) if e.kind() == ErrorKind::KeyError
+        ));
+
+        let mut x_key = EvpPkey::generate(&ctx, EvpPkeyType::X25519).unwrap();
+        assert!(matches!(
+            x_key.set_point_compression(false),
+            Err(e) if e.kind() == ErrorKind::KeyError
+        ));
+        assert!(matches!(
+            x_key.set_point_compression(true),
+            Err(e) if e.kind() == ErrorKind::KeyError
+        ));
     }
 }

@@ -24,8 +24,19 @@ impl SupportedKxGroup for OsslEcKxGroup {
             _ => return Err(Error::General("Unsupported KX group".into())),
         };
 
-        let privkey = EvpPkey::generate(osslctx(), key_type)
+        let mut privkey = EvpPkey::generate(osslctx(), key_type)
             .map_err(|_| Error::General("Failed to generate KX key".into()))?;
+
+        match self.0 {
+            NamedGroup::secp256r1
+            | NamedGroup::secp384r1
+            | NamedGroup::secp521r1 => {
+                privkey.set_point_compression(false).map_err(|_| {
+                    Error::General("Failed to set point format".into())
+                })?;
+            }
+            _ => (),
+        }
 
         let pubkey = match privkey.export_public() {
             Ok(PkeyData::Ecc(ecc)) => {
