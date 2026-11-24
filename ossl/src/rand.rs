@@ -287,24 +287,56 @@ impl Drop for EvpRandCtx {
     }
 }
 
-/// Generates random bytes using the default OpenSSL random number generator.
-/// The `r#priv` boolean flag selects whether to use the private generator
-/// (intended for long term secrets like private keys) or the regular one.
 #[cfg(not(feature = "fips"))]
-pub fn get_random(buf: &mut [u8], r#priv: bool) -> Result<(), Error> {
-    let len = c_int::try_from(buf.len())?;
+fn _get_random(
+    ctx: *mut OSSL_LIB_CTX,
+    buf: &mut [u8],
+    r#priv: bool,
+) -> Result<(), Error> {
+    if buf.is_empty() {
+        return Err(Error::new(ErrorKind::BufferSize));
+    }
     let ret = if r#priv {
-        unsafe { RAND_priv_bytes(buf.as_mut_ptr(), len) }
+        unsafe { RAND_priv_bytes_ex(ctx, buf.as_mut_ptr(), buf.len(), 0) }
     } else {
-        unsafe { RAND_bytes(buf.as_mut_ptr(), len) }
+        unsafe { RAND_bytes_ex(ctx, buf.as_mut_ptr(), buf.len(), 0) }
     };
     if ret != 1 {
         if r#priv {
-            trace_ossl!("RAND_priv_bytes()");
+            trace_ossl!("RAND_priv_bytes_ex()");
         } else {
-            trace_ossl!("RAND_bytes()");
+            trace_ossl!("RAND_bytes_ex()");
         }
         return Err(Error::new(ErrorKind::OsslError));
     }
     Ok(())
+}
+
+/// Generates random bytes using the default OpenSSL random number generator.
+/// The `r#priv` boolean flag selects whether to use the private generator
+/// (intended for long term secrets like private keys) or the regular one.
+///
+/// # Errors
+///
+/// Returns `ErrorKind::BufferSize` if `buf` is empty.
+/// Returns `ErrorKind::OsslError` if OpenSSL fails to generate random bytes.
+#[cfg(not(feature = "fips"))]
+pub fn get_random(buf: &mut [u8], r#priv: bool) -> Result<(), Error> {
+    _get_random(std::ptr::null_mut(), buf, r#priv)
+}
+
+/// Functions as [`get_random`], but takes a context so that it can operate
+/// on the specific context allocated by the application.
+///
+/// # Errors
+///
+/// Returns `ErrorKind::BufferSize` if `buf` is empty.
+/// Returns `ErrorKind::OsslError` if OpenSSL fails to generate random bytes.
+#[cfg(not(feature = "fips"))]
+pub fn get_random_ex(
+    ctx: &OsslContext,
+    buf: &mut [u8],
+    r#priv: bool,
+) -> Result<(), Error> {
+    _get_random(ctx.ptr(), buf, r#priv)
 }
