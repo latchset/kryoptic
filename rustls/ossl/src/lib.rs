@@ -10,7 +10,7 @@ pub mod tls12;
 pub mod tls13;
 pub mod verify;
 
-use ossl::rand::get_random;
+use ossl::rand::get_random_ex;
 use ossl::OsslContext;
 use rustls::crypto::{
     CryptoProvider, GetRandomFailed, KeyExchangeAlgorithm, SecureRandom,
@@ -33,7 +33,7 @@ pub struct OsslSecureRandom;
 
 impl SecureRandom for OsslSecureRandom {
     fn fill(&self, buf: &mut [u8]) -> Result<(), GetRandomFailed> {
-        get_random(buf, true).map_err(|_| GetRandomFailed)
+        get_random_ex(osslctx(), buf, true).map_err(|_| GetRandomFailed)
     }
 
     fn fips(&self) -> bool {

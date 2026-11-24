@@ -42,6 +42,9 @@ mod brainpool;
 #[cfg(not(feature = "fips"))]
 mod chacha20;
 
+#[cfg(not(feature = "fips"))]
+mod rand;
+
 #[cfg(feature = "rfc9580")]
 mod dsa;
 
