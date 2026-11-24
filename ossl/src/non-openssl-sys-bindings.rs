@@ -68,6 +68,12 @@ pub const OSSL_PKEY_PARAM_GROUP_NAME: &[u8; 6] = b"group\0";
 pub const OSSL_PKEY_PARAM_PUB_KEY: &[u8; 4] = b"pub\0";
 pub const OSSL_PKEY_PARAM_PRIV_KEY: &[u8; 5] = b"priv\0";
 
+pub const OSSL_PKEY_PARAM_EC_POINT_CONVERSION_FORMAT: &[u8; 13] =
+    b"point-format\0";
+pub const OSSL_PKEY_EC_POINT_CONVERSION_FORMAT_UNCOMPRESSED: &[u8; 13] =
+    b"uncompressed\0";
+pub const OSSL_PKEY_EC_POINT_CONVERSION_FORMAT_COMPRESSED: &[u8; 11] =
+    b"compressed\0";
 pub const OSSL_PKEY_PARAM_RSA_COEFFICIENT1: &[u8; 17] = b"rsa-coefficient1\0";
 pub const OSSL_PKEY_PARAM_RSA_COEFFICIENT2: &[u8; 17] = b"rsa-coefficient2\0";
 pub const OSSL_PKEY_PARAM_RSA_E: &[u8; 2] = b"e\0";
