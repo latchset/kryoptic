@@ -516,7 +516,7 @@ impl Derive for PubFromPrivOperation {
         // key must be a private key
         // It does not need to allow derivation, as this is a pseudo
         // mechanism that is alaways usable for any private key
-        if !key.is_private() {
+        if key.get_class() != CKO_PRIVATE_KEY {
             return Err(CKR_KEY_TYPE_INCONSISTENT)?;
         }
 
