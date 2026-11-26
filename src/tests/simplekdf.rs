@@ -23,6 +23,7 @@ fn test_concatenate_kdf_token() {
 fn test_concatenate_kdf_session() {
     let mut testtokn = TestToken::initialized("concatente_kdf_session", None);
     let session = testtokn.get_session(false);
+    testtokn.login();
 
     test_concatenate_kdf(session, false);
     testtokn.finalize();
@@ -345,6 +346,7 @@ fn test_concatenate_kdf(session: CK_ULONG, token: bool) {
 fn test_concatenate_kdf_fips() {
     let mut testtokn = TestToken::initialized("concatente_kdf_fips", None);
     let session = testtokn.get_session(false);
+    testtokn.login();
 
     // Import larger keys to satisfy FIPS requirements for generic secret.
     // FIPS wants at least 112 b = 14 B
@@ -554,6 +556,7 @@ fn test_concatenate_kdf_attributes() {
     let mut testtokn =
         TestToken::initialized("concatente_kdf_attributes", None);
     let session = testtokn.get_session(false);
+    testtokn.login();
 
     let base_key = hex::decode("01234567").unwrap();
     let base_key_handle = ret_or_panic!(import_object(
@@ -1263,6 +1266,7 @@ fn test_derive_pub_from_priv() {
 fn test_derive_template() {
     let mut testtokn = TestToken::initialized("test_derive_template", None);
     let session = testtokn.get_session(false);
+    testtokn.login();
 
     let base_key = hex::decode("01234567").unwrap();
     let mut enc_true = CK_TRUE;
