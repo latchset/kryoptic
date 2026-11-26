@@ -566,7 +566,8 @@ impl Token {
     /// If the object has `CKA_TOKEN=true`, it is stored persistently via the
     /// storage backend. Otherwise (session object), it's added to the in-memory
     /// session object map and assigned a new handle.
-    /// Requires login to store token objects.
+    /// Requires a login to store token objects, and a user login to create
+    /// private objects.
     ///
     /// Returns the assigned handle.
     pub fn insert_object(
@@ -574,6 +575,14 @@ impl Token {
         s_handle: CK_SESSION_HANDLE,
         mut obj: Object,
     ) -> Result<CK_OBJECT_HANDLE> {
+        /* Only the normal user can create private objects, session objects
+         * included. Built-in objects have no session and are exempt. */
+        if s_handle != CK_INVALID_HANDLE
+            && obj.is_private()
+            && !self.is_logged_in(CKU_USER)
+        {
+            return Err(CKR_USER_NOT_LOGGED_IN)?;
+        }
         let handle: CK_OBJECT_HANDLE;
         if obj.is_token() {
             if !self.is_logged_in(KRY_UNSPEC) {

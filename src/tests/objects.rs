@@ -107,6 +107,18 @@ fn test_create_objects() {
         CKR_USER_NOT_LOGGED_IN
     );
 
+    /* private session objects need a login too */
+    err_or_panic!(
+        import_object(
+            session,
+            CKO_DATA,
+            &[],
+            &byte_values,
+            &[(CKA_PRIVATE, true)],
+        ),
+        CKR_USER_NOT_LOGGED_IN
+    );
+
     /* login */
     testtokn.login();
 
