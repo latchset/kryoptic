@@ -580,6 +580,8 @@ fn test_unchangeable_attributes() {
     testtokn.finalize();
 }
 
+#[test]
+#[parallel]
 fn test_template_null_pvalue() {
     let mut testtokn =
         TestToken::initialized("test_template_null_pvalue", None);
