@@ -1258,6 +1258,68 @@ fn test_derive_pub_from_priv() {
     testtokn.finalize();
 }
 
+#[cfg(feature = "rsa")]
+#[test]
+#[parallel]
+fn test_derive_pub_from_priv_class() {
+    let mut testtokn =
+        TestToken::initialized("test_derive_pub_from_priv_class", None);
+    let session = testtokn.get_session(true);
+
+    testtokn.login();
+
+    let derive_mech = CK_MECHANISM {
+        mechanism: CKM_PUB_KEY_FROM_PRIV_KEY,
+        pParameter: std::ptr::null_mut(),
+        ulParameterLen: 0,
+    };
+
+    /* A private key that is a public object (CKA_PRIVATE = false) */
+    let (_, hpri) = ret_or_panic!(generate_key_pair(
+        session,
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        &[(CKA_MODULUS_BITS, 2048)],
+        &[],
+        &[(CKA_VERIFY, true)],
+        &[(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_KEY_TYPE, CKK_RSA)],
+        &[],
+        &[(CKA_PRIVATE, false), (CKA_SIGN, true)],
+    ));
+    let mut handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        hpri,
+        std::ptr::null_mut(),
+        0,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_OK);
+    assert_ne!(handle, CK_INVALID_HANDLE);
+
+    /* A secret key that is a private object is not a private key */
+    let secret = ret_or_panic!(import_object(
+        session,
+        CKO_SECRET_KEY,
+        &[(CKA_KEY_TYPE, CKK_GENERIC_SECRET)],
+        &[(CKA_VALUE, "0123456789abcdef".as_bytes())],
+        &[(CKA_PRIVATE, true), (CKA_DERIVE, true)],
+    ));
+    let mut handle = CK_INVALID_HANDLE;
+    let ret = fn_derive_key(
+        session,
+        &derive_mech as *const _ as CK_MECHANISM_PTR,
+        secret,
+        std::ptr::null_mut(),
+        0,
+        &mut handle,
+    );
+    assert_eq!(ret, CKR_KEY_TYPE_INCONSISTENT);
+    assert_eq!(handle, CK_INVALID_HANDLE);
+
+    testtokn.finalize();
+}
+
 #[test]
 #[parallel]
 fn test_derive_template() {
